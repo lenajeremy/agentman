@@ -1,0 +1,21 @@
+{
+  "name": "agentman",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Monitor and control your local coding agents from your phone",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "am": "pnpm --filter @agentman/daemon am"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "packageManager": "pnpm@9.15.0"
+}
