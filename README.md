@@ -84,7 +84,7 @@ and covered by tests.
 | | Discovery | Scrollback | Send a message |
 |---|---|---|---|
 | **Claude Code** | `~/.claude/sessions/<pid>.json`, a live registry with a busy/idle status. Verified against the pid, since the file outlives a crashed session. | `~/.claude/projects/<cwd-slug>/<id>.jsonl` | tmux (mid-turn) or the hook queue |
-| **Codex** | Rollout files under `~/.codex/sessions/YYYY/MM/DD/`, gated on a running `codex` process. The weakest part — hooks will replace the guess. | same rollout file | tmux (mid-turn) or the hook queue |
+| **Codex** | Rollout files under `~/.codex/sessions/YYYY/MM/DD/`, gated on a running `codex` process. Still the weakest detection — and note a Codex session sitting on its trust dialog writes no rollout, so it is invisible until a turn starts. | same rollout file | tmux (mid-turn) or the hook queue |
 | **OpenCode** | `opencode serve`'s HTTP API, which reports exactly which sessions are running | `GET /api/session/:id/message`, cursor-paged | `POST .../prompt` with `delivery: steer` — native, mid-turn |
 
 OpenCode is the one agent that needs no tricks — a real API covers sessions,
@@ -97,9 +97,15 @@ are flat rather than `{info, parts}`), so check the wire, not the schema.
 
 Two more findings worth recording, since neither is documented:
 
-- **Codex has the same hook system as Claude Code.** Its binary contains
-  `hooks.json` and the events `session_start`, `stop`, `user_prompt_submit`,
-  and the rest. One hook design covers both agents.
+- **Codex's hooks do not fire, despite the machinery being there.** Its binary
+  contains `hooks.json` and the same event names as Claude Code, and agentman
+  registers them — but a live session produced no deliveries at all. `am doctor`
+  reports "registered, never observed" rather than a green check, so Codex
+  falls back to polling for state. Claude Code's hooks are verified working.
+- **Each CLI picked a different selection marker.** Claude Code uses ❯ (U+276F),
+  Codex uses › (U+203A). Missing one is not cosmetic: the unmatched line stops
+  being an option and gets read as the question instead, which silently drops
+  a choice.
 - **Codex writes two overlapping streams.** `response_item` is the raw model
   history; `event_msg` is the semantic stream its UI renders. They duplicate
   each other almost exactly, so we read only `event_msg` — it excludes injected

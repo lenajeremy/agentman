@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Pulse } from "../../components/Pulse";
+import { Markdown } from "../../components/Markdown";
 import { QuestionCard } from "../../components/QuestionCard";
 import { Message } from "../../lib/protocol";
 import { PendingSend, useStore } from "../../lib/store";
@@ -249,7 +250,10 @@ function MessageRow({ message }: { message: Message }) {
   return (
     <View style={styles.assistantRow}>
       {message.isSidechain && <Text style={styles.sidechain}>subagent</Text>}
-      <Text style={styles.assistantText}>{message.text}</Text>
+      {/* Agents write markdown constantly — backticked paths, fenced diffs,
+          bulleted change lists. Rendering the source would mean reading
+          `**done**` and counting backticks on a phone. */}
+      <Markdown>{message.text ?? ""}</Markdown>
     </View>
   );
 }

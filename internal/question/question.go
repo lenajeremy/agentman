@@ -41,11 +41,23 @@ type Option struct {
 }
 
 // optionLine matches " ❯ 1. Yes" or "   2. No", capturing the marker, the
-// digit, and the label. Both CLIs render numbered menus this way.
-var optionLine = regexp.MustCompile(`^\s*([❯>»]?)\s*(\d+)[.)]\s+(.*\S)\s*$`)
+// digit, and the label.
+//
+// The marker set is deliberately wide because each CLI picked a different
+// glyph: Claude Code uses ❯ (U+276F) and Codex uses › (U+203A). Missing one
+// is not a cosmetic failure — an unmatched marker line stops being an option
+// and gets read as the question instead, which is exactly what happened to
+// Codex's first choice before › was added here.
+var optionLine = regexp.MustCompile(`^\s*([❯›>»▸▶→*]?)\s*(\d+)[.)]\s+(.*\S)\s*$`)
 
 // footerLine matches the key-hint line under a menu, which ends the block.
 var footerLine = regexp.MustCompile(`(?i)^\s*(esc to|press |↑/↓|tab to)`)
+
+// inputLine matches the TUI's own input box, which sits above the transcript
+// and has nothing to do with the question. Without this the walk upward for
+// context runs straight into whatever the user last typed and reports it as
+// the question's heading.
+var inputLine = regexp.MustCompile(`^\s*[❯›>]\s`)
 
 // maxScan bounds how much of a pane is examined. A prompt is always at the
 // bottom, so there is no reason to walk a long scrollback.
@@ -110,10 +122,19 @@ func Detect(pane string) *Question {
 
 	// The question is the nearest non-empty line above the options; the title
 	// and detail are what sits above that, up to a rule or a blank run.
+	// Kept short on purpose: a menu's heading and detail sit directly above it,
+	// so walking further only risks dragging in unrelated transcript.
 	var context []string
-	for i := first - 1; i >= 0 && len(context) < 12; i-- {
+	bounded := false
+	for i := first - 1; i >= 0 && len(context) < 14; i-- {
 		trimmed := strings.TrimSpace(lines[i])
 		if isRule(trimmed) {
+			// A rule means the CLI drew a box around this question, so
+			// everything gathered belongs to it.
+			bounded = true
+			break
+		}
+		if inputLine.MatchString(lines[i]) {
 			break
 		}
 		if trimmed == "" {
@@ -138,9 +159,15 @@ func Detect(pane string) *Question {
 			rest = rest[:len(rest)-1]
 		}
 		if len(rest) > 0 {
-			// The furthest-up line reads as the heading ("Bash command").
-			q.Title = rest[len(rest)-1]
-			body := rest[:len(rest)-1]
+			body := rest
+			// Only claim a heading when the block was actually delimited.
+			// Claude Code rules off its prompts, so the topmost line really is
+			// a title ("Bash command"); Codex does not, so the same guess
+			// there promotes an unrelated line of transcript into a heading.
+			if bounded {
+				q.Title = rest[len(rest)-1]
+				body = rest[:len(rest)-1]
+			}
 			// Restore top-down order for the detail.
 			for i, j := 0, len(body)-1; i < j; i, j = i+1, j-1 {
 				body[i], body[j] = body[j], body[i]
@@ -168,8 +195,18 @@ func isRule(trimmed string) bool {
 }
 
 // cleanLabel tidies a choice for display on a phone.
+//
+// Codex pads a trailing description onto the same line ("Keep current model
+// (never show again)   Hide future rate limit reminders"). Collapsing all the
+// whitespace would fuse the choice and its explanation into one run-on, so the
+// run of spaces that separates them is treated as the boundary and only the
+// choice itself is kept — the label has to be readable as a button. Two spaces
+// is enough of a signal, since a real label never contains a double space.
 func cleanLabel(label string) string {
-	label = strings.TrimSpace(label)
+	label = strings.TrimRight(strings.TrimSpace(label), " ")
+	if idx := strings.Index(label, "  "); idx > 0 {
+		label = label[:idx]
+	}
 	// Curly quotes come straight from the TUI; keep them, they are the CLI's
 	// own wording and rewriting it would misquote the choice being made.
 	return strings.Join(strings.Fields(label), " ")

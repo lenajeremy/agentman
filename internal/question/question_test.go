@@ -128,6 +128,45 @@ func TestDetectsCodexStyleApproval(t *testing.T) {
 	}
 }
 
+// Captured from a live Codex session. Two things here only showed up against
+// the real terminal: Codex marks its selection with › (U+203A) rather than
+// Claude's ❯, and it pads a description onto the same line as the choice.
+const codexLive = `■ You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit
+https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Aug 16th, 2026 4:19 AM.
+  Approaching rate limits
+  Switch to gpt-5.6-luna for lower credit usage?
+› 1. Switch to gpt-5.6-luna                 Fast and affordable agentic coding model.
+  2. Keep current model
+  3. Keep current model (never show again)  Hide future rate limit reminders about switching models.
+  Press enter to confirm or esc to go back`
+
+func TestDetectsCodexSelectionMarker(t *testing.T) {
+	q := Detect(codexLive)
+	if q == nil {
+		t.Fatal("no question detected in a live Codex menu")
+	}
+	if len(q.Options) != 3 {
+		t.Fatalf("got %d options, want 3 — an unmatched marker turns a choice "+
+			"into the question: %+v", len(q.Options), q.Options)
+	}
+	if !q.Options[0].Selected {
+		t.Error("› should mark the highlighted option")
+	}
+	if q.Prompt != "Switch to gpt-5.6-luna for lower credit usage?" {
+		t.Errorf("Prompt = %q", q.Prompt)
+	}
+	// A choice's trailing description must not fuse into its label; the label
+	// has to read as a button.
+	if q.Options[2].Label != "Keep current model (never show again)" {
+		t.Errorf("option 3 label = %q, want the choice without its description",
+			q.Options[2].Label)
+	}
+	// Codex draws no rule around its prompt, so there is no heading to claim.
+	if q.Title != "" {
+		t.Errorf("Title = %q, want empty for an undelimited prompt", q.Title)
+	}
+}
+
 func TestHandlesEmptyAndGarbage(t *testing.T) {
 	for _, pane := range []string{"", "\n\n\n", "no menu here at all"} {
 		if q := Detect(pane); q != nil {
