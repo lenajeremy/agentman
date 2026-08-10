@@ -84,7 +84,7 @@ and covered by tests.
 | | Discovery | Scrollback | Send a message |
 |---|---|---|---|
 | **Claude Code** | `~/.claude/sessions/<pid>.json`, a live registry with a busy/idle status. Verified against the pid, since the file outlives a crashed session. | `~/.claude/projects/<cwd-slug>/<id>.jsonl` | tmux (mid-turn) or the hook queue |
-| **Codex** | Rollout files under `~/.codex/sessions/YYYY/MM/DD/`, gated on a running `codex` process. Still the weakest detection — and note a Codex session sitting on its trust dialog writes no rollout, so it is invisible until a turn starts. | same rollout file | tmux (mid-turn) or the hook queue |
+| **Codex** | Rollout files under `~/.codex/sessions/YYYY/MM/DD/`, plus any tmux pane running `codex` — Codex writes no rollout until its first turn, so the pane is the only evidence a session exists before then. | same rollout file | tmux (mid-turn) or the hook queue |
 | **OpenCode** | `opencode serve`'s HTTP API, which reports exactly which sessions are running | `GET /api/session/:id/message`, cursor-paged | `POST .../prompt` with `delivery: steer` — native, mid-turn |
 
 OpenCode is the one agent that needs no tricks — a real API covers sessions,

@@ -41,10 +41,16 @@ type Daemon struct {
 	// sessions is the last discovered list, kept so hook events can be matched
 	// against a known session without re-scanning the disk.
 	sessions map[string]protocol.Session
-	// follows holds the cancel function for each active live tail. Only
+	// follows holds the active live tail for each watched session. Only
 	// sessions the app is actually watching appear here, which is what keeps
 	// idle sessions free.
-	follows map[string]context.CancelFunc
+	follows map[string]*follow
+}
+
+// follow is one live tail. It is tracked by pointer identity so that a
+// finishing tail can only ever cancel itself.
+type follow struct {
+	cancel context.CancelFunc
 }
 
 // New creates a daemon.
@@ -53,7 +59,7 @@ func New(registry *source.Registry, sink Transport) *Daemon {
 		registry: registry,
 		sink:     sink,
 		sessions: map[string]protocol.Session{},
-		follows:  map[string]context.CancelFunc{},
+		follows:  map[string]*follow{},
 	}
 }
 
@@ -244,12 +250,19 @@ func (d *Daemon) startFollow(sessionID string) {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	d.follows[sessionID] = cancel
+	handle := &follow{cancel: cancel}
+	d.follows[sessionID] = handle
 	d.mu.Unlock()
 
 	messages := make(chan []protocol.Message, 8)
 	go func() {
-		defer d.stopFollow(sessionID)
+		// Retire only this tail. Cancelling by session id would be a race:
+		// an app that resubscribes (React remounting a screen, or the user
+		// navigating back and forth) produces subscribe → unsubscribe →
+		// subscribe, and the first tail's cleanup would then cancel the
+		// second one — leaving the app subscribed to a stream that had
+		// already been shut down, receiving nothing.
+		defer d.retireFollow(sessionID, handle)
 		_ = d.registry.Follow(ctx, sessionID, messages)
 	}()
 	go func() {
@@ -268,26 +281,37 @@ func (d *Daemon) startFollow(sessionID string) {
 	}()
 }
 
+// stopFollow ends whatever tail is currently running for a session.
 func (d *Daemon) stopFollow(sessionID string) {
 	d.mu.Lock()
-	cancel, exists := d.follows[sessionID]
+	handle, exists := d.follows[sessionID]
 	delete(d.follows, sessionID)
 	d.mu.Unlock()
 	if exists {
-		cancel()
+		handle.cancel()
 	}
+}
+
+// retireFollow removes a tail only if it is still the current one.
+func (d *Daemon) retireFollow(sessionID string, handle *follow) {
+	d.mu.Lock()
+	if current, ok := d.follows[sessionID]; ok && current == handle {
+		delete(d.follows, sessionID)
+	}
+	d.mu.Unlock()
+	handle.cancel()
 }
 
 func (d *Daemon) stopAllFollows() {
 	d.mu.Lock()
-	cancels := make([]context.CancelFunc, 0, len(d.follows))
-	for _, cancel := range d.follows {
-		cancels = append(cancels, cancel)
+	handles := make([]*follow, 0, len(d.follows))
+	for _, handle := range d.follows {
+		handles = append(handles, handle)
 	}
-	d.follows = map[string]context.CancelFunc{}
+	d.follows = map[string]*follow{}
 	d.mu.Unlock()
-	for _, cancel := range cancels {
-		cancel()
+	for _, handle := range handles {
+		handle.cancel()
 	}
 }
 

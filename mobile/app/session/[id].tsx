@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Pulse } from "../../components/Pulse";
 import { Markdown } from "../../components/Markdown";
 import { QuestionCard } from "../../components/QuestionCard";
+import { Thinking } from "../../components/Thinking";
 import { Message } from "../../lib/protocol";
 import { PendingSend, useStore } from "../../lib/store";
 import { color, font, radius, shortPath, size, space, stateStyle } from "../../lib/theme";
@@ -116,6 +117,15 @@ export default function SessionScreen() {
           )
         }
         contentContainerStyle={styles.list}
+        // Inverted, so the header renders at the visual bottom — which is
+        // where a "still working" indicator belongs, under the last message.
+        ListHeaderComponent={
+          session?.state === "busy" ? (
+            <View style={styles.thinking}>
+              <Thinking />
+            </View>
+          ) : null
+        }
         // With the list inverted, the "end" is the oldest message.
         onEndReached={() => store.loadOlder(sessionId)}
         onEndReachedThreshold={0.4}
@@ -384,6 +394,7 @@ const styles = StyleSheet.create({
   },
 
   questionWrap: { paddingHorizontal: space.md, paddingBottom: space.sm },
+  thinking: { paddingTop: space.sm },
   composer: {
     flexDirection: "row",
     alignItems: "flex-end",

@@ -48,6 +48,10 @@ type Session struct {
 	// to the tmux session that can receive its messages.
 	PanePID int
 	Cwd     string
+	// Command is the program running in the pane ("codex", "claude"), which
+	// is the only way to know an agent is there before it has written
+	// anything to disk.
+	Command string
 }
 
 // List returns the agentman-owned tmux sessions currently running.
@@ -55,7 +59,8 @@ func List(ctx context.Context) ([]Session, error) {
 	if !Available() {
 		return nil, ErrNotInstalled
 	}
-	out, err := run(ctx, "list-sessions", "-F", "#{session_name}\t#{pane_pid}\t#{pane_current_path}")
+	out, err := run(ctx, "list-sessions", "-F",
+		"#{session_name}\t#{pane_pid}\t#{pane_current_path}\t#{pane_current_command}")
 	if err != nil {
 		// tmux exits non-zero when no server is running, which is normal.
 		return nil, nil
@@ -71,7 +76,11 @@ func List(ctx context.Context) ([]Session, error) {
 		if err != nil {
 			continue
 		}
-		sessions = append(sessions, Session{Name: fields[0], PanePID: pid, Cwd: fields[2]})
+		session := Session{Name: fields[0], PanePID: pid, Cwd: fields[2]}
+		if len(fields) > 3 {
+			session.Command = fields[3]
+		}
+		sessions = append(sessions, session)
 	}
 	return sessions, nil
 }

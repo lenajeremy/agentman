@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/tmux"
 )
 
 type obj = map[string]any
@@ -214,6 +215,11 @@ func TestClaudeDiscoverOnMachineWithoutClaude(t *testing.T) {
 // regardless of what happens to be running on the test machine.
 func alwaysRunning(context.Context) bool { return true }
 
+// noPanes stands in for the tmux listing. tmux is a machine-wide server, so
+// without this a test would discover whatever panes the developer happens to
+// have open rather than only what its own fixture set up.
+func noPanes(context.Context) ([]tmux.Session, error) { return nil, nil }
+
 func fakeCodexHome(t *testing.T, sessionID, cwd string, age time.Duration) string {
 	t.Helper()
 	home := t.TempDir()
@@ -254,6 +260,7 @@ func TestCodexDiscoverAndPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	src.processCheck = alwaysRunning
+	src.listPanes = noPanes
 	ctx := context.Background()
 
 	sessions, err := src.Discover(ctx)
@@ -288,6 +295,7 @@ func TestCodexIgnoresStaleRollouts(t *testing.T) {
 	home := fakeCodexHome(t, "01900000-aaaa-bbbb-cccc-000000000002", "/Users/me/old", 2*time.Hour)
 	src, _ := NewCodexSource(home)
 	src.processCheck = alwaysRunning
+	src.listPanes = noPanes
 
 	sessions, err := src.Discover(context.Background())
 	if err != nil {
@@ -301,6 +309,7 @@ func TestCodexIgnoresStaleRollouts(t *testing.T) {
 func TestCodexDiscoverOnMachineWithoutCodex(t *testing.T) {
 	src, _ := NewCodexSource(t.TempDir())
 	src.processCheck = alwaysRunning
+	src.listPanes = noPanes
 	sessions, err := src.Discover(context.Background())
 	if err != nil {
 		t.Fatalf("a missing install must not be an error: %v", err)

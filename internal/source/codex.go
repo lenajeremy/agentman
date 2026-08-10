@@ -73,6 +73,10 @@ type CodexSource struct {
 	processCheck func(context.Context) bool
 	// pending holds messages for sessions with no live input channel.
 	pending *PendingQueue
+	// listPanes is injectable for the same reason as processCheck: tmux is a
+	// machine-wide server, so without this a test with its own fake home would
+	// still discover whatever panes happen to be open on the host.
+	listPanes func(context.Context) ([]tmux.Session, error)
 
 	mu       sync.RWMutex
 	sessions map[string]codexSession
@@ -110,6 +114,7 @@ func NewCodexSource(home string) (*CodexSource, error) {
 	return &CodexSource{
 		home:         home,
 		processCheck: codexRunning,
+		listPanes:    tmux.List,
 		sessions:     map[string]codexSession{},
 	}, nil
 }
@@ -148,15 +153,28 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	// two Codex sessions in one directory would be ambiguous — so a directory
 	// running more than one is left unmatched rather than risking delivery to
 	// the wrong agent.
-	panes, _ := tmux.List(ctx)
-	paneByCwd := map[string]string{}
+	var panes []tmux.Session
+	if s.listPanes != nil {
+		panes, _ = s.listPanes(ctx)
+	}
+	paneByCwd := map[string]tmux.Session{}
 	ambiguous := map[string]bool{}
 	for _, pane := range panes {
+		if pane.Command != "codex" {
+			continue
+		}
 		if _, seen := paneByCwd[pane.Cwd]; seen {
 			ambiguous[pane.Cwd] = true
 			continue
 		}
-		paneByCwd[pane.Cwd] = pane.Name
+		paneByCwd[pane.Cwd] = pane
+	}
+	// Panes still waiting for their first rollout, filled in below.
+	unmatched := map[string]tmux.Session{}
+	for cwd, pane := range paneByCwd {
+		if !ambiguous[cwd] {
+			unmatched[cwd] = pane
+		}
 	}
 
 	for _, dir := range dirs {
@@ -184,9 +202,16 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 
 			tmuxName := ""
 			inject := protocol.InjectHook
-			if name, ok := paneByCwd[meta.Payload.Cwd]; ok && !ambiguous[meta.Payload.Cwd] {
-				tmuxName = name
+			if pane, ok := paneByCwd[meta.Payload.Cwd]; ok && !ambiguous[meta.Payload.Cwd] {
+				tmuxName = pane.Name
 				inject = protocol.InjectTmux
+				delete(unmatched, meta.Payload.Cwd)
+				// Key a tmux-backed session on the pane rather than the
+				// rollout. The pane exists from launch and the rollout does
+				// not, so this keeps one stable id across the moment the
+				// rollout appears — otherwise the session would vanish and
+				// return under a new id on the user's first prompt.
+				id = string(protocol.KindCodex) + ":" + tmuxID(pane.Name)
 			}
 
 			session := protocol.Session{
@@ -212,6 +237,32 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 		}
 	}
 
+	// A pane running codex that has written no rollout yet is still a real
+	// session the user may need to reach — Codex writes nothing to disk until
+	// its first turn, so without this a session sitting on its trust dialog,
+	// or simply idle before the first prompt, is invisible to the phone.
+	for cwd, pane := range unmatched {
+		id := string(protocol.KindCodex) + ":" + tmuxID(pane.Name)
+		session := protocol.Session{
+			ID:             id,
+			Kind:           protocol.KindCodex,
+			NativeID:       pane.Name,
+			Name:           filepath.Base(cwd),
+			Cwd:            cwd,
+			State:          protocol.StateIdle,
+			Inject:         protocol.InjectTmux,
+			StartedAt:      now.UnixMilli(),
+			LastActivityAt: now.UnixMilli(),
+		}
+		if q := detectQuestion(ctx, pane.Name); q != nil {
+			session.Question = q
+			session.State = protocol.StateWaitingInput
+		}
+		found = append(found, session)
+		// No transcript yet: Page returns an empty feed rather than failing.
+		next[id] = codexSession{meta: session, transcript: "", tmuxName: pane.Name}
+	}
+
 	// Newest first, so the caller's ordering does not depend on readdir order.
 	sort.Slice(found, func(i, j int) bool {
 		return found[i].LastActivityAt > found[j].LastActivityAt
@@ -222,6 +273,11 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	s.mu.Unlock()
 
 	return found, nil
+}
+
+// tmuxID derives a stable session identifier from a tmux session name.
+func tmuxID(tmuxName string) string {
+	return "tmux-" + tmuxName
 }
 
 func (s *CodexSource) dayDir(t time.Time) string {
@@ -306,6 +362,11 @@ func (s *CodexSource) Page(ctx context.Context, sessionID, before string, limit 
 		return protocol.Page{}, fmt.Errorf("source: unknown codex session %q", sessionID)
 	}
 
+	// A pane discovered before its first turn has no rollout to read.
+	if session.transcript == "" {
+		return protocol.NewPage(sessionID, nil, "", false), nil
+	}
+
 	opts := jsonl.BackwardOptions{
 		Want: limit,
 		Map:  parser.NewCodexParser(sessionID).Parse,
@@ -337,6 +398,13 @@ func (s *CodexSource) Follow(ctx context.Context, sessionID string, out chan<- [
 	s.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("source: unknown codex session %q", sessionID)
+	}
+
+	if session.transcript == "" {
+		// Nothing to follow yet; discovery will re-key this session with a
+		// transcript once the first turn writes one.
+		<-ctx.Done()
+		return ctx.Err()
 	}
 
 	tail := jsonl.NewTail(session.transcript)
