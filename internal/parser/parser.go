@@ -93,3 +93,16 @@ type toolOutcome struct {
 	status  protocol.ToolStatus
 	preview string
 }
+
+// toolCall remembers what a tool invocation looked like so its result can be
+// re-emitted complete.
+//
+// The summary has to be carried, not just the name: the settled row replaces
+// the running one by id, so dropping it here makes a finished command lose the
+// command itself — which showed up as tool rows that displayed "Bash" with no
+// command, seemingly at random, depending only on whether the tool had
+// completed yet.
+type toolCall struct {
+	name    string
+	summary string
+}

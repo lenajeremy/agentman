@@ -79,8 +79,8 @@ type ClaudeParser struct {
 	sessionID string
 	// outcomes holds results seen before their call — the backward-paging case.
 	outcomes *boundedMap[toolOutcome]
-	// toolNames holds names seen before their result — the live-tail case.
-	toolNames *boundedMap[string]
+	// toolCalls holds calls seen before their result — the live-tail case.
+	toolCalls *boundedMap[toolCall]
 }
 
 // NewClaudeParser creates a parser bound to one session.
@@ -88,7 +88,7 @@ func NewClaudeParser(sessionID string) *ClaudeParser {
 	return &ClaudeParser{
 		sessionID: sessionID,
 		outcomes:  newBoundedMap[toolOutcome](2000),
-		toolNames: newBoundedMap[string](2000),
+		toolCalls: newBoundedMap[toolCall](2000),
 	}
 }
 
@@ -152,13 +152,14 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 			if name == "" {
 				name = "tool"
 			}
-			p.toolNames.set(id, name)
+			summary := summarizeToolInput(name, block.Input)
+			p.toolCalls.set(id, toolCall{name: name, summary: summary})
 
 			msg := protocol.Message{
 				ID: id, SessionID: p.sessionID, Role: protocol.RoleTool, Ts: ts,
 				Tool: &protocol.Tool{
 					Name:    name,
-					Summary: summarizeToolInput(name, block.Input),
+					Summary: summary,
 					Status:  protocol.ToolRunning,
 				},
 				IsSidechain: rec.IsSidechain,
@@ -185,11 +186,13 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 			// Reading forwards the row already exists, so re-emit it under the
 			// same ID to settle it. The app upserts by ID, so this replaces the
 			// "running" row rather than adding a second one.
-			if name, ok := p.toolNames.get(block.ToolUseID); ok {
+			if call, ok := p.toolCalls.get(block.ToolUseID); ok {
 				out = append(out, protocol.Message{
 					ID: block.ToolUseID, SessionID: p.sessionID,
 					Role: protocol.RoleTool, Ts: ts, Text: outcome.preview,
-					Tool:        &protocol.Tool{Name: name, Status: status},
+					// Carry the summary through: this row replaces the running
+					// one by id, so omitting it erases the command.
+					Tool:        &protocol.Tool{Name: call.name, Summary: call.summary, Status: status},
 					IsSidechain: rec.IsSidechain,
 				})
 			}

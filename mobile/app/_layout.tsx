@@ -12,11 +12,17 @@ import * as Notifications from "expo-notifications";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
-import { Platform, View } from "react-native";
+import { Platform, UIManager, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { StoreProvider } from "../lib/store";
 import { color } from "../lib/theme";
+
+// LayoutAnimation is opt-in on Android; without this the tool-row expand
+// snaps instead of easing.
+if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 // Notifications are the product, not a nicety: an alert that arrives silently
 // while the app is open would defeat the point of walking away from the desk.

@@ -1,3 +1,4 @@
+import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -14,9 +15,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Pulse } from "../../components/Pulse";
+import { Appear } from "../../components/Appear";
 import { Markdown } from "../../components/Markdown";
 import { QuestionCard } from "../../components/QuestionCard";
 import { Thinking } from "../../components/Thinking";
+import { ToolRow } from "../../components/ToolRow";
 import { Message } from "../../lib/protocol";
 import { PendingSend, useStore } from "../../lib/store";
 import { color, font, radius, shortPath, size, space, stateStyle } from "../../lib/theme";
@@ -33,6 +36,9 @@ export default function SessionScreen() {
   const insets = useSafeAreaInsets();
   const listRef = useRef<FlatList<Row>>(null);
   const [draft, setDraft] = useState("");
+  // Rows present on first render are the backlog and must not animate in;
+  // otherwise opening a session is a cascade of fades.
+  const settled = useRef<Set<string> | null>(null);
 
   const session = store.sessions.find((s) => s.id === sessionId);
   const messages = store.messages[sessionId] ?? [];
@@ -46,6 +52,12 @@ export default function SessionScreen() {
     return () => store.closeSession(sessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
+
+  useEffect(() => {
+    if (settled.current === null && messages.length > 0) {
+      settled.current = new Set(messages.map((m) => m.id));
+    }
+  }, [messages]);
 
   const rows = useMemo<Row[]>(() => {
     const sent = store.pending
@@ -68,6 +80,9 @@ export default function SessionScreen() {
   const submit = useCallback(() => {
     const text = draft.trim();
     if (!text || !canSend) return;
+    if (Platform.OS !== "web") {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
     store.sendMessage(sessionId, text);
     setDraft("");
     // No scroll call needed: an inverted list is already anchored to the
@@ -111,7 +126,10 @@ export default function SessionScreen() {
         }
         renderItem={({ item }) =>
           item.kind === "message" ? (
-            <MessageRow message={item.message} />
+            <MessageRow
+              message={item.message}
+              fresh={settled.current !== null && !settled.current.has(item.message.id)}
+            />
           ) : (
             <PendingRow pending={item.pending} onDismiss={store.dismissPending} />
           )
@@ -184,6 +202,7 @@ export default function SessionScreen() {
               (!canSend || draft.trim().length === 0) && styles.sendDisabled,
               pressed && styles.sendPressed,
             ]}
+            hitSlop={8}
             accessibilityRole="button"
             accessibilityLabel="Send"
           >
@@ -219,52 +238,43 @@ function DeliveryNote({ inject, state }: { inject: string; state: string }) {
   );
 }
 
-function MessageRow({ message }: { message: Message }) {
-  const [expanded, setExpanded] = useState(false);
-
+function MessageRow({ message, fresh }: { message: Message; fresh: boolean }) {
   if (message.role === "tool" && message.tool) {
-    const failed = message.tool.status === "error";
     return (
-      <Pressable
-        onPress={() => message.text && setExpanded((v) => !v)}
-        style={styles.toolRow}
-      >
-        <Text style={[styles.toolGlyph, failed && { color: color.error }]}>
-          {message.tool.status === "running" ? "◐" : failed ? "✗" : "⏺"}
-        </Text>
-        <View style={styles.toolBody}>
-          <Text style={styles.toolLine} numberOfLines={expanded ? undefined : 1}>
-            <Text style={styles.toolName}>{message.tool.name}</Text>
-            {message.tool.summary ? `  ${message.tool.summary}` : ""}
-          </Text>
-          {expanded && message.text ? (
-            <Text style={styles.toolOutput}>{message.text}</Text>
-          ) : null}
-        </View>
-      </Pressable>
+      <Appear enabled={fresh}>
+        <ToolRow message={message} />
+      </Appear>
     );
   }
 
   if (message.role === "user") {
     return (
-      <View style={styles.userRow}>
-        <Text style={styles.userText}>{message.text}</Text>
-      </View>
+      <Appear enabled={fresh}>
+        <View style={styles.userRow}>
+          <Text style={styles.userText}>{message.text}</Text>
+        </View>
+      </Appear>
     );
   }
 
   if (message.role === "system") {
-    return <Text style={styles.systemText}>{message.text}</Text>;
+    return (
+      <Appear enabled={fresh}>
+        <Text style={styles.systemText}>{message.text}</Text>
+      </Appear>
+    );
   }
 
   return (
-    <View style={styles.assistantRow}>
-      {message.isSidechain && <Text style={styles.sidechain}>subagent</Text>}
-      {/* Agents write markdown constantly — backticked paths, fenced diffs,
-          bulleted change lists. Rendering the source would mean reading
-          `**done**` and counting backticks on a phone. */}
-      <Markdown>{message.text ?? ""}</Markdown>
-    </View>
+    <Appear enabled={fresh}>
+      <View style={styles.assistantRow}>
+        {message.isSidechain && <Text style={styles.sidechain}>subagent</Text>}
+        {/* Agents write markdown constantly — backticked paths, fenced diffs,
+            bulleted change lists. Rendering the source would mean reading
+            `**done**` and counting backticks on a phone. */}
+        <Markdown>{message.text ?? ""}</Markdown>
+      </View>
+    </Appear>
   );
 }
 
@@ -322,7 +332,9 @@ const styles = StyleSheet.create({
   },
   noteText: { fontFamily: font.sans, fontSize: size.caption, color: color.muted },
 
-  list: { padding: space.lg, gap: space.lg },
+  // Inverted, so paddingTop is the gap under the newest row. Without it the
+  // last message sits behind the composer and gets clipped.
+  list: { padding: space.lg, paddingTop: space.md, gap: space.lg },
   spinner: { marginVertical: space.lg },
   startOfSession: {
     fontFamily: font.sans,

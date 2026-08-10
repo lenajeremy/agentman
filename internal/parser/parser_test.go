@@ -160,6 +160,48 @@ func TestClaudeLiveTailSettlesRunningToolUnderSameID(t *testing.T) {
 	}
 }
 
+func TestClaudeSettledToolKeepsItsCommand(t *testing.T) {
+	// Regression: the row emitted when a tool finished carried only the name
+	// and status, and because it replaces the running row by id, the command
+	// was erased. On screen that read as tool rows showing a bare "Bash" or
+	// "Read" seemingly at random — the difference being only whether the tool
+	// had completed yet.
+	path := writeFixture(t, []any{
+		claudeAssistant("a1", []any{
+			obj{"type": "tool_use", "id": "toolu_7", "name": "Bash",
+				"input": obj{"command": "go test ./..."}},
+		}),
+		claudeToolResult("u2", "toolu_7", "ok", false),
+	})
+
+	msgs := pageAll(t, path, NewClaudeParser("claude:s"), 20)
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1 settled row", len(msgs))
+	}
+	if msgs[0].Tool.Summary != "go test ./..." {
+		t.Errorf("Summary = %q, want the command to survive completion", msgs[0].Tool.Summary)
+	}
+
+	// The same must hold reading forwards, where the settled row is a genuine
+	// second emission rather than a merge.
+	p := NewClaudeParser("claude:s")
+	tail := jsonl.NewTail(path)
+	lines, err := tail.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var emitted []protocol.Message
+	for _, line := range lines {
+		emitted = append(emitted, p.Parse(line.Text, line.Offset)...)
+	}
+	if len(emitted) != 2 {
+		t.Fatalf("got %d messages, want a running row then a settled one", len(emitted))
+	}
+	if emitted[1].Tool.Summary != "go test ./..." {
+		t.Errorf("settled row lost the command: %+v", emitted[1].Tool)
+	}
+}
+
 func TestClaudeBookkeepingAndThinkingStayOut(t *testing.T) {
 	meta := claudeUser("u0", "hi")
 	meta["isMeta"] = true
