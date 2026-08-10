@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/lenajeremy/agentman/internal/daemon"
@@ -104,7 +106,7 @@ func runServe(ctx context.Context, args []string) error {
 	hookServer := hook.NewServer(cfg.Token)
 	hookServer.SetPendingSource(pending.Take)
 	hookErrs := make(chan error, 1)
-	go func() { hookErrs <- hookServer.Listen(ctx, *addr) }()
+	go func() { hookErrs <- describeListenError(hookServer.Listen(ctx, *addr), *addr) }()
 	fmt.Printf("%s\n", dim("hooks      listening on "+*addr))
 
 	console := &printSink{quiet: *relayURL != ""}
@@ -166,6 +168,24 @@ func runServe(ctx context.Context, args []string) error {
 	case err := <-daemonDone:
 		return err
 	}
+}
+
+// describeListenError turns a bind failure into something actionable.
+//
+// "address already in use" is technically accurate and practically useless:
+// the cause is almost always a second `am serve` the user forgot about, and
+// the raw error says nothing about that or about how to run two on purpose.
+func describeListenError(err error, addr string) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, syscall.EADDRINUSE) {
+		return fmt.Errorf(
+			"another agentman daemon is already listening on %s.\n"+
+				"       Stop it first, or run this one on a different port:\n"+
+				"         am serve -addr 127.0.0.1:8788", addr)
+	}
+	return err
 }
 
 // runPair prints a pairing code for the phone.
