@@ -6,9 +6,9 @@ Start a Claude Code, Codex, or OpenCode session on your machine and it shows up
 on your phone: what it's doing right now, what it has done, and a box to send it
 your next instruction. When an agent finishes a task, your phone rings.
 
-> **Status: Phase 1.** The read path works — discovery, live tailing, and
-> scrollback for Claude Code and Codex, all driven from the `am` CLI. The relay,
-> the mobile app, and message injection are not built yet. See [Roadmap](#roadmap).
+> **Status: Phase 3.** The daemon, hooks, and relay all work — a paired client
+> can list live sessions and page their history from anywhere. The mobile app
+> and message injection are not built yet. See [Roadmap](#roadmap).
 
 ## The relay stores nothing
 
@@ -43,6 +43,27 @@ go build -o bin/am ./cmd/am
 ./bin/am watch                 # follow agents starting, working, going idle
 ./bin/am watch <session-id>    # follow one session's messages live
 ./bin/am history <session-id>  # recent messages, newest last
+```
+
+To get exact "it's done" signals instead of polling, register the hooks:
+
+```bash
+./bin/am install-hooks -dry-run   # see the change first
+./bin/am install-hooks
+./bin/am serve                    # the daemon
+./bin/am doctor                   # confirm it is all wired up
+```
+
+`install-hooks` edits `~/.claude/settings.json`, so it backs the file up, writes
+atomically, preserves every key it does not own, and refuses outright if the
+file will not parse. `uninstall-hooks` removes only its own entries.
+
+To reach it from your phone, run a relay and pair:
+
+```bash
+AGENTMAN_RELAY_SECRET=<long-random-string> ./bin/relay   # anywhere reachable
+./bin/am serve -relay https://your-relay.example.com
+./bin/am pair                                            # prints a 6-digit code
 ```
 
 `am history` prints a cursor when there is more to read:
@@ -91,8 +112,8 @@ first page, 8.2ms for five more, with bounded memory.
 ## Roadmap
 
 - [x] **Phase 1** — discovery, live tailing, paged scrollback, the `am` CLI
-- [ ] **Phase 2** — hooks, for exact turn-completion signals instead of polling
-- [ ] **Phase 3** — the stateless relay
+- [x] **Phase 2** — hooks, for exact turn-completion signals instead of polling
+- [x] **Phase 3** — the stateless relay
 - [ ] **Phase 4** — message injection (tmux, API, hook fallback)
 - [ ] **Phase 5** — the Expo app
 - [ ] **Phase 6** — background push, end-to-end encryption, packaging

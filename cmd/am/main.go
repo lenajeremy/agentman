@@ -26,7 +26,8 @@ Usage:
   am list                     List running agent sessions
   am history <session-id>     Print a session's recent messages
   am watch [session-id]       Follow sessions live (all, or one in detail)
-  am serve                    Receive agent hook events (the daemon loop)
+  am serve                    Run the daemon (hooks + relay connection)
+  am pair                     Print a pairing code for your phone
   am install-hooks            Register agentman's hooks with your agents
   am uninstall-hooks          Remove them again
   am doctor                   Check that everything is wired up correctly
@@ -68,6 +69,8 @@ func main() {
 		err = runInstallHooks(ctx, args, false)
 	case "uninstall-hooks":
 		err = runInstallHooks(ctx, args, true)
+	case "pair":
+		err = runPair(ctx, args)
 	case "doctor":
 		err = runDoctor(ctx, args)
 	case "-h", "--help", "help":

@@ -82,7 +82,7 @@ func (r *Registry) Discover(ctx context.Context) ([]protocol.Session, error) {
 	}
 	wg.Wait()
 
-	sortSessions(all)
+	SortSessions(all)
 
 	if len(failures) > 0 {
 		sort.Strings(failures)
@@ -91,10 +91,10 @@ func (r *Registry) Discover(ctx context.Context) ([]protocol.Session, error) {
 	return all, nil
 }
 
-// sortSessions puts the list in the order the app's agent screen relies on:
+// SortSessions puts the list in the order the app's agent screen relies on:
 // sessions blocked on the user first (they are the ones going nowhere without
 // attention), then busy ones, then everything else by recency.
-func sortSessions(sessions []protocol.Session) {
+func SortSessions(sessions []protocol.Session) {
 	sort.SliceStable(sessions, func(i, j int) bool {
 		if pi, pj := statePriority(sessions[i].State), statePriority(sessions[j].State); pi != pj {
 			return pi < pj

@@ -130,62 +130,6 @@ func runInstallHooks(ctx context.Context, args []string, remove bool) error {
 	return nil
 }
 
-// runServe runs the loopback hook listener and prints events as they arrive.
-// This is the daemon's core loop; the relay client will attach here in Phase 3.
-func runServe(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("addr", hook.DefaultAddr, "loopback listen address")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	cfg, err := hook.LoadConfig("")
-	if err != nil {
-		return err
-	}
-	store, err := hook.NewStore("")
-	if err != nil {
-		return err
-	}
-
-	server := hook.NewServer(cfg.Token)
-	errs := make(chan error, 1)
-	go func() { errs <- server.Listen(ctx, *addr) }()
-
-	fmt.Printf("%s\n\n", dim("listening for agent hooks on "+*addr+" — ctrl-c to stop"))
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case err := <-errs:
-			return err
-		case event := <-server.Events():
-			if err := store.RecordFired(event.Kind, time.UnixMilli(event.ReceivedAt)); err != nil {
-				fmt.Fprintf(os.Stderr, "am: warning: could not record hook state: %v\n", err)
-			}
-			printHookEvent(event)
-		}
-	}
-}
-
-func printHookEvent(event hook.Event) {
-	name := shortSessionID(event.SessionID)
-
-	switch {
-	case event.IsTurnComplete():
-		// The signal the whole notification feature hangs on.
-		fmt.Printf("%s %s %s %s\n", stamp(), "🔔", bold("done "+name),
-			dim(event.Preview()))
-	case event.Name == hook.NameNotification:
-		fmt.Printf("%s ◆ %s %s\n", stamp(), bold("needs you "+name), dim(event.Preview()))
-	case event.Name == hook.NameUserPromptSubmit:
-		fmt.Printf("%s ● %s %s\n", stamp(), name, dim(truncate(event.Payload.Prompt, 80)))
-	default:
-		fmt.Printf("%s %s %s %s\n", stamp(), dim("·"), name, dim(string(event.Name)))
-	}
-}
-
 // shortSessionID trims a composite id to something readable in a log line.
 func shortSessionID(id string) string {
 	if len(id) > 20 {

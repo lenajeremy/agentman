@@ -358,7 +358,7 @@ func TestRegistryOrdersWaitingInputFirst(t *testing.T) {
 		{ID: "d", State: protocol.StateBusy, LastActivityAt: 200},
 	}
 	// Mirrors the comparator Discover applies.
-	sortSessions(sessions)
+	SortSessions(sessions)
 
 	got := []string{sessions[0].ID, sessions[1].ID, sessions[2].ID, sessions[3].ID}
 	want := []string{"c", "d", "b", "a"}
