@@ -112,6 +112,10 @@ func buildRegistry() (*source.Registry, error) {
 	}
 	registry.Add(codex)
 
+	// OpenCode is reached over HTTP rather than the filesystem, so there is
+	// nothing to configure: the adapter stays silent when no server is up.
+	registry.Add(source.NewOpenCodeSource(os.Getenv("AGENTMAN_OPENCODE_URL")))
+
 	return registry, nil
 }
 

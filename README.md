@@ -9,7 +9,8 @@ your next instruction. When an agent finishes a task, your phone rings.
 > **Status: Phase 5.** The daemon, hooks, relay, and message injection all
 > work, and so does the app: a paired phone lists live sessions, reads their
 > history, sends instructions, and answers the approval prompts an agent is
-> blocked on. OpenCode support is next. See [Roadmap](#roadmap).
+> blocked on. All three agents are supported, though Codex is the least
+> verified. See [Roadmap](#roadmap).
 
 ## The relay stores nothing
 
@@ -84,9 +85,17 @@ and covered by tests.
 |---|---|---|---|
 | **Claude Code** | `~/.claude/sessions/<pid>.json`, a live registry with a busy/idle status. Verified against the pid, since the file outlives a crashed session. | `~/.claude/projects/<cwd-slug>/<id>.jsonl` | tmux (mid-turn) or the hook queue |
 | **Codex** | Rollout files under `~/.codex/sessions/YYYY/MM/DD/`, gated on a running `codex` process. The weakest part — hooks will replace the guess. | same rollout file | tmux (mid-turn) or the hook queue |
-| **OpenCode** | Planned — `opencode serve` exposes a real HTTP API | `GET /session/:id/message` | `POST /session/:id/prompt_async` |
+| **OpenCode** | `opencode serve`'s HTTP API, which reports exactly which sessions are running | `GET /api/session/:id/message`, cursor-paged | `POST .../prompt` with `delivery: steer` — native, mid-turn |
 
-Two findings worth recording, since neither is documented:
+OpenCode is the one agent that needs no tricks — a real API covers sessions,
+messages, mid-turn delivery, and questions as structured data. It is the shape
+`source.Source` was designed around, and the best reference for adding a fourth
+agent. Worth knowing if you build against it: its OpenAPI spec and its actual
+responses disagree in three places (the session list is wrapped in
+`{data, cursor}`, the working directory lives under `location`, and messages
+are flat rather than `{info, parts}`), so check the wire, not the schema.
+
+Two more findings worth recording, since neither is documented:
 
 - **Codex has the same hook system as Claude Code.** Its binary contains
   `hooks.json` and the events `session_start`, `stop`, `user_prompt_submit`,

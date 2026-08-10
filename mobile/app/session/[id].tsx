@@ -49,7 +49,12 @@ export default function SessionScreen() {
     const sent = store.pending
       .filter((p) => p.sessionId === sessionId && p.status !== "delivered")
       .map((pending) => ({ kind: "pending" as const, pending }));
-    return [...messages.map((message) => ({ kind: "message" as const, message })), ...sent];
+    const chronological: Row[] = [
+      ...messages.map((message) => ({ kind: "message" as const, message })),
+      ...sent,
+    ];
+    // Reversed to feed an inverted list — see the FlatList below.
+    return chronological.reverse();
   }, [messages, store.pending, sessionId]);
 
   // A blocked agent will not read a new instruction until the question is
@@ -63,7 +68,8 @@ export default function SessionScreen() {
     if (!text || !canSend) return;
     store.sendMessage(sessionId, text);
     setDraft("");
-    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+    // No scroll call needed: an inverted list is already anchored to the
+    // newest row, so the sent message appears in place.
   }, [draft, canSend, sessionId, store]);
 
   return (
@@ -87,9 +93,17 @@ export default function SessionScreen() {
         <DeliveryNote inject={session.inject} state={session.state} />
       )}
 
+      {/* Inverted so the feed opens on the newest message and stays pinned
+          there as more arrive. Opening a long session at its beginning means
+          scrolling through hours of history to find out what just happened,
+          which is the opposite of what someone checking their phone wants.
+          Inverting also makes "load older" the natural end-of-list action,
+          and it leaves the scroll position alone when the user has
+          deliberately scrolled up to read. */}
       <FlatList
         ref={listRef}
         data={rows}
+        inverted
         keyExtractor={(row) =>
           row.kind === "message" ? row.message.id : row.pending.clientId
         }
@@ -101,11 +115,10 @@ export default function SessionScreen() {
           )
         }
         contentContainerStyle={styles.list}
-        onEndReachedThreshold={0.2}
-        // Scrollback loads upward, so "end reached" here means the top.
-        onStartReached={() => store.loadOlder(sessionId)}
-        onStartReachedThreshold={0.3}
-        ListHeaderComponent={
+        // With the list inverted, the "end" is the oldest message.
+        onEndReached={() => store.loadOlder(sessionId)}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={
           paging?.loading ? (
             <ActivityIndicator style={styles.spinner} color={color.faint} />
           ) : paging && !paging.hasMore && messages.length > 0 ? (
