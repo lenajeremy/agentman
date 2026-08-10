@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Pulse } from "../../components/Pulse";
 import { Appear } from "../../components/Appear";
+import { clearDraft, loadDraft, saveDraft } from "../../lib/drafts";
 import { Markdown } from "../../components/Markdown";
 import { QuestionCard } from "../../components/QuestionCard";
 import { Thinking } from "../../components/Thinking";
@@ -36,6 +37,9 @@ export default function SessionScreen() {
   const insets = useSafeAreaInsets();
   const listRef = useRef<FlatList<Row>>(null);
   const [draft, setDraft] = useState("");
+  // Restored before the user can type, so an in-progress instruction survives
+  // leaving the screen, backgrounding the app, or a reconnect.
+  const draftLoaded = useRef(false);
   // Rows present on first render are the backlog and must not animate in;
   // otherwise opening a session is a cascade of fades.
   const settled = useRef<Set<string> | null>(null);
@@ -52,6 +56,22 @@ export default function SessionScreen() {
     return () => store.closeSession(sessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
+
+  useEffect(() => {
+    draftLoaded.current = false;
+    void loadDraft(sessionId).then((saved) => {
+      // Do not clobber anything typed while the read was in flight.
+      setDraft((current) => (current === "" ? saved : current));
+      draftLoaded.current = true;
+    });
+  }, [sessionId]);
+
+  useEffect(() => {
+    // Skip the write until the restore has landed, or an empty initial value
+    // would immediately erase what was saved.
+    if (!draftLoaded.current) return;
+    void saveDraft(sessionId, draft);
+  }, [sessionId, draft]);
 
   useEffect(() => {
     if (settled.current === null && messages.length > 0) {
@@ -85,6 +105,7 @@ export default function SessionScreen() {
     }
     store.sendMessage(sessionId, text);
     setDraft("");
+    void clearDraft(sessionId);
     // No scroll call needed: an inverted list is already anchored to the
     // newest row, so the sent message appears in place.
   }, [draft, canSend, sessionId, store]);
