@@ -65,6 +65,25 @@ type Session struct {
 	Inject         InjectMode `json:"inject"`
 	StartedAt      int64      `json:"startedAt"`
 	LastActivityAt int64      `json:"lastActivityAt"`
+	// Question is set when the agent is blocked on a decision. Its presence
+	// is what makes StateWaitingInput actionable rather than merely visible:
+	// the app renders the choices and the user taps one.
+	Question *Question `json:"question,omitempty"`
+}
+
+// Question is a pending decision an agent is waiting on.
+type Question struct {
+	Prompt  string           `json:"prompt"`
+	Title   string           `json:"title,omitempty"`
+	Detail  string           `json:"detail,omitempty"`
+	Options []QuestionOption `json:"options"`
+}
+
+// QuestionOption is one choice. Key is what gets sent to select it.
+type QuestionOption struct {
+	Key      string `json:"key"`
+	Label    string `json:"label"`
+	Selected bool   `json:"selected,omitempty"`
 }
 
 // Role is who produced a message.

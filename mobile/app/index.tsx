@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Pulse } from "../components/Pulse";
+import { QuestionCard } from "../components/QuestionCard";
 import { Session } from "../lib/protocol";
 import { useStore } from "../lib/store";
 import { ago, color, font, radius, shortPath, size, space, stateStyle } from "../lib/theme";
@@ -145,7 +146,15 @@ function AgentRow({ session }: { session: Session }) {
         <Text style={styles.path} numberOfLines={1}>
           {shortPath(session.cwd)}
         </Text>
-        {needsYou && <Text style={styles.needsYouNote}>Waiting on your answer</Text>}
+        {session.question ? (
+          <QuestionCard
+            question={session.question}
+            onAnswer={() => {}}
+            compact
+          />
+        ) : needsYou ? (
+          <Text style={styles.needsYouNote}>Waiting on your answer</Text>
+        ) : null}
       </View>
     </Pressable>
   );

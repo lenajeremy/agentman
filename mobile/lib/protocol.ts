@@ -19,6 +19,21 @@ export type SessionState = "busy" | "idle" | "waiting_input" | "ended";
  */
 export type InjectMode = "api" | "tmux" | "hook" | "none";
 
+/** A decision an agent is blocked on, with the choices it is offering. */
+export interface Question {
+  prompt: string;
+  title?: string;
+  detail?: string;
+  options: QuestionOption[];
+}
+
+export interface QuestionOption {
+  /** What gets sent to choose this option. */
+  key: string;
+  label: string;
+  selected?: boolean;
+}
+
 export interface Session {
   id: string;
   kind: AgentKind;
@@ -29,6 +44,8 @@ export interface Session {
   inject: InjectMode;
   startedAt: number;
   lastActivityAt: number;
+  /** Present only while the agent is waiting on a decision. */
+  question?: Question;
 }
 
 export interface Tool {
@@ -70,7 +87,8 @@ export type RequestType =
   | "unsubscribe"
   | "fetch_messages"
   | "send_message"
-  | "interrupt";
+  | "interrupt"
+  | "answer_question";
 
 export interface Request {
   type: RequestType;
@@ -79,6 +97,8 @@ export interface Request {
   limit?: number;
   text?: string;
   clientId?: string;
+  /** Chooses an option on answer_question. */
+  optionKey?: string;
 }
 
 export type EventType =

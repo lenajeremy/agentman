@@ -6,10 +6,10 @@ Start a Claude Code, Codex, or OpenCode session on your machine and it shows up
 on your phone: what it's doing right now, what it has done, and a box to send it
 your next instruction. When an agent finishes a task, your phone rings.
 
-> **Status: Phase 4.** The daemon, hooks, relay, and message injection all
-> work — a paired client can list live sessions, read their history, and send
-> them a new instruction from anywhere. The mobile app is next.
-> See [Roadmap](#roadmap).
+> **Status: Phase 5.** The daemon, hooks, relay, and message injection all
+> work, and so does the app: a paired phone lists live sessions, reads their
+> history, sends instructions, and answers the approval prompts an agent is
+> blocked on. OpenCode support is next. See [Roadmap](#roadmap).
 
 ## The relay stores nothing
 
@@ -123,6 +123,28 @@ Two details that matter more than they look:
 - **Multi-line messages use bracketed paste.** Raw newlines would submit at the
   first line break and scatter the rest across follow-up turns.
 
+## Answering the prompts that block an agent
+
+When an agent asks "can I run this command?", it stops until someone answers.
+That is the state worth a notification, and the one the app makes actionable:
+the question, the exact command under review, and the choices all appear on the
+phone, and tapping one answers the real agent.
+
+Finding these is harder than it sounds, and the reason is worth recording:
+
+- **No hook fires for a permission prompt.** Claude Code's `Notification` hook
+  does not run for one, verified by waiting on a live prompt with the daemon
+  attached.
+- **The session registry still says `idle`.** From the outside, an agent blocked
+  on a decision is indistinguishable from one that has finished.
+
+So detection reads the terminal itself — `tmux capture-pane`, parsed by
+[`internal/question`](internal/question/question.go). That carries a real cost:
+only sessions started with `am claude` / `am codex` can be seen or answered.
+It also means the parser must be conservative, since a false positive would
+show a phantom question: a lone numbered line is treated as prose, and a menu
+with anything after it is treated as already answered.
+
 ## Reading transcripts without copying them
 
 [`internal/jsonl`](internal/jsonl/jsonl.go) is the piece that replaces the
@@ -143,7 +165,7 @@ first page, 8.2ms for five more, with bounded memory.
 - [x] **Phase 2** — hooks, for exact turn-completion signals instead of polling
 - [x] **Phase 3** — the stateless relay
 - [x] **Phase 4** — message injection (tmux, hook fallback)
-- [ ] **Phase 5** — the Expo app
+- [x] **Phase 5** — the Expo app, including approval prompts
 - [ ] **Phase 6** — background push, end-to-end encryption, packaging
 
 ## Contributing

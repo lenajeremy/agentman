@@ -148,6 +148,24 @@ func (r *Registry) Inject(ctx context.Context, sessionID, text string) (protocol
 	return injector.Inject(ctx, sessionID, text)
 }
 
+// Answerer is implemented by adapters that can resolve a pending question.
+type Answerer interface {
+	Answer(ctx context.Context, sessionID, optionKey string) error
+}
+
+// Answer routes a decision to the adapter owning the session.
+func (r *Registry) Answer(ctx context.Context, sessionID, optionKey string) error {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return err
+	}
+	answerer, ok := s.(Answerer)
+	if !ok {
+		return fmt.Errorf("source: %s questions cannot be answered remotely", s.Kind())
+	}
+	return answerer.Answer(ctx, sessionID, optionKey)
+}
+
 func (r *Registry) forSession(sessionID string) (Source, error) {
 	kind, _, ok := strings.Cut(sessionID, ":")
 	if !ok {

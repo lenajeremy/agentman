@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/question"
 	"github.com/lenajeremy/agentman/internal/tmux"
 )
 
@@ -127,4 +128,63 @@ func (s *CodexSource) Inject(ctx context.Context, sessionID, text string) (proto
 	}
 	s.pending.Add(sessionID, text)
 	return protocol.InjectHook, nil
+}
+
+// detectQuestion reads a pane and reports any decision the agent is blocked on.
+//
+// Runs on every discovery sweep for every tmux-backed session, so it must stay
+// cheap: one capture-pane per session per second, parsed in memory. Failures
+// are silent — a pane that cannot be read simply means no question, which is
+// the same conclusion as an agent that is working normally.
+func detectQuestion(ctx context.Context, tmuxName string) *protocol.Question {
+	pane, err := tmux.Capture(ctx, tmuxName)
+	if err != nil {
+		return nil
+	}
+	found := question.Detect(pane)
+	if found == nil {
+		return nil
+	}
+	options := make([]protocol.QuestionOption, 0, len(found.Options))
+	for _, option := range found.Options {
+		options = append(options, protocol.QuestionOption{
+			Key:      option.Key,
+			Label:    option.Label,
+			Selected: option.Selected,
+		})
+	}
+	return &protocol.Question{
+		Prompt:  found.Prompt,
+		Title:   found.Title,
+		Detail:  found.Detail,
+		Options: options,
+	}
+}
+
+// Answer selects an option in a question a Claude session is showing.
+func (s *ClaudeSource) Answer(ctx context.Context, sessionID, optionKey string) error {
+	s.mu.RLock()
+	session, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("source: unknown claude session %q", sessionID)
+	}
+	if session.tmuxName == "" {
+		return fmt.Errorf("source: only sessions started with `am claude` can be answered")
+	}
+	return tmux.Answer(ctx, session.tmuxName, optionKey)
+}
+
+// Answer selects an option in a question a Codex session is showing.
+func (s *CodexSource) Answer(ctx context.Context, sessionID, optionKey string) error {
+	s.mu.RLock()
+	session, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("source: unknown codex session %q", sessionID)
+	}
+	if session.tmuxName == "" {
+		return fmt.Errorf("source: only sessions started with `am codex` can be answered")
+	}
+	return tmux.Answer(ctx, session.tmuxName, optionKey)
 }

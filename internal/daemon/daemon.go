@@ -204,6 +204,20 @@ func (d *Daemon) Handle(ctx context.Context, req protocol.Request) protocol.Even
 		}
 		return result
 
+	case protocol.ReqAnswer:
+		if err := d.registry.Answer(ctx, req.SessionID, req.OptionKey); err != nil {
+			return protocol.Event{
+				Type: protocol.EvtSendResult, SessionID: req.SessionID,
+				ClientID: req.ClientID, Status: protocol.StatusFailed, Error: err.Error(),
+			}
+		}
+		// The next discovery sweep clears the question and updates the state,
+		// so nothing else has to be reported here.
+		return protocol.Event{
+			Type: protocol.EvtSendResult, SessionID: req.SessionID,
+			ClientID: req.ClientID, Status: protocol.StatusDelivered,
+		}
+
 	default:
 		return protocol.Event{Type: protocol.EvtError, Error: "unsupported request: " + string(req.Type)}
 	}

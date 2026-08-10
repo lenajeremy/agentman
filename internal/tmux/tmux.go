@@ -266,3 +266,40 @@ func run(ctx context.Context, args ...string) (string, error) {
 func NewName(kind string) string {
 	return fmt.Sprintf("%s%s-%d", Prefix, kind, time.Now().Unix()%100000)
 }
+
+// Capture returns the visible contents of a session's pane.
+//
+// This is how a pending approval prompt is found: the CLIs fire no hook for
+// one, and their session files still say "idle" while they sit blocked, so
+// the terminal is the only place the truth exists.
+func Capture(ctx context.Context, name string) (string, error) {
+	if !Available() {
+		return "", ErrNotInstalled
+	}
+	// -p prints to stdout; without -S the capture is the visible pane only,
+	// which is exactly the region a prompt occupies.
+	out, err := run(ctx, "capture-pane", "-t", name, "-p")
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+// Answer chooses an option in a menu the agent is showing.
+//
+// Deliberately not Send: a menu takes a single keystroke, and Send's
+// prompt-clearing and trailing Enter would both be wrong here — Ctrl-U in a
+// menu does nothing useful, and an extra Enter would confirm whatever the
+// menu moved to next.
+func Answer(ctx context.Context, name, key string) error {
+	if !Available() {
+		return ErrNotInstalled
+	}
+	if key == "" {
+		return errors.New("tmux: no option given")
+	}
+	if _, err := run(ctx, "send-keys", "-t", name, "-l", key); err != nil {
+		return fmt.Errorf("tmux: could not answer: %w", err)
+	}
+	return nil
+}

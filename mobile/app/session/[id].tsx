@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Pulse } from "../../components/Pulse";
+import { QuestionCard } from "../../components/QuestionCard";
 import { Message } from "../../lib/protocol";
 import { PendingSend, useStore } from "../../lib/store";
 import { color, font, radius, shortPath, size, space, stateStyle } from "../../lib/theme";
@@ -51,7 +52,11 @@ export default function SessionScreen() {
     return [...messages.map((message) => ({ kind: "message" as const, message })), ...sent];
   }, [messages, store.pending, sessionId]);
 
-  const canSend = session ? session.inject !== "none" : false;
+  // A blocked agent will not read a new instruction until the question is
+  // resolved, so the composer steps aside rather than accepting text that
+  // would sit unread.
+  const blocked = Boolean(session?.question);
+  const canSend = session ? session.inject !== "none" && !blocked : false;
 
   const submit = useCallback(() => {
     const text = draft.trim();
@@ -78,7 +83,9 @@ export default function SessionScreen() {
         {session && <Pulse state={session.state} />}
       </View>
 
-      {session && <DeliveryNote inject={session.inject} state={session.state} />}
+      {session && !session.question && (
+        <DeliveryNote inject={session.inject} state={session.state} />
+      )}
 
       <FlatList
         ref={listRef}
@@ -116,6 +123,17 @@ export default function SessionScreen() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         keyboardVerticalOffset={insets.top}
       >
+        {/* Pinned above the composer, not buried in the feed: an unanswered
+            question is the only thing on this screen that blocks the agent. */}
+        {session?.question ? (
+          <View style={styles.questionWrap}>
+            <QuestionCard
+              question={session.question}
+              onAnswer={(key) => store.answerQuestion(sessionId, key)}
+            />
+          </View>
+        ) : null}
+
         <View style={[styles.composer, { paddingBottom: insets.bottom + space.sm }]}>
           <TextInput
             style={[styles.input, !canSend && styles.inputDisabled]}
@@ -123,7 +141,11 @@ export default function SessionScreen() {
             onChangeText={setDraft}
             editable={canSend}
             placeholder={
-              canSend ? "Send an instruction…" : "This session can't receive messages"
+              blocked
+                ? "Answer the question above first"
+                : canSend
+                  ? "Send an instruction…"
+                  : "This session can't receive messages"
             }
             placeholderTextColor={color.faint}
             multiline
@@ -344,6 +366,7 @@ const styles = StyleSheet.create({
     marginTop: space.xs,
   },
 
+  questionWrap: { paddingHorizontal: space.md, paddingBottom: space.sm },
   composer: {
     flexDirection: "row",
     alignItems: "flex-end",

@@ -46,6 +46,8 @@ const (
 	ReqFetchMessages RequestType = "fetch_messages"
 	ReqSendMessage   RequestType = "send_message"
 	ReqInterrupt     RequestType = "interrupt"
+	// ReqAnswer selects an option in a pending question.
+	ReqAnswer RequestType = "answer_question"
 )
 
 // Request is anything the app asks of the daemon.
@@ -60,6 +62,8 @@ type Request struct {
 	Before string `json:"before,omitempty"`
 	Limit  int    `json:"limit,omitempty"`
 	Text   string `json:"text,omitempty"`
+	// OptionKey selects an option on ReqAnswer.
+	OptionKey string `json:"optionKey,omitempty"`
 	// ClientID is echoed on SendResult so the app can settle its optimistic
 	// message bubble.
 	ClientID string `json:"clientId,omitempty"`

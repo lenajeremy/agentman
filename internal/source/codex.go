@@ -200,6 +200,13 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				StartedAt:      parseCodexTime(meta.Payload.Timestamp),
 				LastActivityAt: lastActivity,
 			}
+			if tmuxName != "" {
+				if q := detectQuestion(ctx, tmuxName); q != nil {
+					session.Question = q
+					session.State = protocol.StateWaitingInput
+				}
+			}
+
 			found = append(found, session)
 			next[id] = codexSession{meta: session, transcript: path, tmuxName: tmuxName}
 		}

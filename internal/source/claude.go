@@ -145,6 +145,17 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 			StartedAt:      file.StartedAt,
 			LastActivityAt: file.UpdatedAt,
 		}
+
+		// The registry reports a session blocked on a permission prompt as
+		// "idle", and no hook fires for one — so a pending question is only
+		// visible by reading the terminal. Finding one overrides the state,
+		// because "waiting on you" is the truth and "idle" is not.
+		if tmuxName != "" {
+			if q := detectQuestion(ctx, tmuxName); q != nil {
+				meta.Question = q
+				meta.State = protocol.StateWaitingInput
+			}
+		}
 		if meta.LastActivityAt == 0 {
 			meta.LastActivityAt = meta.StartedAt
 		}

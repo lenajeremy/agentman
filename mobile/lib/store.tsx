@@ -48,6 +48,7 @@ interface Store {
   closeSession(sessionId: string): void;
   loadOlder(sessionId: string): void;
   sendMessage(sessionId: string, text: string): void;
+  answerQuestion(sessionId: string, optionKey: string): void;
   dismissPending(clientId: string): void;
 }
 
@@ -306,6 +307,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ),
           );
         }
+      },
+
+      answerQuestion(sessionId, optionKey) {
+        clientRef.current?.send({
+          type: "answer_question",
+          sessionId,
+          optionKey,
+          clientId: `answer-${Date.now()}`,
+        });
+        // The question clears itself on the next discovery sweep, so the row
+        // is left alone rather than optimistically hidden — if the keystroke
+        // did not land, the user needs to still see the choice.
       },
 
       dismissPending(clientId) {
