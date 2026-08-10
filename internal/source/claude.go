@@ -15,6 +15,7 @@ import (
 	"github.com/lenajeremy/agentman/internal/jsonl"
 	"github.com/lenajeremy/agentman/internal/parser"
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/tmux"
 )
 
 // Claude Code maintains a live registry at ~/.claude/sessions/<pid>.json, one
@@ -27,6 +28,9 @@ import (
 // this file so a CLI upgrade breaks in one place.
 type ClaudeSource struct {
 	home string
+	// pending holds messages for sessions with no live input channel, handed
+	// over at the next Stop hook.
+	pending *PendingQueue
 
 	mu       sync.RWMutex
 	sessions map[string]claudeSession
@@ -35,6 +39,11 @@ type ClaudeSource struct {
 type claudeSession struct {
 	meta       protocol.Session
 	transcript string
+	// tmuxName is set when this session was launched through `am claude`, and
+	// is what makes mid-turn delivery possible. Empty means the session was
+	// started normally and can only be reached through the hook queue.
+	tmuxName string
+	pid      int
 }
 
 // claudeSessionFile is the subset of ~/.claude/sessions/<pid>.json we read.
@@ -87,6 +96,10 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 	found := make([]protocol.Session, 0, len(entries))
 	next := make(map[string]claudeSession, len(entries))
 
+	// One tmux lookup per sweep, not per session: the process-ancestry walk
+	// below is what maps an agent to the tmux session that can type into it.
+	panes, _ := tmux.List(ctx)
+
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
@@ -107,6 +120,20 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 		}
 
 		id := string(protocol.KindClaude) + ":" + file.SessionID
+
+		// A session launched through the wrapper can be typed into at any
+		// time, including mid-turn. Everything else falls back to the hook
+		// queue, which only delivers between turns and can be dropped.
+		tmuxName := ""
+		inject := protocol.InjectHook
+		for _, pane := range panes {
+			if tmux.OwnsPID(pane.PanePID, file.PID) {
+				tmuxName = pane.Name
+				inject = protocol.InjectTmux
+				break
+			}
+		}
+
 		meta := protocol.Session{
 			ID:             id,
 			Kind:           protocol.KindClaude,
@@ -114,7 +141,7 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 			Name:           claudeName(file),
 			Cwd:            file.Cwd,
 			State:          claudeState(file.Status),
-			Inject:         protocol.InjectHook,
+			Inject:         inject,
 			StartedAt:      file.StartedAt,
 			LastActivityAt: file.UpdatedAt,
 		}
@@ -126,6 +153,8 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 		next[id] = claudeSession{
 			meta:       meta,
 			transcript: s.transcriptPath(file.Cwd, file.SessionID),
+			tmuxName:   tmuxName,
+			pid:        file.PID,
 		}
 	}
 

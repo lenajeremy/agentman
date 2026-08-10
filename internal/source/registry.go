@@ -161,3 +161,19 @@ func (r *Registry) forSession(sessionID string) (Source, error) {
 	}
 	return s, nil
 }
+
+// EachSource calls fn for every registered adapter.
+//
+// Used to hand shared state (such as the pending-message queue) to whichever
+// adapters support it, without the registry needing to know which those are.
+func (r *Registry) EachSource(fn func(Source)) {
+	r.mu.RLock()
+	sources := make([]Source, 0, len(r.sources))
+	for _, s := range r.sources {
+		sources = append(sources, s)
+	}
+	r.mu.RUnlock()
+	for _, s := range sources {
+		fn(s)
+	}
+}

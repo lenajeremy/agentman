@@ -6,9 +6,10 @@ Start a Claude Code, Codex, or OpenCode session on your machine and it shows up
 on your phone: what it's doing right now, what it has done, and a box to send it
 your next instruction. When an agent finishes a task, your phone rings.
 
-> **Status: Phase 3.** The daemon, hooks, and relay all work — a paired client
-> can list live sessions and page their history from anywhere. The mobile app
-> and message injection are not built yet. See [Roadmap](#roadmap).
+> **Status: Phase 4.** The daemon, hooks, relay, and message injection all
+> work — a paired client can list live sessions, read their history, and send
+> them a new instruction from anywhere. The mobile app is next.
+> See [Roadmap](#roadmap).
 
 ## The relay stores nothing
 
@@ -81,8 +82,8 @@ and covered by tests.
 
 | | Discovery | Scrollback | Send a message |
 |---|---|---|---|
-| **Claude Code** | `~/.claude/sessions/<pid>.json`, a live registry with a busy/idle status. Verified against the pid, since the file outlives a crashed session. | `~/.claude/projects/<cwd-slug>/<id>.jsonl` | Planned: tmux wrapper, hook fallback |
-| **Codex** | Rollout files under `~/.codex/sessions/YYYY/MM/DD/`, gated on a running `codex` process. The weakest part — hooks will replace the guess. | same rollout file | Planned: tmux, possibly `app-server` |
+| **Claude Code** | `~/.claude/sessions/<pid>.json`, a live registry with a busy/idle status. Verified against the pid, since the file outlives a crashed session. | `~/.claude/projects/<cwd-slug>/<id>.jsonl` | tmux (mid-turn) or the hook queue |
+| **Codex** | Rollout files under `~/.codex/sessions/YYYY/MM/DD/`, gated on a running `codex` process. The weakest part — hooks will replace the guess. | same rollout file | tmux (mid-turn) or the hook queue |
 | **OpenCode** | Planned — `opencode serve` exposes a real HTTP API | `GET /session/:id/message` | `POST /session/:id/prompt_async` |
 
 Two findings worth recording, since neither is documented:
@@ -94,6 +95,33 @@ Two findings worth recording, since neither is documented:
   history; `event_msg` is the semantic stream its UI renders. They duplicate
   each other almost exactly, so we read only `event_msg` — it excludes injected
   `developer` instructions and reports commands already parsed.
+
+## Sending a message to a running agent
+
+Agent CLIs are interactive terminal programs with no input API, so the last hop
+is the hard part. Every session shows which of three paths it has, because they
+are not equally good:
+
+| Mode | How | Quality |
+|---|---|---|
+| `tmux` | Started with `am claude` / `am codex`, so the daemon can type into it | Works **mid-turn**, exactly like typing |
+| `hook` | Queued, handed over at the session's next `Stop` hook | Between turns only, and the CLI can discard it |
+| `none` | No route — the composer is disabled | — |
+
+```bash
+am claude                        # start a session you can message later
+am send claude:abc123 "run the tests and tell me what fails"
+```
+
+Two details that matter more than they look:
+
+- **The prompt box is cleared first.** Typing on top of a half-written draft
+  fuses them into one garbled prompt — a real bug this hit in testing, where a
+  draft `this is false` turned an injected message into `this is falserun the
+  tests`. `Ctrl-U` discards the draft into the kill ring, so it is still
+  recoverable with `Ctrl-Y`, unlike a nonsense prompt already sent to the agent.
+- **Multi-line messages use bracketed paste.** Raw newlines would submit at the
+  first line break and scatter the rest across follow-up turns.
 
 ## Reading transcripts without copying them
 
@@ -114,7 +142,7 @@ first page, 8.2ms for five more, with bounded memory.
 - [x] **Phase 1** — discovery, live tailing, paged scrollback, the `am` CLI
 - [x] **Phase 2** — hooks, for exact turn-completion signals instead of polling
 - [x] **Phase 3** — the stateless relay
-- [ ] **Phase 4** — message injection (tmux, API, hook fallback)
+- [x] **Phase 4** — message injection (tmux, hook fallback)
 - [ ] **Phase 5** — the Expo app
 - [ ] **Phase 6** — background push, end-to-end encryption, packaging
 

@@ -17,6 +17,7 @@ import (
 	"github.com/lenajeremy/agentman/internal/jsonl"
 	"github.com/lenajeremy/agentman/internal/parser"
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/tmux"
 )
 
 // Codex keeps no live session registry — unlike Claude Code there is no
@@ -70,6 +71,8 @@ type CodexSource struct {
 	// processCheck is injectable so discovery can be tested without depending
 	// on whether the machine running the tests happens to have Codex open.
 	processCheck func(context.Context) bool
+	// pending holds messages for sessions with no live input channel.
+	pending *PendingQueue
 
 	mu       sync.RWMutex
 	sessions map[string]codexSession
@@ -78,6 +81,9 @@ type CodexSource struct {
 type codexSession struct {
 	meta       protocol.Session
 	transcript string
+	// tmuxName is set for sessions launched through `am codex`, which is what
+	// allows a message to be typed in mid-turn.
+	tmuxName string
 }
 
 // codexMeta is the session_meta record that opens every rollout file.
@@ -137,6 +143,22 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	next := map[string]codexSession{}
 	cutoff := now.Add(-codexLiveWindow)
 
+	// Codex writes no pid to its rollout, so a session is matched to a tmux
+	// pane by working directory. That is weaker than Claude's pid ancestry —
+	// two Codex sessions in one directory would be ambiguous — so a directory
+	// running more than one is left unmatched rather than risking delivery to
+	// the wrong agent.
+	panes, _ := tmux.List(ctx)
+	paneByCwd := map[string]string{}
+	ambiguous := map[string]bool{}
+	for _, pane := range panes {
+		if _, seen := paneByCwd[pane.Cwd]; seen {
+			ambiguous[pane.Cwd] = true
+			continue
+		}
+		paneByCwd[pane.Cwd] = pane.Name
+	}
+
 	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -160,6 +182,13 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			id := string(protocol.KindCodex) + ":" + meta.Payload.SessionID
 			state, lastActivity := codexActivity(path, info.ModTime())
 
+			tmuxName := ""
+			inject := protocol.InjectHook
+			if name, ok := paneByCwd[meta.Payload.Cwd]; ok && !ambiguous[meta.Payload.Cwd] {
+				tmuxName = name
+				inject = protocol.InjectTmux
+			}
+
 			session := protocol.Session{
 				ID:             id,
 				Kind:           protocol.KindCodex,
@@ -167,12 +196,12 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				Name:           filepath.Base(meta.Payload.Cwd),
 				Cwd:            meta.Payload.Cwd,
 				State:          state,
-				Inject:         protocol.InjectNone,
+				Inject:         inject,
 				StartedAt:      parseCodexTime(meta.Payload.Timestamp),
 				LastActivityAt: lastActivity,
 			}
 			found = append(found, session)
-			next[id] = codexSession{meta: session, transcript: path}
+			next[id] = codexSession{meta: session, transcript: path, tmuxName: tmuxName}
 		}
 	}
 

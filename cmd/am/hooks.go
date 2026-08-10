@@ -54,8 +54,18 @@ func runHook(ctx context.Context, args []string) error {
 	if err != nil {
 		return nil // daemon not running; that is fine and expected
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-	_ = resp.Body.Close()
+	defer resp.Body.Close()
+
+	// The daemon answers a Stop hook with a decision when the user has a
+	// message waiting. Relaying it on stdout is what actually delivers that
+	// message into a session with no live input channel.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil || len(bytes.TrimSpace(body)) == 0 {
+		return nil
+	}
+	if resp.StatusCode == http.StatusOK {
+		_, _ = os.Stdout.Write(body)
+	}
 	return nil
 }
 

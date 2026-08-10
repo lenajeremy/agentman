@@ -34,6 +34,17 @@ type Server struct {
 	lastFired map[protocol.Kind]time.Time
 
 	server *http.Server
+
+	// pendingFor returns messages queued for a session, if any. It is what
+	// turns a Stop hook into a delivery channel: the response tells the agent
+	// to keep going with the user's text as the reason.
+	pendingFor func(sessionID string) []string
+}
+
+// SetPendingSource installs the lookup used to answer Stop hooks with queued
+// messages.
+func (s *Server) SetPendingSource(fn func(sessionID string) []string) {
+	s.pendingFor = fn
 }
 
 // NewServer creates a hook receiver. The returned channel is buffered; use
@@ -55,6 +66,25 @@ func (s *Server) LastFired(kind protocol.Kind) (time.Time, bool) {
 	defer s.mu.RUnlock()
 	t, ok := s.lastFired[kind]
 	return t, ok
+}
+
+// hookDecision is the response an agent CLI acts on. An empty decision means
+// "carry on"; "block" feeds Reason back to the model and continues the turn.
+type hookDecision struct {
+	Decision string `json:"decision"`
+	Reason   string `json:"reason"`
+}
+
+// writeHookDecision instructs the agent to continue with the queued text.
+//
+// This path is best-effort by design and the UI says so: the CLI can discard a
+// block on some end-of-turn routes, and it can never interrupt an agent that is
+// still working. It exists so a session the user started normally is not
+// completely unreachable.
+func writeHookDecision(w http.ResponseWriter, reason string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(hookDecision{Decision: "block", Reason: reason})
 }
 
 // Handler builds the HTTP routes, exposed separately so tests can drive it
@@ -156,6 +186,16 @@ func (s *Server) handleHook(w http.ResponseWriter, r *http.Request) {
 	select {
 	case s.events <- event:
 	default:
+	}
+
+	// A turn ending is the one moment a session without a live input channel
+	// can be handed a message. Delivering it means telling the agent not to
+	// stop, with the user's text as the reason it should continue.
+	if event.IsTurnComplete() && s.pendingFor != nil {
+		if queued := s.pendingFor(event.SessionID); len(queued) > 0 {
+			writeHookDecision(w, strings.Join(queued, "\n\n"))
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusNoContent)

@@ -28,6 +28,9 @@ Usage:
   am watch [session-id]       Follow sessions live (all, or one in detail)
   am serve                    Run the daemon (hooks + relay connection)
   am pair                     Print a pairing code for your phone
+  am claude [args...]         Start Claude Code so you can message it later
+  am codex [args...]          Start Codex so you can message it later
+  am send <session-id> <text> Send a message to a running session
   am install-hooks            Register agentman's hooks with your agents
   am uninstall-hooks          Remove them again
   am doctor                   Check that everything is wired up correctly
@@ -71,6 +74,11 @@ func main() {
 		err = runInstallHooks(ctx, args, true)
 	case "pair":
 		err = runPair(ctx, args)
+	case "claude", "codex":
+		// Launch an agent inside tmux so it can receive messages later.
+		err = runWrap(ctx, command, args)
+	case "send":
+		err = runSend(ctx, args)
 	case "doctor":
 		err = runDoctor(ctx, args)
 	case "-h", "--help", "help":

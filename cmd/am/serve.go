@@ -14,6 +14,7 @@ import (
 	"github.com/lenajeremy/agentman/internal/daemon"
 	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/source"
 )
 
 // relayEnv is where the relay URL comes from when -relay is not given.
@@ -93,9 +94,15 @@ func runServe(ctx context.Context, args []string) error {
 		return err
 	}
 
+	// Messages for sessions with no live input channel wait here until their
+	// next Stop hook, which is the only moment such a session can be reached.
+	pending := source.NewPendingQueue()
+	attachPending(registry, pending)
+
 	// Hook receiver: loopback only, and the reason state changes are exact
 	// rather than polled.
 	hookServer := hook.NewServer(cfg.Token)
+	hookServer.SetPendingSource(pending.Take)
 	hookErrs := make(chan error, 1)
 	go func() { hookErrs <- hookServer.Listen(ctx, *addr) }()
 	fmt.Printf("%s\n", dim("hooks      listening on "+*addr))
