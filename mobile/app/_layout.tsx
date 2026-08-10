@@ -1,0 +1,66 @@
+import {
+  IBMPlexMono_400Regular,
+  IBMPlexMono_500Medium,
+} from "@expo-google-fonts/ibm-plex-mono";
+import {
+  IBMPlexSans_400Regular,
+  IBMPlexSans_500Medium,
+  IBMPlexSans_600SemiBold,
+  useFonts,
+} from "@expo-google-fonts/ibm-plex-sans";
+import * as Notifications from "expo-notifications";
+import { Stack } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { useEffect } from "react";
+import { Platform, View } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+
+import { StoreProvider } from "../lib/store";
+import { color } from "../lib/theme";
+
+// Notifications are the product, not a nicety: an alert that arrives silently
+// while the app is open would defeat the point of walking away from the desk.
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
+export default function RootLayout() {
+  const [fontsLoaded] = useFonts({
+    IBMPlexSans_400Regular,
+    IBMPlexSans_500Medium,
+    IBMPlexSans_600SemiBold,
+    IBMPlexMono_400Regular,
+    IBMPlexMono_500Medium,
+  });
+
+  useEffect(() => {
+    // Web has no notification permission model here; asking throws.
+    if (Platform.OS !== "web") {
+      void Notifications.requestPermissionsAsync().catch(() => {});
+    }
+  }, []);
+
+  if (!fontsLoaded) {
+    return <View style={{ flex: 1, backgroundColor: color.ink }} />;
+  }
+
+  return (
+    <SafeAreaProvider>
+      <StoreProvider>
+        <StatusBar style="light" />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: color.ink },
+            animation: "slide_from_right",
+          }}
+        />
+      </StoreProvider>
+    </SafeAreaProvider>
+  );
+}

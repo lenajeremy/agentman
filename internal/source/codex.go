@@ -316,15 +316,11 @@ func (s *CodexSource) Page(ctx context.Context, sessionID, before string, limit 
 		return protocol.Page{}, err
 	}
 
-	page := protocol.Page{
-		SessionID: sessionID,
-		Messages:  result.Messages,
-		HasMore:   result.HasMore,
-	}
+	cursor := ""
 	if result.HasMore {
-		page.NextCursor = strconv.FormatInt(result.NextCursor, 10)
+		cursor = strconv.FormatInt(result.NextCursor, 10)
 	}
-	return page, nil
+	return protocol.NewPage(sessionID, result.Messages, cursor, result.HasMore), nil
 }
 
 // Follow implements Source.

@@ -54,7 +54,28 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /ws/app", s.handleApp)
 	mux.HandleFunc("POST /pair", s.handlePair)
 	mux.HandleFunc("POST /pair/code", s.handlePairCode)
-	return mux
+	return withCORS(mux)
+}
+
+// withCORS allows browser clients to reach the HTTP endpoints.
+//
+// Permissive by design and safe here: every endpoint authenticates with a
+// bearer token or a single-use pairing code, and the relay sets no cookies, so
+// there is no ambient authority for another origin to ride on. Without this a
+// web client cannot pair at all, since the browser blocks the cross-origin
+// request before the relay ever sees it.
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // handlePairCode issues a pairing code to a daemon.

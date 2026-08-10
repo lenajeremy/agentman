@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "agentman",
+    "slug": "agentman",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "agentman",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": { "supportsTablet": true, "bundleIdentifier": "dev.agentman.app" },
+    "android": { "package": "dev.agentman.app", "edgeToEdgeEnabled": true },
+    "plugins": ["expo-router", "expo-font"],
+    "experiments": { "typedRoutes": true }
+  }
+}

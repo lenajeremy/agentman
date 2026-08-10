@@ -212,6 +212,8 @@ func (d *Daemon) Handle(ctx context.Context, req protocol.Request) protocol.Even
 func (d *Daemon) snapshot() []protocol.Session {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	// Always non-nil: Go marshals a nil slice as JSON null, which a client
+	// expecting an array will crash on.
 	out := make([]protocol.Session, 0, len(d.sessions))
 	for _, session := range d.sessions {
 		out = append(out, session)

@@ -237,20 +237,16 @@ func (s *ClaudeSource) Page(ctx context.Context, sessionID, before string, limit
 	if err != nil {
 		if os.IsNotExist(err) {
 			// The session exists but has not written anything yet.
-			return protocol.Page{SessionID: sessionID}, nil
+			return protocol.NewPage(sessionID, nil, "", false), nil
 		}
 		return protocol.Page{}, err
 	}
 
-	page := protocol.Page{
-		SessionID: sessionID,
-		Messages:  result.Messages,
-		HasMore:   result.HasMore,
-	}
+	cursor := ""
 	if result.HasMore {
-		page.NextCursor = strconv.FormatInt(result.NextCursor, 10)
+		cursor = strconv.FormatInt(result.NextCursor, 10)
 	}
-	return page, nil
+	return protocol.NewPage(sessionID, result.Messages, cursor, result.HasMore), nil
 }
 
 // followInterval is how often a followed transcript is checked for new lines.

@@ -126,3 +126,22 @@ type Page struct {
 	NextCursor string `json:"nextCursor,omitempty"`
 	HasMore    bool   `json:"hasMore"`
 }
+
+// NewPage builds a page with a guaranteed non-nil message slice.
+//
+// Go marshals a nil slice as JSON `null` rather than `[]`, and a client that
+// reasonably expects an array crashes on it. That is not hypothetical: an
+// empty page — a session opened before it has written anything — took the
+// mobile app down with "Cannot read properties of null". Normalizing here
+// means no client has to defend against it.
+func NewPage(sessionID string, messages []Message, nextCursor string, hasMore bool) Page {
+	if messages == nil {
+		messages = []Message{}
+	}
+	return Page{
+		SessionID:  sessionID,
+		Messages:   messages,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	}
+}
