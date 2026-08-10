@@ -26,11 +26,16 @@ Usage:
   am list                     List running agent sessions
   am history <session-id>     Print a session's recent messages
   am watch [session-id]       Follow sessions live (all, or one in detail)
+  am serve                    Receive agent hook events (the daemon loop)
+  am install-hooks            Register agentman's hooks with your agents
+  am uninstall-hooks          Remove them again
+  am doctor                   Check that everything is wired up correctly
 
 Flags:
   -json                       Machine-readable output
   -limit <n>                  Messages per history page (default 30)
   -before <cursor>            Page further back, using a cursor from history
+  -dry-run                    With install-hooks: show changes without writing
 `
 
 func main() {
@@ -54,6 +59,17 @@ func main() {
 		err = runHistory(ctx, args)
 	case "watch":
 		err = runWatch(ctx, args)
+	case "serve":
+		err = runServe(ctx, args)
+	case "hook":
+		// Invoked by the agent CLIs themselves, never by a human.
+		err = runHook(ctx, args)
+	case "install-hooks":
+		err = runInstallHooks(ctx, args, false)
+	case "uninstall-hooks":
+		err = runInstallHooks(ctx, args, true)
+	case "doctor":
+		err = runDoctor(ctx, args)
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return
