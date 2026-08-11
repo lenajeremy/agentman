@@ -218,6 +218,48 @@ func TestPairCodeRequiresDaemonToken(t *testing.T) {
 	}
 }
 
+func TestBruteForceIsRateLimitedPerCaller(t *testing.T) {
+	_, ts := newTestServer(t)
+	const daemonToken = "daemon-token"
+	dialDaemon(t, ts.URL, daemonToken)
+	code := requestPairCode(t, ts.URL, daemonToken)
+
+	guess := func(from, code string) int {
+		body, _ := json.Marshal(map[string]string{"code": code, "deviceId": "x"})
+		req, err := http.NewRequest(http.MethodPost, ts.URL+"/pair", strings.NewReader(string(body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Forwarded-For", from)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// An attacker walking the code space gets cut off well before a six-digit
+	// space is anywhere near exhausted.
+	var blocked bool
+	for range 30 {
+		if guess("10.0.0.9", "000000") == http.StatusTooManyRequests {
+			blocked = true
+			break
+		}
+	}
+	if !blocked {
+		t.Fatal("guessing was never rate limited")
+	}
+
+	// And the victim, on a different address, can still pair — the whole point
+	// of charging the caller rather than the code.
+	if status := guess("10.0.0.1", code); status != http.StatusOK {
+		t.Errorf("victim got HTTP %d; an attacker's guessing locked out a real user", status)
+	}
+}
+
 func TestHealthExposesNoUserData(t *testing.T) {
 	_, ts := newTestServer(t)
 	dialDaemon(t, ts.URL, "daemon-token")

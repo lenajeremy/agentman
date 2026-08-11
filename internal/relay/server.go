@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -36,6 +37,13 @@ type Server struct {
 	log    *slog.Logger
 	// version is reported by /health for debugging deployments.
 	version string
+
+	// Failed pairing attempts are bounded per caller and, because a proxied
+	// forwarded-for header can be forged, globally as well. Legitimate pairing
+	// failures are rare — a mistyped code once or twice — so these ceilings sit
+	// far above real use and far below what brute force needs.
+	perClientFailures *limiter
+	globalFailures    *limiter
 }
 
 // NewServer builds a relay.
@@ -43,7 +51,14 @@ func NewServer(secret, version string, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{hub: NewHub(), secret: secret, log: log, version: version}
+	return &Server{
+		hub:               NewHub(),
+		secret:            secret,
+		log:               log,
+		version:           version,
+		perClientFailures: newLimiter(10, time.Minute),
+		globalFailures:    newLimiter(120, time.Minute),
+	}
 }
 
 // Handler returns the routes.
@@ -129,6 +144,15 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+
+	client := clientKey(r)
+	if !s.perClientFailures.allow(client, time.Now()) ||
+		!s.globalFailures.allow("", time.Now()) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "too many pairing attempts — wait a minute and try a fresh code",
+		})
 		return
 	}
 
@@ -376,6 +400,27 @@ func sendControlReply(conn Conn, replyTo string, control protocol.Control) error
 		return err
 	}
 	return conn.Send(frame)
+}
+
+// clientKey identifies the caller for rate limiting.
+//
+// Railway and most hosts put a proxy in front, so RemoteAddr is the proxy for
+// everyone and would lump all users into one bucket. The forwarded-for header
+// gives real per-client granularity but can be forged, which is why the global
+// ceiling exists alongside it — spoofing the header spreads an attacker across
+// many buckets but does not lift the total.
+func clientKey(r *http.Request) string {
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		if first, _, found := strings.Cut(forwarded, ","); found {
+			return strings.TrimSpace(first)
+		}
+		return strings.TrimSpace(forwarded)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 func bearer(r *http.Request) string {

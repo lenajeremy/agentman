@@ -234,26 +234,33 @@ func TestPairingCodeIsSingleUseAndExpires(t *testing.T) {
 	}
 }
 
-func TestPairingCodeBurnsAfterRepeatedGuesses(t *testing.T) {
+func TestWrongGuessesDoNotAffectOtherUsersCodes(t *testing.T) {
+	// Regression, and the reason pairing is no longer rate limited by
+	// penalising codes: the relay is multi-tenant, its pairing table is shared
+	// across accounts, and charging a failed guess to every outstanding entry
+	// let any anonymous caller delete every other user's in-flight code with a
+	// handful of wrong guesses. A wrong guess belongs to nobody, so it is
+	// charged to the caller instead — see limiter.
 	hub := NewHub()
-	account := DeriveAccount("t")
-	code, err := hub.NewPairingCode(account)
+	victim := DeriveAccount("victim-daemon")
+
+	code, err := hub.NewPairingCode(victim)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Six digits is a small space; brute force must not survive a minute.
-	guess := "000000"
-	if guess == code {
-		guess = "111111" // vanishingly unlikely, but do not guess the real code
-	}
-	for i := range pairingAttemptLimit {
-		if _, ok := hub.RedeemPairingCode(guess); ok {
-			t.Fatalf("guess %d wrongly succeeded", i)
+	for range 50 {
+		if _, ok := hub.RedeemPairingCode("000000"); ok {
+			t.Fatal("a guessed code was accepted")
 		}
 	}
-	if _, ok := hub.RedeemPairingCode(code); ok {
-		t.Error("the real code should have been burned by repeated guessing")
+
+	account, ok := hub.RedeemPairingCode(code)
+	if !ok {
+		t.Fatal("a stranger's wrong guesses invalidated an unrelated user's code")
+	}
+	if account != victim {
+		t.Errorf("account = %q, want the victim's", account)
 	}
 }
 

@@ -12,11 +12,6 @@ import (
 // code is six digits, so it must stop being useful almost immediately.
 const PairingCodeTTL = 60 * time.Second
 
-// pairingAttemptLimit caps redemption attempts per code before it is burned.
-// Six digits is only a million possibilities, and a minute is a long time for
-// an attacker with a script.
-const pairingAttemptLimit = 5
-
 // ErrNoPeer is returned when a frame has nowhere to go.
 var ErrNoPeer = errors.New("relay: peer not connected")
 
@@ -52,9 +47,8 @@ type Hub struct {
 }
 
 type pairing struct {
-	account  AccountID
-	expires  time.Time
-	attempts int
+	account AccountID
+	expires time.Time
 }
 
 // NewHub creates an empty hub.
@@ -124,9 +118,6 @@ func (h *Hub) DaemonOnline(account AccountID) (bool, time.Time) {
 // ToDaemon forwards a frame from a device to its daemon.
 //
 // Returns ErrNoPeer immediately when the Mac is offline rather than buffering.
-// Holding the frame would mean storing user data, which is the one thing this
-// relay does not do — and a prompt "your Mac is offline" beats a message that
-// silently arrives an hour later.
 func (h *Hub) ToDaemon(account AccountID, frame []byte) error {
 	h.mu.RLock()
 	conn, ok := h.daemons[account]
@@ -172,8 +163,10 @@ func (h *Hub) NewPairingCode(account AccountID) (string, error) {
 
 // RedeemPairingCode exchanges a code for the account it authorizes.
 //
-// A code is single use: consumed on success, and burned after a few failed
-// attempts so a six-digit space cannot be walked within its lifetime.
+// A code is single use and expires on its own. Brute force is bounded by rate
+// limiting the caller (see limiter) rather than by penalising codes: a wrong
+// guess belongs to nobody in particular, so making outstanding codes pay for
+// it lets any stranger invalidate every other user's pairing on a shared relay.
 func (h *Hub) RedeemPairingCode(code string) (AccountID, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -181,25 +174,10 @@ func (h *Hub) RedeemPairingCode(code string) (AccountID, bool) {
 
 	entry, ok := h.pairings[code]
 	if !ok {
-		// Count the miss against every live code: without a valid code there
-		// is nothing else to attribute a guess to, and this bounds how many
-		// guesses any outstanding pairing can survive.
-		h.chargeFailedAttemptLocked()
 		return "", false
 	}
 	delete(h.pairings, code)
 	return entry.account, true
-}
-
-func (h *Hub) chargeFailedAttemptLocked() {
-	for code, entry := range h.pairings {
-		entry.attempts++
-		if entry.attempts >= pairingAttemptLimit {
-			delete(h.pairings, code)
-			continue
-		}
-		h.pairings[code] = entry
-	}
 }
 
 func (h *Hub) sweepPairingsLocked() {
