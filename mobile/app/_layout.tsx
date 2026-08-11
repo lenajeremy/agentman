@@ -13,6 +13,7 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import { Platform, UIManager, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { StoreProvider } from "../lib/store";
@@ -56,17 +57,21 @@ export default function RootLayout() {
   }
 
   return (
-    <SafeAreaProvider>
-      <StoreProvider>
-        <StatusBar style="light" />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: color.ink },
-            animation: "slide_from_right",
-          }}
-        />
-      </StoreProvider>
-    </SafeAreaProvider>
+    // Gesture handling has to be rooted above everything that uses it, or the
+    // swipe on the status board silently does nothing on Android.
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <StoreProvider>
+          <StatusBar style="light" />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: color.ink },
+              animation: "slide_from_right",
+            }}
+          />
+        </StoreProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

@@ -55,3 +55,8 @@ jobs:
       # side, so a type error here usually means the two have drifted apart.
       - run: npm install --legacy-peer-deps
       - run: npx tsc --noEmit
+
+      # Which sessions the board hides. Pure rules, run on Node's own test
+      # runner — the failure mode is an agent waiting on you being invisible,
+      # which no type check would catch.
+      - run: npm test

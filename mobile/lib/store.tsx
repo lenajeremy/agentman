@@ -18,6 +18,15 @@ import {
   clearCredentials,
   loadCredentials,
 } from "./client";
+import {
+  canDismiss,
+  dismiss as recordDismissal,
+  isHidden,
+  loadDismissals,
+  prune,
+  saveDismissals,
+  type Dismissals,
+} from "./dismissed";
 import { DaemonEvent, Message, Page, SendStatus, Session } from "./protocol";
 
 /** A message the user sent that has not been confirmed yet. */
@@ -37,6 +46,11 @@ interface Store {
   daemonOnline: boolean;
   lastSeenAt: number | null;
   sessions: Session[];
+  /** What the status board shows: sessions minus the ones swiped away, which
+   *  stay hidden until they are triggered again. Deliberately separate from
+   *  `sessions` — a hidden session must still be openable by id, or a
+   *  notification for one would lead to a screen that cannot load. */
+  visibleSessions: Session[];
   messages: Record<string, Message[]>;
   pageState: Record<string, { cursor?: string; hasMore: boolean; loading: boolean }>;
   pending: PendingSend[];
@@ -50,6 +64,14 @@ interface Store {
   sendMessage(sessionId: string, text: string): void;
   answerQuestion(sessionId: string, optionKey: string): void;
   dismissPending(clientId: string): void;
+  /** Hide an idle session until it does something again. */
+  dismissSession(sessionId: string): void;
+  /** Undo that. */
+  restoreSession(sessionId: string): void;
+  /** Bring back everything hidden. Without a way out, hiding a row would be a
+   *  one-way door: a session stays invisible until the agent happens to act,
+   *  which for a finished session may be never. */
+  restoreAllSessions(): void;
 }
 
 const StoreContext = createContext<Store | null>(null);
@@ -82,6 +104,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
   const [pageState, setPageState] = useState<Store["pageState"]>({});
   const [pending, setPending] = useState<PendingSend[]>([]);
+  const [dismissals, setDismissals] = useState<Dismissals>({});
 
   const clientRef = useRef<Client | null>(null);
   /** Maps a fetch_messages frame id to the session that asked, so a page can be
@@ -90,9 +113,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const handleEvent = useCallback((event: DaemonEvent, replyTo?: string) => {
     switch (event.type) {
-      case "sessions":
-        setSessions(event.sessions ?? []);
+      case "sessions": {
+        const list = event.sessions ?? [];
+        setSessions(list);
+        // A full list from a connected daemon is the only safe moment to prune:
+        // doing it from a session_update would judge every other dismissal
+        // against a list of one, and drop them all.
+        setDismissals((current) => {
+          const next = prune(list, current);
+          if (Object.keys(next).length !== Object.keys(current).length) {
+            void saveDismissals(next);
+          }
+          return next;
+        });
         break;
+      }
 
       case "session_update": {
         const updated = event.session;
@@ -206,6 +241,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return () => clientRef.current?.close();
   }, [attach]);
 
+  // Restore what the user hid before the app was last closed.
+  useEffect(() => {
+    void loadDismissals().then(setDismissals);
+  }, []);
+
   // A phone spends most of its life asleep. Reconnect the moment it wakes,
   // rather than waiting out a backoff the user is watching.
   useEffect(() => {
@@ -215,6 +255,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.remove();
   }, []);
 
+  const visibleSessions = useMemo(
+    () => sessions.filter((session) => !isHidden(session, dismissals)),
+    [sessions, dismissals],
+  );
+
   const store: Store = useMemo(
     () => ({
       ready,
@@ -223,6 +268,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       daemonOnline,
       lastSeenAt,
       sessions,
+      visibleSessions,
       messages,
       pageState,
       pending,
@@ -240,6 +286,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setSessions([]);
         setMessages({});
         setConnection("unpaired");
+        setDismissals({});
+        void saveDismissals({});
       },
 
       refresh() {
@@ -324,8 +372,37 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       dismissPending(clientId) {
         setPending((current) => current.filter((item) => item.clientId !== clientId));
       },
+
+      dismissSession(sessionId) {
+        const session = sessions.find((item) => item.id === sessionId);
+        // Re-checked here rather than trusted from the UI: between the swipe
+        // starting and the finger lifting, the agent may have started working.
+        if (!session || !canDismiss(session)) return;
+        setDismissals((current) => {
+          const next = recordDismissal(session, current);
+          void saveDismissals(next);
+          return next;
+        });
+      },
+
+      restoreSession(sessionId) {
+        setDismissals((current) => {
+          if (!(sessionId in current)) return current;
+          const next = { ...current };
+          delete next[sessionId];
+          void saveDismissals(next);
+          return next;
+        });
+      },
+
+      restoreAllSessions() {
+        setDismissals(() => {
+          void saveDismissals({});
+          return {};
+        });
+      },
     }),
-    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, messages, pageState, pending, attach],
+    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, dismissals, attach],
   );
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
