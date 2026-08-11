@@ -3,6 +3,9 @@
   "build": {
     "builder": "DOCKERFILE",
     "dockerfilePath": "Dockerfile",
+    "buildArgs": {
+      "VERSION": "${{RAILWAY_GIT_COMMIT_SHA}}"
+    },
     "watchPatterns": [
       "cmd/relay/**",
       "internal/relay/**",

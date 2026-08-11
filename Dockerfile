@@ -14,8 +14,16 @@ RUN go mod download
 
 COPY . .
 
+# Stamped so a running relay can say what it is. Without this /health reports
+# "dev" forever, and "which commit is actually deployed?" has no answer — a
+# question that already cost us once, when a hand-deploy left production ahead
+# of main without anything showing it.
+ARG VERSION=dev
+
 # Static, stripped, and reproducible. CGO is off so the result runs on scratch.
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/relay ./cmd/relay
+RUN CGO_ENABLED=0 go build -trimpath \
+    -ldflags="-s -w -X main.version=${VERSION}" \
+    -o /out/relay ./cmd/relay
 
 FROM alpine:3.20
 # TLS roots, so the relay can dial out (health checks, future push delivery).
