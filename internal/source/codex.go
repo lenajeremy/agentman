@@ -243,6 +243,14 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	// or simply idle before the first prompt, is invisible to the phone.
 	for cwd, pane := range unmatched {
 		id := string(protocol.KindCodex) + ":" + tmuxID(pane.Name)
+		// Timestamps come from tmux, not the clock. Using the current time
+		// made every sweep look like a change, so an idle session emitted a
+		// session_update every second — defeating the point of sending only
+		// differences, and to a phone on cell data at that.
+		started := pane.Created
+		if started.IsZero() {
+			started = now
+		}
 		session := protocol.Session{
 			ID:             id,
 			Kind:           protocol.KindCodex,
@@ -251,8 +259,8 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			Cwd:            cwd,
 			State:          protocol.StateIdle,
 			Inject:         protocol.InjectTmux,
-			StartedAt:      now.UnixMilli(),
-			LastActivityAt: now.UnixMilli(),
+			StartedAt:      started.UnixMilli(),
+			LastActivityAt: started.UnixMilli(),
 		}
 		if q := detectQuestion(ctx, pane.Name); q != nil {
 			session.Question = q

@@ -10,6 +10,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,6 +25,11 @@ import (
 // appearing and disappearing — a poll is fine, and one second is well below
 // what a human notices.
 const discoverInterval = time.Second
+
+// turnNotifyWindow is how long a hook-delivered notification suppresses the
+// polled one for the same session. Comfortably longer than the gap between a
+// Stop hook and the discovery sweep that sees the same transition.
+const turnNotifyWindow = 15 * time.Second
 
 // Transport is how the daemon reaches the app. Abstracted so the daemon can
 // run over a relay websocket, a LAN listener, or an in-process pipe in tests.
@@ -41,6 +47,9 @@ type Daemon struct {
 	// sessions is the last discovered list, kept so hook events can be matched
 	// against a known session without re-scanning the disk.
 	sessions map[string]protocol.Session
+	// notifiedAt records when a turn-complete was last announced for a session,
+	// so the hook path and the polled path cannot both fire for the same turn.
+	notifiedAt map[string]time.Time
 	// follows holds the active live tail for each watched session. Only
 	// sessions the app is actually watching appear here, which is what keeps
 	// idle sessions free.
@@ -56,10 +65,11 @@ type follow struct {
 // New creates a daemon.
 func New(registry *source.Registry, sink Transport) *Daemon {
 	return &Daemon{
-		registry: registry,
-		sink:     sink,
-		sessions: map[string]protocol.Session{},
-		follows:  map[string]*follow{},
+		registry:   registry,
+		sink:       sink,
+		sessions:   map[string]protocol.Session{},
+		follows:    map[string]*follow{},
+		notifiedAt: map[string]time.Time{},
 	}
 }
 
@@ -121,6 +131,14 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 			s := session
 			_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessionUpdate, Session: &s})
 		}
+		// A turn that just ended. Hooks report this precisely, but only Claude
+		// Code actually delivers them — Codex registers them and stays silent,
+		// and OpenCode has no hook system at all. Without this the headline
+		// feature, "your agent is done", simply never fires for two of the
+		// three agents.
+		if existed && before.State == protocol.StateBusy && session.State == protocol.StateIdle {
+			d.announceTurnComplete(ctx, session)
+		}
 	}
 	for id := range previous {
 		if _, still := current[id]; !still {
@@ -128,6 +146,63 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 			_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessionGone, SessionID: id})
 		}
 	}
+}
+
+// announceTurnComplete rings the phone for a turn that ended, unless a hook
+// already did.
+//
+// The two paths overlap for any agent whose hooks work, and a notification
+// arriving twice for one piece of work is worse than a slightly later one, so
+// the hook wins and this fills the gap behind it.
+func (d *Daemon) announceTurnComplete(ctx context.Context, session protocol.Session) {
+	d.mu.Lock()
+	last, seen := d.notifiedAt[session.ID]
+	recent := seen && time.Since(last) < turnNotifyWindow
+	if !recent {
+		d.notifiedAt[session.ID] = time.Now()
+	}
+	d.mu.Unlock()
+	if recent {
+		return
+	}
+
+	// A notification saying only "it finished" makes you open the app to learn
+	// anything, which is the thing this is meant to save you.
+	//
+	// System messages count, not just the agent's own words: a turn that died
+	// on a provider error produces no assistant text at all, and reporting that
+	// as a bare "done" is actively misleading — it reads as success. Taking the
+	// last of either kind gets this right without a special case, since the
+	// failure is recorded after whatever content preceded it.
+	preview := ""
+	if page, err := d.registry.Page(ctx, session.ID, "", 6); err == nil {
+		for i := len(page.Messages) - 1; i >= 0; i-- {
+			m := page.Messages[i]
+			if m.Text == "" {
+				continue
+			}
+			if m.Role == protocol.RoleAssistant || m.Role == protocol.RoleSystem {
+				preview = clipPreview(m.Text)
+				break
+			}
+		}
+	}
+
+	_ = d.sink.Send(protocol.Event{
+		Type:        protocol.EvtTurnComplete,
+		SessionID:   session.ID,
+		SessionName: session.Name,
+		Preview:     preview,
+	})
+}
+
+func clipPreview(text string) string {
+	flat := strings.Join(strings.Fields(text), " ")
+	runes := []rune(flat)
+	if len(runes) <= 180 {
+		return flat
+	}
+	return string(runes[:179]) + "…"
 }
 
 // handleHook applies a hook event to session state and rings the phone when a
@@ -157,6 +232,10 @@ func (d *Daemon) handleHook(event hook.Event) {
 		if name == "" {
 			name = "agent"
 		}
+		// Claim the window so the polled path does not repeat this.
+		d.mu.Lock()
+		d.notifiedAt[event.SessionID] = time.Now()
+		d.mu.Unlock()
 		_ = d.sink.Send(protocol.Event{
 			Type:        protocol.EvtTurnComplete,
 			SessionID:   event.SessionID,

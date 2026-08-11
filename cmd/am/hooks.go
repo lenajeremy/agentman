@@ -13,6 +13,7 @@ import (
 
 	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/source"
 )
 
 // runHook is the handler the agent CLIs invoke: `am hook <kind> <event>`.
@@ -222,10 +223,26 @@ func runDoctor(ctx context.Context, args []string) error {
 	}
 	state := store.Load()
 	for _, kind := range registry.Kinds() {
+		// OpenCode has no hook system and needs none: its HTTP API reports
+		// session state directly. Reporting absent hooks as a warning sent
+		// people looking for a problem that does not exist.
+		if kind == protocol.KindOpenCode {
+			check(true, string(kind)+" events", "via HTTP API — no hooks needed")
+			continue
+		}
 		if at, ok := state.LastFired[kind]; ok && at > 0 {
 			check(true, string(kind)+" hooks firing", "last fired "+humanAge(at))
 		} else {
-			warn(string(kind)+" hooks firing", "never observed — run `am serve`, then use "+string(kind))
+			warn(string(kind)+" hooks firing", "never observed — turn completion falls back to polling")
+		}
+	}
+
+	if !anyOpenCode(sessions) {
+		oc := source.NewOpenCodeSource(os.Getenv("AGENTMAN_OPENCODE_URL"))
+		if oc.Available(ctx) {
+			check(true, "opencode server", "reachable, no sessions yet")
+		} else {
+			warn("opencode server", "not running — start it with `opencode serve`")
 		}
 	}
 
@@ -245,6 +262,15 @@ func runDoctor(ctx context.Context, args []string) error {
 	}
 	fmt.Printf("\n%s\n", "All good.")
 	return nil
+}
+
+func anyOpenCode(sessions []protocol.Session) bool {
+	for _, s := range sessions {
+		if s.Kind == protocol.KindOpenCode {
+			return true
+		}
+	}
+	return false
 }
 
 func pingDaemon(ctx context.Context) error {

@@ -139,6 +139,16 @@ Findings worth recording, since none are documented anywhere:
   produced no deliveries at all. `am doctor` reports "registered, never
   observed" rather than a green check, and Codex falls back to polling. Claude
   Code's hooks are verified working.
+- **Only one of the three agents can be trusted to say "I'm done".** Claude Code
+  delivers a `Stop` hook, Codex delivers nothing, and OpenCode has no hook
+  system at all — so "your agent finished" is derived from a busy→idle
+  transition in discovery, with the hook preferred when one arrives and
+  suppressing the polled copy for 15s. Two notifications for one piece of work
+  is worse than one arriving a second late.
+- **A failed turn looks exactly like a finished one** unless you check. An
+  OpenCode turn whose provider returns 503 goes busy→idle normally and produces
+  an assistant message with empty content, so the notification has to fall back
+  to the error text or it reads as success.
 - **Each CLI picked a different selection marker.** Claude Code uses `❯`
   (U+276F), Codex uses `›` (U+203A). Missing one is not cosmetic — the unmatched
   line stops being an option and gets read as the question instead, silently

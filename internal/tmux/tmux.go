@@ -52,6 +52,10 @@ type Session struct {
 	// is the only way to know an agent is there before it has written
 	// anything to disk.
 	Command string
+	// Created is when tmux started the session. A stable value matters: a
+	// session discovered from a pane has no file to take a timestamp from, and
+	// using the current time instead makes it look changed on every sweep.
+	Created time.Time
 }
 
 // List returns the agentman-owned tmux sessions currently running.
@@ -60,7 +64,7 @@ func List(ctx context.Context) ([]Session, error) {
 		return nil, ErrNotInstalled
 	}
 	out, err := run(ctx, "list-sessions", "-F",
-		"#{session_name}\t#{pane_pid}\t#{pane_current_path}\t#{pane_current_command}")
+		"#{session_name}\t#{pane_pid}\t#{pane_current_path}\t#{pane_current_command}\t#{session_created}")
 	if err != nil {
 		// tmux exits non-zero when no server is running, which is normal.
 		return nil, nil
@@ -79,6 +83,11 @@ func List(ctx context.Context) ([]Session, error) {
 		session := Session{Name: fields[0], PanePID: pid, Cwd: fields[2]}
 		if len(fields) > 3 {
 			session.Command = fields[3]
+		}
+		if len(fields) > 4 {
+			if unix, err := strconv.ParseInt(strings.TrimSpace(fields[4]), 10, 64); err == nil {
+				session.Created = time.Unix(unix, 0)
+			}
 		}
 		sessions = append(sessions, session)
 	}
