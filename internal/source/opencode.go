@@ -46,6 +46,9 @@ type OpenCodeSource struct {
 	client  *http.Client
 	// password is OPENCODE_SERVER_PASSWORD when the server requires auth.
 	password string
+	// pinned records that the URL came from the user, so discovery stays on it
+	// rather than wandering to another server.
+	pinned bool
 
 	// models remembers each session's model; see modelCache. It matters more
 	// here than for the file-backed agents, because finding it costs an HTTP
@@ -64,6 +67,7 @@ type openCodeSession struct {
 // NewOpenCodeSource creates an adapter. An empty baseURL uses the default
 // local port, and OPENCODE_SERVER_PASSWORD is picked up when set.
 func NewOpenCodeSource(baseURL string) *OpenCodeSource {
+	pinned := baseURL != ""
 	if baseURL == "" {
 		baseURL = fmt.Sprintf("http://127.0.0.1:%d", OpenCodeDefaultPort)
 	}
@@ -71,6 +75,7 @@ func NewOpenCodeSource(baseURL string) *OpenCodeSource {
 		baseURL:  strings.TrimRight(baseURL, "/"),
 		client:   &http.Client{Timeout: openCodeTimeout},
 		password: os.Getenv("OPENCODE_SERVER_PASSWORD"),
+		pinned:   pinned,
 		models:   newModelCache(),
 		sessions: map[string]openCodeSession{},
 	}
@@ -163,6 +168,10 @@ type ocQuestionsResponse struct {
 /* -------------------------------- requests ------------------------------- */
 
 func (s *OpenCodeSource) do(ctx context.Context, method, path string, body any, out any) error {
+	return s.doAt(ctx, s.baseURL, method, path, body, out)
+}
+
+func (s *OpenCodeSource) doAt(ctx context.Context, base, method, path string, body any, out any) error {
 	var reader *bytes.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -174,7 +183,7 @@ func (s *OpenCodeSource) do(ctx context.Context, method, path string, body any, 
 		reader = bytes.NewReader(nil)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, s.baseURL+path, reader)
+	req, err := http.NewRequestWithContext(ctx, method, base+path, reader)
 	if err != nil {
 		return err
 	}
@@ -198,12 +207,45 @@ func (s *OpenCodeSource) do(ctx context.Context, method, path string, body any, 
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-// Available reports whether a local opencode server is reachable.
+// OpenCodePortSpan is how many ports from the default this will look across.
+//
+// There is one server per directory — `am opencode` starts its own rather than
+// attaching, because a session belongs to its server's directory — so the one
+// on the default port is simply whichever started first, and it may well have
+// exited while others are still running.
+const OpenCodePortSpan = 16
+
+// Available reports whether a local opencode server is reachable, adopting one
+// on a nearby port if the default is silent.
+//
+// Any server will do. OpenCode's session storage is global, so every server
+// lists every session regardless of which one created it — that is what allows
+// one server per directory without the daemon having to track them all.
 func (s *OpenCodeSource) Available(ctx context.Context) bool {
+	if s.healthyAt(ctx, s.baseURL) {
+		return true
+	}
+	if s.pinned {
+		return false // the user named a URL; looking elsewhere would surprise them
+	}
+	for port := OpenCodeDefaultPort; port < OpenCodeDefaultPort+OpenCodePortSpan; port++ {
+		candidate := fmt.Sprintf("http://127.0.0.1:%d", port)
+		if candidate == s.baseURL {
+			continue
+		}
+		if s.healthyAt(ctx, candidate) {
+			s.baseURL = candidate
+			return true
+		}
+	}
+	return false
+}
+
+func (s *OpenCodeSource) healthyAt(ctx context.Context, base string) bool {
 	var health struct {
 		Healthy bool `json:"healthy"`
 	}
-	if err := s.do(ctx, http.MethodGet, "/global/health", nil, &health); err != nil {
+	if err := s.doAt(ctx, base, http.MethodGet, "/global/health", nil, &health); err != nil {
 		return false
 	}
 	return health.Healthy

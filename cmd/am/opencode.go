@@ -48,28 +48,56 @@ func runOpenCode(ctx context.Context, args []string) error {
 		return execOpenCode(binary, args)
 	}
 
-	url := fmt.Sprintf("http://127.0.0.1:%d", source.OpenCodeDefaultPort)
-	command := append([]string{"opencode", "--port", fmt.Sprint(source.OpenCodeDefaultPort)}, args...)
-
-	// Something already holds the port. Starting a second server there cannot
-	// work, but attaching to the first one is better than either failing or
-	// falling back to an invisible port: both TUIs then share one server, so
-	// every session stays visible from the phone.
-	if openCodeHealthy(ctx, url) {
-		fmt.Fprintf(os.Stderr, "%s\n", dim("agentman: attaching to the OpenCode server already on "+url))
-		command = append([]string{"opencode", "attach", url}, args...)
-	} else if portBusy(source.OpenCodeDefaultPort) {
+	// Never attach to a server someone else started, however tempting it looks.
+	//
+	// A session belongs to the directory of the *server* that created it, not
+	// the terminal you typed in — and attaching does not change that, `--dir`
+	// included. So attaching filed every session under whatever directory the
+	// existing server happened to be rooted in: you would open OpenCode in your
+	// project, and the session would show up on your phone under some unrelated
+	// path with none of your work in it.
+	//
+	// Starting our own server in this directory is what makes the session say
+	// where it actually came from. Several servers cost nothing here, because
+	// OpenCode's session storage is global — any one of them can read every
+	// session, which is what lets the daemon keep watching a single port.
+	port := freeOpenCodePort()
+	if port == 0 {
 		return fmt.Errorf(
-			"port %d is in use by something that is not OpenCode.\n"+
-				"Free it, or start OpenCode yourself on another port and point the daemon at it:\n"+
-				"  opencode --port 4097\n"+
-				"  AGENTMAN_OPENCODE_URL=http://127.0.0.1:4097 am serve",
-			source.OpenCodeDefaultPort)
-	} else {
-		fmt.Fprintf(os.Stderr, "%s\n", dim("agentman: reachable from your phone (OpenCode API on "+url+")"))
+			"no free port for OpenCode between %d and %d — close some sessions and try again",
+			source.OpenCodeDefaultPort, source.OpenCodeDefaultPort+openCodePortSpan-1)
 	}
 
-	return execOpenCode(binary, command[1:])
+	if port == source.OpenCodeDefaultPort {
+		fmt.Fprintf(os.Stderr, "%s\n", dim(fmt.Sprintf(
+			"agentman: reachable from your phone (OpenCode API on http://127.0.0.1:%d)", port)))
+	} else {
+		// A different port is fine and needs no action: the daemon reads the
+		// shared session store through whichever server answers.
+		fmt.Fprintf(os.Stderr, "%s\n", dim(fmt.Sprintf(
+			"agentman: reachable from your phone (OpenCode API on http://127.0.0.1:%d — "+
+				"%d was taken)", port, source.OpenCodeDefaultPort)))
+	}
+
+	command := append([]string{"--port", fmt.Sprint(port)}, args...)
+	return execOpenCode(binary, command)
+}
+
+// openCodePortSpan is how many ports past the default to try.
+//
+// One server per directory means one per concurrent OpenCode session, and
+// nobody runs sixteen at once.
+const openCodePortSpan = 16
+
+// freeOpenCodePort returns a usable port, preferring the one the daemon
+// watches. Zero means they are all taken.
+func freeOpenCodePort() int {
+	for port := source.OpenCodeDefaultPort; port < source.OpenCodeDefaultPort+openCodePortSpan; port++ {
+		if !portBusy(port) {
+			return port
+		}
+	}
+	return 0
 }
 
 // execOpenCode replaces this process with OpenCode.
