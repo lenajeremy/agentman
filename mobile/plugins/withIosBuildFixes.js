@@ -1,4 +1,8 @@
-const { withDangerousMod, withXcodeProject } = require("expo/config-plugins");
+const {
+  withDangerousMod,
+  withEntitlementsPlist,
+  withXcodeProject,
+} = require("expo/config-plugins");
 const fs = require("fs");
 const path = require("path");
 
@@ -106,6 +110,32 @@ function withSigningTeam(config) {
   });
 }
 
+/**
+ * Drop the push-notification entitlement unless someone asks for it.
+ *
+ * expo-notifications adds `aps-environment` whenever it is installed, and a
+ * free Apple ID cannot provision it at all:
+ *
+ *   Personal development teams, including "...", do not support the Push
+ *   Notifications capability.
+ *
+ * Nothing is lost by removing it. The app only ever fires *local*
+ * notifications — scheduleNotificationAsync with `trigger: null`, driven by a
+ * turn_complete frame that already arrived over the socket — and those need no
+ * entitlement. The daemon talks to the phone directly; there is no APNs round
+ * trip to authorise.
+ *
+ * Set APPLE_PUSH=1 to keep it, which is what a paid account doing real remote
+ * push would want.
+ */
+function withoutPushEntitlement(config) {
+  if (process.env.APPLE_PUSH === "1") return config;
+  return withEntitlementsPlist(config, (config) => {
+    delete config.modResults["aps-environment"];
+    return config;
+  });
+}
+
 module.exports = function withIosBuildFixes(config) {
-  return withSigningTeam(withPodDeploymentTarget(config));
+  return withoutPushEntitlement(withSigningTeam(withPodDeploymentTarget(config)));
 };
