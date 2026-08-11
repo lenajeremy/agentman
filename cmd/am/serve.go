@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mdp/qrterminal/v3"
+	qr "rsc.io/qr"
 
 	"github.com/lenajeremy/agentman/internal/daemon"
 	"github.com/lenajeremy/agentman/internal/hook"
@@ -294,9 +295,19 @@ func runPair(ctx context.Context, args []string) error {
 // it on the phone opens the app straight into pairing, which is the whole
 // point for anyone reading this over a remote shell where scanning is not an
 // option.
+//
+// The relay is omitted when it is the default one, because payload length
+// drives the QR version and so the printed size — dropping those sixty-odd
+// characters takes the code from twenty rows to sixteen. A custom relay is
+// still spelled out in full: a self-hoster whose QR quietly pointed at the
+// public relay would be a far worse outcome than a slightly taller square.
 func PairingURL(relayURL, token string) string {
+	relay := strings.TrimRight(relayURL, "/")
+	if relay == DefaultRelay {
+		return "agentman://pair?token=" + url.QueryEscape(token)
+	}
 	return fmt.Sprintf("agentman://pair?relay=%s&token=%s",
-		url.QueryEscape(strings.TrimRight(relayURL, "/")), url.QueryEscape(token))
+		url.QueryEscape(relay), url.QueryEscape(token))
 }
 
 func printPairCode(relayURL, code, token string, expiresAt time.Time) {
@@ -310,12 +321,20 @@ func printPairCode(relayURL, code, token string, expiresAt time.Time) {
 	// guessing, unlike the eight digits below it.
 	if token != "" && isTerminal() {
 		fmt.Println()
+		// Half blocks pack two QR rows into one terminal line, which is most of
+		// why this fits on screen alongside the prompt that printed it. The
+		// quiet zone stays: it is the margin scanners rely on to find the code
+		// at all, and trimming it to save two rows trades reliability for
+		// cosmetics.
 		qrterminal.GenerateWithConfig(PairingURL(relayURL, token), qrterminal.Config{
-			Level:     qrterminal.M,
-			Writer:    os.Stdout,
-			BlackChar: qrterminal.WHITE,
-			WhiteChar: qrterminal.BLACK,
-			QuietZone: 1,
+			Level:          qr.M,
+			Writer:         os.Stdout,
+			HalfBlocks:     true,
+			BlackChar:      qrterminal.BLACK_BLACK,
+			WhiteChar:      qrterminal.WHITE_WHITE,
+			BlackWhiteChar: qrterminal.BLACK_WHITE,
+			WhiteBlackChar: qrterminal.WHITE_BLACK,
+			QuietZone:      1,
 		})
 	}
 

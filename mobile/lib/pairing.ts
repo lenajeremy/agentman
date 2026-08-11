@@ -6,6 +6,15 @@
  * the app straight into pairing, which is what makes this usable over a remote
  * shell where pointing a camera at the screen is not an option.
  */
+/**
+ * The relay a pairing uses when its QR code does not name one.
+ *
+ * Must match DefaultRelay in the daemon: the daemon omits the address when it
+ * is this one, so a mismatch here would send a scanned pairing somewhere the
+ * daemon is not.
+ */
+export const DEFAULT_RELAY = "https://agentman-production.up.railway.app";
+
 export interface ScannedPairing {
   relayUrl: string;
   token: string;
@@ -27,9 +36,13 @@ export function parsePairingPayload(raw: string): ScannedPairing | null {
   if (queryStart === -1) return null;
 
   const params = new URLSearchParams(text.slice(queryStart + 1));
-  const relayUrl = (params.get("relay") ?? "").trim();
   const token = (params.get("token") ?? "").trim();
-  if (!relayUrl || !token) return null;
+  if (!token) return null;
+
+  // The relay is omitted when it is the default one, which is what keeps the
+  // printed QR small enough to sit alongside the prompt. Absent therefore
+  // means "the public relay", and a self-hosted one is always spelled out.
+  const relayUrl = (params.get("relay") ?? "").trim() || DEFAULT_RELAY;
 
   // Only http(s) is meaningful, and refusing anything else keeps a malicious
   // QR from pointing the app at a scheme it was never meant to speak.

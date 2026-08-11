@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 func TestResolveRelayPrecedence(t *testing.T) {
 	t.Run("falls back to the built-in relay", func(t *testing.T) {
@@ -48,4 +52,47 @@ func TestResolveRelayPrecedence(t *testing.T) {
 			t.Errorf("got %q, want the trimmed environment value", got)
 		}
 	})
+}
+
+func TestPairingURLOmitsOnlyTheDefaultRelay(t *testing.T) {
+	const token = "Yz0gMUIZjTnemlQwXQ"
+
+	// Omitted for the default relay: payload length drives the QR version, and
+	// those sixty characters are the difference between sixteen printed rows
+	// and twenty.
+	got := PairingURL(DefaultRelay, token)
+	if strings.Contains(got, "relay=") {
+		t.Errorf("payload names the default relay, making the QR larger than it needs to be: %q", got)
+	}
+	if !strings.Contains(got, token) {
+		t.Errorf("payload lost the token: %q", got)
+	}
+
+	// Spelled out for anything else. A self-hoster whose QR silently pointed at
+	// the public relay would be a much worse outcome than a taller code.
+	got = PairingURL("https://relay.example.com", token)
+	if !strings.Contains(got, "relay=") {
+		t.Errorf("a custom relay was dropped from the payload: %q", got)
+	}
+
+	// A trailing slash must not defeat the comparison and force the long form.
+	if PairingURL(DefaultRelay+"/", token) != PairingURL(DefaultRelay, token) {
+		t.Error("a trailing slash produced a different payload")
+	}
+}
+
+func TestAppAndDaemonAgreeOnTheDefaultRelay(t *testing.T) {
+	// The daemon omits the relay from a QR when it is the default, and the app
+	// fills it back in from its own copy of the constant. If the two drift, a
+	// scanned pairing goes somewhere the daemon is not — and nothing else in
+	// either codebase would notice.
+	source, err := os.ReadFile("../../mobile/lib/pairing.ts")
+	if err != nil {
+		t.Skipf("mobile source not available: %v", err)
+	}
+	want := `export const DEFAULT_RELAY = "` + DefaultRelay + `";`
+	if !strings.Contains(string(source), want) {
+		t.Errorf("mobile/lib/pairing.ts does not declare %s\n"+
+			"the app and daemon must agree on the default relay", want)
+	}
 }
