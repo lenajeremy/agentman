@@ -33,6 +33,12 @@ const discoverInterval = time.Second
 // Stop hook and the discovery sweep that sees the same transition.
 const turnNotifyWindow = 15 * time.Second
 
+// turnQuestionGrace gives discovery time to distinguish "the turn finished"
+// from "Claude stopped because it opened a question". Claude emits the same
+// Stop hook for both, while the question exists only in the tmux pane and is
+// normally found on the next one-second sweep.
+const turnQuestionGrace = 2 * discoverInterval
+
 // Transport is how the daemon reaches the app. Abstracted so the daemon can
 // run over a relay websocket, a LAN listener, or an in-process pipe in tests.
 type Transport interface {
@@ -52,6 +58,11 @@ type Daemon struct {
 	// notifiedAt records when a turn-complete was last announced for a session,
 	// so the hook path and the polled path cannot both fire for the same turn.
 	notifiedAt map[string]time.Time
+	// pendingTurns delays hook completion just long enough for discovery to
+	// reveal a blocking question. Timers are keyed so duplicate hooks cannot
+	// schedule duplicate alerts.
+	pendingTurns map[string]pendingTurn
+	turnDelay    time.Duration
 	// follows holds the active live tail for each watched session. Only
 	// sessions the app is actually watching appear here, which is what keeps
 	// idle sessions free.
@@ -65,14 +76,21 @@ type follow struct {
 	subscribers map[string]struct{}
 }
 
+type pendingTurn struct {
+	timer *time.Timer
+	token *byte
+}
+
 // New creates a daemon.
 func New(registry *source.Registry, sink Transport) *Daemon {
 	return &Daemon{
-		registry:   registry,
-		sink:       sink,
-		sessions:   map[string]protocol.Session{},
-		follows:    map[string]*follow{},
-		notifiedAt: map[string]time.Time{},
+		registry:     registry,
+		sink:         sink,
+		sessions:     map[string]protocol.Session{},
+		follows:      map[string]*follow{},
+		notifiedAt:   map[string]time.Time{},
+		pendingTurns: map[string]pendingTurn{},
+		turnDelay:    turnQuestionGrace,
 	}
 }
 
@@ -80,6 +98,7 @@ func New(registry *source.Registry, sink Transport) *Daemon {
 func (d *Daemon) Run(ctx context.Context, hooks <-chan hook.Event) error {
 	ticker := time.NewTicker(discoverInterval)
 	defer ticker.Stop()
+	defer d.stopPendingTurns()
 
 	d.refresh(ctx, true)
 
@@ -235,17 +254,62 @@ func (d *Daemon) handleHook(event hook.Event) {
 		if name == "" {
 			name = "agent"
 		}
-		// Claim the window so the polled path does not repeat this.
-		d.mu.Lock()
-		d.notifiedAt[event.SessionID] = time.Now()
-		d.mu.Unlock()
-		_ = d.sink.Send(protocol.Event{
+		d.scheduleHookTurn(protocol.Event{
 			Type:        protocol.EvtTurnComplete,
 			SessionID:   event.SessionID,
 			SessionName: name,
 			Preview:     event.Preview(),
 		})
 	}
+}
+
+func (d *Daemon) scheduleHookTurn(event protocol.Event) {
+	d.mu.Lock()
+	delay := d.turnDelay
+	if previous, ok := d.pendingTurns[event.SessionID]; ok {
+		previous.timer.Stop()
+	}
+	if delay <= 0 {
+		delete(d.pendingTurns, event.SessionID)
+		d.mu.Unlock()
+		d.finishHookTurn(event, nil)
+		return
+	}
+	token := new(byte)
+	timer := time.AfterFunc(delay, func() { d.finishHookTurn(event, token) })
+	d.pendingTurns[event.SessionID] = pendingTurn{timer: timer, token: token}
+	d.mu.Unlock()
+}
+
+func (d *Daemon) finishHookTurn(event protocol.Event, token *byte) {
+	d.mu.Lock()
+	if token != nil {
+		pending, ok := d.pendingTurns[event.SessionID]
+		if !ok || pending.token != token {
+			d.mu.Unlock()
+			return
+		}
+	}
+	delete(d.pendingTurns, event.SessionID)
+	session, known := d.sessions[event.SessionID]
+	if known && (session.State == protocol.StateWaitingInput || session.Question != nil) {
+		d.mu.Unlock()
+		return
+	}
+	// Claim the window only for a real completion. A suppressed question must
+	// not silence the completion notification for the next actual turn.
+	d.notifiedAt[event.SessionID] = time.Now()
+	d.mu.Unlock()
+	_ = d.sink.Send(event)
+}
+
+func (d *Daemon) stopPendingTurns() {
+	d.mu.Lock()
+	for id, pending := range d.pendingTurns {
+		pending.timer.Stop()
+		delete(d.pendingTurns, id)
+	}
+	d.mu.Unlock()
 }
 
 // Handle answers one request from the app.

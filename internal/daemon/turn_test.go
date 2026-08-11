@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/protocol"
@@ -17,15 +18,23 @@ import (
 // discovery interval, so a genuine turn can begin and end without discovery
 // ever observing the busy state.
 type scriptedSource struct {
-	mu     sync.Mutex
-	state  protocol.State
-	reply  string
-	failed string
+	mu       sync.Mutex
+	state    protocol.State
+	reply    string
+	failed   string
+	question *protocol.Question
 }
 
 func (s *scriptedSource) set(state protocol.State) {
 	s.mu.Lock()
 	s.state = state
+	s.mu.Unlock()
+}
+
+func (s *scriptedSource) setQuestion(state protocol.State, question *protocol.Question) {
+	s.mu.Lock()
+	s.state = state
+	s.question = question
 	s.mu.Unlock()
 }
 
@@ -35,10 +44,11 @@ func (s *scriptedSource) Discover(context.Context) ([]protocol.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return []protocol.Session{{
-		ID:    "opencode:s1",
-		Kind:  protocol.KindOpenCode,
-		Name:  "checkout",
-		State: s.state,
+		ID:       "opencode:s1",
+		Kind:     protocol.KindOpenCode,
+		Name:     "checkout",
+		State:    s.state,
+		Question: s.question,
 	}}, nil
 }
 
@@ -137,6 +147,7 @@ func TestHookWinsOverPolling(t *testing.T) {
 
 	sink := &recordingSink{}
 	agent := New(registry, sink)
+	agent.turnDelay = 0
 	ctx := context.Background()
 
 	agent.refresh(ctx, true)
@@ -155,6 +166,38 @@ func TestHookWinsOverPolling(t *testing.T) {
 	if got := sink.turnCompletes(); len(got) != 1 {
 		t.Errorf("got %d turn_complete events for one turn, want 1 — "+
 			"the hook and the poller both announced it", len(got))
+	}
+}
+
+// Claude uses the same Stop hook when a turn finishes and when AskUserQuestion
+// blocks. Discovery sees the tmux question on the next sweep; the delayed hook
+// announcement must yield to that more specific state.
+func TestQuestionSuppressesHookCompletion(t *testing.T) {
+	registry := source.NewRegistry()
+	scripted := &scriptedSource{state: protocol.StateBusy, reply: "Which database?"}
+	registry.Add(scripted)
+
+	sink := &recordingSink{}
+	agent := New(registry, sink)
+	agent.turnDelay = 30 * time.Millisecond
+	ctx := context.Background()
+	agent.refresh(ctx, true)
+
+	agent.handleHook(hook.Event{
+		Kind: protocol.KindClaude, Name: hook.NameStop, SessionID: "opencode:s1",
+	})
+	scripted.setQuestion(protocol.StateWaitingInput, &protocol.Question{
+		Prompt: "Which database?",
+		Options: []protocol.QuestionOption{
+			{Key: "1", Label: "Postgres"},
+			{Key: "2", Label: "SQLite"},
+		},
+	})
+	agent.refresh(ctx, false)
+	time.Sleep(60 * time.Millisecond)
+
+	if got := sink.turnCompletes(); len(got) != 0 {
+		t.Fatalf("question produced %d false turn-complete alerts: %+v", len(got), got)
 	}
 }
 
