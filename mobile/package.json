@@ -7,7 +7,8 @@
     "ios": "expo start --ios",
     "android": "expo start --android",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --disable-warning=MODULE_TYPELESS_PACKAGE_JSON 'lib/**/*.test.mts'"
+    "test": "node --test --disable-warning=MODULE_TYPELESS_PACKAGE_JSON 'lib/**/*.test.mts'",
+    "device": "expo run:ios --device --configuration Release"
   },
   "dependencies": {
     "@expo-google-fonts/ibm-plex-mono": "^0.4.1",
