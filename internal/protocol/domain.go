@@ -71,6 +71,41 @@ type Session struct {
 	Question *Question `json:"question,omitempty"`
 }
 
+// SameAs reports whether two snapshots of a session are equivalent.
+//
+// Deliberately not ==. Session holds a *Question, so the compiler compares
+// pointer identity, and discovery builds a fresh Question from the pane on
+// every sweep — two readings of one unchanged prompt therefore compare unequal
+// forever. That made a session blocked on a permission prompt emit an update
+// every second, which is the exact state where the user is most likely to be
+// watching their phone on cell data.
+func (s Session) SameAs(other Session) bool {
+	question, otherQuestion := s.Question, other.Question
+	s.Question, other.Question = nil, nil
+	if s != other {
+		return false
+	}
+	return question.sameAs(otherQuestion)
+}
+
+func (q *Question) sameAs(other *Question) bool {
+	if q == nil || other == nil {
+		return q == other
+	}
+	if q.Prompt != other.Prompt || q.Title != other.Title || q.Detail != other.Detail {
+		return false
+	}
+	if len(q.Options) != len(other.Options) {
+		return false
+	}
+	for i := range q.Options {
+		if q.Options[i] != other.Options[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // Question is a pending decision an agent is waiting on.
 type Question struct {
 	Prompt  string           `json:"prompt"`

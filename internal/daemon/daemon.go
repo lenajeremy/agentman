@@ -127,7 +127,7 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 
 	for id, session := range current {
 		before, existed := previous[id]
-		if !existed || before != session {
+		if !existed || !before.SameAs(session) {
 			s := session
 			_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessionUpdate, Session: &s})
 		}
