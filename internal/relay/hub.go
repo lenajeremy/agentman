@@ -3,14 +3,62 @@ package relay
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
+	"hash/fnv"
 	"math/big"
 	"sync"
 	"time"
 )
 
-// PairingCodeTTL is how long a pairing code stays valid. Short on purpose: the
-// code is six digits, so it must stop being useful almost immediately.
+// PairingCodeTTL is how long a pairing code stays valid. Short on purpose, so
+// a guessable code stops being useful almost immediately.
 const PairingCodeTTL = 60 * time.Second
+
+// A pairing code is a two-digit account shard followed by six random digits.
+//
+// The shard exists so a failed guess can be attributed to something. A wrong
+// code belongs to no account by definition — that is what makes it wrong — so
+// without a partition the only place to charge it is a bucket shared by every
+// user, and an attacker flooding that bucket locks everyone out. The shard is
+// derived from the account, so a guess names the group it is aimed at even
+// when it names no code, and the damage stops at that group.
+//
+// The random half stays six digits, so the odds of guessing any particular
+// live code are unchanged; the shard adds addressing, not weakness.
+const (
+	pairingShardDigits  = 2
+	pairingRandomDigits = 6
+	// PairingShards must match pairingShardDigits: 10^2.
+	PairingShards = 100
+)
+
+// ShardForAccount returns the bucket an account's codes live in.
+//
+// FNV rather than the account hash itself: the account is already a truncated
+// SHA-256, and reusing its leading digits would put the shard and the identity
+// in the same bits for no reason.
+func ShardForAccount(account AccountID) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(account))
+	return fmt.Sprintf("%0*d", pairingShardDigits, h.Sum32()%PairingShards)
+}
+
+// ShardForCode reads the shard out of a submitted code.
+//
+// Returns false for anything malformed, which is deliberately not treated as
+// a shard of its own: garbage would otherwise get a private budget and could
+// be used to avoid rate limiting entirely.
+func ShardForCode(code string) (string, bool) {
+	if len(code) != pairingShardDigits+pairingRandomDigits {
+		return "", false
+	}
+	for _, r := range code {
+		if r < '0' || r > '9' {
+			return "", false
+		}
+	}
+	return code[:pairingShardDigits], true
+}
 
 // ErrNoPeer is returned when a frame has nowhere to go.
 var ErrNoPeer = errors.New("relay: peer not connected")
@@ -150,10 +198,11 @@ func (h *Hub) ToApps(account AccountID, frame []byte) int {
 
 // NewPairingCode issues a short-lived code for an account.
 func (h *Hub) NewPairingCode(account AccountID) (string, error) {
-	code, err := randomDigits(6)
+	random, err := randomDigits(pairingRandomDigits)
 	if err != nil {
 		return "", err
 	}
+	code := ShardForAccount(account) + random
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.sweepPairingsLocked()

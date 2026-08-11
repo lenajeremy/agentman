@@ -126,10 +126,15 @@ func sign(secret, encoded string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-// FormatPairingCode renders a 6-digit code in a readable form.
+// FormatPairingCode renders a code in a readable form.
+//
+// Grouped in fours rather than at the shard boundary: the split between the
+// account shard and the random half is an implementation detail, and drawing
+// attention to it would only invite someone to read meaning into the first
+// two digits.
 func FormatPairingCode(code string) string {
-	if len(code) != 6 {
+	if len(code) != 8 {
 		return code
 	}
-	return fmt.Sprintf("%s %s", code[:3], code[3:])
+	return fmt.Sprintf("%s %s", code[:4], code[4:])
 }

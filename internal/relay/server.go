@@ -38,11 +38,14 @@ type Server struct {
 	// version is reported by /health for debugging deployments.
 	version string
 
-	// Failed pairing attempts are bounded per caller and, because a proxied
-	// forwarded-for header can be forged, globally as well. Legitimate pairing
-	// failures are rare — a mistyped code once or twice — so these ceilings sit
-	// far above real use and far below what brute force needs.
+	// Failed pairing attempts are bounded three ways, because each alone has a
+	// hole: per caller (precise, but a forwarded-for header can be forged),
+	// per account shard (unforgeable, since the shard is inside the code, and
+	// it confines a flood to a hundredth of users), and globally (a last
+	// backstop against sheer volume, set high enough that it is a CPU guard
+	// rather than something real pairing ever meets).
 	perClientFailures *limiter
+	perShardFailures  *limiter
 	globalFailures    *limiter
 }
 
@@ -57,7 +60,8 @@ func NewServer(secret, version string, log *slog.Logger) *Server {
 		log:               log,
 		version:           version,
 		perClientFailures: newLimiter(10, time.Minute),
-		globalFailures:    newLimiter(120, time.Minute),
+		perShardFailures:  newLimiter(20, time.Minute),
+		globalFailures:    newLimiter(2000, time.Minute),
 	}
 }
 
@@ -147,18 +151,29 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := clientKey(r)
-	if !s.perClientFailures.allow(client, time.Now()) ||
-		!s.globalFailures.allow("", time.Now()) {
+	code := strings.ReplaceAll(strings.TrimSpace(body.Code), " ", "")
+	shard, wellFormed := ShardForCode(code)
+	if !wellFormed {
+		// Nothing to attribute a malformed code to, so it is charged to the
+		// caller and the global backstop only — it can never reach a real
+		// code, so it does not deserve a shard budget of its own.
+		shard = ""
+	}
+
+	if s.pairingBlocked(clientKey(r), shard) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{
 			"error": "too many pairing attempts — wait a minute and try a fresh code",
 		})
 		return
 	}
 
-	code := strings.ReplaceAll(strings.TrimSpace(body.Code), " ", "")
 	account, ok := s.hub.RedeemPairingCode(code)
 	if !ok {
+		// Only failures are charged. A user who types their code correctly
+		// never spends budget, so no amount of guessing by anyone else can
+		// stop a real pairing from going through.
+		s.chargePairingFailure(clientKey(r), shard)
+
 		// Deliberately vague: distinguishing "wrong" from "expired" would help
 		// someone probing the code space more than it helps a real user.
 		writeJSON(w, http.StatusForbidden, map[string]string{
@@ -400,6 +415,25 @@ func sendControlReply(conn Conn, replyTo string, control protocol.Control) error
 		return err
 	}
 	return conn.Send(frame)
+}
+
+// pairingBlocked reports whether this attempt has already exhausted a budget.
+func (s *Server) pairingBlocked(client, shard string) bool {
+	if s.perClientFailures.over(client) || s.globalFailures.over("") {
+		return true
+	}
+	return shard != "" && s.perShardFailures.over(shard)
+}
+
+// chargePairingFailure records a wrong guess against every budget it belongs
+// to. A malformed code has no shard, so it is charged to the other two.
+func (s *Server) chargePairingFailure(client, shard string) {
+	now := time.Now()
+	s.perClientFailures.record(client, now)
+	s.globalFailures.record("", now)
+	if shard != "" {
+		s.perShardFailures.record(shard, now)
+	}
 }
 
 // clientKey identifies the caller for rate limiting.

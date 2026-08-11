@@ -9,6 +9,14 @@
 
 export const PROTOCOL_VERSION = 1;
 
+/**
+ * Pairing codes are eight digits: a two-digit account shard followed by six
+ * random ones. The shard lets the relay charge a failed guess to the group of
+ * accounts it was aimed at, so one person being flooded cannot stop everyone
+ * else from pairing.
+ */
+export const PAIRING_CODE_LENGTH = 8;
+
 export type AgentKind = "claude" | "codex" | "opencode";
 export type SessionState = "busy" | "idle" | "waiting_input" | "ended";
 

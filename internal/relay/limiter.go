@@ -26,11 +26,28 @@ func newLimiter(limit int, window time.Duration) *limiter {
 	return &limiter{window: window, limit: limit, hits: map[string][]time.Time{}}
 }
 
-// allow records a hit for key and reports whether it is within the limit.
-func (l *limiter) allow(key string, now time.Time) bool {
+// over reports whether a key has already exhausted its budget, without
+// recording anything.
+//
+// Checking and recording are separate so that only failures are charged: a
+// correct code is honoured without spending anyone's budget, which is what
+// keeps a flood of wrong guesses from blocking real pairings.
+func (l *limiter) over(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return len(l.liveLocked(key, time.Now())) >= l.limit
+}
 
+// record adds a hit for key.
+func (l *limiter) record(key string, now time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.hits[key] = append(l.liveLocked(key, now), now)
+	l.sweepLocked(now)
+}
+
+// liveLocked returns the hits still inside the window, filtering in place.
+func (l *limiter) liveLocked(key string, now time.Time) []time.Time {
 	cutoff := now.Add(-l.window)
 	kept := l.hits[key][:0]
 	for _, at := range l.hits[key] {
@@ -38,12 +55,12 @@ func (l *limiter) allow(key string, now time.Time) bool {
 			kept = append(kept, at)
 		}
 	}
+	l.hits[key] = kept
+	return kept
+}
 
-	if len(kept) >= l.limit {
-		l.hits[key] = kept
-		return false
-	}
-	l.hits[key] = append(kept, now)
+func (l *limiter) sweepLocked(now time.Time) {
+	cutoff := now.Add(-l.window)
 
 	// Opportunistic sweep: without it, a long-lived relay accumulates one
 	// slice per distinct key forever, which an attacker could grow on purpose
@@ -55,5 +72,4 @@ func (l *limiter) allow(key string, now time.Time) bool {
 			}
 		}
 	}
-	return true
 }

@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -244,7 +245,7 @@ func TestBruteForceIsRateLimitedPerCaller(t *testing.T) {
 	// space is anywhere near exhausted.
 	var blocked bool
 	for range 30 {
-		if guess("10.0.0.9", "000000") == http.StatusTooManyRequests {
+		if guess("10.0.0.9", "00000000") == http.StatusTooManyRequests {
 			blocked = true
 			break
 		}
@@ -257,6 +258,78 @@ func TestBruteForceIsRateLimitedPerCaller(t *testing.T) {
 	// of charging the caller rather than the code.
 	if status := guess("10.0.0.1", code); status != http.StatusOK {
 		t.Errorf("victim got HTTP %d; an attacker's guessing locked out a real user", status)
+	}
+}
+
+func TestFloodOnOneShardLeavesOtherAccountsPairable(t *testing.T) {
+	// The point of putting a shard inside the code: a wrong guess names no
+	// account, so without one the only place to charge it is a bucket shared
+	// by everybody, and a flood locks out every user of a public relay. With
+	// it, the damage stops at a hundredth of accounts.
+	server, ts := newTestServer(t)
+
+	victim := DeriveAccount("victim-daemon")
+	attacked := DeriveAccount("attacked-daemon")
+	if ShardForAccount(victim) == ShardForAccount(attacked) {
+		attacked = DeriveAccount("attacked-daemon-2")
+		if ShardForAccount(victim) == ShardForAccount(attacked) {
+			t.Skip("both fixtures landed in the same shard")
+		}
+	}
+
+	victimCode, err := server.hub.NewPairingCode(victim)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	guess := func(from, code string) int {
+		body, _ := json.Marshal(map[string]string{"code": code, "deviceId": "x"})
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/pair", strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Forwarded-For", from)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// Flood one shard from many forged addresses, so it is the shard budget
+	// that fills rather than any single caller's.
+	attackedShard := ShardForAccount(attacked)
+	for i := range 40 {
+		guess(fmt.Sprintf("10.9.0.%d", i), attackedShard+"000000")
+	}
+
+	// That shard is now shut: the attack is contained, not ignored.
+	if status := guess("10.9.1.1", attackedShard+"111111"); status != http.StatusTooManyRequests {
+		t.Errorf("attacked shard returned HTTP %d, want 429 — the flood was not contained", status)
+	}
+
+	// And the victim, in a different shard, pairs normally.
+	token, status := redeem(t, ts.URL, victimCode)
+	if status != http.StatusOK || token == "" {
+		t.Fatalf("victim got HTTP %d: a flood against another account's shard "+
+			"blocked an unrelated pairing", status)
+	}
+}
+
+func TestSuccessfulPairingSpendsNoBudget(t *testing.T) {
+	// Only failures are charged. If a correct code consumed budget too, heavy
+	// legitimate use would eventually rate limit itself.
+	server, ts := newTestServer(t)
+	account := DeriveAccount("busy-daemon")
+
+	for range 40 {
+		code, err := server.hub.NewPairingCode(account)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, status := redeem(t, ts.URL, code); status != http.StatusOK {
+			t.Fatalf("a valid pairing was rejected with HTTP %d after repeated "+
+				"successful pairings", status)
+		}
 	}
 }
 

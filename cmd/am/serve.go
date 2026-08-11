@@ -16,6 +16,7 @@ import (
 	"github.com/lenajeremy/agentman/internal/daemon"
 	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/relay"
 	"github.com/lenajeremy/agentman/internal/source"
 )
 
@@ -286,11 +287,16 @@ func printPairCode(code string, expiresAt time.Time) {
 	if remaining < 0 {
 		remaining = 0
 	}
-	fmt.Printf("\n  %s\n\n", bold(spaced(code)))
+	fmt.Printf("\n  %s\n\n", bold(spaced(relay.FormatPairingCode(code))))
 	fmt.Printf("  %s\n", dim(fmt.Sprintf("enter this in the app within %s", remaining)))
 }
 
-// spaced widens a code so it can be read off a screen at a glance.
+// spaced widens a code so it can be read off a screen at a glance, keeping
+// the grouping it arrives with.
 func spaced(code string) string {
-	return strings.Join(strings.Split(code, ""), " ")
+	var out []string
+	for _, group := range strings.Fields(code) {
+		out = append(out, strings.Join(strings.Split(group, ""), " "))
+	}
+	return strings.Join(out, "   ")
 }

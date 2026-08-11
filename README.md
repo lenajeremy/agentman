@@ -332,9 +332,13 @@ reachable from your phone.
   are set.
 - Accounts are derived by hashing your daemon token, so the relay never sees or
   stores the token itself.
-- Pairing codes are six digits, single-use, expire in sixty seconds, and burn
-  after five failed attempts — a million-wide space is otherwise walkable inside
-  a minute.
+- Pairing codes are single-use and expire in sixty seconds. A code is two
+  digits of account shard followed by six random ones: a wrong guess names no
+  account by definition, so without the shard the only place to charge it is a
+  bucket shared by every user, and one flood would lock out the whole relay.
+  The shard lets a failure be charged to the group it was aimed at, so an
+  attack is confined to a hundredth of accounts. Only failures are charged, so
+  typing your code correctly never spends anyone's budget.
 - Hook deliveries are authenticated with a token from a `0600` file rather than
   argv, since `ps` is world-readable and the loopback listener would otherwise
   accept a forged "turn complete" from any local process.

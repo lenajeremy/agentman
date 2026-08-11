@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { pair } from "../lib/client";
 import { useStore } from "../lib/store";
+import { PAIRING_CODE_LENGTH } from "../lib/protocol";
 import { color, font, radius, size, space } from "../lib/theme";
 
 export default function Pair() {
@@ -26,7 +27,7 @@ export default function Pair() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSubmit = relayUrl.trim().length > 0 && code.replace(/\D/g, "").length === 6;
+  const canSubmit = relayUrl.trim().length > 0 && code.replace(/\D/g, "").length === PAIRING_CODE_LENGTH;
 
   async function submit() {
     setBusy(true);
@@ -62,8 +63,8 @@ export default function Pair() {
         <View style={styles.steps}>
           <Text style={styles.stepLabel}>On your Mac</Text>
           <Text style={styles.stepBody}>
-            Run <Text style={styles.code}>am pair</Text> to get a six-digit code. It works for
-            one minute.
+            Run <Text style={styles.code}>am pair</Text> to get a code. It works for one
+            minute.
           </Text>
         </View>
 
@@ -87,11 +88,13 @@ export default function Pair() {
           <TextInput
             style={[styles.input, styles.codeInput]}
             value={code}
-            onChangeText={(text) => setCode(text.replace(/\D/g, "").slice(0, 6))}
-            placeholder="000000"
+            onChangeText={(text) =>
+              setCode(text.replace(/\D/g, "").slice(0, PAIRING_CODE_LENGTH))
+            }
+            placeholder="00000000"
             placeholderTextColor={color.faint}
             keyboardType="number-pad"
-            maxLength={6}
+            maxLength={PAIRING_CODE_LENGTH}
           />
         </View>
 
@@ -176,7 +179,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: color.line,
   },
-  codeInput: { fontSize: 26, letterSpacing: 10, textAlign: "center" },
+  codeInput: { fontSize: 24, letterSpacing: 6, textAlign: "center" },
 
   error: { fontFamily: font.sans, fontSize: size.caption, color: color.error },
 

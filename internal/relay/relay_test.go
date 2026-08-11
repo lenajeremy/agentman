@@ -221,8 +221,11 @@ func TestPairingCodeIsSingleUseAndExpires(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(code) != 6 {
-		t.Fatalf("code = %q, want 6 digits", code)
+	if len(code) != 8 {
+		t.Fatalf("code = %q, want 8 digits (2 shard + 6 random)", code)
+	}
+	if shard, ok := ShardForCode(code); !ok || shard != ShardForAccount(account) {
+		t.Errorf("code %q does not carry its account's shard", code)
 	}
 
 	got, ok := hub.RedeemPairingCode(code)
@@ -250,7 +253,7 @@ func TestWrongGuessesDoNotAffectOtherUsersCodes(t *testing.T) {
 	}
 
 	for range 50 {
-		if _, ok := hub.RedeemPairingCode("000000"); ok {
+		if _, ok := hub.RedeemPairingCode("00000000"); ok {
 			t.Fatal("a guessed code was accepted")
 		}
 	}
