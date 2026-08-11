@@ -7,8 +7,10 @@ import (
 
 // limiter is a sliding-window counter used to bound failed pairing attempts.
 //
-// Brute force against a six-digit code has to be stopped somewhere, and the
-// only honest place is at the source of the guesses. 
+// Brute force against a typed pairing code has to be stopped somewhere, and
+// the only honest place is at the caller who made the guesses. Charging it
+// anywhere shared — every outstanding code, or a group of accounts — makes
+// one attacker's noise into everybody else's problem.
 type limiter struct {
 	mu     sync.Mutex
 	window time.Duration

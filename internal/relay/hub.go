@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	PairingCodeTTL = 60 * time.Second
+	PairingCodeTTL        = 60 * time.Second
 	pairingCodeDigits int = 8
 	pairingTokenBytes int = 16
 )
