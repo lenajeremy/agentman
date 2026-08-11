@@ -110,6 +110,10 @@ homebrew_casks:
       own, see https://github.com/lenajeremy/agentman#self-hosting-the-relay
 
 release:
+  # A re-run after a partial failure must be able to overwrite what the first
+  # attempt uploaded. Without this, fixing the tap token and retrying fails at
+  # asset upload instead, because the release already holds those files.
+  mode: replace
   footer: |
     ## Install
 

@@ -322,12 +322,25 @@ func printPairCode(relayURL, code, token string, expiresAt time.Time) {
 	if token != "" && isTerminal() {
 		fmt.Println()
 		// Half blocks pack two QR rows into one terminal line, which is most of
-		// why this fits on screen alongside the prompt that printed it. The
-		// quiet zone stays: it is the margin scanners rely on to find the code
-		// at all, and trimming it to save two rows trades reliability for
-		// cosmetics.
+		// why this fits on screen alongside the prompt that printed it.
+		//
+		// This is as dense as a terminal QR can honestly get. A cell is about
+		// half as wide as it is tall, so one module across by two down comes
+		// out square, which is what scanners expect. Packing 2x2 modules into
+		// a cell would halve the width again but leave every module squashed
+		// to a 1:2 rectangle, and a code that is smaller but does not scan is
+		// not smaller.
+		//
+		// The quiet zone stays for the same reason: it is the margin a scanner
+		// uses to find the code at all, and measuring showed removing it saves
+		// nothing anyway.
 		qrterminal.GenerateWithConfig(PairingURL(relayURL, token), qrterminal.Config{
-			Level:          qr.M,
+			// Level L, not M. Error correction exists to survive physical
+			// damage — smudges, tears, dirt on a printed label. A code drawn
+			// on a screen and scanned seconds later has none of that, and the
+			// lower level drops this payload from a 33-module code to 29,
+			// which is two fewer rows and four fewer columns.
+			Level:          qr.L,
 			Writer:         os.Stdout,
 			HalfBlocks:     true,
 			BlackChar:      qrterminal.BLACK_BLACK,
