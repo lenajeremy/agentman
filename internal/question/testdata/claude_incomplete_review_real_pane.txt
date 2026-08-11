@@ -1,0 +1,48 @@
+  it, since that's a whole afternoon of hunting for data that
+  was never there.
+
+  I also flagged that I had to shorten its Preview probe header
+  to Preview — the tool caps headers at 12 characters and
+  that's 13.
+
+  Harness stays armed a few more minutes. Standing by for
+  whatever shape it wants next.
+
+✻ Worked for 1m 41s
+
+❯ Final Codex verification only: please fire AskUserQuestion
+  with exactly two untouched questions and leave it waiting.
+  First: header Preview, prompt Choose the deployment preview,
+  single-select options Local and Cloud, each with distinct
+  descriptions and multiline preview fields. Second: header
+  Confirm, prompt Did Codex advance exactly once, options Yes
+  and No with descriptions. Please do not type notes, select,
+  answer, or otherwise interact with the form after opening
+  it; Codex will drive it immediately.
+
+⏺ Arming the harness so we capture Codex driving it, then
+  firing exactly as specified — I won't touch the form:
+
+  Ran 1 shell command
+
+───────────────────────────────────────────────────────────────
+←  ☐ Preview  ☒ Confirm  ✔ Submit  →
+
+Review your answers
+
+⚠ You have not answered all questions
+
+ ● Did Codex advance exactly once
+   → Yes
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel
+
+
+
+
+
+
+

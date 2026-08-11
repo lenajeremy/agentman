@@ -135,6 +135,98 @@ func TestSendRejectsEmptyMessages(t *testing.T) {
 	}
 }
 
+func TestAnswerCustomSelectsTypesAndSubmits(t *testing.T) {
+	requireTmux(t)
+	name, out := newSink(t)
+	if err := AnswerCustom(context.Background(), name, "3", "another answer"); err != nil {
+		t.Fatal(err)
+	}
+
+	got := readSoon(t, out, "another answer")
+	if !strings.Contains(got, "3another answer\n") {
+		t.Errorf("custom-answer keystrokes arrived out of order: %q", got)
+	}
+}
+
+func TestAnswerFormTogglesBeforeTypingAndSubmits(t *testing.T) {
+	requireTmux(t)
+	name, out := newSink(t)
+	if err := AnswerForm(
+		context.Background(), name, []string{"1", "2"}, -1, 2, 1, "Desktop",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	got := readSoon(t, out, "Desktop")
+	toggles := strings.Index(got, "12")
+	text := strings.Index(got, "Desktop")
+	if toggles < 0 || text < 0 || toggles > text || !strings.HasSuffix(got, "\n") {
+		t.Errorf("multi-select keystrokes arrived out of order: %q", got)
+	}
+}
+
+func TestClaudeFormSubmitFocusRequiresVisibleNextMarker(t *testing.T) {
+	const nextFocused = `❯ 1. [✔] Alpha
+  2. [✔] Bravo
+❯    Next
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel`
+	if !liveFormFooter.MatchString(nextFocused) || !focusedFormControl.MatchString(nextFocused) {
+		t.Fatal("real Claude Next-focus shape was not recognized")
+	}
+
+	const optionFocused = `❯ 1. [✔] Alpha
+  2. [✔] Bravo
+     Next
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel`
+	if !liveFormFooter.MatchString(optionFocused) {
+		t.Fatal("real Claude form footer was not recognized")
+	}
+	if focusedFormControl.MatchString(optionFocused) {
+		t.Fatal("an unfocused Next row was considered safe to submit")
+	}
+}
+
+func TestClaudeQuestionTabHintSurvivesFooterWrapping(t *testing.T) {
+	const wrapped = `Enter to select · ↑/↓ to navigate · n to add notes · Tab to
+switch questions · ctrl+g to edit in Vim · Esc to cancel`
+	if !hasClaudeQuestionTabs(wrapped) {
+		t.Fatal("wrapped Tab-to-switch-questions footer was not recognized")
+	}
+	if hasClaudeQuestionTabs("Enter to select · ↑/↓ to navigate · Esc to cancel") {
+		t.Fatal("a standalone menu was mistaken for a multi-question tab form")
+	}
+}
+
+// Set AGENTMAN_LIVE_CLAUDE_FORM to a tmux session that is genuinely showing
+// the four-row Claude checkbox layout captured in the question fixtures. This
+// opt-in check exercises the production navigation and safety verification;
+// it intentionally answers and advances that live form.
+func TestLiveClaudeAnswerForm(t *testing.T) {
+	name := os.Getenv("AGENTMAN_LIVE_CLAUDE_FORM")
+	if name == "" {
+		t.Skip("no live Claude checkbox form supplied")
+	}
+	if err := AnswerForm(
+		context.Background(), name, []string{"1", "3"}, 0, 4, 0, "",
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Set AGENTMAN_LIVE_CLAUDE_SINGLE_FORM to a tmux session showing the first
+// question in a genuine Claude tabbed single-select form, with option 1
+// focused. This moves to option 2, verifies that focus, selects it with Enter,
+// and advances exactly one tab.
+func TestLiveClaudeSingleForm(t *testing.T) {
+	name := os.Getenv("AGENTMAN_LIVE_CLAUDE_SINGLE_FORM")
+	if name == "" {
+		t.Skip("no live Claude single-select tab form supplied")
+	}
+	if err := AnswerSingleForm(context.Background(), name, "2", 1, true); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestListOnlyReportsOurSessions(t *testing.T) {
 	requireTmux(t)
 	ctx := context.Background()

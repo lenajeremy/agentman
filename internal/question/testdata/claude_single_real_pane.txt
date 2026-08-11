@@ -1,0 +1,48 @@
+
+✻ Churned for 13s
+
+❯ ask me three questions using the question tool. i want to test how it renders on the app
+
+⏺ Three questions built to stress different parts of the layout — short vs long, two options vs four:
+
+⏺ User answered Claude's questions:
+  ⎿  · Tea or coffee? → doesn't show up
+     · Which of these would you actually want agentman to do next, assuming the current bugs were all
+     fixed and you had a free weekend to point at it? → also doesn't show up
+     · ¿Cómo se ve el texto largo con acentos, em-dashes — y emoji 🐙 — cuando la pregunta se envuelve en
+     varias líneas en una pantalla estrecha? → this didn't show up too. it only shows up when i get to
+     the submit page. so i answered all the questions from my terminal. on getting to the submit page, it
+     shows me the summary with all the selected options
+
+⏺ That's a real bug, and a useful one — thank you for answering from the terminal.
+
+  Let me diagnose. agentman finds questions by scraping the tmux pane, so the detector must not be
+  matching Claude Code's question UI:
+
+  Ran 1 shell command
+
+⏺ The detector requires a numbered option:
+
+  var optionLine = regexp.MustCompile(`^\s*([❯›>»▸▶→*]?)\s*(\d+)[.)]\s+(.*\S)\s*$`)
+
+  Claude Code's question UI may not render options that way. Let me capture what's actually in the pane
+  rather than guess — setting up a recorder, then asking one throwaway question:
+
+  Ran 2 shell commands
+
+⏺ Recorder armed. One throwaway question so it captures the UI on screen — answer it from the terminal as
+  before:
+─────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Capture
+
+Pick either one — this is only to capture what the pane looks like while a question is showing.
+
+❯ 1. Alpha
+     First option.
+  2. Beta
+     Second option.
+  3. Type something.
+─────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

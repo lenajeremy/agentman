@@ -1,0 +1,47 @@
+
+
+  Ran 1 shell command
+
+⏺ Firing now, and leaving it completely untouched for your
+  watcher:
+
+⏺ User declined to answer questions
+  ⎿  · Choose the deployment preview (Local / Cloud)
+     · Did Codex advance exactly once (Yes / No)
+
+✻ Churned for 2m 20s
+
+❯ Do you think codex is done? Can you ask questions to me
+
+  Ran 1 shell command
+
+⏺ Codex isn't done — still working, 53s into its current turn.
+  But the daemon is running a build from 20:15 with its latest
+  work, so this is a live test of current state.
+
+  Arming the harness and firing three that target the open
+  items:
+
+  Ran 1 shell command
+───────────────────────────────────────────────────────────────
+←  ☒ Preview  ☐ Multi  ☐ Review  ✔ Submit  →
+
+Multi-select — select some, then submit. Does it advance, or
+toggle option one?
+
+❯ 1. [ ] Alpha
+  First choice.
+  2. [ ] Bravo
+  Second choice.
+  3. [ ] Charlie
+  Third choice.
+  4. [ ] Type something
+     Next
+───────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+
+
+
+

@@ -129,9 +129,12 @@ type Question struct {
 
 // QuestionOption is one choice. Key is what gets sent to select it.
 type QuestionOption struct {
-	Key      string `json:"key"`
-	Label    string `json:"label"`
-	Selected bool   `json:"selected,omitempty"`
+	Key         string `json:"key"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	Preview     string `json:"preview,omitempty"`
+	Selected    bool   `json:"selected,omitempty"`
+	Checked     bool   `json:"checked,omitempty"`
 }
 
 // QuestionAnswer is the complete user response to one displayed question.

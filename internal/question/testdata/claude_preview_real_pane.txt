@@ -1,0 +1,48 @@
+
+⏺ Now I can see the mechanism, and the likely cause. Codex
+  built AnswerForm, which submits by arithmetic:
+
+  moveFocus(ctx, name, safeMove)     // step to a known
+  position
+  for _, key := range toggleKeys { sendLiteral(...) }
+  moveFocus(ctx, name, targetMove)   // step to the submit
+  control
+  run(ctx, "send-keys", name, "Enter")
+
+  If targetMove is off by even one, Enter lands on option 1 and
+  toggles it — exactly what you saw. And it's computing those
+  offsets blind: I never captured a multi-select or preview
+  frame, so there's no ground truth for either layout. That's
+  the real gap.
+
+  Let me capture both, then send everything:
+
+  Ran 1 shell command
+
+⏺ Recorder armed. Please answer these from the terminal — I
+  need the pane captured while each is on screen. Take your
+  time; the multi-select one especially, so it records the
+  layout before you submit:
+
+───────────────────────────────────────────────────────────────
+←  ☒ Multi cap  ☐ Preview cap  ✔ Submit  →
+
+Preview layout — capturing the side-by-side rendering.
+
+❯ 1. First             ┌───────────────────────────┐
+  2. Second            │ PREVIEW PANEL ONE         │
+                       │                           │
+                       │ this panel renders to the │
+                       │ right of the option list, │
+                       │ which narrows the option  │
+                       │ column considerably       │
+                       └───────────────────────────┘
+
+                       Notes preview doesn't even render at al…
+                       :
+
+───────────────────────────────────────────────────────────────
+  Chat about this
+
+Enter to select · ↑/↓ to navigate · n to add notes · Tab to
+switch questions · ctrl+g to edit in Vim · Esc to cancel

@@ -42,6 +42,9 @@ type ClaudeSource struct {
 
 	mu       sync.RWMutex
 	sessions map[string]claudeSession
+
+	questionMu    sync.Mutex
+	questionSpecs map[string]claudeQuestionSpecCache
 }
 
 type claudeSession struct {
@@ -77,9 +80,10 @@ func NewClaudeSource(home string) (*ClaudeSource, error) {
 		}
 	}
 	return &ClaudeSource{
-		home:     home,
-		models:   newModelCache(),
-		sessions: map[string]claudeSession{},
+		home:          home,
+		models:        newModelCache(),
+		sessions:      map[string]claudeSession{},
+		questionSpecs: map[string]claudeQuestionSpecCache{},
 	}, nil
 }
 
@@ -158,13 +162,16 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 			LastActivityAt: file.UpdatedAt,
 		}
 
+		transcript := s.transcriptPath(file.Cwd, file.SessionID)
+
 		// The registry reports a session blocked on a permission prompt as
 		// "idle", and no hook fires for one — so a pending question is only
 		// visible by reading the terminal. Finding one overrides the state,
 		// because "waiting on you" is the truth and "idle" is not.
 		if tmuxName != "" {
-			if q := detectQuestion(ctx, tmuxName); q != nil {
-				meta.Question = q
+			if detected, err := captureQuestion(ctx, tmuxName); err == nil {
+				s.enrichClaudeQuestion(id, transcript, detected)
+				meta.Question = protocolQuestion(detected)
 				meta.State = protocol.StateWaitingInput
 			}
 		}
@@ -172,7 +179,6 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 			meta.LastActivityAt = meta.StartedAt
 		}
 
-		transcript := s.transcriptPath(file.Cwd, file.SessionID)
 		model, cached := s.models.get(id)
 		if !cached {
 			model = modelFromTranscript(transcript, claudeModelOf)
@@ -194,6 +200,7 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 		live[id] = true
 	}
 	s.models.forget(live)
+	s.forgetClaudeQuestionSpecs(live)
 
 	s.mu.Lock()
 	s.sessions = next

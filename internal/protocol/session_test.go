@@ -57,11 +57,36 @@ func TestSameAsDetectsRealChanges(t *testing.T) {
 		}
 	})
 
+	t.Run("which checkboxes are enabled", func(t *testing.T) {
+		changed := waiting()
+		changed.Question.Multiple = true
+		changed.Question.Options[0].Checked = true
+		if base.SameAs(changed) {
+			t.Error("a checkbox change never reached the app")
+		}
+	})
+
 	t.Run("an option appearing", func(t *testing.T) {
 		changed := waiting()
 		changed.Question.Options = append(changed.Question.Options, QuestionOption{Key: "3", Label: "Always"})
 		if base.SameAs(changed) {
 			t.Error("a choice the agent offered was never shown")
+		}
+	})
+
+	t.Run("option explanatory text", func(t *testing.T) {
+		changed := waiting()
+		changed.Question.Options[0].Description = "Runs the complete suite"
+		if base.SameAs(changed) {
+			t.Error("new option subtext never reached the app")
+		}
+	})
+
+	t.Run("option preview content", func(t *testing.T) {
+		changed := waiting()
+		changed.Question.Options[0].Preview = "npm test -- --runInBand"
+		if base.SameAs(changed) {
+			t.Error("new option preview never reached the app")
 		}
 	})
 

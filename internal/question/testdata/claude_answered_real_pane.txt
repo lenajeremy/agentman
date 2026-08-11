@@ -1,0 +1,48 @@
+
+
+  Ran 1 shell command
+
+⏺ The options are numbered ❯ 1. Alpha — which should match. So the regex isn't the problem. Let me run
+  the real detector against this exact capture:
+
+  Ran 1 shell command
+
+⏺ Confirmed — Detect returns nil on a pane that's visibly showing a question. Let me find why:
+
+  Ran 1 shell command
+
+⏺ Found it. The parser walks upward from the last option and stops at the first non-option line:
+
+  for i := last; i >= 0; i-- {
+      match := optionLine.FindStringSubmatch(lines[i])
+      if match == nil { break }   // ← stops here
+
+  Claude Code's UI puts a description under each option and a horizontal rule before the last one. Let me
+  confirm that's the cause:
+
+  Ran 1 shell command
+
+⏺ My hypothesis was wrong — still nil. Let me stop guessing and instrument the detector directly:
+
+  Ran 1 shell command
+
+⏺ Found the actual cause — and it's one line. The footer regex:
+
+  var footerLine = regexp.MustCompile(`(?i)^\s*(esc to|press |↑/↓|tab to)`)
+
+  Claude Code's footer reads Enter to select · ↑/↓ to navigate · Esc to cancel. It starts with "Enter to
+  select", which matches none of those alternatives — and the pattern is anchored to line start, so the
+  ↑/↓ mid-line doesn't help either. Unrecognised trailing text means "this menu is already resolved", so
+  Detect bails.
+
+  Running 1 shell command…
+
+  /frontend-design:frontend-design          (frontend-design) Guidance for distinctive, intentional
+                                            visual design when building new UI or reshaping an existin…
+  /use-railway                              Operate Railway infrastructure: sign up for or sign in to a
+                                            Railway account, create projects, provision services and d…
+──────────────────────────────────────────────────────────────────────────────── poll-to-hooks-phase-2 ──
+❯ /
+─────────────────────────────────────────────────────────────────────────────────────────────────────────
+  mac@Jeremiahs-MacBook-Pro-4  ~/Desktop/agentman  [main]  Opus 5  ctx:47%
+  ⏵⏵ auto mode on (shift+tab to cycle)

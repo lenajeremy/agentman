@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,6 +37,11 @@ var ErrNotInstalled = errors.New("tmux: not installed")
 // commandTimeout bounds every tmux invocation. These are local and fast; a
 // hang means something is wrong and waiting will not fix it.
 const commandTimeout = 5 * time.Second
+
+var (
+	liveFormFooter     = regexp.MustCompile(`(?im)^\s*Enter to select\b`)
+	focusedFormControl = regexp.MustCompile(`(?im)^\s*[❯›>»▸▶→*]\s*(?:Next|Submit)\s*$`)
+)
 
 // Agent actions are multi-command terminal transactions. Serialize actions
 // aimed at the same pane so two phones cannot interleave clear/type/submit and
@@ -359,4 +365,253 @@ func Answer(ctx context.Context, name, key string) error {
 		return fmt.Errorf("tmux: could not answer: %w", err)
 	}
 	return nil
+}
+
+// AnswerSingleForm records a single choice in Claude's tabbed or preview
+// question form. Those layouts do not accept numeric shortcuts: the desired
+// row has to receive focus and Enter before Tab can advance the form.
+//
+// The visible-focus check is deliberately inside the same per-pane lock as
+// the arrow and Enter events. Pressing Enter on the wrong row would submit a
+// different answer, so an uncertain render is safer to reject than to guess.
+func AnswerSingleForm(ctx context.Context, name, key string, focusDistance int, advance bool) error {
+	if !Available() {
+		return ErrNotInstalled
+	}
+	if key == "" {
+		return errors.New("tmux: no option given")
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+
+	if err := moveFocus(ctx, name, focusDistance); err != nil {
+		return err
+	}
+	if focusDistance != 0 {
+		time.Sleep(45 * time.Millisecond)
+	}
+	if err := verifyFocusedOption(ctx, name, key); err != nil {
+		return err
+	}
+	if _, err := run(ctx, "send-keys", "-t", name, "Enter"); err != nil {
+		return fmt.Errorf("tmux: could not select Claude option: %w", err)
+	}
+	if advance {
+		time.Sleep(60 * time.Millisecond)
+		return advanceClaudeQuestion(ctx, name)
+	}
+	return nil
+}
+
+// AnswerCustom chooses Claude's synthetic free-text row, types the response,
+// and submits it. This has to remain one locked action: another phone request
+// interleaved between the row selection and the text would answer the wrong
+// control.
+func AnswerCustom(ctx context.Context, name, key, text string) error {
+	return answerCustom(ctx, name, key, text, false)
+}
+
+// AnswerCustomAndAdvance records custom text in a multi-question tab form and
+// moves to the next tab after Claude accepts the text.
+func AnswerCustomAndAdvance(ctx context.Context, name, key, text string) error {
+	return answerCustom(ctx, name, key, text, true)
+}
+
+func answerCustom(ctx context.Context, name, key, text string, advance bool) error {
+	if !Available() {
+		return ErrNotInstalled
+	}
+	if key == "" {
+		return errors.New("tmux: no custom option given")
+	}
+	if strings.TrimSpace(text) == "" {
+		return errors.New("tmux: refusing to send an empty custom answer")
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+
+	if err := sendLiteral(ctx, name, key); err != nil {
+		return fmt.Errorf("tmux: could not select custom answer: %w", err)
+	}
+	time.Sleep(40 * time.Millisecond)
+	if err := typeAnswerText(ctx, name, text); err != nil {
+		return err
+	}
+	time.Sleep(60 * time.Millisecond)
+	if _, err := run(ctx, "send-keys", "-t", name, "Enter"); err != nil {
+		return fmt.Errorf("tmux: could not submit custom answer: %w", err)
+	}
+	if advance {
+		time.Sleep(60 * time.Millisecond)
+		return advanceClaudeQuestion(ctx, name)
+	}
+	return nil
+}
+
+func advanceClaudeQuestion(ctx context.Context, name string) error {
+	pane, err := Capture(ctx, name)
+	if err != nil {
+		return fmt.Errorf("tmux: could not verify Claude question navigation: %w", err)
+	}
+	if !hasClaudeQuestionTabs(pane) {
+		// A one-question form can finish immediately after selection. In that
+		// case there is no tab strip left and sending Tab would touch the normal
+		// prompt, so completion is already the desired result.
+		return nil
+	}
+	if _, err := run(ctx, "send-keys", "-t", name, "Tab"); err != nil {
+		return fmt.Errorf("tmux: could not advance to the next Claude question: %w", err)
+	}
+	return nil
+}
+
+func hasClaudeQuestionTabs(pane string) bool {
+	hints := strings.ToLower(strings.Join(strings.Fields(pane), " "))
+	return strings.Contains(hints, "tab to switch questions")
+}
+
+func verifyFocusedOption(ctx context.Context, name, key string) error {
+	focusedOption := regexp.MustCompile(
+		`(?m)^\s*[❯›>»▸▶→*]\s*` + regexp.QuoteMeta(key) + `[.)]`,
+	)
+	for attempt := 0; attempt < 3; attempt++ {
+		pane, err := Capture(ctx, name)
+		if err != nil {
+			return fmt.Errorf("tmux: could not verify Claude option focus: %w", err)
+		}
+		if liveFormFooter.MatchString(pane) && focusedOption.MatchString(pane) {
+			return nil
+		}
+		if attempt < 2 {
+			time.Sleep(40 * time.Millisecond)
+		}
+	}
+	return fmt.Errorf("tmux: option %q did not receive focus; refusing to press Enter", key)
+}
+
+// AnswerForm reconciles a Claude multi-select menu with the answer selected on
+// the phone, then activates Next/Submit. safeMove first leaves Claude's custom
+// input when checkbox digits need to be sent. targetMove then reaches either
+// Submit or the custom input; afterTextMove reaches Submit after typing.
+func AnswerForm(
+	ctx context.Context,
+	name string,
+	toggleKeys []string,
+	safeMove, targetMove, afterTextMove int,
+	text string,
+) error {
+	if !Available() {
+		return ErrNotInstalled
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+
+	if err := moveFocus(ctx, name, safeMove); err != nil {
+		return err
+	}
+	if safeMove != 0 {
+		time.Sleep(35 * time.Millisecond)
+	}
+	for _, key := range toggleKeys {
+		if key == "" {
+			return errors.New("tmux: empty multi-select option")
+		}
+		if err := sendLiteral(ctx, name, key); err != nil {
+			return fmt.Errorf("tmux: could not toggle option %q: %w", key, err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if err := moveFocus(ctx, name, targetMove); err != nil {
+		return err
+	}
+	if text != "" {
+		time.Sleep(35 * time.Millisecond)
+		if err := typeAnswerText(ctx, name, text); err != nil {
+			return err
+		}
+		time.Sleep(40 * time.Millisecond)
+		if err := moveFocus(ctx, name, afterTextMove); err != nil {
+			return err
+		}
+	}
+	time.Sleep(60 * time.Millisecond)
+	if err := verifyFormSubmitFocus(ctx, name); err != nil {
+		return err
+	}
+	if _, err := run(ctx, "send-keys", "-t", name, "Enter"); err != nil {
+		return fmt.Errorf("tmux: could not submit multi-select answer: %w", err)
+	}
+	return nil
+}
+
+func sendLiteral(ctx context.Context, name, text string) error {
+	_, err := run(ctx, "send-keys", "-t", name, "-l", text)
+	return err
+}
+
+func typeAnswerText(ctx context.Context, name, text string) error {
+	if strings.ContainsAny(text, "\n\r") {
+		if err := pasteMultiline(ctx, name, text); err != nil {
+			return fmt.Errorf("tmux: could not type custom answer: %w", err)
+		}
+		return nil
+	}
+	if err := sendLiteral(ctx, name, text); err != nil {
+		return fmt.Errorf("tmux: could not type custom answer: %w", err)
+	}
+	return nil
+}
+
+func moveFocus(ctx context.Context, name string, distance int) error {
+	if distance == 0 {
+		return nil
+	}
+	key := "Down"
+	if distance < 0 {
+		key = "Up"
+		distance = -distance
+	}
+	if distance > 256 {
+		return errors.New("tmux: refusing an implausibly large menu navigation")
+	}
+	// Ink/React TUIs update focus between key events. tmux's -N emits a burst
+	// quickly enough that every event can observe the same stale focus and land
+	// on the wrong row. Send discrete events and allow one render tick between
+	// them; the captured Claude failure otherwise ended by pressing Enter on
+	// option 1 and toggling it instead of activating Next.
+	for step := 0; step < distance; step++ {
+		if _, err := run(ctx, "send-keys", "-t", name, key); err != nil {
+			return fmt.Errorf("tmux: could not move to form control: %w", err)
+		}
+		if step+1 < distance {
+			time.Sleep(30 * time.Millisecond)
+		}
+	}
+	return nil
+}
+
+// verifyFormSubmitFocus is the final safety rail before Enter. In tests and
+// non-Claude sinks there is no form footer, so there is nothing to verify. On
+// a real Claude checkbox form, however, Enter is only safe when Next/Submit is
+// visibly focused; anywhere else it toggles the current checkbox.
+func verifyFormSubmitFocus(ctx context.Context, name string) error {
+	for attempt := 0; attempt < 3; attempt++ {
+		pane, err := Capture(ctx, name)
+		if err != nil {
+			return fmt.Errorf("tmux: could not verify multi-select focus: %w", err)
+		}
+		if !liveFormFooter.MatchString(pane) || focusedFormControl.MatchString(pane) {
+			return nil
+		}
+		// capture-pane can win the race with Ink's redraw even though the key
+		// event was accepted. Give it two render ticks before concluding that
+		// the navigation genuinely landed on an option.
+		if attempt < 2 {
+			time.Sleep(40 * time.Millisecond)
+		}
+	}
+	return errors.New("tmux: Next/Submit did not receive focus; refusing to press Enter")
 }
