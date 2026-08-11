@@ -196,3 +196,14 @@ func TestOwnsPIDMatchesDescendants(t *testing.T) {
 		t.Error("init must never be claimed")
 	}
 }
+
+func TestNewNameDoesNotCollideWithinOneSecond(t *testing.T) {
+	seen := make(map[string]struct{}, 1000)
+	for range 1000 {
+		name := NewName("codex")
+		if _, exists := seen[name]; exists {
+			t.Fatalf("NewName returned duplicate %q", name)
+		}
+		seen[name] = struct{}{}
+	}
+}

@@ -26,6 +26,7 @@ type ocFake struct {
 	permissions []map[string]any
 	cursor      string
 	requests    []ocCapturedRequest
+	failSession bool
 }
 
 type ocCapturedRequest struct {
@@ -38,6 +39,12 @@ type ocCapturedRequest struct {
 func (f *ocFake) set(messages []map[string]any) {
 	f.mu.Lock()
 	f.messages = messages
+	f.mu.Unlock()
+}
+
+func (f *ocFake) setSessionFailure(fail bool) {
+	f.mu.Lock()
+	f.failSession = fail
 	f.mu.Unlock()
 }
 
@@ -76,6 +83,12 @@ func (f *ocFake) lastRequest() ocCapturedRequest {
 	return f.requests[len(f.requests)-1]
 }
 
+func (f *ocFake) requestCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.requests)
+}
+
 func (f *ocFake) start(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -83,6 +96,13 @@ func (f *ocFake) start(t *testing.T) *httptest.Server {
 		json.NewEncoder(w).Encode(map[string]any{"healthy": true})
 	})
 	mux.HandleFunc("/session", func(w http.ResponseWriter, _ *http.Request) {
+		f.mu.Lock()
+		fail := f.failSession
+		f.mu.Unlock()
+		if fail {
+			http.Error(w, "temporary failure", http.StatusServiceUnavailable)
+			return
+		}
 		title := f.title
 		if title == "" {
 			title = "checkout"
@@ -369,7 +389,7 @@ func TestOpenCodeQuestionCanBeAnswered(t *testing.T) {
 	if len(sessions) != 1 || sessions[0].State != protocol.StateWaitingInput || sessions[0].Question == nil {
 		t.Fatalf("pending question was not discovered: %+v", sessions)
 	}
-	if err := src.Answer(ctx, "opencode:ses_1", "Postgres"); err != nil {
+	if err := src.Answer(ctx, "opencode:ses_1", protocol.QuestionAnswer{OptionKey: "Postgres"}); err != nil {
 		t.Fatal(err)
 	}
 	request := fake.lastRequest()
@@ -379,6 +399,131 @@ func TestOpenCodeQuestionCanBeAnswered(t *testing.T) {
 	answers, ok := request.body["answers"].([]any)
 	if !ok || len(answers) != 1 {
 		t.Fatalf("reply body = %#v", request.body)
+	}
+}
+
+func TestOpenCodeMultipleAndCustomQuestionCanBeAnswered(t *testing.T) {
+	fake := &ocFake{questions: []map[string]any{{
+		"id": "que_1", "sessionID": "ses_1",
+		"questions": []map[string]any{{
+			"header": "Targets", "question": "Which targets?", "multiple": true, "custom": true,
+			"options": []map[string]any{{"label": "API"}, {"label": "CLI"}},
+		}},
+	}}}
+	server := fake.start(t)
+	src := NewOpenCodeSource(server.URL)
+	ctx := context.Background()
+	sessions, err := src.Discover(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	question := sessions[0].Question
+	if question == nil || !question.Multiple || !question.Custom {
+		t.Fatalf("question capabilities were lost: %+v", question)
+	}
+	answer := protocol.QuestionAnswer{Options: []string{"API", "CLI"}, Text: "Desktop"}
+	if err := src.Answer(ctx, "opencode:ses_1", answer); err != nil {
+		t.Fatal(err)
+	}
+	request := fake.lastRequest()
+	answers, ok := request.body["answers"].([]any)
+	if !ok || len(answers) != 1 {
+		t.Fatalf("reply body = %#v", request.body)
+	}
+	values, ok := answers[0].([]any)
+	if !ok || len(values) != 3 || values[0] != "API" || values[1] != "CLI" || values[2] != "Desktop" {
+		t.Fatalf("multiple/custom answer = %#v", values)
+	}
+}
+
+func TestOpenCodeCustomOnlyQuestionIsNotHidden(t *testing.T) {
+	fake := &ocFake{questions: []map[string]any{{
+		"id": "que_1", "sessionID": "ses_1",
+		"questions": []map[string]any{{
+			"header": "Name", "question": "What should it be called?", "custom": true,
+		}},
+	}}}
+	server := fake.start(t)
+	src := NewOpenCodeSource(server.URL)
+	sessions, err := src.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].Question == nil || !sessions[0].Question.Custom {
+		t.Fatalf("custom-only question was hidden: %+v", sessions)
+	}
+	if err := src.Answer(context.Background(), "opencode:ses_1", protocol.QuestionAnswer{Text: "Falcon"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpenCodeQuestionsAreAnsweredSequentially(t *testing.T) {
+	fake := &ocFake{questions: []map[string]any{{
+		"id": "que_1", "sessionID": "ses_1",
+		"questions": []map[string]any{
+			{
+				"header": "Database", "question": "Which database?",
+				"options": []map[string]any{{"label": "Postgres"}, {"label": "SQLite"}},
+			},
+			{
+				"header": "Region", "question": "Which region?",
+				"options": []map[string]any{{"label": "Dublin"}, {"label": "Virginia"}},
+			},
+		},
+	}}}
+	server := fake.start(t)
+	src := NewOpenCodeSource(server.URL)
+	ctx := context.Background()
+
+	sessions, err := src.Discover(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].Question == nil {
+		t.Fatalf("first pending question was not discovered: %+v", sessions)
+	}
+	if got := sessions[0].Question.Prompt; got != "Which database?" {
+		t.Fatalf("first prompt = %q", got)
+	}
+	if got := sessions[0].Question.Detail; got != "Question 1 of 2" {
+		t.Fatalf("first detail = %q", got)
+	}
+	if err := src.Answer(ctx, "opencode:ses_1", protocol.QuestionAnswer{OptionKey: "Postgres"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.requestCount(); got != 0 {
+		t.Fatalf("sent %d replies after only the first answer, want 0", got)
+	}
+
+	sessions, err = src.Discover(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].Question == nil {
+		t.Fatalf("second pending question was not discovered: %+v", sessions)
+	}
+	if got := sessions[0].Question.Prompt; got != "Which region?" {
+		t.Fatalf("second prompt = %q", got)
+	}
+	if got := sessions[0].Question.Detail; got != "Question 2 of 2" {
+		t.Fatalf("second detail = %q", got)
+	}
+	if err := src.Answer(ctx, "opencode:ses_1", protocol.QuestionAnswer{OptionKey: "Dublin"}); err != nil {
+		t.Fatal(err)
+	}
+	request := fake.lastRequest()
+	if request.path != "/question/que_1/reply" {
+		t.Fatalf("reply path = %q", request.path)
+	}
+	answers, ok := request.body["answers"].([]any)
+	if !ok || len(answers) != 2 {
+		t.Fatalf("reply body = %#v", request.body)
+	}
+	first, firstOK := answers[0].([]any)
+	second, secondOK := answers[1].([]any)
+	if !firstOK || len(first) != 1 || first[0] != "Postgres" ||
+		!secondOK || len(second) != 1 || second[0] != "Dublin" {
+		t.Fatalf("answers = %#v", answers)
 	}
 }
 
@@ -401,7 +546,7 @@ func TestOpenCodePermissionCanBeAnswered(t *testing.T) {
 	if sessions[0].Question.Detail != "go test ./..." {
 		t.Errorf("permission detail = %q", sessions[0].Question.Detail)
 	}
-	if err := src.Answer(ctx, "opencode:ses_1", "once"); err != nil {
+	if err := src.Answer(ctx, "opencode:ses_1", protocol.QuestionAnswer{OptionKey: "once"}); err != nil {
 		t.Fatal(err)
 	}
 	request := fake.lastRequest()
@@ -443,6 +588,45 @@ func TestOpenCodeDiscoversEveryLiveServer(t *testing.T) {
 	}
 	if len(sessions) != 2 {
 		t.Fatalf("got %d sessions, want one from each live server: %+v", len(sessions), sessions)
+	}
+}
+
+func TestOpenCodePartialServerFailurePreservesItsSessions(t *testing.T) {
+	first := &ocFake{sessionID: "ses_1", directory: "/Users/me/one"}
+	second := &ocFake{sessionID: "ses_2", directory: "/Users/me/two"}
+	firstServer := first.start(t)
+	secondServer := second.start(t)
+
+	src := NewOpenCodeSource(firstServer.URL)
+	src.findServers = func(context.Context) []string {
+		return []string{firstServer.URL, secondServer.URL}
+	}
+	if sessions, err := src.Discover(context.Background()); err != nil || len(sessions) != 2 {
+		t.Fatalf("initial discovery = %d sessions, %v", len(sessions), err)
+	}
+
+	second.setSessionFailure(true)
+	sessions, err := src.Discover(context.Background())
+	if err == nil {
+		t.Fatal("partial API failure was not reported")
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("partial discovery dropped the failed server's cached session: %+v", sessions)
+	}
+	if _, err := src.Page(context.Background(), "opencode:ses_2", "", 20); err != nil {
+		t.Fatalf("cached route was discarded after a partial failure: %v", err)
+	}
+}
+
+func TestOpenCodeHealthResponseIsBounded(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat("x", maxOpenCodeHealthResponse+1)))
+	}))
+	defer server.Close()
+
+	src := NewOpenCodeSource(server.URL)
+	if src.Available(context.Background()) {
+		t.Fatal("an oversized health response was accepted")
 	}
 }
 

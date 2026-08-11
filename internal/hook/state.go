@@ -16,9 +16,8 @@ type State struct {
 	// epoch milliseconds.
 	//
 	// This is the difference between "hooks are configured" and "hooks work".
-	// It matters most for Codex, whose config schema we could not verify: with
-	// this, `am doctor` can say "registered, but never seen firing" instead of
-	// reporting a green check that means nothing.
+	// It lets `am doctor` say "registered, but never seen firing" instead of
+	// reporting a green check for a command that fails at runtime.
 	LastFired map[protocol.Kind]int64 `json:"lastFired"`
 }
 

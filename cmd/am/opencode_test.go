@@ -58,6 +58,23 @@ func TestExplicitPortIgnoresLookalikes(t *testing.T) {
 	}
 }
 
+func TestOpenCodeWrapperPinsAPIToLoopback(t *testing.T) {
+	got := localOpenCodeArgs([]string{"--pure"})
+	if strings.Join(got, " ") != "--hostname 127.0.0.1 --pure" {
+		t.Fatalf("local args = %q", got)
+	}
+	for _, args := range [][]string{
+		{"--hostname", "0.0.0.0"},
+		{"--hostname=::1"},
+		{"--mdns"},
+	} {
+		got := localOpenCodeArgs(args)
+		if strings.Join(got, "\x00") != strings.Join(args, "\x00") {
+			t.Errorf("explicit network setting %q was changed to %q", args, got)
+		}
+	}
+}
+
 func TestOpenCodeHealthyOnlyAcceptsOpenCode(t *testing.T) {
 	ctx := context.Background()
 

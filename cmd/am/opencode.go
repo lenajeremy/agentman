@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,11 +42,20 @@ func runOpenCode(ctx context.Context, args []string) error {
 	// avoiding a clash; silently overriding that would be worse than the
 	// session being missed, and the message below says how to reconcile it.
 	if custom, ok := explicitPort(args); ok {
-		fmt.Fprintf(os.Stderr, "%s\n", dim(fmt.Sprintf(
-			"agentman: watching port %d, so this session will not appear — "+
-				"run the daemon with AGENTMAN_OPENCODE_URL=http://127.0.0.1:%s to follow it",
-			source.OpenCodeDefaultPort, custom)))
-		return execOpenCode(binary, args)
+		port, parseErr := strconv.Atoi(custom)
+		if parseErr == nil && port >= source.OpenCodeDefaultPort &&
+			port < source.OpenCodeDefaultPort+source.OpenCodePortSpan {
+			fmt.Fprintf(os.Stderr, "%s\n", dim(fmt.Sprintf(
+				"agentman: reachable from your phone (OpenCode API on http://127.0.0.1:%d)", port)))
+		} else {
+			fmt.Fprintf(os.Stderr, "%s\n", dim(fmt.Sprintf(
+				"agentman: ports %d-%d are watched, so this session will not appear — "+
+					"run the daemon with AGENTMAN_OPENCODE_URL=http://127.0.0.1:%s to follow it",
+				source.OpenCodeDefaultPort,
+				source.OpenCodeDefaultPort+source.OpenCodePortSpan-1,
+				custom)))
+		}
+		return execOpenCode(binary, localOpenCodeArgs(args))
 	}
 
 	// Never attach to a server someone else started, however tempting it looks.
@@ -58,14 +68,13 @@ func runOpenCode(ctx context.Context, args []string) error {
 	// path with none of your work in it.
 	//
 	// Starting our own server in this directory is what makes the session say
-	// where it actually came from. Several servers cost nothing here, because
-	// OpenCode's session storage is global — any one of them can read every
-	// session, which is what lets the daemon keep watching a single port.
+	// where it actually came from. Each concurrent invocation takes a free port
+	// in the watched range, and the daemon merges the sessions from all of them.
 	port := freeOpenCodePort()
 	if port == 0 {
 		return fmt.Errorf(
 			"no free port for OpenCode between %d and %d — close some sessions and try again",
-			source.OpenCodeDefaultPort, source.OpenCodeDefaultPort+openCodePortSpan-1)
+			source.OpenCodeDefaultPort, source.OpenCodeDefaultPort+source.OpenCodePortSpan-1)
 	}
 
 	if port == source.OpenCodeDefaultPort {
@@ -79,25 +88,42 @@ func runOpenCode(ctx context.Context, args []string) error {
 				"%d was taken)", port, source.OpenCodeDefaultPort)))
 	}
 
-	command := append([]string{"--port", fmt.Sprint(port)}, args...)
+	command := append([]string{"--port", fmt.Sprint(port)}, localOpenCodeArgs(args)...)
 	return execOpenCode(binary, command)
 }
-
-// openCodePortSpan is how many ports past the default to try.
-//
-// One server per directory means one per concurrent OpenCode session, and
-// nobody runs sixteen at once.
-const openCodePortSpan = 16
 
 // freeOpenCodePort returns a usable port, preferring the one the daemon
 // watches. Zero means they are all taken.
 func freeOpenCodePort() int {
-	for port := source.OpenCodeDefaultPort; port < source.OpenCodeDefaultPort+openCodePortSpan; port++ {
+	for port := source.OpenCodeDefaultPort; port < source.OpenCodeDefaultPort+source.OpenCodePortSpan; port++ {
 		if !portBusy(port) {
 			return port
 		}
 	}
 	return 0
+}
+
+// localOpenCodeArgs makes the API's trust boundary explicit. OpenCode already
+// defaults to loopback, but spelling it out prevents a future default change
+// from exposing prompts and approval endpoints to the LAN. A user-supplied
+// hostname or mDNS flag is respected because it is an explicit opt-in.
+func localOpenCodeArgs(args []string) []string {
+	if hasOpenCodeNetworkFlag(args) {
+		return args
+	}
+	out := make([]string, 0, len(args)+2)
+	out = append(out, "--hostname", "127.0.0.1")
+	return append(out, args...)
+}
+
+func hasOpenCodeNetworkFlag(args []string) bool {
+	for _, arg := range args {
+		if arg == "--hostname" || strings.HasPrefix(arg, "--hostname=") ||
+			arg == "--mdns" || strings.HasPrefix(arg, "--mdns=") {
+			return true
+		}
+	}
+	return false
 }
 
 // execOpenCode replaces this process with OpenCode.

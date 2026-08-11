@@ -129,6 +129,19 @@ func TestClaudeIgnoresSessionsWhoseProcessIsGone(t *testing.T) {
 	}
 }
 
+func TestClaudeSessionIDCannotEscapeTranscriptDirectory(t *testing.T) {
+	for _, id := range []string{"../secret", "a/b", `a\b`, "", strings.Repeat("a", 257)} {
+		if validClaudeSessionID(id) {
+			t.Errorf("unsafe Claude session id %q was accepted", id)
+		}
+	}
+	for _, id := range []string{"550e8400-e29b-41d4-a716-446655440000", "session_123"} {
+		if !validClaudeSessionID(id) {
+			t.Errorf("normal Claude session id %q was rejected", id)
+		}
+	}
+}
+
 func TestClaudePageReadsTranscript(t *testing.T) {
 	home := fakeClaudeHome(t, "/Users/me/work/proj", "sess-1", "idle")
 	src, _ := NewClaudeSource(home)
@@ -320,6 +333,37 @@ func TestCodexDiscoverOnMachineWithoutCodex(t *testing.T) {
 }
 
 /* -------------------------------- Registry -------------------------------- */
+
+type flakySource struct{ fail bool }
+
+func (s *flakySource) Kind() protocol.Kind { return protocol.KindOpenCode }
+func (s *flakySource) Discover(context.Context) ([]protocol.Session, error) {
+	if s.fail {
+		return nil, fmt.Errorf("temporary API failure")
+	}
+	return []protocol.Session{{ID: "opencode:s1", Kind: protocol.KindOpenCode}}, nil
+}
+func (s *flakySource) Page(context.Context, string, string, int) (protocol.Page, error) {
+	return protocol.Page{}, nil
+}
+func (s *flakySource) Follow(context.Context, string, chan<- []protocol.Message) error { return nil }
+
+func TestRegistryPreservesLastSnapshotAcrossTransientAdapterFailure(t *testing.T) {
+	adapter := &flakySource{}
+	registry := NewRegistry()
+	registry.Add(adapter)
+	if sessions, err := registry.Discover(context.Background()); err != nil || len(sessions) != 1 {
+		t.Fatalf("initial discovery = %+v, %v", sessions, err)
+	}
+	adapter.fail = true
+	sessions, err := registry.Discover(context.Background())
+	if err == nil {
+		t.Fatal("adapter failure was not reported")
+	}
+	if len(sessions) != 1 || sessions[0].ID != "opencode:s1" {
+		t.Fatalf("transient failure erased live sessions: %+v", sessions)
+	}
+}
 
 func TestRegistryRoutesAndOrders(t *testing.T) {
 	home := fakeClaudeHome(t, "/Users/me/work/proj", "sess-1", "busy")

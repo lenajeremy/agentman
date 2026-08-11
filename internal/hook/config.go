@@ -23,6 +23,17 @@ type Config struct {
 	// forged "turn complete" would ring the user's phone with a lie. The
 	// token is cheap and closes that gap.
 	Token string `json:"token"`
+	// HookAddr is the loopback listener selected by `am serve -addr`. Hooks are
+	// separate processes, so persisting it is what makes a custom port usable.
+	HookAddr string `json:"hookAddr,omitempty"`
+}
+
+// ListenAddr returns the configured safe loopback listener or the default.
+func (c Config) ListenAddr() string {
+	if ValidateAddr(c.HookAddr) == nil {
+		return c.HookAddr
+	}
+	return DefaultAddr
 }
 
 // ConfigDir returns ~/.agentman, creating it if needed.
@@ -37,6 +48,9 @@ func ConfigDir(home string) (string, error) {
 	dir := filepath.Join(home, ".agentman")
 	// 0700: the directory holds the hook token.
 	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return "", err
 	}
 	return dir, nil
@@ -56,6 +70,10 @@ func LoadConfig(home string) (Config, error) {
 	case err == nil:
 		var cfg Config
 		if json.Unmarshal(raw, &cfg) == nil && cfg.Token != "" {
+			// Repair permissive modes left by older releases or manual copies.
+			if err := os.Chmod(path, 0o600); err != nil {
+				return Config{}, err
+			}
 			return cfg, nil
 		}
 		// Corrupt or tokenless: fall through and mint a new one rather than
@@ -77,6 +95,27 @@ func LoadConfig(home string) (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// SaveConfig atomically persists daemon configuration with private modes.
+func SaveConfig(home string, cfg Config) error {
+	if cfg.Token == "" {
+		return fmt.Errorf("hook: refusing to save an empty authentication token")
+	}
+	if cfg.HookAddr != "" {
+		if err := ValidateAddr(cfg.HookAddr); err != nil {
+			return err
+		}
+	}
+	dir, err := ConfigDir(home)
+	if err != nil {
+		return err
+	}
+	body, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(filepath.Join(dir, "config.json"), body, 0o600)
 }
 
 func newToken() (string, error) {

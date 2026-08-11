@@ -117,6 +117,19 @@ func Detect(pane string) *Question {
 	if len(options) < 2 {
 		return nil
 	}
+	selected := 0
+	for _, option := range options {
+		if option.Selected {
+			selected++
+		}
+	}
+	// Both supported TUIs draw exactly one active selection. Requiring that
+	// marker prevents an assistant response ending in an ordinary numbered
+	// list from becoming a fake approval card whose digit is typed into the
+	// next prompt.
+	if selected != 1 {
+		return nil
+	}
 
 	q := &Question{Options: options}
 

@@ -6,9 +6,10 @@
 // feature depends on: "your agent is done" has to arrive when the agent is
 // done, not up to a second later and possibly wrong.
 //
-// Both Claude Code and Codex support the same hook model, so one design covers
-// both. Claude's payload schema is verified against the shipped binary; see
-// install.go for the caveat on Codex.
+// Claude Code uses lifecycle hooks with JSON on stdin. Codex exposes a
+// narrower `notify` callback after a completed turn and appends a different
+// JSON shape to argv. Both are normalized here, but their capabilities must
+// not be treated as interchangeable.
 package hook
 
 import (
@@ -18,8 +19,8 @@ import (
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
 
-// Name is a hook lifecycle event. These are the PascalCase names that appear
-// in the payload's hook_event_name field, which both CLIs share.
+// Name is a normalized hook lifecycle event. These are Claude's PascalCase
+// names; Codex's sole completion notification is mapped to NameStop.
 type Name string
 
 const (
@@ -50,23 +51,6 @@ var Installed = []Name{
 
 // ClaudeEventKey maps an event to its key in ~/.claude/settings.json.
 func ClaudeEventKey(n Name) string { return string(n) }
-
-// CodexEventKey maps an event to its key in ~/.codex/hooks.json, which uses
-// snake_case where Claude uses PascalCase.
-func CodexEventKey(n Name) string {
-	var b strings.Builder
-	for i, r := range string(n) {
-		if r >= 'A' && r <= 'Z' {
-			if i > 0 {
-				b.WriteByte('_')
-			}
-			b.WriteRune(r + ('a' - 'A'))
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
-}
 
 // Payload is the JSON an agent CLI writes to a hook's stdin.
 //
@@ -159,6 +143,29 @@ func ParsePayload(raw []byte) (Payload, error) {
 	if trimmed == "" {
 		return p, nil
 	}
-	err := json.Unmarshal([]byte(trimmed), &p)
-	return p, err
+	if err := json.Unmarshal([]byte(trimmed), &p); err != nil {
+		return p, err
+	}
+	if p.SessionID != "" {
+		return p, nil
+	}
+
+	// Codex's supported `notify` command appends a legacy JSON object as its
+	// final argv entry rather than writing Claude's hook shape on stdin.
+	var codex struct {
+		Type                 string `json:"type"`
+		ThreadID             string `json:"thread-id"`
+		Cwd                  string `json:"cwd"`
+		LastAssistantMessage string `json:"last-assistant-message"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &codex); err != nil {
+		return p, err
+	}
+	if codex.Type == "agent-turn-complete" && codex.ThreadID != "" {
+		p.SessionID = codex.ThreadID
+		p.Cwd = codex.Cwd
+		p.HookEventName = string(NameStop)
+		p.LastAssistantMessage = codex.LastAssistantMessage
+	}
+	return p, nil
 }

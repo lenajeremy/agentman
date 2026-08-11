@@ -37,6 +37,14 @@ const (
 	// produce a session the daemon never sees.
 	OpenCodeDefaultPort = 4096
 	openCodeTimeout     = 5 * time.Second
+	// API responses are local but not inherently trusted: a mismatched service
+	// on a scanned port must not be able to make the daemon allocate without a
+	// bound. Metadata is much smaller than transcript pages, so keeping separate
+	// ceilings prevents sixteen concurrent health probes from each allocating a
+	// transcript-sized buffer.
+	maxOpenCodeMetadataResponse = 4 * 1024 * 1024
+	maxOpenCodeMessageResponse  = 16 * 1024 * 1024
+	maxOpenCodeHealthResponse   = 4 * 1024
 	// openCodeIdleWindow decides how long after its last message a session
 	// still counts as live. The API reports which sessions are *running*, but
 	// an idle session is still one the user may want to look at, so recency
@@ -64,6 +72,11 @@ type OpenCodeSource struct {
 	// here than for the file-backed agents, because finding it costs an HTTP
 	// request rather than a read of a file already on disk.
 	models *modelCache
+	// questionAnswers accumulates answers when OpenCode asks several questions
+	// in one request. The mobile protocol presents one choice card at a time;
+	// once the final card is answered, the whole ordered answer matrix is sent.
+	answerMu        sync.Mutex
+	questionAnswers map[string][][]string
 
 	mu       sync.RWMutex
 	sessions map[string]openCodeSession
@@ -87,7 +100,9 @@ const (
 type openCodePending struct {
 	kind          openCodePendingKind
 	requestID     string
+	answerKey     string
 	questionCount int
+	questionIndex int
 }
 
 // NewOpenCodeSource creates an adapter. An empty baseURL uses the default
@@ -102,13 +117,14 @@ func NewOpenCodeSource(baseURL string) *OpenCodeSource {
 		username = "opencode"
 	}
 	source := &OpenCodeSource{
-		baseURL:  strings.TrimRight(baseURL, "/"),
-		client:   &http.Client{Timeout: openCodeTimeout},
-		password: os.Getenv("OPENCODE_SERVER_PASSWORD"),
-		username: username,
-		pinned:   pinned,
-		models:   newModelCache(),
-		sessions: map[string]openCodeSession{},
+		baseURL:         strings.TrimRight(baseURL, "/"),
+		client:          &http.Client{Timeout: openCodeTimeout},
+		password:        os.Getenv("OPENCODE_SERVER_PASSWORD"),
+		username:        username,
+		pinned:          pinned,
+		models:          newModelCache(),
+		sessions:        map[string]openCodeSession{},
+		questionAnswers: map[string][][]string{},
 	}
 	source.findServers = source.scanServers
 	return source
@@ -211,12 +227,17 @@ type ocPermissionRequest struct {
 
 /* -------------------------------- requests ------------------------------- */
 
-func (s *OpenCodeSource) do(ctx context.Context, method, path string, body any, out any) error {
-	_, err := s.doAt(ctx, s.baseURL, method, path, body, out)
-	return err
+func (s *OpenCodeSource) doAt(ctx context.Context, base, method, path string, body any, out any) (http.Header, error) {
+	return s.doAtLimit(ctx, base, method, path, body, out, maxOpenCodeMetadataResponse)
 }
 
-func (s *OpenCodeSource) doAt(ctx context.Context, base, method, path string, body any, out any) (http.Header, error) {
+func (s *OpenCodeSource) doAtLimit(
+	ctx context.Context,
+	base, method, path string,
+	body any,
+	out any,
+	limit int64,
+) (http.Header, error) {
 	var reader *bytes.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -252,9 +273,20 @@ func (s *OpenCodeSource) doAt(ctx context.Context, base, method, path string, bo
 		return resp.Header, fmt.Errorf("opencode: %s %s: %s", method, path, resp.Status)
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		return resp.Header, nil
 	}
-	return resp.Header, json.NewDecoder(resp.Body).Decode(out)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return resp.Header, err
+	}
+	if int64(len(raw)) > limit {
+		return resp.Header, fmt.Errorf("opencode: %s %s: response exceeds %d bytes", method, path, limit)
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return resp.Header, fmt.Errorf("opencode: %s %s: invalid JSON: %w", method, path, err)
+	}
+	return resp.Header, nil
 }
 
 // OpenCodePortSpan is how many ports from the default this will look across.
@@ -284,11 +316,25 @@ func (s *OpenCodeSource) scanServers(ctx context.Context) []string {
 		return nil // the user named a URL; looking elsewhere would surprise them
 	}
 
+	// Probe concurrently. A different process can occupy one candidate port and
+	// accept a connection without answering; doing sixteen five-second probes
+	// serially made every discovery sweep stall for over a minute.
+	healthy := make([]bool, OpenCodePortSpan)
+	var wait sync.WaitGroup
+	for index := range OpenCodePortSpan {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			candidate := fmt.Sprintf("http://127.0.0.1:%d", OpenCodeDefaultPort+index)
+			healthy[index] = s.healthyAt(ctx, candidate)
+		}()
+	}
+	wait.Wait()
+
 	servers := make([]string, 0, OpenCodePortSpan)
-	for port := OpenCodeDefaultPort; port < OpenCodeDefaultPort+OpenCodePortSpan; port++ {
-		candidate := fmt.Sprintf("http://127.0.0.1:%d", port)
-		if s.healthyAt(ctx, candidate) {
-			servers = append(servers, candidate)
+	for index, ok := range healthy {
+		if ok {
+			servers = append(servers, fmt.Sprintf("http://127.0.0.1:%d", OpenCodeDefaultPort+index))
 		}
 	}
 	return servers
@@ -298,7 +344,8 @@ func (s *OpenCodeSource) healthyAt(ctx context.Context, base string) bool {
 	var health struct {
 		Healthy bool `json:"healthy"`
 	}
-	if _, err := s.doAt(ctx, base, http.MethodGet, "/global/health", nil, &health); err != nil {
+	if _, err := s.doAtLimit(ctx, base, http.MethodGet, "/global/health", nil, &health,
+		maxOpenCodeHealthResponse); err != nil {
 		return false
 	}
 	return health.Healthy
@@ -309,6 +356,12 @@ func openCodePath(path string, query url.Values) string {
 		return path
 	}
 	return path + "?" + query.Encode()
+}
+
+func openCodeSegment(value string) string { return url.PathEscape(value) }
+
+func openCodeAnswerKey(base, nativeID, requestID string) string {
+	return base + "\x00" + nativeID + "\x00" + requestID
 }
 
 /* -------------------------------- Source --------------------------------- */
@@ -327,16 +380,22 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 
 	cutoff := time.Now().Add(-openCodeIdleWindow).UnixMilli()
 	next := make(map[string]openCodeSession)
+	activeQuestionAnswers := make(map[string]struct{})
 	var failures []error
+	failedServers := make(map[string]struct{})
 	var reached int
 
 	for _, base := range servers {
 		listed, statuses, questions, permissions, err := s.snapshotAt(ctx, base)
 		if err != nil {
 			failures = append(failures, err)
+			failedServers[base] = struct{}{}
 			continue
 		}
 		reached++
+		for _, request := range questions {
+			activeQuestionAnswers[openCodeAnswerKey(base, request.SessionID, request.ID)] = struct{}{}
+		}
 
 		for _, item := range listed {
 			updated := item.Time.Updated
@@ -353,7 +412,7 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 				state = protocol.StateBusy
 			}
 
-			question, pending := openCodePendingFor(item.ID, questions, permissions)
+			question, pending := s.openCodePendingFor(base, item.ID, questions, permissions)
 			if question != nil {
 				state = protocol.StateWaitingInput
 			}
@@ -397,6 +456,36 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 	if reached == 0 {
 		return nil, errors.Join(failures...)
 	}
+	if len(failedServers) > 0 {
+		// A server answered its health probe but one of the four snapshot calls
+		// failed. Preserve that server's last routes for this sweep; otherwise a
+		// transient API error announces every session on it as gone and tears
+		// down active subscriptions even while other OpenCode servers are fine.
+		s.mu.RLock()
+		for id, previous := range s.sessions {
+			if _, failed := failedServers[previous.baseURL]; !failed {
+				continue
+			}
+			current, exists := next[id]
+			if !exists || openCodeRoutePriority(previous) > openCodeRoutePriority(current) {
+				next[id] = previous
+			}
+		}
+		s.mu.RUnlock()
+	}
+	// Partial multi-question answers are useful only while the exact request is
+	// still pending. Prune after a completely healthy sweep; if one server was
+	// temporarily unreachable, preserve its state so a reconnect does not make
+	// the user answer earlier cards again.
+	if len(failures) == 0 {
+		s.answerMu.Lock()
+		for key := range s.questionAnswers {
+			if _, live := activeQuestionAnswers[key]; !live {
+				delete(s.questionAnswers, key)
+			}
+		}
+		s.answerMu.Unlock()
+	}
 
 	live := make(map[string]bool, len(next))
 	for id := range next {
@@ -413,6 +502,9 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 		found = append(found, session.meta)
 	}
 	SortSessions(found)
+	if len(failures) > 0 {
+		return found, errors.Join(failures...)
+	}
 	return found, nil
 }
 
@@ -428,16 +520,34 @@ func (s *OpenCodeSource) snapshotAt(ctx context.Context, base string) (
 	error,
 ) {
 	var listed []ocSession
-	if _, err := s.doAt(ctx, base, http.MethodGet, "/session?limit=200", nil, &listed); err != nil {
+	statuses := map[string]ocSessionStatus{}
+	var questions []ocQuestionRequest
+	var permissions []ocPermissionRequest
+	requests := []struct {
+		path string
+		out  any
+	}{
+		{path: "/session?limit=200", out: &listed},
+		{path: "/session/status", out: &statuses},
+		{path: "/question", out: &questions},
+		{path: "/permission", out: &permissions},
+	}
+	errs := make([]error, len(requests))
+	var wait sync.WaitGroup
+	for index := range requests {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			request := requests[index]
+			if _, err := s.doAt(ctx, base, http.MethodGet, request.path, nil, request.out); err != nil {
+				errs[index] = fmt.Errorf("%s%s: %w", base, request.path, err)
+			}
+		}()
+	}
+	wait.Wait()
+	if err := errors.Join(errs...); err != nil {
 		return nil, nil, nil, nil, err
 	}
-
-	statuses := map[string]ocSessionStatus{}
-	_, _ = s.doAt(ctx, base, http.MethodGet, "/session/status", nil, &statuses)
-	var questions []ocQuestionRequest
-	_, _ = s.doAt(ctx, base, http.MethodGet, "/question", nil, &questions)
-	var permissions []ocPermissionRequest
-	_, _ = s.doAt(ctx, base, http.MethodGet, "/permission", nil, &permissions)
 	return listed, statuses, questions, permissions, nil
 }
 
@@ -465,7 +575,8 @@ func openCodeName(item ocSession) string {
 	return "opencode"
 }
 
-func openCodePendingFor(
+func (s *OpenCodeSource) openCodePendingFor(
+	base string,
 	nativeID string,
 	questions []ocQuestionRequest,
 	permissions []ocPermissionRequest,
@@ -497,26 +608,72 @@ func openCodePendingFor(
 		if request.SessionID != nativeID || len(request.Questions) == 0 {
 			continue
 		}
-		first := request.Questions[0]
+		answerKey := openCodeAnswerKey(base, nativeID, request.ID)
+		index := s.nextQuestionIndex(answerKey, len(request.Questions))
+		first := request.Questions[index]
 		options := make([]protocol.QuestionOption, 0, len(first.Options))
 		for _, option := range first.Options {
 			options = append(options, protocol.QuestionOption{Key: option.Label, Label: option.Label})
 		}
-		if len(options) == 0 {
+		if len(options) == 0 && !first.Custom {
 			continue
 		}
 		detail := ""
 		if len(request.Questions) > 1 {
-			detail = fmt.Sprintf("Question 1 of %d", len(request.Questions))
+			detail = fmt.Sprintf("Question %d of %d", index+1, len(request.Questions))
 		}
 		return &protocol.Question{
 				Prompt: first.Question, Title: first.Header, Detail: detail, Options: options,
+				Multiple: first.Multiple, Custom: first.Custom,
 			}, openCodePending{
 				kind: openCodeQuestionPending, requestID: request.ID,
-				questionCount: len(request.Questions),
+				answerKey:     answerKey,
+				questionCount: len(request.Questions), questionIndex: index,
 			}
 	}
 	return nil, openCodePending{}
+}
+
+func (s *OpenCodeSource) nextQuestionIndex(answerKey string, count int) int {
+	s.answerMu.Lock()
+	defer s.answerMu.Unlock()
+	answers := s.questionAnswers[answerKey]
+	for index := 0; index < count && index < len(answers); index++ {
+		if len(answers[index]) == 0 {
+			return index
+		}
+	}
+	if len(answers) < count {
+		return len(answers)
+	}
+	// A completed answer set is kept only while its POST is in flight. Keep
+	// showing the last question rather than indexing past the request.
+	return max(0, count-1)
+}
+
+func (s *OpenCodeSource) recordQuestionAnswer(pending openCodePending, values []string) ([][]string, bool) {
+	s.answerMu.Lock()
+	defer s.answerMu.Unlock()
+	answers := s.questionAnswers[pending.answerKey]
+	if len(answers) != pending.questionCount {
+		answers = make([][]string, pending.questionCount)
+	}
+	if pending.questionIndex >= 0 && pending.questionIndex < len(answers) {
+		answers[pending.questionIndex] = append([]string(nil), values...)
+	}
+	s.questionAnswers[pending.answerKey] = answers
+	for _, answer := range answers {
+		if len(answer) == 0 {
+			return answers, false
+		}
+	}
+	return answers, true
+}
+
+func (s *OpenCodeSource) clearQuestionAnswers(answerKey string) {
+	s.answerMu.Lock()
+	delete(s.questionAnswers, answerKey)
+	s.answerMu.Unlock()
 }
 
 // Page implements Source.
@@ -535,10 +692,11 @@ func (s *OpenCodeSource) Page(ctx context.Context, sessionID, before string, lim
 	if session.directory != "" {
 		query.Set("directory", session.directory)
 	}
-	path := openCodePath(fmt.Sprintf("/session/%s/message", session.nativeID), query)
+	path := openCodePath(fmt.Sprintf("/session/%s/message", openCodeSegment(session.nativeID)), query)
 
 	var response []ocMessage
-	headers, err := s.doAt(ctx, session.baseURL, http.MethodGet, path, nil, &response)
+	headers, err := s.doAtLimit(ctx, session.baseURL, http.MethodGet, path, nil, &response,
+		maxOpenCodeMessageResponse)
 	if err != nil {
 		return protocol.Page{}, err
 	}
@@ -741,9 +899,10 @@ func (s *OpenCodeSource) modelOfAt(ctx context.Context, base, nativeID, director
 	if directory != "" {
 		query.Set("directory", directory)
 	}
-	path := openCodePath("/session/"+nativeID+"/message", query)
+	path := openCodePath("/session/"+openCodeSegment(nativeID)+"/message", query)
 	var response []ocMessage
-	if _, err := s.doAt(ctx, base, http.MethodGet, path, nil, &response); err != nil {
+	if _, err := s.doAtLimit(ctx, base, http.MethodGet, path, nil, &response,
+		maxOpenCodeMessageResponse); err != nil {
 		return ""
 	}
 	for i := len(response) - 1; i >= 0; i-- {
@@ -774,7 +933,7 @@ func (s *OpenCodeSource) Inject(ctx context.Context, sessionID, text string) (pr
 	if session.directory != "" {
 		query.Set("directory", session.directory)
 	}
-	path := openCodePath("/session/"+session.nativeID+"/prompt_async", query)
+	path := openCodePath("/session/"+openCodeSegment(session.nativeID)+"/prompt_async", query)
 	if _, err := s.doAt(ctx, session.baseURL, http.MethodPost, path, body, nil); err != nil {
 		return protocol.InjectNone, err
 	}
@@ -782,7 +941,7 @@ func (s *OpenCodeSource) Inject(ctx context.Context, sessionID, text string) (pr
 }
 
 // Answer implements Answerer.
-func (s *OpenCodeSource) Answer(ctx context.Context, sessionID, optionKey string) error {
+func (s *OpenCodeSource) Answer(ctx context.Context, sessionID string, answer protocol.QuestionAnswer) error {
 	s.mu.RLock()
 	session, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
@@ -800,7 +959,7 @@ func (s *OpenCodeSource) Answer(ctx context.Context, sessionID, optionKey string
 	if _, err := s.doAt(ctx, session.baseURL, http.MethodGet, "/permission", nil, &permissions); err != nil {
 		return err
 	}
-	_, pending := openCodePendingFor(session.nativeID, questions, permissions)
+	pending := session.pending
 	if pending.requestID == "" {
 		return fmt.Errorf("source: that question is no longer waiting for an answer")
 	}
@@ -811,24 +970,89 @@ func (s *OpenCodeSource) Answer(ctx context.Context, sessionID, optionKey string
 	}
 	switch pending.kind {
 	case openCodePermissionPending:
-		if optionKey != "once" && optionKey != "always" && optionKey != "reject" {
-			return fmt.Errorf("source: invalid OpenCode permission answer %q", optionKey)
+		var current *ocPermissionRequest
+		for index := range permissions {
+			request := &permissions[index]
+			if request.ID == pending.requestID && request.SessionID == session.nativeID {
+				current = request
+				break
+			}
 		}
-		path := openCodePath("/permission/"+pending.requestID+"/reply", query)
+		if current == nil {
+			return fmt.Errorf("source: that question is no longer waiting for an answer")
+		}
+		if len(answer.Options) > 0 || answer.Text != "" {
+			return fmt.Errorf("source: OpenCode permissions accept one listed option")
+		}
+		if answer.OptionKey != "once" && answer.OptionKey != "always" && answer.OptionKey != "reject" {
+			return fmt.Errorf("source: invalid OpenCode permission answer %q", answer.OptionKey)
+		}
+		if answer.OptionKey == "always" && len(current.Always) == 0 {
+			return fmt.Errorf("source: OpenCode did not offer an always-allow answer")
+		}
+		path := openCodePath("/permission/"+openCodeSegment(pending.requestID)+"/reply", query)
 		_, err := s.doAt(ctx, session.baseURL, http.MethodPost, path,
-			map[string]any{"reply": optionKey}, nil)
+			map[string]any{"reply": answer.OptionKey}, nil)
 		return err
 
 	case openCodeQuestionPending:
-		answers := make([][]string, pending.questionCount)
-		if len(answers) == 0 {
-			answers = make([][]string, 1)
+		var current *ocQuestionRequest
+		for index := range questions {
+			request := &questions[index]
+			if request.ID == pending.requestID && request.SessionID == session.nativeID {
+				current = request
+				break
+			}
 		}
-		answers[0] = []string{optionKey}
-		path := openCodePath("/question/"+pending.requestID+"/reply", query)
-		_, err := s.doAt(ctx, session.baseURL, http.MethodPost, path,
-			map[string]any{"answers": answers}, nil)
-		return err
+		if current == nil || pending.questionIndex < 0 || pending.questionIndex >= len(current.Questions) {
+			return fmt.Errorf("source: that question is no longer waiting for an answer")
+		}
+		question := current.Questions[pending.questionIndex]
+		values := append([]string(nil), answer.Options...)
+		if answer.OptionKey != "" {
+			values = append(values, answer.OptionKey)
+		}
+		customText := strings.TrimSpace(answer.Text)
+		if customText != "" {
+			if !question.Custom {
+				return fmt.Errorf("source: OpenCode did not offer a custom answer")
+			}
+			values = append(values, customText)
+		}
+		if len(values) == 0 || (!question.Multiple && len(values) != 1) {
+			return fmt.Errorf("source: this OpenCode question requires %s answer",
+				map[bool]string{true: "at least one", false: "exactly one"}[question.Multiple])
+		}
+		listed := make(map[string]struct{}, len(question.Options))
+		for _, option := range question.Options {
+			listed[option.Label] = struct{}{}
+		}
+		seen := make(map[string]struct{}, len(values))
+		for _, value := range values {
+			if _, duplicate := seen[value]; duplicate {
+				return fmt.Errorf("source: duplicate OpenCode question answer %q", value)
+			}
+			seen[value] = struct{}{}
+			if value == customText && customText != "" && question.Custom {
+				continue
+			}
+			if _, valid := listed[value]; !valid {
+				return fmt.Errorf("source: invalid OpenCode question answer %q", value)
+			}
+		}
+
+		pending.questionCount = len(current.Questions)
+		answers, complete := s.recordQuestionAnswer(pending, values)
+		if !complete {
+			return nil
+		}
+		path := openCodePath("/question/"+openCodeSegment(pending.requestID)+"/reply", query)
+		if _, err := s.doAt(ctx, session.baseURL, http.MethodPost, path,
+			map[string]any{"answers": answers}, nil); err != nil {
+			return err
+		}
+		s.clearQuestionAnswers(pending.answerKey)
+		return nil
 	default:
 		return fmt.Errorf("source: unsupported OpenCode decision")
 	}
@@ -846,7 +1070,7 @@ func (s *OpenCodeSource) Interrupt(ctx context.Context, sessionID string) error 
 	if session.directory != "" {
 		query.Set("directory", session.directory)
 	}
-	path := openCodePath("/session/"+session.nativeID+"/abort", query)
+	path := openCodePath("/session/"+openCodeSegment(session.nativeID)+"/abort", query)
 	_, err := s.doAt(ctx, session.baseURL, http.MethodPost, path, nil, nil)
 	return err
 }

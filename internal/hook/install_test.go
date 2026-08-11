@@ -36,6 +36,10 @@ func claudeSettingsPath(home string) string {
 	return filepath.Join(home, ".claude", "settings.json")
 }
 
+func codexConfigPath(home string) string {
+	return filepath.Join(home, ".codex", "config.toml")
+}
+
 func writeSettings(t *testing.T, home, body string) string {
 	t.Helper()
 	path := claudeSettingsPath(home)
@@ -219,6 +223,16 @@ func TestUninstallAfterBinaryMoved(t *testing.T) {
 	}
 }
 
+func TestUninstallDoesNotClaimSimilarlyNamedProgram(t *testing.T) {
+	entry := map[string]any{
+		"command": "/usr/local/bin/agentmanager",
+		"args":    []any{"hook", "claude", "Stop"},
+	}
+	if isOurCommand(entry) {
+		t.Fatal("similarly named user command was classified as agentman")
+	}
+}
+
 func TestInstallRefusesToClobberUnparseableSettings(t *testing.T) {
 	home := t.TempDir()
 	// Half-written, or hand-edited with a trailing comma.
@@ -255,10 +269,12 @@ func TestInstallCreatesConfigWhenAbsent(t *testing.T) {
 	if _, ok := readJSON(t, claudeSettingsPath(home))["hooks"]; !ok {
 		t.Error("hooks not written to a fresh settings file")
 	}
-	codex := readJSON(t, filepath.Join(home, ".codex", "hooks.json"))
-	// Codex uses snake_case keys where Claude uses PascalCase.
-	if _, ok := codex["user_prompt_submit"]; !ok {
-		t.Errorf("codex hooks not written with snake_case keys: %v", codex)
+	codex, err := os.ReadFile(codexConfigPath(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(codex), `notify = ["/usr/local/bin/am", "hook", "codex", "Stop"]`) {
+		t.Errorf("Codex's supported notify command was not installed:\n%s", codex)
 	}
 }
 
@@ -277,17 +293,66 @@ func TestInstallBacksUpPreviousConfig(t *testing.T) {
 	}
 }
 
-func TestCodexEventKeyCasing(t *testing.T) {
-	cases := map[Name]string{
-		NameSessionStart:     "session_start",
-		NameUserPromptSubmit: "user_prompt_submit",
-		NameStop:             "stop",
-		NameNotification:     "notification",
-		NameSessionEnd:       "session_end",
+func TestCodexNotifyPreservesTOMLAndIsIdempotent(t *testing.T) {
+	home := t.TempDir()
+	path := codexConfigPath(home)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	for name, want := range cases {
-		if got := CodexEventKey(name); got != want {
-			t.Errorf("CodexEventKey(%q) = %q, want %q", name, got, want)
+	const original = "model = \"gpt-5.6-sol\"\n\n[tui]\nanimations = false\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	in := Installer{Home: home, Binary: "/usr/local/bin/am"}
+	applyAll(t, in, false)
+	first, _ := os.ReadFile(path)
+	if !contains(string(first), original) {
+		t.Fatalf("Codex config was not preserved:\n%s", first)
+	}
+	applyAll(t, in, false)
+	second, _ := os.ReadFile(path)
+	if string(second) != string(first) {
+		t.Fatal("installing Codex notify twice changed the config")
+	}
+	applyAll(t, in, true)
+	after, _ := os.ReadFile(path)
+	if string(after) != original {
+		t.Fatalf("uninstall did not restore the Codex config:\n%s", after)
+	}
+}
+
+func TestCodexNotifyRefusesToReplaceUserCommand(t *testing.T) {
+	home := t.TempDir()
+	path := codexConfigPath(home)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const original = "notify = [\"terminal-notifier\"]\n"
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plans, err := (Installer{Home: home, Binary: "/usr/local/bin/am"}).Plans("tok", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plan := range plans {
+		if plan.Kind == protocol.KindCodex && plan.Err == nil {
+			t.Fatal("installer would overwrite the user's existing Codex notifier")
+		}
+	}
+}
+
+func TestAppliedConfigsAndBackupsArePrivate(t *testing.T) {
+	home := t.TempDir()
+	path := writeSettings(t, home, realisticSettings)
+	applyAll(t, Installer{Home: home, Binary: "/usr/local/bin/am"}, false)
+	for _, candidate := range []string{path, path + ".agentman.bak"} {
+		info, err := os.Stat(candidate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("%s mode = %#o, want 0600", candidate, got)
 		}
 	}
 }

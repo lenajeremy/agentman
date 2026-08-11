@@ -2,9 +2,12 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/source"
@@ -100,6 +103,7 @@ func TestResubscribeKeepsStreaming(t *testing.T) {
 	sink := &recordingSink{}
 	agent := New(registry, sink)
 	ctx := context.Background()
+	agent.refresh(ctx, true)
 
 	agent.Handle(ctx, protocol.Request{Type: protocol.ReqSubscribe, SessionID: "claude:s1"})
 	agent.Handle(ctx, protocol.Request{Type: protocol.ReqUnsubscribe, SessionID: "claude:s1"})
@@ -127,6 +131,7 @@ func TestUnsubscribeStopsStreaming(t *testing.T) {
 	sink := &recordingSink{}
 	agent := New(registry, sink)
 	ctx := context.Background()
+	agent.refresh(ctx, true)
 
 	agent.Handle(ctx, protocol.Request{Type: protocol.ReqSubscribe, SessionID: "claude:s1"})
 	time.Sleep(120 * time.Millisecond)
@@ -149,6 +154,7 @@ func TestSubscribeIsIdempotent(t *testing.T) {
 
 	agent := New(registry, &recordingSink{})
 	ctx := context.Background()
+	agent.refresh(ctx, true)
 
 	for range 4 {
 		agent.Handle(ctx, protocol.Request{Type: protocol.ReqSubscribe, SessionID: "claude:s1"})
@@ -157,5 +163,112 @@ func TestSubscribeIsIdempotent(t *testing.T) {
 
 	if got := streaming.activeFollows(); got != 1 {
 		t.Errorf("%d tails running for one session, want 1", got)
+	}
+}
+
+func TestUnsubscribeOnlyStopsTheCallingDevice(t *testing.T) {
+	registry := source.NewRegistry()
+	streaming := &streamingSource{}
+	registry.Add(streaming)
+
+	agent := New(registry, &recordingSink{})
+	ctx := context.Background()
+	agent.refresh(ctx, true)
+	agent.HandleFrom(ctx, "phone", protocol.Request{Type: protocol.ReqSubscribe, SessionID: "claude:s1"})
+	agent.HandleFrom(ctx, "tablet", protocol.Request{Type: protocol.ReqSubscribe, SessionID: "claude:s1"})
+	time.Sleep(80 * time.Millisecond)
+
+	agent.HandleFrom(ctx, "phone", protocol.Request{Type: protocol.ReqUnsubscribe, SessionID: "claude:s1"})
+	time.Sleep(60 * time.Millisecond)
+	if got := streaming.activeFollows(); got != 1 {
+		t.Fatalf("one device stopped another device's tail; active = %d", got)
+	}
+
+	agent.DisconnectSubscriber("tablet")
+	time.Sleep(60 * time.Millisecond)
+	if got := streaming.activeFollows(); got != 0 {
+		t.Fatalf("disconnected device left %d tails running", got)
+	}
+}
+
+type interruptingSource struct {
+	streamingSource
+	interrupted bool
+}
+
+func (s *interruptingSource) Interrupt(context.Context, string) error {
+	s.mu.Lock()
+	s.interrupted = true
+	s.mu.Unlock()
+	return nil
+}
+
+func TestInterruptRequestReachesSource(t *testing.T) {
+	registry := source.NewRegistry()
+	controlled := &interruptingSource{}
+	registry.Add(controlled)
+	agent := New(registry, &recordingSink{})
+
+	event := agent.Handle(context.Background(), protocol.Request{
+		Type: protocol.ReqInterrupt, SessionID: "claude:s1", ClientID: "stop-1",
+	})
+	if event.Type != protocol.EvtSendResult || event.Status != protocol.StatusDelivered {
+		t.Fatalf("interrupt result = %+v", event)
+	}
+	controlled.mu.Lock()
+	interrupted := controlled.interrupted
+	controlled.mu.Unlock()
+	if !interrupted {
+		t.Fatal("interrupt request never reached the source")
+	}
+}
+
+func TestOversizedMessageIsRejectedBeforeInjection(t *testing.T) {
+	agent := New(source.NewRegistry(), &recordingSink{})
+	event := agent.Handle(context.Background(), protocol.Request{
+		Type: protocol.ReqSendMessage, SessionID: "claude:s1",
+		ClientID: "send-1", Text: strings.Repeat("x", maxMessageBytes+1),
+	})
+	if event.Type != protocol.EvtSendResult || event.Status != protocol.StatusFailed {
+		t.Fatalf("oversized request result = %+v", event)
+	}
+}
+
+func TestHistoryEventFitsRelayFrameWithoutDroppingMessages(t *testing.T) {
+	messages := make([]protocol.Message, maxPageMessages)
+	for i := range messages {
+		messages[i] = protocol.Message{
+			ID: "message", SessionID: "claude:s1", Role: protocol.RoleAssistant,
+			// Control characters exercise JSON's worst-case escaping expansion.
+			Text: strings.Repeat("\x00", maxWireMessageBytes),
+		}
+	}
+	page := protocol.NewPage("claude:s1", messages, "next", true)
+	event := fitMessageEvent(protocol.Event{Type: protocol.EvtPage, Page: &page})
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > maxEventBytes {
+		t.Fatalf("event is %d bytes, limit is %d", len(encoded), maxEventBytes)
+	}
+	if len(event.Page.Messages) != len(messages) {
+		t.Fatalf("fit dropped messages: got %d, want %d", len(event.Page.Messages), len(messages))
+	}
+	if event.Page.Messages[0].Text == messages[0].Text {
+		t.Fatal("oversized text was not truncated")
+	}
+	if messages[0].Text != strings.Repeat("\x00", maxWireMessageBytes) {
+		t.Fatal("fit mutated source messages")
+	}
+}
+
+func TestWireTruncationPreservesUTF8(t *testing.T) {
+	got := truncateWireText(strings.Repeat("🙂", 100), 101)
+	if !strings.HasSuffix(got, wireTruncation) {
+		t.Fatalf("missing truncation marker: %q", got)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncation produced invalid UTF-8: %q", got)
 	}
 }

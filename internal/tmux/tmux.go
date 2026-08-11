@@ -14,12 +14,15 @@ package tmux
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -33,6 +36,20 @@ var ErrNotInstalled = errors.New("tmux: not installed")
 // commandTimeout bounds every tmux invocation. These are local and fast; a
 // hang means something is wrong and waiting will not fix it.
 const commandTimeout = 5 * time.Second
+
+// Agent actions are multi-command terminal transactions. Serialize actions
+// aimed at the same pane so two phones cannot interleave clear/type/submit and
+// accidentally fuse two instructions or answer a menu while a send is midway.
+var actionLocks [64]sync.Mutex
+
+func actionLock(name string) *sync.Mutex {
+	var hash uint64 = 14695981039346656037
+	for i := 0; i < len(name); i++ {
+		hash ^= uint64(name[i])
+		hash *= 1099511628211
+	}
+	return &actionLocks[hash%uint64(len(actionLocks))]
+}
 
 // Available reports whether tmux can be used.
 func Available() bool {
@@ -148,6 +165,9 @@ func Send(ctx context.Context, name, text string) error {
 	if strings.TrimSpace(text) == "" {
 		return errors.New("tmux: refusing to send an empty message")
 	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
 
 	// Clear whatever is already in the prompt box first.
 	//
@@ -199,8 +219,10 @@ func pasteMultiline(ctx context.Context, name, text string) error {
 	}
 
 	// A named buffer avoids disturbing whatever the user has in tmux's default
-	// paste buffer.
-	buffer := "agentman"
+	// paste buffer. It must also be unique: two phone requests can paste at the
+	// same time, and sharing one name lets one prompt overwrite the other's
+	// staged contents before either paste completes.
+	buffer := "agentman-" + uniqueSuffix()
 	if _, err := run(ctx, "load-buffer", "-b", buffer, file.Name()); err != nil {
 		return fmt.Errorf("tmux: could not stage the message: %w", err)
 	}
@@ -216,6 +238,9 @@ func Interrupt(ctx context.Context, name string) error {
 	if !Available() {
 		return ErrNotInstalled
 	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
 	if _, err := run(ctx, "send-keys", "-t", name, "C-c"); err != nil {
 		return fmt.Errorf("tmux: could not interrupt: %w", err)
 	}
@@ -282,7 +307,18 @@ func run(ctx context.Context, args ...string) (string, error) {
 
 // NewName mints a session name for an agent launch.
 func NewName(kind string) string {
-	return fmt.Sprintf("%s%s-%d", Prefix, kind, time.Now().Unix()%100000)
+	return fmt.Sprintf("%s%s-%d-%s", Prefix, kind, time.Now().UnixMilli(), uniqueSuffix())
+}
+
+func uniqueSuffix() string {
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err == nil {
+		return hex.EncodeToString(raw[:])
+	}
+	// Randomness is only for collision avoidance, not authentication. A
+	// nanosecond timestamp plus pid remains a useful fallback if the OS random
+	// source is temporarily unavailable.
+	return fmt.Sprintf("%x-%x", time.Now().UnixNano(), os.Getpid())
 }
 
 // Capture returns the visible contents of a session's pane.
@@ -316,6 +352,9 @@ func Answer(ctx context.Context, name, key string) error {
 	if key == "" {
 		return errors.New("tmux: no option given")
 	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
 	if _, err := run(ctx, "send-keys", "-t", name, "-l", key); err != nil {
 		return fmt.Errorf("tmux: could not answer: %w", err)
 	}

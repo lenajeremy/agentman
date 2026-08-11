@@ -29,9 +29,17 @@ func runHook(ctx context.Context, args []string) error {
 	}
 	kind, event := args[0], args[1]
 
-	payload, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
-	if err != nil {
-		return nil
+	var payload []byte
+	// Claude writes its hook payload to stdin. Codex's supported `notify`
+	// command instead appends one JSON argument to the configured argv.
+	if kind == string(protocol.KindCodex) && len(args) >= 3 {
+		payload = []byte(args[len(args)-1])
+	} else {
+		var err error
+		payload, err = io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+		if err != nil {
+			return nil
+		}
 	}
 
 	cfg, err := hook.LoadConfig("")
@@ -43,7 +51,7 @@ func runHook(ctx context.Context, args []string) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	url := fmt.Sprintf("http://%s/hook/%s/%s", hook.DefaultAddr, kind, event)
+	url := fmt.Sprintf("http://%s/hook/%s/%s", cfg.ListenAddr(), kind, event)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil
@@ -215,8 +223,9 @@ func runDoctor(ctx context.Context, args []string) error {
 		}
 	}
 
-	// Registered is not the same as working. Codex's schema is unverified, so
-	// this distinction is reported rather than assumed.
+	// Registered is not the same as working. A syntactically valid config can
+	// still point at an old binary or fail at runtime, so report actual recent
+	// deliveries separately.
 	store, err := hook.NewStore("")
 	if err != nil {
 		return err
@@ -249,10 +258,11 @@ func runDoctor(ctx context.Context, args []string) error {
 	}
 
 	fmt.Println("\nDaemon")
-	if err := pingDaemon(ctx); err != nil {
+	listenAddr := cfg.ListenAddr()
+	if err := pingDaemon(ctx, listenAddr); err != nil {
 		warn("hook listener", "not running — start it with `am serve`")
 	} else {
-		check(true, "hook listener", "responding on "+hook.DefaultAddr)
+		check(true, "hook listener", "responding on "+listenAddr)
 	}
 
 	fmt.Println("\nTranscript formats")
@@ -275,11 +285,11 @@ func anyOpenCode(sessions []protocol.Session) bool {
 	return false
 }
 
-func pingDaemon(ctx context.Context) error {
+func pingDaemon(ctx context.Context, addr string) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		"http://"+hook.DefaultAddr+"/health", nil)
+		"http://"+addr+"/health", nil)
 	if err != nil {
 		return err
 	}
@@ -310,20 +320,45 @@ func reportFormatDrift(
 		warn("parser check", "no running sessions to sample")
 		return
 	}
+	type failedSample struct {
+		name string
+		err  error
+	}
+	order := make([]protocol.Kind, 0, 3)
+	seen := map[protocol.Kind]bool{}
+	healthy := map[protocol.Kind]bool{}
+	failed := map[protocol.Kind]failedSample{}
 	for _, session := range sessions {
+		if !seen[session.Kind] {
+			seen[session.Kind] = true
+			order = append(order, session.Kind)
+		}
+		if healthy[session.Kind] {
+			continue
+		}
 		page, err := registry.Page(ctx, session.ID, "", 25)
 		if err != nil {
-			check(false, string(session.Kind)+" transcript", err.Error())
+			failed[session.Kind] = failedSample{name: session.Name, err: err}
 			continue
 		}
 		if len(page.Messages) == 0 {
-			warn(string(session.Kind)+" transcript",
-				"parsed 0 messages from "+session.Name+" — possible format change")
+			failed[session.Kind] = failedSample{name: session.Name}
 			continue
 		}
+		healthy[session.Kind] = true
 		check(true, string(session.Kind)+" transcript",
 			fmt.Sprintf("parsed %d messages from %s", len(page.Messages), session.Name))
-		// One healthy sample per agent kind is enough.
-		break
+	}
+	for _, kind := range order {
+		if healthy[kind] {
+			continue
+		}
+		sample := failed[kind]
+		if sample.err != nil {
+			check(false, string(kind)+" transcript", sample.err.Error())
+			continue
+		}
+		warn(string(kind)+" transcript",
+			"parsed 0 messages from "+sample.name+" — possible format change")
 	}
 }

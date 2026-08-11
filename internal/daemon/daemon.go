@@ -10,9 +10,11 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/protocol"
@@ -59,7 +61,8 @@ type Daemon struct {
 // follow is one live tail. It is tracked by pointer identity so that a
 // finishing tail can only ever cancel itself.
 type follow struct {
-	cancel context.CancelFunc
+	cancel      context.CancelFunc
+	subscribers map[string]struct{}
 }
 
 // New creates a daemon.
@@ -142,7 +145,7 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 	}
 	for id := range previous {
 		if _, still := current[id]; !still {
-			d.stopFollow(id)
+			d.stopFollowAll(id)
 			_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessionGone, SessionID: id})
 		}
 	}
@@ -247,27 +250,52 @@ func (d *Daemon) handleHook(event hook.Event) {
 
 // Handle answers one request from the app.
 func (d *Daemon) Handle(ctx context.Context, req protocol.Request) protocol.Event {
+	return d.HandleFrom(ctx, "local", req)
+}
+
+// HandleFrom answers one request and attributes subscription state to the app
+// connection that sent it. Without that identity, one phone leaving a screen
+// could unsubscribe a second phone that was still watching the same session.
+func (d *Daemon) HandleFrom(
+	ctx context.Context,
+	subscriberID string,
+	req protocol.Request,
+) protocol.Event {
+	if err := validateRequest(req); err != nil {
+		if req.Type == protocol.ReqSendMessage || req.Type == protocol.ReqAnswer ||
+			req.Type == protocol.ReqInterrupt {
+			return protocol.Event{
+				Type: protocol.EvtSendResult, SessionID: req.SessionID,
+				ClientID: req.ClientID, Status: protocol.StatusFailed, Error: err.Error(),
+			}
+		}
+		return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
+	}
+
 	switch req.Type {
 	case protocol.ReqListSessions:
 		return protocol.Event{Type: protocol.EvtSessions, Sessions: d.snapshot()}
 
 	case protocol.ReqFetchMessages:
 		limit := req.Limit
-		if limit <= 0 || limit > 200 {
-			limit = 50
+		if limit <= 0 || limit > maxPageMessages {
+			limit = maxPageMessages
 		}
 		page, err := d.registry.Page(ctx, req.SessionID, req.Before, limit)
 		if err != nil {
 			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
 		}
-		return protocol.Event{Type: protocol.EvtPage, Page: &page}
+		event := protocol.Event{Type: protocol.EvtPage, Page: &page}
+		return fitMessageEvent(event)
 
 	case protocol.ReqSubscribe:
-		d.startFollow(req.SessionID)
+		if err := d.startFollow(subscriberID, req.SessionID); err != nil {
+			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
+		}
 		return protocol.Event{}
 
 	case protocol.ReqUnsubscribe:
-		d.stopFollow(req.SessionID)
+		d.stopFollow(subscriberID, req.SessionID)
 		return protocol.Event{}
 
 	case protocol.ReqSendMessage:
@@ -290,7 +318,12 @@ func (d *Daemon) Handle(ctx context.Context, req protocol.Request) protocol.Even
 		return result
 
 	case protocol.ReqAnswer:
-		if err := d.registry.Answer(ctx, req.SessionID, req.OptionKey); err != nil {
+		answer := protocol.QuestionAnswer{
+			OptionKey: req.OptionKey,
+			Options:   req.OptionKeys,
+			Text:      req.AnswerText,
+		}
+		if err := d.registry.Answer(ctx, req.SessionID, answer); err != nil {
 			return protocol.Event{
 				Type: protocol.EvtSendResult, SessionID: req.SessionID,
 				ClientID: req.ClientID, Status: protocol.StatusFailed, Error: err.Error(),
@@ -303,8 +336,81 @@ func (d *Daemon) Handle(ctx context.Context, req protocol.Request) protocol.Even
 			ClientID: req.ClientID, Status: protocol.StatusDelivered,
 		}
 
+	case protocol.ReqInterrupt:
+		if err := d.registry.Interrupt(ctx, req.SessionID); err != nil {
+			return protocol.Event{
+				Type: protocol.EvtSendResult, SessionID: req.SessionID,
+				ClientID: req.ClientID, Status: protocol.StatusFailed, Error: err.Error(),
+			}
+		}
+		return protocol.Event{
+			Type: protocol.EvtSendResult, SessionID: req.SessionID,
+			ClientID: req.ClientID, Status: protocol.StatusDelivered,
+		}
+
 	default:
 		return protocol.Event{Type: protocol.EvtError, Error: "unsupported request: " + string(req.Type)}
+	}
+}
+
+const (
+	maxSessionIDBytes = 512
+	maxCursorBytes    = 4096
+	maxMessageBytes   = 64 * 1024
+	maxOptionKeyBytes = 4096
+	maxClientIDBytes  = 256
+	// The relay accepts a 4 MiB websocket frame. Keep normalized events below
+	// that ceiling with room for the envelope and JSON escaping. Without this,
+	// one unusually long assistant response makes the relay close the daemon
+	// connection and the phone appears to go mysteriously offline.
+	maxEventBytes       = 3 << 20
+	maxPageMessages     = 40
+	maxWireMessageBytes = 256 << 10
+	maxWireToolBytes    = 32 << 10
+)
+
+const wireTruncation = "\n\n[output truncated by agentman]"
+
+func validateRequest(req protocol.Request) error {
+	requiresSession := req.Type == protocol.ReqSubscribe || req.Type == protocol.ReqUnsubscribe ||
+		req.Type == protocol.ReqFetchMessages || req.Type == protocol.ReqSendMessage ||
+		req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqAnswer
+	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
+		return fmt.Errorf("daemon: invalid session id")
+	}
+	if len(req.Before) > maxCursorBytes || len(req.ClientID) > maxClientIDBytes {
+		return fmt.Errorf("daemon: request metadata is too large")
+	}
+	switch req.Type {
+	case protocol.ReqListSessions, protocol.ReqSubscribe, protocol.ReqUnsubscribe,
+		protocol.ReqFetchMessages, protocol.ReqInterrupt:
+		return nil
+	case protocol.ReqSendMessage:
+		if strings.TrimSpace(req.Text) == "" {
+			return fmt.Errorf("daemon: refusing to send an empty message")
+		}
+		if len(req.Text) > maxMessageBytes {
+			return fmt.Errorf("daemon: message exceeds %d bytes", maxMessageBytes)
+		}
+		return nil
+	case protocol.ReqAnswer:
+		if len(req.OptionKeys) > 64 || len(req.AnswerText) > maxMessageBytes {
+			return fmt.Errorf("daemon: invalid question answer")
+		}
+		total := len(req.OptionKey)
+		for _, option := range req.OptionKeys {
+			if option == "" || len(option) > maxOptionKeyBytes {
+				return fmt.Errorf("daemon: invalid question answer")
+			}
+			total += len(option)
+		}
+		if len(req.OptionKey) > maxOptionKeyBytes || total > maxMessageBytes ||
+			(req.OptionKey == "" && len(req.OptionKeys) == 0 && strings.TrimSpace(req.AnswerText) == "") {
+			return fmt.Errorf("daemon: invalid question answer")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported request: %s", req.Type)
 	}
 }
 
@@ -322,14 +428,24 @@ func (d *Daemon) snapshot() []protocol.Session {
 }
 
 // startFollow begins live-tailing a session, if it is not already followed.
-func (d *Daemon) startFollow(sessionID string) {
+func (d *Daemon) startFollow(subscriberID, sessionID string) error {
+	if subscriberID == "" {
+		subscriberID = "local"
+	}
 	d.mu.Lock()
-	if _, exists := d.follows[sessionID]; exists {
+	if _, exists := d.sessions[sessionID]; !exists {
 		d.mu.Unlock()
-		return
+		return fmt.Errorf("daemon: cannot subscribe to unknown session %q", sessionID)
+	}
+	if existing, exists := d.follows[sessionID]; exists {
+		existing.subscribers[subscriberID] = struct{}{}
+		d.mu.Unlock()
+		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	handle := &follow{cancel: cancel}
+	handle := &follow{
+		cancel: cancel, subscribers: map[string]struct{}{subscriberID: {}},
+	}
 	d.follows[sessionID] = handle
 	d.mu.Unlock()
 
@@ -342,7 +458,11 @@ func (d *Daemon) startFollow(sessionID string) {
 		// second one — leaving the app subscribed to a stream that had
 		// already been shut down, receiving nothing.
 		defer d.retireFollow(sessionID, handle)
-		_ = d.registry.Follow(ctx, sessionID, messages)
+		if err := d.registry.Follow(ctx, sessionID, messages); err != nil && ctx.Err() == nil {
+			_ = d.sink.Send(protocol.Event{
+				Type: protocol.EvtError, SessionID: sessionID, Error: err.Error(),
+			})
+		}
 	}()
 	go func() {
 		for {
@@ -350,24 +470,70 @@ func (d *Daemon) startFollow(sessionID string) {
 			case <-ctx.Done():
 				return
 			case batch := <-messages:
-				_ = d.sink.Send(protocol.Event{
-					Type:      protocol.EvtMessages,
-					SessionID: sessionID,
-					Messages:  batch,
-				})
+				for len(batch) > 0 {
+					take := min(len(batch), maxPageMessages)
+					event := protocol.Event{
+						Type:      protocol.EvtMessages,
+						SessionID: sessionID,
+						Messages:  batch[:take],
+					}
+					_ = d.sink.Send(fitMessageEvent(event))
+					batch = batch[take:]
+				}
 			}
 		}
 	}()
+	return nil
 }
 
 // stopFollow ends whatever tail is currently running for a session.
-func (d *Daemon) stopFollow(sessionID string) {
+func (d *Daemon) stopFollow(subscriberID, sessionID string) {
+	if subscriberID == "" {
+		subscriberID = "local"
+	}
+	d.mu.Lock()
+	handle, exists := d.follows[sessionID]
+	if exists {
+		delete(handle.subscribers, subscriberID)
+		if len(handle.subscribers) == 0 {
+			delete(d.follows, sessionID)
+		} else {
+			exists = false
+		}
+	}
+	d.mu.Unlock()
+	if exists {
+		handle.cancel()
+	}
+}
+
+func (d *Daemon) stopFollowAll(sessionID string) {
 	d.mu.Lock()
 	handle, exists := d.follows[sessionID]
 	delete(d.follows, sessionID)
 	d.mu.Unlock()
 	if exists {
 		handle.cancel()
+	}
+}
+
+// DisconnectSubscriber releases every follow owned by one app connection.
+func (d *Daemon) DisconnectSubscriber(subscriberID string) {
+	if subscriberID == "" {
+		return
+	}
+	d.mu.Lock()
+	var cancel []context.CancelFunc
+	for sessionID, handle := range d.follows {
+		delete(handle.subscribers, subscriberID)
+		if len(handle.subscribers) == 0 {
+			delete(d.follows, sessionID)
+			cancel = append(cancel, handle.cancel)
+		}
+	}
+	d.mu.Unlock()
+	for _, stop := range cancel {
+		stop()
 	}
 }
 
@@ -392,6 +558,92 @@ func (d *Daemon) stopAllFollows() {
 	for _, handle := range handles {
 		handle.cancel()
 	}
+}
+
+// fitMessageEvent makes a private copy of message data and bounds it for the
+// websocket protocol. It never drops a message: history cursors would then
+// skip content the app had no way to request again. Instead, exceptionally
+// large bodies are visibly truncated, while live batches are split by the
+// caller before reaching this function.
+func fitMessageEvent(event protocol.Event) protocol.Event {
+	var messages []protocol.Message
+	switch {
+	case event.Page != nil:
+		page := *event.Page
+		page.Messages = cloneMessages(page.Messages)
+		event.Page = &page
+		messages = page.Messages
+	case event.Messages != nil:
+		event.Messages = cloneMessages(event.Messages)
+		messages = event.Messages
+	default:
+		return event
+	}
+
+	for i := range messages {
+		messages[i].Text = truncateWireText(messages[i].Text, maxWireMessageBytes)
+		if messages[i].Tool != nil {
+			tool := *messages[i].Tool
+			tool.Name = truncateUTF8(tool.Name, maxOptionKeyBytes, "")
+			tool.Summary = truncateUTF8(tool.Summary, maxWireToolBytes, wireTruncation)
+			messages[i].Tool = &tool
+		}
+	}
+
+	// JSON escaping can expand control-heavy strings, so raw byte caps alone
+	// are not sufficient. Measure the actual event and progressively shrink the
+	// largest body until it is safely below the on-wire ceiling.
+	for {
+		encoded, err := json.Marshal(event)
+		if err != nil || len(encoded) <= maxEventBytes {
+			return event
+		}
+		largest := -1
+		for i := range messages {
+			if largest < 0 || len(messages[i].Text) > len(messages[largest].Text) {
+				largest = i
+			}
+		}
+		if largest < 0 || messages[largest].Text == "" {
+			return event
+		}
+		over := len(encoded) - maxEventBytes + 1024
+		limit := len(messages[largest].Text) - over
+		if limit < 0 {
+			limit = 0
+		}
+		messages[largest].Text = truncateWireText(messages[largest].Text, limit)
+	}
+}
+
+func cloneMessages(messages []protocol.Message) []protocol.Message {
+	out := append([]protocol.Message(nil), messages...)
+	return out
+}
+
+func truncateWireText(text string, maxBytes int) string {
+	if len(text) <= maxBytes {
+		return text
+	}
+	text = strings.TrimSuffix(text, wireTruncation)
+	return truncateUTF8(text, maxBytes, wireTruncation)
+}
+
+func truncateUTF8(text string, maxBytes int, suffix string) string {
+	if len(text) <= maxBytes {
+		return text
+	}
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(suffix) >= maxBytes {
+		suffix = ""
+	}
+	cut := maxBytes - len(suffix)
+	for cut > 0 && !utf8.ValidString(text[:cut]) {
+		cut--
+	}
+	return text[:cut] + suffix
 }
 
 // DecodeRequest parses an app request from an envelope payload.

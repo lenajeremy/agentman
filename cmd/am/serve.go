@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -29,10 +30,9 @@ const relayEnv = "AGENTMAN_RELAY"
 
 // DefaultRelay is the public relay, used when nothing else is specified.
 //
-// Baking in an address is only reasonable because this one stores nothing:
-// there is no account on it, nothing retained, and no privacy cost to being
-// the default. Anyone who would rather not use it can point elsewhere, and
-// `-relay none` opts out entirely.
+// The service has no transcript database, but it remains a live trust boundary
+// because payloads are not end-to-end encrypted. Users can point at a relay
+// they operate themselves, and `-relay none` opts out entirely.
 const DefaultRelay = "https://agentman-production.up.railway.app"
 
 // relayFlagHelp describes the flag consistently across subcommands.
@@ -115,7 +115,7 @@ func (m multiSink) Send(event protocol.Event) error {
 // connection that a phone reaches it through.
 func runServe(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("addr", hook.DefaultAddr, "loopback address for agent hook deliveries")
+	addrFlag := fs.String("addr", "", "loopback address for agent hook deliveries (persisted for installed hooks)")
 	relayFlag := fs.String("relay", "", relayFlagHelp)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -124,6 +124,13 @@ func runServe(ctx context.Context, args []string) error {
 
 	cfg, err := hook.LoadConfig("")
 	if err != nil {
+		return err
+	}
+	addr := cfg.ListenAddr()
+	if strings.TrimSpace(*addrFlag) != "" {
+		addr = strings.TrimSpace(*addrFlag)
+	}
+	if err := hook.ValidateAddr(addr); err != nil {
 		return err
 	}
 	store, err := hook.NewStore("")
@@ -144,9 +151,20 @@ func runServe(ctx context.Context, args []string) error {
 	// rather than polled.
 	hookServer := hook.NewServer(cfg.Token)
 	hookServer.SetPendingSource(pending.Take)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return describeListenError(err, addr)
+	}
+	if cfg.HookAddr != addr {
+		cfg.HookAddr = addr
+		if err := hook.SaveConfig("", cfg); err != nil {
+			_ = listener.Close()
+			return fmt.Errorf("save hook listener address: %w", err)
+		}
+	}
 	hookErrs := make(chan error, 1)
-	go func() { hookErrs <- describeListenError(hookServer.Listen(ctx, *addr), *addr) }()
-	fmt.Printf("%s\n", dim("hooks      listening on "+*addr))
+	go func() { hookErrs <- hookServer.Serve(ctx, listener) }()
+	fmt.Printf("%s\n", dim("hooks      listening on "+addr))
 
 	console := &printSink{quiet: relayURL != ""}
 	sinks := []daemon.Transport{console}
@@ -161,8 +179,8 @@ func runServe(ctx context.Context, args []string) error {
 			}
 			fmt.Printf("%s %s\n", stamp(), dim("relay      disconnected ("+detail+") — retrying"))
 		}
-		client.OnPairCode = func(code string, expiresAt time.Time) {
-			printPairCode(relayURL, code, "", expiresAt)
+		client.OnPairCode = func(code, token string, expiresAt time.Time) {
+			printPairCode(relayURL, code, token, expiresAt)
 		}
 		sinks = append(sinks, client)
 		fmt.Printf("%s\n", dim("relay      "+relayURL+"  account "+string(client.Account())))
@@ -171,6 +189,9 @@ func runServe(ctx context.Context, args []string) error {
 	}
 
 	agent := daemon.New(registry, multiSink{sinks: sinks})
+	if client != nil {
+		client.OnDeviceDisconnected = agent.DisconnectSubscriber
+	}
 
 	// Record hook activity for `am doctor`, then pass it to the daemon.
 	hookEvents := make(chan hook.Event, 32)
@@ -193,7 +214,7 @@ func runServe(ctx context.Context, args []string) error {
 	}()
 
 	if client != nil {
-		go func() { _ = client.Run(ctx, agent.Handle) }()
+		go func() { _ = client.Run(ctx, agent.HandleFrom) }()
 	}
 
 	fmt.Printf("%s\n\n", dim("ctrl-c to stop"))
@@ -318,7 +339,7 @@ func printPairCode(relayURL, code, token string, expiresAt time.Time) {
 
 	// The QR carries the long token, so scanning needs no typing and no relay
 	// address — and because that secret is 128 bits, it is not something worth
-	// guessing, unlike the eight digits below it.
+	// guessing, unlike the ten digits below it.
 	if token != "" && isTerminal() {
 		fmt.Println()
 		// Half blocks pack two QR rows into one terminal line, which is most of

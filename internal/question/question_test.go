@@ -86,6 +86,16 @@ func TestIgnoresProseThatLooksLikeAMenu(t *testing.T) {
 	}
 }
 
+func TestIgnoresNumberedListAtBottomOfPane(t *testing.T) {
+	const prose = `Here are your options:
+
+  1. Keep the current implementation
+  2. Rewrite it later`
+	if q := Detect(prose); q != nil {
+		t.Errorf("an ordinary numbered list was treated as a live menu: %+v", q)
+	}
+}
+
 func TestIgnoresAnAlreadyAnsweredMenu(t *testing.T) {
 	// The menu scrolled past and the agent carried on; nothing is pending.
 	const answered = ` Do you want to proceed?

@@ -103,9 +103,6 @@ func (s *ClaudeSource) Interrupt(ctx context.Context, sessionID string) error {
 	return tmux.Interrupt(ctx, session.tmuxName)
 }
 
-// SetPending gives the Codex source a fallback queue.
-func (s *CodexSource) SetPending(queue *PendingQueue) { s.pending = queue }
-
 // Inject implements Injector for Codex.
 func (s *CodexSource) Inject(ctx context.Context, sessionID, text string) (protocol.InjectMode, error) {
 	s.mu.RLock()
@@ -122,12 +119,12 @@ func (s *CodexSource) Inject(ctx context.Context, sessionID, text string) (proto
 		return protocol.InjectTmux, nil
 	}
 
-	if s.pending == nil {
-		return protocol.InjectNone, fmt.Errorf(
-			"source: this session cannot receive messages — start it with `am codex` to enable sending")
-	}
-	s.pending.Add(sessionID, text)
-	return protocol.InjectHook, nil
+	// Codex's supported notify callback is fire-and-forget: stdout is discarded
+	// and it cannot feed a blocking decision or queued prompt back into the
+	// turn. Advertising hook delivery here made the app report "queued" for a
+	// message that could never arrive.
+	return protocol.InjectNone, fmt.Errorf(
+		"source: this session cannot receive messages — start it with `am codex` to enable sending")
 }
 
 // detectQuestion reads a pane and reports any decision the agent is blocked on.
@@ -162,7 +159,7 @@ func detectQuestion(ctx context.Context, tmuxName string) *protocol.Question {
 }
 
 // Answer selects an option in a question a Claude session is showing.
-func (s *ClaudeSource) Answer(ctx context.Context, sessionID, optionKey string) error {
+func (s *ClaudeSource) Answer(ctx context.Context, sessionID string, answer protocol.QuestionAnswer) error {
 	s.mu.RLock()
 	session, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
@@ -172,11 +169,17 @@ func (s *ClaudeSource) Answer(ctx context.Context, sessionID, optionKey string) 
 	if session.tmuxName == "" {
 		return fmt.Errorf("source: only sessions started with `am claude` can be answered")
 	}
-	return tmux.Answer(ctx, session.tmuxName, optionKey)
+	if len(answer.Options) > 0 || answer.Text != "" {
+		return fmt.Errorf("source: this terminal question only accepts one listed option")
+	}
+	if err := validateCurrentQuestion(ctx, session.tmuxName, session.meta.Question, answer.OptionKey); err != nil {
+		return err
+	}
+	return tmux.Answer(ctx, session.tmuxName, answer.OptionKey)
 }
 
 // Answer selects an option in a question a Codex session is showing.
-func (s *CodexSource) Answer(ctx context.Context, sessionID, optionKey string) error {
+func (s *CodexSource) Answer(ctx context.Context, sessionID string, answer protocol.QuestionAnswer) error {
 	s.mu.RLock()
 	session, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
@@ -186,5 +189,57 @@ func (s *CodexSource) Answer(ctx context.Context, sessionID, optionKey string) e
 	if session.tmuxName == "" {
 		return fmt.Errorf("source: only sessions started with `am codex` can be answered")
 	}
-	return tmux.Answer(ctx, session.tmuxName, optionKey)
+	if len(answer.Options) > 0 || answer.Text != "" {
+		return fmt.Errorf("source: this terminal question only accepts one listed option")
+	}
+	if err := validateCurrentQuestion(ctx, session.tmuxName, session.meta.Question, answer.OptionKey); err != nil {
+		return err
+	}
+	return tmux.Answer(ctx, session.tmuxName, answer.OptionKey)
+}
+
+// validateCurrentQuestion prevents a delayed phone tap from being typed into
+// an unrelated prompt. The pane is re-read immediately before the keystroke;
+// both the question identity and the selected key must still match what the
+// app was shown during discovery.
+func validateCurrentQuestion(
+	ctx context.Context,
+	tmuxName string,
+	shown *protocol.Question,
+	optionKey string,
+) error {
+	if shown == nil || !questionHasOption(shown, optionKey) {
+		return fmt.Errorf("source: that question or option is no longer current; refresh the session")
+	}
+	current := detectQuestion(ctx, tmuxName)
+	if current == nil || !sameQuestion(shown, current) || !questionHasOption(current, optionKey) {
+		return fmt.Errorf("source: that question is no longer on screen; refresh the session")
+	}
+	return nil
+}
+
+func questionHasOption(question *protocol.Question, key string) bool {
+	if question == nil || key == "" {
+		return false
+	}
+	for _, option := range question.Options {
+		if option.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+func sameQuestion(left, right *protocol.Question) bool {
+	if left == nil || right == nil || left.Prompt != right.Prompt || left.Title != right.Title ||
+		left.Detail != right.Detail || left.Multiple != right.Multiple || left.Custom != right.Custom ||
+		len(left.Options) != len(right.Options) {
+		return false
+	}
+	for i := range left.Options {
+		if left.Options[i].Key != right.Options[i].Key || left.Options[i].Label != right.Options[i].Label {
+			return false
+		}
+	}
+	return true
 }

@@ -297,6 +297,13 @@ func TestReadingDoesNotScanWholeFile(t *testing.T) {
 	}
 }
 
+func TestBackwardReadRejectsNewlineTerminatedOversizedLine(t *testing.T) {
+	path := writeFixture(t, []string{strings.Repeat("x", MaxLineBytes+1)})
+	if _, err := CollectBackward(path, BackwardOptions{Want: 1, Map: asMessage}); err == nil {
+		t.Fatal("newline-terminated oversized line bypassed the memory bound")
+	}
+}
+
 /* ------------------------------- forward tail ---------------------------- */
 
 func TestTailYieldsEachLineExactlyOnce(t *testing.T) {
@@ -381,6 +388,44 @@ func TestTailSeekToEndSkipsBacklog(t *testing.T) {
 	appendTo(t, path, "{\"n\":100}\n")
 	if lines := mustRead(t, tail); len(lines) != 1 {
 		t.Fatalf("new appends should still arrive, got %d lines", len(lines))
+	}
+}
+
+func TestTailBoundsEachReadWhenTranscriptGrowsSuddenly(t *testing.T) {
+	path := writeFixture(t, nil)
+	// Enough complete records to exceed several read windows. The exact line
+	// content is unimportant; this is a regression test for allocating the
+	// entire file growth in one shot.
+	record := strings.Repeat("x", 1023) + "\n"
+	appendTo(t, path, strings.Repeat(record, tailReadChunk/len(record)*3))
+
+	tail := NewTail(path)
+	var total int
+	previous := int64(0)
+	for tail.Offset() < int64(tailReadChunk*3) {
+		lines := mustRead(t, tail)
+		total += len(lines)
+		advanced := tail.Offset() - previous
+		if advanced <= 0 || advanced > tailReadChunk {
+			t.Fatalf("one read advanced %d bytes, want 1..%d", advanced, tailReadChunk)
+		}
+		previous = tail.Offset()
+	}
+	if total != tailReadChunk/len(record)*3 {
+		t.Fatalf("tailed %d records, want %d", total, tailReadChunk/len(record)*3)
+	}
+}
+
+func TestTailRejectsNewlineTerminatedOversizedLine(t *testing.T) {
+	path := writeFixture(t, []string{strings.Repeat("x", MaxLineBytes+1)})
+	tail := NewTail(path)
+	for tail.Offset() < MaxLineBytes {
+		if _, err := tail.Read(); err != nil {
+			return
+		}
+	}
+	if _, err := tail.Read(); err == nil {
+		t.Fatal("newline-terminated oversized line bypassed the tail memory bound")
 	}
 }
 

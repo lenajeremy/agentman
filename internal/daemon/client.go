@@ -22,6 +22,10 @@ const (
 	// relay redeploys — all routine, none worth surfacing as an error.
 	minBackoff = time.Second
 	maxBackoff = 30 * time.Second
+	// A paired device is trusted to control the user's agents, but it must not
+	// be able to exhaust the daemon with an unbounded number of simultaneous
+	// history reads or process-control requests.
+	maxConcurrentRequests = 32
 )
 
 // Client connects a daemon to a relay and keeps that connection alive.
@@ -33,9 +37,11 @@ type Client struct {
 	ws *websocket.Conn
 
 	// OnPairCode is called when the relay issues a pairing code.
-	OnPairCode func(code string, expiresAt time.Time)
+	OnPairCode func(code, token string, expiresAt time.Time)
 	// OnStatus reports connection transitions for the CLI to display.
 	OnStatus func(connected bool, detail string)
+	// OnDeviceDisconnected releases subscriptions owned by one app socket.
+	OnDeviceDisconnected func(deviceID string)
 }
 
 // NewClient creates a relay client. The URL may use http(s) or ws(s).
@@ -72,6 +78,9 @@ func (c *Client) Send(event protocol.Event) error {
 	if err != nil {
 		return err
 	}
+	if len(frame) > maxFrame {
+		return fmt.Errorf("daemon: event exceeds websocket frame limit")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
 	defer cancel()
@@ -103,7 +112,10 @@ func (c *Client) RequestPairCode(ctx context.Context) error {
 
 // Run maintains the relay connection until ctx is cancelled, dispatching app
 // requests to the handler.
-func (c *Client) Run(ctx context.Context, handler func(context.Context, protocol.Request) protocol.Event) error {
+func (c *Client) Run(
+	ctx context.Context,
+	handler func(context.Context, string, protocol.Request) protocol.Event,
+) error {
 	backoff := minBackoff
 
 	for {
@@ -111,6 +123,7 @@ func (c *Client) Run(ctx context.Context, handler func(context.Context, protocol
 			return nil
 		}
 
+		attemptStarted := time.Now()
 		err := c.connectOnce(ctx, handler)
 		if ctx.Err() != nil {
 			return nil
@@ -122,6 +135,11 @@ func (c *Client) Run(ctx context.Context, handler func(context.Context, protocol
 				detail = err.Error()
 			}
 			c.OnStatus(false, detail)
+		}
+		// A connection that stayed healthy has paid off the previous failures;
+		// do not make the next routine network handover inherit a 30-second wait.
+		if time.Since(attemptStarted) >= 30*time.Second {
+			backoff = minBackoff
 		}
 
 		// Jittered backoff: without it, every daemon reconnects in lockstep
@@ -136,7 +154,10 @@ func (c *Client) Run(ctx context.Context, handler func(context.Context, protocol
 	}
 }
 
-func (c *Client) connectOnce(ctx context.Context, handler func(context.Context, protocol.Request) protocol.Event) error {
+func (c *Client) connectOnce(
+	ctx context.Context,
+	handler func(context.Context, string, protocol.Request) protocol.Event,
+) error {
 	dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
@@ -151,9 +172,21 @@ func (c *Client) connectOnce(ctx context.Context, handler func(context.Context, 
 	c.mu.Lock()
 	c.ws = ws
 	c.mu.Unlock()
+	connectionCtx, stopConnection := context.WithCancel(ctx)
+	devices := map[string]struct{}{}
+	var requestWG sync.WaitGroup
 	defer func() {
+		stopConnection()
+		requestWG.Wait()
+		if c.OnDeviceDisconnected != nil {
+			for deviceID := range devices {
+				c.OnDeviceDisconnected(deviceID)
+			}
+		}
 		c.mu.Lock()
-		c.ws = nil
+		if c.ws == ws {
+			c.ws = nil
+		}
 		c.mu.Unlock()
 		ws.CloseNow()
 	}()
@@ -164,9 +197,10 @@ func (c *Client) connectOnce(ctx context.Context, handler func(context.Context, 
 
 	// Send the current session list immediately: a phone that reconnects
 	// should see agents without waiting for the next discovery tick.
-	if event := handler(ctx, protocol.Request{Type: protocol.ReqListSessions}); event.Type != "" {
+	if event := handler(connectionCtx, "", protocol.Request{Type: protocol.ReqListSessions}); event.Type != "" {
 		_ = c.Send(event)
 	}
+	requests := make(chan struct{}, maxConcurrentRequests)
 
 	for {
 		_, data, err := ws.Read(ctx)
@@ -178,14 +212,23 @@ func (c *Client) connectOnce(ctx context.Context, handler func(context.Context, 
 		if json.Unmarshal(data, &envelope) != nil {
 			continue
 		}
+		if envelope.V != protocol.Version {
+			continue
+		}
 
 		if envelope.To == protocol.PeerRelay {
-			c.handleControl(envelope)
+			if disconnected := c.handleControl(envelope); disconnected != "" {
+				delete(devices, disconnected)
+			}
 			continue
 		}
 		if envelope.To != protocol.PeerDaemon {
 			continue
 		}
+		if envelope.From == "" {
+			continue
+		}
+		devices[envelope.From] = struct{}{}
 
 		req, err := DecodeRequest(envelope.Payload)
 		if err != nil {
@@ -194,43 +237,51 @@ func (c *Client) connectOnce(ctx context.Context, handler func(context.Context, 
 
 		// Each request is handled on its own goroutine so a slow page read
 		// cannot stall live events or another request behind it.
-		go func(req protocol.Request, replyTo string) {
-			event := handler(ctx, req)
+		select {
+		case requests <- struct{}{}:
+		default:
+			c.sendReplyOn(ws, envelope.ID, protocol.Event{
+				Type: protocol.EvtError, Error: "daemon is handling too many requests",
+			})
+			continue
+		}
+		requestWG.Add(1)
+		go func(req protocol.Request, replyTo, deviceID string) {
+			defer requestWG.Done()
+			defer func() { <-requests }()
+			event := handler(connectionCtx, deviceID, req)
 			if event.Type == "" {
 				return // acknowledged with nothing to say (subscribe/unsubscribe)
 			}
-			c.sendReply(replyTo, event)
-		}(req, envelope.ID)
+			c.sendReplyOn(ws, replyTo, event)
+		}(req, envelope.ID, envelope.From)
 	}
 }
 
-func (c *Client) handleControl(envelope protocol.Envelope) {
+func (c *Client) handleControl(envelope protocol.Envelope) string {
 	var control protocol.Control
 	if json.Unmarshal(envelope.Payload, &control) != nil {
-		return
+		return ""
 	}
 	if control.Type == protocol.CtlPairCode && c.OnPairCode != nil {
-		c.OnPairCode(control.Code, time.UnixMilli(control.ExpiresAt))
+		c.OnPairCode(control.Code, control.Token, time.UnixMilli(control.ExpiresAt))
 	}
+	if control.Type == protocol.CtlAppDisconnected &&
+		control.DeviceID != "" && c.OnDeviceDisconnected != nil {
+		c.OnDeviceDisconnected(control.DeviceID)
+		return control.DeviceID
+	}
+	return ""
 }
 
-// sendReply sends an event tagged with the request it answers, so the app can
-// match a page to the scroll that asked for it.
-func (c *Client) sendReply(replyTo string, event protocol.Event) {
-	c.mu.Lock()
-	ws := c.ws
-	c.mu.Unlock()
-	if ws == nil {
-		return
-	}
-
+func (c *Client) sendReplyOn(ws *websocket.Conn, replyTo string, event protocol.Event) {
 	envelope, err := protocol.NewEnvelope(newID(), protocol.PeerApp, event)
 	if err != nil {
 		return
 	}
 	envelope.ReplyTo = replyTo
 	frame, err := json.Marshal(envelope)
-	if err != nil {
+	if err != nil || len(frame) > maxFrame {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)

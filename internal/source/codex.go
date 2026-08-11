@@ -34,7 +34,8 @@ import (
 // Neither is sufficient alone — the process check cannot say *which* rollout
 // is live, and recency alone keeps showing sessions long after Codex quits.
 // This is the weakest part of Codex support and it is deliberately contained
-// here: hooks (Phase 2) replace the guess with an exact signal.
+// here. Codex's supported notifier reports turn completion but not a complete
+// live-session registry, so polling still owns discovery and busy state.
 const codexLiveWindow = 30 * time.Minute
 
 // processCheckTimeout bounds the liveness probe so a wedged pgrep cannot stall
@@ -71,8 +72,6 @@ type CodexSource struct {
 	// processCheck is injectable so discovery can be tested without depending
 	// on whether the machine running the tests happens to have Codex open.
 	processCheck func(context.Context) bool
-	// pending holds messages for sessions with no live input channel.
-	pending *PendingQueue
 	// listPanes is injectable for the same reason as processCheck: tmux is a
 	// machine-wide server, so without this a test with its own fake home would
 	// still discover whatever panes happen to be open on the host.
@@ -230,7 +229,7 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			state, lastActivity := codexActivity(path, modTime)
 
 			tmuxName := ""
-			inject := protocol.InjectHook
+			inject := protocol.InjectNone
 			pane, hasPane := paneByCwd[meta.Payload.Cwd]
 			if hasPane && !ambiguous[meta.Payload.Cwd] && !claimed[pane.Name] {
 				claimed[pane.Name] = true
@@ -452,16 +451,35 @@ func (s *CodexSource) Follow(ctx context.Context, sessionID string, out chan<- [
 		return fmt.Errorf("source: unknown codex session %q", sessionID)
 	}
 
-	if session.transcript == "" {
-		// Nothing to follow yet; discovery will re-key this session with a
-		// transcript once the first turn writes one.
-		<-ctx.Done()
-		return ctx.Err()
+	startedWithoutTranscript := session.transcript == ""
+	if startedWithoutTranscript {
+		// A wrapped Codex pane exists before its first rollout. Keep this same
+		// subscription alive until discovery attaches the rollout to the stable
+		// tmux-backed id; otherwise the app remains subscribed to a tail that can
+		// never emit anything after the first prompt.
+		wait := time.NewTicker(followInterval)
+		defer wait.Stop()
+		for session.transcript == "" {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-wait.C:
+				s.mu.RLock()
+				updated, stillLive := s.sessions[sessionID]
+				s.mu.RUnlock()
+				if !stillLive {
+					return fmt.Errorf("source: codex session %q ended", sessionID)
+				}
+				session = updated
+			}
+		}
 	}
 
 	tail := jsonl.NewTail(session.transcript)
-	if err := tail.SeekToEnd(); err != nil && !os.IsNotExist(err) {
-		return err
+	if !startedWithoutTranscript {
+		if err := tail.SeekToEnd(); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
 	p := parser.NewCodexParser(sessionID)
 

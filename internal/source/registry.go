@@ -20,11 +20,19 @@ import (
 type Registry struct {
 	mu      sync.RWMutex
 	sources map[protocol.Kind]Source
+	// last keeps the most recent successful snapshot per adapter. A transient
+	// API/read error must not announce every session of that kind as ended and
+	// tear down its live follows; the next successful empty snapshot is what
+	// confirms they are genuinely gone.
+	last map[protocol.Kind][]protocol.Session
 }
 
 // NewRegistry creates an empty registry.
 func NewRegistry() *Registry {
-	return &Registry{sources: map[protocol.Kind]Source{}}
+	return &Registry{
+		sources: map[protocol.Kind]Source{},
+		last:    map[protocol.Kind][]protocol.Session{},
+	}
 }
 
 // Add registers an adapter.
@@ -32,6 +40,7 @@ func (r *Registry) Add(s Source) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.sources[s.Kind()] = s
+	delete(r.last, s.Kind())
 }
 
 // Kinds lists the registered adapter kinds, sorted for stable output.
@@ -71,11 +80,22 @@ func (r *Registry) Discover(ctx context.Context) ([]protocol.Session, error) {
 		go func(s Source) {
 			defer wg.Done()
 			sessions, err := s.Discover(ctx)
+			if err != nil && sessions == nil {
+				r.mu.RLock()
+				sessions = append([]protocol.Session(nil), r.last[s.Kind()]...)
+				r.mu.RUnlock()
+			} else {
+				// A non-nil slice alongside an error is an adapter-owned partial
+				// snapshot. OpenCode uses this to merge the last known routes from
+				// one failed local server with fresh data from the others.
+				r.mu.Lock()
+				r.last[s.Kind()] = append([]protocol.Session(nil), sessions...)
+				r.mu.Unlock()
+			}
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
 				failures = append(failures, fmt.Sprintf("%s: %v", s.Kind(), err))
-				return
 			}
 			all = append(all, sessions...)
 		}(s)
@@ -150,11 +170,16 @@ func (r *Registry) Inject(ctx context.Context, sessionID, text string) (protocol
 
 // Answerer is implemented by adapters that can resolve a pending question.
 type Answerer interface {
-	Answer(ctx context.Context, sessionID, optionKey string) error
+	Answer(ctx context.Context, sessionID string, answer protocol.QuestionAnswer) error
+}
+
+// Interrupter is implemented by adapters that can stop an active turn.
+type Interrupter interface {
+	Interrupt(ctx context.Context, sessionID string) error
 }
 
 // Answer routes a decision to the adapter owning the session.
-func (r *Registry) Answer(ctx context.Context, sessionID, optionKey string) error {
+func (r *Registry) Answer(ctx context.Context, sessionID string, answer protocol.QuestionAnswer) error {
 	s, err := r.forSession(sessionID)
 	if err != nil {
 		return err
@@ -163,7 +188,20 @@ func (r *Registry) Answer(ctx context.Context, sessionID, optionKey string) erro
 	if !ok {
 		return fmt.Errorf("source: %s questions cannot be answered remotely", s.Kind())
 	}
-	return answerer.Answer(ctx, sessionID, optionKey)
+	return answerer.Answer(ctx, sessionID, answer)
+}
+
+// Interrupt routes cancellation to the adapter owning the session.
+func (r *Registry) Interrupt(ctx context.Context, sessionID string) error {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return err
+	}
+	interrupter, ok := s.(Interrupter)
+	if !ok {
+		return fmt.Errorf("source: %s sessions cannot be interrupted remotely", s.Kind())
+	}
+	return interrupter.Interrupt(ctx, sessionID)
 }
 
 func (r *Registry) forSession(sessionID string) (Source, error) {

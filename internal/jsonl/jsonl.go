@@ -35,6 +35,12 @@ const (
 	// line can legitimately be enormous (a tool result holding a whole file),
 	// but a corrupt or binary file must not be able to exhaust memory.
 	MaxLineBytes = 32 * 1024 * 1024
+
+	// tailReadChunk bounds how much newly appended data one Tail.Read call can
+	// allocate. Tool output can grow a transcript by hundreds of megabytes
+	// between polls; allocating size-offset before inspecting it lets one turn
+	// exhaust the daemon. Subsequent polls continue from the advanced offset.
+	tailReadChunk = 1024 * 1024
 )
 
 // NoCursor is returned as NextCursor when a read reached the head of the file,
@@ -141,12 +147,20 @@ func CollectBackward(path string, opts BackwardOptions) (BackwardResult, error) 
 			pos = start
 			continue
 		}
+		if newlines[0] > MaxLineBytes {
+			return BackwardResult{NextCursor: NoCursor}, fmt.Errorf(
+				"jsonl: %s: line exceeds %d bytes at offset %d", path, MaxLineBytes, start)
+		}
 
 		// Lines fully contained between two newlines, emitted right-to-left so
 		// we can stop the moment the page is full.
 		for j := len(newlines) - 1; j >= 1 && len(found) < opts.Want; j-- {
 			from := newlines[j-1] + 1
 			to := newlines[j]
+			if to-from > MaxLineBytes {
+				return BackwardResult{NextCursor: NoCursor}, fmt.Errorf(
+					"jsonl: %s: line exceeds %d bytes at offset %d", path, MaxLineBytes, start+int64(from))
+			}
 			abs := start + int64(from)
 			if appendReversed(opts.Map(string(combined[from:to]), abs), &found) {
 				oldest = abs
@@ -282,10 +296,12 @@ func (t *Tail) Read() ([]Line, error) {
 		return nil, nil
 	}
 
-	buf := make([]byte, size-t.offset)
+	readLen := min(size-t.offset, int64(tailReadChunk))
+	buf := make([]byte, readLen)
 	if _, err := f.ReadAt(buf, t.offset); err != nil && err != io.EOF {
 		return nil, err
 	}
+	nextOffset := t.offset + readLen
 
 	combined := buf
 	if len(t.carry) > 0 {
@@ -304,6 +320,10 @@ func (t *Tail) Read() ([]Line, error) {
 			break
 		}
 		end := lineStart + n
+		if end-lineStart > MaxLineBytes {
+			return nil, fmt.Errorf("jsonl: %s: line exceeds %d bytes at offset %d",
+				t.path, MaxLineBytes, base+int64(lineStart))
+		}
 		lines = append(lines, Line{
 			Text:   string(combined[lineStart:end]),
 			Offset: base + int64(lineStart),
@@ -316,7 +336,7 @@ func (t *Tail) Read() ([]Line, error) {
 		return nil, fmt.Errorf("jsonl: %s: unterminated line exceeds %d bytes", t.path, MaxLineBytes)
 	}
 	t.carry = append([]byte(nil), rest...)
-	t.offset = size
+	t.offset = nextOffset
 
 	return lines, nil
 }

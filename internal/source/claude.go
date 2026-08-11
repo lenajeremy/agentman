@@ -1,9 +1,11 @@
 package source
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -17,6 +19,8 @@ import (
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/tmux"
 )
+
+const maxClaudeRegistryBytes = 1 << 20
 
 // Claude Code maintains a live registry at ~/.claude/sessions/<pid>.json, one
 // file per running session, carrying the pid, session id, cwd, a friendly
@@ -112,13 +116,13 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		raw, err := os.ReadFile(filepath.Join(s.sessionsDir(), entry.Name()))
+		raw, err := readBoundedFile(filepath.Join(s.sessionsDir(), entry.Name()), maxClaudeRegistryBytes)
 		if err != nil {
 			continue // the session ended mid-read; it will be gone next sweep
 		}
 
 		var file claudeSessionFile
-		if json.Unmarshal(raw, &file) != nil || file.SessionID == "" {
+		if json.Unmarshal(raw, &file) != nil || !validClaudeSessionID(file.SessionID) {
 			continue
 		}
 		// A registry file outlives a crashed session, so the pid is the real
@@ -196,6 +200,35 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 	s.mu.Unlock()
 
 	return found, nil
+}
+
+func readBoundedFile(path string, limit int64) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	var body bytes.Buffer
+	if _, err := body.ReadFrom(io.LimitReader(file, limit+1)); err != nil {
+		return nil, err
+	}
+	if int64(body.Len()) > limit {
+		return nil, fmt.Errorf("source: %s exceeds %d bytes", path, limit)
+	}
+	return body.Bytes(), nil
+}
+
+func validClaudeSessionID(id string) bool {
+	if id == "" || len(id) > 256 {
+		return false
+	}
+	for _, r := range id {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') &&
+			(r < '0' || r > '9') && r != '-' && r != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 // transcriptPath resolves a session's JSONL file.

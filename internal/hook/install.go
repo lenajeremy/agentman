@@ -41,23 +41,6 @@ type Plan struct {
 	Err error
 }
 
-// command is one hook handler entry.
-//
-// The exec form (command plus args) is used rather than a shell string so
-// nothing in a path needs quoting and no shell is spawned per event.
-type command struct {
-	Type    string   `json:"type"`
-	Command string   `json:"command"`
-	Args    []string `json:"args,omitempty"`
-	Timeout int      `json:"timeout,omitempty"`
-}
-
-// matcherGroup is the { matcher, hooks } shape both CLIs use.
-type matcherGroup struct {
-	Matcher string    `json:"matcher,omitempty"`
-	Hooks   []command `json:"hooks"`
-}
-
 // Plans computes the changes for every supported agent without applying them.
 func (in Installer) Plans(token string, remove bool) ([]Plan, error) {
 	home := in.Home
@@ -83,17 +66,17 @@ func (p Plan) Apply() error {
 	if !p.Changed {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(p.Path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(p.Path), 0o700); err != nil {
 		return err
 	}
 	// Back up whatever is there now. These are the user's real agent configs;
 	// a one-command undo matters more than tidiness.
 	if p.Before != "" {
-		if err := writeFileAtomic(p.Path+".agentman.bak", []byte(p.Before), 0o644); err != nil {
+		if err := writeFileAtomic(p.Path+".agentman.bak", []byte(p.Before), 0o600); err != nil {
 			return err
 		}
 	}
-	return writeFileAtomic(p.Path, []byte(p.After), 0o644)
+	return writeFileAtomic(p.Path, []byte(p.After), 0o600)
 }
 
 /* --------------------------------- Claude -------------------------------- */
@@ -162,18 +145,13 @@ func (in Installer) planClaude(home, token string, remove bool) Plan {
 /* --------------------------------- Codex --------------------------------- */
 
 func (in Installer) planCodex(home, token string, remove bool) Plan {
-	path := filepath.Join(home, ".codex", "hooks.json")
+	path := filepath.Join(home, ".codex", "config.toml")
 	plan := Plan{
 		Kind: protocol.KindCodex,
 		Path: path,
-		// Stated plainly because we could not confirm it. The Codex binary
-		// contains the same hook machinery and snake_case event names, but it
-		// ships no schema, `codex doctor` does not validate hooks, and
-		// confirming it needs a live authenticated session. `am doctor`
-		// reports whether Codex hooks have ever actually fired, so this stays
-		// visible instead of being assumed.
-		Note: "schema unverified — run `am doctor` after a Codex turn to confirm it fires",
+		Note: "uses Codex's supported `notify` command for turn-complete events",
 	}
+	_ = token // read by the invoked am process from its private config file
 
 	raw, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -182,37 +160,69 @@ func (in Installer) planCodex(home, token string, remove bool) Plan {
 	}
 	plan.Before = string(raw)
 
-	config := map[string]any{}
-	if len(strings.TrimSpace(string(raw))) > 0 {
-		if err := json.Unmarshal(raw, &config); err != nil {
-			plan.Err = fmt.Errorf("%s is not valid JSON (%w) — fix or move it, then re-run", path, err)
-			return plan
-		}
-	}
-
-	for _, name := range Installed {
-		key := CodexEventKey(name)
-		groups := stripOurGroups(config[key])
-		if !remove {
-			groups = append(groups, map[string]any{
-				"hooks": []any{ourCommand(in.Binary, protocol.KindCodex, name, token)},
-			})
-		}
-		if len(groups) == 0 {
-			delete(config, key)
-			continue
-		}
-		config[key] = groups
-	}
-
-	after, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		plan.Err = err
+	base, _ := stripCodexNotifyBlock(plan.Before)
+	if remove {
+		plan.After = base
+		plan.Changed = plan.After != plan.Before
 		return plan
 	}
-	plan.After = string(after) + "\n"
-	plan.Changed = normalizeJSON(plan.Before) != normalizeJSON(plan.After)
+	if hasTopLevelTOMLKey(base, "notify") {
+		plan.Err = fmt.Errorf(
+			"%s already defines `notify`; refusing to replace the user's command", path)
+		return plan
+	}
+
+	quotedBinary, _ := json.Marshal(in.Binary)
+	block := codexNotifyBegin + "\n" +
+		"notify = [" + string(quotedBinary) + ", \"hook\", \"codex\", \"Stop\"]\n" +
+		codexNotifyEnd + "\n"
+	plan.After = block + strings.TrimLeft(base, "\n")
+	plan.Changed = plan.After != plan.Before
 	return plan
+}
+
+const (
+	codexNotifyBegin = "# agentman: managed Codex turn notification"
+	codexNotifyEnd   = "# agentman: end managed Codex turn notification"
+)
+
+func stripCodexNotifyBlock(text string) (string, bool) {
+	start := strings.Index(text, codexNotifyBegin)
+	if start < 0 {
+		return text, false
+	}
+	relativeEnd := strings.Index(text[start:], codexNotifyEnd)
+	if relativeEnd < 0 {
+		return text, false
+	}
+	end := start + relativeEnd + len(codexNotifyEnd)
+	if end < len(text) && text[end] == '\r' {
+		end++
+	}
+	if end < len(text) && text[end] == '\n' {
+		end++
+	}
+	return text[:start] + text[end:], true
+}
+
+// hasTopLevelTOMLKey looks only before the first table header. TOML never
+// returns to the document root after entering a table, so this avoids
+// mistaking `[profile.work] notify = ...` for the global Codex notifier.
+func hasTopLevelTOMLKey(text, wanted string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "[") {
+			return false
+		}
+		key, _, ok := strings.Cut(trimmed, "=")
+		if ok && strings.TrimSpace(key) == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 /* --------------------------------- shared -------------------------------- */
@@ -288,7 +298,7 @@ func isOurCommand(value any) bool {
 	// recognized and replaced instead of accumulating duplicates.
 	command, _ := entry["command"].(string)
 	base := filepath.Base(command)
-	return base == "am" || strings.Contains(base, "agentman")
+	return base == "am" || base == "agentman"
 }
 
 // normalizeJSON compares configs by structure rather than formatting, so
