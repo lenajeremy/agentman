@@ -28,4 +28,5 @@ web-build/
 
 # agentman local state (machine identifiers, pairing tokens — never commit)
 .agentman/
-dist/
+# GoReleaser output
+/dist/

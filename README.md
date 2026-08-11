@@ -355,6 +355,25 @@ reachable from your phone.
 
 ---
 
+## Releasing
+
+Push a version tag; everything else is automated.
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+[GoReleaser](.goreleaser.yaml) runs the tests, cross-compiles for macOS and
+Linux on both architectures, publishes the GitHub release, and opens the cask
+update on the tap with checksums it computed itself. That last part is why this
+is automated at all — the hashes were previously transcribed by hand, and
+getting one wrong fails `brew install` with an error that says nothing about
+the cause.
+
+Requires one repository secret, `HOMEBREW_TAP_TOKEN`: a token with write access
+to `lenajeremy/homebrew-agentman`. The default `GITHUB_TOKEN` is scoped to this
+repository alone and cannot push to the tap.
+
 ## Contributing
 
 The interesting extension point is

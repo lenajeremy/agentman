@@ -1,0 +1,118 @@
+# Release automation.
+#
+# Replaces a hand-run sequence that was easy to get wrong: cross-compile four
+# binaries, tar them, compute SHA-256s by hand, paste those into a formula in a
+# second repository, and cut a release. The hashes were the dangerous part —
+# transcribe one wrong and `brew install` fails with a checksum mismatch that
+# says nothing about the cause.
+#
+# Cut a release by pushing a tag:
+#
+#     git tag v0.2.0 && git push origin v0.2.0
+version: 2
+
+project_name: agentman
+
+before:
+  hooks:
+    - go mod tidy
+    # A tagged build is the one nobody reviews before it ships, so it is the
+    # one that most needs the tests to have run.
+    - go test ./...
+
+builds:
+  # Only the daemon is distributed. The relay is deployed as a container and
+  # the app ships through Expo, so neither belongs in a Homebrew formula.
+  - id: am
+    main: ./cmd/am
+    # The command is `am`; without this GoReleaser names the binary after the
+    # project and the cask installs something the docs never mention.
+    binary: am
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      # Without this the binary cannot report its own version, which matters
+      # most for `brew install` where the user did not build it themselves.
+      - -s -w -X main.version={{ .Version }}
+    # Reproducible: strip local paths and pin the timestamp to the commit.
+    flags: [-trimpath]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: am
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+# Homebrew ships as a Cask rather than a Formula: GoReleaser deprecated the
+# Formula path for prebuilt binaries, and a Cask is the supported way to
+# distribute something already compiled.
+homebrew_casks:
+  - name: agentman
+    # The archive contains `am`; without naming it here the cask defaults to
+    # the project name and tries to link a file that does not exist.
+    binaries:
+      - am
+    homepage: https://github.com/lenajeremy/agentman
+    description: Watch your coding agents from your phone and answer them when they get stuck
+    repository:
+      owner: lenajeremy
+      name: homebrew-agentman
+      # GITHUB_TOKEN is scoped to this repository, so publishing to the tap
+      # needs its own token with write access there.
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    # Required to send messages to Claude Code or Codex and to answer the
+    # prompts that block them — the headline feature on two of three agents.
+    # Homebrew serves a prebuilt bottle, so this costs a download, not a build.
+    dependencies:
+      - formula: tmux
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            # The binary is downloaded rather than built locally and is not
+            # notarized, so Gatekeeper quarantines it and macOS refuses to run
+            # it at all. Stripping the attribute is what makes an unsigned
+            # cask usable.
+            system_command "/usr/bin/xattr",
+                           args: ["-dr", "com.apple.quarantine", "#{staged_path}/am"]
+          end
+    caveats: |
+      Get started:
+
+        am install-hooks
+        am serve
+        am pair
+
+      Then launch agents through the wrapper so you can message them back:
+
+        am claude
+        am codex
+
+      `am` uses the public relay by default. It stores nothing — to run your
+      own, see https://github.com/lenajeremy/agentman#self-hosting-the-relay
+
+release:
+  footer: |
+    ## Install
+
+    ```bash
+    brew install lenajeremy/agentman/agentman
+    ```

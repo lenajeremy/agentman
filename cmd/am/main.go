@@ -20,6 +20,11 @@ import (
 	"github.com/lenajeremy/agentman/internal/source"
 )
 
+// version is stamped at build time with -ldflags "-X main.version=...".
+// Without it a released binary cannot say what it is, which matters most for
+// the one path where the user did not build it themselves: `brew install`.
+var version = "dev"
+
 const usage = `am — monitor your local coding agents
 
 Usage:
@@ -34,6 +39,7 @@ Usage:
   am install-hooks            Register agentman's hooks with your agents
   am uninstall-hooks          Remove them again
   am doctor                   Check that everything is wired up correctly
+  am version                  Print the version
 
 Flags:
   -json                       Machine-readable output
@@ -84,6 +90,9 @@ func main() {
 		err = runSend(ctx, args)
 	case "doctor":
 		err = runDoctor(ctx, args)
+	case "version", "--version", "-v":
+		fmt.Printf("agentman %s\n", version)
+		return
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return
