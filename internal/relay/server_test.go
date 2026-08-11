@@ -3,7 +3,6 @@ package relay
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -20,7 +19,9 @@ const testSecret = "test-secret-long-enough"
 
 func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
-	server := NewServer(testSecret, "test", slog.New(slog.DiscardHandler))
+	// Tests forge X-Forwarded-For to stand in for distinct callers, which only
+	// means anything when the header is trusted.
+	server := NewServer(testSecret, "test", slog.New(slog.DiscardHandler), true)
 	http := httptest.NewServer(server.Handler())
 	t.Cleanup(http.Close)
 	return server, http
@@ -261,23 +262,14 @@ func TestBruteForceIsRateLimitedPerCaller(t *testing.T) {
 	}
 }
 
-func TestFloodOnOneShardLeavesOtherAccountsPairable(t *testing.T) {
-	// The point of putting a shard inside the code: a wrong guess names no
-	// account, so without one the only place to charge it is a bucket shared
-	// by everybody, and a flood locks out every user of a public relay. With
-	// it, the damage stops at a hundredth of accounts.
+func TestOneCallersGuessingDoesNotAffectAnother(t *testing.T) {
+	// The property that replaced sharding. An earlier design charged failures
+	// to a group of accounts, which meant one person mistyping could stop
+	// everyone in that group from pairing. Behind a proxy that overwrites
+	// X-Forwarded-For the caller is known exactly, so a failure is charged to
+	// them alone and no innocent user is ever caught in it.
 	server, ts := newTestServer(t)
-
-	victim := DeriveAccount("victim-daemon")
-	attacked := DeriveAccount("attacked-daemon")
-	if ShardForAccount(victim) == ShardForAccount(attacked) {
-		attacked = DeriveAccount("attacked-daemon-2")
-		if ShardForAccount(victim) == ShardForAccount(attacked) {
-			t.Skip("both fixtures landed in the same shard")
-		}
-	}
-
-	victimCode, err := server.hub.NewPairingCode(victim)
+	code, err := server.hub.NewPairingCode(DeriveAccount("victim-daemon"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,23 +287,58 @@ func TestFloodOnOneShardLeavesOtherAccountsPairable(t *testing.T) {
 		return resp.StatusCode
 	}
 
-	// Flood one shard from many forged addresses, so it is the shard budget
-	// that fills rather than any single caller's.
-	attackedShard := ShardForAccount(attacked)
-	for i := range 40 {
-		guess(fmt.Sprintf("10.9.0.%d", i), attackedShard+"000000")
+	// One caller guesses until they are cut off.
+	var blocked bool
+	for range 30 {
+		if guess("198.51.100.7", "00000000") == http.StatusTooManyRequests {
+			blocked = true
+			break
+		}
+	}
+	if !blocked {
+		t.Fatal("guessing was never rate limited")
 	}
 
-	// That shard is now shut: the attack is contained, not ignored.
-	if status := guess("10.9.1.1", attackedShard+"111111"); status != http.StatusTooManyRequests {
-		t.Errorf("attacked shard returned HTTP %d, want 429 — the flood was not contained", status)
+	// Everyone else is unaffected, including the owner of a real code.
+	if status := guess("203.0.113.9", "11111111"); status != http.StatusForbidden {
+		t.Errorf("an unrelated caller got HTTP %d, want 403 — they were caught "+
+			"in someone else's rate limit", status)
 	}
+	if _, status := redeem(t, ts.URL, code); status != http.StatusOK {
+		t.Errorf("the victim could not pair (HTTP %d) while another caller was "+
+			"being rate limited", status)
+	}
+}
 
-	// And the victim, in a different shard, pairs normally.
-	token, status := redeem(t, ts.URL, victimCode)
-	if status != http.StatusOK || token == "" {
-		t.Fatalf("victim got HTTP %d: a flood against another account's shard "+
-			"blocked an unrelated pairing", status)
+func TestIPv6CallersAreGroupedBySubnet(t *testing.T) {
+	// A single subscriber is routinely handed a /64, so limiting per full v6
+	// address would give one attacker 2^64 buckets and no limit at all.
+	server, _ := newTestServer(t)
+	req := func(addr string) string {
+		r, _ := http.NewRequest(http.MethodPost, "http://x/pair", nil)
+		r.Header.Set("X-Forwarded-For", addr)
+		return server.clientKey(r)
+	}
+	if a, b := req("2001:db8:1:2::1"), req("2001:db8:1:2::9999"); a != b {
+		t.Errorf("addresses in one /64 landed in different buckets: %q vs %q", a, b)
+	}
+	if a, b := req("2001:db8:1:2::1"), req("2001:db8:9:9::1"); a == b {
+		t.Errorf("different /64s shared a bucket: %q", a)
+	}
+}
+
+func TestForgedForwardedForIsIgnoredWithoutAProxy(t *testing.T) {
+	// The header is client-supplied. A relay exposed directly must not believe
+	// it, or an attacker mints a fresh bucket per request and per-caller
+	// limiting stops existing.
+	direct := NewServer(testSecret, "test", slog.New(slog.DiscardHandler), false)
+
+	r, _ := http.NewRequest(http.MethodPost, "http://x/pair", nil)
+	r.RemoteAddr = "192.0.2.10:5555"
+	r.Header.Set("X-Forwarded-For", "198.51.100.1")
+
+	if key := direct.clientKey(r); key != "192.0.2.10" {
+		t.Errorf("clientKey = %q, want the socket address — a forged header was believed", key)
 	}
 }
 
@@ -330,6 +357,60 @@ func TestSuccessfulPairingSpendsNoBudget(t *testing.T) {
 			t.Fatalf("a valid pairing was rejected with HTTP %d after repeated "+
 				"successful pairings", status)
 		}
+	}
+}
+
+func TestScannedTokenPairsAndIsNotRateLimited(t *testing.T) {
+	// The reason the QR path exists: a scanned secret is never typed, so it can
+	// carry 128 bits, and at that size guessing is not a threat the relay has
+	// to defend against. That in turn means a flood of wrong typed codes — the
+	// thing that can still exhaust a shard budget — cannot stop someone from
+	// pairing by scanning.
+	server, ts := newTestServer(t)
+	account := DeriveAccount("daemon-token")
+
+	secrets, err := server.hub.NewPairing(account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !IsPairingToken(secrets.Token) {
+		t.Fatalf("token %q is not recognised as one", secrets.Token)
+	}
+
+	// Exhaust this caller's typed-code budget.
+	for range 30 {
+		body, _ := json.Marshal(map[string]string{"code": "00000000"})
+		resp, err := http.Post(ts.URL+"/pair", "application/json", strings.NewReader(string(body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	if _, status := redeem(t, ts.URL, secrets.Code); status != http.StatusTooManyRequests {
+		t.Fatalf("typed path returned HTTP %d, want 429 — the setup did not exhaust it", status)
+	}
+
+	// The scanned token still works.
+	token, status := redeem(t, ts.URL, secrets.Token)
+	if status != http.StatusOK || token == "" {
+		t.Fatalf("scanning returned HTTP %d; a long secret needs no rate limiting", status)
+	}
+}
+
+func TestRedeemingOneSecretRetiresTheOther(t *testing.T) {
+	// A pairing consumed by scanning must not still be redeemable by typing,
+	// or the unused half would linger as a second way in for its full minute.
+	server, ts := newTestServer(t)
+	secrets, err := server.hub.NewPairing(DeriveAccount("daemon-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, status := redeem(t, ts.URL, secrets.Token); status != http.StatusOK {
+		t.Fatalf("scanning failed with HTTP %d", status)
+	}
+	if _, status := redeem(t, ts.URL, secrets.Code); status == http.StatusOK {
+		t.Error("the typed code still worked after the pairing was scanned")
 	}
 }
 

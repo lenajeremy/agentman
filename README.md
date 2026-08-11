@@ -26,7 +26,7 @@ brew install lenajeremy/agentman/agentman
 
 am install-hooks          # exact "it's done" signals instead of polling
 am serve                  # leave this running
-am pair                   # prints a 6-digit code for the app
+am pair                   # prints a QR code to scan
 ```
 
 `am` talks to the public relay by default, so there is nothing to configure.
@@ -332,13 +332,20 @@ reachable from your phone.
   are set.
 - Accounts are derived by hashing your daemon token, so the relay never sees or
   stores the token itself.
-- Pairing codes are single-use and expire in sixty seconds. A code is two
-  digits of account shard followed by six random ones: a wrong guess names no
-  account by definition, so without the shard the only place to charge it is a
-  bucket shared by every user, and one flood would lock out the whole relay.
-  The shard lets a failure be charged to the group it was aimed at, so an
-  attack is confined to a hundredth of accounts. Only failures are charged, so
-  typing your code correctly never spends anyone's budget.
+- Pairing offers two secrets for the same sixty-second window: a QR code and
+  eight digits. Redeeming either retires both. The scanned secret is 128 bits,
+  so guessing it is not a threat and that path needs no rate limiting at all —
+  being unreadable by a human is exactly what lets it be strong. The typed code
+  has to stay short, so it carries the protections below.
+- Typed pairing codes are eight random digits, single-use, and expire in sixty
+  seconds. Failed attempts are rate limited per caller, so one person guessing
+  badly never affects anyone else, and only failures are charged — typing your
+  code correctly costs nothing.
+- **Self-hosting note:** the relay identifies callers by socket address unless
+  you set `AGENTMAN_TRUST_PROXY=1`. Set it only when a proxy in front
+  overwrites `X-Forwarded-For` (Railway does). On a directly exposed relay that
+  header is whatever the caller typed, and believing it would let anyone mint a
+  fresh rate-limit bucket per request.
 - Hook deliveries are authenticated with a token from a `0600` file rather than
   argv, since `ps` is world-readable and the loopback listener would otherwise
   accept a forged "turn complete" from any local process.

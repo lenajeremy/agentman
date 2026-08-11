@@ -2,62 +2,28 @@ package relay
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"errors"
-	"fmt"
-	"hash/fnv"
 	"math/big"
 	"sync"
 	"time"
 )
 
-// PairingCodeTTL is how long a pairing code stays valid. Short on purpose, so
-// a guessable code stops being useful almost immediately.
-const PairingCodeTTL = 60 * time.Second
-
-// A pairing code is a two-digit account shard followed by six random digits.
-//
-// The shard exists so a failed guess can be attributed to something. A wrong
-// code belongs to no account by definition — that is what makes it wrong — so
-// without a partition the only place to charge it is a bucket shared by every
-// user, and an attacker flooding that bucket locks everyone out. The shard is
-// derived from the account, so a guess names the group it is aimed at even
-// when it names no code, and the damage stops at that group.
-//
-// The random half stays six digits, so the odds of guessing any particular
-// live code are unchanged; the shard adds addressing, not weakness.
 const (
-	pairingShardDigits  = 2
-	pairingRandomDigits = 6
-	// PairingShards must match pairingShardDigits: 10^2.
-	PairingShards = 100
+	PairingCodeTTL = 60 * time.Second
+	pairingCodeDigits int = 8
+	pairingTokenBytes int = 16
 )
 
-// ShardForAccount returns the bucket an account's codes live in.
-//
-// FNV rather than the account hash itself: the account is already a truncated
-// SHA-256, and reusing its leading digits would put the shard and the identity
-// in the same bits for no reason.
-func ShardForAccount(account AccountID) string {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(account))
-	return fmt.Sprintf("%0*d", pairingShardDigits, h.Sum32()%PairingShards)
-}
-
-// ShardForCode reads the shard out of a submitted code.
-//
-// Returns false for anything malformed, which is deliberately not treated as
-// a shard of its own: garbage would otherwise get a private budget and could
-// be used to avoid rate limiting entirely.
-func ShardForCode(code string) (string, bool) {
-	if len(code) != pairingShardDigits+pairingRandomDigits {
-		return "", false
+// IsPairingToken reports whether a submitted secret is a scanned token rather
+// than a typed code. They are told apart by shape, not by a flag from the
+// client, so a caller cannot claim the token path to dodge rate limiting.
+func IsPairingToken(secret string) bool {
+	if len(secret) != base64.RawURLEncoding.EncodedLen(pairingTokenBytes) {
+		return false
 	}
-	for _, r := range code {
-		if r < '0' || r > '9' {
-			return "", false
-		}
-	}
-	return code[:pairingShardDigits], true
+	_, err := base64.RawURLEncoding.DecodeString(secret)
+	return err == nil
 }
 
 // ErrNoPeer is returned when a frame has nowhere to go.
@@ -77,8 +43,7 @@ type Conn interface {
 // Hub is the relay's entire state: who is connected right now.
 //
 // Everything here is in memory and deliberately disposable. Restarting the
-// relay drops connections, which every client already handles by reconnecting,
-// and loses nothing else because there is nothing else.
+// relay drops connections, which every client already handles by reconnecting.
 type Hub struct {
 	mu sync.RWMutex
 	// daemons holds at most one daemon per account — the newest connection
@@ -97,6 +62,11 @@ type Hub struct {
 type pairing struct {
 	account AccountID
 	expires time.Time
+	// peer is the other key for this same pairing. A pairing is reachable by
+	// two secrets — a long one for scanning and a short one for typing — and
+	// redeeming either has to retire both, or the unused one would linger as a
+	// second way in.
+	peer string
 }
 
 // NewHub creates an empty hub.
@@ -196,26 +166,47 @@ func (h *Hub) ToApps(account AccountID, frame []byte) int {
 	return delivered
 }
 
-// NewPairingCode issues a short-lived code for an account.
-func (h *Hub) NewPairingCode(account AccountID) (string, error) {
-	random, err := randomDigits(pairingRandomDigits)
+// PairingSecrets are the two ways to redeem one pairing.
+type PairingSecrets struct {
+	// Code is eight digits, meant to be read off a screen and typed.
+	Code string
+	// Token is long and random, meant to be scanned from a QR code. Because
+	// nobody types it, it can carry enough entropy that guessing is not a
+	// threat worth rate limiting — which is the whole reason it exists.
+	Token string
+}
+
+// NewPairing issues a short-lived pairing reachable by either secret.
+func (h *Hub) NewPairing(account AccountID) (PairingSecrets, error) {
+	code, err := randomDigits(pairingCodeDigits)
 	if err != nil {
-		return "", err
+		return PairingSecrets{}, err
 	}
-	code := ShardForAccount(account) + random
+	token, err := randomToken(pairingTokenBytes)
+	if err != nil {
+		return PairingSecrets{}, err
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.sweepPairingsLocked()
-	h.pairings[code] = pairing{account: account, expires: time.Now().Add(PairingCodeTTL)}
-	return code, nil
+
+	expires := time.Now().Add(PairingCodeTTL)
+	h.pairings[code] = pairing{account: account, expires: expires, peer: token}
+	h.pairings[token] = pairing{account: account, expires: expires, peer: code}
+	return PairingSecrets{Code: code, Token: token}, nil
+}
+
+// NewPairingCode issues a pairing and returns only its typed code.
+func (h *Hub) NewPairingCode(account AccountID) (string, error) {
+	secrets, err := h.NewPairing(account)
+	return secrets.Code, err
 }
 
 // RedeemPairingCode exchanges a code for the account it authorizes.
 //
 // A code is single use and expires on its own. Brute force is bounded by rate
-// limiting the caller (see limiter) rather than by penalising codes: a wrong
-// guess belongs to nobody in particular, so making outstanding codes pay for
-// it lets any stranger invalidate every other user's pairing on a shared relay.
+// limiting the caller (see limiter.go).
 func (h *Hub) RedeemPairingCode(code string) (AccountID, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -226,7 +217,21 @@ func (h *Hub) RedeemPairingCode(code string) (AccountID, bool) {
 		return "", false
 	}
 	delete(h.pairings, code)
+	// Retire the sibling too: a pairing consumed by scanning must not still be
+	// redeemable by typing, and vice versa.
+	if entry.peer != "" {
+		delete(h.pairings, entry.peer)
+	}
 	return entry.account, true
+}
+
+// randomToken returns a URL-safe secret with n bytes of entropy.
+func randomToken(n int) (string, error) {
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 func (h *Hub) sweepPairingsLocked() {
@@ -246,7 +251,14 @@ func (h *Hub) Stats() (daemons, apps, pendingPairings int) {
 	for _, devices := range h.apps {
 		apps += len(devices)
 	}
-	return len(h.daemons), apps, len(h.pairings)
+	// One pairing occupies two entries — the typed code and the scanned token
+	// — so count only the codes, or /health reports double.
+	for key := range h.pairings {
+		if !IsPairingToken(key) {
+			pendingPairings++
+		}
+	}
+	return len(h.daemons), apps, pendingPairings
 }
 
 func randomDigits(n int) (string, error) {

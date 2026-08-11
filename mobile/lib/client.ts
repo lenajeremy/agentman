@@ -34,6 +34,16 @@ export async function clearCredentials(): Promise<void> {
   await AsyncStorage.removeItem(STORAGE_KEY);
 }
 
+/** Exchange a scanned pairing token for a device token. */
+export async function pairWithToken(
+  relayUrl: string,
+  token: string,
+): Promise<Credentials> {
+  // Same endpoint: the relay tells a scanned token from a typed code by its
+  // shape, so the client cannot pick which path it gets.
+  return pair(relayUrl, token);
+}
+
 /** Exchange a pairing code for a long-lived device token. */
 export async function pair(
   relayUrl: string,

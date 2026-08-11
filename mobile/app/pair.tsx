@@ -63,9 +63,22 @@ export default function Pair() {
         <View style={styles.steps}>
           <Text style={styles.stepLabel}>On your Mac</Text>
           <Text style={styles.stepBody}>
-            Run <Text style={styles.code}>am pair</Text> to get a code. It works for one
-            minute.
+            Run <Text style={styles.code}>am pair</Text>. It prints a QR code and eight
+            digits, both good for one minute.
           </Text>
+        </View>
+
+        <Pressable
+          onPress={() => router.push("/scan")}
+          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+        >
+          <Text style={styles.buttonText}>Scan the QR code</Text>
+        </Pressable>
+
+        <View style={styles.divider}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerLabel}>or type it</Text>
+          <View style={styles.dividerLine} />
         </View>
 
         <View style={styles.field}>
@@ -112,7 +125,7 @@ export default function Pair() {
           {busy ? (
             <ActivityIndicator color={color.ink} />
           ) : (
-            <Text style={styles.buttonText}>Pair this phone</Text>
+            <Text style={styles.buttonText}>Pair with this code</Text>
           )}
         </Pressable>
 
@@ -192,6 +205,9 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { backgroundColor: color.line },
   buttonPressed: { opacity: 0.8 },
+  divider: { flexDirection: "row", alignItems: "center", gap: space.md },
+  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: color.line },
+  dividerLabel: { fontFamily: font.sans, fontSize: size.caption, color: color.faint },
   buttonText: { fontFamily: font.sansBold, fontSize: size.body, color: color.ink },
 
   footnote: {
