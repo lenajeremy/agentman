@@ -9,21 +9,15 @@ import {
   useFonts,
 } from "@expo-google-fonts/ibm-plex-sans";
 import * as Notifications from "expo-notifications";
-import { Stack } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
-import { Platform, UIManager, View } from "react-native";
+import { Platform, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { StoreProvider } from "../lib/store";
 import { color } from "../lib/theme";
-
-// LayoutAnimation is opt-in on Android; without this the tool-row expand
-// snaps instead of easing.
-if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 // Notifications are the product, not a nicety: an alert that arrives silently
 // while the app is open would defeat the point of walking away from the desk.
@@ -35,6 +29,32 @@ Notifications.setNotificationHandler({
     shouldSetBadge: false,
   }),
 });
+
+function NotificationNavigation() {
+  const router = useRouter();
+
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const handled = new Set<string>();
+    const openSession = (response: Notifications.NotificationResponse | null) => {
+      if (!response) return;
+      const identifier = response.notification.request.identifier;
+      if (handled.has(identifier)) return;
+      handled.add(identifier);
+      const sessionId = response.notification.request.content.data?.sessionId;
+      if (typeof sessionId === "string" && sessionId) {
+        router.push(`/session/${encodeURIComponent(sessionId)}`);
+      }
+      void Notifications.clearLastNotificationResponseAsync().catch(() => {});
+    };
+
+    const subscription = Notifications.addNotificationResponseReceivedListener(openSession);
+    void Notifications.getLastNotificationResponseAsync().then(openSession).catch(() => {});
+    return () => subscription.remove();
+  }, [router]);
+
+  return null;
+}
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -48,20 +68,20 @@ export default function RootLayout() {
   useEffect(() => {
     // Web has no notification permission model here; asking throws.
     if (Platform.OS !== "web") {
-	  void (async () => {
-		// Android 13 does not present the notification permission prompt until
-		// the app has created a channel. Local completion alerts use the default
-		// channel when scheduled with an immediate trigger.
-		if (Platform.OS === "android") {
-		  await Notifications.setNotificationChannelAsync("default", {
-			name: "Agent completions",
-			importance: Notifications.AndroidImportance.HIGH,
-			sound: "default",
-			vibrationPattern: [0, 200, 100, 200],
-		  });
-		}
-		await Notifications.requestPermissionsAsync();
-	  })().catch(() => {});
+      void (async () => {
+        // Android 13 does not present the notification permission prompt until
+        // the app has created a channel. Questions and completion alerts share
+        // one high-priority local-alert channel.
+        if (Platform.OS === "android") {
+          await Notifications.setNotificationChannelAsync("default", {
+            name: "Agent alerts",
+            importance: Notifications.AndroidImportance.HIGH,
+            sound: "default",
+            vibrationPattern: [0, 200, 100, 200],
+          });
+        }
+        await Notifications.requestPermissionsAsync();
+      })().catch(() => {});
     }
   }, []);
 
@@ -75,6 +95,7 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <StoreProvider>
+          <NotificationNavigation />
           <StatusBar style="light" />
           <Stack
             screenOptions={{

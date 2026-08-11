@@ -120,9 +120,10 @@ function withSigningTeam(config) {
  *   Notifications capability.
  *
  * Nothing is lost by removing it. The app only ever fires *local*
- * notifications — scheduleNotificationAsync with `trigger: null`, driven by a
- * turn_complete frame that already arrived through the relay websocket — and
- * those need no entitlement. There is no APNs round trip to authorise.
+ * notifications — scheduleNotificationAsync with `trigger: null`, driven by
+ * question/session updates and turn_complete frames that already arrived
+ * through the relay websocket — and those need no entitlement. There is no
+ * APNs round trip to authorise.
  *
  * Set APPLE_PUSH=1 to keep it, which is what a paid account doing real remote
  * push would want.

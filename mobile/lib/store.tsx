@@ -41,6 +41,11 @@ import {
   SendStatus,
   Session,
 } from "./protocol";
+import {
+  reconcileQuestionAlerts,
+  sessionNeedsAnswer,
+  updateQuestionAlerts,
+} from "./question-alerts";
 
 /** A message the user sent that has not been confirmed yet. */
 export interface PendingSend {
@@ -108,6 +113,20 @@ function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
   });
 }
 
+function notifyQuestion(session: Session) {
+  if (Platform.OS === "web") return;
+  void Notifications.scheduleNotificationAsync({
+    content: {
+      title: `${session.name || session.kind} needs your answer`,
+      body: session.question?.prompt || "The agent is waiting for your input.",
+      sound: true,
+      data: { sessionId: session.id, kind: "question" },
+    },
+    trigger: null,
+  }).catch(() => {});
+  void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+}
+
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [credentials, setCredentials] = useState<Credentials | null>(null);
@@ -119,6 +138,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [pageState, setPageState] = useState<Store["pageState"]>({});
   const [pending, setPending] = useState<PendingSend[]>([]);
   const [dismissals, setDismissals] = useState<Dismissals>({});
+  const sessionsRef = useRef<Session[]>([]);
 
   const clientRef = useRef<Client | null>(null);
   /** Maps a fetch_messages frame id to the session that asked, so a page can be
@@ -129,11 +149,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    *  the newest end of the feed, so letting it set the scroll cursor would make
    *  "load older" jump over everything in between. */
   const catchUpRequests = useRef(new Map<string, CatchUpState>());
+  /** Sessions whose current blocked period has already produced an alert. */
+  const announcedQuestions = useRef(new Set<string>());
 
   const handleEvent = useCallback((event: DaemonEvent, replyTo?: string) => {
     switch (event.type) {
       case "sessions": {
         const list = event.sessions ?? [];
+        const alerts = reconcileQuestionAlerts(announcedQuestions.current, list);
+        announcedQuestions.current = alerts.announced;
+        for (const session of alerts.newlyPending) notifyQuestion(session);
+        sessionsRef.current = list;
         setSessions(list);
         // A full list from a connected daemon is the only safe moment to prune:
         // doing it from a session_update would judge every other dismissal
@@ -151,6 +177,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       case "session_update": {
         const updated = event.session;
         if (!updated) break;
+        const alert = updateQuestionAlerts(announcedQuestions.current, updated);
+        announcedQuestions.current = alert.announced;
+        if (alert.newlyPending) notifyQuestion(alert.newlyPending);
+        const currentIndex = sessionsRef.current.findIndex((session) => session.id === updated.id);
+        sessionsRef.current = currentIndex < 0
+          ? [...sessionsRef.current, updated]
+          : sessionsRef.current.map((session, index) =>
+              index === currentIndex ? updated : session,
+            );
         setSessions((current) => {
           const index = current.findIndex((s) => s.id === updated.id);
           if (index === -1) return [...current, updated];
@@ -162,6 +197,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
 
       case "session_gone":
+        if (event.sessionId) announcedQuestions.current.delete(event.sessionId);
+        sessionsRef.current = sessionsRef.current.filter((session) => session.id !== event.sessionId);
         setSessions((current) => current.filter((s) => s.id !== event.sessionId));
         break;
 
@@ -220,6 +257,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
 
       case "turn_complete": {
+        const current = sessionsRef.current.find((session) => session.id === event.sessionId);
+        if (current && sessionNeedsAnswer(current)) break;
         // The whole point of the product: tell the user their agent finished.
         // Guarded because neither module exists on web, where an unhandled
         // rejection here takes the whole screen down.
@@ -346,6 +385,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 		setPageState({});
 		setPending([]);
 		setDismissals({});
+		announcedQuestions.current.clear();
+		sessionsRef.current = [];
 		void saveDismissals({});
         setCredentials(creds);
         attach(creds);
@@ -362,6 +403,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 		setPending([]);
 		pageRequests.current.clear();
 		catchUpRequests.current.clear();
+		announcedQuestions.current.clear();
+		sessionsRef.current = [];
 		setDaemonOnline(false);
 		setLastSeenAt(null);
         setConnection("unpaired");
