@@ -4,6 +4,9 @@
 # broken commit and a release was whether I remembered to run the tests.
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -13,10 +16,12 @@ jobs:
   go:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          go-version: "1.24"
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.5"
           cache: true
 
       - name: Verify formatting
@@ -29,6 +34,11 @@ jobs:
           fi
 
       - run: go vet ./...
+
+      - name: Verify module files are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
 
       # -race matters here: the relay hub and the daemon's follow tracking are
       # both concurrent, and a resubscribe race in the latter already shipped
@@ -46,14 +56,16 @@ jobs:
       run:
         working-directory: mobile
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
 
       # The app shares a hand-written copy of the wire contract with the Go
       # side, so a type error here usually means the two have drifted apart.
-      - run: npm install --legacy-peer-deps
+      - run: npm ci --legacy-peer-deps
       - run: npx tsc --noEmit
 
       # Which sessions the board hides. Pure rules, run on Node's own test

@@ -15,7 +15,6 @@ project_name: agentman
 
 before:
   hooks:
-    - go mod tidy
     # A tagged build is the one nobody reviews before it ships, so it is the
     # one that most needs the tests to have run.
     - go test ./...
@@ -106,8 +105,9 @@ homebrew_casks:
         am claude
         am codex
 
-      `am` uses the public relay by default. It stores nothing — to run your
-      own, see https://github.com/lenajeremy/agentman#self-hosting-the-relay
+      `am` uses the public relay by default. It has no transcript database but
+      can observe live traffic. To run your own, see
+      https://github.com/lenajeremy/agentman#self-hosting-the-relay
 
 release:
   # A re-run after a partial failure must be able to overwrite what the first

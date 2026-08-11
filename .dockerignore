@@ -1,0 +1,9 @@
+.git
+.github
+.codex
+.agents
+bin
+docs
+mobile
+*.md
+.goreleaser.yaml

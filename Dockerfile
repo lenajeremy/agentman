@@ -5,7 +5,10 @@
 # and the app runs on your phone. Building just this keeps the image tiny and
 # makes self-hosting a single `docker build`.
 
-FROM golang:1.24-alpine AS build
+# Pin both the toolchain patch and the multi-platform image digest. A mutable
+# major-version tag can otherwise change the compiler and build environment
+# underneath an unchanged commit.
+FROM golang:1.26.5-alpine3.23@sha256:622e56dbc11a8cfe87cafa2331e9a201877271cbff918af53d3be315f3da88cc AS build
 WORKDIR /src
 
 # Dependencies first, so a source-only change reuses the cached layer.
@@ -25,15 +28,15 @@ RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags="-s -w -X main.version=${VERSION}" \
     -o /out/relay ./cmd/relay
 
-FROM alpine:3.20
-# TLS roots, so the relay can dial out (health checks, future push delivery).
-RUN apk add --no-cache ca-certificates && adduser -D -u 10001 relay
-USER relay
+FROM scratch
+# The relay is an inbound-only static binary. A scratch runtime removes the
+# shell, package manager, and unrelated libraries from the attack surface.
+USER 10001:10001
 
-COPY --from=build /out/relay /usr/local/bin/relay
+COPY --from=build /out/relay /relay
 
 # Railway supplies PORT; this is only the fallback for a plain docker run.
 ENV PORT=8080
 EXPOSE 8080
 
-ENTRYPOINT ["/usr/local/bin/relay"]
+ENTRYPOINT ["/relay"]

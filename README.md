@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go 1.24](https://img.shields.io/badge/go-1.24-00ADD8.svg)](https://go.dev)
-[![Relay: stores nothing](https://img.shields.io/badge/relay-stores%20nothing-FFB020.svg)](#the-relay-stores-nothing)
+[![Relay: no database](https://img.shields.io/badge/relay-no%20database-FFB020.svg)](#the-relay-has-no-database)
 
 </div>
 
@@ -46,7 +46,7 @@ not use the app at all.
 
 ---
 
-## The relay stores nothing
+## The relay has no database
 
 The obvious design puts your transcripts in a database on a server. This one
 doesn't, and that single constraint shapes everything else.
@@ -59,12 +59,16 @@ matches two sockets and forwards bytes between them.
 So the relay needs **no database at all**. Device tokens are signed and
 re-verified rather than stored. Accounts are derived by hashing your daemon
 token, so there is no user table and no registration step. Pairing codes live in
-memory for sixty seconds. Notifications go from your machine straight to the
-notification service. Restart the relay and nothing is lost but reconnections.
+memory for sixty seconds. Turn-complete events use the same live socket as
+everything else, and the app turns them into local notifications. Restart the
+relay and only live connections and short-lived pairing state are lost.
 
-That is the point: **the relay holds nothing, so it doesn't matter whose relay
-you use.** Use the public one above, [deploy your own](#self-hosting-the-relay),
-or skip it entirely and run the daemon on your LAN.
+The privacy boundary matters: payloads are TLS-protected on each network hop,
+but there is currently **no end-to-end encryption**, so the relay can observe
+transcripts and control messages while forwarding them. Use the public relay
+only if you trust its operator with data in transit; otherwise
+[deploy your own](#self-hosting-the-relay). The useful guarantee is no
+persistent server-side transcript store, not an inability to inspect traffic.
 
 Two honest trade-offs:
 
@@ -98,35 +102,35 @@ flowchart LR
         app["agentman app"]
     end
 
-    daemon <-->|wss| relay
-    relay <-->|wss| app
-    daemon -.->|push, bypasses relay| app
+    daemon <-->|wss, plaintext payload inside TLS| relay
+    relay <-->|wss, plaintext payload inside TLS| app
 ```
 
-The daemon is the only component that touches agent data, and the only one that
-holds any. The relay is a pipe. The app is a view. That concentration is
-deliberate — it is what allows the relay to store nothing.
+The daemon is the only component that reads transcript files from disk. The
+relay forwards their contents without persisting them, and the app keeps the
+view it has fetched. The relay is therefore still a live confidentiality and
+integrity boundary even though it has no transcript database.
 
 | Data | Direction | Why |
 |---|---|---|
 | Session list | push, daemon → app | Metadata only. Small, always live. |
 | New messages | push, **subscribed session only** | The app subscribes on screen focus and drops it on blur, so idle sessions cost nothing. |
 | Scrollback | pull, app → daemon | Read from disk on demand with an opaque cursor. |
-| Notifications | daemon → push service | Never touches the relay. |
+| Turn-complete events | daemon → relay → app | Uses the live socket; the app schedules a local notification after receipt. There is no APNs/FCM push service. |
 
 ---
 
 ## How it finds your agents
 
-Each CLI has one adapter in [`internal/source`](internal/source). None of these
-formats are published APIs, so every assumption is isolated there and covered by
-tests.
+Each CLI has one adapter in [`internal/source`](internal/source). Claude and the
+current Codex adapter rely partly on undocumented local formats; OpenCode uses
+its supported HTTP API. Every assumption is isolated there and covered by tests.
 
 | | Discovery | Scrollback | Send a message |
 |---|---|---|---|
 | **Claude Code** | `~/.claude/sessions/<pid>.json`, a live registry with a busy/idle status, verified against the pid because the file outlives a crash | `~/.claude/projects/<cwd-slug>/<id>.jsonl` | tmux (mid-turn) or the hook queue |
-| **Codex** | Rollout files under `~/.codex/sessions/`, **plus any tmux pane running `codex`** — Codex writes no rollout until its first turn, so the pane is the only evidence a session exists before then | same rollout file | tmux (mid-turn) or the hook queue |
-| **OpenCode** | OpenCode's HTTP API, which reports exactly which sessions are running | `GET /api/session/:id/message`, cursor-paged | `POST .../prompt` with `delivery: steer` — native, mid-turn |
+| **Codex** | Rollout files under `~/.codex/sessions/`, **plus any tmux pane running `codex`** — Codex writes no rollout until its first turn, so the pane is the only evidence a session exists before then | same rollout file | tmux when started with `am codex`; otherwise read-only |
+| **OpenCode** | OpenCode's HTTP API, which reports exactly which sessions are running | `GET /session/:id/message`, cursor-paged | `POST /session/:id/prompt_async` — native, asynchronous |
 
 **OpenCode is the one agent that needs no tricks.** A real API covers sessions,
 messages, mid-turn delivery, and questions as structured data. It is the shape
@@ -136,25 +140,22 @@ reference for adding a fourth agent.
 It does need that API to be reachable, which is what `am opencode` is for. The
 TUI serves it already, but on an ephemeral port unless told otherwise — so a
 plain `opencode` is invisible to agentman with nothing on screen to say why.
-`am opencode` starts it on the port the daemon watches, and if one is already
-running there it attaches to that instead, so several TUIs share one server and
-every session stays visible. Note there is no tmux here, unlike `am claude` and
-`am codex`: those need a terminal to type into because their CLIs have no input
-channel, and OpenCode does not.
+`am opencode` starts it in the daemon's small watched port range. Concurrent
+TUIs keep separate servers, and the daemon combines their supported `/session`,
+`/question`, and `/permission` APIs so every live project stays visible. Note
+there is no tmux here, unlike `am claude` and `am codex`: those need a terminal
+to type into because their CLIs have no input channel, and OpenCode does not.
 
 Findings worth recording, since none are documented anywhere:
 
-- **Codex's hooks do not fire.** Its binary contains `hooks.json` and the same
-  event names as Claude Code, and agentman registers them — but a live session
-  produced no deliveries at all. `am doctor` reports "registered, never
-  observed" rather than a green check, and Codex falls back to polling. Claude
-  Code's hooks are verified working.
-- **Only one of the three agents can be trusted to say "I'm done".** Claude Code
-  delivers a `Stop` hook, Codex delivers nothing, and OpenCode has no hook
-  system at all — so "your agent finished" is derived from a busy→idle
-  transition in discovery, with the hook preferred when one arrives and
-  suppressing the polled copy for 15s. Two notifications for one piece of work
-  is worse than one arriving a second late.
+- **Codex has one supported notification callback, not Claude-style hooks.**
+  Agentman installs a top-level `notify` command in `~/.codex/config.toml` and
+  normalizes its `agent-turn-complete` payload. It is fire-and-forget: it can
+  signal completion but cannot carry a queued prompt back into Codex.
+- **Completion has an exact path and a fallback.** Claude's `Stop` hook and
+  Codex's `notify` callback win when they arrive. OpenCode and any missed hook
+  fall back to the adapter's busy→idle transition, with a 15-second suppression
+  window so one turn never rings twice.
 - **A failed turn looks exactly like a finished one** unless you check. An
   OpenCode turn whose provider returns 503 goes busy→idle normally and produces
   an assistant message with empty content, so the notification has to fall back
@@ -180,10 +181,9 @@ Findings worth recording, since none are documented anywhere:
   that reach hundreds of megabytes. Codex writes it in two places
   (`turn_context.payload.model` and nested under `world_state`), and Claude Code
   writes `<synthetic>` for messages it generated itself.
-- **OpenCode's OpenAPI spec disagrees with its own responses** in three places:
-  the session list is wrapped in `{data, cursor}`, the working directory lives
-  under `location`, and messages are flat rather than `{info, parts}`. Check the
-  wire, not the schema.
+- **OpenCode's supported API has changed across releases.** Agentman uses the
+  OpenAPI-backed `/session`, `/question`, and `/permission` routes and tests the
+  exact `{info, parts}` message shape, pagination header, and request payloads.
 
 ---
 
@@ -199,7 +199,7 @@ are not equally good and the app refuses to imply otherwise.
 |---|---|---|
 | `api` | OpenCode's own endpoint | Instant, works **mid-turn** |
 | `tmux` | Started with `am claude` / `am codex`, so the daemon types into it | Instant, works **mid-turn** |
-| `hook` | Queued, handed over at the session's next `Stop` hook | Between turns only, and the CLI can discard it |
+| `hook` | Claude only: queued and handed over at the next `Stop` hook | Between turns only, and Claude can discard it |
 | `none` | No route — the composer is disabled | — |
 
 ```bash
@@ -304,12 +304,12 @@ am history claude:abc123 -limit 20 -before 319250377
 
 ### About `install-hooks`
 
-It edits `~/.claude/settings.json`, which is your real configuration, so it is
-built around not damaging it: it backs the file up, writes atomically via
-rename, preserves every key it does not own, and **refuses outright if the file
-will not parse** rather than guessing. `am uninstall-hooks` removes only its own
-entries, leaving any hooks you wrote alone. Run `am install-hooks -dry-run`
-first to see exactly what would change.
+It edits `~/.claude/settings.json` and adds a managed top-level `notify` entry to
+`~/.codex/config.toml`. Both are real user configurations, so writes are private
+(`0600`), atomic, backed up, and surgical. Claude JSON is refused outright if it
+does not parse. An existing user-owned Codex `notify` command is never replaced.
+`am uninstall-hooks` removes only agentman's entries. Run
+`am install-hooks -dry-run` first to see exactly what would change.
 
 ---
 
@@ -319,17 +319,16 @@ The mobile app is Expo / React Native, in [`mobile/`](mobile).
 
 ```bash
 cd mobile
-npm install
+npm ci
 npx expo start
 ```
 
 Open it in Expo Go, enter your relay address and the code from `am pair`.
 
-**Notifications:** Expo Go cannot receive remote push, so alerts only fire while
-the app is open. For a real alarm when your phone is in your pocket you need a
-development build (`eas build --profile development`), which requires an Apple
-Developer account. The daemon can also post to a private `ntfy.sh` topic if you
-want background alerts without that.
+**Notifications:** these are local notifications scheduled after a
+`turn_complete` frame arrives over the live websocket. There is no remote push
+backend, so the app cannot reliably alert after iOS or Android suspends its
+socket in the background. A development build does not change that limitation.
 
 Pinned to **Expo SDK 54**. TypeScript is pinned to 5.9 because TypeScript 7
 breaks the SDK 54 CLI.
@@ -345,8 +344,9 @@ to the app or the daemon does not restart a live relay for no reason.
 
 ## Self-hosting the relay
 
-The public relay at `agentman-production.up.railway.app` stores nothing, so
-using it costs you no privacy — but you never have to.
+The public relay at `agentman-production.up.railway.app` keeps no transcript
+database, but it can observe live plaintext payloads. Self-host when that trust
+boundary is not acceptable.
 
 **Docker:**
 
@@ -363,9 +363,6 @@ railway variables --set "AGENTMAN_RELAY_SECRET=$(openssl rand -hex 32)"
 railway domain
 ```
 
-**No relay at all:** point the app straight at your machine over your LAN or a
-Tailscale address. Same protocol, one less hop.
-
 `AGENTMAN_RELAY_SECRET` signs device tokens and **must stay stable across
 restarts** — changing it invalidates every paired device, which looks like a
 mysterious logout rather than a config change. The relay refuses to start
@@ -381,17 +378,18 @@ reachable from your phone.
 
 ## Security
 
-- The relay sees frames in transit but **stores none of them**. Every endpoint
-  authenticates with a bearer token or a single-use pairing code, and no cookies
-  are set.
-- Accounts are derived by hashing your daemon token, so the relay never sees or
-  stores the token itself.
+- The relay sees plaintext frame payloads in transit but does not persist
+  transcripts or messages. Every endpoint authenticates with a bearer token or
+  a single-use pairing code, and no cookies are set.
+- Accounts are derived by hashing your daemon token. The relay necessarily sees
+  that root token while authenticating the daemon and issuing a pairing code,
+  but does not store it or forward it onward.
 - Pairing offers two secrets for the same sixty-second window: a QR code and
-  eight digits. Redeeming either retires both. The scanned secret is 128 bits,
+  ten digits. Redeeming either retires both. The scanned secret is 128 bits,
   so guessing it is not a threat and that path needs no rate limiting at all —
   being unreadable by a human is exactly what lets it be strong. The typed code
   has to stay short, so it carries the protections below.
-- Typed pairing codes are eight random digits, single-use, and expire in sixty
+- Typed pairing codes are ten random digits, single-use, and expire in sixty
   seconds. Failed attempts are rate limited per caller, so one person guessing
   badly never affects anyone else, and only failures are charged — typing your
   code correctly costs nothing.
@@ -403,9 +401,17 @@ reachable from your phone.
 - Hook deliveries are authenticated with a token from a `0600` file rather than
   argv, since `ps` is world-readable and the loopback listener would otherwise
   accept a forged "turn complete" from any local process.
-- The frame envelope keeps its body in a single opaque field, so end-to-end
-  encryption is a drop-in later. **It is not implemented yet** — run your own
-  relay if that matters to you today.
+- Native mobile credentials are kept in iOS Keychain / Android
+  Keystore-backed SecureStore. The web build necessarily uses browser storage,
+  and its websocket bearer appears in the query string because browsers cannot
+  set upgrade headers; proxy access logs must redact it.
+- Device tokens last one year and the stateless relay has no per-device
+  revocation list. "Unpair" deletes the phone's local copy; a copied or stolen
+  token remains valid until expiry. Rotating the daemon token moves the daemon
+  to a new account and invalidates all existing pairings.
+- The frame envelope keeps its body in one field to permit a future encrypted
+  payload, but **end-to-end encryption is not implemented**. Self-host the relay
+  if the operator must not see traffic today.
 
 ---
 
