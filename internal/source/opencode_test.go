@@ -3,8 +3,10 @@ package source
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -16,17 +18,18 @@ import (
 // ocFake is a stand-in for OpenCode's published HTTP API. Its response shapes
 // are copied from the OpenAPI document served by OpenCode 1.18.15 at /doc.
 type ocFake struct {
-	mu          sync.Mutex
-	sessionID   string
-	title       string
-	directory   string
-	messages    []map[string]any
-	statuses    map[string]any
-	questions   []map[string]any
-	permissions []map[string]any
-	cursor      string
-	requests    []ocCapturedRequest
-	failSession bool
+	mu           sync.Mutex
+	sessionID    string
+	title        string
+	directory    string
+	messages     []map[string]any
+	statuses     map[string]any
+	questions    []map[string]any
+	permissions  []map[string]any
+	cursor       string
+	requests     []ocCapturedRequest
+	failSession  bool
+	scopePending bool
 }
 
 type ocCapturedRequest struct {
@@ -114,22 +117,34 @@ func (f *ocFake) start(t *testing.T) *httptest.Server {
 			"time":  map[string]any{"created": time.Now().UnixMilli(), "updated": time.Now().UnixMilli()},
 		}})
 	})
-	mux.HandleFunc("/session/status", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/session/status", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		if f.scopePending && r.URL.Query().Get("directory") != f.dir() {
+			json.NewEncoder(w).Encode(map[string]any{})
+			return
+		}
 		if f.statuses == nil {
 			f.statuses = map[string]any{}
 		}
 		json.NewEncoder(w).Encode(f.statuses)
 	})
-	mux.HandleFunc("/question", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/question", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		if f.scopePending && r.URL.Query().Get("directory") != f.dir() {
+			json.NewEncoder(w).Encode([]map[string]any{})
+			return
+		}
 		json.NewEncoder(w).Encode(f.questions)
 	})
-	mux.HandleFunc("/permission", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/permission", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		if f.scopePending && r.URL.Query().Get("directory") != f.dir() {
+			json.NewEncoder(w).Encode([]map[string]any{})
+			return
+		}
 		json.NewEncoder(w).Encode(f.permissions)
 	})
 	mux.HandleFunc("/session/"+f.id()+"/message", func(w http.ResponseWriter, _ *http.Request) {
@@ -402,6 +417,57 @@ func TestOpenCodeQuestionCanBeAnswered(t *testing.T) {
 	}
 }
 
+func TestOpenCodeScopesQuestionsToTheSessionDirectory(t *testing.T) {
+	fake := &ocFake{
+		directory:    "/Users/me/other-project",
+		scopePending: true,
+		questions: []map[string]any{{
+			"id": "que_1", "sessionID": "ses_1",
+			"questions": []map[string]any{{
+				"header": "Database", "question": "Which database?",
+				"options": []map[string]any{{"label": "Postgres"}, {"label": "SQLite"}},
+			}},
+		}},
+	}
+	server := fake.start(t)
+	src := NewOpenCodeSource(server.URL)
+	ctx := context.Background()
+
+	sessions, err := src.Discover(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].State != protocol.StateWaitingInput || sessions[0].Question == nil {
+		t.Fatalf("directory-scoped question was not discovered: %+v", sessions)
+	}
+	if err := src.Answer(ctx, "opencode:ses_1", protocol.QuestionAnswer{OptionKey: "Postgres"}); err != nil {
+		t.Fatalf("directory-scoped question could not be answered: %v", err)
+	}
+	if got := fake.lastRequest().query; !strings.Contains(got, "directory=%2FUsers%2Fme%2Fother-project") {
+		t.Fatalf("reply query = %q, want the session directory", got)
+	}
+}
+
+func TestOpenCodeScopesStatusToTheSessionDirectory(t *testing.T) {
+	fake := &ocFake{
+		directory:    "/Users/me/other-project",
+		scopePending: true,
+		statuses: map[string]any{
+			"ses_1": map[string]any{"type": "busy"},
+		},
+	}
+	server := fake.start(t)
+	src := NewOpenCodeSource(server.URL)
+
+	sessions, err := src.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].State != protocol.StateBusy {
+		t.Fatalf("directory-scoped status was not discovered: %+v", sessions)
+	}
+}
+
 func TestOpenCodeMultipleAndCustomQuestionCanBeAnswered(t *testing.T) {
 	fake := &ocFake{questions: []map[string]any{{
 		"id": "que_1", "sessionID": "ses_1",
@@ -433,6 +499,187 @@ func TestOpenCodeMultipleAndCustomQuestionCanBeAnswered(t *testing.T) {
 	values, ok := answers[0].([]any)
 	if !ok || len(values) != 3 || values[0] != "API" || values[1] != "CLI" || values[2] != "Desktop" {
 		t.Fatalf("multiple/custom answer = %#v", values)
+	}
+}
+
+func TestOpenCodeDefaultsCustomTrueAndPreservesDescriptions(t *testing.T) {
+	fake := &ocFake{questions: []map[string]any{{
+		"id": "que_1", "sessionID": "ses_1",
+		"questions": []map[string]any{
+			{
+				"header": "Single choice", "question": "Pick one",
+				"options": []map[string]any{
+					{"label": "Focused", "description": "Deep in a flow state"},
+					{"label": "Chill", "description": "Taking it easy"},
+				},
+			},
+			{
+				"header": "Open-ended", "question": "What comes to mind?",
+				"options": []map[string]any{},
+			},
+		},
+	}}}
+	server := fake.start(t)
+	src := NewOpenCodeSource(server.URL)
+	ctx := context.Background()
+
+	sessions, err := src.Discover(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := sessions[0].Question
+	if first == nil || !first.Custom {
+		t.Fatalf("OpenCode's omitted custom flag did not default true: %+v", first)
+	}
+	if got := first.Options[0].Description; got != "Deep in a flow state" {
+		t.Errorf("description = %q", got)
+	}
+	if err := src.Answer(ctx, "opencode:ses_1", protocol.QuestionAnswer{OptionKey: "Focused"}); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions, err = src.Discover(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := sessions[0].Question
+	if second == nil || second.Prompt != "What comes to mind?" || !second.Custom || len(second.Options) != 0 {
+		t.Fatalf("custom-only default question was hidden: %+v", second)
+	}
+	if err := src.Answer(ctx, "opencode:ses_1", protocol.QuestionAnswer{Text: "Agentman"}); err != nil {
+		t.Fatal(err)
+	}
+	request := fake.lastRequest()
+	answers, ok := request.body["answers"].([]any)
+	if !ok || len(answers) != 2 {
+		t.Fatalf("reply body = %#v", request.body)
+	}
+}
+
+func TestOpenCodeExplicitlyDisablesCustomAnswers(t *testing.T) {
+	fake := &ocFake{questions: []map[string]any{{
+		"id": "que_1", "sessionID": "ses_1",
+		"questions": []map[string]any{{
+			"header": "Confirm", "question": "Continue?", "custom": false,
+			"options": []map[string]any{{"label": "Yes"}, {"label": "No"}},
+		}},
+	}}}
+	server := fake.start(t)
+	src := NewOpenCodeSource(server.URL)
+	sessions, err := src.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if question := sessions[0].Question; question == nil || question.Custom {
+		t.Fatalf("explicit custom:false was ignored: %+v", question)
+	}
+}
+
+// Set AGENTMAN_LIVE_OPENCODE_QUESTIONS to the native session id of a live
+// OpenCode request containing the six-format compatibility matrix. This is
+// intentionally opt-in because it answers the real request and lets the agent
+// resume. It verifies the supported API rather than a reconstructed payload.
+func TestLiveOpenCodeQuestionFormats(t *testing.T) {
+	nativeID := os.Getenv("AGENTMAN_LIVE_OPENCODE_QUESTIONS")
+	if nativeID == "" {
+		t.Skip("no live OpenCode question session supplied")
+	}
+	src := NewOpenCodeSource("http://127.0.0.1:4096")
+	ctx := context.Background()
+	sessionID := "opencode:" + nativeID
+	steps := []struct {
+		promptContains string
+		answer         protocol.QuestionAnswer
+		check          func(*testing.T, *protocol.Question)
+	}{
+		{
+			promptContains: "mood right now",
+			answer:         protocol.QuestionAnswer{OptionKey: "Focused"},
+			check: func(t *testing.T, question *protocol.Question) {
+				if !question.Custom {
+					t.Error("OpenCode's default custom answer was disabled")
+				}
+				if len(question.Options) != 4 || question.Options[0].Description != "Ready to work deeply." {
+					t.Errorf("single-select options lost descriptions: %+v", question.Options)
+				}
+			},
+		},
+		{
+			promptContains: "Which parts should we test?",
+			answer: protocol.QuestionAnswer{Options: []string{
+				"CLI feature", "Mobile app",
+			}},
+			check: func(t *testing.T, question *protocol.Question) {
+				if !question.Multiple || !question.Custom {
+					t.Errorf("multi-select capabilities = multiple %t custom %t", question.Multiple, question.Custom)
+				}
+			},
+		},
+		{
+			promptContains: "workflow optimize for",
+			answer:         protocol.QuestionAnswer{Text: "Reliable remote question forms"},
+			check: func(t *testing.T, question *protocol.Question) {
+				if !question.Custom || len(question.Options) != 0 {
+					t.Errorf("custom-only question = %+v", question)
+				}
+			},
+		},
+		{
+			promptContains: "tradeoff should win",
+			answer:         protocol.QuestionAnswer{OptionKey: "Favor correctness"},
+		},
+		{
+			promptContains: "confident are you",
+			answer:         protocol.QuestionAnswer{OptionKey: "4"},
+			check: func(t *testing.T, question *protocol.Question) {
+				if len(question.Options) != 5 {
+					t.Errorf("five-option scale was truncated: %+v", question.Options)
+				}
+			},
+		},
+		{
+			promptContains: "Choose a note",
+			answer:         protocol.QuestionAnswer{Text: "Keep the real API payloads as fixtures."},
+		},
+	}
+
+	for index, step := range steps {
+		sessions, err := src.Discover(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var current *protocol.Session
+		for sessionIndex := range sessions {
+			if sessions[sessionIndex].ID == sessionID {
+				current = &sessions[sessionIndex]
+				break
+			}
+		}
+		if current == nil || current.Question == nil {
+			t.Fatalf("step %d question missing: %+v", index+1, current)
+		}
+		if !strings.Contains(current.Question.Prompt, step.promptContains) {
+			t.Fatalf("step %d prompt = %q, want text %q", index+1, current.Question.Prompt, step.promptContains)
+		}
+		if current.Question.Detail != fmt.Sprintf("Question %d of %d", index+1, len(steps)) {
+			t.Errorf("step %d detail = %q", index+1, current.Question.Detail)
+		}
+		if step.check != nil {
+			step.check(t, current.Question)
+		}
+		if err := src.Answer(ctx, sessionID, step.answer); err != nil {
+			t.Fatalf("step %d answer: %v", index+1, err)
+		}
+	}
+
+	sessions, err := src.Discover(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range sessions {
+		if session.ID == sessionID && session.Question != nil {
+			t.Fatalf("OpenCode request remained pending after all six answers: %+v", session.Question)
+		}
 	}
 }
 

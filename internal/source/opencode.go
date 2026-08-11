@@ -208,8 +208,11 @@ type ocQuestionRequest struct {
 		Question string `json:"question"`
 		Header   string `json:"header"`
 		Multiple bool   `json:"multiple"`
-		Custom   bool   `json:"custom"`
-		Options  []struct {
+		// OpenCode enables its synthetic custom-answer row by default and omits
+		// this field in that case. A pointer preserves the distinction between
+		// an omitted/default-true value and an explicit false.
+		Custom  *bool `json:"custom"`
+		Options []struct {
 			Label       string `json:"label"`
 			Description string `json:"description"`
 		} `json:"options"`
@@ -386,7 +389,7 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 	var reached int
 
 	for _, base := range servers {
-		listed, statuses, questions, permissions, err := s.snapshotAt(ctx, base)
+		listed, statuses, questions, permissions, err := s.snapshotAt(ctx, base, cutoff)
 		if err != nil {
 			failures = append(failures, err)
 			failedServers[base] = struct{}{}
@@ -512,7 +515,7 @@ type ocSessionStatus struct {
 	Type string `json:"type"`
 }
 
-func (s *OpenCodeSource) snapshotAt(ctx context.Context, base string) (
+func (s *OpenCodeSource) snapshotAt(ctx context.Context, base string, cutoff int64) (
 	[]ocSession,
 	map[string]ocSessionStatus,
 	[]ocQuestionRequest,
@@ -520,33 +523,90 @@ func (s *OpenCodeSource) snapshotAt(ctx context.Context, base string) (
 	error,
 ) {
 	var listed []ocSession
-	statuses := map[string]ocSessionStatus{}
-	var questions []ocQuestionRequest
-	var permissions []ocPermissionRequest
-	requests := []struct {
-		path string
-		out  any
-	}{
-		{path: "/session?limit=200", out: &listed},
-		{path: "/session/status", out: &statuses},
-		{path: "/question", out: &questions},
-		{path: "/permission", out: &permissions},
+	if _, err := s.doAt(ctx, base, http.MethodGet, "/session?limit=200", nil, &listed); err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("%s/session?limit=200: %w", base, err)
 	}
-	errs := make([]error, len(requests))
+
+	// OpenCode's pending-state endpoints are scoped to a project directory.
+	// Calling them without ?directory= only reports the server's launch
+	// directory, even though /session lists sessions from every project. This
+	// made sessions in any other directory look idle and hid their questions.
+	directories := make(map[string]struct{})
+	for _, item := range listed {
+		updated := item.Time.Updated
+		if updated == 0 {
+			updated = item.Time.Created
+		}
+		if updated >= cutoff {
+			directories[item.directory()] = struct{}{}
+		}
+	}
+	type scopedSnapshot struct {
+		directory   string
+		statuses    map[string]ocSessionStatus
+		questions   []ocQuestionRequest
+		permissions []ocPermissionRequest
+	}
+	scopes := make([]scopedSnapshot, 0, len(directories))
+	for directory := range directories {
+		scopes = append(scopes, scopedSnapshot{
+			directory: directory,
+			statuses:  map[string]ocSessionStatus{},
+		})
+	}
+
+	errs := make([]error, len(scopes)*3)
 	var wait sync.WaitGroup
-	for index := range requests {
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
-			request := requests[index]
-			if _, err := s.doAt(ctx, base, http.MethodGet, request.path, nil, request.out); err != nil {
-				errs[index] = fmt.Errorf("%s%s: %w", base, request.path, err)
-			}
-		}()
+	for index := range scopes {
+		query := url.Values{}
+		if scopes[index].directory != "" {
+			query.Set("directory", scopes[index].directory)
+		}
+		requests := []struct {
+			path string
+			out  any
+		}{
+			{path: openCodePath("/session/status", query), out: &scopes[index].statuses},
+			{path: openCodePath("/question", query), out: &scopes[index].questions},
+			{path: openCodePath("/permission", query), out: &scopes[index].permissions},
+		}
+		for requestIndex := range requests {
+			wait.Add(1)
+			go func(scopeIndex, requestIndex int) {
+				defer wait.Done()
+				request := requests[requestIndex]
+				if _, err := s.doAt(ctx, base, http.MethodGet, request.path, nil, request.out); err != nil {
+					errs[scopeIndex*3+requestIndex] = fmt.Errorf("%s%s: %w", base, request.path, err)
+				}
+			}(index, requestIndex)
+		}
 	}
 	wait.Wait()
 	if err := errors.Join(errs...); err != nil {
 		return nil, nil, nil, nil, err
+	}
+
+	statuses := map[string]ocSessionStatus{}
+	questionsByID := make(map[string]ocQuestionRequest)
+	permissionsByID := make(map[string]ocPermissionRequest)
+	for _, scope := range scopes {
+		for sessionID, status := range scope.statuses {
+			statuses[sessionID] = status
+		}
+		for _, question := range scope.questions {
+			questionsByID[question.ID] = question
+		}
+		for _, permission := range scope.permissions {
+			permissionsByID[permission.ID] = permission
+		}
+	}
+	questions := make([]ocQuestionRequest, 0, len(questionsByID))
+	for _, question := range questionsByID {
+		questions = append(questions, question)
+	}
+	permissions := make([]ocPermissionRequest, 0, len(permissionsByID))
+	for _, permission := range permissionsByID {
+		permissions = append(permissions, permission)
 	}
 	return listed, statuses, questions, permissions, nil
 }
@@ -611,11 +671,14 @@ func (s *OpenCodeSource) openCodePendingFor(
 		answerKey := openCodeAnswerKey(base, nativeID, request.ID)
 		index := s.nextQuestionIndex(answerKey, len(request.Questions))
 		first := request.Questions[index]
+		custom := first.Custom == nil || *first.Custom
 		options := make([]protocol.QuestionOption, 0, len(first.Options))
 		for _, option := range first.Options {
-			options = append(options, protocol.QuestionOption{Key: option.Label, Label: option.Label})
+			options = append(options, protocol.QuestionOption{
+				Key: option.Label, Label: option.Label, Description: option.Description,
+			})
 		}
-		if len(options) == 0 && !first.Custom {
+		if len(options) == 0 && !custom {
 			continue
 		}
 		detail := ""
@@ -624,7 +687,7 @@ func (s *OpenCodeSource) openCodePendingFor(
 		}
 		return &protocol.Question{
 				Prompt: first.Question, Title: first.Header, Detail: detail, Options: options,
-				Multiple: first.Multiple, Custom: first.Custom,
+				Multiple: first.Multiple, Custom: custom,
 			}, openCodePending{
 				kind: openCodeQuestionPending, requestID: request.ID,
 				answerKey:     answerKey,
@@ -951,12 +1014,18 @@ func (s *OpenCodeSource) Answer(ctx context.Context, sessionID string, answer pr
 
 	// Re-read the pending decision: it can disappear or change between the app
 	// rendering it and the user tapping an option.
+	query := url.Values{}
+	if session.directory != "" {
+		query.Set("directory", session.directory)
+	}
 	var questions []ocQuestionRequest
-	if _, err := s.doAt(ctx, session.baseURL, http.MethodGet, "/question", nil, &questions); err != nil {
+	if _, err := s.doAt(ctx, session.baseURL, http.MethodGet,
+		openCodePath("/question", query), nil, &questions); err != nil {
 		return err
 	}
 	var permissions []ocPermissionRequest
-	if _, err := s.doAt(ctx, session.baseURL, http.MethodGet, "/permission", nil, &permissions); err != nil {
+	if _, err := s.doAt(ctx, session.baseURL, http.MethodGet,
+		openCodePath("/permission", query), nil, &permissions); err != nil {
 		return err
 	}
 	pending := session.pending
@@ -964,10 +1033,6 @@ func (s *OpenCodeSource) Answer(ctx context.Context, sessionID string, answer pr
 		return fmt.Errorf("source: that question is no longer waiting for an answer")
 	}
 
-	query := url.Values{}
-	if session.directory != "" {
-		query.Set("directory", session.directory)
-	}
 	switch pending.kind {
 	case openCodePermissionPending:
 		var current *ocPermissionRequest
@@ -1013,8 +1078,9 @@ func (s *OpenCodeSource) Answer(ctx context.Context, sessionID string, answer pr
 			values = append(values, answer.OptionKey)
 		}
 		customText := strings.TrimSpace(answer.Text)
+		customAllowed := question.Custom == nil || *question.Custom
 		if customText != "" {
-			if !question.Custom {
+			if !customAllowed {
 				return fmt.Errorf("source: OpenCode did not offer a custom answer")
 			}
 			values = append(values, customText)
@@ -1033,7 +1099,7 @@ func (s *OpenCodeSource) Answer(ctx context.Context, sessionID string, answer pr
 				return fmt.Errorf("source: duplicate OpenCode question answer %q", value)
 			}
 			seen[value] = struct{}{}
-			if value == customText && customText != "" && question.Custom {
+			if value == customText && customText != "" && customAllowed {
 				continue
 			}
 			if _, valid := listed[value]; !valid {
