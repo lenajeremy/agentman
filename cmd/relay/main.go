@@ -24,14 +24,20 @@ import (
 // version is stamped at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
+func isTruthy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
 func main() {
+
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	secret := strings.TrimSpace(os.Getenv("AGENTMAN_RELAY_SECRET"))
 	if secret == "" {
-		// Refuse rather than generate one: a secret that changes on restart
-		// would silently invalidate every paired device, which looks like a
-		// mysterious logout rather than a configuration mistake.
 		log.Error("AGENTMAN_RELAY_SECRET is required",
 			"hint", "set it to a long random string; it signs device tokens and must be stable across restarts")
 		os.Exit(1)
@@ -41,13 +47,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Railway and most hosts supply PORT.
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	server := relay.NewServer(secret, version, log)
+	// Railway overwrites X-Forwarded-For, so it can be believed there; a relay
+	// exposed straight to the internet receives whatever the client sent.
+	trustProxy := isTruthy(os.Getenv("AGENTMAN_TRUST_PROXY"))
+	if !trustProxy {
+		log.Info("rate limiting by socket address",
+			"hint", "set AGENTMAN_TRUST_PROXY=1 when a proxy in front overwrites X-Forwarded-For")
+	}
+
+	server := relay.NewServer(secret, version, log, trustProxy)
 	httpServer := &http.Server{
 		Addr:              ":" + port,
 		Handler:           server.Handler(),

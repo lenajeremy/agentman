@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -38,19 +39,23 @@ type Server struct {
 	// version is reported by /health for debugging deployments.
 	version string
 
-	// Failed pairing attempts are bounded three ways, because each alone has a
-	// hole: per caller (precise, but a forwarded-for header can be forged),
-	// per account shard (unforgeable, since the shard is inside the code, and
-	// it confines a flood to a hundredth of users), and globally (a last
-	// backstop against sheer volume, set high enough that it is a CPU guard
-	// rather than something real pairing ever meets).
+	// Failed pairing attempts are charged to the caller who made them, so one
+	// person guessing badly never affects anyone else. The global ceiling is a
+	// backstop against sheer volume from a large botnet, set high enough that
+	// real pairing never meets it.
 	perClientFailures *limiter
-	perShardFailures  *limiter
 	globalFailures    *limiter
+	// trustProxy says whether X-Forwarded-For may be believed. See clientKey.
+	trustProxy bool
 }
 
 // NewServer builds a relay.
-func NewServer(secret, version string, log *slog.Logger) *Server {
+//
+// Set trustProxy only when something in front of this process overwrites
+// X-Forwarded-For — a managed host like Railway, or a reverse proxy configured
+// to do so. Setting it on a directly exposed relay lets every caller forge
+// their own rate-limit bucket.
+func NewServer(secret, version string, log *slog.Logger, trustProxy bool) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -60,8 +65,8 @@ func NewServer(secret, version string, log *slog.Logger) *Server {
 		log:               log,
 		version:           version,
 		perClientFailures: newLimiter(10, time.Minute),
-		perShardFailures:  newLimiter(20, time.Minute),
 		globalFailures:    newLimiter(2000, time.Minute),
+		trustProxy:        trustProxy,
 	}
 }
 
@@ -126,9 +131,6 @@ func (s *Server) handlePairCode(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleHealth reports liveness and connection counts.
-//
-// Counts only. The relay has no sessions, messages, or user records to expose
-// here, which is the point — there is no endpoint that could leak them.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	daemons, apps, pending := s.hub.Stats()
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -170,15 +172,8 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shard, wellFormed := ShardForCode(code)
-	if !wellFormed {
-		// Nothing to attribute a malformed code to, so it is charged to the
-		// caller and the global backstop only — it can never reach a real
-		// code, so it does not deserve a shard budget of its own.
-		shard = ""
-	}
-
-	if s.pairingBlocked(clientKey(r), shard) {
+	client := s.clientKey(r)
+	if s.perClientFailures.over(client) || s.globalFailures.over("") {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{
 			"error": "too many pairing attempts — wait a minute and try a fresh code",
 		})
@@ -187,10 +182,12 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 
 	account, ok := s.hub.RedeemPairingCode(code)
 	if !ok {
-		// Only failures are charged. A user who types their code correctly
-		// never spends budget, so no amount of guessing by anyone else can
-		// stop a real pairing from going through.
-		s.chargePairingFailure(clientKey(r), shard)
+		// Only failures are charged, and only to the caller who made them. A
+		// user who types their code correctly never spends budget, and one
+		// person guessing badly never affects anybody else.
+		now := time.Now()
+		s.perClientFailures.record(client, now)
+		s.globalFailures.record("", now)
 
 		// Deliberately vague: distinguishing "wrong" from "expired" would help
 		// someone probing the code space more than it helps a real user.
@@ -439,44 +436,61 @@ func sendControlReply(conn Conn, replyTo string, control protocol.Control) error
 	return conn.Send(frame)
 }
 
-// pairingBlocked reports whether this attempt has already exhausted a budget.
-func (s *Server) pairingBlocked(client, shard string) bool {
-	if s.perClientFailures.over(client) || s.globalFailures.over("") {
-		return true
-	}
-	return shard != "" && s.perShardFailures.over(shard)
-}
-
-// chargePairingFailure records a wrong guess against every budget it belongs
-// to. A malformed code has no shard, so it is charged to the other two.
-func (s *Server) chargePairingFailure(client, shard string) {
-	now := time.Now()
-	s.perClientFailures.record(client, now)
-	s.globalFailures.record("", now)
-	if shard != "" {
-		s.perShardFailures.record(shard, now)
-	}
-}
-
 // clientKey identifies the caller for rate limiting.
 //
-// Railway and most hosts put a proxy in front, so RemoteAddr is the proxy for
-// everyone and would lump all users into one bucket. The forwarded-for header
-// gives real per-client granularity but can be forged, which is why the global
-// ceiling exists alongside it — spoofing the header spreads an attacker across
-// many buckets but does not lift the total.
-func clientKey(r *http.Request) string {
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		if first, _, found := strings.Cut(forwarded, ","); found {
-			return strings.TrimSpace(first)
+// Behind a proxy the socket address is the proxy for everyone, so without
+// X-Forwarded-For every user shares one bucket and per-caller limiting does
+// nothing. Railway overwrites that header with the true peer address —
+// verified by sending two different forged values and watching both land in
+// the same bucket — so reading it there is both safe and necessary.
+//
+// It is only safe when something overwrites it. A relay exposed directly, as
+// `docker run -p 8080:8080` gives you, receives whatever the client typed, and
+// an attacker varying it per request would mint unlimited buckets. Same
+// binary, opposite trust environments, so the operator declares which one this
+// is rather than the code guessing.
+func (s *Server) clientKey(r *http.Request) string {
+	if s.trustProxy {
+		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+			// Left-most entry is the original client; a trusted proxy appends
+			// itself to the right.
+			first, _, found := strings.Cut(forwarded, ",")
+			if !found {
+				first = forwarded
+			}
+			if key := normalizeIP(strings.TrimSpace(first)); key != "" {
+				return key
+			}
 		}
-		return strings.TrimSpace(forwarded)
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if key := normalizeIP(host); key != "" {
+		return key
 	}
 	return host
+}
+
+// normalizeIP collapses an address to the unit worth rate limiting.
+//
+// IPv6 is grouped by /64, the smallest block routinely assigned to a single
+// subscriber. Keying on a full v6 address would hand one attacker 2^64 free
+// buckets, which is not rate limiting at all.
+func normalizeIP(raw string) string {
+	addr, err := netip.ParseAddr(raw)
+	if err != nil {
+		return ""
+	}
+	if addr.Is4() || addr.Is4In6() {
+		return addr.Unmap().String()
+	}
+	prefix, err := addr.Prefix(64)
+	if err != nil {
+		return addr.String()
+	}
+	return prefix.String()
 }
 
 func bearer(r *http.Request) string {
