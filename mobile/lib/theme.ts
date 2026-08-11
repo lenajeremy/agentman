@@ -17,30 +17,38 @@
  */
 export const color = {
   /** Page background. */
-  ink: "#0B0D12",
+  ink: "#090C12",
   /** Raised surface — cards, the composer bar. */
-  surface: "#141821",
+  surface: "#131823",
+  /** A surface that needs to read independently from the page. */
+  surfaceRaised: "#181E2A",
   /** A pressed or nested surface. */
-  sunken: "#0F131A",
+  sunken: "#0D1119",
   /** Hairlines and dividers. */
-  line: "#222836",
+  line: "#252C3A",
   /** A stronger divider, for section boundaries. */
-  lineStrong: "#2E3547",
+  lineStrong: "#364055",
 
-  text: "#E8EBF2",
+  text: "#F0F3F9",
   /** Secondary text: paths, timestamps, tool summaries. */
-  muted: "#8A93A8",
+  muted: "#9AA5B8",
   /** Tertiary: labels, section headers. */
-  faint: "#5C6577",
+  faint: "#657086",
 
   /** An agent is working. */
-  working: "#5BC8FF",
+  working: "#63D0FF",
+  workingWash: "#102431",
   /** An agent is blocked on the user — the most actionable state there is. */
-  needsYou: "#FFB020",
+  needsYou: "#FFB84A",
+  needsYouWash: "#271F12",
   /** A tool call failed. */
-  error: "#FF6B6B",
+  error: "#FF747A",
+  errorWash: "#29171B",
   /** Delivery confirmed. */
-  ok: "#4ADE9B",
+  ok: "#52DFA3",
+  okWash: "#12251E",
+  /** Camera and modal chrome over unpredictable content. */
+  scrim: "rgba(5, 8, 13, 0.76)",
 } as const;
 
 /**
@@ -62,23 +70,35 @@ export const size = {
   label: 11,
   caption: 12,
   body: 15,
-  title: 17,
-  display: 26,
+  title: 18,
+  heading: 22,
+  display: 30,
 } as const;
 
 export const space = {
+  xxs: 2,
   xs: 4,
   sm: 8,
   md: 12,
   lg: 16,
   xl: 24,
   xxl: 40,
+  xxxl: 56,
 } as const;
 
 export const radius = {
-  sm: 6,
-  md: 10,
-  lg: 14,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  pill: 999,
+} as const;
+
+/** Shared responsive constraints keep tablet layouts readable and centred. */
+export const layout = {
+  contentMax: 760,
+  formMax: 540,
+  touchTarget: 44,
 } as const;
 
 /** Per-state presentation, kept in one place so the list and detail agree. */

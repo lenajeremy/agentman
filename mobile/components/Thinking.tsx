@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
-import { AccessibilityInfo, StyleSheet, Text, View } from "react-native";
+import { useEffect } from "react";
+import { StyleSheet, Text, View } from "react-native";
 import Animated, {
   Easing,
   cancelAnimation,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withDelay,
   withRepeat,
@@ -26,16 +27,7 @@ import { color, font, size, space } from "../lib/theme";
  * composing a reply, which is what is actually happening.
  */
 export function Thinking({ label = "Working" }: { label?: string }) {
-  const [reduceMotion, setReduceMotion] = useState(false);
-
-  useEffect(() => {
-    void AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
-    const subscription = AccessibilityInfo.addEventListener(
-      "reduceMotionChanged",
-      setReduceMotion,
-    );
-    return () => subscription.remove();
-  }, []);
+  const reduceMotion = useReducedMotion();
 
   return (
     <View style={styles.row} accessibilityRole="progressbar" accessibilityLabel={label}>
@@ -63,8 +55,8 @@ function Dot({ index, still }: { index: number; still: boolean }) {
       index * 180,
       withRepeat(
         withSequence(
-          withTiming(1, { duration: 420, easing: Easing.out(Easing.ease) }),
-          withTiming(0.25, { duration: 420, easing: Easing.in(Easing.ease) }),
+          withTiming(1, { duration: 360, easing: Easing.linear }),
+          withTiming(0.25, { duration: 360, easing: Easing.linear }),
         ),
         -1,
         false,

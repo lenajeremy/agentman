@@ -61,4 +61,44 @@ test("rejects nested fields that could crash rendering", () => {
       question: { prompt: "approve?", options: [{ key: 1, label: "yes" }] },
     },
   }), null);
+
+  const questionSession = {
+    id: "s", kind: "claude", nativeId: "n", name: "name", cwd: "/tmp",
+    state: "waiting_input", inject: "tmux", startedAt: 1, lastActivityAt: 2,
+    question: {
+      prompt: "Which targets?", multiple: true,
+      options: [{
+        key: "1", label: "API", description: "HTTP service",
+        preview: "curl http://localhost", checked: true,
+      }],
+    },
+  };
+  assert.ok(decodeDaemonEvent({ type: "session_update", session: questionSession }));
+  assert.equal(decodeDaemonEvent({
+    type: "session_update",
+    session: {
+      ...questionSession,
+      question: { ...questionSession.question, options: [{ key: "1", label: "API", checked: "yes" }] },
+    },
+  }), null);
+  assert.equal(decodeDaemonEvent({
+    type: "session_update",
+    session: {
+      ...questionSession,
+      question: {
+        ...questionSession.question,
+        options: [{ key: "1", label: "API", description: { unsafe: true } }],
+      },
+    },
+  }), null);
+  assert.equal(decodeDaemonEvent({
+    type: "session_update",
+    session: {
+      ...questionSession,
+      question: {
+        ...questionSession.question,
+        options: [{ key: "1", label: "API", preview: { unsafe: true } }],
+      },
+    },
+  }), null);
 });

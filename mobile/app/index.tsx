@@ -1,7 +1,6 @@
 import { Redirect, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -10,6 +9,9 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { Appear } from "../components/Appear";
+import { ContentColumn } from "../components/ContentColumn";
+import { MotionPressable } from "../components/MotionPressable";
 import { Pulse } from "../components/Pulse";
 import { QuestionCard } from "../components/QuestionCard";
 import { SwipeToDismiss } from "../components/SwipeToDismiss";
@@ -48,34 +50,55 @@ export default function Agents() {
   if (!store.ready) return <View style={styles.page} />;
   if (!store.credentials) return <Redirect href="/pair" />;
 
-  const working = store.visibleSessions.filter((s) => s.state === "busy").length;
+  const counts = store.visibleSessions.reduce(
+    (current, session) => {
+      if (session.state === "waiting_input") current.needsYou += 1;
+      else if (session.state === "busy") current.working += 1;
+      else current.idle += 1;
+      return current;
+    },
+    { needsYou: 0, working: 0, idle: 0 },
+  );
 
   return (
     <View style={[styles.page, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
+      <ContentColumn style={styles.header}>
         <View>
-          <Text style={styles.wordmark}>agentman</Text>
-          <Text style={styles.subhead}>
-            {store.visibleSessions.length === 0
-              ? "No agents running"
-              : `${store.visibleSessions.length} agent${store.visibleSessions.length === 1 ? "" : "s"}` +
-                (working > 0 ? ` · ${working} working` : "")}
+          <Text style={styles.wordmark}>
+            agentman<Text style={styles.wordmarkAccent}>.</Text>
           </Text>
+          <View style={styles.connectionLine}>
+            <View
+              style={[
+                styles.connectionDot,
+                { backgroundColor: store.daemonOnline ? color.ok : color.error },
+              ]}
+            />
+            <Text style={styles.subhead}>
+              {store.daemonOnline ? "Mac connected" : "Trying to reconnect"}
+            </Text>
+          </View>
         </View>
-        <Pressable
+        <MotionPressable
           hitSlop={12}
           style={styles.gear}
+          pressedScale={0.94}
           onPress={() => router.push("/settings")}
           accessibilityRole="button"
           accessibilityLabel="Settings"
         >
-          <Text style={styles.gearGlyph}>⋯</Text>
-        </Pressable>
-      </View>
+          <SettingsGlyph />
+        </MotionPressable>
+      </ContentColumn>
 
-      {!store.daemonOnline && <OfflineBanner lastSeenAt={store.lastSeenAt} />}
+      {!store.daemonOnline && (
+        <ContentColumn>
+          <OfflineBanner lastSeenAt={store.lastSeenAt} />
+        </ContentColumn>
+      )}
 
       <ScrollView
+        style={styles.scroll}
         contentContainerStyle={{ paddingBottom: insets.bottom + space.xxl }}
         refreshControl={
           <RefreshControl
@@ -89,41 +112,57 @@ export default function Agents() {
           />
         }
       >
-        {store.visibleSessions.length === 0 && store.daemonOnline && (
-          hiddenCount > 0 ? (
-            <AllHiddenState count={hiddenCount} onShow={store.restoreAllSessions} />
-          ) : (
-            <EmptyState />
-          )
-        )}
+        <ContentColumn>
+          {store.visibleSessions.length > 0 ? (
+            <Appear style={styles.summaryWrap}>
+              <DashboardSummary counts={counts} />
+            </Appear>
+          ) : null}
 
-        {groups.map(({ label, tint, sessions }) => (
-          <View key={label} style={styles.group}>
-            <Text style={[styles.groupLabel, { color: tint }]}>{label}</Text>
-            {sessions.map((session) => (
-              <SwipeToDismiss
-                key={session.id}
-                enabled={canDismiss(session)}
-                onDismiss={() => {
-                  store.dismissSession(session.id);
-                  setUndo({ id: session.id, name: session.name });
-                }}
-                accessibilityLabel={`${session.name}, ${stateStyle(session.state).label}`}
-              >
-                <AgentRow session={session} />
-              </SwipeToDismiss>
+          {store.visibleSessions.length === 0 && store.daemonOnline &&
+            (hiddenCount > 0 ? (
+              <AllHiddenState count={hiddenCount} onShow={store.restoreAllSessions} />
+            ) : (
+              <EmptyState />
             ))}
-          </View>
-        ))}
+
+          {groups.map(({ label, tint, sessions }) => (
+            <View key={label} style={styles.group}>
+              <View style={styles.groupHeading}>
+                <Text style={[styles.groupLabel, { color: tint }]}>{label}</Text>
+                <Text style={styles.groupCount}>{sessions.length}</Text>
+              </View>
+              {sessions.map((session) => (
+                <SwipeToDismiss
+                  key={session.id}
+                  enabled={canDismiss(session)}
+                  onDismiss={() => {
+                    store.dismissSession(session.id);
+                    setUndo({ id: session.id, name: session.name });
+                  }}
+                  accessibilityLabel={`${session.name}, ${stateStyle(session.state).label}`}
+                >
+                  <AgentRow session={session} />
+                </SwipeToDismiss>
+              ))}
+            </View>
+          ))}
+        </ContentColumn>
       </ScrollView>
 
       {undo && (
-        <View style={[styles.undoBar, { bottom: insets.bottom + space.lg }]}>
+        <Appear
+          key={undo.id}
+          style={[styles.undoBar, { bottom: insets.bottom + space.lg }]}
+          offset={8}
+        >
           <Text style={styles.undoText} numberOfLines={1}>
             Hid {undo.name}
           </Text>
-          <Pressable
+          <MotionPressable
             hitSlop={10}
+            style={styles.undoButton}
+            pressedScale={0.94}
             onPress={() => {
               store.restoreSession(undo.id);
               setUndo(null);
@@ -131,8 +170,8 @@ export default function Agents() {
             accessibilityRole="button"
           >
             <Text style={styles.undoAction}>Undo</Text>
-          </Pressable>
-        </View>
+          </MotionPressable>
+        </Appear>
       )}
     </View>
   );
@@ -146,7 +185,10 @@ export default function Agents() {
  * section header is the answer rather than a decoration.
  */
 function groupByState(sessions: Session[]) {
-  const buckets = new Map<string, { label: string; tint: string; rank: number; sessions: Session[] }>();
+  const buckets = new Map<
+    string,
+    { label: string; tint: string; rank: number; sessions: Session[] }
+  >();
   for (const session of sessions) {
     const meta = stateStyle(session.state);
     const bucket = buckets.get(meta.label) ?? {
@@ -171,17 +213,17 @@ function AgentRow({ session }: { session: Session }) {
   const needsYou = session.state === "waiting_input";
 
   return (
-    <Pressable
+    <MotionPressable
       onPress={() => router.push(`/session/${encodeURIComponent(session.id)}`)}
-      style={({ pressed }) => [
-        styles.row,
-        needsYou && styles.rowNeedsYou,
-        pressed && styles.rowPressed,
-      ]}
+      style={[styles.row, needsYou && styles.rowNeedsYou]}
+      pressedScale={0.985}
       accessibilityRole="button"
       accessibilityLabel={`${session.name}, ${stateStyle(session.state).label}`}
     >
-      <Pulse state={session.state} />
+      {needsYou ? <View style={styles.priorityRail} /> : null}
+      <View style={styles.pulseWrap}>
+        <Pulse state={session.state} />
+      </View>
       <View style={styles.rowBody}>
         <View style={styles.rowTop}>
           {/* Session names are machine-generated, so they are set in mono —
@@ -197,9 +239,11 @@ function AgentRow({ session }: { session: Session }) {
           <Text style={styles.path} numberOfLines={1}>
             {shortPath(session.cwd)}
           </Text>
-          <Text style={styles.model} numberOfLines={1}>
-            {session.model ?? session.kind}
-          </Text>
+          <View style={styles.modelBadge}>
+            <Text style={styles.model} numberOfLines={1}>
+              {session.model ?? session.kind}
+            </Text>
+          </View>
         </View>
         {session.question ? (
           <QuestionCard
@@ -211,7 +255,91 @@ function AgentRow({ session }: { session: Session }) {
           <Text style={styles.needsYouNote}>Waiting on your answer</Text>
         ) : null}
       </View>
-    </Pressable>
+      <Text style={styles.chevron}>›</Text>
+    </MotionPressable>
+  );
+}
+
+function DashboardSummary({
+  counts,
+}: {
+  counts: { needsYou: number; working: number; idle: number };
+}) {
+  const total = counts.needsYou + counts.working + counts.idle;
+  const title = counts.needsYou
+    ? `${counts.needsYou} ${counts.needsYou === 1 ? "agent needs" : "agents need"} you`
+    : counts.working
+      ? `${counts.working} ${counts.working === 1 ? "agent is" : "agents are"} working`
+      : "Everything is caught up";
+  const detail = counts.needsYou
+    ? "A decision is blocking progress."
+    : counts.working
+      ? "You can step away — status updates live."
+      : `${total} ${total === 1 ? "agent is" : "agents are"} ready when you are.`;
+
+  return (
+    <View style={[styles.summary, counts.needsYou > 0 && styles.summaryAttention]}>
+      <View style={styles.summaryTop}>
+        <View style={styles.summaryCopy}>
+          <Text style={styles.eyebrow}>Live workspace</Text>
+          <Text style={styles.summaryTitle}>{title}</Text>
+          <Text style={styles.summaryDetail}>{detail}</Text>
+        </View>
+        <View
+          style={[
+            styles.summarySignal,
+            {
+              backgroundColor: counts.needsYou ? color.needsYouWash : color.workingWash,
+            },
+          ]}
+        >
+          <Pulse
+            state={counts.needsYou ? "waiting_input" : counts.working ? "busy" : "idle"}
+            size={9}
+          />
+        </View>
+      </View>
+      <View style={styles.metrics}>
+        <Metric label="Needs you" value={counts.needsYou} tint={color.needsYou} />
+        <View style={styles.metricDivider} />
+        <Metric label="Working" value={counts.working} tint={color.working} />
+        <View style={styles.metricDivider} />
+        <Metric label="Idle" value={counts.idle} tint={color.muted} />
+      </View>
+    </View>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  tint,
+}: {
+  label: string;
+  value: number;
+  tint: string;
+}) {
+  return (
+    <View style={styles.metric}>
+      <Text style={[styles.metricValue, { color: tint }]}>{value}</Text>
+      <Text style={styles.metricLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function SettingsGlyph() {
+  return (
+    <View style={styles.settingsGlyph}>
+      <View style={styles.settingsLine}>
+        <View style={[styles.settingsKnob, { left: 5 }]} />
+      </View>
+      <View style={styles.settingsLine}>
+        <View style={[styles.settingsKnob, { right: 5 }]} />
+      </View>
+      <View style={styles.settingsLine}>
+        <View style={[styles.settingsKnob, { left: 9 }]} />
+      </View>
+    </View>
   );
 }
 
@@ -232,9 +360,14 @@ function AllHiddenState({ count, onShow }: { count: number; onShow(): void }) {
       </Text>
       {/* The only way back to a session hidden long ago, and it appears only
           here — on a board that is empty solely because of hiding. */}
-      <Pressable hitSlop={10} onPress={onShow} accessibilityRole="button">
+      <MotionPressable
+        hitSlop={10}
+        style={styles.emptyActionButton}
+        onPress={onShow}
+        accessibilityRole="button"
+      >
         <Text style={styles.emptyAction}>Show them anyway</Text>
-      </Pressable>
+      </MotionPressable>
     </View>
   );
 }
@@ -242,10 +375,15 @@ function AllHiddenState({ count, onShow }: { count: number; onShow(): void }) {
 function OfflineBanner({ lastSeenAt }: { lastSeenAt: number | null }) {
   return (
     <View style={styles.banner}>
-      <Text style={styles.bannerText}>
-        Your Mac is offline{lastSeenAt ? ` · last seen ${ago(lastSeenAt)} ago` : ""}
-      </Text>
-      <Text style={styles.bannerHint}>Agents appear here when it reconnects.</Text>
+      <View style={styles.offlineIcon}>
+        <Text style={styles.offlineGlyph}>!</Text>
+      </View>
+      <View style={styles.bannerCopy}>
+        <Text style={styles.bannerText}>
+          Your Mac is offline{lastSeenAt ? ` · last seen ${ago(lastSeenAt)} ago` : ""}
+        </Text>
+        <Text style={styles.bannerHint}>Agents appear here when it reconnects.</Text>
+      </View>
     </View>
   );
 }
@@ -253,6 +391,9 @@ function OfflineBanner({ lastSeenAt }: { lastSeenAt: number | null }) {
 function EmptyState() {
   return (
     <View style={styles.empty}>
+      <View style={styles.emptyIcon}>
+        <Text style={styles.emptyGlyph}>›_</Text>
+      </View>
       <Text style={styles.emptyTitle}>Nothing running</Text>
       <Text style={styles.emptyBody}>
         Start an agent on your Mac and it shows up here. Use{" "}
@@ -264,6 +405,7 @@ function EmptyState() {
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: color.ink },
+  scroll: { flex: 1 },
 
   header: {
     flexDirection: "row",
@@ -271,52 +413,141 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: space.lg,
     paddingTop: space.lg,
-    paddingBottom: space.md,
+    paddingBottom: space.lg,
   },
   wordmark: {
     fontFamily: font.mono,
     fontSize: size.display,
     color: color.text,
-    letterSpacing: -0.5,
+    letterSpacing: -1.2,
   },
+  wordmarkAccent: { color: color.working },
+  connectionLine: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 },
+  connectionDot: { width: 6, height: 6, borderRadius: 3 },
   subhead: {
     fontFamily: font.sans,
     fontSize: size.caption,
     color: color.muted,
-    marginTop: 2,
   },
-  gear: { padding: space.xs },
-  gearGlyph: { color: color.muted, fontSize: 22, lineHeight: 24 },
+  gear: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: color.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.line,
+  },
+  settingsGlyph: { width: 19, gap: 4 },
+  settingsLine: { height: 2, borderRadius: 1, backgroundColor: color.muted },
+  settingsKnob: {
+    position: "absolute",
+    top: -2,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: color.text,
+  },
 
-  group: { marginTop: space.lg },
+  summaryWrap: { marginHorizontal: space.lg, marginTop: space.xs },
+  summary: {
+    borderRadius: radius.xl,
+    padding: space.lg,
+    backgroundColor: color.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.line,
+  },
+  summaryAttention: { borderColor: "#594523", backgroundColor: color.needsYouWash },
+  summaryTop: { flexDirection: "row", gap: space.md, alignItems: "flex-start" },
+  summaryCopy: { flex: 1 },
+  eyebrow: {
+    fontFamily: font.sansMedium,
+    fontSize: size.label,
+    letterSpacing: 1.4,
+    textTransform: "uppercase",
+    color: color.faint,
+  },
+  summaryTitle: {
+    fontFamily: font.sansBold,
+    fontSize: size.heading,
+    lineHeight: 27,
+    letterSpacing: -0.35,
+    color: color.text,
+    marginTop: space.xs,
+  },
+  summaryDetail: {
+    fontFamily: font.sans,
+    fontSize: size.caption,
+    lineHeight: 18,
+    color: color.muted,
+    marginTop: space.xs,
+  },
+  summarySignal: {
+    width: 42,
+    height: 42,
+    borderRadius: radius.md,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  metrics: {
+    flexDirection: "row",
+    marginTop: space.lg,
+    paddingTop: space.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.line,
+  },
+  metric: { flex: 1, alignItems: "center", gap: space.xxs },
+  metricValue: { fontFamily: font.monoMedium, fontSize: size.title },
+  metricLabel: { fontFamily: font.sans, fontSize: size.label, color: color.faint },
+  metricDivider: { width: StyleSheet.hairlineWidth, backgroundColor: color.line },
+
+  group: { marginTop: space.xl },
+  groupHeading: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: space.lg,
+    marginBottom: space.sm,
+  },
   groupLabel: {
     fontFamily: font.sansMedium,
     fontSize: size.label,
     letterSpacing: 1.4,
     textTransform: "uppercase",
-    paddingHorizontal: space.lg,
-    marginBottom: space.sm,
   },
+  groupCount: { fontFamily: font.mono, fontSize: size.label, color: color.faint },
 
   row: {
     flexDirection: "row",
     alignItems: "flex-start",
     gap: space.sm,
-    paddingVertical: space.md,
+    paddingVertical: 14,
     paddingHorizontal: space.md,
-    marginHorizontal: space.md,
-    borderRadius: radius.md,
+    marginHorizontal: space.lg,
+    borderRadius: radius.lg,
     backgroundColor: color.surface,
     marginBottom: space.sm,
-    borderLeftWidth: 2,
-    borderLeftColor: "transparent",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.line,
+    overflow: "hidden",
   },
   // The one place the design raises its voice: an agent that cannot continue
   // without the user.
-  rowNeedsYou: { borderLeftColor: color.needsYou, backgroundColor: "#1B1A17" },
-  rowPressed: { backgroundColor: color.sunken },
+  rowNeedsYou: { borderColor: "#594523", backgroundColor: color.needsYouWash },
+  priorityRail: {
+    position: "absolute",
+    left: 0,
+    top: 14,
+    bottom: 14,
+    width: 3,
+    borderTopRightRadius: 2,
+    borderBottomRightRadius: 2,
+    backgroundColor: color.needsYou,
+  },
+  pulseWrap: { marginTop: -space.xs },
 
-  rowBody: { flex: 1, gap: 2 },
+  rowBody: { flex: 1, gap: space.xxs },
   rowTop: { flexDirection: "row", alignItems: "baseline", gap: space.sm },
   name: {
     flex: 1,
@@ -325,12 +556,26 @@ const styles = StyleSheet.create({
     color: color.text,
   },
   age: { fontFamily: font.sans, fontSize: size.caption, color: color.faint },
-  rowMeta: { flexDirection: "row", alignItems: "baseline", gap: space.sm },
+  rowMeta: { flexDirection: "row", alignItems: "center", gap: space.sm },
   path: { flex: 1, fontFamily: font.mono, fontSize: size.caption, color: color.muted },
   // The model, or the agent kind until the agent has replied once and named
   // one. Falling back to the kind rather than showing nothing keeps the column
   // from flickering into existence on the first reply.
-  model: { fontFamily: font.mono, fontSize: size.caption, color: color.faint },
+  modelBadge: {
+    maxWidth: "45%",
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+    backgroundColor: color.sunken,
+  },
+  model: { fontFamily: font.mono, fontSize: size.label, color: color.faint },
+  chevron: {
+    alignSelf: "center",
+    color: color.faint,
+    fontFamily: font.sans,
+    fontSize: 22,
+    lineHeight: 24,
+  },
   needsYouNote: {
     fontFamily: font.sansMedium,
     fontSize: size.caption,
@@ -339,42 +584,79 @@ const styles = StyleSheet.create({
   },
 
   banner: {
-    marginHorizontal: space.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.md,
+    marginHorizontal: space.lg,
     padding: space.md,
-    borderRadius: radius.md,
-    backgroundColor: color.surface,
+    borderRadius: radius.lg,
+    backgroundColor: color.errorWash,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.line,
+    borderColor: "#563039",
   },
+  offlineIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#402127",
+  },
+  offlineGlyph: { color: color.error, fontFamily: font.sansBold, fontSize: size.body },
+  bannerCopy: { flex: 1 },
   bannerText: { fontFamily: font.sansMedium, fontSize: size.caption, color: color.text },
   bannerHint: { fontFamily: font.sans, fontSize: size.caption, color: color.muted, marginTop: 2 },
 
-  empty: { paddingHorizontal: space.xl, paddingTop: space.xxl, gap: space.sm },
-  emptyTitle: { fontFamily: font.sansBold, fontSize: size.title, color: color.text },
+  empty: {
+    marginHorizontal: space.lg,
+    marginTop: space.xl,
+    paddingHorizontal: space.xl,
+    paddingVertical: space.xxl,
+    alignItems: "center",
+    borderRadius: radius.xl,
+    backgroundColor: color.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.line,
+    gap: space.sm,
+  },
+  emptyIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.lg,
+    backgroundColor: color.sunken,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: space.sm,
+  },
+  emptyGlyph: { fontFamily: font.monoMedium, fontSize: size.title, color: color.working },
+  emptyTitle: { fontFamily: font.sansBold, fontSize: size.heading, color: color.text },
   emptyBody: { fontFamily: font.sans, fontSize: size.body, color: color.muted, lineHeight: 22 },
   code: { fontFamily: font.mono, color: color.working },
   emptyAction: {
     fontFamily: font.sansMedium,
     fontSize: size.body,
     color: color.working,
-    marginTop: space.sm,
   },
+  emptyActionButton: { paddingVertical: space.sm, paddingHorizontal: space.md },
 
   undoBar: {
     position: "absolute",
-    left: space.lg,
-    right: space.lg,
+    alignSelf: "center",
+    width: "90%",
+    maxWidth: 520,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: space.md,
     paddingVertical: space.md,
     paddingHorizontal: space.lg,
-    borderRadius: radius.md,
-    backgroundColor: color.surface,
+    borderRadius: radius.lg,
+    backgroundColor: color.surfaceRaised,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.line,
+    borderColor: color.lineStrong,
+    zIndex: 20,
   },
   undoText: { flex: 1, fontFamily: font.sans, fontSize: size.body, color: color.muted },
   undoAction: { fontFamily: font.sansMedium, fontSize: size.body, color: color.working },
+  undoButton: { paddingVertical: space.xs, paddingHorizontal: space.sm },
 });

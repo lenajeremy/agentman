@@ -1,19 +1,19 @@
 import { useEffect } from "react";
-import { AccessibilityInfo, View } from "react-native";
+import { View } from "react-native";
 import Animated, {
   Easing,
   cancelAnimation,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withRepeat,
   withTiming,
 } from "react-native-reanimated";
-import { useState } from "react";
 
 import { color } from "../lib/theme";
 
 /**
- * The state indicator, and the one piece of motion in the app.
+ * The state indicator, and the only persistent motion on the status board.
  *
  * A working agent breathes; an idle one sits still. That is the whole signal —
  * it is legible from across a room, which is the point of a status board, and
@@ -26,16 +26,7 @@ import { color } from "../lib/theme";
 export function Pulse({ state, size = 8 }: { state: string; size?: number }) {
   const scale = useSharedValue(1);
   const opacity = useSharedValue(0.5);
-  const [reduceMotion, setReduceMotion] = useState(false);
-
-  useEffect(() => {
-    void AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
-    const subscription = AccessibilityInfo.addEventListener(
-      "reduceMotionChanged",
-      setReduceMotion,
-    );
-    return () => subscription.remove();
-  }, []);
+  const reduceMotion = useReducedMotion();
 
   const isWorking = state === "busy";
 
@@ -50,12 +41,12 @@ export function Pulse({ state, size = 8 }: { state: string; size?: number }) {
     // Slow enough to read as breathing rather than blinking. A blink reads as
     // an alarm, and "working" is not an alarm.
     scale.value = withRepeat(
-      withTiming(2.6, { duration: 1600, easing: Easing.out(Easing.ease) }),
+      withTiming(2.6, { duration: 1600, easing: Easing.linear }),
       -1,
       false,
     );
     opacity.value = withRepeat(
-      withTiming(0, { duration: 1600, easing: Easing.out(Easing.ease) }),
+      withTiming(0, { duration: 1600, easing: Easing.linear }),
       -1,
       false,
     );

@@ -45,7 +45,13 @@ export interface QuestionOption {
   /** What gets sent to choose this option. */
   key: string;
   label: string;
+  /** Explanatory text shown beneath the label. */
+  description?: string;
+  /** Claude's side-by-side content panel for this option. */
+  preview?: string;
   selected?: boolean;
+  /** Whether Claude has this checkbox enabled in a multi-select form. */
+  checked?: boolean;
 }
 
 export interface Session {
@@ -278,7 +284,10 @@ function isQuestion(value: unknown): value is Question {
   return boundedArray(value.options, 256, (option): option is QuestionOption =>
     isRecord(option) && boundedString(option.key, 4096, true) &&
     boundedString(option.label, 64 * 1024) &&
-    (option.selected === undefined || typeof option.selected === "boolean"));
+    optionalBoundedString(option.description, 64 * 1024) &&
+    optionalBoundedString(option.preview, 256 * 1024) &&
+    (option.selected === undefined || typeof option.selected === "boolean") &&
+    (option.checked === undefined || typeof option.checked === "boolean"));
 }
 
 function isMessage(value: unknown): value is Message {

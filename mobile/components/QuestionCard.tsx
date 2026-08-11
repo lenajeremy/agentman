@@ -1,8 +1,20 @@
+import * as Haptics from "expo-haptics";
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Platform, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { Question, QuestionAnswer } from "../lib/protocol";
 import { color, font, radius, size, space } from "../lib/theme";
+import { MotionPressable } from "./MotionPressable";
+
+function terminalOptionKeys(question: Question): string[] {
+  const checked = question.options.filter((option) => option.checked).map((option) => option.key);
+  if (checked.length > 0) return checked;
+  if (question.options.some((option) => option.preview)) {
+    const highlighted = question.options.find((option) => option.selected);
+    if (highlighted) return [highlighted.key];
+  }
+  return [];
+}
 
 /**
  * A decision the agent is blocked on.
@@ -25,7 +37,7 @@ export function QuestionCard({
   /** In a list row, show the question without the choices. */
   compact?: boolean;
 }) {
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string[]>(() => terminalOptionKeys(question));
   const [custom, setCustom] = useState("");
   const identity = useMemo(
     () =>
@@ -35,24 +47,46 @@ export function QuestionCard({
         question.detail,
         question.multiple,
         question.custom,
-        ...question.options.flatMap((option) => [option.key, option.label]),
+        ...question.options.flatMap((option) => [
+          option.key,
+          option.label,
+          option.description,
+          option.preview,
+          option.selected,
+          option.checked,
+        ]),
       ].join("\u0000"),
     [question],
   );
+  const terminalSelection = useMemo(() => terminalOptionKeys(question), [identity]);
   useEffect(() => {
-    setSelected([]);
+    setSelected(terminalSelection);
     setCustom("");
-  }, [identity]);
+  }, [identity, terminalSelection]);
 
-  const advanced = Boolean(question.multiple || question.custom);
+  const hasPreviews = question.options.some((option) => Boolean(option.preview));
+  const advanced = Boolean(question.multiple || question.custom || hasPreviews);
   const customText = custom.trim();
   const answerCount = selected.length + (customText ? 1 : 0);
   const canSubmit = answerCount > 0 && (question.multiple || answerCount === 1);
+  const activePreview = question.options.find(
+    (option) => selected.includes(option.key) && option.preview,
+  )?.preview;
+
+  const commit = (answer: QuestionAnswer) => {
+    if (Platform.OS !== "web") {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
+    onAnswer(answer);
+  };
 
   const choose = (key: string) => {
     if (!advanced) {
-      onAnswer({ optionKey: key });
+      commit({ optionKey: key });
       return;
+    }
+    if (Platform.OS !== "web") {
+      void Haptics.selectionAsync().catch(() => {});
     }
     if (!question.multiple) {
       setSelected([key]);
@@ -67,10 +101,10 @@ export function QuestionCard({
   const submit = () => {
     if (!canSubmit) return;
     if (!question.multiple && selected.length === 1) {
-      onAnswer({ optionKey: selected[0] });
+      commit({ optionKey: selected[0] });
       return;
     }
-    onAnswer({
+    commit({
       optionKeys: selected.length > 0 ? selected : undefined,
       answerText: customText || undefined,
     });
@@ -78,12 +112,22 @@ export function QuestionCard({
 
   return (
     <View style={[styles.card, compact && styles.cardCompact]}>
-      {question.title ? <Text style={styles.title}>{question.title}</Text> : null}
+      <View style={styles.header}>
+        <View style={[styles.questionMark, compact && styles.questionMarkCompact]}>
+          <Text style={styles.questionGlyph}>?</Text>
+        </View>
+        <View style={styles.headerCopy}>
+          <Text style={styles.eyebrow}>Agent needs you</Text>
+          <Text style={styles.title}>{question.title || "Decision needed"}</Text>
+        </View>
+      </View>
 
       {question.detail ? (
-        <Text style={styles.detail} numberOfLines={compact ? 2 : undefined}>
-          {question.detail}
-        </Text>
+        <View style={styles.detailBox}>
+          <Text style={styles.detail} numberOfLines={compact ? 2 : undefined}>
+            {question.detail}
+          </Text>
+        </View>
       ) : null}
 
       <Text style={styles.prompt}>{question.prompt}</Text>
@@ -95,26 +139,40 @@ export function QuestionCard({
             // helps, but nothing is preselected here — a tap is a decision.
             const affirmative = /^(yes|allow|approve|proceed)/i.test(option.label);
             return (
-              <Pressable
+              <MotionPressable
                 key={option.key}
                 onPress={() => choose(option.key)}
-                style={({ pressed }) => [
+                style={[
                   styles.option,
                   affirmative && styles.optionAffirmative,
                   selected.includes(option.key) && styles.optionSelected,
-                  pressed && styles.optionPressed,
                 ]}
+                pressedScale={0.985}
                 accessibilityRole="button"
-                accessibilityLabel={option.label}
+                accessibilityLabel={
+                  option.description ? `${option.label}. ${option.description}` : option.label
+                }
                 accessibilityState={{ selected: selected.includes(option.key) }}
               >
-                <Text style={styles.optionKey}>{option.key}</Text>
-                <Text
-                  style={[styles.optionLabel, affirmative && styles.optionLabelAffirmative]}
-                >
-                  {option.label}
-                </Text>
-              </Pressable>
+                <View style={styles.optionKeyWrap}>
+                  <Text style={styles.optionKey}>{option.key}</Text>
+                </View>
+                <View style={styles.optionCopy}>
+                  <Text
+                    style={[styles.optionLabel, affirmative && styles.optionLabelAffirmative]}
+                  >
+                    {option.label}
+                  </Text>
+                  {option.description ? (
+                    <Text style={styles.optionDescription}>{option.description}</Text>
+                  ) : null}
+                </View>
+                {selected.includes(option.key) ? (
+                  <View style={styles.checkMark}>
+                    <Text style={styles.checkGlyph}>✓</Text>
+                  </View>
+                ) : null}
+              </MotionPressable>
             );
           })}
           {question.custom ? (
@@ -131,20 +189,27 @@ export function QuestionCard({
               accessibilityLabel="Custom answer"
             />
           ) : null}
+          {activePreview ? (
+            <View style={styles.previewBox}>
+              <Text style={styles.previewEyebrow}>Preview</Text>
+              <Text style={styles.previewText} selectable>
+                {activePreview}
+              </Text>
+            </View>
+          ) : null}
           {advanced ? (
-            <Pressable
+            <MotionPressable
               onPress={submit}
               disabled={!canSubmit}
-              style={({ pressed }) => [
+              style={[
                 styles.submit,
                 !canSubmit && styles.submitDisabled,
-                pressed && styles.optionPressed,
               ]}
               accessibilityRole="button"
               accessibilityLabel="Submit answer"
             >
               <Text style={styles.submitLabel}>Submit answer</Text>
-            </Pressable>
+            </MotionPressable>
           ) : null}
         </View>
       )}
@@ -154,21 +219,40 @@ export function QuestionCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: "#1B1A17",
-    borderRadius: radius.md,
-    borderLeftWidth: 2,
-    borderLeftColor: color.needsYou,
-    padding: space.md,
-    gap: space.sm,
+    backgroundColor: color.needsYouWash,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#594523",
+    padding: space.lg,
+    gap: space.md,
   },
-  cardCompact: { padding: space.sm, gap: space.xs, marginTop: space.sm },
+  cardCompact: { padding: space.md, gap: space.sm, marginTop: space.sm },
 
-  title: {
+  header: { flexDirection: "row", alignItems: "center", gap: space.md },
+  questionMark: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#3A2D16",
+  },
+  questionMarkCompact: { width: 28, height: 28, borderRadius: 14 },
+  questionGlyph: { fontFamily: font.sansBold, fontSize: size.body, color: color.needsYou },
+  headerCopy: { flex: 1 },
+  eyebrow: {
     fontFamily: font.sansMedium,
     fontSize: size.label,
     letterSpacing: 1.2,
     textTransform: "uppercase",
     color: color.needsYou,
+  },
+
+  title: {
+    fontFamily: font.sansBold,
+    fontSize: size.body,
+    color: color.text,
+    marginTop: space.xxs,
   },
   // Machine text, set in mono like every other command in the app.
   detail: {
@@ -177,34 +261,91 @@ const styles = StyleSheet.create({
     color: color.text,
     lineHeight: 18,
   },
-  prompt: { fontFamily: font.sansMedium, fontSize: size.body, color: color.text },
+  detailBox: {
+    backgroundColor: color.sunken,
+    borderRadius: radius.md,
+    padding: space.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.line,
+  },
+  prompt: {
+    fontFamily: font.sansMedium,
+    fontSize: size.body,
+    lineHeight: 21,
+    color: color.text,
+  },
 
   options: { gap: space.sm, marginTop: space.xs },
   option: {
     flexDirection: "row",
     alignItems: "center",
     gap: space.sm,
-    paddingVertical: space.sm,
+    minHeight: 48,
     paddingHorizontal: space.md,
-    borderRadius: radius.sm,
+    paddingVertical: space.sm,
+    borderRadius: radius.md,
     backgroundColor: color.sunken,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: color.line,
   },
   optionAffirmative: { borderColor: color.needsYou },
   optionSelected: { backgroundColor: "#302A1E", borderColor: color.needsYou },
-  optionPressed: { opacity: 0.65 },
+  optionKeyWrap: {
+    minWidth: 26,
+    height: 26,
+    paddingHorizontal: space.xs,
+    borderRadius: radius.sm,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: color.surfaceRaised,
+  },
   optionKey: {
     fontFamily: font.monoMedium,
     fontSize: size.caption,
-    color: color.faint,
-    minWidth: 12,
+    color: color.muted,
   },
-  optionLabel: { flex: 1, fontFamily: font.sans, fontSize: size.body, color: color.text },
+  optionCopy: { flex: 1, gap: space.xxs },
+  optionLabel: { fontFamily: font.sans, fontSize: size.body, color: color.text },
   optionLabelAffirmative: { fontFamily: font.sansMedium, color: color.needsYou },
+  optionDescription: {
+    fontFamily: font.sans,
+    fontSize: size.caption,
+    lineHeight: 18,
+    color: color.muted,
+  },
+  previewBox: {
+    gap: space.sm,
+    padding: space.md,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.lineStrong,
+    backgroundColor: color.surfaceRaised,
+  },
+  previewEyebrow: {
+    fontFamily: font.sansMedium,
+    fontSize: size.label,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    color: color.muted,
+  },
+  previewText: {
+    fontFamily: font.mono,
+    fontSize: size.caption,
+    lineHeight: 18,
+    color: color.text,
+  },
+  checkMark: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: color.needsYou,
+  },
+  checkGlyph: { fontFamily: font.sansBold, fontSize: size.label, color: color.ink },
   customInput: {
-    minHeight: 48,
-    borderRadius: radius.sm,
+    minHeight: 52,
+    borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: color.line,
     backgroundColor: color.sunken,
@@ -215,13 +356,14 @@ const styles = StyleSheet.create({
     paddingVertical: space.sm,
   },
   submit: {
+    minHeight: 48,
     alignItems: "center",
-    borderRadius: radius.sm,
+    justifyContent: "center",
+    borderRadius: radius.md,
     backgroundColor: color.needsYou,
     paddingHorizontal: space.md,
-    paddingVertical: space.sm,
   },
-  submitDisabled: { opacity: 0.35 },
+  submitDisabled: { backgroundColor: color.lineStrong, opacity: 0.55 },
   submitLabel: {
     color: color.ink,
     fontFamily: font.sansMedium,

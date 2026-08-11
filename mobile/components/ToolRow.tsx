@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { LayoutAnimation, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import Animated, {
   Easing,
   cancelAnimation,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withRepeat,
   withTiming,
@@ -11,6 +12,7 @@ import Animated, {
 
 import { Message } from "../lib/protocol";
 import { color, font, radius, size, space } from "../lib/theme";
+import { MotionPressable } from "./MotionPressable";
 
 /**
  * The status glyph, drawn rather than typed.
@@ -24,10 +26,11 @@ import { color, font, radius, size, space } from "../lib/theme";
  */
 function StatusMark({ status }: { status?: string }) {
   const spin = useSharedValue(0);
+  const reduceMotion = useReducedMotion();
   const running = status === "running";
 
   useEffect(() => {
-    if (!running) {
+    if (!running || reduceMotion) {
       cancelAnimation(spin);
       spin.value = 0;
       return;
@@ -38,13 +41,20 @@ function StatusMark({ status }: { status?: string }) {
       false,
     );
     return () => cancelAnimation(spin);
-  }, [running, spin]);
+  }, [reduceMotion, running, spin]);
 
   const spinStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${spin.value * 360}deg` }],
   }));
 
   if (running) {
+    if (reduceMotion) {
+      return (
+        <View style={styles.mark}>
+          <View style={[styles.dot, styles.dotRunning]} />
+        </View>
+      );
+    }
     // An open arc reads as motion the moment it turns; a filled dot would not.
     return (
       <View style={styles.mark}>
@@ -69,6 +79,27 @@ function StatusMark({ status }: { status?: string }) {
   );
 }
 
+function Chevron({ expanded }: { expanded: boolean }) {
+  const rotation = useSharedValue(expanded ? 90 : 0);
+  const reduceMotion = useReducedMotion();
+
+  useEffect(() => {
+    const next = expanded ? 90 : 0;
+    rotation.value = reduceMotion
+      ? next
+      : withTiming(next, {
+          duration: 150,
+          easing: Easing.bezier(0.23, 1, 0.32, 1),
+        });
+  }, [expanded, reduceMotion, rotation]);
+
+  const style = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotation.value}deg` }],
+  }));
+
+  return <Animated.Text style={[styles.chevron, style]}>›</Animated.Text>;
+}
+
 /**
  * One tool call: what ran, and how it ended.
  *
@@ -85,19 +116,14 @@ export function ToolRow({ message }: { message: Message }) {
   const failed = tool.status === "error";
 
   return (
-    <Pressable
+    <MotionPressable
       onPress={() => {
         if (!hasOutput) return;
-        // Animate the height change so output does not snap into place and
-        // shove the rest of the feed.
-        if (Platform.OS !== "web") {
-          LayoutAnimation.configureNext(
-            LayoutAnimation.create(180, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity),
-          );
-        }
         setExpanded((open) => !open);
       }}
-      style={({ pressed }) => [styles.row, pressed && hasOutput && styles.rowPressed]}
+      disabled={!hasOutput}
+      style={styles.row}
+      pressedScale={0.995}
       accessibilityRole={hasOutput ? "button" : "text"}
       accessibilityLabel={`${tool.name} ${tool.summary ?? ""}`}
       accessibilityState={{ expanded }}
@@ -110,9 +136,7 @@ export function ToolRow({ message }: { message: Message }) {
             {tool.summary}
           </Text>
         ) : null}
-        {hasOutput ? (
-          <Text style={[styles.chevron, expanded && styles.chevronOpen]}>›</Text>
-        ) : null}
+        {hasOutput ? <Chevron expanded={expanded} /> : null}
       </View>
 
       {expanded && hasOutput ? (
@@ -120,7 +144,7 @@ export function ToolRow({ message }: { message: Message }) {
           {message.text}
         </Text>
       ) : null}
-    </Pressable>
+    </MotionPressable>
   );
 }
 
@@ -129,7 +153,6 @@ const MARK_COLUMN = 16;
 
 const styles = StyleSheet.create({
   row: { borderRadius: radius.sm, marginHorizontal: -space.xs, paddingHorizontal: space.xs },
-  rowPressed: { backgroundColor: color.sunken },
   line: { flexDirection: "row", alignItems: "center", gap: space.sm },
 
   mark: {
@@ -139,6 +162,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: color.faint },
+  dotRunning: { backgroundColor: color.working },
   arc: {
     width: 10,
     height: 10,
@@ -160,9 +184,7 @@ const styles = StyleSheet.create({
     fontFamily: font.mono,
     fontSize: size.caption,
     color: color.faint,
-    transform: [{ rotate: "90deg" }],
   },
-  chevronOpen: { transform: [{ rotate: "270deg" }] },
 
   output: {
     fontFamily: font.mono,

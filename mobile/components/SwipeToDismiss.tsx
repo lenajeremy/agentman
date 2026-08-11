@@ -3,20 +3,24 @@ import { ReactNode, useCallback } from "react";
 import { Platform, StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
+  Easing,
+  LinearTransition,
+  ReduceMotion,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  withSpring,
   withTiming,
 } from "react-native-reanimated";
 
 import { color, font, radius, space } from "../lib/theme";
 
 /** How far the row must travel before letting go dismisses it. */
-const THRESHOLD = 96;
+const THRESHOLD = 88;
 /** Past this, the row is gone regardless of distance — a fast flick is intent. */
-const FLICK_VELOCITY = 800;
-/** Wide enough that the row is off screen on any phone. */
-const OFF_SCREEN = 1000;
+const FLICK_VELOCITY = 700;
+/** Wide enough that the row is off screen on a landscape tablet. */
+const OFF_SCREEN = 2000;
 
 interface Props {
   children: ReactNode;
@@ -45,8 +49,6 @@ export function SwipeToDismiss({
   accessibilityLabel,
 }: Props) {
   const translateX = useSharedValue(0);
-  const height = useSharedValue<number | undefined>(undefined);
-  const measured = useSharedValue(0);
 
   const buzz = useCallback(() => {
     if (Platform.OS === "web") return;
@@ -63,10 +65,17 @@ export function SwipeToDismiss({
     .activeOffsetX([-16, 16])
     .failOffsetY([-12, 12])
     .onUpdate((event) => {
+      if (!enabled) {
+        // Busy and blocked rows acknowledge the gesture without suggesting
+        // that they can actually be hidden.
+        translateX.value = event.translationX * 0.12;
+        return;
+      }
       if (event.translationX > 0) {
-        // Rightward drag gets a fraction of the movement: enough to feel
-        // attached to the finger, not enough to look like it will do anything.
-        translateX.value = event.translationX * 0.2;
+        // Progressive resistance feels like a boundary rather than a frozen
+        // control, and keeps clear of iOS's rightward navigation gesture.
+        const distance = event.translationX;
+        translateX.value = (distance * 80 * 0.55) / (80 + 0.55 * distance);
         return;
       }
       translateX.value = event.translationX;
@@ -77,24 +86,31 @@ export function SwipeToDismiss({
 
       if (enabled && (far || flicked)) {
         runOnJS(buzz)();
-        translateX.value = withTiming(-OFF_SCREEN, { duration: 180 });
-        // Collapsing the gap is what makes the list close up rather than
-        // leaving a hole where the row used to be.
-        height.value = withTiming(0, { duration: 180 }, (done) => {
+        translateX.value = withTiming(
+          -OFF_SCREEN,
+          {
+            duration: 170,
+            easing: Easing.bezier(0.23, 1, 0.32, 1),
+            reduceMotion: ReduceMotion.System,
+          },
+          (done) => {
           if (done) runOnJS(finish)();
-        });
+          },
+        );
         return;
       }
-      translateX.value = withTiming(0, { duration: 180 });
+      translateX.value = withSpring(0, {
+        damping: 24,
+        stiffness: 280,
+        mass: 0.7,
+        overshootClamping: true,
+        reduceMotion: ReduceMotion.System,
+      });
     });
 
   const rowStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],
   }));
-
-  const containerStyle = useAnimatedStyle(() =>
-    height.value === undefined ? {} : { height: height.value, overflow: "hidden" },
-  );
 
   // The backdrop only fades in as the row travels, so a half-committed swipe
   // shows how close it is rather than flashing at the first pixel.
@@ -105,15 +121,7 @@ export function SwipeToDismiss({
 
   return (
     <Animated.View
-      style={containerStyle}
-      onLayout={(event) => {
-        // Measured once. Re-measuring during the collapse would fight the
-        // animation for control of the same value.
-        if (measured.value === 0) {
-          measured.value = 1;
-          height.value = event.nativeEvent.layout.height;
-        }
-      }}
+      layout={LinearTransition.duration(180).reduceMotion(ReduceMotion.System)}
     >
       <Animated.View style={[styles.backdrop, backdropStyle]} pointerEvents="none">
         <Text style={styles.backdropText}>Hide</Text>
