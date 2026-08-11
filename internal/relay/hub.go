@@ -11,7 +11,7 @@ import (
 
 const (
 	PairingCodeTTL        = 60 * time.Second
-	pairingCodeDigits int = 8
+	pairingCodeDigits int = 10
 	pairingTokenBytes int = 16
 )
 
@@ -28,6 +28,16 @@ func IsPairingToken(secret string) bool {
 
 // ErrNoPeer is returned when a frame has nowhere to go.
 var ErrNoPeer = errors.New("relay: peer not connected")
+
+// ErrPairingCapacity protects the relay from an anonymous caller filling the
+// in-memory pairing table faster than the one-minute expiry can drain it.
+var ErrPairingCapacity = errors.New("relay: too many pending pairings")
+
+const (
+	maxLastSeenAccounts = 100_000
+	lastSeenTTL         = 30 * 24 * time.Hour
+	maxFanoutWorkers    = 32
+)
 
 // Conn is one live websocket participant. The hub only needs to be able to
 // push bytes at it, which keeps the transport swappable and the tests free of
@@ -57,6 +67,9 @@ type Hub struct {
 	// lastSeen lets an app be told how long the Mac has been gone, rather than
 	// just "offline".
 	lastSeen map[AccountID]time.Time
+	// maxPairings is configurable in tests. Each pairing occupies two map
+	// entries (typed code and scan token), but counts as one against this cap.
+	maxPairings int
 }
 
 type pairing struct {
@@ -72,10 +85,11 @@ type pairing struct {
 // NewHub creates an empty hub.
 func NewHub() *Hub {
 	return &Hub{
-		daemons:  map[AccountID]Conn{},
-		apps:     map[AccountID]map[string]Conn{},
-		pairings: map[string]pairing{},
-		lastSeen: map[AccountID]time.Time{},
+		daemons:     map[AccountID]Conn{},
+		apps:        map[AccountID]map[string]Conn{},
+		pairings:    map[string]pairing{},
+		lastSeen:    map[AccountID]time.Time{},
+		maxPairings: 10_000,
 	}
 }
 
@@ -91,13 +105,15 @@ func (h *Hub) AddDaemon(account AccountID, conn Conn) (replaced Conn) {
 
 // RemoveDaemon deregisters a daemon, ignoring a connection that has already
 // been replaced by a newer one.
-func (h *Hub) RemoveDaemon(account AccountID, conn Conn) {
+func (h *Hub) RemoveDaemon(account AccountID, conn Conn) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if current, ok := h.daemons[account]; ok && current == conn {
 		delete(h.daemons, account)
-		h.lastSeen[account] = time.Now()
+		h.recordLastSeenLocked(account, time.Now())
+		return true
 	}
+	return false
 }
 
 // AddApp registers a device connection under a caller-supplied id.
@@ -147,8 +163,11 @@ func (h *Hub) ToDaemon(account AccountID, frame []byte) error {
 }
 
 // ToApps fans a frame out to every device on an account, returning how many
-// received it. Send errors are ignored: a dead socket is the reader loop's
-// problem to notice and clean up.
+// received it. Writes run through a bounded worker group: one unresponsive
+// phone must not hold every other device behind its write timeout, while an
+// account with thousands of sockets must not create thousands of goroutines
+// for every daemon event. Send errors are the reader loop's problem to clean
+// up.
 func (h *Hub) ToApps(account AccountID, frame []byte) int {
 	h.mu.RLock()
 	devices := make([]Conn, 0, len(h.apps[account]))
@@ -157,9 +176,33 @@ func (h *Hub) ToApps(account AccountID, frame []byte) int {
 	}
 	h.mu.RUnlock()
 
-	var delivered int
+	if len(devices) == 0 {
+		return 0
+	}
+
+	jobs := make(chan Conn, len(devices))
+	results := make(chan bool, len(devices))
+	workers := min(len(devices), maxFanoutWorkers)
+	var wait sync.WaitGroup
+	for range workers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for conn := range jobs {
+				results <- conn.Send(frame) == nil
+			}
+		}()
+	}
 	for _, conn := range devices {
-		if conn.Send(frame) == nil {
+		jobs <- conn
+	}
+	close(jobs)
+	wait.Wait()
+	close(results)
+
+	delivered := 0
+	for ok := range results {
+		if ok {
 			delivered++
 		}
 	}
@@ -168,7 +211,7 @@ func (h *Hub) ToApps(account AccountID, frame []byte) int {
 
 // PairingSecrets are the two ways to redeem one pairing.
 type PairingSecrets struct {
-	// Code is eight digits, meant to be read off a screen and typed.
+	// Code is ten digits, meant to be read off a screen and typed.
 	Code string
 	// Token is long and random, meant to be scanned from a QR code. Because
 	// nobody types it, it can carry enough entropy that guessing is not a
@@ -178,23 +221,38 @@ type PairingSecrets struct {
 
 // NewPairing issues a short-lived pairing reachable by either secret.
 func (h *Hub) NewPairing(account AccountID) (PairingSecrets, error) {
-	code, err := randomDigits(pairingCodeDigits)
-	if err != nil {
-		return PairingSecrets{}, err
-	}
-	token, err := randomToken(pairingTokenBytes)
-	if err != nil {
-		return PairingSecrets{}, err
-	}
+	for range 16 {
+		code, err := randomDigits(pairingCodeDigits)
+		if err != nil {
+			return PairingSecrets{}, err
+		}
+		token, err := randomToken(pairingTokenBytes)
+		if err != nil {
+			return PairingSecrets{}, err
+		}
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.sweepPairingsLocked()
+		h.mu.Lock()
+		h.sweepPairingsLocked()
+		if len(h.pairings)/2 >= h.maxPairings {
+			h.mu.Unlock()
+			return PairingSecrets{}, ErrPairingCapacity
+		}
+		if _, codeExists := h.pairings[code]; codeExists {
+			h.mu.Unlock()
+			continue
+		}
+		if _, tokenExists := h.pairings[token]; tokenExists {
+			h.mu.Unlock()
+			continue
+		}
 
-	expires := time.Now().Add(PairingCodeTTL)
-	h.pairings[code] = pairing{account: account, expires: expires, peer: token}
-	h.pairings[token] = pairing{account: account, expires: expires, peer: code}
-	return PairingSecrets{Code: code, Token: token}, nil
+		expires := time.Now().Add(PairingCodeTTL)
+		h.pairings[code] = pairing{account: account, expires: expires, peer: token}
+		h.pairings[token] = pairing{account: account, expires: expires, peer: code}
+		h.mu.Unlock()
+		return PairingSecrets{Code: code, Token: token}, nil
+	}
+	return PairingSecrets{}, errors.New("relay: could not mint a unique pairing code")
 }
 
 // NewPairingCode issues a pairing and returns only its typed code.
@@ -241,6 +299,27 @@ func (h *Hub) sweepPairingsLocked() {
 			delete(h.pairings, code)
 		}
 	}
+}
+
+func (h *Hub) recordLastSeenLocked(account AccountID, now time.Time) {
+	if len(h.lastSeen) >= maxLastSeenAccounts {
+		cutoff := now.Add(-lastSeenTTL)
+		var oldestAccount AccountID
+		var oldest time.Time
+		for candidate, seen := range h.lastSeen {
+			if seen.Before(cutoff) {
+				delete(h.lastSeen, candidate)
+				continue
+			}
+			if oldest.IsZero() || seen.Before(oldest) {
+				oldestAccount, oldest = candidate, seen
+			}
+		}
+		if len(h.lastSeen) >= maxLastSeenAccounts && oldestAccount != "" {
+			delete(h.lastSeen, oldestAccount)
+		}
+	}
+	h.lastSeen[account] = now
 }
 
 // Stats reports connection counts. Deliberately the only introspection the

@@ -1,10 +1,9 @@
 // Command relay is the stateless message relay between a user's daemon and
 // their phone.
 //
-// It has no database, no volume, and no persistent state of any kind: it
-// matches two websockets and forwards frames between them. Deploy it, run it
-// behind any host, or don't run one at all and point the app at a daemon over
-// a LAN — the daemon speaks the same protocol either way.
+// It has no database or persistent transcript state: it matches two websockets
+// and forwards frames between them. Payloads are not end-to-end encrypted, so
+// the relay operator remains a live trust boundary.
 package main
 
 import (
@@ -65,6 +64,7 @@ func main() {
 		Addr:              ":" + port,
 		Handler:           server.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		MaxHeaderBytes:    16 * 1024,
 		// No write timeout: these are long-lived websockets, and a deadline
 		// here would sever an idle connection mid-session.
 	}

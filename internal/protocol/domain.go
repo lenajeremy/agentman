@@ -100,7 +100,8 @@ func (q *Question) sameAs(other *Question) bool {
 	if q == nil || other == nil {
 		return q == other
 	}
-	if q.Prompt != other.Prompt || q.Title != other.Title || q.Detail != other.Detail {
+	if q.Prompt != other.Prompt || q.Title != other.Title || q.Detail != other.Detail ||
+		q.Multiple != other.Multiple || q.Custom != other.Custom {
 		return false
 	}
 	if len(q.Options) != len(other.Options) {
@@ -120,6 +121,10 @@ type Question struct {
 	Title   string           `json:"title,omitempty"`
 	Detail  string           `json:"detail,omitempty"`
 	Options []QuestionOption `json:"options"`
+	// Multiple means the agent accepts more than one listed choice. Custom
+	// means the user may supply their own text instead of a listed choice.
+	Multiple bool `json:"multiple,omitempty"`
+	Custom   bool `json:"custom,omitempty"`
 }
 
 // QuestionOption is one choice. Key is what gets sent to select it.
@@ -127,6 +132,15 @@ type QuestionOption struct {
 	Key      string `json:"key"`
 	Label    string `json:"label"`
 	Selected bool   `json:"selected,omitempty"`
+}
+
+// QuestionAnswer is the complete user response to one displayed question.
+// Terminal menus use OptionKey; API-backed agents may accept several choices
+// and/or custom text.
+type QuestionAnswer struct {
+	OptionKey string
+	Options   []string
+	Text      string
 }
 
 // Role is who produced a message.

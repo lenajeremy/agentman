@@ -1,13 +1,14 @@
 // Package relay implements the stateless message relay between a user's
 // daemon and their phone.
 //
-// The defining constraint: the relay stores nothing. No transcripts, no
-// messages, no session lists, no database. It matches two sockets and forwards
-// bytes between them, treating each frame's payload as opaque.
+// The defining constraint: the relay persistently stores no transcripts,
+// messages, session lists, or accounts. It matches sockets and forwards bytes,
+// retaining only live connections and short-lived pairing/last-seen state in
+// memory.
 //
-// That is what makes the deployment question uninteresting — run the public
-// relay, deploy your own, or skip it and use a LAN address. A relay operator
-// has nothing to leak, nothing to retain, and nothing to migrate.
+// This removes persistent transcript storage, but not trust: payloads are not
+// end-to-end encrypted and a relay operator can inspect live traffic. Users who
+// do not accept that boundary should self-host the relay.
 //
 // Two things would normally force a database, and both are avoided here:
 //
@@ -48,11 +49,15 @@ type AccountID string
 //
 // Deriving rather than registering is what keeps the relay free of a user
 // table: the same daemon token always maps to the same account, and the relay
-// never needs to have seen it before. The daemon token itself is never stored
-// or transmitted onward — only this hash is used for routing.
+// never needs to have seen it before. The relay sees the token during bearer
+// authentication but does not store or transmit it onward; only this hash is
+// used for routing.
 func DeriveAccount(daemonToken string) AccountID {
 	sum := sha256.Sum256([]byte("agentman-account\x00" + daemonToken))
-	return AccountID(hex.EncodeToString(sum[:])[:16])
+	// 128 bits keeps cross-account routing collision-resistant even at public
+	// relay scale. The earlier 64-bit truncation made a birthday collision a
+	// realistic long-term multi-tenant risk.
+	return AccountID(hex.EncodeToString(sum[:])[:32])
 }
 
 // deviceClaims is the body of a device token.
@@ -93,6 +98,9 @@ func MintDeviceToken(secret string, account AccountID, nonce string) (string, er
 // VerifyDeviceToken checks a token's signature and expiry, returning the
 // account it authorizes. Nothing is looked up; the token carries its own proof.
 func VerifyDeviceToken(secret, token string) (AccountID, error) {
+	if secret == "" {
+		return "", ErrTokenSignature
+	}
 	encoded, signature, ok := strings.Cut(token, ".")
 	if !ok || encoded == "" || signature == "" {
 		return "", ErrTokenMalformed
@@ -128,13 +136,12 @@ func sign(secret, encoded string) string {
 
 // FormatPairingCode renders a code in a readable form.
 //
-// Grouped in fours rather than at the shard boundary: the split between the
-// account shard and the random half is an implementation detail, and drawing
-// attention to it would only invite someone to read meaning into the first
-// two digits.
+// Split into two groups so a human can transcribe it without losing their
+// place. Every digit is random; the grouping carries no account information.
 func FormatPairingCode(code string) string {
-	if len(code) != 8 {
+	if len(code) != pairingCodeDigits {
 		return code
 	}
-	return fmt.Sprintf("%s %s", code[:4], code[4:])
+	middle := len(code) / 2
+	return fmt.Sprintf("%s %s", code[:middle], code[middle:])
 }

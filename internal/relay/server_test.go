@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
 
@@ -113,6 +115,39 @@ func TestPairingDoesNotDisconnectTheDaemon(t *testing.T) {
 	}
 }
 
+func TestWebsocketPairRequestsAreRateLimited(t *testing.T) {
+	server, ts := newTestServer(t)
+	server.perClientPairings = newLimiter(1, time.Minute)
+	server.globalPairings = newLimiter(10, time.Minute)
+	daemon := dialDaemon(t, ts.URL, "daemon-token")
+
+	for index := range 2 {
+		envelope, err := protocol.NewEnvelope(fmt.Sprintf("pair-%d", index), protocol.PeerRelay,
+			protocol.Control{Type: protocol.CtlPairRequest})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := wsjson.Write(context.Background(), daemon, envelope); err != nil {
+			t.Fatal(err)
+		}
+		var reply protocol.Envelope
+		if err := wsjson.Read(context.Background(), daemon, &reply); err != nil {
+			t.Fatal(err)
+		}
+		var control protocol.Control
+		if err := json.Unmarshal(reply.Payload, &control); err != nil {
+			t.Fatal(err)
+		}
+		want := protocol.CtlPairCode
+		if index == 1 {
+			want = protocol.CtlError
+		}
+		if control.Type != want {
+			t.Fatalf("reply %d = %q, want %q", index, control.Type, want)
+		}
+	}
+}
+
 func TestAppSeesDaemonOnlineOnConnect(t *testing.T) {
 	_, ts := newTestServer(t)
 	const daemonToken = "daemon-token"
@@ -193,6 +228,9 @@ func TestAppFrameReachesDaemon(t *testing.T) {
 	if got.ID != "req-1" {
 		t.Errorf("frame id = %q, want the app's original id", got.ID)
 	}
+	if got.From == "" {
+		t.Error("relay did not identify the app connection for subscription ownership")
+	}
 }
 
 func TestAppTokenIsRequired(t *testing.T) {
@@ -217,6 +255,65 @@ func TestPairCodeRequiresDaemonToken(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("HTTP %d, want 401 for an unauthenticated code request", resp.StatusCode)
+	}
+}
+
+func TestDaemonTokenIsRejectedInQueryString(t *testing.T) {
+	_, ts := newTestServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if ws, _, err := websocket.Dial(ctx,
+		wsAddr(ts.URL)+"/ws/daemon?token=daemon-root-secret", nil); err == nil {
+		ws.CloseNow()
+		t.Fatal("daemon root token in a query string was accepted")
+	}
+}
+
+func TestPairCodeCreationIsRateLimited(t *testing.T) {
+	_, ts := newTestServer(t)
+	var blocked bool
+	for range 40 {
+		req, err := http.NewRequest(http.MethodPost, ts.URL+"/pair/code", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer attacker-chosen-account")
+		req.Header.Set("X-Forwarded-For", "198.51.100.44")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusTooManyRequests {
+			blocked = true
+			break
+		}
+	}
+	if !blocked {
+		t.Fatal("anonymous pairing creation was never rate limited")
+	}
+}
+
+func TestPeerDirectionPolicy(t *testing.T) {
+	allowed := []struct {
+		from protocol.Peer
+		to   protocol.Peer
+	}{
+		{protocol.PeerApp, protocol.PeerDaemon},
+		{protocol.PeerApp, protocol.PeerRelay},
+		{protocol.PeerDaemon, protocol.PeerApp},
+		{protocol.PeerDaemon, protocol.PeerRelay},
+	}
+	for _, route := range allowed {
+		if !allowedDestination(route.from, route.to) {
+			t.Errorf("route %s -> %s was rejected", route.from, route.to)
+		}
+	}
+	if allowedDestination(protocol.PeerApp, protocol.PeerApp) {
+		t.Error("an app can impersonate the daemon to other apps")
+	}
+	if allowedDestination(protocol.PeerDaemon, protocol.PeerDaemon) {
+		t.Error("a daemon can reflect frames back into itself")
 	}
 }
 
@@ -411,6 +508,39 @@ func TestRedeemingOneSecretRetiresTheOther(t *testing.T) {
 	}
 	if _, status := redeem(t, ts.URL, secrets.Code); status == http.StatusOK {
 		t.Error("the typed code still worked after the pairing was scanned")
+	}
+}
+
+func TestConnectionCapacityIsBoundedPerClient(t *testing.T) {
+	server := NewServer(testSecret, "test", nil, false)
+	client := "203.0.113.7"
+	for range maxConnectionsPerClient {
+		if !server.acquireConnection(httptest.NewRecorder(), client) {
+			t.Fatal("client was rejected below its connection ceiling")
+		}
+	}
+
+	rejected := httptest.NewRecorder()
+	if server.acquireConnection(rejected, client) {
+		t.Fatal("one client occupied more than its connection ceiling")
+	}
+	if rejected.Code != http.StatusTooManyRequests {
+		t.Fatalf("rejection status = %d, want %d", rejected.Code, http.StatusTooManyRequests)
+	}
+
+	// Another caller still has capacity; this is an isolation limit, not a
+	// smaller accidental global limit.
+	other := "203.0.113.8"
+	if !server.acquireConnection(httptest.NewRecorder(), other) {
+		t.Fatal("one abusive client exhausted another client's capacity")
+	}
+	server.releaseConnection(other)
+
+	for range maxConnectionsPerClient {
+		server.releaseConnection(client)
+	}
+	if len(server.connections) != 0 || len(server.clientConnections) != 0 {
+		t.Fatal("released connections leaked capacity bookkeeping")
 	}
 }
 

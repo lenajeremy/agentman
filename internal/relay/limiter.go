@@ -16,29 +16,59 @@ type limiter struct {
 	window time.Duration
 	limit  int
 	hits   map[string][]time.Time
+	active map[string]int
 }
 
 func newLimiter(limit int, window time.Duration) *limiter {
-	return &limiter{window: window, limit: limit, hits: map[string][]time.Time{}}
+	return &limiter{
+		window: window,
+		limit:  limit,
+		hits:   map[string][]time.Time{},
+		active: map[string]int{},
+	}
 }
 
-// over reports whether a key has already exhausted its budget, without
-// recording anything.
-//
-// Checking and recording are separate so that only failures are charged: a
-// correct code is honoured without spending anyone's budget, which is what
-// keeps a flood of wrong guesses from blocking real pairings.
-func (l *limiter) over(key string) bool {
+// allow atomically spends one request from a key's sliding-window budget.
+// Keeping the check and record under one lock matters: otherwise a burst of
+// concurrent requests can all observe the old count and bypass the limit.
+func (l *limiter) allow(key string, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return len(l.liveLocked(key, time.Now())) >= l.limit
+	if len(l.liveLocked(key, now))+l.active[key] >= l.limit {
+		return false
+	}
+	l.hits[key] = append(l.hits[key], now)
+	l.sweepLocked(now)
+	return true
 }
 
-// record adds a hit for key.
-func (l *limiter) record(key string, now time.Time) {
+// reserve temporarily occupies one slot without charging it yet. Pairing-code
+// redemption uses this so a valid code is not counted as a failed guess while
+// many concurrent guesses still cannot race through one apparent slot.
+func (l *limiter) reserve(key string, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.hits[key] = append(l.liveLocked(key, now), now)
+	if len(l.liveLocked(key, now))+l.active[key] >= l.limit {
+		return false
+	}
+	l.active[key]++
+	return true
+
+}
+
+// release retires a reservation, charging it when the attempted operation
+// failed. Callers pass failed=false for a valid pairing code.
+func (l *limiter) release(key string, now time.Time, failed bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.active[key] > 1 {
+		l.active[key]--
+	} else {
+		delete(l.active, key)
+	}
+	if failed {
+		l.hits[key] = append(l.liveLocked(key, now), now)
+	}
 	l.sweepLocked(now)
 }
 

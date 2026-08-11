@@ -56,13 +56,16 @@ func TestDeviceTokenRejectsTampering(t *testing.T) {
 			t.Errorf("malformed token %q verified", bad)
 		}
 	}
+	if _, err := VerifyDeviceToken("", token); !errors.Is(err, ErrTokenSignature) {
+		t.Errorf("token verified with an empty relay secret: %v", err)
+	}
 }
 
 func TestDeriveAccountIsStableAndDistinct(t *testing.T) {
 	// Stable across restarts: the derivation must be a pure function of the
 	// token, with no randomness or per-process salt, or a returning daemon
 	// would land in a different account and lose its paired devices.
-	const knownAccount = "6f4a441b727ba6f5"
+	const knownAccount = "6f4a441b727ba6f50133c69e8e0520b5"
 	if got := DeriveAccount("token-a"); string(got) != knownAccount {
 		t.Errorf("DeriveAccount changed: got %q, want the pinned %q — "+
 			"every paired device would be orphaned by this", got, knownAccount)
@@ -85,6 +88,21 @@ type fakeConn struct {
 	closed bool
 	err    error
 }
+
+type gatedConn struct {
+	sent  chan struct{}
+	block <-chan struct{}
+}
+
+func (c *gatedConn) Send([]byte) error {
+	close(c.sent)
+	if c.block != nil {
+		<-c.block
+	}
+	return nil
+}
+
+func (c *gatedConn) Close() error { return nil }
 
 func (c *fakeConn) Send(frame []byte) error {
 	c.mu.Lock()
@@ -136,6 +154,29 @@ func TestHubRoutesBetweenDaemonAndApps(t *testing.T) {
 	}
 }
 
+func TestHubSlowAppDoesNotDelayOtherApps(t *testing.T) {
+	hub := NewHub()
+	account := DeriveAccount("fanout")
+	releaseSlow := make(chan struct{})
+	slow := &gatedConn{sent: make(chan struct{}), block: releaseSlow}
+	fast := &gatedConn{sent: make(chan struct{})}
+	hub.AddApp(account, "slow", slow)
+	hub.AddApp(account, "fast", fast)
+
+	done := make(chan int, 1)
+	go func() { done <- hub.ToApps(account, []byte("event")) }()
+	select {
+	case <-fast.sent:
+		// Good: the healthy app was not queued behind the blocked one.
+	case <-time.After(time.Second):
+		t.Fatal("a blocked app delayed delivery to another app")
+	}
+	close(releaseSlow)
+	if delivered := <-done; delivered != 2 {
+		t.Fatalf("delivered = %d, want 2", delivered)
+	}
+}
+
 func TestHubIsolatesAccounts(t *testing.T) {
 	hub := NewHub()
 	mine := DeriveAccount("my-daemon")
@@ -177,7 +218,9 @@ func TestHubReportsOfflineImmediately(t *testing.T) {
 		t.Error("daemon should report online once connected")
 	}
 
-	hub.RemoveDaemon(account, daemon)
+	if !hub.RemoveDaemon(account, daemon) {
+		t.Fatal("current daemon was not removed")
+	}
 	online, lastSeen := hub.DaemonOnline(account)
 	if online {
 		t.Error("daemon should report offline after disconnect")
@@ -201,7 +244,9 @@ func TestHubReplacesStaleDaemonConnection(t *testing.T) {
 	}
 
 	// A late cleanup from the old connection must not deregister the new one.
-	hub.RemoveDaemon(account, first)
+	if hub.RemoveDaemon(account, first) {
+		t.Fatal("stale daemon cleanup reported that it removed the replacement")
+	}
 	if online, _ := hub.DaemonOnline(account); !online {
 		t.Error("stale disconnect wrongly removed the current daemon")
 	}
@@ -213,6 +258,17 @@ func TestHubReplacesStaleDaemonConnection(t *testing.T) {
 	}
 }
 
+func TestHubCapsPendingPairings(t *testing.T) {
+	hub := NewHub()
+	hub.maxPairings = 1
+	if _, err := hub.NewPairing(DeriveAccount("first")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hub.NewPairing(DeriveAccount("second")); !errors.Is(err, ErrPairingCapacity) {
+		t.Fatalf("second pairing error = %v, want ErrPairingCapacity", err)
+	}
+}
+
 func TestPairingCodeIsSingleUseAndExpires(t *testing.T) {
 	hub := NewHub()
 	account := DeriveAccount("t")
@@ -221,8 +277,8 @@ func TestPairingCodeIsSingleUseAndExpires(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(code) != 8 {
-		t.Fatalf("code = %q, want 8 digits (2 shard + 6 random)", code)
+	if len(code) != pairingCodeDigits {
+		t.Fatalf("code = %q, want %d random digits", code, pairingCodeDigits)
 	}
 	for _, r := range code {
 		if r < '0' || r > '9' {
@@ -236,6 +292,50 @@ func TestPairingCodeIsSingleUseAndExpires(t *testing.T) {
 	}
 	if _, ok := hub.RedeemPairingCode(code); ok {
 		t.Error("a pairing code must not be reusable")
+	}
+}
+
+func TestLimiterCannotBeBypassedByConcurrentRequests(t *testing.T) {
+	limit := newLimiter(1, time.Minute)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	allowed := 0
+	for range 100 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if limit.allow("caller", time.Now()) {
+				mu.Lock()
+				allowed++
+				mu.Unlock()
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if allowed != 1 {
+		t.Fatalf("concurrent limiter allowed %d requests, want 1", allowed)
+	}
+}
+
+func TestLimiterReservationsChargeOnlyFailures(t *testing.T) {
+	limit := newLimiter(1, time.Minute)
+	now := time.Now()
+	if !limit.reserve("caller", now) {
+		t.Fatal("first reservation was refused")
+	}
+	if limit.reserve("caller", now) {
+		t.Fatal("concurrent reservation bypassed the limit")
+	}
+	limit.release("caller", now, false)
+	if !limit.reserve("caller", now) {
+		t.Fatal("successful operation was charged as a failure")
+	}
+	limit.release("caller", now, true)
+	if limit.reserve("caller", now) {
+		t.Fatal("failed operation did not consume the budget")
 	}
 }
 

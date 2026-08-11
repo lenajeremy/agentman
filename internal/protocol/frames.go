@@ -19,15 +19,17 @@ const (
 
 // Envelope wraps every frame on the wire.
 //
-// The relay routes on this and treats Payload as opaque for daemon and app
-// traffic. Keeping the body in a single field from day one is what makes
-// end-to-end encryption a later drop-in: seal Payload, and a relay operator
-// can route traffic it provably cannot read. Control frames addressed to
-// PeerRelay are the exception and stay in the clear, because they are the
-// relay's own business.
+// The relay routes on this and does not interpret Payload for daemon/app
+// traffic, but the bytes are not encrypted end to end: a relay operator can
+// inspect them. Keeping the body in one field leaves room for a future sealed
+// payload. Relay control frames necessarily remain relay-readable.
 type Envelope struct {
 	V  int    `json:"v"`
 	ID string `json:"id"`
+	// From is assigned by the relay for app-originated requests. Clients must
+	// not trust a value they supplied themselves; the relay overwrites it
+	// before forwarding so daemon subscription ownership cannot be spoofed.
+	From string `json:"from,omitempty"`
 	// ReplyTo echoes the ID of the request this answers.
 	ReplyTo string          `json:"replyTo,omitempty"`
 	To      Peer            `json:"to"`
@@ -64,6 +66,10 @@ type Request struct {
 	Text   string `json:"text,omitempty"`
 	// OptionKey selects an option on ReqAnswer.
 	OptionKey string `json:"optionKey,omitempty"`
+	// OptionKeys and AnswerText support API questions that allow several
+	// selections or a custom response. OptionKey remains the terminal-menu path.
+	OptionKeys []string `json:"optionKeys,omitempty"`
+	AnswerText string   `json:"answerText,omitempty"`
 	// ClientID is echoed on SendResult so the app can settle its optimistic
 	// message bubble.
 	ClientID string `json:"clientId,omitempty"`
@@ -135,7 +141,10 @@ const (
 	// because the relay buffers nothing.
 	CtlDaemonOnline  ControlType = "daemon_online"
 	CtlDaemonOffline ControlType = "daemon_offline"
-	CtlError         ControlType = "error"
+	// CtlAppDisconnected lets the daemon release only that connection's live
+	// subscriptions without disrupting another phone watching the same agent.
+	CtlAppDisconnected ControlType = "app_disconnected"
+	CtlError           ControlType = "error"
 )
 
 // Control is a frame the relay itself originates or consumes.
@@ -145,10 +154,12 @@ type Control struct {
 	DaemonOnline bool `json:"daemonOnline,omitempty"`
 	// Code and ExpiresAt are set on CtlPairCode.
 	Code      string `json:"code,omitempty"`
+	Token     string `json:"token,omitempty"`
 	ExpiresAt int64  `json:"expiresAt,omitempty"`
 	// LastSeenAt is set on CtlDaemonOffline when the daemon has been seen
 	// before, so the app can say how long it has been gone.
 	LastSeenAt int64  `json:"lastSeenAt,omitempty"`
+	DeviceID   string `json:"deviceId,omitempty"`
 	Message    string `json:"message,omitempty"`
 }
 

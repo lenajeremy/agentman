@@ -27,6 +27,13 @@ const (
 	// pingInterval keeps NAT and load-balancer idle timers from silently
 	// dropping a connection that is simply quiet — common on mobile networks.
 	pingInterval = 30 * time.Second
+	// A hard ceiling turns connection floods into a bounded 503 response rather
+	// than an out-of-memory crash. Normal deployments remain far below it.
+	maxRelayConnections = 10_000
+	// Daemon authentication is intentionally self-sovereign: any random token
+	// creates an isolated account. Without a per-client ceiling that also means
+	// one IP can occupy every global websocket slot with throwaway accounts.
+	maxConnectionsPerClient = 128
 )
 
 // Server is the relay's HTTP surface.
@@ -45,8 +52,18 @@ type Server struct {
 	// real pairing never meets it.
 	perClientFailures *limiter
 	globalFailures    *limiter
+	// Pairing creation is authenticated only by possession of a daemon token,
+	// and accounts are intentionally self-sovereign rather than registered.
+	// That means any caller can mint an account of its own, so creation needs a
+	// separate resource-abuse limit even though redeeming codes is protected
+	// against guessing below.
+	perClientPairings *limiter
+	globalPairings    *limiter
 	// trustProxy says whether X-Forwarded-For may be believed. See clientKey.
-	trustProxy bool
+	trustProxy        bool
+	connections       chan struct{}
+	connectionMu      sync.Mutex
+	clientConnections map[string]int
 }
 
 // NewServer builds a relay.
@@ -66,7 +83,11 @@ func NewServer(secret, version string, log *slog.Logger, trustProxy bool) *Serve
 		version:           version,
 		perClientFailures: newLimiter(10, time.Minute),
 		globalFailures:    newLimiter(2000, time.Minute),
+		perClientPairings: newLimiter(30, time.Minute),
+		globalPairings:    newLimiter(5000, time.Minute),
 		trustProxy:        trustProxy,
+		connections:       make(chan struct{}, maxRelayConnections),
+		clientConnections: map[string]int{},
 	}
 }
 
@@ -109,9 +130,17 @@ func withCORS(next http.Handler) http.Handler {
 // (one daemon per account, newest wins), knocking the real daemon offline every
 // time the user ran `am pair`.
 func (s *Server) handlePairCode(w http.ResponseWriter, r *http.Request) {
-	token := bearer(r)
+	token := bearerHeader(r)
 	if token == "" {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing daemon token"})
+		return
+	}
+	client := s.clientKey(r)
+	now := time.Now()
+	if !s.perClientPairings.allow("ip:"+client, now) || !s.globalPairings.allow("", now) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "too many pairing codes requested — wait a minute and try again",
+		})
 		return
 	}
 	// Derived, not looked up: the relay can issue a code for a daemon it has
@@ -120,9 +149,16 @@ func (s *Server) handlePairCode(w http.ResponseWriter, r *http.Request) {
 
 	secrets, err := s.hub.NewPairing(account)
 	if err != nil {
+		if errors.Is(err, ErrPairingCapacity) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "the relay is temporarily at pairing capacity — try again shortly",
+			})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not generate a code"})
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"code":      secrets.Code,
 		"token":     secrets.Token,
@@ -172,8 +208,16 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := s.clientKey(r)
-	if s.perClientFailures.over(client) || s.globalFailures.over("") {
+	client := "ip:" + s.clientKey(r)
+	now := time.Now()
+	if !s.perClientFailures.reserve(client, now) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "too many pairing attempts — wait a minute and try a fresh code",
+		})
+		return
+	}
+	if !s.globalFailures.reserve("", now) {
+		s.perClientFailures.release(client, now, false)
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{
 			"error": "too many pairing attempts — wait a minute and try a fresh code",
 		})
@@ -181,14 +225,9 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	}
 
 	account, ok := s.hub.RedeemPairingCode(code)
+	s.perClientFailures.release(client, time.Now(), !ok)
+	s.globalFailures.release("", time.Now(), !ok)
 	if !ok {
-		// Only failures are charged, and only to the caller who made them. A
-		// user who types their code correctly never spends budget, and one
-		// person guessing badly never affects anybody else.
-		now := time.Now()
-		s.perClientFailures.record(client, now)
-		s.globalFailures.record("", now)
-
 		// Deliberately vague: distinguishing "wrong" from "expired" would help
 		// someone probing the code space more than it helps a real user.
 		writeJSON(w, http.StatusForbidden, map[string]string{
@@ -205,11 +244,20 @@ func (s *Server) issueDeviceToken(w http.ResponseWriter, account AccountID, devi
 	if deviceID == "" {
 		deviceID = "device"
 	}
-	token, err := MintDeviceToken(s.secret, account, deviceID)
+	nonce, err := randomToken(12)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not issue token"})
 		return
 	}
+	if len(deviceID) > 80 {
+		deviceID = deviceID[:80]
+	}
+	token, err := MintDeviceToken(s.secret, account, deviceID+":"+nonce)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not issue token"})
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 
@@ -250,7 +298,9 @@ func (s *Server) accept(w http.ResponseWriter, r *http.Request) (*websocket.Conn
 
 // handleDaemon serves a daemon connection.
 func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
-	token := bearer(r)
+	// A daemon can always set an Authorization header. Never accept its
+	// long-lived root token in the query string, where proxies commonly log it.
+	token := bearerHeader(r)
 	if token == "" {
 		http.Error(w, "missing bearer token", http.StatusUnauthorized)
 		return
@@ -258,6 +308,11 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	// No lookup: the account is derived from the token itself, so the relay
 	// serves a daemon it has never seen without storing anything about it.
 	account := DeriveAccount(token)
+	client := s.clientKey(r)
+	if !s.acquireConnection(w, client) {
+		return
+	}
+	defer s.releaseConnection(client)
 
 	ws, err := s.accept(w, r)
 	if err != nil {
@@ -275,15 +330,18 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	s.notifyApps(account, protocol.Control{Type: protocol.CtlDaemonOnline, DaemonOnline: true})
 
 	defer func() {
-		s.hub.RemoveDaemon(account, conn)
-		s.notifyApps(account, protocol.Control{
-			Type:       protocol.CtlDaemonOffline,
-			LastSeenAt: time.Now().UnixMilli(),
-		})
-		s.log.Info("daemon disconnected", "account", account)
+		// Replacing a stale socket closes its reader. That old handler must not
+		// announce "offline" after the replacement already announced "online".
+		if s.hub.RemoveDaemon(account, conn) {
+			s.notifyApps(account, protocol.Control{
+				Type:       protocol.CtlDaemonOffline,
+				LastSeenAt: time.Now().UnixMilli(),
+			})
+			s.log.Info("daemon disconnected", "account", account)
+		}
 	}()
 
-	s.pump(r.Context(), ws, conn, account, protocol.PeerDaemon)
+	s.pump(r.Context(), ws, conn, account, protocol.PeerDaemon, "")
 }
 
 // handleApp serves a phone connection.
@@ -294,6 +352,11 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid device token", http.StatusUnauthorized)
 		return
 	}
+	client := s.clientKey(r)
+	if !s.acquireConnection(w, client) {
+		return
+	}
+	defer s.releaseConnection(client)
 
 	ws, err := s.accept(w, r)
 	if err != nil {
@@ -303,7 +366,12 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 
 	deviceID := fmt.Sprintf("%s-%d", account, time.Now().UnixNano())
 	s.hub.AddApp(account, deviceID, conn)
-	defer s.hub.RemoveApp(account, deviceID)
+	defer func() {
+		s.hub.RemoveApp(account, deviceID)
+		s.notifyDaemon(account, protocol.Control{
+			Type: protocol.CtlAppDisconnected, DeviceID: deviceID,
+		})
+	}()
 
 	online, lastSeen := s.hub.DaemonOnline(account)
 	hello := protocol.Control{Type: protocol.CtlHello, DaemonOnline: online}
@@ -312,15 +380,26 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = sendControl(conn, hello)
 
-	s.pump(r.Context(), ws, conn, account, protocol.PeerApp)
+	s.pump(r.Context(), ws, conn, account, protocol.PeerApp, deviceID)
 }
 
 // pump reads frames from one side and routes them to the other until the
 // connection closes.
-func (s *Server) pump(ctx context.Context, ws *websocket.Conn, conn Conn, account AccountID, from protocol.Peer) {
+func (s *Server) pump(
+	ctx context.Context,
+	ws *websocket.Conn,
+	conn Conn,
+	account AccountID,
+	from protocol.Peer,
+	deviceID string,
+) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	go keepAlive(ctx, ws)
+	go func() {
+		if keepAlive(ctx, ws) != nil {
+			cancel()
+		}
+	}()
 
 	for {
 		_, data, err := ws.Read(ctx)
@@ -332,13 +411,32 @@ func (s *Server) pump(ctx context.Context, ws *websocket.Conn, conn Conn, accoun
 		if err := json.Unmarshal(data, &envelope); err != nil {
 			continue // malformed frames are dropped, not fatal
 		}
+		if envelope.V != protocol.Version {
+			_ = sendControlReply(conn, envelope.ID, protocol.Control{
+				Type: protocol.CtlError, Message: "unsupported protocol version",
+			})
+			continue
+		}
+		if !allowedDestination(from, envelope.To) {
+			_ = sendControlReply(conn, envelope.ID, protocol.Control{
+				Type: protocol.CtlError, Message: "frame is addressed to an invalid peer",
+			})
+			continue
+		}
 
 		switch envelope.To {
 		case protocol.PeerRelay:
 			s.handleControl(conn, account, from, envelope)
 
 		case protocol.PeerDaemon:
-			if err := s.hub.ToDaemon(account, data); errors.Is(err, ErrNoPeer) {
+			// The sender identity is relay-owned. Overwrite anything the app
+			// supplied so one device cannot impersonate another subscription.
+			envelope.From = deviceID
+			forwarded, err := json.Marshal(envelope)
+			if err != nil {
+				continue
+			}
+			if err := s.hub.ToDaemon(account, forwarded); errors.Is(err, ErrNoPeer) {
 				// Answer immediately rather than buffering: the relay stores
 				// nothing, and a prompt failure is more honest than a message
 				// that silently arrives an hour later.
@@ -354,6 +452,17 @@ func (s *Server) pump(ctx context.Context, ws *websocket.Conn, conn Conn, accoun
 		case protocol.PeerApp:
 			s.hub.ToApps(account, data)
 		}
+	}
+}
+
+func allowedDestination(from, to protocol.Peer) bool {
+	switch from {
+	case protocol.PeerDaemon:
+		return to == protocol.PeerApp || to == protocol.PeerRelay
+	case protocol.PeerApp:
+		return to == protocol.PeerDaemon || to == protocol.PeerRelay
+	default:
+		return false
 	}
 }
 
@@ -373,7 +482,15 @@ func (s *Server) handleControl(conn Conn, account AccountID, from protocol.Peer,
 			})
 			return
 		}
-		code, err := s.hub.NewPairingCode(account)
+		now := time.Now()
+		if !s.perClientPairings.allow("account:"+string(account), now) ||
+			!s.globalPairings.allow("", now) {
+			_ = sendControlReply(conn, envelope.ID, protocol.Control{
+				Type: protocol.CtlError, Message: "too many pairing codes requested",
+			})
+			return
+		}
+		secrets, err := s.hub.NewPairing(account)
 		if err != nil {
 			_ = sendControlReply(conn, envelope.ID, protocol.Control{
 				Type: protocol.CtlError, Message: "could not generate a code",
@@ -382,7 +499,8 @@ func (s *Server) handleControl(conn Conn, account AccountID, from protocol.Peer,
 		}
 		_ = sendControlReply(conn, envelope.ID, protocol.Control{
 			Type:      protocol.CtlPairCode,
-			Code:      code,
+			Code:      secrets.Code,
+			Token:     secrets.Token,
 			ExpiresAt: time.Now().Add(PairingCodeTTL).UnixMilli(),
 		})
 	}
@@ -401,22 +519,62 @@ func (s *Server) notifyApps(account AccountID, control protocol.Control) {
 	}
 }
 
-func keepAlive(ctx context.Context, ws *websocket.Conn) {
+func (s *Server) notifyDaemon(account AccountID, control protocol.Control) {
+	envelope, err := protocol.NewEnvelope(newFrameID(), protocol.PeerRelay, control)
+	if err != nil {
+		return
+	}
+	if frame, err := json.Marshal(envelope); err == nil {
+		_ = s.hub.ToDaemon(account, frame)
+	}
+}
+
+func keepAlive(ctx context.Context, ws *websocket.Conn) error {
 	ticker := time.NewTicker(pingInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-ticker.C:
 			pingCtx, cancel := context.WithTimeout(ctx, writeTimeout)
 			err := ws.Ping(pingCtx)
 			cancel()
 			if err != nil {
-				return
+				return err
 			}
 		}
 	}
+}
+
+func (s *Server) acquireConnection(w http.ResponseWriter, client string) bool {
+	select {
+	case s.connections <- struct{}{}:
+	default:
+		http.Error(w, "relay connection capacity reached", http.StatusServiceUnavailable)
+		return false
+	}
+
+	s.connectionMu.Lock()
+	defer s.connectionMu.Unlock()
+	if s.clientConnections[client] >= maxConnectionsPerClient {
+		<-s.connections
+		http.Error(w, "client connection capacity reached", http.StatusTooManyRequests)
+		return false
+	}
+	s.clientConnections[client]++
+	return true
+}
+
+func (s *Server) releaseConnection(client string) {
+	s.connectionMu.Lock()
+	if remaining := s.clientConnections[client] - 1; remaining > 0 {
+		s.clientConnections[client] = remaining
+	} else {
+		delete(s.clientConnections, client)
+	}
+	s.connectionMu.Unlock()
+	<-s.connections
 }
 
 func sendControl(conn Conn, control protocol.Control) error {
@@ -493,10 +651,17 @@ func normalizeIP(raw string) string {
 	return prefix.String()
 }
 
-func bearer(r *http.Request) string {
+func bearerHeader(r *http.Request) string {
 	header := r.Header.Get("Authorization")
 	if after, ok := strings.CutPrefix(header, "Bearer "); ok {
 		return strings.TrimSpace(after)
+	}
+	return ""
+}
+
+func bearer(r *http.Request) string {
+	if token := bearerHeader(r); token != "" {
+		return token
 	}
 	// Native websocket clients can set headers, but browsers and some mobile
 	// stacks cannot, so a query parameter is accepted as a fallback.
