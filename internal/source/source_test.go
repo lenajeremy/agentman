@@ -377,3 +377,88 @@ func TestRegistryOrdersWaitingInputFirst(t *testing.T) {
 		}
 	}
 }
+
+// addCodexRollout writes an extra rollout into an existing fake home, so a
+// directory can hold more than one — which is what real use produces, since
+// Codex files a new rollout on every run.
+func addCodexRollout(t *testing.T, home, sessionID, cwd string, age time.Duration) {
+	t.Helper()
+	when := time.Now().Add(-age)
+	path := filepath.Join(home, ".codex", "sessions",
+		when.Format("2006"), when.Format("01"), when.Format("02"),
+		"rollout-"+when.Format("2006-01-02T15-04-05")+"-"+sessionID+".jsonl")
+
+	writeJSONL(t, path, []any{
+		obj{"timestamp": when.Format(time.RFC3339Nano), "type": "session_meta",
+			"payload": obj{"session_id": sessionID, "cwd": cwd, "cli_version": "0.147.0",
+				"timestamp": when.Format(time.RFC3339Nano)}},
+		obj{"timestamp": when.Format(time.RFC3339Nano), "type": "event_msg",
+			"payload": obj{"type": "task_complete"}},
+	})
+	if err := os.Chtimes(path, when, when); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCodexPaneIsClaimedByOneRolloutOnly reproduces a session that became
+// unreachable from the phone.
+//
+// A tmux-backed session is keyed on its pane rather than its rollout, because
+// the pane exists from launch and the rollout does not. But a directory
+// accumulates a rollout per Codex run, and every one of them matched the same
+// pane by working directory — so the same session was reported twice under one
+// id, with whichever state each rollout happened to imply.
+//
+// The app keys its rows by session id. Two rows under one id meant duplicate
+// React keys, conflicting states, and a session that could not be opened.
+func TestCodexPaneIsClaimedByOneRolloutOnly(t *testing.T) {
+	const cwd = "/Users/me/repo"
+	// Older run first, so the newest is not simply the one read first.
+	home := fakeCodexHome(t, "01900000-aaaa-bbbb-cccc-00000000000a", cwd, 20*time.Minute)
+	addCodexRollout(t, home, "01900000-aaaa-bbbb-cccc-00000000000b", cwd, time.Minute)
+
+	src, err := NewCodexSource(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.processCheck = alwaysRunning
+	src.listPanes = func(context.Context) ([]tmux.Session, error) {
+		return []tmux.Session{{
+			Name: tmux.Prefix + "codex-1", PanePID: 4242, Cwd: cwd, Command: "codex",
+			Created: time.Now().Add(-30 * time.Minute),
+		}}, nil
+	}
+
+	sessions, err := src.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seen := map[string]protocol.Session{}
+	for _, session := range sessions {
+		if previous, clash := seen[session.ID]; clash {
+			t.Fatalf("id %q reported twice (states %q and %q) — the app keys rows by id, "+
+				"so this session renders twice and cannot be opened",
+				session.ID, previous.State, session.State)
+		}
+		seen[session.ID] = session
+	}
+
+	// Exactly one session may own the pane, and it must be the newest rollout:
+	// that is the one the running Codex process is actually writing to, and the
+	// only one where typing into the pane reaches the right conversation.
+	var tmuxBacked []protocol.Session
+	for _, session := range sessions {
+		if session.Inject == protocol.InjectTmux {
+			tmuxBacked = append(tmuxBacked, session)
+		}
+	}
+	if len(tmuxBacked) != 1 {
+		t.Fatalf("got %d tmux-backed sessions, want exactly 1: %+v", len(tmuxBacked), tmuxBacked)
+	}
+	if tmuxBacked[0].NativeID != "01900000-aaaa-bbbb-cccc-00000000000b" {
+		t.Errorf("the pane was claimed by rollout %q, want the newest one — "+
+			"messages typed into the pane would land in a stale conversation",
+			tmuxBacked[0].NativeID)
+	}
+}

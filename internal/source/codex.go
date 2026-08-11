@@ -180,6 +180,15 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 		}
 	}
 
+	// Rollouts are gathered before they are turned into sessions so they can be
+	// walked newest first. Order decides which rollout gets to claim a tmux
+	// pane, and only the newest one should: a directory accumulates a rollout
+	// per Codex run, but the pane holds exactly one live session.
+	type rollout struct {
+		path    string
+		modTime time.Time
+	}
+	var rollouts []rollout
 	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -193,19 +202,38 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			if err != nil || info.ModTime().Before(cutoff) {
 				continue
 			}
+			rollouts = append(rollouts, rollout{
+				path:    filepath.Join(dir, entry.Name()),
+				modTime: info.ModTime(),
+			})
+		}
+	}
+	sort.Slice(rollouts, func(i, j int) bool {
+		return rollouts[i].modTime.After(rollouts[j].modTime)
+	})
 
-			path := filepath.Join(dir, entry.Name())
+	// Panes already spoken for. Without this, two rollouts in one directory
+	// both key themselves on the same pane and the session is reported twice
+	// under one id — which the app keys its rows by, so the row renders twice
+	// with conflicting states and becomes unreachable.
+	claimed := map[string]bool{}
+
+	{
+		for _, entry := range rollouts {
+			path, modTime := entry.path, entry.modTime
 			meta, err := readCodexMeta(path)
 			if err != nil {
 				continue
 			}
 
 			id := string(protocol.KindCodex) + ":" + meta.Payload.SessionID
-			state, lastActivity := codexActivity(path, info.ModTime())
+			state, lastActivity := codexActivity(path, modTime)
 
 			tmuxName := ""
 			inject := protocol.InjectHook
-			if pane, ok := paneByCwd[meta.Payload.Cwd]; ok && !ambiguous[meta.Payload.Cwd] {
+			pane, hasPane := paneByCwd[meta.Payload.Cwd]
+			if hasPane && !ambiguous[meta.Payload.Cwd] && !claimed[pane.Name] {
+				claimed[pane.Name] = true
 				tmuxName = pane.Name
 				inject = protocol.InjectTmux
 				delete(unmatched, meta.Payload.Cwd)

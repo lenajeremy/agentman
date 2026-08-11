@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -46,9 +50,15 @@ type OpenCodeSource struct {
 	client  *http.Client
 	// password is OPENCODE_SERVER_PASSWORD when the server requires auth.
 	password string
+	// username defaults to "opencode", but OpenCode lets users override it.
+	username string
 	// pinned records that the URL came from the user, so discovery stays on it
 	// rather than wandering to another server.
 	pinned bool
+	// findServers is replaceable in tests. In production it scans the small
+	// port range used by `am opencode` and returns every live server, not just
+	// the first one: concurrent OpenCode TUIs each own their own API process.
+	findServers func(context.Context) []string
 
 	// models remembers each session's model; see modelCache. It matters more
 	// here than for the file-backed agents, because finding it costs an HTTP
@@ -60,8 +70,24 @@ type OpenCodeSource struct {
 }
 
 type openCodeSession struct {
-	meta     protocol.Session
-	nativeID string
+	meta      protocol.Session
+	nativeID  string
+	baseURL   string
+	directory string
+	pending   openCodePending
+}
+
+type openCodePendingKind string
+
+const (
+	openCodeQuestionPending   openCodePendingKind = "question"
+	openCodePermissionPending openCodePendingKind = "permission"
+)
+
+type openCodePending struct {
+	kind          openCodePendingKind
+	requestID     string
+	questionCount int
 }
 
 // NewOpenCodeSource creates an adapter. An empty baseURL uses the default
@@ -71,14 +97,21 @@ func NewOpenCodeSource(baseURL string) *OpenCodeSource {
 	if baseURL == "" {
 		baseURL = fmt.Sprintf("http://127.0.0.1:%d", OpenCodeDefaultPort)
 	}
-	return &OpenCodeSource{
+	username := strings.TrimSpace(os.Getenv("OPENCODE_SERVER_USERNAME"))
+	if username == "" {
+		username = "opencode"
+	}
+	source := &OpenCodeSource{
 		baseURL:  strings.TrimRight(baseURL, "/"),
 		client:   &http.Client{Timeout: openCodeTimeout},
 		password: os.Getenv("OPENCODE_SERVER_PASSWORD"),
+		username: username,
 		pinned:   pinned,
 		models:   newModelCache(),
 		sessions: map[string]openCodeSession{},
 	}
+	source.findServers = source.scanServers
+	return source
 }
 
 // Kind implements Source.
@@ -86,13 +119,19 @@ func (s *OpenCodeSource) Kind() protocol.Kind { return protocol.KindOpenCode }
 
 /* ------------------------------ wire types ------------------------------- */
 
-// ocSession mirrors what the server actually returns, which differs from its
-// own OpenAPI spec in two ways found by calling it: the list is wrapped in
-// {data, cursor} rather than being a bare array, and the working directory
-// lives under `location`, not at the top level as `directory`.
+// These types mirror OpenCode's published OpenAPI 3.1 contract. Keeping the
+// wire structs local prevents its release cadence from leaking into the rest
+// of agentman, whose protocol is intentionally stable.
 type ocSession struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Directory string `json:"directory"`
+	Model     struct {
+		ID         string `json:"id"`
+		ProviderID string `json:"providerID"`
+	} `json:"model"`
+	// Location is retained as a compatibility fallback for the short-lived
+	// experimental /api/session response used by older OpenCode builds.
 	Location struct {
 		Directory string `json:"directory"`
 	} `json:"location"`
@@ -102,35 +141,31 @@ type ocSession struct {
 	} `json:"time"`
 }
 
-type ocSessionsResponse struct {
-	Data []ocSession `json:"data"`
-}
-
-// ocMessagesResponse mirrors what the server returns, which again differs
-// from its OpenAPI spec — the spec describes {info, parts} per entry, but the
-// wire format is a flat message whose shape depends on its type: a user
-// message carries `text` directly, an assistant message carries `content`.
-type ocMessagesResponse struct {
-	Data   []ocMessage `json:"data"`
-	Cursor struct {
-		Previous string `json:"previous"`
-		Next     string `json:"next"`
-	} `json:"cursor"`
+func (s ocSession) directory() string {
+	if s.Directory != "" {
+		return s.Directory
+	}
+	return s.Location.Directory
 }
 
 type ocMessage struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
+	Info  ocMessageInfo `json:"info"`
+	Parts []ocPart      `json:"parts"`
+}
+
+type ocMessageInfo struct {
+	ID         string `json:"id"`
+	Role       string `json:"role"`
+	ModelID    string `json:"modelID"`
+	ProviderID string `json:"providerID"`
+	Model      struct {
+		ModelID    string `json:"modelID"`
+		ProviderID string `json:"providerID"`
+	} `json:"model"`
 	Time struct {
 		Created int64 `json:"created"`
 	} `json:"time"`
-	// User messages.
-	Text string `json:"text"`
-	// Assistant messages.
-	Content []ocPart `json:"content"`
-	Error   *struct {
-		Message string `json:"message"`
-	} `json:"error"`
+	Error json.RawMessage `json:"error"`
 }
 
 // ocPart is one element of an assistant message's content.
@@ -146,37 +181,47 @@ type ocPart struct {
 		Status string `json:"status"`
 		Title  string `json:"title"`
 		Output string `json:"output"`
+		Error  string `json:"error"`
 	} `json:"state"`
 }
 
-type ocQuestionsResponse struct {
-	Data []struct {
-		ID        string `json:"id"`
-		SessionID string `json:"sessionID"`
-		Questions []struct {
-			Question string `json:"question"`
-			Header   string `json:"header"`
-			Multiple bool   `json:"multiple"`
-			Options  []struct {
-				Label       string `json:"label"`
-				Description string `json:"description"`
-			} `json:"options"`
-		} `json:"questions"`
-	} `json:"data"`
+type ocQuestionRequest struct {
+	ID        string `json:"id"`
+	SessionID string `json:"sessionID"`
+	Questions []struct {
+		Question string `json:"question"`
+		Header   string `json:"header"`
+		Multiple bool   `json:"multiple"`
+		Custom   bool   `json:"custom"`
+		Options  []struct {
+			Label       string `json:"label"`
+			Description string `json:"description"`
+		} `json:"options"`
+	} `json:"questions"`
+}
+
+type ocPermissionRequest struct {
+	ID         string         `json:"id"`
+	SessionID  string         `json:"sessionID"`
+	Permission string         `json:"permission"`
+	Patterns   []string       `json:"patterns"`
+	Metadata   map[string]any `json:"metadata"`
+	Always     []string       `json:"always"`
 }
 
 /* -------------------------------- requests ------------------------------- */
 
 func (s *OpenCodeSource) do(ctx context.Context, method, path string, body any, out any) error {
-	return s.doAt(ctx, s.baseURL, method, path, body, out)
+	_, err := s.doAt(ctx, s.baseURL, method, path, body, out)
+	return err
 }
 
-func (s *OpenCodeSource) doAt(ctx context.Context, base, method, path string, body any, out any) error {
+func (s *OpenCodeSource) doAt(ctx context.Context, base, method, path string, body any, out any) (http.Header, error) {
 	var reader *bytes.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		reader = bytes.NewReader(encoded)
 	} else {
@@ -185,26 +230,31 @@ func (s *OpenCodeSource) doAt(ctx context.Context, base, method, path string, bo
 
 	req, err := http.NewRequestWithContext(ctx, method, base+path, reader)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if s.password != "" {
-		req.SetBasicAuth("opencode", s.password)
+		req.SetBasicAuth(s.username, s.password)
 	}
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("opencode: %s %s: %s", method, path, resp.Status)
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		message := strings.TrimSpace(string(detail))
+		if message != "" {
+			return resp.Header, fmt.Errorf("opencode: %s %s: %s: %s", method, path, resp.Status, message)
+		}
+		return resp.Header, fmt.Errorf("opencode: %s %s: %s", method, path, resp.Status)
 	}
-	if out == nil {
-		return nil
+	if out == nil || resp.StatusCode == http.StatusNoContent {
+		return resp.Header, nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return resp.Header, json.NewDecoder(resp.Body).Decode(out)
 }
 
 // OpenCodePortSpan is how many ports from the default this will look across.
@@ -215,40 +265,50 @@ func (s *OpenCodeSource) doAt(ctx context.Context, base, method, path string, bo
 // exited while others are still running.
 const OpenCodePortSpan = 16
 
-// Available reports whether a local opencode server is reachable, adopting one
-// on a nearby port if the default is silent.
-//
-// Any server will do. OpenCode's session storage is global, so every server
-// lists every session regardless of which one created it — that is what allows
-// one server per directory without the daemon having to track them all.
+// Available reports whether at least one local OpenCode server is reachable.
 func (s *OpenCodeSource) Available(ctx context.Context) bool {
-	if s.healthyAt(ctx, s.baseURL) {
-		return true
-	}
+	return len(s.findServers(ctx)) > 0
+}
+
+// scanServers returns every server the wrapper may have started.
+//
+// OpenCode's supported API is instance-scoped: two TUIs in two projects have
+// two servers, and only the owning server reliably reports live status,
+// questions, and permissions. Adopting the first healthy port made the others
+// silently disappear or route commands through the wrong process.
+func (s *OpenCodeSource) scanServers(ctx context.Context) []string {
 	if s.pinned {
-		return false // the user named a URL; looking elsewhere would surprise them
+		if s.healthyAt(ctx, s.baseURL) {
+			return []string{s.baseURL}
+		}
+		return nil // the user named a URL; looking elsewhere would surprise them
 	}
+
+	servers := make([]string, 0, OpenCodePortSpan)
 	for port := OpenCodeDefaultPort; port < OpenCodeDefaultPort+OpenCodePortSpan; port++ {
 		candidate := fmt.Sprintf("http://127.0.0.1:%d", port)
-		if candidate == s.baseURL {
-			continue
-		}
 		if s.healthyAt(ctx, candidate) {
-			s.baseURL = candidate
-			return true
+			servers = append(servers, candidate)
 		}
 	}
-	return false
+	return servers
 }
 
 func (s *OpenCodeSource) healthyAt(ctx context.Context, base string) bool {
 	var health struct {
 		Healthy bool `json:"healthy"`
 	}
-	if err := s.doAt(ctx, base, http.MethodGet, "/global/health", nil, &health); err != nil {
+	if _, err := s.doAt(ctx, base, http.MethodGet, "/global/health", nil, &health); err != nil {
 		return false
 	}
 	return health.Healthy
+}
+
+func openCodePath(path string, query url.Values) string {
+	if len(query) == 0 {
+		return path
+	}
+	return path + "?" + query.Encode()
 }
 
 /* -------------------------------- Source --------------------------------- */
@@ -257,76 +317,85 @@ func (s *OpenCodeSource) healthyAt(ctx context.Context, base string) bool {
 func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 	// No server means OpenCode simply is not being used. Not an error, and it
 	// must stay cheap — this runs every second.
-	if !s.Available(ctx) {
+	servers := s.findServers(ctx)
+	if len(servers) == 0 {
 		s.mu.Lock()
 		s.sessions = map[string]openCodeSession{}
 		s.mu.Unlock()
 		return nil, nil
 	}
 
-	var listed ocSessionsResponse
-	if err := s.do(ctx, http.MethodGet, "/api/session", nil, &listed); err != nil {
-		return nil, err
-	}
-	list := listed.Data
-
-	// The API says which sessions are mid-turn, so busy/idle is exact here
-	// rather than inferred from file mtimes as it is for the other agents.
-	var active struct {
-		Data map[string]struct {
-			Type string `json:"type"`
-		} `json:"data"`
-	}
-	_ = s.do(ctx, http.MethodGet, "/api/session/active", nil, &active)
-
 	cutoff := time.Now().Add(-openCodeIdleWindow).UnixMilli()
-	found := make([]protocol.Session, 0, len(list))
-	next := make(map[string]openCodeSession, len(list))
+	next := make(map[string]openCodeSession)
+	var failures []error
+	var reached int
 
-	for _, item := range list {
-		updated := item.Time.Updated
-		if updated == 0 {
-			updated = item.Time.Created
-		}
-		if updated < cutoff {
+	for _, base := range servers {
+		listed, statuses, questions, permissions, err := s.snapshotAt(ctx, base)
+		if err != nil {
+			failures = append(failures, err)
 			continue
 		}
+		reached++
 
-		state := protocol.StateIdle
-		if entry, ok := active.Data[item.ID]; ok && entry.Type == "running" {
-			state = protocol.StateBusy
+		for _, item := range listed {
+			updated := item.Time.Updated
+			if updated == 0 {
+				updated = item.Time.Created
+			}
+			if updated < cutoff {
+				continue
+			}
+
+			directory := item.directory()
+			state := protocol.StateIdle
+			if status := statuses[item.ID].Type; status == "busy" || status == "retry" {
+				state = protocol.StateBusy
+			}
+
+			question, pending := openCodePendingFor(item.ID, questions, permissions)
+			if question != nil {
+				state = protocol.StateWaitingInput
+			}
+
+			id := string(protocol.KindOpenCode) + ":" + item.ID
+			model := cleanModel(item.Model.ID)
+			if model == "" {
+				if cached, ok := s.models.get(id); ok {
+					model = cached
+				} else {
+					model = s.modelOfAt(ctx, base, item.ID, directory)
+					s.models.put(id, model)
+				}
+			} else {
+				s.models.put(id, model)
+			}
+
+			meta := protocol.Session{
+				ID: id, Kind: protocol.KindOpenCode, NativeID: item.ID,
+				Name: openCodeName(item), Cwd: directory, State: state,
+				Inject: protocol.InjectAPI, StartedAt: item.Time.Created,
+				LastActivityAt: updated, Model: model, Question: question,
+			}
+			candidate := openCodeSession{
+				meta: meta, nativeID: item.ID, baseURL: base,
+				directory: directory, pending: pending,
+			}
+
+			// The same project may have several OpenCode servers. Each lists
+			// the same history, but only the server that owns the live TUI
+			// reports its busy state or pending decision. Prefer that route.
+			current, exists := next[id]
+			if !exists || openCodeRoutePriority(candidate) > openCodeRoutePriority(current) ||
+				(openCodeRoutePriority(candidate) == openCodeRoutePriority(current) &&
+					candidate.meta.LastActivityAt > current.meta.LastActivityAt) {
+				next[id] = candidate
+			}
 		}
+	}
 
-		session := protocol.Session{
-			ID:       string(protocol.KindOpenCode) + ":" + item.ID,
-			Kind:     protocol.KindOpenCode,
-			NativeID: item.ID,
-			Name:     openCodeName(item),
-			Cwd:      item.Location.Directory,
-			State:    state,
-			// A real API, so messages land immediately and mid-turn — the
-			// same quality as the tmux path but without the wrapper.
-			Inject:         protocol.InjectAPI,
-			StartedAt:      item.Time.Created,
-			LastActivityAt: updated,
-		}
-
-		// Questions are structured data here, not something scraped off a
-		// terminal — so this works for any OpenCode session, however started.
-		if q := s.pendingQuestion(ctx, item.ID); q != nil {
-			session.Question = q
-			session.State = protocol.StateWaitingInput
-		}
-
-		model, cached := s.models.get(session.ID)
-		if !cached {
-			model = s.modelOf(ctx, item.ID)
-			s.models.put(session.ID, model)
-		}
-		session.Model = model
-
-		found = append(found, session)
-		next[session.ID] = openCodeSession{meta: session, nativeID: item.ID}
+	if reached == 0 {
+		return nil, errors.Join(failures...)
 	}
 
 	live := make(map[string]bool, len(next))
@@ -338,7 +407,49 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 	s.mu.Lock()
 	s.sessions = next
 	s.mu.Unlock()
+
+	found := make([]protocol.Session, 0, len(next))
+	for _, session := range next {
+		found = append(found, session.meta)
+	}
+	SortSessions(found)
 	return found, nil
+}
+
+type ocSessionStatus struct {
+	Type string `json:"type"`
+}
+
+func (s *OpenCodeSource) snapshotAt(ctx context.Context, base string) (
+	[]ocSession,
+	map[string]ocSessionStatus,
+	[]ocQuestionRequest,
+	[]ocPermissionRequest,
+	error,
+) {
+	var listed []ocSession
+	if _, err := s.doAt(ctx, base, http.MethodGet, "/session?limit=200", nil, &listed); err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	statuses := map[string]ocSessionStatus{}
+	_, _ = s.doAt(ctx, base, http.MethodGet, "/session/status", nil, &statuses)
+	var questions []ocQuestionRequest
+	_, _ = s.doAt(ctx, base, http.MethodGet, "/question", nil, &questions)
+	var permissions []ocPermissionRequest
+	_, _ = s.doAt(ctx, base, http.MethodGet, "/permission", nil, &permissions)
+	return listed, statuses, questions, permissions, nil
+}
+
+func openCodeRoutePriority(session openCodeSession) int {
+	switch session.meta.State {
+	case protocol.StateWaitingInput:
+		return 3
+	case protocol.StateBusy:
+		return 2
+	default:
+		return 1
+	}
 }
 
 func openCodeName(item ocSession) string {
@@ -348,46 +459,64 @@ func openCodeName(item ocSession) string {
 	if title != "" && !strings.HasPrefix(title, "New session") {
 		return title
 	}
-	if base := filepath.Base(item.Location.Directory); base != "." && base != string(filepath.Separator) {
+	if base := filepath.Base(item.directory()); base != "." && base != string(filepath.Separator) {
 		return base
 	}
 	return "opencode"
 }
 
-// pendingQuestion returns the first unanswered question for a session.
-func (s *OpenCodeSource) pendingQuestion(ctx context.Context, nativeID string) *protocol.Question {
-	var response ocQuestionsResponse
-	if err := s.do(ctx, http.MethodGet, "/api/session/"+nativeID+"/question", nil, &response); err != nil {
-		return nil
+func openCodePendingFor(
+	nativeID string,
+	questions []ocQuestionRequest,
+	permissions []ocPermissionRequest,
+) (*protocol.Question, openCodePending) {
+	// Permissions take priority because they usually block a tool already in
+	// flight. They were previously ignored entirely by the OpenCode adapter.
+	for _, request := range permissions {
+		if request.SessionID != nativeID {
+			continue
+		}
+		options := []protocol.QuestionOption{
+			{Key: "once", Label: "Allow once"},
+		}
+		if len(request.Always) > 0 {
+			options = append(options, protocol.QuestionOption{Key: "always", Label: "Always allow"})
+		}
+		options = append(options, protocol.QuestionOption{Key: "reject", Label: "Reject"})
+		detail := strings.Join(request.Patterns, "\n")
+		prompt := "Allow this action?"
+		if request.Permission != "" {
+			prompt = "Allow " + request.Permission + "?"
+		}
+		return &protocol.Question{
+			Title: "Permission", Prompt: prompt, Detail: detail, Options: options,
+		}, openCodePending{kind: openCodePermissionPending, requestID: request.ID}
 	}
-	for _, request := range response.Data {
-		if len(request.Questions) == 0 {
+
+	for _, request := range questions {
+		if request.SessionID != nativeID || len(request.Questions) == 0 {
 			continue
 		}
 		first := request.Questions[0]
 		options := make([]protocol.QuestionOption, 0, len(first.Options))
 		for _, option := range first.Options {
-			// The reply endpoint identifies a choice by its label, so the key
-			// is the label itself rather than an index.
-			options = append(options, protocol.QuestionOption{
-				Key:   option.Label,
-				Label: option.Label,
-			})
+			options = append(options, protocol.QuestionOption{Key: option.Label, Label: option.Label})
 		}
 		if len(options) == 0 {
 			continue
 		}
-		return &protocol.Question{
-			Prompt: first.Question,
-			Title:  first.Header,
-			// The request id has to survive the round trip so the reply can
-			// name which question is being answered.
-			Detail:  "",
-			Options: options,
-			// Carried out-of-band; see questionRequestID.
+		detail := ""
+		if len(request.Questions) > 1 {
+			detail = fmt.Sprintf("Question 1 of %d", len(request.Questions))
 		}
+		return &protocol.Question{
+				Prompt: first.Question, Title: first.Header, Detail: detail, Options: options,
+			}, openCodePending{
+				kind: openCodeQuestionPending, requestID: request.ID,
+				questionCount: len(request.Questions),
+			}
 	}
-	return nil
+	return nil, openCodePending{}
 }
 
 // Page implements Source.
@@ -399,47 +528,42 @@ func (s *OpenCodeSource) Page(ctx context.Context, sessionID, before string, lim
 		return protocol.Page{}, fmt.Errorf("source: unknown opencode session %q", sessionID)
 	}
 
-	path := fmt.Sprintf("/api/session/%s/message?limit=%d", session.nativeID, limit)
+	query := url.Values{"limit": {strconv.Itoa(limit)}}
 	if before != "" {
-		// The cursor is opaque to every caller; only this adapter knows it is
-		// OpenCode's own pagination token rather than a byte offset.
-		path += "&cursor=" + before
+		query.Set("before", before)
 	}
+	if session.directory != "" {
+		query.Set("directory", session.directory)
+	}
+	path := openCodePath(fmt.Sprintf("/session/%s/message", session.nativeID), query)
 
-	var response ocMessagesResponse
-	if err := s.do(ctx, http.MethodGet, path, nil, &response); err != nil {
+	var response []ocMessage
+	headers, err := s.doAt(ctx, session.baseURL, http.MethodGet, path, nil, &response)
+	if err != nil {
 		return protocol.Page{}, err
 	}
 
-	// The API returns newest-first (its cursor says order=desc), but a Page is
-	// contractually oldest-first — without this the reply to a message sorts
-	// above the message itself.
-	messages := make([]protocol.Message, 0, len(response.Data))
-	for i := len(response.Data) - 1; i >= 0; i-- {
-		messages = append(messages, openCodeMessages(sessionID, response.Data[i])...)
+	// OpenCode returns the newest page in chronological order. Older pages are
+	// requested with the opaque X-Next-Cursor value in the `before` parameter.
+	messages := make([]protocol.Message, 0, len(response))
+	for _, message := range response {
+		messages = append(messages, openCodeMessages(sessionID, message)...)
 	}
 
-	return protocol.NewPage(sessionID, messages, response.Cursor.Previous, response.Cursor.Previous != ""), nil
+	cursor := headers.Get("X-Next-Cursor")
+	return protocol.NewPage(sessionID, messages, cursor, cursor != ""), nil
 }
 
 // openCodeMessages flattens one API message into the normalized feed.
 func openCodeMessages(sessionID string, message ocMessage) []protocol.Message {
-	ts := message.Time.Created
-
-	// A user message holds its text directly, with no parts to walk.
-	if message.Type == "user" {
-		text := strings.TrimSpace(message.Text)
-		if text == "" {
-			return nil
-		}
-		return []protocol.Message{{
-			ID: message.ID, SessionID: sessionID,
-			Role: protocol.RoleUser, Ts: ts, Text: text,
-		}}
+	ts := message.Info.Time.Created
+	role := protocol.RoleAssistant
+	if message.Info.Role == "user" {
+		role = protocol.RoleUser
 	}
 
-	out := make([]protocol.Message, 0, len(message.Content)+1)
-	for i, part := range message.Content {
+	out := make([]protocol.Message, 0, len(message.Parts)+1)
+	for i, part := range message.Parts {
 		// Synthetic and ignored parts are scaffolding the UI never shows.
 		if part.Synthetic || part.Ignored {
 			continue
@@ -453,9 +577,9 @@ func openCodeMessages(sessionID string, message ocMessage) []protocol.Message {
 		// merges pages and live updates by id, and Follow decides what is new
 		// by id. Session-wide collisions therefore collapsed every assistant
 		// reply into one row and stopped new replies from ever streaming.
-		id := fmt.Sprintf("%s:%d", message.ID, i)
+		id := fmt.Sprintf("%s:%d", message.Info.ID, i)
 		if part.ID != "" {
-			id = message.ID + ":" + part.ID
+			id = message.Info.ID + ":" + part.ID
 		}
 
 		switch part.Type {
@@ -466,7 +590,7 @@ func openCodeMessages(sessionID string, message ocMessage) []protocol.Message {
 			}
 			out = append(out, protocol.Message{
 				ID: id, SessionID: sessionID,
-				Role: protocol.RoleAssistant, Ts: ts, Text: text,
+				Role: role, Ts: ts, Text: text,
 			})
 
 		case "tool":
@@ -481,9 +605,13 @@ func openCodeMessages(sessionID string, message ocMessage) []protocol.Message {
 			if name == "" {
 				name = "tool"
 			}
+			text := part.State.Output
+			if part.State.Error != "" {
+				text = part.State.Error
+			}
 			out = append(out, protocol.Message{
 				ID: id, SessionID: sessionID, Role: protocol.RoleTool, Ts: ts,
-				Text: clipOutput(part.State.Output),
+				Text: clipOutput(text),
 				Tool: &protocol.Tool{
 					Name:    name,
 					Summary: clipOutput(part.State.Title),
@@ -497,14 +625,43 @@ func openCodeMessages(sessionID string, message ocMessage) []protocol.Message {
 
 	// A failed turn produces no content at all, so without this the agent
 	// would appear to have silently done nothing.
-	if message.Error != nil && message.Error.Message != "" {
+	if text := openCodeErrorText(message.Info.Error); text != "" {
 		out = append(out, protocol.Message{
-			ID: message.ID + ":error", SessionID: sessionID,
+			ID: message.Info.ID + ":error", SessionID: sessionID,
 			Role: protocol.RoleSystem, Ts: ts,
-			Text: clipOutput(message.Error.Message),
+			Text: clipOutput(text),
 		})
 	}
 	return out
+}
+
+func openCodeErrorText(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var parsed struct {
+		Name    string `json:"name"`
+		Message string `json:"message"`
+		Data    struct {
+			Message      string `json:"message"`
+			ResponseBody string `json:"responseBody"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(raw, &parsed) == nil {
+		if parsed.Data.Message != "" {
+			return parsed.Data.Message
+		}
+		if parsed.Message != "" {
+			return parsed.Message
+		}
+		if parsed.Data.ResponseBody != "" {
+			return parsed.Data.ResponseBody
+		}
+		if parsed.Name != "" {
+			return parsed.Name
+		}
+	}
+	return "OpenCode turn failed"
 }
 
 func clipOutput(text string) string {
@@ -579,21 +736,22 @@ func (s *OpenCodeSource) Follow(ctx context.Context, sessionID string, out chan<
 // session, so this asks for the last few messages and takes the newest one that
 // carries a name. Cached by the caller — this is an HTTP request, and discovery
 // runs every second.
-func (s *OpenCodeSource) modelOf(ctx context.Context, nativeID string) string {
-	var response struct {
-		Data []struct {
-			Model struct {
-				ID string `json:"id"`
-			} `json:"model"`
-		} `json:"data"`
+func (s *OpenCodeSource) modelOfAt(ctx context.Context, base, nativeID, directory string) string {
+	query := url.Values{"limit": {"6"}}
+	if directory != "" {
+		query.Set("directory", directory)
 	}
-	if err := s.do(ctx, http.MethodGet,
-		"/api/session/"+nativeID+"/message?limit=6", nil, &response); err != nil {
+	path := openCodePath("/session/"+nativeID+"/message", query)
+	var response []ocMessage
+	if _, err := s.doAt(ctx, base, http.MethodGet, path, nil, &response); err != nil {
 		return ""
 	}
-	// Newest first, as everywhere else in this API.
-	for _, message := range response.Data {
-		if model := cleanModel(message.Model.ID); model != "" {
+	for i := len(response) - 1; i >= 0; i-- {
+		modelID := response[i].Info.ModelID
+		if modelID == "" {
+			modelID = response[i].Info.Model.ModelID
+		}
+		if model := cleanModel(modelID); model != "" {
 			return model
 		}
 	}
@@ -610,12 +768,14 @@ func (s *OpenCodeSource) Inject(ctx context.Context, sessionID, text string) (pr
 	}
 
 	body := map[string]any{
-		"prompt": map[string]any{"text": text},
-		// "steer" delivers into a turn already in progress, which is what the
-		// tmux path achieves by typing. Native, and without the wrapper.
-		"delivery": "steer",
+		"parts": []map[string]any{{"type": "text", "text": text}},
 	}
-	if err := s.do(ctx, http.MethodPost, "/api/session/"+session.nativeID+"/prompt", body, nil); err != nil {
+	query := url.Values{}
+	if session.directory != "" {
+		query.Set("directory", session.directory)
+	}
+	path := openCodePath("/session/"+session.nativeID+"/prompt_async", query)
+	if _, err := s.doAt(ctx, session.baseURL, http.MethodPost, path, body, nil); err != nil {
 		return protocol.InjectNone, err
 	}
 	return protocol.InjectAPI, nil
@@ -630,22 +790,48 @@ func (s *OpenCodeSource) Answer(ctx context.Context, sessionID, optionKey string
 		return fmt.Errorf("source: unknown opencode session %q", sessionID)
 	}
 
-	// Re-read the pending question: its request id is what the reply must
-	// name, and it can change between the app rendering and the user tapping.
-	var response ocQuestionsResponse
-	if err := s.do(ctx, http.MethodGet,
-		"/api/session/"+session.nativeID+"/question", nil, &response); err != nil {
+	// Re-read the pending decision: it can disappear or change between the app
+	// rendering it and the user tapping an option.
+	var questions []ocQuestionRequest
+	if _, err := s.doAt(ctx, session.baseURL, http.MethodGet, "/question", nil, &questions); err != nil {
 		return err
 	}
-	if len(response.Data) == 0 {
+	var permissions []ocPermissionRequest
+	if _, err := s.doAt(ctx, session.baseURL, http.MethodGet, "/permission", nil, &permissions); err != nil {
+		return err
+	}
+	_, pending := openCodePendingFor(session.nativeID, questions, permissions)
+	if pending.requestID == "" {
 		return fmt.Errorf("source: that question is no longer waiting for an answer")
 	}
-	request := response.Data[0]
 
-	// Answers are per question, each a list of selected labels.
-	body := map[string]any{"answers": []any{[]string{optionKey}}}
-	return s.do(ctx, http.MethodPost,
-		fmt.Sprintf("/api/session/%s/question/%s/reply", session.nativeID, request.ID), body, nil)
+	query := url.Values{}
+	if session.directory != "" {
+		query.Set("directory", session.directory)
+	}
+	switch pending.kind {
+	case openCodePermissionPending:
+		if optionKey != "once" && optionKey != "always" && optionKey != "reject" {
+			return fmt.Errorf("source: invalid OpenCode permission answer %q", optionKey)
+		}
+		path := openCodePath("/permission/"+pending.requestID+"/reply", query)
+		_, err := s.doAt(ctx, session.baseURL, http.MethodPost, path,
+			map[string]any{"reply": optionKey}, nil)
+		return err
+
+	case openCodeQuestionPending:
+		answers := make([][]string, pending.questionCount)
+		if len(answers) == 0 {
+			answers = make([][]string, 1)
+		}
+		answers[0] = []string{optionKey}
+		path := openCodePath("/question/"+pending.requestID+"/reply", query)
+		_, err := s.doAt(ctx, session.baseURL, http.MethodPost, path,
+			map[string]any{"answers": answers}, nil)
+		return err
+	default:
+		return fmt.Errorf("source: unsupported OpenCode decision")
+	}
 }
 
 // Interrupt stops a running turn.
@@ -656,7 +842,13 @@ func (s *OpenCodeSource) Interrupt(ctx context.Context, sessionID string) error 
 	if !ok {
 		return fmt.Errorf("source: unknown opencode session %q", sessionID)
 	}
-	return s.do(ctx, http.MethodPost, "/api/session/"+session.nativeID+"/interrupt", nil, nil)
+	query := url.Values{}
+	if session.directory != "" {
+		query.Set("directory", session.directory)
+	}
+	path := openCodePath("/session/"+session.nativeID+"/abort", query)
+	_, err := s.doAt(ctx, session.baseURL, http.MethodPost, path, nil, nil)
+	return err
 }
 
 // messageFingerprint captures the parts of a message that can change while its
