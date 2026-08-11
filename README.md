@@ -219,6 +219,18 @@ anything is reported.
 brew install lenajeremy/agentman/agentman
 ```
 
+That one-liner taps and installs in a single step. If you would rather type the
+short name, tap once first:
+
+```bash
+brew tap lenajeremy/agentman
+brew install agentman
+```
+
+Bare `brew install agentman` only works once the tap is added — Homebrew has no
+way to find an untapped formula by name alone. Making it work with no tap at
+all would mean getting into `homebrew-core`, which has its own notability bar.
+
 ### From source
 
 ```bash
@@ -288,6 +300,13 @@ Pinned to **Expo SDK 54**. TypeScript is pinned to 5.9 because TypeScript 7
 breaks the SDK 54 CLI.
 
 ---
+
+## Deploying the relay
+
+The relay redeploys itself when `main` changes. Railway watches the repository
+and rebuilds from [`Dockerfile`](Dockerfile), which builds only `cmd/relay` —
+`railway.json` limits the trigger to paths that actually affect it, so a change
+to the app or the daemon does not restart a live relay for no reason.
 
 ## Self-hosting the relay
 
