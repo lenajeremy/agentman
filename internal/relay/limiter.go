@@ -8,13 +8,7 @@ import (
 // limiter is a sliding-window counter used to bound failed pairing attempts.
 //
 // Brute force against a six-digit code has to be stopped somewhere, and the
-// only honest place is at the source of the guesses. The first version of this
-// charged every failed guess against every outstanding pairing code, which
-// looked like rate limiting but was actually a cross-account denial of
-// service: on a shared relay, ten wrong guesses from a stranger deleted every
-// other user's in-flight code. A wrong guess cannot be attributed to a code —
-// that is exactly what makes it wrong — so it is attributed to the caller
-// instead, and nobody else's pairing is affected.
+// only honest place is at the source of the guesses. 
 type limiter struct {
 	mu     sync.Mutex
 	window time.Duration

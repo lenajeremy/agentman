@@ -9,31 +9,10 @@ import (
 	"time"
 )
 
-// PairingCodeTTL is how long a pairing code stays valid. Short on purpose, so
-// a guessable code stops being useful almost immediately.
-const PairingCodeTTL = 60 * time.Second
-
-// A pairing code is eight random digits.
-//
-// An earlier version spent two of them on an account shard so a failed guess
-// could be charged to a group of accounts. That was solving the wrong problem:
-// it punished every user in a shard for one person's mistyping, and it existed
-// only because the client's address was assumed untrustworthy. Behind a proxy
-// that overwrites X-Forwarded-For — verified against Railway, which discards a
-// forged value outright — a failure can be charged to the caller who made it,
-// and nobody else pays.
-//
-// Dropping the shard also returned those two digits to entropy: the space went
-// from 10^6 guessable-with-a-known-shard to 10^8, a hundredfold improvement at
-// no cost to how much there is to type.
-const pairingCodeDigits = 8
-
 const (
-	// pairingTokenBytes is the entropy behind a scanned pairing. At 16 bytes
-	// the space is 2^128, so brute force is not a threat the relay has to
-	// defend against — which is what lets the scanned path skip the rate
-	// limiting that the eight-digit typed path needs.
-	pairingTokenBytes = 16
+	PairingCodeTTL = 60 * time.Second
+	pairingCodeDigits int = 8
+	pairingTokenBytes int = 16
 )
 
 // IsPairingToken reports whether a submitted secret is a scanned token rather
@@ -64,8 +43,7 @@ type Conn interface {
 // Hub is the relay's entire state: who is connected right now.
 //
 // Everything here is in memory and deliberately disposable. Restarting the
-// relay drops connections, which every client already handles by reconnecting,
-// and loses nothing else because there is nothing else.
+// relay drops connections, which every client already handles by reconnecting.
 type Hub struct {
 	mu sync.RWMutex
 	// daemons holds at most one daemon per account — the newest connection
@@ -228,9 +206,7 @@ func (h *Hub) NewPairingCode(account AccountID) (string, error) {
 // RedeemPairingCode exchanges a code for the account it authorizes.
 //
 // A code is single use and expires on its own. Brute force is bounded by rate
-// limiting the caller (see limiter) rather than by penalising codes: a wrong
-// guess belongs to nobody in particular, so making outstanding codes pay for
-// it lets any stranger invalidate every other user's pairing on a shared relay.
+// limiting the caller (see limiter.go).
 func (h *Hub) RedeemPairingCode(code string) (AccountID, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
