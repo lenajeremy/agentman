@@ -1,109 +1,247 @@
-import { useMemo } from "react";
-import { StyleSheet } from "react-native";
-import MarkdownDisplay from "react-native-markdown-display";
+import { ReactNode } from "react";
+import { StyleSheet, Text, View } from "react-native";
 
 import { color, font, radius, size, space } from "../lib/theme";
 
+const MAX_MARKDOWN_CHARS = 200_000;
+
+type Block =
+  | { kind: "paragraph" | "quote" | "code"; text: string }
+  | { kind: "heading"; level: number; text: string }
+  | { kind: "bullet" | "number"; marker: string; text: string };
+
 /**
- * Renders an agent's reply as markdown.
+ * Renders the small markdown vocabulary agents use in ordinary replies.
  *
- * Agents write markdown constantly — backticked paths, fenced diffs, bullet
- * lists of what they changed — and showing the raw source means reading
- * `**done**` and counting backticks on a phone. The rules here follow the same
- * split as the rest of the app: prose in the sans face, anything the machine
- * produced (code, paths, commands) in mono.
- *
- * Deliberately restrained: no syntax highlighting, no tables with borders, no
- * images. A transcript viewer needs to be legible at a glance, not to be a
- * document renderer.
+ * This is intentionally local and linear rather than a general HTML/markdown
+ * engine. Agent output is untrusted: the former parser dependency had known
+ * quadratic-complexity advisories, could fetch remote images, and opened custom
+ * URL schemes. This renderer never performs network or OS actions and bounds
+ * the amount of one message it will parse.
  */
 export function Markdown({ children }: { children: string }) {
-  // The stylesheet is static but built once per mount to keep the theme in
-  // one place rather than duplicating literals across the tree.
-  const styles = useMemo(() => markdownStyles, []);
+  const clipped = children.length > MAX_MARKDOWN_CHARS;
+  const source = clipped ? children.slice(0, MAX_MARKDOWN_CHARS) : children;
+  const blocks = parseBlocks(source);
+
   return (
-    <MarkdownDisplay style={styles} mergeStyle={false}>
-      {children}
-    </MarkdownDisplay>
+    <View style={styles.body}>
+      {blocks.map((block, index) => (
+        <BlockView key={`${index}:${block.kind}`} block={block} />
+      ))}
+      {clipped ? (
+        <Text style={styles.truncated}>
+          Message truncated on this device after {MAX_MARKDOWN_CHARS.toLocaleString()} characters.
+        </Text>
+      ) : null}
+    </View>
   );
 }
 
-const markdownStyles = StyleSheet.create({
-  body: {
+function BlockView({ block }: { block: Block }) {
+  switch (block.kind) {
+    case "heading":
+      return (
+        <Text selectable style={[styles.text, styles.heading, block.level === 1 && styles.heading1]}>
+          {renderInline(block.text)}
+        </Text>
+      );
+    case "code":
+      return (
+        <Text selectable style={styles.codeBlock}>
+          {block.text}
+        </Text>
+      );
+    case "quote":
+      return (
+        <View style={styles.quote}>
+          <Text selectable style={[styles.text, styles.muted]}>
+            {renderInline(block.text)}
+          </Text>
+        </View>
+      );
+    case "bullet":
+    case "number":
+      return (
+        <View style={styles.listRow}>
+          <Text style={styles.marker}>{block.marker}</Text>
+          <Text selectable style={[styles.text, styles.listText]}>
+            {renderInline(block.text)}
+          </Text>
+        </View>
+      );
+    default:
+      return (
+        <Text selectable style={styles.text}>
+          {renderInline(block.text)}
+        </Text>
+      );
+  }
+}
+
+function parseBlocks(source: string): Block[] {
+  const blocks: Block[] = [];
+  const lines = source.replace(/\r\n?/g, "\n").split("\n");
+  let paragraph: string[] = [];
+  let code: string[] | null = null;
+
+  const flushParagraph = () => {
+    if (paragraph.length > 0) {
+      blocks.push({ kind: "paragraph", text: paragraph.join("\n") });
+      paragraph = [];
+    }
+  };
+  const flushCode = () => {
+    if (code !== null) {
+      blocks.push({ kind: "code", text: code.join("\n") });
+      code = null;
+    }
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("```")) {
+      if (code === null) {
+        flushParagraph();
+        code = [];
+      } else {
+        flushCode();
+      }
+      continue;
+    }
+    if (code !== null) {
+      code.push(line);
+      continue;
+    }
+    if (trimmed === "") {
+      flushParagraph();
+      continue;
+    }
+
+    const heading = headingLine(trimmed);
+    if (heading) {
+      flushParagraph();
+      blocks.push(heading);
+      continue;
+    }
+    if (trimmed.startsWith("> ")) {
+      flushParagraph();
+      blocks.push({ kind: "quote", text: trimmed.slice(2) });
+      continue;
+    }
+    if (/^[-*+]\s/.test(trimmed)) {
+      flushParagraph();
+      blocks.push({ kind: "bullet", marker: "•", text: trimmed.slice(2) });
+      continue;
+    }
+    const numbered = numberedLine(trimmed);
+    if (numbered) {
+      flushParagraph();
+      blocks.push(numbered);
+      continue;
+    }
+    paragraph.push(line);
+  }
+  flushParagraph();
+  flushCode();
+  return blocks;
+}
+
+function headingLine(line: string): Block | null {
+  let level = 0;
+  while (level < 3 && line[level] === "#") level += 1;
+  if (level === 0 || line[level] !== " ") return null;
+  return { kind: "heading", level, text: line.slice(level + 1) };
+}
+
+function numberedLine(line: string): Block | null {
+  let end = 0;
+  while (end < line.length && end < 6 && line.charCodeAt(end) >= 48 && line.charCodeAt(end) <= 57) {
+    end += 1;
+  }
+  if (end === 0 || line[end] !== "." || line[end + 1] !== " ") return null;
+  return { kind: "number", marker: line.slice(0, end + 1), text: line.slice(end + 2) };
+}
+
+// Inline code and bold cover the high-value cases (paths, commands, result
+// labels) without auto-linking or interpreting arbitrary HTML.
+function renderInline(text: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  let cursor = 0;
+  let plainStart = 0;
+  let key = 0;
+  while (cursor < text.length) {
+    const marker = text.startsWith("**", cursor) ? "**" : text[cursor] === "`" ? "`" : "";
+    if (!marker) {
+      cursor += 1;
+      continue;
+    }
+    const contentStart = cursor + marker.length;
+    const close = text.indexOf(marker, contentStart);
+    if (close < 0) {
+      // There cannot be another occurrence of this marker, so continuing the
+      // single pass cannot repeatedly rescan the same suffix.
+      cursor += marker.length;
+      continue;
+    }
+    if (cursor > plainStart) out.push(text.slice(plainStart, cursor));
+    out.push(
+      <Text key={key++} style={marker === "`" ? styles.inlineCode : styles.bold}>
+        {text.slice(contentStart, close)}
+      </Text>,
+    );
+    cursor = close + marker.length;
+    plainStart = cursor;
+  }
+  if (plainStart < text.length) out.push(text.slice(plainStart));
+  return out;
+}
+
+const styles = StyleSheet.create({
+  body: { gap: space.sm },
+  text: {
     fontFamily: font.sans,
     fontSize: size.body,
     color: color.text,
     lineHeight: 22,
   },
-  paragraph: { marginTop: 0, marginBottom: space.sm },
-
-  // Headings stay close to body size: an agent's "## Summary" is a signpost in
-  // a chat message, not a page title, and blowing it up wrecks the rhythm.
-  heading1: { fontFamily: font.sansBold, fontSize: size.title, color: color.text, marginBottom: space.xs },
-  heading2: { fontFamily: font.sansBold, fontSize: size.body, color: color.text, marginBottom: space.xs },
-  heading3: { fontFamily: font.sansMedium, fontSize: size.body, color: color.text, marginBottom: space.xs },
-  heading4: { fontFamily: font.sansMedium, fontSize: size.body, color: color.muted },
-  heading5: { fontFamily: font.sansMedium, fontSize: size.caption, color: color.muted },
-  heading6: { fontFamily: font.sansMedium, fontSize: size.caption, color: color.muted },
-
-  strong: { fontFamily: font.sansBold, color: color.text },
-  em: { fontStyle: "italic" },
-  s: { textDecorationLine: "line-through", color: color.muted },
-
-  link: { color: color.working, textDecorationLine: "underline" },
-
-  // Inline code is usually a path or a symbol — machine text, so mono, and
-  // tinted to separate it from prose without shouting.
-  code_inline: {
+  heading: { fontFamily: font.sansBold, marginTop: space.xs },
+  heading1: { fontSize: size.title },
+  bold: { fontFamily: font.sansBold },
+  inlineCode: {
     fontFamily: font.mono,
     fontSize: size.caption,
     color: color.working,
     backgroundColor: color.sunken,
-    borderRadius: radius.sm,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
   },
-  code_block: {
+  codeBlock: {
     fontFamily: font.mono,
     fontSize: size.caption,
+    lineHeight: 18,
     color: color.text,
     backgroundColor: color.sunken,
     borderRadius: radius.sm,
-    borderWidth: 0,
     padding: space.sm,
-    marginBottom: space.sm,
   },
-  fence: {
-    fontFamily: font.mono,
-    fontSize: size.caption,
-    color: color.text,
-    backgroundColor: color.sunken,
-    borderRadius: radius.sm,
-    borderWidth: 0,
-    padding: space.sm,
-    marginBottom: space.sm,
-  },
-
-  bullet_list: { marginBottom: space.sm },
-  ordered_list: { marginBottom: space.sm },
-  list_item: { flexDirection: "row", marginBottom: space.xs },
-  bullet_list_icon: { color: color.faint, marginRight: space.sm, marginLeft: 0 },
-  ordered_list_icon: { color: color.faint, marginRight: space.sm, marginLeft: 0 },
-
-  blockquote: {
-    backgroundColor: color.sunken,
+  quote: {
     borderLeftWidth: 2,
     borderLeftColor: color.line,
-    paddingHorizontal: space.sm,
-    paddingVertical: space.xs,
-    marginBottom: space.sm,
+    paddingLeft: space.sm,
   },
-
-  hr: { backgroundColor: color.line, height: StyleSheet.hairlineWidth, marginVertical: space.sm },
-
-  table: { borderWidth: 0, marginBottom: space.sm },
-  thead: { borderBottomWidth: StyleSheet.hairlineWidth, borderColor: color.line },
-  th: { fontFamily: font.sansMedium, color: color.muted, padding: space.xs },
-  td: { padding: space.xs, borderWidth: 0 },
-  tr: { borderBottomWidth: StyleSheet.hairlineWidth, borderColor: color.line },
+  muted: { color: color.muted },
+  listRow: { flexDirection: "row", alignItems: "flex-start", gap: space.sm },
+  marker: {
+    minWidth: 16,
+    fontFamily: font.mono,
+    fontSize: size.caption,
+    color: color.faint,
+    lineHeight: 22,
+  },
+  listText: { flex: 1 },
+  truncated: {
+    fontFamily: font.sans,
+    fontSize: size.caption,
+    color: color.faint,
+    fontStyle: "italic",
+  },
 });

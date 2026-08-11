@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { pair } from "../lib/client";
+import { DEFAULT_RELAY } from "../lib/pairing";
 import { useStore } from "../lib/store";
 import { PAIRING_CODE_LENGTH } from "../lib/protocol";
 import { color, font, radius, size, space } from "../lib/theme";
@@ -22,7 +23,7 @@ export default function Pair() {
   const store = useStore();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [relayUrl, setRelayUrl] = useState("");
+  const [relayUrl, setRelayUrl] = useState(DEFAULT_RELAY);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +64,7 @@ export default function Pair() {
         <View style={styles.steps}>
           <Text style={styles.stepLabel}>On your Mac</Text>
           <Text style={styles.stepBody}>
-            Run <Text style={styles.code}>am pair</Text>. It prints a QR code and eight
+            Run <Text style={styles.code}>am pair</Text>. It prints a QR code and ten
             digits, both good for one minute.
           </Text>
         </View>
@@ -104,7 +105,7 @@ export default function Pair() {
             onChangeText={(text) =>
               setCode(text.replace(/\D/g, "").slice(0, PAIRING_CODE_LENGTH))
             }
-            placeholder="00000000"
+            placeholder="0000000000"
             placeholderTextColor={color.faint}
             keyboardType="number-pad"
             maxLength={PAIRING_CODE_LENGTH}
@@ -130,8 +131,8 @@ export default function Pair() {
         </Pressable>
 
         <Text style={styles.footnote}>
-          The relay only passes messages between your Mac and this phone. It never stores
-          your transcripts.
+          The relay does not persist transcripts, but it can see them while forwarding.
+          Self-host if you do not trust its operator with live traffic.
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>

@@ -48,7 +48,20 @@ export default function RootLayout() {
   useEffect(() => {
     // Web has no notification permission model here; asking throws.
     if (Platform.OS !== "web") {
-      void Notifications.requestPermissionsAsync().catch(() => {});
+	  void (async () => {
+		// Android 13 does not present the notification permission prompt until
+		// the app has created a channel. Local completion alerts use the default
+		// channel when scheduled with an immediate trigger.
+		if (Platform.OS === "android") {
+		  await Notifications.setNotificationChannelAsync("default", {
+			name: "Agent completions",
+			importance: Notifications.AndroidImportance.HIGH,
+			sound: "default",
+			vibrationPattern: [0, 200, 100, 200],
+		  });
+		}
+		await Notifications.requestPermissionsAsync();
+	  })().catch(() => {});
     }
   }, []);
 

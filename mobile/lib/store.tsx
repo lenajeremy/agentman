@@ -33,7 +33,14 @@ import {
   saveDismissals,
   type Dismissals,
 } from "./dismissed";
-import { DaemonEvent, Message, Page, SendStatus, Session } from "./protocol";
+import {
+  DaemonEvent,
+  Message,
+  Page,
+  QuestionAnswer,
+  SendStatus,
+  Session,
+} from "./protocol";
 
 /** A message the user sent that has not been confirmed yet. */
 export interface PendingSend {
@@ -68,7 +75,8 @@ interface Store {
   closeSession(sessionId: string): void;
   loadOlder(sessionId: string): void;
   sendMessage(sessionId: string, text: string): void;
-  answerQuestion(sessionId: string, optionKey: string): void;
+  interruptSession(sessionId: string): void;
+  answerQuestion(sessionId: string, answer: QuestionAnswer): void;
   dismissPending(clientId: string): void;
   /** Hide an idle session until it does something again. */
   dismissSession(sessionId: string): void;
@@ -243,6 +251,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         );
         break;
       }
+
+	  case "error": {
+		// A failed history request must release its loading state. Otherwise a
+		// transient adapter error leaves the spinner and pagination disabled for
+		// the rest of the app process.
+		const sessionId = replyTo ? pageRequests.current.get(replyTo) : undefined;
+		if (replyTo) {
+		  pageRequests.current.delete(replyTo);
+		  catchUpRequests.current.delete(replyTo);
+		}
+		if (sessionId) {
+		  setPageState((current) => ({
+			...current,
+			[sessionId]: { ...current[sessionId], hasMore: false, loading: false },
+		  }));
+		}
+		break;
+	  }
     }
   }, []);
 
@@ -311,6 +337,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       pending,
 
       signIn(creds) {
+		// Pairing to another daemon is an account boundary. Never retain the
+		// previous machine's transcripts or pending messages on the new board.
+		pageRequests.current.clear();
+		catchUpRequests.current.clear();
+		setSessions([]);
+		setMessages({});
+		setPageState({});
+		setPending([]);
+		setDismissals({});
+		void saveDismissals({});
         setCredentials(creds);
         attach(creds);
       },
@@ -322,6 +358,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setCredentials(null);
         setSessions([]);
         setMessages({});
+		setPageState({});
+		setPending([]);
+		pageRequests.current.clear();
+		catchUpRequests.current.clear();
+		setDaemonOnline(false);
+		setLastSeenAt(null);
         setConnection("unpaired");
         setDismissals({});
         void saveDismissals({});
@@ -346,7 +388,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             sessionId,
             limit: 40,
           });
-          if (id) pageRequests.current.set(id, sessionId);
+		  if (id) {
+			pageRequests.current.set(id, sessionId);
+		  } else {
+			setPageState((current) => ({
+			  ...current,
+			  [sessionId]: { hasMore: true, loading: false },
+			}));
+		  }
           return;
         }
 
@@ -387,7 +436,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           before: state.cursor,
           limit: 40,
         });
-        if (id) pageRequests.current.set(id, sessionId);
+		if (id) {
+		  pageRequests.current.set(id, sessionId);
+		} else {
+		  setPageState((current) => ({
+			...current,
+			[sessionId]: { ...state, loading: false },
+		  }));
+		}
       },
 
       sendMessage(sessionId, text) {
@@ -413,11 +469,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
       },
 
-      answerQuestion(sessionId, optionKey) {
+      interruptSession(sessionId) {
+        clientRef.current?.send({
+          type: "interrupt",
+          sessionId,
+          clientId: `interrupt-${Date.now()}`,
+        });
+      },
+
+      answerQuestion(sessionId, answer) {
         clientRef.current?.send({
           type: "answer_question",
           sessionId,
-          optionKey,
+          ...answer,
           clientId: `answer-${Date.now()}`,
         });
         // The question clears itself on the next discovery sweep, so the row

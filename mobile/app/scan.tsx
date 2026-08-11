@@ -14,7 +14,7 @@ import { color, font, radius, size, space } from "../lib/theme";
  *
  * Scanning is the better path in both directions: nothing to type, and the
  * secret behind it is long enough that guessing it is not a threat, so it
- * skips the rate limiting the eight-digit code needs. Typing stays available
+ * skips the rate limiting the ten-digit code needs. Typing stays available
  * for anyone whose camera is unavailable or who is reading the code over a
  * remote shell.
  */

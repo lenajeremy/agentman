@@ -129,6 +129,17 @@ export default function SessionScreen() {
               : sessionId}
           </Text>
         </View>
+        {session?.state === "busy" ? (
+          <Pressable
+            onPress={() => store.interruptSession(sessionId)}
+            hitSlop={10}
+            style={({ pressed }) => [styles.stop, pressed && styles.stopPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Stop current turn"
+          >
+            <View style={styles.stopGlyph} />
+          </Pressable>
+        ) : null}
         {session && <Pulse state={session.state} />}
       </View>
 
@@ -197,7 +208,7 @@ export default function SessionScreen() {
           <View style={styles.questionWrap}>
             <QuestionCard
               question={session.question}
-              onAnswer={(key) => store.answerQuestion(sessionId, key)}
+              onAnswer={(answer) => store.answerQuestion(sessionId, answer)}
             />
           </View>
         ) : null}
@@ -348,6 +359,17 @@ const styles = StyleSheet.create({
   back: { paddingHorizontal: space.xs },
   backGlyph: { color: color.muted, fontSize: 30, lineHeight: 32, marginTop: -4 },
   headerBody: { flex: 1 },
+	stop: {
+	  width: 30,
+	  height: 30,
+	  alignItems: "center",
+	  justifyContent: "center",
+	  borderRadius: radius.sm,
+	  borderWidth: StyleSheet.hairlineWidth,
+	  borderColor: color.lineStrong,
+	},
+	stopPressed: { opacity: 0.6 },
+	stopGlyph: { width: 10, height: 10, borderRadius: 2, backgroundColor: color.error },
   title: { fontFamily: font.monoMedium, fontSize: size.title, color: color.text },
   subtitle: { fontFamily: font.mono, fontSize: size.caption, color: color.muted },
 

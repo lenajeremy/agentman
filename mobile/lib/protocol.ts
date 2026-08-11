@@ -10,12 +10,10 @@
 export const PROTOCOL_VERSION = 1;
 
 /**
- * Pairing codes are eight digits: a two-digit account shard followed by six
- * random ones. The shard lets the relay charge a failed guess to the group of
- * accounts it was aimed at, so one person being flooded cannot stop everyone
- * else from pairing.
+ * Pairing codes are ten fully random digits. They are single-use and
+ * short-lived; the relay rate-limits failed redemption attempts.
  */
-export const PAIRING_CODE_LENGTH = 8;
+export const PAIRING_CODE_LENGTH = 10;
 
 export type AgentKind = "claude" | "codex" | "opencode";
 export type SessionState = "busy" | "idle" | "waiting_input" | "ended";
@@ -33,6 +31,14 @@ export interface Question {
   title?: string;
   detail?: string;
   options: QuestionOption[];
+  multiple?: boolean;
+  custom?: boolean;
+}
+
+export interface QuestionAnswer {
+  optionKey?: string;
+  optionKeys?: string[];
+  answerText?: string;
 }
 
 export interface QuestionOption {
@@ -87,6 +93,8 @@ export type Peer = "daemon" | "app" | "relay";
 export interface Envelope {
   v: number;
   id: string;
+  /** Relay-assigned identity of the app connection that sent a request. */
+  from?: string;
   replyTo?: string;
   to: Peer;
   payload: unknown;
@@ -110,6 +118,8 @@ export interface Request {
   clientId?: string;
   /** Chooses an option on answer_question. */
   optionKey?: string;
+  optionKeys?: string[];
+  answerText?: string;
 }
 
 export type EventType =
@@ -144,6 +154,7 @@ export type ControlType =
   | "pair_code"
   | "daemon_online"
   | "daemon_offline"
+  | "app_disconnected"
   | "error";
 
 export interface Control {
@@ -152,6 +163,7 @@ export interface Control {
   code?: string;
   expiresAt?: number;
   lastSeenAt?: number;
+  deviceId?: string;
   message?: string;
 }
 
@@ -159,4 +171,163 @@ let counter = 0;
 export function newFrameId(): string {
   counter += 1;
   return `${Date.now().toString(36)}-${counter}`;
+}
+
+/** Parse an untrusted websocket frame before application code touches it. */
+export function decodeEnvelope(raw: string): Envelope | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (
+    !isRecord(value) ||
+    value.v !== PROTOCOL_VERSION ||
+    !boundedString(value.id, 256, true) ||
+    !isOneOf(value.to, ["daemon", "app", "relay"] as const) ||
+    !isRecord(value.payload) ||
+    !optionalBoundedString(value.from, 512) ||
+    !optionalBoundedString(value.replyTo, 256)
+  ) {
+    return null;
+  }
+  return value as unknown as Envelope;
+}
+
+/** Validate a relay-owned control payload. */
+export function decodeControl(value: unknown): Control | null {
+  if (!isRecord(value) || !isOneOf(value.type, [
+    "hello", "pair_request", "pair_code", "daemon_online", "daemon_offline",
+    "app_disconnected", "error",
+  ] as const)) return null;
+  if (
+    (value.daemonOnline !== undefined && typeof value.daemonOnline !== "boolean") ||
+    !optionalBoundedString(value.code, 256) ||
+    !optionalFiniteNumber(value.expiresAt) ||
+    !optionalFiniteNumber(value.lastSeenAt) ||
+    !optionalBoundedString(value.deviceId, 512) ||
+    !optionalBoundedString(value.message, 4096)
+  ) return null;
+  return value as unknown as Control;
+}
+
+/** Validate a daemon event, including its nested session/message data. */
+export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
+  if (!isRecord(value) || !isOneOf(value.type, [
+    "sessions", "session_update", "session_gone", "messages", "page",
+    "turn_complete", "send_result", "error",
+  ] as const)) return null;
+
+  switch (value.type) {
+    case "sessions":
+      if (!boundedArray(value.sessions, 10_000, isSession)) return null;
+      break;
+    case "session_update":
+      if (!isSession(value.session)) return null;
+      break;
+    case "session_gone":
+      if (!boundedString(value.sessionId, 512, true)) return null;
+      break;
+    case "messages":
+      if (!boundedString(value.sessionId, 512, true) ||
+          !boundedArray(value.messages, 100, isMessage)) return null;
+      break;
+    case "page":
+      if (!isPage(value.page)) return null;
+      break;
+    case "turn_complete":
+      if (!boundedString(value.sessionId, 512, true) ||
+          !optionalBoundedString(value.sessionName, 4096) ||
+          !optionalBoundedString(value.preview, 64 * 1024)) return null;
+      break;
+    case "send_result":
+      if (!boundedString(value.clientId, 256, true) ||
+          !isOneOf(value.status, ["delivered", "queued", "failed"] as const) ||
+          !optionalBoundedString(value.sessionId, 512) ||
+          !optionalBoundedString(value.error, 64 * 1024)) return null;
+      break;
+    case "error":
+      if (!boundedString(value.error, 64 * 1024, true) ||
+          !optionalBoundedString(value.sessionId, 512)) return null;
+      break;
+  }
+  return value as unknown as DaemonEvent;
+}
+
+function isSession(value: unknown): value is Session {
+  if (!isRecord(value)) return false;
+  return boundedString(value.id, 512, true) &&
+    isOneOf(value.kind, ["claude", "codex", "opencode"] as const) &&
+    boundedString(value.nativeId, 512, true) &&
+    boundedString(value.name, 4096) &&
+    boundedString(value.cwd, 64 * 1024) &&
+    isOneOf(value.state, ["busy", "idle", "waiting_input", "ended"] as const) &&
+    isOneOf(value.inject, ["api", "tmux", "hook", "none"] as const) &&
+    finiteNumber(value.startedAt) && finiteNumber(value.lastActivityAt) &&
+    optionalBoundedString(value.model, 4096) &&
+    (value.question === undefined || isQuestion(value.question));
+}
+
+function isQuestion(value: unknown): value is Question {
+  if (!isRecord(value) || !boundedString(value.prompt, 64 * 1024) ||
+      !optionalBoundedString(value.title, 4096) ||
+      !optionalBoundedString(value.detail, 256 * 1024) ||
+      (value.multiple !== undefined && typeof value.multiple !== "boolean") ||
+      (value.custom !== undefined && typeof value.custom !== "boolean")) return false;
+  return boundedArray(value.options, 256, (option): option is QuestionOption =>
+    isRecord(option) && boundedString(option.key, 4096, true) &&
+    boundedString(option.label, 64 * 1024) &&
+    (option.selected === undefined || typeof option.selected === "boolean"));
+}
+
+function isMessage(value: unknown): value is Message {
+  if (!isRecord(value) || !boundedString(value.id, 4096, true) ||
+      !boundedString(value.sessionId, 512, true) ||
+      !isOneOf(value.role, ["user", "assistant", "tool", "system"] as const) ||
+      !finiteNumber(value.ts) || !optionalBoundedString(value.text, 512 * 1024) ||
+      (value.isSidechain !== undefined && typeof value.isSidechain !== "boolean")) return false;
+  if (value.tool === undefined) return true;
+  return isRecord(value.tool) && boundedString(value.tool.name, 4096, true) &&
+    optionalBoundedString(value.tool.summary, 64 * 1024) &&
+    (value.tool.status === undefined ||
+      isOneOf(value.tool.status, ["running", "ok", "error"] as const));
+}
+
+function isPage(value: unknown): value is Page {
+  return isRecord(value) && boundedString(value.sessionId, 512, true) &&
+    boundedArray(value.messages, 100, isMessage) &&
+    optionalBoundedString(value.nextCursor, 4096) && typeof value.hasMore === "boolean";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function finiteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function optionalFiniteNumber(value: unknown): boolean {
+  return value === undefined || finiteNumber(value);
+}
+
+function boundedString(value: unknown, max: number, required = false): value is string {
+  return typeof value === "string" && value.length <= max && (!required || value.length > 0);
+}
+
+function optionalBoundedString(value: unknown, max: number): boolean {
+  return value === undefined || boundedString(value, max);
+}
+
+function boundedArray<T>(
+  value: unknown,
+  max: number,
+  predicate: (item: unknown) => item is T,
+): value is T[] {
+  return Array.isArray(value) && value.length <= max && value.every(predicate);
+}
+
+function isOneOf<T extends string>(value: unknown, options: readonly T[]): value is T {
+  return typeof value === "string" && options.includes(value as T);
 }

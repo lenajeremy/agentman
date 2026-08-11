@@ -37,11 +37,11 @@ export default function Settings() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardLabel}>What the relay keeps</Text>
+          <Text style={styles.cardLabel}>Relay privacy</Text>
           <Text style={styles.body}>
-            Nothing. Your transcripts stay on your Mac and stream to this phone only while
-            you are looking at them. The relay matches the two connections and forgets
-            everything else.
+            Transcripts stay on your Mac and are not persisted by the relay. They do pass
+            through it without end-to-end encryption, so use a relay operator you trust or
+            self-host one.
           </Text>
         </View>
 

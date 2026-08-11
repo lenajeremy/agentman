@@ -121,9 +121,8 @@ function withSigningTeam(config) {
  *
  * Nothing is lost by removing it. The app only ever fires *local*
  * notifications — scheduleNotificationAsync with `trigger: null`, driven by a
- * turn_complete frame that already arrived over the socket — and those need no
- * entitlement. The daemon talks to the phone directly; there is no APNs round
- * trip to authorise.
+ * turn_complete frame that already arrived through the relay websocket — and
+ * those need no entitlement. There is no APNs round trip to authorise.
  *
  * Set APPLE_PUSH=1 to keep it, which is what a paid account doing real remote
  * push would want.
