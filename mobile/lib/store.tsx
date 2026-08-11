@@ -19,6 +19,12 @@ import {
   loadCredentials,
 } from "./client";
 import {
+  CATCH_UP_PAGE,
+  needsAnotherPage,
+  newestTimestamp,
+  type CatchUpState,
+} from "./catchup";
+import {
   canDismiss,
   dismiss as recordDismissal,
   isHidden,
@@ -110,6 +116,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   /** Maps a fetch_messages frame id to the session that asked, so a page can be
    *  filed correctly when several sessions are paging at once. */
   const pageRequests = useRef(new Map<string, string>());
+  /** Fetches that are filling the gap left by navigating away, kept apart from
+   *  scroll-back requests. Both ask for a page, but a catch-up page comes from
+   *  the newest end of the feed, so letting it set the scroll cursor would make
+   *  "load older" jump over everything in between. */
+  const catchUpRequests = useRef(new Map<string, CatchUpState>());
 
   const handleEvent = useCallback((event: DaemonEvent, replyTo?: string) => {
     switch (event.type) {
@@ -159,6 +170,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       case "page": {
         const page = event.page as Page | undefined;
         if (!page) break;
+
+        // A catch-up page: merge it, and keep walking back until it overlaps
+        // what we already had. Anything else would leave a silent hole.
+        const catching = replyTo ? catchUpRequests.current.get(replyTo) : undefined;
+        if (catching) {
+          catchUpRequests.current.delete(replyTo!);
+          const sessionId = page.sessionId || catching.sessionId;
+          setMessages((current) => ({
+            ...current,
+            [sessionId]: mergeMessages(current[sessionId] ?? [], page.messages),
+          }));
+
+          if (needsAnotherPage(page.messages, page.hasMore, catching)) {
+            const id = clientRef.current?.send({
+              type: "fetch_messages",
+              sessionId,
+              before: page.nextCursor,
+              limit: CATCH_UP_PAGE,
+            });
+            if (id) {
+              catchUpRequests.current.set(id, { ...catching, depth: catching.depth + 1 });
+            }
+          }
+          break;
+        }
+
         const sessionId = page.sessionId || (replyTo ? pageRequests.current.get(replyTo) : undefined);
         if (!sessionId) break;
         if (replyTo) pageRequests.current.delete(replyTo);
@@ -296,9 +333,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       openSession(sessionId) {
         clientRef.current?.subscribe(sessionId);
-        // Only fetch history the first time; re-entering a session should not
-        // refetch what is already on screen.
-        if (!pageState[sessionId]) {
+
+        const known = messages[sessionId] ?? [];
+        if (known.length === 0) {
+          // First visit: load the tail of the conversation.
           setPageState((current) => ({
             ...current,
             [sessionId]: { hasMore: true, loading: true },
@@ -309,7 +347,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             limit: 40,
           });
           if (id) pageRequests.current.set(id, sessionId);
+          return;
         }
+
+        // Coming back. Subscribing only starts the live tail from now, so
+        // whatever the agent did while this screen was closed would be missing
+        // — and because the screen already has messages, nothing else would
+        // ever fetch it. Ask for the newest page and walk back until it
+        // overlaps what we have.
+        //
+        // Bounded on purpose: a long absence stops after a few pages rather
+        // than pulling a whole transcript down a phone connection. The rest is
+        // still reachable by scrolling up.
+        const newest = newestTimestamp(known);
+        const id = clientRef.current?.send({
+          type: "fetch_messages",
+          sessionId,
+          limit: CATCH_UP_PAGE,
+        });
+        if (id) catchUpRequests.current.set(id, { sessionId, sinceTs: newest, depth: 0 });
       },
 
       closeSession(sessionId) {

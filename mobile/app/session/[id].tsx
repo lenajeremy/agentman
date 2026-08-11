@@ -121,7 +121,12 @@ export default function SessionScreen() {
             {session?.name ?? "Session"}
           </Text>
           <Text style={styles.subtitle} numberOfLines={1}>
-            {session ? shortPath(session.cwd) : sessionId}
+            {session
+              ? // Which model is answering you is worth knowing before you send
+                // it something — "Codex" says which CLI is open, not what is
+                // doing the work.
+                [shortPath(session.cwd), session.model ?? session.kind].join("  ·  ")
+              : sessionId}
           </Text>
         </View>
         {session && <Pulse state={session.state} />}

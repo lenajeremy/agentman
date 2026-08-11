@@ -77,6 +77,8 @@ type CodexSource struct {
 	// machine-wide server, so without this a test with its own fake home would
 	// still discover whatever panes happen to be open on the host.
 	listPanes func(context.Context) ([]tmux.Session, error)
+	// models remembers each session's model; see modelCache.
+	models *modelCache
 
 	mu       sync.RWMutex
 	sessions map[string]codexSession
@@ -115,6 +117,7 @@ func NewCodexSource(home string) (*CodexSource, error) {
 		home:         home,
 		processCheck: codexRunning,
 		listPanes:    tmux.List,
+		models:       newModelCache(),
 		sessions:     map[string]codexSession{},
 	}, nil
 }
@@ -232,6 +235,13 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				}
 			}
 
+			model, cached := s.models.get(id)
+			if !cached {
+				model = modelFromTranscript(path, codexModelOf)
+				s.models.put(id, model)
+			}
+			session.Model = model
+
 			found = append(found, session)
 			next[id] = codexSession{meta: session, transcript: path, tmuxName: tmuxName}
 		}
@@ -275,6 +285,12 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	sort.Slice(found, func(i, j int) bool {
 		return found[i].LastActivityAt > found[j].LastActivityAt
 	})
+
+	live := make(map[string]bool, len(next))
+	for id := range next {
+		live[id] = true
+	}
+	s.models.forget(live)
 
 	s.mu.Lock()
 	s.sessions = next

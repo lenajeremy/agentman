@@ -27,6 +27,10 @@ import (
 // None of this is a published API. Everything that touches the layout is in
 // this file so a CLI upgrade breaks in one place.
 type ClaudeSource struct {
+	// models remembers each session's model so the transcript tail is not
+	// re-read on every one-second discovery sweep.
+	models *modelCache
+
 	home string
 	// pending holds messages for sessions with no live input channel, handed
 	// over at the next Stop hook.
@@ -68,7 +72,11 @@ func NewClaudeSource(home string) (*ClaudeSource, error) {
 			return nil, err
 		}
 	}
-	return &ClaudeSource{home: home, sessions: map[string]claudeSession{}}, nil
+	return &ClaudeSource{
+		home:     home,
+		models:   newModelCache(),
+		sessions: map[string]claudeSession{},
+	}, nil
 }
 
 // Kind implements Source.
@@ -160,14 +168,28 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 			meta.LastActivityAt = meta.StartedAt
 		}
 
+		transcript := s.transcriptPath(file.Cwd, file.SessionID)
+		model, cached := s.models.get(id)
+		if !cached {
+			model = modelFromTranscript(transcript, claudeModelOf)
+			s.models.put(id, model)
+		}
+		meta.Model = model
+
 		found = append(found, meta)
 		next[id] = claudeSession{
 			meta:       meta,
-			transcript: s.transcriptPath(file.Cwd, file.SessionID),
+			transcript: transcript,
 			tmuxName:   tmuxName,
 			pid:        file.PID,
 		}
 	}
+
+	live := make(map[string]bool, len(next))
+	for id := range next {
+		live[id] = true
+	}
+	s.models.forget(live)
 
 	s.mu.Lock()
 	s.sessions = next

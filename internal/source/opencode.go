@@ -47,6 +47,11 @@ type OpenCodeSource struct {
 	// password is OPENCODE_SERVER_PASSWORD when the server requires auth.
 	password string
 
+	// models remembers each session's model; see modelCache. It matters more
+	// here than for the file-backed agents, because finding it costs an HTTP
+	// request rather than a read of a file already on disk.
+	models *modelCache
+
 	mu       sync.RWMutex
 	sessions map[string]openCodeSession
 }
@@ -66,6 +71,7 @@ func NewOpenCodeSource(baseURL string) *OpenCodeSource {
 		baseURL:  strings.TrimRight(baseURL, "/"),
 		client:   &http.Client{Timeout: openCodeTimeout},
 		password: os.Getenv("OPENCODE_SERVER_PASSWORD"),
+		models:   newModelCache(),
 		sessions: map[string]openCodeSession{},
 	}
 }
@@ -270,9 +276,22 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 			session.State = protocol.StateWaitingInput
 		}
 
+		model, cached := s.models.get(session.ID)
+		if !cached {
+			model = s.modelOf(ctx, item.ID)
+			s.models.put(session.ID, model)
+		}
+		session.Model = model
+
 		found = append(found, session)
 		next[session.ID] = openCodeSession{meta: session, nativeID: item.ID}
 	}
+
+	live := make(map[string]bool, len(next))
+	for id := range next {
+		live[id] = true
+	}
+	s.models.forget(live)
 
 	s.mu.Lock()
 	s.sessions = next
@@ -383,9 +402,18 @@ func openCodeMessages(sessionID string, message ocMessage) []protocol.Message {
 		if part.Synthetic || part.Ignored {
 			continue
 		}
-		id := part.ID
-		if id == "" {
-			id = fmt.Sprintf("%s:%d", message.ID, i)
+		// Always namespaced by the message id. OpenCode numbers parts within
+		// their message, so part.ID is "text-0" for the first text part of
+		// *every* assistant message — unique inside one message and colliding
+		// across the session.
+		//
+		// Ids are the identity of a message everywhere downstream: the app
+		// merges pages and live updates by id, and Follow decides what is new
+		// by id. Session-wide collisions therefore collapsed every assistant
+		// reply into one row and stopped new replies from ever streaming.
+		id := fmt.Sprintf("%s:%d", message.ID, i)
+		if part.ID != "" {
+			id = message.ID + ":" + part.ID
 		}
 
 		switch part.Type {
@@ -453,11 +481,16 @@ func clipOutput(text string) string {
 // once-a-second loop, one extra local HTTP call is cheaper than managing a
 // long-lived stream's lifecycle, and messages are deduplicated by id anyway.
 func (s *OpenCodeSource) Follow(ctx context.Context, sessionID string, out chan<- []protocol.Message) error {
-	seen := map[string]bool{}
+	// Keyed by id, valued by a fingerprint of the content rather than a bare
+	// "seen" flag. OpenCode fills a message in as the model produces it, so the
+	// same id legitimately carries different content on successive polls: a
+	// reply first appears as a fragment and grows. Treating a known id as
+	// nothing-to-report froze every long answer at its first few words.
+	seen := map[string]string{}
 	// Prime from the current tail so the backlog is not replayed as new.
 	if page, err := s.Page(ctx, sessionID, "", 50); err == nil {
 		for _, message := range page.Messages {
-			seen[message.ID] = true
+			seen[message.ID] = messageFingerprint(message)
 		}
 	}
 
@@ -475,12 +508,15 @@ func (s *OpenCodeSource) Follow(ctx context.Context, sessionID string, out chan<
 			}
 			var batch []protocol.Message
 			for _, message := range page.Messages {
-				// A running tool re-emits under the same id as it settles, so
-				// only a genuinely new id counts as new.
-				if seen[message.ID] && message.Tool == nil {
+				// Send anything whose content has moved: a new message, a
+				// reply that has grown, or a tool that has settled. The app
+				// merges by id, so re-sending a changed message replaces the
+				// row rather than duplicating it.
+				fingerprint := messageFingerprint(message)
+				if previous, known := seen[message.ID]; known && previous == fingerprint {
 					continue
 				}
-				seen[message.ID] = true
+				seen[message.ID] = fingerprint
 				batch = append(batch, message)
 			}
 			if len(batch) == 0 {
@@ -493,6 +529,33 @@ func (s *OpenCodeSource) Follow(ctx context.Context, sessionID string, out chan<
 			}
 		}
 	}
+}
+
+// modelOf reports the model behind a session's most recent reply.
+//
+// OpenCode names the model on each assistant message rather than on the
+// session, so this asks for the last few messages and takes the newest one that
+// carries a name. Cached by the caller — this is an HTTP request, and discovery
+// runs every second.
+func (s *OpenCodeSource) modelOf(ctx context.Context, nativeID string) string {
+	var response struct {
+		Data []struct {
+			Model struct {
+				ID string `json:"id"`
+			} `json:"model"`
+		} `json:"data"`
+	}
+	if err := s.do(ctx, http.MethodGet,
+		"/api/session/"+nativeID+"/message?limit=6", nil, &response); err != nil {
+		return ""
+	}
+	// Newest first, as everywhere else in this API.
+	for _, message := range response.Data {
+		if model := cleanModel(message.Model.ID); model != "" {
+			return model
+		}
+	}
+	return ""
 }
 
 // Inject implements Injector.
@@ -552,4 +615,14 @@ func (s *OpenCodeSource) Interrupt(ctx context.Context, sessionID string) error 
 		return fmt.Errorf("source: unknown opencode session %q", sessionID)
 	}
 	return s.do(ctx, http.MethodPost, "/api/session/"+session.nativeID+"/interrupt", nil, nil)
+}
+
+// messageFingerprint captures the parts of a message that can change while its
+// id stays the same, so a poll can tell "already sent this" from "this grew".
+func messageFingerprint(message protocol.Message) string {
+	if message.Tool == nil {
+		return message.Text
+	}
+	return message.Text + "\x00" + message.Tool.Name + "\x00" +
+		message.Tool.Summary + "\x00" + string(message.Tool.Status)
 }

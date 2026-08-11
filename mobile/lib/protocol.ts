@@ -52,6 +52,9 @@ export interface Session {
   inject: InjectMode;
   startedAt: number;
   lastActivityAt: number;
+  /** What the agent is actually running ("claude-opus-5", "gpt-5.6-sol").
+   *  Absent until it has replied once — none of the CLIs record it before. */
+  model?: string;
   /** Present only while the agent is waiting on a decision. */
   question?: Question;
 }

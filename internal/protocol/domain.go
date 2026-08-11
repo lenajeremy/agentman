@@ -65,6 +65,14 @@ type Session struct {
 	Inject         InjectMode `json:"inject"`
 	StartedAt      int64      `json:"startedAt"`
 	LastActivityAt int64      `json:"lastActivityAt"`
+	// Model is what the agent is actually running — "claude-opus-5",
+	// "gpt-5.6-sol", "big-pickle". Empty until the agent has replied once,
+	// because none of the three record it before then.
+	//
+	// Worth surfacing because Kind does not answer the question people ask.
+	// "Codex" says which CLI is open, not which model is doing the work, and
+	// those diverge constantly.
+	Model string `json:"model,omitempty"`
 	// Question is set when the agent is blocked on a decision. Its presence
 	// is what makes StateWaitingInput actionable rather than merely visible:
 	// the app renders the choices and the user taps one.

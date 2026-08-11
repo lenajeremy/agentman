@@ -191,9 +191,16 @@ function AgentRow({ session }: { session: Session }) {
           </Text>
           <Text style={styles.age}>{ago(session.lastActivityAt)}</Text>
         </View>
-        <Text style={styles.path} numberOfLines={1}>
-          {shortPath(session.cwd)}
-        </Text>
+        {/* Path and model share a line so the row does not grow a third one.
+            Both are machine-authored, so both are set in mono. */}
+        <View style={styles.rowMeta}>
+          <Text style={styles.path} numberOfLines={1}>
+            {shortPath(session.cwd)}
+          </Text>
+          <Text style={styles.model} numberOfLines={1}>
+            {session.model ?? session.kind}
+          </Text>
+        </View>
         {session.question ? (
           <QuestionCard
             question={session.question}
@@ -318,7 +325,12 @@ const styles = StyleSheet.create({
     color: color.text,
   },
   age: { fontFamily: font.sans, fontSize: size.caption, color: color.faint },
-  path: { fontFamily: font.mono, fontSize: size.caption, color: color.muted },
+  rowMeta: { flexDirection: "row", alignItems: "baseline", gap: space.sm },
+  path: { flex: 1, fontFamily: font.mono, fontSize: size.caption, color: color.muted },
+  // The model, or the agent kind until the agent has replied once and named
+  // one. Falling back to the kind rather than showing nothing keeps the column
+  // from flickering into existence on the first reply.
+  model: { fontFamily: font.mono, fontSize: size.caption, color: color.faint },
   needsYouNote: {
     fontFamily: font.sansMedium,
     fontSize: size.caption,

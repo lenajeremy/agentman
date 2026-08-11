@@ -166,6 +166,20 @@ Findings worth recording, since none are documented anywhere:
 - **Codex writes two overlapping streams.** `response_item` is the raw model
   history; `event_msg` is what its UI renders. They duplicate each other almost
   exactly, so only `event_msg` is read.
+- **OpenCode's part ids are unique only inside their message.** The first text
+  part of every assistant message is `text-0`. Using that as a message id made
+  every reply in a session collide — the app merges by id, so the whole
+  conversation folded into a single assistant row and no new reply ever
+  streamed. Ids are namespaced by the message id now.
+- **An OpenCode message is filled in as the model writes it**, under a stable
+  id. So "have I sent this already?" cannot be answered by id alone; the live
+  tail compares content, or long answers freeze at their first few words.
+- **No agent records its model in a session header.** It is on individual
+  assistant messages, so the model is found by reading backwards from the end of
+  a transcript — and cached, because discovery runs every second against files
+  that reach hundreds of megabytes. Codex writes it in two places
+  (`turn_context.payload.model` and nested under `world_state`), and Claude Code
+  writes `<synthetic>` for messages it generated itself.
 - **OpenCode's OpenAPI spec disagrees with its own responses** in three places:
   the session list is wrapped in `{data, cursor}`, the working directory lives
   under `location`, and messages are flat rather than `{info, parts}`. Check the
