@@ -38,6 +38,7 @@ Then start an agent through the wrapper so you can message it back:
 ```bash
 am claude                 # instead of `claude`
 am codex                  # instead of `codex`
+am opencode               # instead of `opencode`
 ```
 
 That's it. `am list` will show your sessions in the terminal too, if you'd rather
@@ -125,12 +126,21 @@ tests.
 |---|---|---|---|
 | **Claude Code** | `~/.claude/sessions/<pid>.json`, a live registry with a busy/idle status, verified against the pid because the file outlives a crash | `~/.claude/projects/<cwd-slug>/<id>.jsonl` | tmux (mid-turn) or the hook queue |
 | **Codex** | Rollout files under `~/.codex/sessions/`, **plus any tmux pane running `codex`** — Codex writes no rollout until its first turn, so the pane is the only evidence a session exists before then | same rollout file | tmux (mid-turn) or the hook queue |
-| **OpenCode** | `opencode serve`'s HTTP API, which reports exactly which sessions are running | `GET /api/session/:id/message`, cursor-paged | `POST .../prompt` with `delivery: steer` — native, mid-turn |
+| **OpenCode** | OpenCode's HTTP API, which reports exactly which sessions are running | `GET /api/session/:id/message`, cursor-paged | `POST .../prompt` with `delivery: steer` — native, mid-turn |
 
 **OpenCode is the one agent that needs no tricks.** A real API covers sessions,
 messages, mid-turn delivery, and questions as structured data. It is the shape
 [`source.Source`](internal/source/source.go) was designed around and the best
 reference for adding a fourth agent.
+
+It does need that API to be reachable, which is what `am opencode` is for. The
+TUI serves it already, but on an ephemeral port unless told otherwise — so a
+plain `opencode` is invisible to agentman with nothing on screen to say why.
+`am opencode` starts it on the port the daemon watches, and if one is already
+running there it attaches to that instead, so several TUIs share one server and
+every session stays visible. Note there is no tmux here, unlike `am claude` and
+`am codex`: those need a terminal to type into because their CLIs have no input
+channel, and OpenCode does not.
 
 Findings worth recording, since none are documented anywhere:
 
@@ -265,6 +275,7 @@ am serve                    Run the daemon (hooks + relay connection)
 am pair                     Print a pairing code for your phone
 am claude [args...]         Start Claude Code so you can message it later
 am codex [args...]          Start Codex so you can message it later
+am opencode [args...]       Start OpenCode so you can message it later
 am install-hooks            Register agentman's hooks with your agents
 am uninstall-hooks          Remove them again
 am doctor                   Check that everything is wired up correctly

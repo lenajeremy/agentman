@@ -27,7 +27,11 @@ import (
 // So this adapter is the shape the Source interface was designed for, and a
 // useful reference for anyone adding a fourth agent.
 const (
-	openCodeDefaultPort = 4096
+	// OpenCodeDefaultPort is where this adapter looks for OpenCode's API, and
+	// therefore the port `am opencode` has to start it on. Exported so the two
+	// cannot drift: a wrapper that launched OpenCode anywhere else would
+	// produce a session the daemon never sees.
+	OpenCodeDefaultPort = 4096
 	openCodeTimeout     = 5 * time.Second
 	// openCodeIdleWindow decides how long after its last message a session
 	// still counts as live. The API reports which sessions are *running*, but
@@ -56,7 +60,7 @@ type openCodeSession struct {
 // local port, and OPENCODE_SERVER_PASSWORD is picked up when set.
 func NewOpenCodeSource(baseURL string) *OpenCodeSource {
 	if baseURL == "" {
-		baseURL = fmt.Sprintf("http://127.0.0.1:%d", openCodeDefaultPort)
+		baseURL = fmt.Sprintf("http://127.0.0.1:%d", OpenCodeDefaultPort)
 	}
 	return &OpenCodeSource{
 		baseURL:  strings.TrimRight(baseURL, "/"),

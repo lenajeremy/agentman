@@ -35,6 +35,7 @@ Usage:
   am pair                     Print a pairing code for your phone
   am claude [args...]         Start Claude Code so you can message it later
   am codex [args...]          Start Codex so you can message it later
+  am opencode [args...]       Start OpenCode so you can message it later
   am send <session-id> <text> Send a message to a running session
   am install-hooks            Register agentman's hooks with your agents
   am uninstall-hooks          Remove them again
@@ -86,6 +87,10 @@ func main() {
 	case "claude", "codex":
 		// Launch an agent inside tmux so it can receive messages later.
 		err = runWrap(ctx, command, args)
+	case "opencode":
+		// No tmux: OpenCode takes prompts over its API. What it needs instead
+		// is its API on the port the daemon watches.
+		err = runOpenCode(ctx, args)
 	case "send":
 		err = runSend(ctx, args)
 	case "doctor":
@@ -177,7 +182,7 @@ func runList(ctx context.Context, args []string) error {
 
 	if len(sessions) == 0 {
 		fmt.Println("No running agent sessions.")
-		fmt.Println("Start one with `claude` or `codex` and run `am list` again.")
+		fmt.Println("Start one with `am claude`, `am codex`, or `am opencode` and run `am list` again.")
 		return discoverErr
 	}
 

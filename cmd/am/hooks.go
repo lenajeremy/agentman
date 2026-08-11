@@ -242,7 +242,9 @@ func runDoctor(ctx context.Context, args []string) error {
 		if oc.Available(ctx) {
 			check(true, "opencode server", "reachable, no sessions yet")
 		} else {
-			warn("opencode server", "not running — start it with `opencode serve`")
+			// `am opencode` rather than `opencode serve`: serve is headless, so
+			// it would leave the user with a reachable API and nowhere to type.
+			warn("opencode server", "not running — start a session with `am opencode`")
 		}
 	}
 
