@@ -7,11 +7,14 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/mdp/qrterminal/v3"
 
 	"github.com/lenajeremy/agentman/internal/daemon"
 	"github.com/lenajeremy/agentman/internal/hook"
@@ -157,7 +160,9 @@ func runServe(ctx context.Context, args []string) error {
 			}
 			fmt.Printf("%s %s\n", stamp(), dim("relay      disconnected ("+detail+") — retrying"))
 		}
-		client.OnPairCode = printPairCode
+		client.OnPairCode = func(code string, expiresAt time.Time) {
+			printPairCode(relayURL, code, "", expiresAt)
+		}
 		sinks = append(sinks, client)
 		fmt.Printf("%s\n", dim("relay      "+relayURL+"  account "+string(client.Account())))
 	} else {
@@ -269,6 +274,7 @@ func runPair(ctx context.Context, args []string) error {
 
 	var body struct {
 		Code      string `json:"code"`
+		Token     string `json:"token"`
 		ExpiresAt int64  `json:"expiresAt"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
@@ -278,17 +284,44 @@ func runPair(ctx context.Context, args []string) error {
 		return fmt.Errorf("relay returned an empty pairing code")
 	}
 
-	printPairCode(body.Code, time.UnixMilli(body.ExpiresAt))
+	printPairCode(relayURL, body.Code, body.Token, time.UnixMilli(body.ExpiresAt))
 	return nil
 }
 
-func printPairCode(code string, expiresAt time.Time) {
+// PairingURL is the payload encoded in the QR code.
+//
+// A URL rather than bare JSON so the same string works as a deep link: tapping
+// it on the phone opens the app straight into pairing, which is the whole
+// point for anyone reading this over a remote shell where scanning is not an
+// option.
+func PairingURL(relayURL, token string) string {
+	return fmt.Sprintf("agentman://pair?relay=%s&token=%s",
+		url.QueryEscape(strings.TrimRight(relayURL, "/")), url.QueryEscape(token))
+}
+
+func printPairCode(relayURL, code, token string, expiresAt time.Time) {
 	remaining := time.Until(expiresAt).Round(time.Second)
 	if remaining < 0 {
 		remaining = 0
 	}
+
+	// The QR carries the long token, so scanning needs no typing and no relay
+	// address — and because that secret is 128 bits, it is not something worth
+	// guessing, unlike the eight digits below it.
+	if token != "" && isTerminal() {
+		fmt.Println()
+		qrterminal.GenerateWithConfig(PairingURL(relayURL, token), qrterminal.Config{
+			Level:     qrterminal.M,
+			Writer:    os.Stdout,
+			BlackChar: qrterminal.WHITE,
+			WhiteChar: qrterminal.BLACK,
+			QuietZone: 1,
+		})
+	}
+
 	fmt.Printf("\n  %s\n\n", bold(spaced(relay.FormatPairingCode(code))))
-	fmt.Printf("  %s\n", dim(fmt.Sprintf("enter this in the app within %s", remaining)))
+	fmt.Printf("  %s\n", dim(fmt.Sprintf(
+		"scan the code above, or type these digits — either works, for %s", remaining)))
 }
 
 // spaced widens a code so it can be read off a screen at a glance, keeping

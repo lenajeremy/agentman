@@ -26,7 +26,7 @@ brew install lenajeremy/agentman/agentman
 
 am install-hooks          # exact "it's done" signals instead of polling
 am serve                  # leave this running
-am pair                   # prints a 6-digit code for the app
+am pair                   # prints a QR code to scan
 ```
 
 `am` talks to the public relay by default, so there is nothing to configure.
@@ -332,7 +332,12 @@ reachable from your phone.
   are set.
 - Accounts are derived by hashing your daemon token, so the relay never sees or
   stores the token itself.
-- Pairing codes are single-use and expire in sixty seconds. A code is two
+- Pairing offers two secrets for the same sixty-second window: a QR code and
+  eight digits. Redeeming either retires both. The scanned secret is 128 bits,
+  so guessing it is not a threat and that path needs no rate limiting at all —
+  being unreadable by a human is exactly what lets it be strong. The typed code
+  has to stay short, so it carries the protections below.
+- Typed pairing codes are single-use and expire in sixty seconds. A code is two
   digits of account shard followed by six random ones: a wrong guess names no
   account by definition, so without the shard the only place to charge it is a
   bucket shared by every user, and one flood would lock out the whole relay.

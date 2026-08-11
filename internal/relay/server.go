@@ -113,13 +113,14 @@ func (s *Server) handlePairCode(w http.ResponseWriter, r *http.Request) {
 	// never seen, with nothing stored on either side.
 	account := DeriveAccount(token)
 
-	code, err := s.hub.NewPairingCode(account)
+	secrets, err := s.hub.NewPairing(account)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not generate a code"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"code":      code,
+		"code":      secrets.Code,
+		"token":     secrets.Token,
 		"expiresAt": time.Now().Add(PairingCodeTTL).UnixMilli(),
 	})
 }
@@ -152,6 +153,23 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	}
 
 	code := strings.ReplaceAll(strings.TrimSpace(body.Code), " ", "")
+
+	// A scanned token carries 128 bits, so guessing it is not a threat and
+	// there is nothing to rate limit. Recognising it by shape rather than by a
+	// flag from the caller matters: otherwise anyone could claim this path and
+	// skip the limits that protect the typed code.
+	if IsPairingToken(code) {
+		account, ok := s.hub.RedeemPairingCode(code)
+		if !ok {
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error": "this pairing has expired — scan a fresh code",
+			})
+			return
+		}
+		s.issueDeviceToken(w, account, body.DeviceID)
+		return
+	}
+
 	shard, wellFormed := ShardForCode(code)
 	if !wellFormed {
 		// Nothing to attribute a malformed code to, so it is charged to the
@@ -182,7 +200,11 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deviceID := body.DeviceID
+	s.issueDeviceToken(w, account, body.DeviceID)
+}
+
+// issueDeviceToken completes a successful pairing.
+func (s *Server) issueDeviceToken(w http.ResponseWriter, account AccountID, deviceID string) {
 	if deviceID == "" {
 		deviceID = "device"
 	}

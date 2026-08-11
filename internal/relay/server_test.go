@@ -333,6 +333,61 @@ func TestSuccessfulPairingSpendsNoBudget(t *testing.T) {
 	}
 }
 
+func TestScannedTokenPairsAndIsNotRateLimited(t *testing.T) {
+	// The reason the QR path exists: a scanned secret is never typed, so it can
+	// carry 128 bits, and at that size guessing is not a threat the relay has
+	// to defend against. That in turn means a flood of wrong typed codes — the
+	// thing that can still exhaust a shard budget — cannot stop someone from
+	// pairing by scanning.
+	server, ts := newTestServer(t)
+	account := DeriveAccount("daemon-token")
+
+	secrets, err := server.hub.NewPairing(account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !IsPairingToken(secrets.Token) {
+		t.Fatalf("token %q is not recognised as one", secrets.Token)
+	}
+
+	// Exhaust every typed budget this caller and shard have.
+	shard, _ := ShardForCode(secrets.Code)
+	for range 60 {
+		body, _ := json.Marshal(map[string]string{"code": shard + "000000"})
+		resp, err := http.Post(ts.URL+"/pair", "application/json", strings.NewReader(string(body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	if _, status := redeem(t, ts.URL, secrets.Code); status != http.StatusTooManyRequests {
+		t.Fatalf("typed path returned HTTP %d, want 429 — the setup did not exhaust it", status)
+	}
+
+	// The scanned token still works.
+	token, status := redeem(t, ts.URL, secrets.Token)
+	if status != http.StatusOK || token == "" {
+		t.Fatalf("scanning returned HTTP %d; a long secret needs no rate limiting", status)
+	}
+}
+
+func TestRedeemingOneSecretRetiresTheOther(t *testing.T) {
+	// A pairing consumed by scanning must not still be redeemable by typing,
+	// or the unused half would linger as a second way in for its full minute.
+	server, ts := newTestServer(t)
+	secrets, err := server.hub.NewPairing(DeriveAccount("daemon-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, status := redeem(t, ts.URL, secrets.Token); status != http.StatusOK {
+		t.Fatalf("scanning failed with HTTP %d", status)
+	}
+	if _, status := redeem(t, ts.URL, secrets.Code); status == http.StatusOK {
+		t.Error("the typed code still worked after the pairing was scanned")
+	}
+}
+
 func TestHealthExposesNoUserData(t *testing.T) {
 	_, ts := newTestServer(t)
 	dialDaemon(t, ts.URL, "daemon-token")

@@ -2,6 +2,7 @@ package relay
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -30,7 +31,24 @@ const (
 	pairingRandomDigits = 6
 	// PairingShards must match pairingShardDigits: 10^2.
 	PairingShards = 100
+
+	// pairingTokenBytes is the entropy behind a scanned pairing. At 16 bytes
+	// the space is 2^128, so brute force is not a threat the relay has to
+	// defend against — which is what lets the scanned path skip the rate
+	// limiting that the eight-digit typed path needs.
+	pairingTokenBytes = 16
 )
+
+// IsPairingToken reports whether a submitted secret is a scanned token rather
+// than a typed code. They are told apart by shape, not by a flag from the
+// client, so a caller cannot claim the token path to dodge rate limiting.
+func IsPairingToken(secret string) bool {
+	if len(secret) != base64.RawURLEncoding.EncodedLen(pairingTokenBytes) {
+		return false
+	}
+	_, err := base64.RawURLEncoding.DecodeString(secret)
+	return err == nil
+}
 
 // ShardForAccount returns the bucket an account's codes live in.
 //
@@ -97,6 +115,11 @@ type Hub struct {
 type pairing struct {
 	account AccountID
 	expires time.Time
+	// peer is the other key for this same pairing. A pairing is reachable by
+	// two secrets — a long one for scanning and a short one for typing — and
+	// redeeming either has to retire both, or the unused one would linger as a
+	// second way in.
+	peer string
 }
 
 // NewHub creates an empty hub.
@@ -196,18 +219,42 @@ func (h *Hub) ToApps(account AccountID, frame []byte) int {
 	return delivered
 }
 
-// NewPairingCode issues a short-lived code for an account.
-func (h *Hub) NewPairingCode(account AccountID) (string, error) {
+// PairingSecrets are the two ways to redeem one pairing.
+type PairingSecrets struct {
+	// Code is eight digits, meant to be read off a screen and typed.
+	Code string
+	// Token is long and random, meant to be scanned from a QR code. Because
+	// nobody types it, it can carry enough entropy that guessing is not a
+	// threat worth rate limiting — which is the whole reason it exists.
+	Token string
+}
+
+// NewPairing issues a short-lived pairing reachable by either secret.
+func (h *Hub) NewPairing(account AccountID) (PairingSecrets, error) {
 	random, err := randomDigits(pairingRandomDigits)
 	if err != nil {
-		return "", err
+		return PairingSecrets{}, err
+	}
+	token, err := randomToken(pairingTokenBytes)
+	if err != nil {
+		return PairingSecrets{}, err
 	}
 	code := ShardForAccount(account) + random
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.sweepPairingsLocked()
-	h.pairings[code] = pairing{account: account, expires: time.Now().Add(PairingCodeTTL)}
-	return code, nil
+
+	expires := time.Now().Add(PairingCodeTTL)
+	h.pairings[code] = pairing{account: account, expires: expires, peer: token}
+	h.pairings[token] = pairing{account: account, expires: expires, peer: code}
+	return PairingSecrets{Code: code, Token: token}, nil
+}
+
+// NewPairingCode issues a pairing and returns only its typed code.
+func (h *Hub) NewPairingCode(account AccountID) (string, error) {
+	secrets, err := h.NewPairing(account)
+	return secrets.Code, err
 }
 
 // RedeemPairingCode exchanges a code for the account it authorizes.
@@ -226,7 +273,21 @@ func (h *Hub) RedeemPairingCode(code string) (AccountID, bool) {
 		return "", false
 	}
 	delete(h.pairings, code)
+	// Retire the sibling too: a pairing consumed by scanning must not still be
+	// redeemable by typing, and vice versa.
+	if entry.peer != "" {
+		delete(h.pairings, entry.peer)
+	}
 	return entry.account, true
+}
+
+// randomToken returns a URL-safe secret with n bytes of entropy.
+func randomToken(n int) (string, error) {
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 func (h *Hub) sweepPairingsLocked() {
@@ -246,7 +307,14 @@ func (h *Hub) Stats() (daemons, apps, pendingPairings int) {
 	for _, devices := range h.apps {
 		apps += len(devices)
 	}
-	return len(h.daemons), apps, len(h.pairings)
+	// One pairing occupies two entries — the typed code and the scanned token
+	// — so count only the codes, or /health reports double.
+	for key := range h.pairings {
+		if !IsPairingToken(key) {
+			pendingPairings++
+		}
+	}
+	return len(h.daemons), apps, pendingPairings
 }
 
 func randomDigits(n int) (string, error) {
