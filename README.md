@@ -25,9 +25,13 @@ agent stops to ask permission, you can answer it from wherever you are.
 brew install lenajeremy/agentman/agentman
 
 am install-hooks          # exact "it's done" signals instead of polling
-am serve --relay https://agentman-production.up.railway.app
+am serve                  # leave this running
 am pair                   # prints a 6-digit code for the app
 ```
+
+`am` talks to the public relay by default, so there is nothing to configure.
+To use your own, set `AGENTMAN_RELAY` or pass `--relay`; to run with no relay
+at all, pass `--relay none`.
 
 Then start an agent through the wrapper so you can message it back:
 
@@ -313,8 +317,11 @@ restarts** — changing it invalidates every paired device, which looks like a
 mysterious logout rather than a config change. The relay refuses to start
 without it rather than generating one that would silently change.
 
-Point the daemon at your relay with `am serve --relay https://your-relay` or by
-setting `AGENTMAN_RELAY`.
+Point the daemon at your relay with `am serve --relay https://your-relay`, or
+set `AGENTMAN_RELAY` once and drop the flag. Precedence is flag, then
+environment, then the built-in default. `--relay none` disables it entirely —
+the daemon still watches your agents and prints locally, it just is not
+reachable from your phone.
 
 ---
 

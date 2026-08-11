@@ -19,8 +19,41 @@ import (
 	"github.com/lenajeremy/agentman/internal/source"
 )
 
-// relayEnv is where the relay URL comes from when -relay is not given.
+// relayEnv overrides the built-in relay without passing a flag every time.
 const relayEnv = "AGENTMAN_RELAY"
+
+// DefaultRelay is the public relay, used when nothing else is specified.
+//
+// Baking in an address is only reasonable because this one stores nothing:
+// there is no account on it, nothing retained, and no privacy cost to being
+// the default. Anyone who would rather not use it can point elsewhere, and
+// `-relay none` opts out entirely.
+const DefaultRelay = "https://agentman-production.up.railway.app"
+
+// relayFlagHelp describes the flag consistently across subcommands.
+const relayFlagHelp = "relay URL; defaults to the public relay, " +
+	"or set " + relayEnv + ". Use \"none\" to run without one."
+
+// resolveRelay applies the precedence: an explicit flag wins, then the
+// environment, then the built-in default.
+//
+// Returning empty means "no relay" — the daemon still watches agents and
+// prints locally, which is a legitimate way to run it and the reason an opt
+// out exists at all.
+func resolveRelay(flagValue string) string {
+	value := strings.TrimSpace(flagValue)
+	if value == "" {
+		value = strings.TrimSpace(os.Getenv(relayEnv))
+	}
+	if value == "" {
+		value = DefaultRelay
+	}
+	switch strings.ToLower(value) {
+	case "none", "off", "-":
+		return ""
+	}
+	return value
+}
 
 // printSink reports daemon events to the terminal.
 //
@@ -78,10 +111,11 @@ func (m multiSink) Send(event protocol.Event) error {
 func runServe(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	addr := fs.String("addr", hook.DefaultAddr, "loopback address for agent hook deliveries")
-	relayURL := fs.String("relay", os.Getenv(relayEnv), "relay URL (or set "+relayEnv+")")
+	relayFlag := fs.String("relay", "", relayFlagHelp)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	relayURL := resolveRelay(*relayFlag)
 
 	cfg, err := hook.LoadConfig("")
 	if err != nil {
@@ -109,12 +143,12 @@ func runServe(ctx context.Context, args []string) error {
 	go func() { hookErrs <- describeListenError(hookServer.Listen(ctx, *addr), *addr) }()
 	fmt.Printf("%s\n", dim("hooks      listening on "+*addr))
 
-	console := &printSink{quiet: *relayURL != ""}
+	console := &printSink{quiet: relayURL != ""}
 	sinks := []daemon.Transport{console}
 
 	var client *daemon.Client
-	if *relayURL != "" {
-		client = daemon.NewClient(*relayURL, cfg.Token)
+	if relayURL != "" {
+		client = daemon.NewClient(relayURL, cfg.Token)
 		client.OnStatus = func(connected bool, detail string) {
 			if connected {
 				fmt.Printf("%s %s\n", stamp(), dim("relay      connected to "+detail))
@@ -124,9 +158,9 @@ func runServe(ctx context.Context, args []string) error {
 		}
 		client.OnPairCode = printPairCode
 		sinks = append(sinks, client)
-		fmt.Printf("%s\n", dim("relay      "+*relayURL+"  account "+string(client.Account())))
+		fmt.Printf("%s\n", dim("relay      "+relayURL+"  account "+string(client.Account())))
 	} else {
-		fmt.Printf("%s\n", dim("relay      not configured — run with -relay to reach your phone"))
+		fmt.Printf("%s\n", dim("relay      disabled — this daemon is not reachable from your phone"))
 	}
 
 	agent := daemon.New(registry, multiSink{sinks: sinks})
@@ -198,12 +232,13 @@ func describeListenError(err error, addr string) error {
 // the running daemon offline every time the user paired a device.
 func runPair(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("pair", flag.ExitOnError)
-	relayURL := fs.String("relay", os.Getenv(relayEnv), "relay URL (or set "+relayEnv+")")
+	relayFlag := fs.String("relay", "", relayFlagHelp)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *relayURL == "" {
-		return fmt.Errorf("pair needs a relay: pass -relay or set %s", relayEnv)
+	relayURL := resolveRelay(*relayFlag)
+	if relayURL == "" {
+		return fmt.Errorf("pairing needs a relay, but it was disabled with -relay none")
 	}
 
 	cfg, err := hook.LoadConfig("")
@@ -214,7 +249,7 @@ func runPair(ctx context.Context, args []string) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	endpoint := strings.TrimRight(*relayURL, "/") + "/pair/code"
+	endpoint := strings.TrimRight(relayURL, "/") + "/pair/code"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
 	if err != nil {
 		return err
@@ -223,7 +258,7 @@ func runPair(ctx context.Context, args []string) error {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("could not reach the relay at %s: %w", *relayURL, err)
+		return fmt.Errorf("could not reach the relay at %s: %w", relayURL, err)
 	}
 	defer resp.Body.Close()
 
