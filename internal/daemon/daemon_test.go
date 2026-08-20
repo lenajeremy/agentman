@@ -3,8 +3,10 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -43,6 +45,15 @@ func (s *recordingSink) messageCount() int {
 type streamingSource struct {
 	mu      sync.Mutex
 	follows int
+}
+
+type bulkDiscoverySource struct {
+	streamingSource
+	sessions []protocol.Session
+}
+
+func (s *bulkDiscoverySource) Discover(context.Context) ([]protocol.Session, error) {
+	return append([]protocol.Session(nil), s.sessions...), nil
 }
 
 func (s *streamingSource) Kind() protocol.Kind { return protocol.KindClaude }
@@ -234,6 +245,125 @@ func TestOversizedMessageIsRejectedBeforeInjection(t *testing.T) {
 	}
 }
 
+type concurrentActionSource struct {
+	streamingSource
+	active atomic.Int32
+	peak   atomic.Int32
+	calls  atomic.Int32
+}
+
+func (s *concurrentActionSource) Inject(
+	context.Context,
+	string,
+	string,
+) (protocol.InjectMode, error) {
+	s.calls.Add(1)
+	current := s.active.Add(1)
+	for {
+		previous := s.peak.Load()
+		if current <= previous || s.peak.CompareAndSwap(previous, current) {
+			break
+		}
+	}
+	time.Sleep(15 * time.Millisecond)
+	s.active.Add(-1)
+	return protocol.InjectTmux, nil
+}
+
+func TestMessageCannotTypeIntoPendingQuestion(t *testing.T) {
+	registry := source.NewRegistry()
+	controlled := &concurrentActionSource{}
+	registry.Add(controlled)
+	agent := New(registry, &recordingSink{})
+	agent.sessions["claude:s1"] = protocol.Session{
+		ID: "claude:s1", Kind: protocol.KindClaude,
+		Question: &protocol.Question{
+			Prompt: "Approve?", Options: []protocol.QuestionOption{{Key: "1", Label: "Yes"}},
+		},
+	}
+
+	result := agent.Handle(context.Background(), protocol.Request{
+		Type: protocol.ReqSendMessage, SessionID: "claude:s1",
+		ClientID: "send-1", Text: "this must not reach the menu",
+	})
+	if result.Status != protocol.StatusFailed || !strings.Contains(result.Error, "pending question") {
+		t.Fatalf("send result = %+v", result)
+	}
+	if got := controlled.calls.Load(); got != 0 {
+		t.Fatalf("injector called %d times while a question was pending", got)
+	}
+}
+
+func TestSessionMutationsAreSerialized(t *testing.T) {
+	registry := source.NewRegistry()
+	controlled := &concurrentActionSource{}
+	registry.Add(controlled)
+	agent := New(registry, &recordingSink{})
+
+	const actions = 12
+	start := make(chan struct{})
+	results := make(chan protocol.Event, actions)
+	var wait sync.WaitGroup
+	for index := range actions {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			results <- agent.Handle(context.Background(), protocol.Request{
+				Type: protocol.ReqSendMessage, SessionID: "claude:s1",
+				ClientID: fmt.Sprintf("send-%d", index), Text: "continue",
+			})
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(results)
+	for result := range results {
+		if result.Status != protocol.StatusDelivered {
+			t.Fatalf("mutation failed: %+v", result)
+		}
+	}
+	if got := controlled.peak.Load(); got != 1 {
+		t.Fatalf("%d mutations reached one session concurrently, want 1", got)
+	}
+}
+
+func TestRequestValidationRejectsTerminalControlCharacters(t *testing.T) {
+	tests := []protocol.Request{
+		{Type: protocol.ReqSendMessage, SessionID: "claude:s1", Text: "hello\x1b[A"},
+		{Type: protocol.ReqSendMessage, SessionID: "claude:s1", Text: "hello\x00world"},
+		{Type: protocol.ReqSendMessage, SessionID: "claude:s1", Text: "hello\rworld"},
+		{Type: protocol.ReqSendMessage, SessionID: "claude:s1", Text: "hello\u0085world"},
+		{Type: protocol.ReqAnswer, SessionID: "claude:s1", OptionKey: "1\x1b[201~"},
+		{Type: protocol.ReqAnswer, SessionID: "claude:s1", OptionKeys: []string{"1", "2\x00"}},
+		{Type: protocol.ReqAnswer, SessionID: "claude:s1", AnswerText: "yes\x1b[201~"},
+	}
+	for _, request := range tests {
+		if err := validateRequest(request); err == nil {
+			t.Errorf("accepted terminal control characters in %+v", request)
+		}
+	}
+	if err := validateRequest(protocol.Request{
+		Type: protocol.ReqSendMessage, SessionID: "claude:s1", Text: "line one\n\tline two",
+	}); err != nil {
+		t.Fatalf("rejected ordinary multiline text: %v", err)
+	}
+}
+
+func TestQuestionAnswerRequiresRevisionToken(t *testing.T) {
+	if err := validateRequest(protocol.Request{
+		Type: protocol.ReqAnswer, SessionID: "claude:s1", OptionKey: "1",
+	}); err == nil {
+		t.Fatal("answer without question revision was accepted")
+	}
+	if err := validateRequest(protocol.Request{
+		Type: protocol.ReqAnswer, SessionID: "claude:s1",
+		QuestionID: "terminal-current", OptionKey: "1",
+	}); err != nil {
+		t.Fatalf("answer with question revision was rejected: %v", err)
+	}
+}
+
 func TestHistoryEventFitsRelayFrameWithoutDroppingMessages(t *testing.T) {
 	messages := make([]protocol.Message, maxPageMessages)
 	for i := range messages {
@@ -270,5 +400,209 @@ func TestWireTruncationPreservesUTF8(t *testing.T) {
 	}
 	if !utf8.ValidString(got) {
 		t.Fatalf("truncation produced invalid UTF-8: %q", got)
+	}
+}
+
+func TestDiscoveredSessionsAreBoundedWithoutMutatingSource(t *testing.T) {
+	originalPrompt := strings.Repeat("question\x00", maxWirePromptBytes)
+	originalPreview := strings.Repeat("preview\x00", maxWirePreviewBytes)
+	input := []protocol.Session{{
+		ID: "claude:s1", Kind: protocol.KindClaude, NativeID: "s1",
+		Name:  strings.Repeat("name", maxWireNameBytes),
+		Cwd:   strings.Repeat("/directory", maxWirePathBytes),
+		State: protocol.StateWaitingInput,
+		Question: &protocol.Question{
+			ID: "terminal-revision", Prompt: originalPrompt,
+			Options: []protocol.QuestionOption{
+				{Key: "1", Label: strings.Repeat("label", maxWireOptionBytes), Preview: originalPreview},
+			},
+		},
+	}}
+
+	got := normalizeDiscoveredSessions(input)
+	if len(got) != 1 || got[0].Question == nil {
+		t.Fatalf("normalized sessions = %+v", got)
+	}
+	if len(got[0].Question.Options) != 1 || got[0].Question.Options[0].Key != "1" {
+		t.Fatalf("invalid option key survived normalization: %+v", got[0].Question.Options)
+	}
+	if len(got[0].Question.Prompt) > maxWirePromptBytes ||
+		len(got[0].Question.Options[0].Preview) > maxWirePreviewBytes {
+		t.Fatalf("wire text exceeded its bound: %+v", got[0].Question)
+	}
+	if input[0].Question.Prompt != originalPrompt ||
+		input[0].Question.Options[0].Preview != originalPreview ||
+		len(input[0].Question.Options) != 1 {
+		t.Fatal("normalization mutated the adapter's source snapshot")
+	}
+}
+
+func TestSessionListFitsRelayFrameAndKeepsActionableSessions(t *testing.T) {
+	sessions := make([]protocol.Session, maxWireSessions)
+	for index := range sessions {
+		sessions[index] = protocol.Session{
+			ID: fmt.Sprintf("claude:%d", index), Kind: protocol.KindClaude,
+			NativeID: fmt.Sprintf("%d", index), State: protocol.StateIdle,
+			Name: strings.Repeat("\x00", maxWireNameBytes),
+		}
+	}
+	sessions[0].State = protocol.StateWaitingInput
+	sessions[0].Question = &protocol.Question{
+		ID: "terminal-revision", Prompt: "Approve?",
+		Options: []protocol.QuestionOption{{Key: "1", Label: "Yes"}},
+	}
+
+	normalized := normalizeDiscoveredSessions(sessions)
+	fitted := fitSessionList(normalized)
+	encoded, err := json.Marshal(protocol.Event{Type: protocol.EvtSessions, Sessions: fitted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > maxEventBytes {
+		t.Fatalf("sessions event is %d bytes, limit is %d", len(encoded), maxEventBytes)
+	}
+	if len(fitted) == 0 || fitted[0].ID != "claude:0" || fitted[0].Question == nil {
+		t.Fatalf("actionable first session was not retained: %+v", fitted)
+	}
+}
+
+func TestOverlongQuestionRevisionIsNotTruncatedIntoAnUnanswerableToken(t *testing.T) {
+	got := normalizeDiscoveredSessions([]protocol.Session{{
+		ID: "claude:s1", Kind: protocol.KindClaude, NativeID: "s1",
+		State: protocol.StateWaitingInput,
+		Question: &protocol.Question{
+			ID: strings.Repeat("r", maxClientIDBytes+1), Prompt: "Approve?",
+			Options: []protocol.QuestionOption{{Key: "1", Label: "Yes"}},
+		},
+	}})
+	if len(got) != 1 || got[0].Question != nil || got[0].State != protocol.StateIdle {
+		t.Fatalf("overlong concurrency token was exposed: %+v", got)
+	}
+}
+
+func TestWorstCaseQuestionUpdateFitsRelayFrame(t *testing.T) {
+	options := make([]protocol.QuestionOption, maxWireOptions)
+	for index := range options {
+		options[index] = protocol.QuestionOption{
+			Key:         fmt.Sprintf("option-%d", index),
+			Label:       strings.Repeat("\x00", maxWireOptionBytes*2),
+			Description: strings.Repeat("\x00", maxWireOptionBytes*2),
+			Preview:     strings.Repeat("\x00", maxWirePreviewBytes*2),
+		}
+	}
+	got := normalizeDiscoveredSessions([]protocol.Session{{
+		ID: "claude:s1", Kind: protocol.KindClaude, NativeID: "s1",
+		Name:  strings.Repeat("\x00", maxWireNameBytes*2),
+		Cwd:   strings.Repeat("\x00", maxWirePathBytes*2),
+		State: protocol.StateWaitingInput,
+		Question: &protocol.Question{
+			ID:      "terminal-revision",
+			Title:   strings.Repeat("\x00", maxWireNameBytes*2),
+			Prompt:  strings.Repeat("\x00", maxWirePromptBytes*2),
+			Detail:  strings.Repeat("\x00", maxWireDetailBytes*2),
+			Options: options,
+		},
+	}})
+	if len(got) != 1 {
+		t.Fatalf("normalization dropped worst-case bounded session")
+	}
+	encoded, err := json.Marshal(protocol.Event{Type: protocol.EvtSessionUpdate, Session: &got[0]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > maxEventBytes {
+		t.Fatalf("worst-case session update is %d bytes, limit is %d", len(encoded), maxEventBytes)
+	}
+}
+
+func TestQuestionOptionsAreCompleteOrExplicitlyUnsupported(t *testing.T) {
+	seventeen := make([]protocol.QuestionOption, 17)
+	for index := range seventeen {
+		seventeen[index] = protocol.QuestionOption{
+			Key: fmt.Sprint(index + 1), Label: fmt.Sprintf("Choice %d", index+1),
+			Checked: index == 16,
+		}
+	}
+	preserved := normalizeDiscoveredSessions([]protocol.Session{{
+		ID: "claude:s1", Kind: protocol.KindClaude, NativeID: "s1",
+		State: protocol.StateWaitingInput,
+		Question: &protocol.Question{
+			ID: "terminal-seventeen", Prompt: "Choose", Multiple: true, Options: seventeen,
+		},
+	}})
+	if got := len(preserved[0].Question.Options); got != len(seventeen) ||
+		!preserved[0].Question.Options[16].Checked {
+		t.Fatalf("answerable options were truncated: %+v", preserved[0].Question)
+	}
+
+	tooMany := append(append([]protocol.QuestionOption(nil), seventeen...),
+		make([]protocol.QuestionOption, maxWireOptions-len(seventeen)+1)...)
+	for index := len(seventeen); index < len(tooMany); index++ {
+		tooMany[index] = protocol.QuestionOption{Key: fmt.Sprint(index + 1), Label: "More"}
+	}
+	unsupported := normalizeDiscoveredSessions([]protocol.Session{{
+		ID: "claude:s2", Kind: protocol.KindClaude, NativeID: "s2",
+		State: protocol.StateWaitingInput,
+		Question: &protocol.Question{
+			ID: "terminal-too-many", Prompt: "Choose", Multiple: true, Options: tooMany,
+		},
+	}})
+	question := unsupported[0].Question
+	if question == nil || len(question.Options) != 0 ||
+		!strings.Contains(question.Detail, "too many options") ||
+		question.Custom || question.Multiple ||
+		unsupported[0].State != protocol.StateWaitingInput {
+		t.Fatalf("oversized decision was silently made partial: %+v", unsupported[0])
+	}
+
+	invalid := normalizeDiscoveredSessions([]protocol.Session{{
+		ID: "claude:s3", Kind: protocol.KindClaude, NativeID: "s3",
+		State: protocol.StateWaitingInput,
+		Question: &protocol.Question{
+			ID: "terminal-invalid", Prompt: "Choose", Options: []protocol.QuestionOption{
+				{Key: "1", Label: "Visible"},
+				{Key: "bad\x00key", Label: "Unsafe"},
+			},
+		},
+	}})
+	question = invalid[0].Question
+	if question == nil || len(question.Options) != 0 ||
+		!strings.Contains(question.Detail, "cannot be represented safely") {
+		t.Fatalf("invalid option left an answerable partial question: %+v", invalid[0])
+	}
+}
+
+func TestRefreshCoalescesLargeSessionBursts(t *testing.T) {
+	adapter := &bulkDiscoverySource{}
+	for index := range 40 {
+		adapter.sessions = append(adapter.sessions, protocol.Session{
+			ID: fmt.Sprintf("claude:%d", index), Kind: protocol.KindClaude,
+			NativeID: fmt.Sprint(index), Name: "before", State: protocol.StateIdle,
+		})
+	}
+	registry := source.NewRegistry()
+	registry.Add(adapter)
+	sink := &recordingSink{}
+	agent := New(registry, sink)
+	agent.refresh(context.Background(), true)
+	for index := range adapter.sessions {
+		adapter.sessions[index].Name = "after"
+	}
+	agent.refresh(context.Background(), false)
+
+	sink.mu.Lock()
+	events := append([]protocol.Event(nil), sink.events...)
+	sink.mu.Unlock()
+	var lists, updates int
+	for _, event := range events {
+		switch event.Type {
+		case protocol.EvtSessions:
+			lists++
+		case protocol.EvtSessionUpdate:
+			updates++
+		}
+	}
+	if lists != 2 || updates != 0 {
+		t.Fatalf("large refresh emitted %d lists and %d updates, want 2 and 0", lists, updates)
 	}
 }

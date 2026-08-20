@@ -41,6 +41,17 @@ type Server struct {
 	// turns a Stop hook into a delivery channel: the response tells the agent
 	// to keep going with the user's text as the reason.
 	pendingFor func(sessionID string) []string
+
+	// speak reads a finished turn out loud, when the user has asked for it.
+	// A function rather than the Speaker itself, so this package does not
+	// depend on how speech is produced -- or on it existing at all.
+	speak func(text string)
+}
+
+// SetSpeaker installs a function to read finished turns aloud. Optional: with
+// none set, nothing is spoken and nothing changes.
+func (s *Server) SetSpeaker(fn func(text string)) {
+	s.speak = fn
 }
 
 // SetPendingSource installs the lookup used to answer Stop hooks with queued
@@ -244,10 +255,18 @@ func (s *Server) handleHook(w http.ResponseWriter, r *http.Request) {
 	// A turn ending is the one moment a session without a live input channel
 	// can be handed a message. Delivering it means telling the agent not to
 	// stop, with the user's text as the reason it should continue.
-	if event.IsTurnComplete() && s.pendingFor != nil {
-		if queued := s.pendingFor(event.SessionID); len(queued) > 0 {
-			writeHookDecision(w, strings.Join(queued, "\n\n"))
-			return
+	if event.IsTurnComplete() {
+		// Before the delivery check, because speaking is fire-and-forget and
+		// must happen whether or not there is queued input to hand back.
+		if s.speak != nil {
+			s.speak(event.Payload.LastAssistantMessage)
+		}
+
+		if s.pendingFor != nil {
+			if queued := s.pendingFor(event.SessionID); len(queued) > 0 {
+				writeHookDecision(w, strings.Join(queued, "\n\n"))
+				return
+			}
 		}
 	}
 
