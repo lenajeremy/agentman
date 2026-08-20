@@ -2,6 +2,8 @@ package tmux
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,6 +125,25 @@ func TestSendHandlesMultilineText(t *testing.T) {
 	for _, line := range []string{"first line", "second line", "third line"} {
 		if !strings.Contains(got, line) {
 			t.Errorf("lost %q from a multi-line message; got %q", line, got)
+		}
+	}
+}
+
+func TestFailedMultilinePasteDeletesPrivateBuffer(t *testing.T) {
+	requireTmux(t)
+	name, _ := newSink(t)
+	ctx := context.Background()
+
+	if err := pasteMultiline(ctx, name+"-missing", "sensitive\nmessage"); err == nil {
+		t.Fatal("paste to a missing target unexpectedly succeeded")
+	}
+	buffers, err := run(ctx, "list-buffers", "-F", "#{buffer_name}")
+	if err != nil && !strings.Contains(err.Error(), "no buffers") {
+		t.Fatal(err)
+	}
+	for _, buffer := range strings.Fields(buffers) {
+		if strings.HasPrefix(buffer, "agentman-") {
+			t.Fatalf("failed paste left sensitive tmux buffer %q behind", buffer)
 		}
 	}
 }
@@ -286,6 +307,63 @@ func TestOwnsPIDMatchesDescendants(t *testing.T) {
 	}
 	if OwnsPID(pane, 1) {
 		t.Error("init must never be claimed")
+	}
+}
+
+func TestProcessTreeSupportsManyAncestryChecksFromOneSnapshot(t *testing.T) {
+	const processCount = 5000
+	var table strings.Builder
+	for pid := 2; pid < processCount+2; pid++ {
+		parent := pid - 1
+		if pid == 2 {
+			parent = 1
+		}
+		fmt.Fprintf(&table, "%d %d\n", pid, parent)
+	}
+
+	processes := parseProcessTree(table.String())
+	for descendant := 3; descendant < 14; descendant++ {
+		if !processes.OwnsPID(2, descendant) {
+			t.Fatalf("pid %d was not recognised as a descendant", descendant)
+		}
+	}
+	if processes.OwnsPID(2, 14) {
+		t.Fatal("ancestry deeper than the safety bound was accepted")
+	}
+	if processes.OwnsPID(4000, 3000) {
+		t.Fatal("an ancestor was mistaken for a descendant")
+	}
+}
+
+func TestProcessTreeParsingIgnoresMalformedRowsAndCycles(t *testing.T) {
+	processes := parseProcessTree("header junk\n10 9\n9 8\n8 10\n-1 2\n7 nope\n")
+	if !processes.OwnsPID(8, 10) {
+		t.Fatal("valid rows around malformed input were lost")
+	}
+	if processes.OwnsPID(2, 10) {
+		t.Fatal("a cycle escaped the bounded ancestry walk")
+	}
+}
+
+func TestSnapshotProcessTreeHonorsCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := SnapshotProcessTree(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled snapshot returned %v", err)
+	}
+}
+
+func BenchmarkProcessTreeOwnsPID(b *testing.B) {
+	parents := make(map[int]int, 12)
+	for pid := 3; pid <= 13; pid++ {
+		parents[pid] = pid - 1
+	}
+	processes := &ProcessTree{parents: parents}
+	b.ResetTimer()
+	for b.Loop() {
+		if !processes.OwnsPID(2, 13) {
+			b.Fatal("ancestry lookup failed")
+		}
 	}
 }
 
