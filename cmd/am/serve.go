@@ -6,6 +6,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -15,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lenajeremy/agentman/internal/speech"
 	"github.com/mdp/qrterminal/v3"
 	qr "rsc.io/qr"
 
@@ -27,6 +30,8 @@ import (
 
 // relayEnv overrides the built-in relay without passing a flag every time.
 const relayEnv = "AGENTMAN_RELAY"
+
+const maxPairCodeResponse = 16 * 1024
 
 // DefaultRelay is the public relay, used when nothing else is specified.
 //
@@ -58,6 +63,50 @@ func resolveRelay(flagValue string) string {
 		return ""
 	}
 	return value
+}
+
+// normalizeRelayURL accepts websocket-style spelling for convenience but
+// returns an HTTP base URL usable by both pairing and the daemon client. A
+// bearer grants full control of the user's agents, so plaintext transport is
+// permitted only on the same machine.
+func normalizeRelayURL(raw string) (string, error) {
+	value := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if value == "" {
+		return "", fmt.Errorf("relay URL is empty")
+	}
+	if !strings.Contains(value, "://") {
+		value = "https://" + value
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" || parsed.Hostname() == "" {
+		return "", fmt.Errorf("invalid relay URL %q", raw)
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
+		(parsed.Path != "" && parsed.Path != "/") {
+		return "", fmt.Errorf("relay URL must contain only a scheme, host, and optional port")
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "wss":
+		parsed.Scheme = "https"
+	case "ws":
+		parsed.Scheme = "http"
+	case "https", "http":
+	default:
+		return "", fmt.Errorf("relay URL must use HTTPS or WSS")
+	}
+	if parsed.Scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
+		return "", fmt.Errorf("plaintext relay transport is allowed only on loopback; use HTTPS for %s", parsed.Hostname())
+	}
+	parsed.Path = ""
+	return strings.TrimRight(parsed.String(), "/"), nil
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // printSink reports daemon events to the terminal.
@@ -121,6 +170,13 @@ func runServe(ctx context.Context, args []string) error {
 		return err
 	}
 	relayURL := resolveRelay(*relayFlag)
+	if relayURL != "" {
+		var err error
+		relayURL, err = normalizeRelayURL(relayURL)
+		if err != nil {
+			return err
+		}
+	}
 
 	cfg, err := hook.LoadConfig("")
 	if err != nil {
@@ -151,6 +207,14 @@ func runServe(ctx context.Context, args []string) error {
 	// rather than polled.
 	hookServer := hook.NewServer(cfg.Token)
 	hookServer.SetPendingSource(pending.Take)
+
+	// Reading answers out loud, if it has been switched on. Failures here are
+	// logged and otherwise ignored: a speech service being down is not a
+	// reason for the agent monitor to stop working.
+	if speaker := speech.New(cfg.Speech, slog.New(slog.NewTextHandler(io.Discard, nil))); speaker.Enabled() {
+		hookServer.SetSpeaker(speaker.Speak)
+		fmt.Printf("%s\n", dim("speech     reading turns aloud in "+cfg.Speech.Voice))
+	}
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return describeListenError(err, addr)
@@ -268,6 +332,10 @@ func runPair(ctx context.Context, args []string) error {
 	if relayURL == "" {
 		return fmt.Errorf("pairing needs a relay, but it was disabled with -relay none")
 	}
+	relayURL, err := normalizeRelayURL(relayURL)
+	if err != nil {
+		return err
+	}
 
 	cfg, err := hook.LoadConfig("")
 	if err != nil {
@@ -294,20 +362,53 @@ func runPair(ctx context.Context, args []string) error {
 		return fmt.Errorf("relay refused to issue a code (HTTP %d)", resp.StatusCode)
 	}
 
-	var body struct {
-		Code      string `json:"code"`
-		Token     string `json:"token"`
-		ExpiresAt int64  `json:"expiresAt"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	body, err := readPairCodeResponse(resp.Body, time.Now())
+	if err != nil {
 		return err
-	}
-	if body.Code == "" {
-		return fmt.Errorf("relay returned an empty pairing code")
 	}
 
 	printPairCode(relayURL, body.Code, body.Token, time.UnixMilli(body.ExpiresAt))
 	return nil
+}
+
+type pairCodeResponse struct {
+	Code      string `json:"code"`
+	Token     string `json:"token"`
+	ExpiresAt int64  `json:"expiresAt"`
+}
+
+func readPairCodeResponse(reader io.Reader, now time.Time) (pairCodeResponse, error) {
+	var body pairCodeResponse
+	raw, err := io.ReadAll(io.LimitReader(reader, maxPairCodeResponse+1))
+	if err != nil {
+		return body, fmt.Errorf("read pairing response: %w", err)
+	}
+	if len(raw) > maxPairCodeResponse {
+		return body, fmt.Errorf("relay pairing response exceeds %d bytes", maxPairCodeResponse)
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return body, fmt.Errorf("relay returned invalid pairing JSON: %w", err)
+	}
+	if len(body.Code) != 10 || !allDigits(body.Code) {
+		return body, fmt.Errorf("relay returned an invalid pairing code")
+	}
+	if !relay.IsPairingToken(body.Token) {
+		return body, fmt.Errorf("relay returned an invalid pairing token")
+	}
+	expires := time.UnixMilli(body.ExpiresAt)
+	if !expires.After(now.Add(-5*time.Second)) || expires.After(now.Add(5*time.Minute)) {
+		return body, fmt.Errorf("relay returned an invalid pairing expiry")
+	}
+	return body, nil
+}
+
+func allDigits(value string) bool {
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // PairingURL is the payload encoded in the QR code.
