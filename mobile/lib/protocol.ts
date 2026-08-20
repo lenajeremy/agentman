@@ -7,7 +7,7 @@
  * is the backstop, not this file.
  */
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /**
  * Pairing codes are ten fully random digits. They are single-use and
@@ -27,6 +27,8 @@ export type InjectMode = "api" | "tmux" | "hook" | "none";
 
 /** A decision an agent is blocked on, with the choices it is offering. */
 export interface Question {
+  /** Stable daemon identity used to reject answers to a prompt that moved on. */
+  id: string;
   prompt: string;
   title?: string;
   detail?: string;
@@ -36,6 +38,7 @@ export interface Question {
 }
 
 export interface QuestionAnswer {
+  questionId?: string;
   optionKey?: string;
   optionKeys?: string[];
   answerText?: string;
@@ -122,6 +125,8 @@ export interface Request {
   limit?: number;
   text?: string;
   clientId?: string;
+  /** Echoes the question snapshot the user actually answered. */
+  questionId?: string;
   /** Chooses an option on answer_question. */
   optionKey?: string;
   optionKeys?: string[];
@@ -173,12 +178,6 @@ export interface Control {
   message?: string;
 }
 
-let counter = 0;
-export function newFrameId(): string {
-  counter += 1;
-  return `${Date.now().toString(36)}-${counter}`;
-}
-
 /** Parse an untrusted websocket frame before application code touches it. */
 export function decodeEnvelope(raw: string): Envelope | null {
   let value: unknown;
@@ -189,7 +188,7 @@ export function decodeEnvelope(raw: string): Envelope | null {
   }
   if (
     !isRecord(value) ||
-    value.v !== PROTOCOL_VERSION ||
+    (!finiteNumber(value.v) || !Number.isInteger(value.v)) ||
     !boundedString(value.id, 256, true) ||
     !isOneOf(value.to, ["daemon", "app", "relay"] as const) ||
     !isRecord(value.payload) ||
@@ -198,6 +197,14 @@ export function decodeEnvelope(raw: string): Envelope | null {
   ) {
     return null;
   }
+  // A relay on another protocol version sends the error in the requester's
+  // version. Accept only that narrow cross-version control shape so the app can
+  // explain the mismatch instead of sitting on a permanently blank socket.
+  if (value.v !== PROTOCOL_VERSION && !(
+    value.to === "relay" && isRecord(value.payload) &&
+    value.payload.type === "error" &&
+    value.payload.message === "unsupported protocol version"
+  )) return null;
   return value as unknown as Envelope;
 }
 
@@ -277,6 +284,7 @@ function isSession(value: unknown): value is Session {
 
 function isQuestion(value: unknown): value is Question {
   if (!isRecord(value) || !boundedString(value.prompt, 64 * 1024) ||
+      !boundedString(value.id, 256, true) ||
       !optionalBoundedString(value.title, 4096) ||
       !optionalBoundedString(value.detail, 256 * 1024) ||
       (value.multiple !== undefined && typeof value.multiple !== "boolean") ||

@@ -18,6 +18,14 @@
     "plugins": [
       "expo-router",
       "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Agentman to scan a one-time pairing QR code.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
       "./plugins/withIosBuildFixes"
     ],
     "experiments": {

@@ -2,7 +2,7 @@ import { Redirect, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   RefreshControl,
-  ScrollView,
+  SectionList,
   StyleSheet,
   Text,
   View,
@@ -17,6 +17,7 @@ import { QuestionCard } from "../components/QuestionCard";
 import { SwipeToDismiss } from "../components/SwipeToDismiss";
 import { canDismiss } from "../lib/dismissed";
 import { Session } from "../lib/protocol";
+import { sessionNeedsAnswer } from "../lib/question-alerts";
 import { useStore } from "../lib/store";
 import { ago, color, font, radius, shortPath, size, space, stateStyle } from "../lib/theme";
 
@@ -46,13 +47,14 @@ export default function Agents() {
     [store.visibleSessions],
   );
   const hiddenCount = store.sessions.length - store.visibleSessions.length;
+  const incompatible = store.connection === "incompatible";
 
   if (!store.ready) return <View style={styles.page} />;
   if (!store.credentials) return <Redirect href="/pair" />;
 
   const counts = store.visibleSessions.reduce(
     (current, session) => {
-      if (session.state === "waiting_input") current.needsYou += 1;
+      if (sessionNeedsAnswer(session)) current.needsYou += 1;
       else if (session.state === "busy") current.working += 1;
       else current.idle += 1;
       return current;
@@ -75,7 +77,11 @@ export default function Agents() {
               ]}
             />
             <Text style={styles.subhead}>
-              {store.daemonOnline ? "Mac connected" : "Trying to reconnect"}
+              {store.daemonOnline
+                ? "Mac connected"
+                : incompatible
+                  ? "Update required"
+                  : "Trying to reconnect"}
             </Text>
           </View>
         </View>
@@ -93,12 +99,22 @@ export default function Agents() {
 
       {!store.daemonOnline && (
         <ContentColumn>
-          <OfflineBanner lastSeenAt={store.lastSeenAt} />
+          {incompatible
+            ? <ProtocolBanner />
+            : <OfflineBanner lastSeenAt={store.lastSeenAt} />}
         </ContentColumn>
       )}
 
-      <ScrollView
+      <SectionList
         style={styles.scroll}
+        sections={groups.map((group) => ({
+          ...group,
+          data: group.sessions,
+        }))}
+        keyExtractor={(session) => session.id}
+        stickySectionHeadersEnabled={false}
+        initialNumToRender={12}
+        windowSize={7}
         contentContainerStyle={{ paddingBottom: insets.bottom + space.xxl }}
         refreshControl={
           <RefreshControl
@@ -111,44 +127,47 @@ export default function Agents() {
             }}
           />
         }
-      >
-        <ContentColumn>
-          {store.visibleSessions.length > 0 ? (
+        ListHeaderComponent={
+          <ContentColumn>
+            {store.visibleSessions.length > 0 ? (
             <Appear style={styles.summaryWrap}>
               <DashboardSummary counts={counts} />
             </Appear>
-          ) : null}
+            ) : null}
 
-          {store.visibleSessions.length === 0 && store.daemonOnline &&
-            (hiddenCount > 0 ? (
-              <AllHiddenState count={hiddenCount} onShow={store.restoreAllSessions} />
-            ) : (
-              <EmptyState />
-            ))}
-
-          {groups.map(({ label, tint, sessions }) => (
-            <View key={label} style={styles.group}>
-              <View style={styles.groupHeading}>
-                <Text style={[styles.groupLabel, { color: tint }]}>{label}</Text>
-                <Text style={styles.groupCount}>{sessions.length}</Text>
-              </View>
-              {sessions.map((session) => (
-                <SwipeToDismiss
-                  key={session.id}
-                  enabled={canDismiss(session)}
-                  onDismiss={() => {
-                    store.dismissSession(session.id);
-                    setUndo({ id: session.id, name: session.name });
-                  }}
-                  accessibilityLabel={`${session.name}, ${stateStyle(session.state).label}`}
-                >
-                  <AgentRow session={session} />
-                </SwipeToDismiss>
+            {store.visibleSessions.length === 0 && store.daemonOnline &&
+              (hiddenCount > 0 ? (
+                <AllHiddenState count={hiddenCount} onShow={store.restoreAllSessions} />
+              ) : (
+                <EmptyState />
               ))}
+          </ContentColumn>
+        }
+        renderSectionHeader={({ section }) => (
+          <ContentColumn>
+            <View style={styles.groupHeading}>
+              <Text style={[styles.groupLabel, { color: section.tint }]}>
+                {section.label}
+              </Text>
+              <Text style={styles.groupCount}>{section.data.length}</Text>
             </View>
-          ))}
-        </ContentColumn>
-      </ScrollView>
+          </ContentColumn>
+        )}
+        renderItem={({ item: session }) => (
+          <ContentColumn>
+            <SwipeToDismiss
+              enabled={canDismiss(session)}
+              onDismiss={() => {
+                store.dismissSession(session.id);
+                setUndo({ id: session.id, name: session.name });
+              }}
+              accessibilityLabel={`${session.name}, ${stateStyle(effectiveSessionState(session)).label}`}
+            >
+              <AgentRow session={session} />
+            </SwipeToDismiss>
+          </ContentColumn>
+        )}
+      />
 
       {undo && (
         <Appear
@@ -190,7 +209,7 @@ function groupByState(sessions: Session[]) {
     { label: string; tint: string; rank: number; sessions: Session[] }
   >();
   for (const session of sessions) {
-    const meta = stateStyle(session.state);
+    const meta = stateStyle(effectiveSessionState(session));
     const bucket = buckets.get(meta.label) ?? {
       label: meta.label,
       tint: meta.rank === 0 ? meta.color : color.faint,
@@ -210,7 +229,8 @@ function groupByState(sessions: Session[]) {
 
 function AgentRow({ session }: { session: Session }) {
   const router = useRouter();
-  const needsYou = session.state === "waiting_input";
+  const needsYou = sessionNeedsAnswer(session);
+  const displayState = effectiveSessionState(session);
 
   return (
     <MotionPressable
@@ -218,11 +238,11 @@ function AgentRow({ session }: { session: Session }) {
       style={[styles.row, needsYou && styles.rowNeedsYou]}
       pressedScale={0.985}
       accessibilityRole="button"
-      accessibilityLabel={`${session.name}, ${stateStyle(session.state).label}`}
+      accessibilityLabel={`${session.name}, ${stateStyle(displayState).label}`}
     >
       {needsYou ? <View style={styles.priorityRail} /> : null}
       <View style={styles.pulseWrap}>
-        <Pulse state={session.state} />
+        <Pulse state={displayState} />
       </View>
       <View style={styles.rowBody}>
         <View style={styles.rowTop}>
@@ -258,6 +278,10 @@ function AgentRow({ session }: { session: Session }) {
       <Text style={styles.chevron}>›</Text>
     </MotionPressable>
   );
+}
+
+function effectiveSessionState(session: Session): Session["state"] {
+  return sessionNeedsAnswer(session) ? "waiting_input" : session.state;
 }
 
 function DashboardSummary({
@@ -388,6 +412,22 @@ function OfflineBanner({ lastSeenAt }: { lastSeenAt: number | null }) {
   );
 }
 
+function ProtocolBanner() {
+  return (
+    <View style={styles.banner} accessibilityRole="alert">
+      <View style={styles.offlineIcon}>
+        <Text style={styles.offlineGlyph}>!</Text>
+      </View>
+      <View style={styles.bannerCopy}>
+        <Text style={styles.bannerText}>Agentman versions do not match</Text>
+        <Text style={styles.bannerHint}>
+          Update or restart the app, daemon, and relay together.
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 function EmptyState() {
   return (
     <View style={styles.empty}>
@@ -502,12 +542,12 @@ const styles = StyleSheet.create({
   metricLabel: { fontFamily: font.sans, fontSize: size.label, color: color.faint },
   metricDivider: { width: StyleSheet.hairlineWidth, backgroundColor: color.line },
 
-  group: { marginTop: space.xl },
   groupHeading: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: space.lg,
+    marginTop: space.xl,
     marginBottom: space.sm,
   },
   groupLabel: {

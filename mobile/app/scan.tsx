@@ -4,6 +4,7 @@ import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   StyleProp,
   StyleSheet,
@@ -59,22 +60,51 @@ export default function Scan() {
 
       handled.current = true;
       setBusy(true);
-      try {
-        const creds = await pairWithToken(payload.relayUrl, payload.token);
-        store.signIn(creds);
-        if (Platform.OS !== "web") {
-          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
-            () => {},
-          );
+      const redeem = async () => {
+        try {
+          const creds = await pairWithToken(payload.relayUrl, payload.token);
+          store.signIn(creds);
+          if (Platform.OS !== "web") {
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+              () => {},
+            );
+          }
+          router.replace("/");
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "That code did not work.");
+          setBusy(false);
+          // Allow another attempt: the code may simply have expired while the
+          // camera was being lined up.
+          handled.current = false;
         }
-        router.replace("/");
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "That code did not work.");
-        setBusy(false);
-        // Allow another attempt: the code may simply have expired while the
-        // camera was being lined up.
-        handled.current = false;
+      };
+
+      if (store.credentials) {
+        // Redeeming a QR consumes its one-time token. Confirm before doing that
+        // or silently replacing the Mac this phone is already paired with.
+        Alert.alert(
+          "Replace current pairing?",
+          "This QR code points to a different Agentman setup.",
+          [
+            {
+              text: "Cancel",
+              style: "cancel",
+              onPress: () => {
+                setBusy(false);
+                handled.current = false;
+              },
+            },
+            {
+              text: "Replace",
+              style: "destructive",
+              onPress: () => void redeem(),
+            },
+          ],
+        );
+        return;
       }
+
+      await redeem();
     },
     [router, store],
   );

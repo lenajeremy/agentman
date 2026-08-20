@@ -64,6 +64,20 @@ test("a question always brings it back", () => {
   assert.equal(isHidden(blocked, dismissals), false);
 });
 
+test("a parsed question wins even when discovery still reports idle", () => {
+  const dismissals = dismiss(session(), {});
+  const blocked = session({
+    state: "idle",
+    question: { prompt: "Run npm test?", options: [{ key: "1", label: "Yes" }] },
+  });
+  assert.equal(
+    isHidden(blocked, dismissals),
+    false,
+    "the alert path treats idle plus question as blocked, so visibility must agree",
+  );
+  assert.equal(canDismiss(blocked), false);
+});
+
 test("only idle sessions can be swiped away", () => {
   assert.equal(canDismiss(session({ state: "idle" })), true);
   assert.equal(canDismiss(session({ state: "busy" })), false);
