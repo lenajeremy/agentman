@@ -1,7 +1,9 @@
 package jsonl
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -61,6 +63,160 @@ func texts(msgs []protocol.Message) []string {
 func ptr(v int64) *int64 { return &v }
 
 /* ---------------------------- backward paging ---------------------------- */
+
+func TestCollectBackwardRejectsUnsafeMessageCounts(t *testing.T) {
+	path := writeFixture(t, numbered(3))
+	for _, want := range []int{-1, 0, maxCollectMessages + 1, int(^uint(0) >> 1)} {
+		t.Run(fmt.Sprint(want), func(t *testing.T) {
+			if _, err := CollectBackward(path, BackwardOptions{Want: want, Map: asMessage}); err == nil {
+				t.Fatalf("Want=%d was accepted", want)
+			}
+		})
+	}
+}
+
+func TestCollectBackwardRequiresMapper(t *testing.T) {
+	path := writeFixture(t, numbered(1))
+	if _, err := CollectBackward(path, BackwardOptions{Want: 1}); err == nil {
+		t.Fatal("nil mapper was accepted")
+	}
+}
+
+func TestCollectBackwardRejectsUnsafeScanBudgets(t *testing.T) {
+	path := writeFixture(t, numbered(1))
+	for _, budget := range []int64{-1, MaxBackwardScanBytes + 1} {
+		if _, err := CollectBackward(path, BackwardOptions{
+			Want: 1, Map: asMessage, MaxScanBytes: budget,
+		}); err == nil {
+			t.Fatalf("MaxScanBytes=%d was accepted", budget)
+		}
+	}
+}
+
+func TestCollectBackwardHonorsCancellationDuringFilteredScan(t *testing.T) {
+	path := writeFixture(t, numbered(1000))
+	ctx, cancel := context.WithCancel(context.Background())
+	mapped := 0
+	_, err := CollectBackwardContext(ctx, path, BackwardOptions{
+		Want: 100,
+		Map: func(line string, offset int64) []protocol.Message {
+			mapped++
+			if mapped == 5 {
+				cancel()
+			}
+			return nil
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled scan returned %v", err)
+	}
+	if mapped != 5 {
+		t.Fatalf("mapper ran %d times after cancellation, want 5", mapped)
+	}
+}
+
+func TestFilteredBudgetReturnsHonestContinuationCursor(t *testing.T) {
+	const total = 200
+	lines := make([]string, total)
+	for i := range lines {
+		lines[i] = fmt.Sprintf(`{"noise":%d,"pad":%q}`, i, strings.Repeat("x", 40))
+	}
+	path := writeFixture(t, lines)
+
+	var cursor *int64
+	previous := int64(^uint64(0) >> 1)
+	mapped := 0
+	pages := 0
+	for {
+		result, err := CollectBackward(path, BackwardOptions{
+			Want:         1,
+			Before:       cursor,
+			ChunkSize:    32,
+			MaxScanBytes: 128,
+			Map: func(string, int64) []protocol.Message {
+				mapped++
+				return nil
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pages++
+		if len(result.Messages) != 0 {
+			t.Fatalf("filtered page returned messages: %+v", result.Messages)
+		}
+		if !result.HasMore {
+			if result.NextCursor != NoCursor {
+				t.Fatalf("terminal page cursor = %d, want NoCursor", result.NextCursor)
+			}
+			break
+		}
+		if result.NextCursor < 0 || result.NextCursor >= previous {
+			t.Fatalf("continuation cursor did not move backwards: %d after %d",
+				result.NextCursor, previous)
+		}
+		previous = result.NextCursor
+		cursor = ptr(result.NextCursor)
+		if pages > total {
+			t.Fatal("budgeted paging failed to terminate")
+		}
+	}
+	if pages < 2 {
+		t.Fatal("fixture did not exercise a budget continuation")
+	}
+	if mapped != total {
+		t.Fatalf("mapped %d complete lines across continuations, want %d", mapped, total)
+	}
+}
+
+func TestBudgetFinishesOneLongLineBeforeReturning(t *testing.T) {
+	big := strings.Repeat("y", 2*1024*1024)
+	path := writeFixture(t, []string{`{"n":0}`, fmt.Sprintf(`{"n":1,"pad":%q}`, big)})
+	result, err := CollectBackward(path, BackwardOptions{
+		Want: 1, Map: asMessage, ChunkSize: 1024, MaxScanBytes: 4096,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Messages) != 1 || result.Messages[0].Text != "1" {
+		t.Fatalf("long line was not reconstructed: %v", texts(result.Messages))
+	}
+	if result.ScannedBytes <= 4096 {
+		t.Fatalf("scan did not exercise soft-budget line completion: %d bytes", result.ScannedBytes)
+	}
+	if !result.HasMore || result.NextCursor <= 0 {
+		t.Fatalf("older line was hidden after budget stop: %+v", result)
+	}
+}
+
+func TestBudgetCanContinueBeforeLargeTrailingPartialLine(t *testing.T) {
+	path := writeFixture(t, []string{`{"n":0}`})
+	partial := strings.Repeat("p", 2*1024*1024)
+	appendTo(t, path, partial)
+
+	first, err := CollectBackward(path, BackwardOptions{
+		Want: 1, Map: asMessage, ChunkSize: 1024, MaxScanBytes: 4096,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Messages) != 0 || !first.HasMore || first.NextCursor <= 0 {
+		t.Fatalf("partial-line continuation was not exposed: %+v", first)
+	}
+	if first.NextCursor != int64(len(`{"n":0}`)+1) {
+		t.Fatalf("continuation cursor = %d, want start of partial record", first.NextCursor)
+	}
+
+	second, err := CollectBackward(path, BackwardOptions{
+		Want: 1, Before: ptr(first.NextCursor), Map: asMessage, MaxScanBytes: 4096,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Messages) != 1 || second.Messages[0].Text != "0" || second.HasMore {
+		t.Fatalf("older complete line was lost behind partial record: %+v", second)
+	}
+}
 
 func TestCollectBackwardReturnsNewestInChronologicalOrder(t *testing.T) {
 	path := writeFixture(t, numbered(10))
@@ -375,6 +531,48 @@ func TestTailRestartsWhenFileTruncated(t *testing.T) {
 	}
 }
 
+func TestTailRestartsWhenPathIsReplacedAtSameSize(t *testing.T) {
+	path := writeFixture(t, []string{`{"n":1}`})
+	tail := NewTail(path)
+	if lines := mustRead(t, tail); len(lines) != 1 {
+		t.Fatalf("initial read returned %d lines, want 1", len(lines))
+	}
+
+	replacement := filepath.Join(filepath.Dir(path), "replacement.jsonl")
+	if err := os.WriteFile(replacement, []byte("{\"n\":2}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, path); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := mustRead(t, tail)
+	if len(lines) != 1 || lines[0].Text != `{"n":2}` || lines[0].Offset != 0 {
+		t.Fatalf("same-size replacement was not restarted from zero: %+v", lines)
+	}
+}
+
+func TestTailSeekToEndStillReadsReplacementFromStart(t *testing.T) {
+	path := writeFixture(t, []string{`{"n":1}`})
+	tail := NewTail(path)
+	if err := tail.SeekToEnd(); err != nil {
+		t.Fatal(err)
+	}
+
+	replacement := filepath.Join(filepath.Dir(path), "replacement.jsonl")
+	if err := os.WriteFile(replacement, []byte("{\"n\":2}\n{\"n\":3}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, path); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := mustRead(t, tail)
+	if len(lines) != 2 || lines[0].Text != `{"n":2}` || lines[1].Text != `{"n":3}` {
+		t.Fatalf("replacement after SeekToEnd was skipped: %+v", lines)
+	}
+}
+
 func TestTailSeekToEndSkipsBacklog(t *testing.T) {
 	path := writeFixture(t, numbered(100))
 	tail := NewTail(path)
@@ -426,6 +624,44 @@ func TestTailRejectsNewlineTerminatedOversizedLine(t *testing.T) {
 	}
 	if _, err := tail.Read(); err == nil {
 		t.Fatal("newline-terminated oversized line bypassed the tail memory bound")
+	}
+}
+
+func TestTailAssemblesLongLineAcrossManyReads(t *testing.T) {
+	big := strings.Repeat("x", 3*tailReadChunk+123)
+	path := writeFixture(t, []string{big})
+	tail := NewTail(path)
+
+	var got []Line
+	for tail.Offset() == 0 || tail.Offset() < int64(len(big)+1) {
+		lines := mustRead(t, tail)
+		got = append(got, lines...)
+	}
+	if len(got) != 1 {
+		t.Fatalf("long tailed line count = %d, want 1", len(got))
+	}
+	if got[0].Text != big || got[0].Offset != 0 {
+		t.Fatalf("long tailed line was corrupted: offset=%d text-bytes=%d",
+			got[0].Offset, len(got[0].Text))
+	}
+}
+
+func BenchmarkCollectBackwardLongLine(b *testing.B) {
+	big := strings.Repeat("x", 4*1024*1024)
+	path := filepath.Join(b.TempDir(), "long.jsonl")
+	if err := os.WriteFile(path, []byte(fmt.Sprintf(`{"n":1,"pad":%q}`+"\n", big)), 0o600); err != nil {
+		b.Fatal(err)
+	}
+	b.SetBytes(int64(len(big)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		result, err := CollectBackward(path, BackwardOptions{
+			Want: 1, Map: asMessage, ChunkSize: 4096,
+		})
+		if err != nil || len(result.Messages) != 1 {
+			b.Fatalf("scan failed: messages=%d err=%v", len(result.Messages), err)
+		}
 	}
 }
 
