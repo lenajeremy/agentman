@@ -7,7 +7,7 @@
 **Monitor and control local coding agents from your phone.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Go 1.26.5](https://img.shields.io/badge/go-1.26.5-00ADD8.svg)](https://go.dev)
+[![Go 1.26.6](https://img.shields.io/badge/go-1.26.6-00ADD8.svg)](https://go.dev)
 [![Expo SDK 54](https://img.shields.io/badge/Expo-SDK%2054-000020.svg)](https://expo.dev)
 
 </div>
@@ -42,7 +42,7 @@ cd agentman
 go build -o bin/am ./cmd/am
 ```
 
-Source builds require Go 1.26.5. Install `tmux` to send messages to Claude Code
+Source builds require Go 1.26.6. Install `tmux` to send messages to Claude Code
 or Codex and to answer their terminal prompts:
 
 ```bash
@@ -170,7 +170,7 @@ sequenceDiagram
 | Only the visible session is followed live. | Idle sessions do not continuously stream transcript data. |
 | Terminal parsing is conservative. | Ambiguous terminal text is ignored instead of being exposed as a false question. |
 | Notifications are scheduled locally after a WebSocket event. | No APNs or FCM backend is required, but alerts are not reliable after the OS suspends the app. |
-| Transport uses TLS without end-to-end payload encryption. | A relay operator can inspect live traffic; self-host when that trust boundary is unacceptable. |
+| Transport uses TLS without end-to-end payload authentication or encryption. | A relay operator can inspect, alter, or inject live control traffic; self-host when that trust boundary is unacceptable. |
 
 ## Agent adapters
 
@@ -261,6 +261,10 @@ separately managed OpenCode server, configure:
 | `OPENCODE_SERVER_USERNAME` | HTTP basic-auth username |
 | `OPENCODE_SERVER_PASSWORD` | HTTP basic-auth password |
 
+When `OPENCODE_SERVER_PASSWORD` is set, `AGENTMAN_OPENCODE_URL` is required.
+Agentman will not broadcast a Basic-auth credential while scanning the watched
+port range.
+
 ## Mobile development
 
 ```bash
@@ -282,8 +286,10 @@ by events received through the live relay WebSocket.
 
 ## Self-hosting the relay
 
-The public relay can observe live frame payloads. Deploy a private relay when
-that is not acceptable.
+The public relay can observe and alter live frame payloads, including control
+requests. Deploy a private relay when that trust boundary is not acceptable.
+Remote relay URLs must use HTTPS/WSS; plaintext HTTP/WS is accepted only for a
+loopback development relay.
 
 ### Docker
 
@@ -324,7 +330,10 @@ relay where clients can supply forwarding headers.
   arguments.
 - Native app credentials use Expo SecureStore. Web builds use browser storage.
 - WebSocket payloads are protected by TLS in transit but are not end-to-end
-  encrypted from daemon to app.
+  authenticated or encrypted from daemon to app. A compromised relay can
+  inspect traffic and issue agent-control requests.
+- Wire protocol v2 rejects incompatible clients before forwarding their
+  requests, preventing a partially compatible app from answering stale forms.
 - The relay does not persist transcripts, messages, or notification payloads.
 
 ## Development
@@ -341,6 +350,8 @@ go build ./cmd/am ./cmd/relay
 
 cd mobile
 npm ci --legacy-peer-deps
+node scripts/check-npm-audit.mjs
+npx expo install --check
 npx tsc --noEmit
 npm test
 ```
