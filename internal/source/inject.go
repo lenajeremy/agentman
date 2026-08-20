@@ -2,6 +2,9 @@ package source
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -10,6 +13,8 @@ import (
 	"github.com/lenajeremy/agentman/internal/question"
 	"github.com/lenajeremy/agentman/internal/tmux"
 )
+
+var errNoAnswerableQuestion = errors.New("source: no answerable question is on screen")
 
 // PendingQueue holds messages that could not be delivered immediately.
 //
@@ -76,6 +81,9 @@ func (s *ClaudeSource) Inject(ctx context.Context, sessionID, text string) (prot
 	}
 
 	if session.tmuxName != "" {
+		if err := rejectSendIntoLiveQuestion(ctx, s.capturePane, session.tmuxName); err != nil {
+			return protocol.InjectNone, err
+		}
 		if err := tmux.Send(ctx, session.tmuxName, text); err != nil {
 			return protocol.InjectNone, err
 		}
@@ -114,6 +122,9 @@ func (s *CodexSource) Inject(ctx context.Context, sessionID, text string) (proto
 	}
 
 	if session.tmuxName != "" {
+		if err := rejectSendIntoLiveQuestion(ctx, s.capturePane, session.tmuxName); err != nil {
+			return protocol.InjectNone, err
+		}
 		if err := tmux.Send(ctx, session.tmuxName, text); err != nil {
 			return protocol.InjectNone, err
 		}
@@ -126,6 +137,27 @@ func (s *CodexSource) Inject(ctx context.Context, sessionID, text string) (proto
 	// message that could never arrive.
 	return protocol.InjectNone, fmt.Errorf(
 		"source: this session cannot receive messages — start it with `am codex` to enable sending")
+}
+
+func rejectSendIntoLiveQuestion(
+	ctx context.Context,
+	capture func(context.Context, string) (string, error),
+	tmuxName string,
+) error {
+	if capture == nil {
+		capture = tmux.Capture
+	}
+	pane, err := capture(ctx, tmuxName)
+	if err != nil {
+		// Fail closed. Ctrl-U + arbitrary text is safe at a normal prompt but can
+		// mutate an interactive menu; if the pane cannot be inspected, the daemon
+		// cannot prove which of those states it is in.
+		return fmt.Errorf("source: could not safely inspect the terminal before sending: %w", err)
+	}
+	if question.Detect(pane) != nil {
+		return fmt.Errorf("source: answer the pending question before sending a message")
+	}
+	return nil
 }
 
 // detectQuestion reads a pane and reports any decision the agent is blocked on.
@@ -142,6 +174,34 @@ func detectQuestion(ctx context.Context, tmuxName string) *protocol.Question {
 	return protocolQuestion(found)
 }
 
+// CurrentQuestion re-reads one Claude pane for the daemon's Stop-hook
+// reconciliation path. This stays separate from full discovery so a slow
+// OpenCode API cannot delay detecting a question that is already visible in
+// the local terminal.
+func (s *ClaudeSource) CurrentQuestion(
+	ctx context.Context,
+	sessionID string,
+) (*protocol.Question, error) {
+	s.mu.RLock()
+	session, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("source: unknown claude session %q", sessionID)
+	}
+	if session.tmuxName == "" {
+		return session.meta.Question, nil
+	}
+	current, err := captureQuestion(ctx, session.tmuxName)
+	if err != nil {
+		if errors.Is(err, errNoAnswerableQuestion) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	s.enrichClaudeQuestion(sessionID, session.transcript, current)
+	return protocolQuestion(current), nil
+}
+
 func captureQuestion(ctx context.Context, tmuxName string) (*question.Question, error) {
 	pane, err := tmux.Capture(ctx, tmuxName)
 	if err != nil {
@@ -149,7 +209,7 @@ func captureQuestion(ctx context.Context, tmuxName string) (*question.Question, 
 	}
 	found := question.Detect(pane)
 	if found == nil {
-		return nil, fmt.Errorf("source: no answerable question is on screen")
+		return nil, errNoAnswerableQuestion
 	}
 	return found, nil
 }
@@ -166,7 +226,7 @@ func protocolQuestion(found *question.Question) *protocol.Question {
 			Checked:     option.Checked,
 		})
 	}
-	return &protocol.Question{
+	question := &protocol.Question{
 		Prompt:   found.Prompt,
 		Title:    found.Title,
 		Detail:   found.Detail,
@@ -174,6 +234,29 @@ func protocolQuestion(found *question.Question) *protocol.Question {
 		Multiple: found.Multiple,
 		Custom:   found.Custom,
 	}
+	question.ID = terminalQuestionID(question)
+	return question
+}
+
+func terminalQuestionID(question *protocol.Question) string {
+	if question == nil {
+		return ""
+	}
+	fields := []string{
+		question.Title, question.Prompt, question.Detail,
+		fmt.Sprint(question.Multiple), fmt.Sprint(question.Custom),
+	}
+	for _, option := range question.Options {
+		// Preview and terminal selection/check state are intentionally excluded:
+		// they change as focus moves within one form and are not a new decision.
+		fields = append(fields, option.Key, option.Label, option.Description)
+	}
+	var identity strings.Builder
+	for _, field := range fields {
+		fmt.Fprintf(&identity, "%d:%s|", len(field), field)
+	}
+	sum := sha256.Sum256([]byte(identity.String()))
+	return "terminal-" + hex.EncodeToString(sum[:12])
 }
 
 // Answer completes the question a Claude session is showing. Permission and
@@ -189,6 +272,10 @@ func (s *ClaudeSource) Answer(ctx context.Context, sessionID string, answer prot
 	}
 	if session.tmuxName == "" {
 		return fmt.Errorf("source: only sessions started with `am claude` can be answered")
+	}
+	if session.meta.Question == nil || answer.QuestionID == "" ||
+		answer.QuestionID != session.meta.Question.ID {
+		return fmt.Errorf("source: that question is no longer current; refresh the session")
 	}
 	current, err := captureQuestion(ctx, session.tmuxName)
 	if err != nil {
@@ -364,6 +451,10 @@ func (s *CodexSource) Answer(ctx context.Context, sessionID string, answer proto
 	if session.tmuxName == "" {
 		return fmt.Errorf("source: only sessions started with `am codex` can be answered")
 	}
+	if session.meta.Question == nil || answer.QuestionID == "" ||
+		answer.QuestionID != session.meta.Question.ID {
+		return fmt.Errorf("source: that question is no longer current; refresh the session")
+	}
 	if len(answer.Options) > 0 || answer.Text != "" {
 		return fmt.Errorf("source: this terminal question only accepts one listed option")
 	}
@@ -422,7 +513,7 @@ func questionHasOption(question *protocol.Question, key string) bool {
 
 func sameQuestion(left, right *protocol.Question) bool {
 	if left == nil || right == nil || left.Prompt != right.Prompt || left.Title != right.Title ||
-		left.Detail != right.Detail || left.Multiple != right.Multiple || left.Custom != right.Custom ||
+		left.ID != right.ID || left.Detail != right.Detail || left.Multiple != right.Multiple || left.Custom != right.Custom ||
 		len(left.Options) != len(right.Options) {
 		return false
 	}

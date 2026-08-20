@@ -39,6 +39,13 @@ type ClaudeSource struct {
 	// pending holds messages for sessions with no live input channel, handed
 	// over at the next Stop hook.
 	pending *PendingQueue
+	// listPanes and snapshotProcesses are injectable so discovery's process
+	// matching can be tested without a live tmux server or host process table.
+	// Production takes exactly one process snapshot per discovery sweep.
+	listPanes         func(context.Context) ([]tmux.Session, error)
+	snapshotProcesses func(context.Context) (*tmux.ProcessTree, error)
+	// capturePane is injectable for the last-moment send safety check.
+	capturePane func(context.Context, string) (string, error)
 
 	mu       sync.RWMutex
 	sessions map[string]claudeSession
@@ -80,10 +87,13 @@ func NewClaudeSource(home string) (*ClaudeSource, error) {
 		}
 	}
 	return &ClaudeSource{
-		home:          home,
-		models:        newModelCache(),
-		sessions:      map[string]claudeSession{},
-		questionSpecs: map[string]claudeQuestionSpecCache{},
+		home:              home,
+		models:            newModelCache(),
+		sessions:          map[string]claudeSession{},
+		questionSpecs:     map[string]claudeQuestionSpecCache{},
+		listPanes:         tmux.List,
+		snapshotProcesses: tmux.SnapshotProcessTree,
+		capturePane:       tmux.Capture,
 	}, nil
 }
 
@@ -100,6 +110,9 @@ func (s *ClaudeSource) projectsDir() string {
 
 // Discover implements Source.
 func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(s.sessionsDir())
 	if err != nil {
 		// Claude Code simply is not installed, or has never run. Not an error.
@@ -114,9 +127,28 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 
 	// One tmux lookup per sweep, not per session: the process-ancestry walk
 	// below is what maps an agent to the tmux session that can type into it.
-	panes, _ := tmux.List(ctx)
+	var panes []tmux.Session
+	if s.listPanes != nil {
+		panes, _ = s.listPanes(ctx)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	var processes *tmux.ProcessTree
+	if len(panes) > 0 && s.snapshotProcesses != nil {
+		// One process-table command supports every session × pane comparison
+		// below. The old implementation spawned `ps` once per ancestor for every
+		// candidate pair, making discovery grow quadratically with open sessions.
+		processes, _ = s.snapshotProcesses(ctx)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
@@ -143,7 +175,7 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 		tmuxName := ""
 		inject := protocol.InjectHook
 		for _, pane := range panes {
-			if tmux.OwnsPID(pane.PanePID, file.PID) {
+			if processes.OwnsPID(pane.PanePID, file.PID) {
 				tmuxName = pane.Name
 				inject = protocol.InjectTmux
 				break
@@ -293,7 +325,8 @@ func (s *ClaudeSource) Page(ctx context.Context, sessionID, before string, limit
 	}
 
 	opts := jsonl.BackwardOptions{
-		Want: limit,
+		Want:         limit,
+		MaxScanBytes: jsonl.DefaultScanBytes,
 		// A fresh parser per page is correct: reading backwards, a tool result
 		// is met before its call, so pairing resolves within the page.
 		Map: parser.NewClaudeParser(sessionID).Parse,
@@ -306,7 +339,7 @@ func (s *ClaudeSource) Page(ctx context.Context, sessionID, before string, limit
 		opts.Before = &offset
 	}
 
-	result, err := jsonl.CollectBackward(session.transcript, opts)
+	result, err := jsonl.CollectBackwardContext(ctx, session.transcript, opts)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// The session exists but has not written anything yet.

@@ -27,6 +27,20 @@ type Registry struct {
 	last map[protocol.Kind][]protocol.Session
 }
 
+// MaxPageMessages bounds a direct history request. The relay-facing daemon
+// uses a smaller wire-oriented page size, while the terminal can reasonably
+// print more at once. Keeping the source boundary finite prevents any caller
+// from turning a user-controlled limit into a large allocation or API request.
+const MaxPageMessages = 100
+
+// ValidatePageLimit rejects invalid pagination before it reaches an adapter.
+func ValidatePageLimit(limit int) error {
+	if limit <= 0 || limit > MaxPageMessages {
+		return fmt.Errorf("message limit must be between 1 and %d", MaxPageMessages)
+	}
+	return nil
+}
+
 // NewRegistry creates an empty registry.
 func NewRegistry() *Registry {
 	return &Registry{
@@ -138,6 +152,9 @@ func statePriority(s protocol.State) int {
 
 // Page routes a scrollback request to the owning adapter.
 func (r *Registry) Page(ctx context.Context, sessionID, before string, limit int) (protocol.Page, error) {
+	if err := ValidatePageLimit(limit); err != nil {
+		return protocol.Page{}, err
+	}
 	s, err := r.forSession(sessionID)
 	if err != nil {
 		return protocol.Page{}, err
@@ -173,6 +190,14 @@ type Answerer interface {
 	Answer(ctx context.Context, sessionID string, answer protocol.QuestionAnswer) error
 }
 
+// QuestionInspector is implemented by terminal adapters that can cheaply
+// re-read one live pane. It lets a Stop hook distinguish a real completion
+// from an agent that stopped only to ask the user something, without waiting
+// for an unrelated slow adapter in the next whole-registry discovery sweep.
+type QuestionInspector interface {
+	CurrentQuestion(ctx context.Context, sessionID string) (*protocol.Question, error)
+}
+
 // Interrupter is implemented by adapters that can stop an active turn.
 type Interrupter interface {
 	Interrupt(ctx context.Context, sessionID string) error
@@ -189,6 +214,23 @@ func (r *Registry) Answer(ctx context.Context, sessionID string, answer protocol
 		return fmt.Errorf("source: %s questions cannot be answered remotely", s.Kind())
 	}
 	return answerer.Answer(ctx, sessionID, answer)
+}
+
+// CurrentQuestion performs a targeted live check when the owning adapter
+// supports one. A nil question with a nil error means the pane is not blocked.
+func (r *Registry) CurrentQuestion(
+	ctx context.Context,
+	sessionID string,
+) (*protocol.Question, error) {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	inspector, ok := s.(QuestionInspector)
+	if !ok {
+		return nil, nil
+	}
+	return inspector.CurrentQuestion(ctx, sessionID)
 }
 
 // Interrupt routes cancellation to the adapter owning the session.

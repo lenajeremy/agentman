@@ -9,11 +9,18 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
 
 // ocFake is a stand-in for OpenCode's published HTTP API. Its response shapes
 // are copied from the OpenAPI document served by OpenCode 1.18.15 at /doc.
@@ -336,6 +343,37 @@ func TestOpenCodeFollowSendsGrowingReplies(t *testing.T) {
 	}
 }
 
+func TestOpenCodeFollowDedupStateIsBounded(t *testing.T) {
+	seen := map[string]openCodeSeenMessage{}
+	for generation := uint64(1); generation <= 1_000; generation++ {
+		messages := make([]protocol.Message, 20)
+		for index := range messages {
+			messages[index] = protocol.Message{
+				ID: fmt.Sprintf("message-%d-%d", generation, index), Text: "content",
+			}
+		}
+		_ = updateOpenCodeSeen(seen, messages, generation)
+	}
+	if got := len(seen); got > 60 {
+		t.Fatalf("follow retained %d fingerprints for a 20-message window", got)
+	}
+}
+
+func TestOpenCodeSeenEmitsChangedMessageContent(t *testing.T) {
+	seen := map[string]openCodeSeenMessage{}
+	first := protocol.Message{ID: "message-1", Text: "partial"}
+	if got := updateOpenCodeSeen(seen, []protocol.Message{first}, 1); len(got) != 1 {
+		t.Fatalf("new message emitted %d rows", len(got))
+	}
+	if got := updateOpenCodeSeen(seen, []protocol.Message{first}, 2); len(got) != 0 {
+		t.Fatalf("unchanged message emitted %d rows", len(got))
+	}
+	first.Text = "complete"
+	if got := updateOpenCodeSeen(seen, []protocol.Message{first}, 3); len(got) != 1 {
+		t.Fatalf("grown message emitted %d rows", len(got))
+	}
+}
+
 func TestOpenCodePageUsesHeaderCursor(t *testing.T) {
 	fake := &ocFake{cursor: "older page/+="}
 	server := fake.start(t)
@@ -404,7 +442,27 @@ func TestOpenCodeQuestionCanBeAnswered(t *testing.T) {
 	if len(sessions) != 1 || sessions[0].State != protocol.StateWaitingInput || sessions[0].Question == nil {
 		t.Fatalf("pending question was not discovered: %+v", sessions)
 	}
-	if err := src.Answer(ctx, "opencode:ses_1", protocol.QuestionAnswer{OptionKey: "Postgres"}); err != nil {
+	questionID := sessions[0].Question.ID
+	if questionID == "" {
+		t.Fatal("pending question has no revision id")
+	}
+	before := fake.requestCount()
+	if err := src.Answer(ctx, "opencode:ses_1", protocol.QuestionAnswer{
+		OptionKey: "Postgres",
+	}); err == nil {
+		t.Fatal("answer without a question revision was accepted")
+	}
+	if err := src.Answer(ctx, "opencode:ses_1", protocol.QuestionAnswer{
+		QuestionID: "question-older-request-0", OptionKey: "Postgres",
+	}); err == nil {
+		t.Fatal("stale question revision was accepted")
+	}
+	if got := fake.requestCount(); got != before {
+		t.Fatalf("stale answer made %d API requests", got-before)
+	}
+	if err := src.Answer(ctx, "opencode:ses_1", protocol.QuestionAnswer{
+		QuestionID: questionID, OptionKey: "Postgres",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	request := fake.lastRequest()
@@ -440,7 +498,9 @@ func TestOpenCodeScopesQuestionsToTheSessionDirectory(t *testing.T) {
 	if len(sessions) != 1 || sessions[0].State != protocol.StateWaitingInput || sessions[0].Question == nil {
 		t.Fatalf("directory-scoped question was not discovered: %+v", sessions)
 	}
-	if err := src.Answer(ctx, "opencode:ses_1", protocol.QuestionAnswer{OptionKey: "Postgres"}); err != nil {
+	if err := src.Answer(ctx, "opencode:ses_1", currentOpenCodeAnswer(
+		t, src, "opencode:ses_1", protocol.QuestionAnswer{OptionKey: "Postgres"},
+	)); err != nil {
 		t.Fatalf("directory-scoped question could not be answered: %v", err)
 	}
 	if got := fake.lastRequest().query; !strings.Contains(got, "directory=%2FUsers%2Fme%2Fother-project") {
@@ -487,7 +547,9 @@ func TestOpenCodeMultipleAndCustomQuestionCanBeAnswered(t *testing.T) {
 	if question == nil || !question.Multiple || !question.Custom {
 		t.Fatalf("question capabilities were lost: %+v", question)
 	}
-	answer := protocol.QuestionAnswer{Options: []string{"API", "CLI"}, Text: "Desktop"}
+	answer := currentOpenCodeAnswer(t, src, "opencode:ses_1", protocol.QuestionAnswer{
+		Options: []string{"API", "CLI"}, Text: "Desktop",
+	})
 	if err := src.Answer(ctx, "opencode:ses_1", answer); err != nil {
 		t.Fatal(err)
 	}
@@ -534,7 +596,9 @@ func TestOpenCodeDefaultsCustomTrueAndPreservesDescriptions(t *testing.T) {
 	if got := first.Options[0].Description; got != "Deep in a flow state" {
 		t.Errorf("description = %q", got)
 	}
-	if err := src.Answer(ctx, "opencode:ses_1", protocol.QuestionAnswer{OptionKey: "Focused"}); err != nil {
+	if err := src.Answer(ctx, "opencode:ses_1", currentOpenCodeAnswer(
+		t, src, "opencode:ses_1", protocol.QuestionAnswer{OptionKey: "Focused"},
+	)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -546,7 +610,9 @@ func TestOpenCodeDefaultsCustomTrueAndPreservesDescriptions(t *testing.T) {
 	if second == nil || second.Prompt != "What comes to mind?" || !second.Custom || len(second.Options) != 0 {
 		t.Fatalf("custom-only default question was hidden: %+v", second)
 	}
-	if err := src.Answer(ctx, "opencode:ses_1", protocol.QuestionAnswer{Text: "Agentman"}); err != nil {
+	if err := src.Answer(ctx, "opencode:ses_1", currentOpenCodeAnswer(
+		t, src, "opencode:ses_1", protocol.QuestionAnswer{Text: "Agentman"},
+	)); err != nil {
 		t.Fatal(err)
 	}
 	request := fake.lastRequest()
@@ -667,7 +733,7 @@ func TestLiveOpenCodeQuestionFormats(t *testing.T) {
 		if step.check != nil {
 			step.check(t, current.Question)
 		}
-		if err := src.Answer(ctx, sessionID, step.answer); err != nil {
+		if err := src.Answer(ctx, sessionID, currentOpenCodeAnswer(t, src, sessionID, step.answer)); err != nil {
 			t.Fatalf("step %d answer: %v", index+1, err)
 		}
 	}
@@ -699,7 +765,9 @@ func TestOpenCodeCustomOnlyQuestionIsNotHidden(t *testing.T) {
 	if len(sessions) != 1 || sessions[0].Question == nil || !sessions[0].Question.Custom {
 		t.Fatalf("custom-only question was hidden: %+v", sessions)
 	}
-	if err := src.Answer(context.Background(), "opencode:ses_1", protocol.QuestionAnswer{Text: "Falcon"}); err != nil {
+	if err := src.Answer(context.Background(), "opencode:ses_1", currentOpenCodeAnswer(
+		t, src, "opencode:ses_1", protocol.QuestionAnswer{Text: "Falcon"},
+	)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -735,8 +803,14 @@ func TestOpenCodeQuestionsAreAnsweredSequentially(t *testing.T) {
 	if got := sessions[0].Question.Detail; got != "Question 1 of 2" {
 		t.Fatalf("first detail = %q", got)
 	}
-	if err := src.Answer(ctx, "opencode:ses_1", protocol.QuestionAnswer{OptionKey: "Postgres"}); err != nil {
+	firstAnswer := currentOpenCodeAnswer(
+		t, src, "opencode:ses_1", protocol.QuestionAnswer{OptionKey: "Postgres"},
+	)
+	if err := src.Answer(ctx, "opencode:ses_1", firstAnswer); err != nil {
 		t.Fatal(err)
+	}
+	if err := src.Answer(ctx, "opencode:ses_1", firstAnswer); err == nil {
+		t.Fatal("a second answer to question one overwrote the first before discovery")
 	}
 	if got := fake.requestCount(); got != 0 {
 		t.Fatalf("sent %d replies after only the first answer, want 0", got)
@@ -755,7 +829,9 @@ func TestOpenCodeQuestionsAreAnsweredSequentially(t *testing.T) {
 	if got := sessions[0].Question.Detail; got != "Question 2 of 2" {
 		t.Fatalf("second detail = %q", got)
 	}
-	if err := src.Answer(ctx, "opencode:ses_1", protocol.QuestionAnswer{OptionKey: "Dublin"}); err != nil {
+	if err := src.Answer(ctx, "opencode:ses_1", currentOpenCodeAnswer(
+		t, src, "opencode:ses_1", protocol.QuestionAnswer{OptionKey: "Dublin"},
+	)); err != nil {
 		t.Fatal(err)
 	}
 	request := fake.lastRequest()
@@ -778,7 +854,7 @@ func TestOpenCodePermissionCanBeAnswered(t *testing.T) {
 	fake := &ocFake{permissions: []map[string]any{{
 		"id": "per_1", "sessionID": "ses_1", "permission": "bash",
 		"patterns": []string{"go test ./..."}, "always": []string{"go test *"},
-		"metadata": map[string]any{},
+		"metadata": map[string]any{"command": "go test ./...", "cwd": "/Users/me/code"},
 	}}}
 	server := fake.start(t)
 	src := NewOpenCodeSource(server.URL)
@@ -790,16 +866,46 @@ func TestOpenCodePermissionCanBeAnswered(t *testing.T) {
 	if len(sessions) != 1 || sessions[0].Question == nil {
 		t.Fatalf("pending permission was not discovered: %+v", sessions)
 	}
-	if sessions[0].Question.Detail != "go test ./..." {
-		t.Errorf("permission detail = %q", sessions[0].Question.Detail)
+	detail := sessions[0].Question.Detail
+	for _, want := range []string{
+		"Requested scope:\ngo test ./...",
+		`"command": "go test ./..."`,
+		`"cwd": "/Users/me/code"`,
+		"Persistent scope:\ngo test *",
+	} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("permission detail %q does not contain %q", detail, want)
+		}
 	}
-	if err := src.Answer(ctx, "opencode:ses_1", protocol.QuestionAnswer{OptionKey: "once"}); err != nil {
+	if got := sessions[0].Question.Options[1].Description; !strings.Contains(got, "go test *") {
+		t.Errorf("persistent approval description = %q", got)
+	}
+	if err := src.Answer(ctx, "opencode:ses_1", currentOpenCodeAnswer(
+		t, src, "opencode:ses_1", protocol.QuestionAnswer{OptionKey: "once"},
+	)); err != nil {
 		t.Fatal(err)
 	}
 	request := fake.lastRequest()
 	if request.path != "/permission/per_1/reply" || request.body["reply"] != "once" {
 		t.Fatalf("permission reply = %#v", request)
 	}
+}
+
+func currentOpenCodeAnswer(
+	t *testing.T,
+	src *OpenCodeSource,
+	sessionID string,
+	answer protocol.QuestionAnswer,
+) protocol.QuestionAnswer {
+	t.Helper()
+	src.mu.RLock()
+	session, ok := src.sessions[sessionID]
+	src.mu.RUnlock()
+	if !ok || session.meta.Question == nil || session.meta.Question.ID == "" {
+		t.Fatalf("session %q has no current question revision", sessionID)
+	}
+	answer.QuestionID = session.meta.Question.ID
+	return answer
 }
 
 func TestOpenCodeInterruptUsesAbortAPI(t *testing.T) {
@@ -865,6 +971,83 @@ func TestOpenCodePartialServerFailurePreservesItsSessions(t *testing.T) {
 	}
 }
 
+func TestOpenCodeRepeatedSnapshotFailureExpiresServer(t *testing.T) {
+	working := &ocFake{sessionID: "ses_1", directory: "/Users/me/one"}
+	server := working.start(t)
+	src := NewOpenCodeSource(server.URL)
+	src.findServers = func(context.Context) []string { return []string{server.URL} }
+	if sessions, err := src.Discover(context.Background()); err != nil || len(sessions) != 1 {
+		t.Fatalf("initial discovery = %d sessions, %v", len(sessions), err)
+	}
+
+	working.setSessionFailure(true)
+	for miss := 1; miss <= openCodeHealthMissGrace; miss++ {
+		sessions, err := src.Discover(context.Background())
+		if err == nil || len(sessions) != 1 {
+			t.Fatalf("snapshot failure %d = %d sessions, %v", miss, len(sessions), err)
+		}
+	}
+	sessions, err := src.Discover(context.Background())
+	if err == nil || sessions == nil || len(sessions) != 0 {
+		t.Fatalf("sustained snapshot failure did not expire route: %#v, %v", sessions, err)
+	}
+}
+
+func TestOpenCodeTransientHealthMissPreservesSessions(t *testing.T) {
+	fake := &ocFake{sessionID: "ses_1", directory: "/Users/me/one"}
+	server := fake.start(t)
+	src := NewOpenCodeSource(server.URL)
+	available := true
+	src.findServers = func(context.Context) []string {
+		if available {
+			return []string{server.URL}
+		}
+		return nil
+	}
+
+	if sessions, err := src.Discover(context.Background()); err != nil || len(sessions) != 1 {
+		t.Fatalf("initial discover = %+v, %v", sessions, err)
+	}
+	available = false
+	for miss := 1; miss <= openCodeHealthMissGrace; miss++ {
+		sessions, err := src.Discover(context.Background())
+		if err == nil || len(sessions) != 1 {
+			t.Fatalf("health miss %d dropped sessions: %+v, %v", miss, sessions, err)
+		}
+	}
+	if sessions, err := src.Discover(context.Background()); err != nil || len(sessions) != 0 {
+		t.Fatalf("sustained health misses did not remove sessions: %+v, %v", sessions, err)
+	}
+}
+
+func TestOpenCodeHealthGraceIsPerServer(t *testing.T) {
+	first := &ocFake{sessionID: "ses_1", directory: "/Users/me/one"}
+	second := &ocFake{sessionID: "ses_2", directory: "/Users/me/two"}
+	firstServer := first.start(t)
+	secondServer := second.start(t)
+
+	src := NewOpenCodeSource(firstServer.URL)
+	servers := []string{firstServer.URL, secondServer.URL}
+	src.findServers = func(context.Context) []string { return servers }
+	if sessions, err := src.Discover(context.Background()); err != nil || len(sessions) != 2 {
+		t.Fatalf("initial discovery = %d sessions, %v", len(sessions), err)
+	}
+
+	// One process remains healthy throughout. Its presence must not reset the
+	// independent grace counter for the missing second process.
+	servers = []string{firstServer.URL}
+	for miss := 1; miss <= openCodeHealthMissGrace; miss++ {
+		sessions, err := src.Discover(context.Background())
+		if err == nil || len(sessions) != 2 {
+			t.Fatalf("partial health miss %d = %d sessions, %v", miss, len(sessions), err)
+		}
+	}
+	sessions, err := src.Discover(context.Background())
+	if err != nil || len(sessions) != 1 || sessions[0].ID != "opencode:ses_1" {
+		t.Fatalf("expired server remained or healthy server vanished: %+v, %v", sessions, err)
+	}
+}
+
 func TestOpenCodeHealthResponseIsBounded(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(strings.Repeat("x", maxOpenCodeHealthResponse+1)))
@@ -893,5 +1076,175 @@ func TestOpenCodeUsesConfiguredServerUsername(t *testing.T) {
 	src := NewOpenCodeSource(server.URL)
 	if !src.Available(context.Background()) {
 		t.Fatal("server rejected authentication; configured OpenCode username was not used")
+	}
+}
+
+func TestOpenCodeDoesNotBroadcastPasswordDuringDiscovery(t *testing.T) {
+	t.Setenv("OPENCODE_SERVER_PASSWORD", "secret")
+	src := NewOpenCodeSource("")
+	if err := src.Validate(); err == nil || !strings.Contains(err.Error(), "AGENTMAN_OPENCODE_URL") {
+		t.Fatalf("missing pinned URL did not produce actionable error: %v", err)
+	}
+	var requests atomic.Int32
+	src.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		requests.Add(1)
+		return nil, fmt.Errorf("unexpected discovery request")
+	})
+
+	if servers := src.scanServers(context.Background()); len(servers) != 0 {
+		t.Fatalf("authenticated unpinned discovery returned servers: %v", servers)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("password discovery made %d requests; expected none", got)
+	}
+}
+
+func TestOpenCodeConfigurationRequiresTLSOffLoopback(t *testing.T) {
+	t.Setenv("OPENCODE_SERVER_PASSWORD", "secret")
+	for _, raw := range []string{
+		"http://example.com:4096",
+		"ws://127.0.0.1:4096",
+		"https://user:pass@example.com",
+		"https://example.com/api",
+	} {
+		if err := NewOpenCodeSource(raw).Validate(); err == nil {
+			t.Errorf("unsafe OpenCode URL %q was accepted", raw)
+		}
+	}
+	for _, raw := range []string{
+		"http://127.0.0.1:4096",
+		"http://[::1]:4096",
+		"http://localhost:4096",
+		"https://example.com:4096",
+	} {
+		if err := NewOpenCodeSource(raw).Validate(); err != nil {
+			t.Errorf("safe OpenCode URL %q was rejected: %v", raw, err)
+		}
+	}
+}
+
+func TestOpenCodeSnapshotRejectsExcessSessionsBeforeFanout(t *testing.T) {
+	var scopedRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/session":
+			items := make([]map[string]any, maxOpenCodeSessions+1)
+			for index := range items {
+				items[index] = map[string]any{
+					"id": fmt.Sprintf("ses_%d", index), "directory": "/tmp/project",
+					"time": map[string]any{"updated": time.Now().UnixMilli()},
+				}
+			}
+			_ = json.NewEncoder(w).Encode(items)
+		default:
+			scopedRequests.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{})
+		}
+	}))
+	defer server.Close()
+
+	src := NewOpenCodeSource(server.URL)
+	_, _, _, _, err := src.snapshotAt(context.Background(), server.URL, 0)
+	if err == nil || !strings.Contains(err.Error(), "maximum is 200") {
+		t.Fatalf("snapshot error = %v, want session-count rejection", err)
+	}
+	if got := scopedRequests.Load(); got != 0 {
+		t.Fatalf("started %d scoped requests after rejecting the session list", got)
+	}
+}
+
+func TestOpenCodeSnapshotBoundsRequestConcurrency(t *testing.T) {
+	const directoryCount = 20
+	var active atomic.Int32
+	var peak atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/session" {
+			items := make([]map[string]any, directoryCount)
+			for index := range items {
+				items[index] = map[string]any{
+					"id":        fmt.Sprintf("ses_%d", index),
+					"directory": fmt.Sprintf("/tmp/project-%d", index),
+					"time":      map[string]any{"updated": time.Now().UnixMilli()},
+				}
+			}
+			_ = json.NewEncoder(w).Encode(items)
+			return
+		}
+
+		current := active.Add(1)
+		for {
+			previous := peak.Load()
+			if current <= previous || peak.CompareAndSwap(previous, current) {
+				break
+			}
+		}
+		time.Sleep(15 * time.Millisecond)
+		active.Add(-1)
+		if r.URL.Path == "/session/status" {
+			_ = json.NewEncoder(w).Encode(map[string]any{})
+		} else {
+			_ = json.NewEncoder(w).Encode([]any{})
+		}
+	}))
+	defer server.Close()
+
+	src := NewOpenCodeSource(server.URL)
+	if _, _, _, _, err := src.snapshotAt(context.Background(), server.URL, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := peak.Load(); got > maxOpenCodeSnapshotWorkers {
+		t.Fatalf("peak request concurrency = %d, maximum is %d", got, maxOpenCodeSnapshotWorkers)
+	} else if got < 2 {
+		t.Fatalf("snapshot ran serially; peak concurrency = %d", got)
+	}
+}
+
+func TestOpenCodeDiscoveryDoesNotFetchEveryMissingModel(t *testing.T) {
+	var messageRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/global/health":
+			_ = json.NewEncoder(w).Encode(map[string]any{"healthy": true})
+		case r.URL.Path == "/session":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"id": "ses_1", "title": "model probe", "directory": "/tmp/project",
+				"time": map[string]any{"updated": time.Now().UnixMilli()},
+			}})
+		case r.URL.Path == "/session/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{})
+		case r.URL.Path == "/question" || r.URL.Path == "/permission":
+			_ = json.NewEncoder(w).Encode([]any{})
+		case strings.HasSuffix(r.URL.Path, "/message"):
+			messageRequests.Add(1)
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"info": map[string]any{
+					"id": "msg_1", "role": "assistant", "modelID": "fast-model",
+					"time": map[string]any{"created": time.Now().UnixMilli()},
+				},
+				"parts": []map[string]any{{"id": "text-0", "type": "text", "text": "ready"}},
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	src := NewOpenCodeSource(server.URL)
+	sessions, err := src.Discover(context.Background())
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("discover = %+v, %v", sessions, err)
+	}
+	if sessions[0].Model != "" || messageRequests.Load() != 0 {
+		t.Fatalf("discovery fetched a cosmetic model: session=%+v requests=%d", sessions[0], messageRequests.Load())
+	}
+	if _, err := src.Page(context.Background(), sessions[0].ID, "", 20); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err = src.Discover(context.Background())
+	if err != nil || sessions[0].Model != "fast-model" {
+		t.Fatalf("model was not cached from the normal page read: %+v, %v", sessions, err)
+	}
+	if got := messageRequests.Load(); got != 1 {
+		t.Fatalf("message requests = %d, want only the explicit page read", got)
 	}
 }

@@ -42,6 +42,17 @@ const codexLiveWindow = 30 * time.Minute
 // a discovery sweep.
 const processCheckTimeout = 2 * time.Second
 
+// codexActivityScanBytes bounds the once-per-discovery search for a recent
+// turn boundary. Large tool records may require finishing one bounded JSONL
+// line beyond this budget, but a transcript containing no state events can no
+// longer consume an unbounded amount of work every second.
+const codexActivityScanBytes int64 = 1024 * 1024
+
+// tmux reports session creation at whole-second precision while Codex records
+// rollout timestamps with sub-second precision. Allow a small boundary margin,
+// but never bind a clearly older conversation to a newly launched pane.
+const codexPaneStartTolerance = 2 * time.Second
+
 // codexRunning reports whether any codex process is alive.
 //
 // A missing pgrep (or any other failure) returns true rather than false: it is
@@ -76,8 +87,16 @@ type CodexSource struct {
 	// machine-wide server, so without this a test with its own fake home would
 	// still discover whatever panes happen to be open on the host.
 	listPanes func(context.Context) ([]tmux.Session, error)
+	// capturePane is injectable for the last-moment send safety check.
+	capturePane func(context.Context, string) (string, error)
 	// models remembers each session's model; see modelCache.
 	models *modelCache
+	// readMeta and readActivity are injectable for cache instrumentation tests.
+	readMeta     func(string) (codexMeta, error)
+	readActivity func(context.Context, string, time.Time) (protocol.State, int64, error)
+
+	cacheMu      sync.Mutex
+	rolloutCache map[string]codexRolloutCacheEntry
 
 	mu       sync.RWMutex
 	sessions map[string]codexSession
@@ -89,6 +108,30 @@ type codexSession struct {
 	// tmuxName is set for sessions launched through `am codex`, which is what
 	// allows a message to be typed in mid-turn.
 	tmuxName string
+}
+
+type codexFileVersion struct {
+	size    int64
+	modTime time.Time
+}
+
+func codexVersion(info os.FileInfo) codexFileVersion {
+	return codexFileVersion{size: info.Size(), modTime: info.ModTime()}
+}
+
+func (v codexFileVersion) matches(info os.FileInfo) bool {
+	return v.size == info.Size() && v.modTime.Equal(info.ModTime())
+}
+
+type codexRolloutCacheEntry struct {
+	identity os.FileInfo
+
+	meta    codexMeta
+	metaSet bool
+
+	activityVersion codexFileVersion
+	activityState   protocol.State
+	activitySet     bool
 }
 
 // codexMeta is the session_meta record that opens every rollout file.
@@ -116,7 +159,11 @@ func NewCodexSource(home string) (*CodexSource, error) {
 		home:         home,
 		processCheck: codexRunning,
 		listPanes:    tmux.List,
+		capturePane:  tmux.Capture,
 		models:       newModelCache(),
+		readMeta:     readCodexMeta,
+		readActivity: codexActivity,
+		rolloutCache: map[string]codexRolloutCacheEntry{},
 		sessions:     map[string]codexSession{},
 	}, nil
 }
@@ -134,6 +181,7 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 		s.mu.Lock()
 		s.sessions = map[string]codexSession{}
 		s.mu.Unlock()
+		s.forgetCodexRollouts(nil)
 		return nil, nil
 	}
 
@@ -186,6 +234,7 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	type rollout struct {
 		path    string
 		modTime time.Time
+		info    os.FileInfo
 	}
 	var rollouts []rollout
 	for _, dir := range dirs {
@@ -204,6 +253,7 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			rollouts = append(rollouts, rollout{
 				path:    filepath.Join(dir, entry.Name()),
 				modTime: info.ModTime(),
+				info:    info,
 			})
 		}
 	}
@@ -216,22 +266,28 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	// under one id — which the app keys its rows by, so the row renders twice
 	// with conflicting states and becomes unreachable.
 	claimed := map[string]bool{}
+	liveRollouts := make(map[string]bool, len(rollouts))
 
 	{
 		for _, entry := range rollouts {
-			path, modTime := entry.path, entry.modTime
-			meta, err := readCodexMeta(path)
+			path := entry.path
+			liveRollouts[path] = true
+			meta, err := s.cachedCodexMeta(path, entry.info)
 			if err != nil {
 				continue
 			}
 
 			id := string(protocol.KindCodex) + ":" + meta.Payload.SessionID
-			state, lastActivity := codexActivity(path, modTime)
+			state, lastActivity, err := s.cachedCodexActivity(ctx, path, entry.info)
+			if err != nil {
+				return nil, err
+			}
 
 			tmuxName := ""
 			inject := protocol.InjectNone
 			pane, hasPane := paneByCwd[meta.Payload.Cwd]
-			if hasPane && !ambiguous[meta.Payload.Cwd] && !claimed[pane.Name] {
+			if hasPane && !ambiguous[meta.Payload.Cwd] && !claimed[pane.Name] &&
+				codexRolloutCanClaimPane(meta, pane) {
 				claimed[pane.Name] = true
 				tmuxName = pane.Name
 				inject = protocol.InjectTmux
@@ -318,6 +374,7 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 		live[id] = true
 	}
 	s.models.forget(live)
+	s.forgetCodexRollouts(liveRollouts)
 
 	s.mu.Lock()
 	s.sessions = next
@@ -334,6 +391,93 @@ func tmuxID(tmuxName string) string {
 func (s *CodexSource) dayDir(t time.Time) string {
 	return filepath.Join(s.sessionsDir(),
 		t.Format("2006"), t.Format("01"), t.Format("02"))
+}
+
+// cachedCodexMeta reads a rollout header once per path and underlying file.
+// Appends change size and mtime but never the first record, so invalidating on
+// every write would defeat the cache. Atomic path replacement changes file
+// identity and correctly forces a fresh header read.
+func (s *CodexSource) cachedCodexMeta(path string, info os.FileInfo) (codexMeta, error) {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+
+	entry := s.rolloutEntryLocked(path, info)
+	if entry.metaSet {
+		return entry.meta, nil
+	}
+	read := s.readMeta
+	if read == nil {
+		read = readCodexMeta
+	}
+	meta, err := read(path)
+	if err != nil {
+		return codexMeta{}, err
+	}
+	entry.meta = meta
+	entry.metaSet = true
+	s.rolloutCache[path] = entry
+	return meta, nil
+}
+
+// cachedCodexActivity reuses the last state scan only while file identity,
+// size, and modification time all match. Any append invalidates it; an atomic
+// replacement invalidates both activity and immutable metadata.
+func (s *CodexSource) cachedCodexActivity(
+	ctx context.Context, path string, info os.FileInfo,
+) (protocol.State, int64, error) {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+
+	entry := s.rolloutEntryLocked(path, info)
+	if entry.activitySet && entry.activityVersion.matches(info) {
+		return entry.activityState, info.ModTime().UnixMilli(), nil
+	}
+	read := s.readActivity
+	if read == nil {
+		read = codexActivity
+	}
+	state, lastActivity, err := read(ctx, path, info.ModTime())
+	if err != nil {
+		if ctx.Err() != nil {
+			return protocol.StateIdle, info.ModTime().UnixMilli(), ctx.Err()
+		}
+		// A rollout can be caught between an append and a complete record. Keep
+		// the last known state when possible and retry on the next sweep;
+		// otherwise preserve the historical conservative idle fallback.
+		if entry.activitySet {
+			return entry.activityState, info.ModTime().UnixMilli(), nil
+		}
+		return protocol.StateIdle, info.ModTime().UnixMilli(), nil
+	}
+	entry.activityVersion = codexVersion(info)
+	entry.activityState = state
+	entry.activitySet = true
+	s.rolloutCache[path] = entry
+	return state, lastActivity, nil
+}
+
+func (s *CodexSource) rolloutEntryLocked(path string, info os.FileInfo) codexRolloutCacheEntry {
+	if s.rolloutCache == nil {
+		s.rolloutCache = map[string]codexRolloutCacheEntry{}
+	}
+	entry, ok := s.rolloutCache[path]
+	if !ok || entry.identity == nil || !os.SameFile(entry.identity, info) {
+		return codexRolloutCacheEntry{identity: info}
+	}
+	// Refresh the retained FileInfo snapshot. Identity is stable, while this
+	// keeps diagnostics and future comparisons tied to the newest observation.
+	entry.identity = info
+	return entry
+}
+
+func (s *CodexSource) forgetCodexRollouts(live map[string]bool) {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	for path := range s.rolloutCache {
+		if !live[path] {
+			delete(s.rolloutCache, path)
+		}
+	}
 }
 
 // readCodexMeta reads just the first line of a rollout, which is the
@@ -370,13 +514,14 @@ func readCodexMeta(path string) (codexMeta, error) {
 
 // codexActivity determines busy/idle by reading the tail for the most recent
 // turn boundary. Without hooks this is the only signal available, and reading
-// a few KB from the end is cheap enough to do on every discovery sweep.
-func codexActivity(path string, modTime time.Time) (protocol.State, int64) {
+// a bounded tail is cheap enough to do whenever the rollout changes.
+func codexActivity(ctx context.Context, path string, modTime time.Time) (protocol.State, int64, error) {
 	state := protocol.StateIdle
 
-	result, err := jsonl.CollectBackward(path, jsonl.BackwardOptions{
-		Want:      1,
-		ChunkSize: 32 * 1024,
+	result, err := jsonl.CollectBackwardContext(ctx, path, jsonl.BackwardOptions{
+		Want:         1,
+		ChunkSize:    32 * 1024,
+		MaxScanBytes: codexActivityScanBytes,
 		Map: func(line string, offset int64) []protocol.Message {
 			s, ok := parser.CodexStateFromLine(line)
 			if !ok {
@@ -387,10 +532,16 @@ func codexActivity(path string, modTime time.Time) (protocol.State, int64) {
 			return []protocol.Message{{ID: string(s)}}
 		},
 	})
-	if err == nil && len(result.Messages) == 1 {
+	if err != nil {
+		if ctx.Err() != nil {
+			return state, modTime.UnixMilli(), ctx.Err()
+		}
+		return state, modTime.UnixMilli(), err
+	}
+	if len(result.Messages) == 1 {
 		state = protocol.State(result.Messages[0].ID)
 	}
-	return state, modTime.UnixMilli()
+	return state, modTime.UnixMilli(), nil
 }
 
 func parseCodexTime(value string) int64 {
@@ -402,6 +553,21 @@ func parseCodexTime(value string) int64 {
 		return 0
 	}
 	return t.UnixMilli()
+}
+
+func codexRolloutCanClaimPane(meta codexMeta, pane tmux.Session) bool {
+	if pane.Created.IsZero() {
+		// Older tmux versions/configurations may not expose session_created. Keep
+		// the previous newest-rollout behavior when there is no timing evidence.
+		return true
+	}
+	started, err := time.Parse(time.RFC3339Nano, meta.Payload.Timestamp)
+	if err != nil {
+		// Working directory alone is ambiguous. When pane timing is available,
+		// declining injection is safer than typing into the wrong conversation.
+		return false
+	}
+	return !started.Before(pane.Created.Add(-codexPaneStartTolerance))
 }
 
 // Page implements Source.
@@ -419,8 +585,9 @@ func (s *CodexSource) Page(ctx context.Context, sessionID, before string, limit 
 	}
 
 	opts := jsonl.BackwardOptions{
-		Want: limit,
-		Map:  parser.NewCodexParser(sessionID).Parse,
+		Want:         limit,
+		Map:          parser.NewCodexParser(sessionID).Parse,
+		MaxScanBytes: jsonl.DefaultScanBytes,
 	}
 	if before != "" {
 		offset, err := strconv.ParseInt(before, 10, 64)
@@ -430,7 +597,7 @@ func (s *CodexSource) Page(ctx context.Context, sessionID, before string, limit 
 		opts.Before = &offset
 	}
 
-	result, err := jsonl.CollectBackward(session.transcript, opts)
+	result, err := jsonl.CollectBackwardContext(ctx, session.transcript, opts)
 	if err != nil {
 		return protocol.Page{}, err
 	}

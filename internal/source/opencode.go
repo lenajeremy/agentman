@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -45,6 +46,11 @@ const (
 	maxOpenCodeMetadataResponse = 4 * 1024 * 1024
 	maxOpenCodeMessageResponse  = 16 * 1024 * 1024
 	maxOpenCodeHealthResponse   = 4 * 1024
+	maxOpenCodeSessions         = 200
+	maxOpenCodeDirectories      = 64
+	maxOpenCodeSnapshotWorkers  = 8
+	maxOpenCodeQuestionDetail   = 16 * 1024
+	openCodeHealthMissGrace     = 3
 	// openCodeIdleWindow decides how long after its last message a session
 	// still counts as live. The API reports which sessions are *running*, but
 	// an idle session is still one the user may want to look at, so recency
@@ -62,7 +68,8 @@ type OpenCodeSource struct {
 	username string
 	// pinned records that the URL came from the user, so discovery stays on it
 	// rather than wandering to another server.
-	pinned bool
+	pinned             bool
+	configurationError error
 	// findServers is replaceable in tests. In production it scans the small
 	// port range used by `am opencode` and returns every live server, not just
 	// the first one: concurrent OpenCode TUIs each own their own API process.
@@ -80,6 +87,10 @@ type OpenCodeSource struct {
 
 	mu       sync.RWMutex
 	sessions map[string]openCodeSession
+	// A process can miss one health probe while it is busy or restarting. Misses
+	// are tracked per server: one healthy OpenCode instance must not make a
+	// second, temporarily unresponsive instance's sessions disappear.
+	serverMisses map[string]int
 }
 
 type openCodeSession struct {
@@ -109,6 +120,8 @@ type openCodePending struct {
 // local port, and OPENCODE_SERVER_PASSWORD is picked up when set.
 func NewOpenCodeSource(baseURL string) *OpenCodeSource {
 	pinned := baseURL != ""
+	password := os.Getenv("OPENCODE_SERVER_PASSWORD")
+	configurationError := validateOpenCodeConfiguration(baseURL, password)
 	if baseURL == "" {
 		baseURL = fmt.Sprintf("http://127.0.0.1:%d", OpenCodeDefaultPort)
 	}
@@ -117,17 +130,54 @@ func NewOpenCodeSource(baseURL string) *OpenCodeSource {
 		username = "opencode"
 	}
 	source := &OpenCodeSource{
-		baseURL:         strings.TrimRight(baseURL, "/"),
-		client:          &http.Client{Timeout: openCodeTimeout},
-		password:        os.Getenv("OPENCODE_SERVER_PASSWORD"),
-		username:        username,
-		pinned:          pinned,
-		models:          newModelCache(),
-		sessions:        map[string]openCodeSession{},
-		questionAnswers: map[string][][]string{},
+		baseURL:            strings.TrimRight(baseURL, "/"),
+		client:             &http.Client{Timeout: openCodeTimeout},
+		password:           password,
+		username:           username,
+		pinned:             pinned,
+		configurationError: configurationError,
+		models:             newModelCache(),
+		sessions:           map[string]openCodeSession{},
+		serverMisses:       map[string]int{},
+		questionAnswers:    map[string][][]string{},
 	}
 	source.findServers = source.scanServers
 	return source
+}
+
+// Validate reports an actionable configuration error before discovery starts.
+func (s *OpenCodeSource) Validate() error { return s.configurationError }
+
+func validateOpenCodeConfiguration(baseURL, password string) error {
+	if strings.TrimSpace(baseURL) == "" {
+		if password != "" {
+			return fmt.Errorf("opencode: AGENTMAN_OPENCODE_URL is required when OPENCODE_SERVER_PASSWORD is set")
+		}
+		return nil
+	}
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || parsed.Host == "" || parsed.Hostname() == "" {
+		return fmt.Errorf("opencode: AGENTMAN_OPENCODE_URL is invalid")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
+		(parsed.Path != "" && parsed.Path != "/") {
+		return fmt.Errorf("opencode: AGENTMAN_OPENCODE_URL must contain only a scheme, host, and optional port")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("opencode: AGENTMAN_OPENCODE_URL must use HTTP or HTTPS")
+	}
+	if parsed.Scheme == "http" && !openCodeLoopbackHost(parsed.Hostname()) {
+		return fmt.Errorf("opencode: remote AGENTMAN_OPENCODE_URL must use HTTPS")
+	}
+	return nil
+}
+
+func openCodeLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // Kind implements Source.
@@ -241,6 +291,9 @@ func (s *OpenCodeSource) doAtLimit(
 	out any,
 	limit int64,
 ) (http.Header, error) {
+	if s.configurationError != nil {
+		return nil, s.configurationError
+	}
 	var reader *bytes.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -302,6 +355,9 @@ const OpenCodePortSpan = 16
 
 // Available reports whether at least one local OpenCode server is reachable.
 func (s *OpenCodeSource) Available(ctx context.Context) bool {
+	if s.configurationError != nil {
+		return false
+	}
 	return len(s.findServers(ctx)) > 0
 }
 
@@ -317,6 +373,13 @@ func (s *OpenCodeSource) scanServers(ctx context.Context) []string {
 			return []string{s.baseURL}
 		}
 		return nil // the user named a URL; looking elsewhere would surprise them
+	}
+	// A password is a credential, not a discovery token. Sending it to every
+	// process that happens to bind one of the watched ports lets an unrelated
+	// local process steal it. Authenticated servers must therefore be pinned
+	// explicitly with AGENTMAN_OPENCODE_URL; only that endpoint receives auth.
+	if s.password != "" {
+		return nil
 	}
 
 	// Probe concurrently. A different process can occupy one candidate port and
@@ -371,14 +434,71 @@ func openCodeAnswerKey(base, nativeID, requestID string) string {
 
 // Discover implements Source.
 func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, error) {
+	if s.configurationError != nil {
+		return nil, s.configurationError
+	}
+	s.mu.RLock()
+	previous := make(map[string]openCodeSession, len(s.sessions))
+	previousBases := make(map[string]struct{})
+	for id, session := range s.sessions {
+		previous[id] = session
+		previousBases[session.baseURL] = struct{}{}
+	}
+	misses := make(map[string]int, len(s.serverMisses))
+	for base, count := range s.serverMisses {
+		misses[base] = count
+	}
+	s.mu.RUnlock()
+
 	// No server means OpenCode simply is not being used. Not an error, and it
 	// must stay cheap — this runs every second.
 	servers := s.findServers(ctx)
 	if len(servers) == 0 {
+		if len(previous) == 0 {
+			return nil, nil
+		}
+		kept := make(map[string]openCodeSession)
+		for base := range previousBases {
+			misses[base]++
+			if misses[base] > openCodeHealthMissGrace {
+				delete(misses, base)
+				continue
+			}
+			for id, session := range previous {
+				if session.baseURL == base {
+					kept[id] = session
+				}
+			}
+		}
 		s.mu.Lock()
-		s.sessions = map[string]openCodeSession{}
+		s.sessions = kept
+		s.serverMisses = misses
 		s.mu.Unlock()
-		return nil, nil
+		if len(kept) == 0 {
+			return nil, nil
+		}
+		found := openCodeMetas(kept)
+		return found, fmt.Errorf("opencode: all known server health probes missed")
+	}
+
+	healthyServers := make(map[string]struct{}, len(servers))
+	for _, base := range servers {
+		healthyServers[base] = struct{}{}
+	}
+	// Health scanning returns only responsive servers. Preserve each omitted
+	// known server independently for a short grace period, even when another
+	// OpenCode process is healthy in the same sweep.
+	missedServers := make(map[string]struct{})
+	for base := range previousBases {
+		if _, healthy := healthyServers[base]; healthy {
+			continue
+		}
+		misses[base]++
+		if misses[base] <= openCodeHealthMissGrace {
+			missedServers[base] = struct{}{}
+		} else {
+			delete(misses, base)
+		}
 	}
 
 	cutoff := time.Now().Add(-openCodeIdleWindow).UnixMilli()
@@ -392,9 +512,15 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 		listed, statuses, questions, permissions, err := s.snapshotAt(ctx, base, cutoff)
 		if err != nil {
 			failures = append(failures, err)
-			failedServers[base] = struct{}{}
+			misses[base]++
+			if misses[base] <= openCodeHealthMissGrace {
+				failedServers[base] = struct{}{}
+			} else {
+				delete(misses, base)
+			}
 			continue
 		}
+		delete(misses, base)
 		reached++
 		for _, request := range questions {
 			activeQuestionAnswers[openCodeAnswerKey(base, request.SessionID, request.ID)] = struct{}{}
@@ -423,12 +549,7 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 			id := string(protocol.KindOpenCode) + ":" + item.ID
 			model := cleanModel(item.Model.ID)
 			if model == "" {
-				if cached, ok := s.models.get(id); ok {
-					model = cached
-				} else {
-					model = s.modelOfAt(ctx, base, item.ID, directory)
-					s.models.put(id, model)
-				}
+				model, _ = s.models.get(id)
 			} else {
 				s.models.put(id, model)
 			}
@@ -455,26 +576,49 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 			}
 		}
 	}
+	for base := range missedServers {
+		failures = append(failures, fmt.Errorf("opencode: %s health probe missed", base))
+	}
 
 	if reached == 0 {
-		return nil, errors.Join(failures...)
+		kept := make(map[string]openCodeSession)
+		for id, previousSession := range previous {
+			// Both sets are still inside their grace window, exactly as in the
+			// partial-failure branch below. Keying on failedServers alone made a
+			// total outage discard state that a partial one preserves, which is
+			// backwards: the worse the sweep, the less it should be trusted to
+			// declare a session gone.
+			_, failed := failedServers[previousSession.baseURL]
+			_, missed := missedServers[previousSession.baseURL]
+			if failed || missed {
+				kept[id] = previousSession
+			}
+		}
+		s.mu.Lock()
+		s.sessions = kept
+		s.serverMisses = misses
+		s.mu.Unlock()
+		// openCodeMetas returns a non-nil empty slice. That distinction tells the
+		// registry a sustained failure has expired rather than asking it to
+		// restore its own last snapshot forever.
+		return openCodeMetas(kept), errors.Join(failures...)
 	}
-	if len(failedServers) > 0 {
+	if len(failedServers) > 0 || len(missedServers) > 0 {
 		// A server answered its health probe but one of the four snapshot calls
 		// failed. Preserve that server's last routes for this sweep; otherwise a
 		// transient API error announces every session on it as gone and tears
 		// down active subscriptions even while other OpenCode servers are fine.
-		s.mu.RLock()
-		for id, previous := range s.sessions {
-			if _, failed := failedServers[previous.baseURL]; !failed {
+		for id, previousSession := range previous {
+			_, failed := failedServers[previousSession.baseURL]
+			_, missed := missedServers[previousSession.baseURL]
+			if !failed && !missed {
 				continue
 			}
 			current, exists := next[id]
-			if !exists || openCodeRoutePriority(previous) > openCodeRoutePriority(current) {
-				next[id] = previous
+			if !exists || openCodeRoutePriority(previousSession) > openCodeRoutePriority(current) {
+				next[id] = previousSession
 			}
 		}
-		s.mu.RUnlock()
 	}
 	// Partial multi-question answers are useful only while the exact request is
 	// still pending. Prune after a completely healthy sweep; if one server was
@@ -498,17 +642,23 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 
 	s.mu.Lock()
 	s.sessions = next
+	s.serverMisses = misses
 	s.mu.Unlock()
 
-	found := make([]protocol.Session, 0, len(next))
-	for _, session := range next {
-		found = append(found, session.meta)
-	}
-	SortSessions(found)
+	found := openCodeMetas(next)
 	if len(failures) > 0 {
 		return found, errors.Join(failures...)
 	}
 	return found, nil
+}
+
+func openCodeMetas(sessions map[string]openCodeSession) []protocol.Session {
+	found := make([]protocol.Session, 0, len(sessions))
+	for _, session := range sessions {
+		found = append(found, session.meta)
+	}
+	SortSessions(found)
+	return found
 }
 
 type ocSessionStatus struct {
@@ -526,6 +676,12 @@ func (s *OpenCodeSource) snapshotAt(ctx context.Context, base string, cutoff int
 	if _, err := s.doAt(ctx, base, http.MethodGet, "/session?limit=200", nil, &listed); err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("%s/session?limit=200: %w", base, err)
 	}
+	if len(listed) > maxOpenCodeSessions {
+		return nil, nil, nil, nil, fmt.Errorf(
+			"%s/session?limit=200: returned %d sessions, maximum is %d",
+			base, len(listed), maxOpenCodeSessions,
+		)
+	}
 
 	// OpenCode's pending-state endpoints are scoped to a project directory.
 	// Calling them without ?directory= only reports the server's launch
@@ -541,6 +697,12 @@ func (s *OpenCodeSource) snapshotAt(ctx context.Context, base string, cutoff int
 			directories[item.directory()] = struct{}{}
 		}
 	}
+	if len(directories) > maxOpenCodeDirectories {
+		return nil, nil, nil, nil, fmt.Errorf(
+			"%s/session?limit=200: returned %d active directories, maximum is %d",
+			base, len(directories), maxOpenCodeDirectories,
+		)
+	}
 	type scopedSnapshot struct {
 		directory   string
 		statuses    map[string]ocSessionStatus
@@ -555,8 +717,29 @@ func (s *OpenCodeSource) snapshotAt(ctx context.Context, base string, cutoff int
 		})
 	}
 
+	type snapshotJob struct {
+		scopeIndex   int
+		requestIndex int
+		path         string
+		out          any
+	}
 	errs := make([]error, len(scopes)*3)
+	jobs := make(chan snapshotJob)
 	var wait sync.WaitGroup
+	workers := min(maxOpenCodeSnapshotWorkers, len(scopes)*3)
+	for range workers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for job := range jobs {
+				if _, err := s.doAt(ctx, base, http.MethodGet, job.path, nil, job.out); err != nil {
+					errs[job.scopeIndex*3+job.requestIndex] = fmt.Errorf(
+						"%s%s: %w", base, job.path, err,
+					)
+				}
+			}
+		}()
+	}
 	for index := range scopes {
 		query := url.Values{}
 		if scopes[index].directory != "" {
@@ -571,16 +754,14 @@ func (s *OpenCodeSource) snapshotAt(ctx context.Context, base string, cutoff int
 			{path: openCodePath("/permission", query), out: &scopes[index].permissions},
 		}
 		for requestIndex := range requests {
-			wait.Add(1)
-			go func(scopeIndex, requestIndex int) {
-				defer wait.Done()
-				request := requests[requestIndex]
-				if _, err := s.doAt(ctx, base, http.MethodGet, request.path, nil, request.out); err != nil {
-					errs[scopeIndex*3+requestIndex] = fmt.Errorf("%s%s: %w", base, request.path, err)
-				}
-			}(index, requestIndex)
+			request := requests[requestIndex]
+			jobs <- snapshotJob{
+				scopeIndex: index, requestIndex: requestIndex,
+				path: request.path, out: request.out,
+			}
 		}
 	}
+	close(jobs)
 	wait.Wait()
 	if err := errors.Join(errs...); err != nil {
 		return nil, nil, nil, nil, err
@@ -648,18 +829,24 @@ func (s *OpenCodeSource) openCodePendingFor(
 			continue
 		}
 		options := []protocol.QuestionOption{
-			{Key: "once", Label: "Allow once"},
+			{Key: "once", Label: "Allow once", Description: "Approve only this request."},
 		}
 		if len(request.Always) > 0 {
-			options = append(options, protocol.QuestionOption{Key: "always", Label: "Always allow"})
+			options = append(options, protocol.QuestionOption{
+				Key: "always", Label: "Always allow",
+				Description: "Persist for: " + clipRunes(strings.Join(request.Always, ", "), 400),
+			})
 		}
-		options = append(options, protocol.QuestionOption{Key: "reject", Label: "Reject"})
-		detail := strings.Join(request.Patterns, "\n")
+		options = append(options, protocol.QuestionOption{
+			Key: "reject", Label: "Reject", Description: "Deny this request.",
+		})
+		detail := openCodePermissionDetail(request)
 		prompt := "Allow this action?"
 		if request.Permission != "" {
 			prompt = "Allow " + request.Permission + "?"
 		}
 		return &protocol.Question{
+			ID:    "permission-" + request.ID,
 			Title: "Permission", Prompt: prompt, Detail: detail, Options: options,
 		}, openCodePending{kind: openCodePermissionPending, requestID: request.ID}
 	}
@@ -686,6 +873,7 @@ func (s *OpenCodeSource) openCodePendingFor(
 			detail = fmt.Sprintf("Question %d of %d", index+1, len(request.Questions))
 		}
 		return &protocol.Question{
+				ID:     fmt.Sprintf("question-%s-%d", request.ID, index),
 				Prompt: first.Question, Title: first.Header, Detail: detail, Options: options,
 				Multiple: first.Multiple, Custom: custom,
 			}, openCodePending{
@@ -695,6 +883,36 @@ func (s *OpenCodeSource) openCodePendingFor(
 			}
 	}
 	return nil, openCodePending{}
+}
+
+func openCodePermissionDetail(request ocPermissionRequest) string {
+	parts := make([]string, 0, 3)
+	if len(request.Patterns) > 0 {
+		parts = append(parts, "Requested scope:\n"+strings.Join(request.Patterns, "\n"))
+	}
+	if len(request.Metadata) > 0 {
+		if encoded, err := json.MarshalIndent(request.Metadata, "", "  "); err == nil {
+			parts = append(parts, "Context:\n"+string(encoded))
+		}
+	}
+	if len(request.Always) > 0 {
+		parts = append(parts, "Persistent scope:\n"+strings.Join(request.Always, "\n"))
+	}
+	return clipRunes(strings.Join(parts, "\n\n"), maxOpenCodeQuestionDetail)
+}
+
+func clipRunes(text string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	if limit == 1 {
+		return "…"
+	}
+	return string(runes[:limit-1]) + "…"
 }
 
 func (s *OpenCodeSource) nextQuestionIndex(answerKey string, count int) int {
@@ -762,6 +980,9 @@ func (s *OpenCodeSource) Page(ctx context.Context, sessionID, before string, lim
 		maxOpenCodeMessageResponse)
 	if err != nil {
 		return protocol.Page{}, err
+	}
+	if model := openCodeModel(response); model != "" {
+		s.models.put(sessionID, model)
 	}
 
 	// OpenCode returns the newest page in chronological order. Older pages are
@@ -906,12 +1127,12 @@ func (s *OpenCodeSource) Follow(ctx context.Context, sessionID string, out chan<
 	// same id legitimately carries different content on successive polls: a
 	// reply first appears as a fragment and grows. Treating a known id as
 	// nothing-to-report froze every long answer at its first few words.
-	seen := map[string]string{}
+	seen := map[string]openCodeSeenMessage{}
+	var generation uint64
 	// Prime from the current tail so the backlog is not replayed as new.
 	if page, err := s.Page(ctx, sessionID, "", 50); err == nil {
-		for _, message := range page.Messages {
-			seen[message.ID] = messageFingerprint(message)
-		}
+		generation++
+		_ = updateOpenCodeSeen(seen, page.Messages, generation)
 	}
 
 	ticker := time.NewTicker(followInterval)
@@ -926,19 +1147,8 @@ func (s *OpenCodeSource) Follow(ctx context.Context, sessionID string, out chan<
 			if err != nil {
 				continue
 			}
-			var batch []protocol.Message
-			for _, message := range page.Messages {
-				// Send anything whose content has moved: a new message, a
-				// reply that has grown, or a tool that has settled. The app
-				// merges by id, so re-sending a changed message replaces the
-				// row rather than duplicating it.
-				fingerprint := messageFingerprint(message)
-				if previous, known := seen[message.ID]; known && previous == fingerprint {
-					continue
-				}
-				seen[message.ID] = fingerprint
-				batch = append(batch, message)
-			}
+			generation++
+			batch := updateOpenCodeSeen(seen, page.Messages, generation)
 			if len(batch) == 0 {
 				continue
 			}
@@ -951,23 +1161,46 @@ func (s *OpenCodeSource) Follow(ctx context.Context, sessionID string, out chan<
 	}
 }
 
-// modelOf reports the model behind a session's most recent reply.
-//
-// OpenCode names the model on each assistant message rather than on the
-// session, so this asks for the last few messages and takes the newest one that
-// carries a name. Cached by the caller — this is an HTTP request, and discovery
-// runs every second.
-func (s *OpenCodeSource) modelOfAt(ctx context.Context, base, nativeID, directory string) string {
-	query := url.Values{"limit": {"6"}}
-	if directory != "" {
-		query.Set("directory", directory)
+type openCodeSeenMessage struct {
+	fingerprint string
+	generation  uint64
+}
+
+func updateOpenCodeSeen(
+	seen map[string]openCodeSeenMessage,
+	messages []protocol.Message,
+	generation uint64,
+) []protocol.Message {
+	var changed []protocol.Message
+	for _, message := range messages {
+		fingerprint := messageFingerprint(message)
+		previous, known := seen[message.ID]
+		seen[message.ID] = openCodeSeenMessage{
+			fingerprint: fingerprint,
+			generation:  generation,
+		}
+		if !known || previous.fingerprint != fingerprint {
+			// Send anything whose content has moved: a new message, a reply
+			// that has grown, or a tool that has settled. The app merges by id.
+			changed = append(changed, message)
+		}
 	}
-	path := openCodePath("/session/"+openCodeSegment(nativeID)+"/message", query)
-	var response []ocMessage
-	if _, err := s.doAtLimit(ctx, base, http.MethodGet, path, nil, &response,
-		maxOpenCodeMessageResponse); err != nil {
-		return ""
+	// Page returns only the recent tail. Keeping two prior windows is enough to
+	// deduplicate overlap while bounding memory for a subscription that runs
+	// through hundreds of thousands of messages.
+	for id, entry := range seen {
+		if entry.generation+2 < generation {
+			delete(seen, id)
+		}
 	}
+	return changed
+}
+
+// openCodeModel reports the model behind the newest reply in an API page.
+// Discovery never makes a per-session message request merely to populate this
+// cosmetic label: Page and Follow already read messages and update the cache,
+// avoiding hundreds of sequential five-second calls during a slow sweep.
+func openCodeModel(response []ocMessage) string {
 	for i := len(response) - 1; i >= 0; i-- {
 		modelID := response[i].Info.ModelID
 		if modelID == "" {
@@ -1010,6 +1243,10 @@ func (s *OpenCodeSource) Answer(ctx context.Context, sessionID string, answer pr
 	s.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("source: unknown opencode session %q", sessionID)
+	}
+	if session.meta.Question == nil || answer.QuestionID == "" ||
+		answer.QuestionID != session.meta.Question.ID {
+		return fmt.Errorf("source: that question is no longer current; refresh the session")
 	}
 
 	// Re-read the pending decision: it can disappear or change between the app
@@ -1071,6 +1308,12 @@ func (s *OpenCodeSource) Answer(ctx context.Context, sessionID string, answer pr
 		}
 		if current == nil || pending.questionIndex < 0 || pending.questionIndex >= len(current.Questions) {
 			return fmt.Errorf("source: that question is no longer waiting for an answer")
+		}
+		// recordQuestionAnswer advances immediately, before the next discovery
+		// sweep updates session.meta. Reject a second device or double tap still
+		// carrying the prior card's revision instead of overwriting its answer.
+		if next := s.nextQuestionIndex(pending.answerKey, len(current.Questions)); next != pending.questionIndex {
+			return fmt.Errorf("source: that question is no longer current; refresh the session")
 		}
 		question := current.Questions[pending.questionIndex]
 		values := append([]string(nil), answer.Options...)
