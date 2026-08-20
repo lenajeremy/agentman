@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -22,8 +23,17 @@ const (
 	// scrollback with long tool output, small enough to bound memory per
 	// connection.
 	maxFrame = 4 << 20
+	// App requests contain at most a 64 KiB message plus envelope metadata.
+	// Daemon events may legitimately be much larger, but accepting 4 MiB from
+	// an app only increases relay/daemon allocation exposure.
+	maxAppFrame = 128 << 10
 	// writeTimeout stops one unresponsive peer from pinning a goroutine.
 	writeTimeout = 10 * time.Second
+	// Each connection gets a short burst buffer. When it fills, the connection
+	// is dropped and can recover through reconnect/history instead of retaining
+	// an unbounded transcript in the relay.
+	outboundQueueSize     = 16
+	maxOutboundQueueBytes = 8 << 20
 	// pingInterval keeps NAT and load-balancer idle timers from silently
 	// dropping a connection that is simply quiet — common on mobile networks.
 	pingInterval = 30 * time.Second
@@ -34,6 +44,11 @@ const (
 	// creates an isolated account. Without a per-client ceiling that also means
 	// one IP can occupy every global websocket slot with throwaway accounts.
 	maxConnectionsPerClient = 128
+	// Pairing requests are unauthenticated until their body has been read. Keep
+	// both their lifetime and aggregate resource use bounded so slow clients
+	// cannot pin an arbitrary number of HTTP connections and goroutines.
+	maxConcurrentPairingRequests = 64
+	pairingBodyReadTimeout       = 5 * time.Second
 )
 
 // Server is the relay's HTTP surface.
@@ -59,6 +74,12 @@ type Server struct {
 	// against guessing below.
 	perClientPairings *limiter
 	globalPairings    *limiter
+	// pairingRequests limits the unauthenticated POST /pair handlers, including
+	// requests that are still trickling in their bodies. pairingReadTimeout is
+	// a field so focused tests can exercise the deadline without sleeping for
+	// the production timeout.
+	pairingRequests    chan struct{}
+	pairingReadTimeout time.Duration
 	// trustProxy says whether X-Forwarded-For may be believed. See clientKey.
 	trustProxy        bool
 	connections       chan struct{}
@@ -77,17 +98,19 @@ func NewServer(secret, version string, log *slog.Logger, trustProxy bool) *Serve
 		log = slog.Default()
 	}
 	return &Server{
-		hub:               NewHub(),
-		secret:            secret,
-		log:               log,
-		version:           version,
-		perClientFailures: newLimiter(10, time.Minute),
-		globalFailures:    newLimiter(2000, time.Minute),
-		perClientPairings: newLimiter(30, time.Minute),
-		globalPairings:    newLimiter(5000, time.Minute),
-		trustProxy:        trustProxy,
-		connections:       make(chan struct{}, maxRelayConnections),
-		clientConnections: map[string]int{},
+		hub:                NewHub(),
+		secret:             secret,
+		log:                log,
+		version:            version,
+		perClientFailures:  newLimiter(10, time.Minute),
+		globalFailures:     newLimiter(2000, time.Minute),
+		perClientPairings:  newLimiter(30, time.Minute),
+		globalPairings:     newLimiter(5000, time.Minute),
+		pairingRequests:    make(chan struct{}, maxConcurrentPairingRequests),
+		pairingReadTimeout: pairingBodyReadTimeout,
+		trustProxy:         trustProxy,
+		connections:        make(chan struct{}, maxRelayConnections),
+		clientConnections:  map[string]int{},
 	}
 }
 
@@ -181,14 +204,57 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // handlePair exchanges a pairing code for a device token.
 func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
+	select {
+	case s.pairingRequests <- struct{}{}:
+		defer func() { <-s.pairingRequests }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "the relay is temporarily at pairing capacity — try again shortly",
+		})
+		return
+	}
+
+	// A server-wide ReadTimeout would also expire long-lived websocket
+	// connections. Scope the deadline to this unauthenticated request body and
+	// clear it as soon as the complete JSON document has been consumed.
+	controller := http.NewResponseController(w)
+	if err := controller.SetReadDeadline(time.Now().Add(s.pairingReadTimeout)); err != nil {
+		w.Header().Set("Connection", "close")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "could not safely read pairing request",
+		})
+		return
+	}
+
 	var body struct {
 		Code     string `json:"code"`
 		DeviceID string `json:"deviceId"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	if err := decoder.Decode(&body); err != nil {
+		w.Header().Set("Connection", "close")
+		if isTimeout(err) {
+			writeJSON(w, http.StatusRequestTimeout, map[string]string{"error": "pairing request timed out"})
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
+	// Reaching EOF proves a chunked client finished its body and prevents a
+	// valid JSON prefix followed by an indefinitely slow suffix from escaping
+	// the deadline. It also rejects multiple JSON documents.
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		w.Header().Set("Connection", "close")
+		if isTimeout(err) {
+			writeJSON(w, http.StatusRequestTimeout, map[string]string{"error": "pairing request timed out"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	_ = controller.SetReadDeadline(time.Time{})
 
 	code := strings.ReplaceAll(strings.TrimSpace(body.Code), " ", "")
 
@@ -239,6 +305,11 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	s.issueDeviceToken(w, account, body.DeviceID)
 }
 
+func isTimeout(err error) bool {
+	var timeout interface{ Timeout() bool }
+	return errors.As(err, &timeout) && timeout.Timeout()
+}
+
 // issueDeviceToken completes a successful pairing.
 func (s *Server) issueDeviceToken(w http.ResponseWriter, account AccountID, deviceID string) {
 	if deviceID == "" {
@@ -263,24 +334,151 @@ func (s *Server) issueDeviceToken(w http.ResponseWriter, account AccountID, devi
 
 /* ------------------------------- websockets ------------------------------ */
 
-// wsConn adapts a websocket to the hub's Conn interface.
+var (
+	errOutboundClosed    = errors.New("relay: outbound connection closed")
+	errOutboundQueueFull = errors.New("relay: outbound queue full")
+)
+
+// websocketWriter is the write side of coder/websocket.Conn. Keeping it
+// narrow makes queue overflow and write failures deterministic to test without
+// weakening the real socket integration tests.
+type websocketWriter interface {
+	Write(context.Context, websocket.MessageType, []byte) error
+	Ping(context.Context) error
+	CloseNow() error
+}
+
+// outboundFrame is one queued write. wrote, when non-nil, is closed once the
+// writer has finished with the frame — successfully or not — so a caller that
+// must get a final message out before hanging up can wait for it.
+type outboundFrame struct {
+	data  []byte
+	wrote chan struct{}
+}
+
+// wsConn adapts a websocket to the hub's Conn interface. Send only enqueues;
+// writeLoop is the sole owner of websocket writes and preserves frame order.
 type wsConn struct {
-	ws *websocket.Conn
-	// Writes are serialized: the websocket library allows only one writer at a
-	// time, and both the hub fan-out and the ping loop can write concurrently.
-	mu sync.Mutex
+	ws          websocketWriter
+	outbound    chan outboundFrame
+	done        chan struct{}
+	close       sync.Once
+	closeErr    error
+	queueMu     sync.Mutex
+	queuedBytes int
+}
+
+func newWSConn(ws websocketWriter) *wsConn {
+	return newWSConnWithQueue(ws, outboundQueueSize)
+}
+
+func newWSConnWithQueue(ws websocketWriter, capacity int) *wsConn {
+	c := &wsConn{
+		ws:       ws,
+		outbound: make(chan outboundFrame, capacity),
+		done:     make(chan struct{}),
+	}
+	go c.writeLoop()
+	return c
 }
 
 func (c *wsConn) Send(frame []byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
-	defer cancel()
-	return c.ws.Write(ctx, websocket.MessageText, frame)
+	return c.enqueue(outboundFrame{data: frame})
+}
+
+// sendAndFlush queues a frame and waits for the writer to be done with it, so
+// an immediately following close cannot discard it. Bounded by writeTimeout:
+// a peer that has stopped reading must not pin the caller here.
+func (c *wsConn) sendAndFlush(frame []byte) {
+	wrote := make(chan struct{})
+	if err := c.enqueue(outboundFrame{data: frame, wrote: wrote}); err != nil {
+		return
+	}
+	timeout := time.NewTimer(writeTimeout)
+	defer timeout.Stop()
+	select {
+	case <-wrote:
+	case <-c.done:
+	case <-timeout.C:
+	}
+}
+
+func (c *wsConn) enqueue(frame outboundFrame) error {
+	// Prefer the closed result even when buffer space happens to be available;
+	// the second check covers a close racing the enqueue.
+	select {
+	case <-c.done:
+		return errOutboundClosed
+	default:
+	}
+	c.queueMu.Lock()
+	if c.queuedBytes > maxOutboundQueueBytes-len(frame.data) {
+		c.queueMu.Unlock()
+		_ = c.Close()
+		return errOutboundQueueFull
+	}
+	c.queuedBytes += len(frame.data)
+	select {
+	case c.outbound <- frame:
+		c.queueMu.Unlock()
+		select {
+		case <-c.done:
+			return errOutboundClosed
+		default:
+			return nil
+		}
+	default:
+		c.queuedBytes -= len(frame.data)
+		c.queueMu.Unlock()
+		select {
+		case <-c.done:
+			return errOutboundClosed
+		default:
+			_ = c.Close()
+			return errOutboundQueueFull
+		}
+	}
 }
 
 func (c *wsConn) Close() error {
-	return c.ws.Close(websocket.StatusNormalClosure, "")
+	c.close.Do(func() {
+		close(c.done)
+		c.closeErr = c.ws.CloseNow()
+	})
+	return c.closeErr
+}
+
+func (c *wsConn) writeLoop() {
+	ticker := time.NewTicker(pingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.done:
+			return
+		case frame := <-c.outbound:
+			ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+			err := c.ws.Write(ctx, websocket.MessageText, frame.data)
+			cancel()
+			c.queueMu.Lock()
+			c.queuedBytes -= len(frame.data)
+			c.queueMu.Unlock()
+			if frame.wrote != nil {
+				close(frame.wrote)
+			}
+			if err != nil {
+				_ = c.Close()
+				return
+			}
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+			err := c.ws.Ping(ctx)
+			cancel()
+			if err != nil {
+				_ = c.Close()
+				return
+			}
+		}
+	}
 }
 
 func (s *Server) accept(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
@@ -318,7 +516,10 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	conn := &wsConn{ws: ws}
+	// Keep the daemon at accept's maxFrame. It publishes history pages and
+	// session snapshots that are legitimately far larger than any app request.
+	conn := newWSConn(ws)
+	defer conn.Close()
 
 	// A reconnecting daemon replaces its previous socket, so a half-dead
 	// connection from a suspended laptop cannot keep owning the account.
@@ -362,7 +563,11 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	conn := &wsConn{ws: ws}
+	// An app only ever sends requests, so hold it to the smaller ceiling at the
+	// socket itself. pump's length check stays as a second line of defence.
+	ws.SetReadLimit(maxAppFrame)
+	conn := newWSConn(ws)
+	defer conn.Close()
 
 	deviceID := fmt.Sprintf("%s-%d", account, time.Now().UnixNano())
 	s.hub.AddApp(account, deviceID, conn)
@@ -393,17 +598,13 @@ func (s *Server) pump(
 	from protocol.Peer,
 	deviceID string,
 ) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	go func() {
-		if keepAlive(ctx, ws) != nil {
-			cancel()
-		}
-	}()
-
 	for {
 		_, data, err := ws.Read(ctx)
 		if err != nil {
+			return
+		}
+		if from == protocol.PeerApp && len(data) > maxAppFrame {
+			_ = conn.Close()
 			return
 		}
 
@@ -412,10 +613,19 @@ func (s *Server) pump(
 			continue // malformed frames are dropped, not fatal
 		}
 		if envelope.V != protocol.Version {
-			_ = sendControlReply(conn, envelope.ID, protocol.Control{
-				Type: protocol.CtlError, Message: "unsupported protocol version",
+			// Say why, in the peer's own version, before hanging up. Without this
+			// the close is indistinguishable from a flaky network: the app retries
+			// forever showing "offline" and never learns it needs updating.
+			// Ordinary Send only queues, and the close below would discard it.
+			sendFinalControl(conn, envelope.ID, envelope.V, protocol.Control{
+				Type:    protocol.CtlError,
+				Message: "unsupported protocol version",
 			})
-			continue
+			// Never leave an incompatible daemon registered as online. A policy
+			// close makes the deferred hub removal publish offline and prevents the
+			// much worse half-compatible state where forms render but answers fail.
+			_ = ws.Close(websocket.StatusPolicyViolation, "unsupported protocol version")
+			return
 		}
 		if !allowedDestination(from, envelope.To) {
 			_ = sendControlReply(conn, envelope.ID, protocol.Control{
@@ -436,7 +646,7 @@ func (s *Server) pump(
 			if err != nil {
 				continue
 			}
-			if err := s.hub.ToDaemon(account, forwarded); errors.Is(err, ErrNoPeer) {
+			if err := s.hub.ToDaemon(account, forwarded); err != nil {
 				// Answer immediately rather than buffering: the relay stores
 				// nothing, and a prompt failure is more honest than a message
 				// that silently arrives an hour later.
@@ -529,24 +739,6 @@ func (s *Server) notifyDaemon(account AccountID, control protocol.Control) {
 	}
 }
 
-func keepAlive(ctx context.Context, ws *websocket.Conn) error {
-	ticker := time.NewTicker(pingInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-			pingCtx, cancel := context.WithTimeout(ctx, writeTimeout)
-			err := ws.Ping(pingCtx)
-			cancel()
-			if err != nil {
-				return err
-			}
-		}
-	}
-}
-
 func (s *Server) acquireConnection(w http.ResponseWriter, client string) bool {
 	select {
 	case s.connections <- struct{}{}:
@@ -582,12 +774,41 @@ func sendControl(conn Conn, control protocol.Control) error {
 }
 
 func sendControlReply(conn Conn, replyTo string, control protocol.Control) error {
+	return sendControlReplyVersion(conn, replyTo, protocol.Version, control)
+}
+
+func controlReplyFrame(replyTo string, version int, control protocol.Control) ([]byte, error) {
 	envelope, err := protocol.NewEnvelope(newFrameID(), protocol.PeerRelay, control)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	envelope.V = version
 	envelope.ReplyTo = replyTo
-	frame, err := json.Marshal(envelope)
+	return json.Marshal(envelope)
+}
+
+// sendFinalControl delivers one last control frame and waits for it to reach
+// the socket, for callers that are about to close. Connections that cannot
+// guarantee a flush fall back to a plain queued send.
+func sendFinalControl(conn Conn, replyTo string, version int, control protocol.Control) {
+	frame, err := controlReplyFrame(replyTo, version, control)
+	if err != nil {
+		return
+	}
+	if flusher, ok := conn.(interface{ sendAndFlush([]byte) }); ok {
+		flusher.sendAndFlush(frame)
+		return
+	}
+	_ = conn.Send(frame)
+}
+
+func sendControlReplyVersion(
+	conn Conn,
+	replyTo string,
+	version int,
+	control protocol.Control,
+) error {
+	frame, err := controlReplyFrame(replyTo, version, control)
 	if err != nil {
 		return err
 	}

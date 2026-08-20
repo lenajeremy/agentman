@@ -1,11 +1,17 @@
 package relay
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
+	"github.com/lenajeremy/agentman/internal/protocol"
 )
 
 /* --------------------------------- tokens -------------------------------- */
@@ -89,20 +95,88 @@ type fakeConn struct {
 	err    error
 }
 
-type gatedConn struct {
-	sent  chan struct{}
-	block <-chan struct{}
+type recordingSocket struct {
+	mu          sync.Mutex
+	frames      [][]byte
+	gate        <-chan struct{}
+	writeErr    error
+	started     chan struct{}
+	startedOnce sync.Once
+	closed      chan struct{}
+	closeOnce   sync.Once
 }
 
-func (c *gatedConn) Send([]byte) error {
-	close(c.sent)
-	if c.block != nil {
-		<-c.block
+func newRecordingSocket(gate <-chan struct{}, writeErr error) *recordingSocket {
+	return &recordingSocket{
+		gate:     gate,
+		writeErr: writeErr,
+		started:  make(chan struct{}),
+		closed:   make(chan struct{}),
 	}
+}
+
+func (s *recordingSocket) Write(ctx context.Context, _ websocket.MessageType, frame []byte) error {
+	s.startedOnce.Do(func() { close(s.started) })
+	if s.gate != nil {
+		select {
+		case <-s.gate:
+		case <-s.closed:
+			return errOutboundClosed
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if s.writeErr != nil {
+		return s.writeErr
+	}
+	select {
+	case <-s.closed:
+		return errOutboundClosed
+	default:
+	}
+	s.mu.Lock()
+	s.frames = append(s.frames, append([]byte(nil), frame...))
+	s.mu.Unlock()
 	return nil
 }
 
-func (c *gatedConn) Close() error { return nil }
+func (s *recordingSocket) Ping(context.Context) error {
+	select {
+	case <-s.closed:
+		return errOutboundClosed
+	default:
+		return nil
+	}
+}
+
+func (s *recordingSocket) CloseNow() error {
+	s.closeOnce.Do(func() { close(s.closed) })
+	return nil
+}
+
+func (s *recordingSocket) snapshot() [][]byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	frames := make([][]byte, len(s.frames))
+	for i := range s.frames {
+		frames[i] = append([]byte(nil), s.frames[i]...)
+	}
+	return frames
+}
+
+func waitForFrames(t *testing.T, socket *recordingSocket, count int) [][]byte {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if frames := socket.snapshot(); len(frames) >= count {
+			return frames
+		}
+		time.Sleep(time.Millisecond)
+	}
+	frames := socket.snapshot()
+	t.Fatalf("writer recorded %d frames, want %d", len(frames), count)
+	return nil
+}
 
 func (c *fakeConn) Send(frame []byte) error {
 	c.mu.Lock()
@@ -125,6 +199,34 @@ func (c *fakeConn) count() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.frames)
+}
+
+func TestProtocolMismatchReplyRemainsReadableToOldClient(t *testing.T) {
+	conn := &fakeConn{}
+	if err := sendControlReplyVersion(conn, "old-request", 1, protocol.Control{
+		Type: protocol.CtlError, Message: "unsupported protocol version",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
+	if len(conn.frames) != 1 {
+		t.Fatalf("control frames = %d, want 1", len(conn.frames))
+	}
+	var envelope protocol.Envelope
+	if err := json.Unmarshal(conn.frames[0], &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.V != 1 || envelope.ReplyTo != "old-request" {
+		t.Fatalf("old client cannot correlate version error: %+v", envelope)
+	}
+	var control protocol.Control
+	if err := json.Unmarshal(envelope.Payload, &control); err != nil {
+		t.Fatal(err)
+	}
+	if control.Type != protocol.CtlError || control.Message != "unsupported protocol version" {
+		t.Fatalf("unexpected version response: %+v", control)
+	}
 }
 
 func TestHubRoutesBetweenDaemonAndApps(t *testing.T) {
@@ -157,23 +259,202 @@ func TestHubRoutesBetweenDaemonAndApps(t *testing.T) {
 func TestHubSlowAppDoesNotDelayOtherApps(t *testing.T) {
 	hub := NewHub()
 	account := DeriveAccount("fanout")
-	releaseSlow := make(chan struct{})
-	slow := &gatedConn{sent: make(chan struct{}), block: releaseSlow}
-	fast := &gatedConn{sent: make(chan struct{})}
+	slowGate := make(chan struct{})
+	slowSocket := newRecordingSocket(slowGate, nil)
+	fastSocket := newRecordingSocket(nil, nil)
+	slow := newWSConnWithQueue(slowSocket, 1)
+	fast := newWSConnWithQueue(fastSocket, 8)
+	defer fast.Close()
 	hub.AddApp(account, "slow", slow)
 	hub.AddApp(account, "fast", fast)
 
-	done := make(chan int, 1)
-	go func() { done <- hub.ToApps(account, []byte("event")) }()
-	select {
-	case <-fast.sent:
-		// Good: the healthy app was not queued behind the blocked one.
-	case <-time.After(time.Second):
-		t.Fatal("a blocked app delayed delivery to another app")
+	if delivered := hub.ToApps(account, []byte("one")); delivered != 2 {
+		t.Fatalf("first fanout accepted by %d devices, want 2", delivered)
 	}
-	close(releaseSlow)
-	if delivered := <-done; delivered != 2 {
-		t.Fatalf("delivered = %d, want 2", delivered)
+	select {
+	case <-slowSocket.started:
+		// The writer now owns frame one and is blocked in network I/O, leaving
+		// exactly one queue slot available.
+	case <-time.After(time.Second):
+		t.Fatal("slow writer did not start")
+	}
+	if delivered := hub.ToApps(account, []byte("two")); delivered != 2 {
+		t.Fatalf("second fanout accepted by %d devices, want 2", delivered)
+	}
+
+	// Frame three overflows only the slow queue. Fanout must return without
+	// waiting for its blocked network write, while the healthy peer receives
+	// every frame in order.
+	done := make(chan int, 1)
+	go func() { done <- hub.ToApps(account, []byte("three")) }()
+	select {
+	case delivered := <-done:
+		if delivered != 1 {
+			t.Fatalf("overflow fanout accepted by %d devices, want only the healthy one", delivered)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("a full slow-app queue stalled hub fanout")
+	}
+	select {
+	case <-slowSocket.closed:
+	case <-time.After(time.Second):
+		t.Fatal("overflowing slow app was not closed")
+	}
+	_, apps, _ := hub.Stats()
+	if apps != 1 {
+		t.Fatalf("hub retained %d apps after removing slow consumer, want 1", apps)
+	}
+
+	frames := waitForFrames(t, fastSocket, 3)
+	for i, want := range []string{"one", "two", "three"} {
+		if got := string(frames[i]); got != want {
+			t.Fatalf("healthy frame %d = %q, want %q", i, got, want)
+		}
+	}
+}
+
+func TestWSConnPreservesQueuedFrameOrder(t *testing.T) {
+	gate := make(chan struct{})
+	socket := newRecordingSocket(gate, nil)
+	conn := newWSConnWithQueue(socket, 3)
+	defer conn.Close()
+
+	if err := conn.Send([]byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-socket.started:
+	case <-time.After(time.Second):
+		t.Fatal("writer did not start")
+	}
+	for _, frame := range []string{"two", "three", "four"} {
+		if err := conn.Send([]byte(frame)); err != nil {
+			t.Fatalf("enqueue %q: %v", frame, err)
+		}
+	}
+	close(gate)
+
+	frames := waitForFrames(t, socket, 4)
+	for i, want := range []string{"one", "two", "three", "four"} {
+		if got := string(frames[i]); got != want {
+			t.Fatalf("frame %d = %q, want %q", i, got, want)
+		}
+	}
+}
+
+func TestWSConnClosesAtOutboundByteBudget(t *testing.T) {
+	gate := make(chan struct{})
+	socket := newRecordingSocket(gate, nil)
+	conn := newWSConnWithQueue(socket, 16)
+
+	frame := make([]byte, maxFrame)
+	if err := conn.Send(frame); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-socket.started:
+	case <-time.After(time.Second):
+		t.Fatal("writer did not start")
+	}
+	if err := conn.Send(frame); err != nil {
+		t.Fatalf("second frame within byte budget: %v", err)
+	}
+	if err := conn.Send([]byte("overflow")); !errors.Is(err, errOutboundQueueFull) {
+		t.Fatalf("byte-budget overflow error = %v", err)
+	}
+	select {
+	case <-socket.closed:
+	case <-time.After(time.Second):
+		t.Fatal("byte-budget overflow did not close socket")
+	}
+}
+
+func TestWSConnWriteFailureClosesAndHubRemovesConsumer(t *testing.T) {
+	hub := NewHub()
+	account := DeriveAccount("write-failure")
+	gate := make(chan struct{})
+	socket := newRecordingSocket(gate, errors.New("write failed"))
+	conn := newWSConnWithQueue(socket, 1)
+	hub.AddApp(account, "broken", conn)
+
+	if delivered := hub.ToApps(account, []byte("one")); delivered != 1 {
+		t.Fatalf("initial enqueue accepted by %d devices, want 1", delivered)
+	}
+	select {
+	case <-socket.started:
+	case <-time.After(time.Second):
+		t.Fatal("writer did not start")
+	}
+	close(gate)
+	select {
+	case <-socket.closed:
+	case <-time.After(time.Second):
+		t.Fatal("write failure did not close the websocket")
+	}
+
+	// The next fanout observes the closed queue and removes it synchronously.
+	if delivered := hub.ToApps(account, []byte("two")); delivered != 0 {
+		t.Fatalf("closed consumer accepted a later frame (delivered=%d)", delivered)
+	}
+	_, apps, _ := hub.Stats()
+	if apps != 0 {
+		t.Fatalf("hub retained %d apps after writer failure, want 0", apps)
+	}
+}
+
+func TestHubFanoutDropsManySlowConsumersWithoutStalling(t *testing.T) {
+	hub := NewHub()
+	account := DeriveAccount("slow-consumer-load")
+	const slowCount = 64 // deliberately exceeds the old 32-worker fanout cap
+
+	sockets := make([]*recordingSocket, 0, slowCount)
+	connections := make([]*wsConn, 0, slowCount)
+	neverWrite := make(chan struct{})
+	for i := range slowCount {
+		socket := newRecordingSocket(neverWrite, nil)
+		conn := newWSConnWithQueue(socket, 1)
+		sockets = append(sockets, socket)
+		connections = append(connections, conn)
+		hub.AddApp(account, "slow-"+strconv.Itoa(i), conn)
+	}
+	t.Cleanup(func() {
+		for _, conn := range connections {
+			_ = conn.Close()
+		}
+	})
+	healthy := &fakeConn{}
+	hub.AddApp(account, "healthy", healthy)
+
+	if delivered := hub.ToApps(account, []byte("one")); delivered != slowCount+1 {
+		t.Fatalf("first fanout accepted by %d devices, want %d", delivered, slowCount+1)
+	}
+	for i, socket := range sockets {
+		select {
+		case <-socket.started:
+		case <-time.After(time.Second):
+			t.Fatalf("slow writer %d did not start", i)
+		}
+	}
+	if delivered := hub.ToApps(account, []byte("two")); delivered != slowCount+1 {
+		t.Fatalf("second fanout accepted by %d devices, want %d", delivered, slowCount+1)
+	}
+
+	done := make(chan int, 1)
+	go func() { done <- hub.ToApps(account, []byte("three")) }()
+	select {
+	case delivered := <-done:
+		if delivered != 1 {
+			t.Fatalf("overflow fanout accepted by %d devices, want only the healthy one", delivered)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("64 saturated consumers stalled fanout")
+	}
+	if healthy.count() != 3 {
+		t.Fatalf("healthy consumer received %d frames, want 3", healthy.count())
+	}
+	_, apps, _ := hub.Stats()
+	if apps != 1 {
+		t.Fatalf("hub retained %d apps after overflow load, want 1", apps)
 	}
 }
 
