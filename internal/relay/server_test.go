@@ -1,11 +1,13 @@
 package relay
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -255,6 +257,105 @@ func TestPairCodeRequiresDaemonToken(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("HTTP %d, want 401 for an unauthenticated code request", resp.StatusCode)
+	}
+}
+
+func TestPairBodyTimeoutReleasesCapacity(t *testing.T) {
+	server, ts := newTestServer(t)
+	server.pairingRequests = make(chan struct{}, 1)
+	server.pairingReadTimeout = 250 * time.Millisecond
+
+	secrets, err := server.hub.NewPairing(DeriveAccount("daemon-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Send an incomplete body over a real TCP connection. A ResponseRecorder
+	// cannot exercise ResponseController's connection deadline.
+	conn, err := net.Dial("tcp", strings.TrimPrefix(ts.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	request := "POST /pair HTTP/1.1\r\n" +
+		"Host: " + strings.TrimPrefix(ts.URL, "http://") + "\r\n" +
+		"Content-Type: application/json\r\n" +
+		"Content-Length: 1024\r\n" +
+		"Connection: close\r\n\r\n{"
+	if _, err := io.WriteString(conn, request); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for len(server.pairingRequests) != 1 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(server.pairingRequests) != 1 {
+		t.Fatal("slow request never occupied pairing capacity")
+	}
+
+	// Capacity is bounded while the slow body is outstanding. This request
+	// must be rejected without consuming its valid single-use token.
+	if _, status := redeem(t, ts.URL, secrets.Token); status != http.StatusServiceUnavailable {
+		t.Fatalf("request during slow body returned HTTP %d, want %d", status, http.StatusServiceUnavailable)
+	}
+
+	rawRequest, err := http.NewRequest(http.MethodPost, ts.URL+"/pair", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.ReadResponse(bufio.NewReader(conn), rawRequest)
+	if err != nil {
+		t.Fatalf("read slow request response: %v", err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusRequestTimeout {
+		t.Fatalf("slow body returned HTTP %d, want %d", response.StatusCode, http.StatusRequestTimeout)
+	}
+
+	deadline = time.Now().Add(time.Second)
+	for len(server.pairingRequests) != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(server.pairingRequests) != 0 {
+		t.Fatal("timed-out request did not release pairing capacity")
+	}
+
+	if token, status := redeem(t, ts.URL, secrets.Token); status != http.StatusOK || token == "" {
+		t.Fatalf("valid request after timeout returned HTTP %d with token %q", status, token)
+	}
+}
+
+func TestPairBodySizeLimitIsPreserved(t *testing.T) {
+	server, ts := newTestServer(t)
+	secrets, err := server.hub.NewPairing(DeriveAccount("daemon-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := json.Marshal(map[string]string{
+		"code":    secrets.Token,
+		"padding": strings.Repeat("x", 4096),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(ts.URL+"/pair", "application/json", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("oversized body returned HTTP %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+
+	// Rejecting the oversized document must happen before its embedded token
+	// is redeemed.
+	if token, status := redeem(t, ts.URL, secrets.Token); status != http.StatusOK || token == "" {
+		t.Fatalf("oversized body consumed the pairing token; retry returned HTTP %d", status)
 	}
 }
 

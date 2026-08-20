@@ -36,15 +36,16 @@ var ErrPairingCapacity = errors.New("relay: too many pending pairings")
 const (
 	maxLastSeenAccounts = 100_000
 	lastSeenTTL         = 30 * 24 * time.Hour
-	maxFanoutWorkers    = 32
 )
 
 // Conn is one live websocket participant. The hub only needs to be able to
 // push bytes at it, which keeps the transport swappable and the tests free of
 // real sockets.
 type Conn interface {
-	// Send delivers one frame. It must be safe for concurrent use and must not
-	// block indefinitely — a wedged phone must never stall the daemon.
+	// Send queues one immutable frame for ordered delivery. It must be safe for
+	// concurrent use and return without waiting for network I/O — a wedged
+	// phone must never stall the daemon. The caller does not mutate frame after
+	// passing it to Send.
 	Send(frame []byte) error
 	// Close terminates the connection.
 	Close() error
@@ -159,54 +160,55 @@ func (h *Hub) ToDaemon(account AccountID, frame []byte) error {
 	if !ok {
 		return ErrNoPeer
 	}
-	return conn.Send(frame)
+	if err := conn.Send(frame); err != nil {
+		// Closing unblocks the daemon's reader loop, whose existing deferred
+		// cleanup removes it and broadcasts the offline transition.
+		_ = conn.Close()
+		return err
+	}
+	return nil
 }
 
 // ToApps fans a frame out to every device on an account, returning how many
-// received it. Writes run through a bounded worker group: one unresponsive
-// phone must not hold every other device behind its write timeout, while an
-// account with thousands of sockets must not create thousands of goroutines
-// for every daemon event. Send errors are the reader loop's problem to clean
-// up.
+// accepted it into their ordered outbound queue. Conn.Send is nonblocking, so
+// fanout never waits for network I/O and does not need a goroutine per device.
+// A full or failed consumer is removed and closed immediately; its handler's
+// existing deferred cleanup remains safe and idempotent.
 func (h *Hub) ToApps(account AccountID, frame []byte) int {
+	type destination struct {
+		deviceID string
+		conn     Conn
+	}
 	h.mu.RLock()
-	devices := make([]Conn, 0, len(h.apps[account]))
-	for _, conn := range h.apps[account] {
-		devices = append(devices, conn)
+	devices := make([]destination, 0, len(h.apps[account]))
+	for deviceID, conn := range h.apps[account] {
+		devices = append(devices, destination{deviceID: deviceID, conn: conn})
 	}
 	h.mu.RUnlock()
 
-	if len(devices) == 0 {
-		return 0
-	}
-
-	jobs := make(chan Conn, len(devices))
-	results := make(chan bool, len(devices))
-	workers := min(len(devices), maxFanoutWorkers)
-	var wait sync.WaitGroup
-	for range workers {
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
-			for conn := range jobs {
-				results <- conn.Send(frame) == nil
-			}
-		}()
-	}
-	for _, conn := range devices {
-		jobs <- conn
-	}
-	close(jobs)
-	wait.Wait()
-	close(results)
-
 	delivered := 0
-	for ok := range results {
-		if ok {
+	for _, device := range devices {
+		if err := device.conn.Send(frame); err == nil {
 			delivered++
+			continue
 		}
+		h.removeAppIfCurrent(account, device.deviceID, device.conn)
+		_ = device.conn.Close()
 	}
 	return delivered
+}
+
+func (h *Hub) removeAppIfCurrent(account AccountID, deviceID string, conn Conn) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	devices := h.apps[account]
+	if devices[deviceID] != conn {
+		return
+	}
+	delete(devices, deviceID)
+	if len(devices) == 0 {
+		delete(h.apps, account)
+	}
 }
 
 // PairingSecrets are the two ways to redeem one pairing.

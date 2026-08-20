@@ -232,6 +232,14 @@ func pasteMultiline(ctx context.Context, name, text string) error {
 	if _, err := run(ctx, "load-buffer", "-b", buffer, file.Name()); err != nil {
 		return fmt.Errorf("tmux: could not stage the message: %w", err)
 	}
+	// paste-buffer -d normally removes it, but a missing pane or cancelled
+	// paste fails before -d takes effect. Always attempt cleanup with a fresh
+	// bounded context so sensitive prompt text is not left in tmux memory.
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_, _ = run(cleanupCtx, "delete-buffer", "-b", buffer)
+	}()
 	// -p uses bracketed paste; -d deletes the buffer afterwards.
 	if _, err := run(ctx, "paste-buffer", "-d", "-p", "-b", buffer, "-t", name); err != nil {
 		return fmt.Errorf("tmux: could not paste the message: %w", err)
@@ -266,6 +274,62 @@ func Kill(ctx context.Context, name string) error {
 // than the working directory because two agents can easily run in the same
 // directory, and typing into the wrong one would be worse than not delivering.
 func OwnsPID(panePID, pid int) bool {
+	if pid > 1 && pid == panePID {
+		return true
+	}
+	processes, err := SnapshotProcessTree(context.Background())
+	if err != nil {
+		return false
+	}
+	return processes.OwnsPID(panePID, pid)
+}
+
+// ProcessTree is one immutable snapshot of the operating system's PID → parent
+// relationships. A discovery sweep can perform any number of ancestry checks
+// against it without spawning another process or observing an inconsistent
+// process table halfway through the sweep.
+type ProcessTree struct {
+	parents map[int]int
+}
+
+// SnapshotProcessTree reads the process table with one cancellable ps command.
+// The caller's context is authoritative; commandTimeout is only a second line
+// of defence for callers that supplied no deadline of their own.
+func SnapshotProcessTree(ctx context.Context) (*ProcessTree, error) {
+	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "ps", "-axo", "pid=,ppid=").Output()
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, err
+	}
+	return parseProcessTree(string(out)), nil
+}
+
+func parseProcessTree(table string) *ProcessTree {
+	parents := make(map[int]int)
+	for _, line := range strings.Split(table, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		pid, pidErr := strconv.Atoi(fields[0])
+		parent, parentErr := strconv.Atoi(fields[1])
+		if pidErr != nil || parentErr != nil || pid <= 0 || parent < 0 {
+			continue
+		}
+		parents[pid] = parent
+	}
+	return &ProcessTree{parents: parents}
+}
+
+// OwnsPID reports whether pid is the pane process or one of its descendants in
+// this snapshot. A short depth bound protects against malformed/cyclic process
+// data and preserves the previous lookup's conservative behaviour.
+func (p *ProcessTree) OwnsPID(panePID, pid int) bool {
 	const maxDepth = 12 // guards against a cycle in a malformed process table
 	for range maxDepth {
 		if pid <= 1 {
@@ -274,27 +338,16 @@ func OwnsPID(panePID, pid int) bool {
 		if pid == panePID {
 			return true
 		}
-		parent, ok := parentPID(pid)
-		if !ok {
+		if p == nil {
+			return false
+		}
+		parent, ok := p.parents[pid]
+		if !ok || parent == pid {
 			return false
 		}
 		pid = parent
 	}
 	return false
-}
-
-func parentPID(pid int) (int, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "ps", "-o", "ppid=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
-		return 0, false
-	}
-	parent, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil {
-		return 0, false
-	}
-	return parent, true
 }
 
 func run(ctx context.Context, args ...string) (string, error) {

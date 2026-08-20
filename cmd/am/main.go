@@ -131,7 +131,11 @@ func buildRegistry() (*source.Registry, error) {
 
 	// OpenCode is reached over HTTP rather than the filesystem, so there is
 	// nothing to configure: the adapter stays silent when no server is up.
-	registry.Add(source.NewOpenCodeSource(os.Getenv("AGENTMAN_OPENCODE_URL")))
+	openCode := source.NewOpenCodeSource(os.Getenv("AGENTMAN_OPENCODE_URL"))
+	if err := openCode.Validate(); err != nil {
+		return nil, err
+	}
+	registry.Add(openCode)
 
 	return registry, nil
 }
@@ -208,6 +212,9 @@ func runHistory(ctx context.Context, args []string) error {
 	}
 	if sessionID == "" {
 		return fmt.Errorf("history needs a session id (see `am list`)")
+	}
+	if err := source.ValidatePageLimit(*limit); err != nil {
+		return fmt.Errorf("history: %w", err)
 	}
 
 	registry, buildErr := buildRegistry()

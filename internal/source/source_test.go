@@ -403,6 +403,18 @@ func TestRegistryRejectsUnknownSessions(t *testing.T) {
 	}
 }
 
+func TestRegistryRejectsUnsafePageLimitsBeforeCallingAdapter(t *testing.T) {
+	adapter := &flakySource{}
+	registry := NewRegistry()
+	registry.Add(adapter)
+
+	for _, limit := range []int{-1, 0, MaxPageMessages + 1, int(^uint(0) >> 1)} {
+		if _, err := registry.Page(context.Background(), "opencode:s1", "", limit); err == nil {
+			t.Errorf("limit %d was accepted", limit)
+		}
+	}
+}
+
 func TestRegistryOrdersWaitingInputFirst(t *testing.T) {
 	sessions := []protocol.Session{
 		{ID: "a", State: protocol.StateIdle, LastActivityAt: 300},

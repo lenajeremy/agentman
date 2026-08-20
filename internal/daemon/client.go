@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -18,6 +19,12 @@ import (
 const (
 	maxFrame     = 4 << 20
 	writeTimeout = 10 * time.Second
+	// A short ordered burst queue keeps refresh, hook, and history work from
+	// blocking on a slow relay socket. If it fills, reconnect/history recovery
+	// is safer than retaining an unbounded copy of live transcript data.
+	relayOutboundQueue = 32
+	relayOutboundBytes = 8 << 20
+	relayPingInterval  = 30 * time.Second
 	// Reconnect backoff. A laptop lid closes, a train enters a tunnel, the
 	// relay redeploys — all routine, none worth surfacing as an error.
 	minBackoff = time.Second
@@ -34,7 +41,7 @@ type Client struct {
 	token string
 
 	mu sync.Mutex
-	ws *websocket.Conn
+	ws *daemonRelayConn
 
 	// OnPairCode is called when the relay issues a pairing code.
 	OnPairCode func(code, token string, expiresAt time.Time)
@@ -64,9 +71,9 @@ func (c *Client) Account() relay.AccountID {
 // exists to avoid.
 func (c *Client) Send(event protocol.Event) error {
 	c.mu.Lock()
-	ws := c.ws
+	conn := c.ws
 	c.mu.Unlock()
-	if ws == nil {
+	if conn == nil {
 		return nil
 	}
 
@@ -82,17 +89,15 @@ func (c *Client) Send(event protocol.Event) error {
 		return fmt.Errorf("daemon: event exceeds websocket frame limit")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
-	defer cancel()
-	return ws.Write(ctx, websocket.MessageText, frame)
+	return conn.Send(frame)
 }
 
 // RequestPairCode asks the relay for a pairing code.
 func (c *Client) RequestPairCode(ctx context.Context) error {
 	c.mu.Lock()
-	ws := c.ws
+	conn := c.ws
 	c.mu.Unlock()
-	if ws == nil {
+	if conn == nil {
 		return fmt.Errorf("daemon: not connected to the relay")
 	}
 
@@ -105,9 +110,10 @@ func (c *Client) RequestPairCode(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, writeTimeout)
-	defer cancel()
-	return ws.Write(ctx, websocket.MessageText, frame)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return conn.Send(frame)
 }
 
 // Run maintains the relay connection until ctx is cancelled, dispatching app
@@ -168,15 +174,30 @@ func (c *Client) connectOnce(
 		return err
 	}
 	ws.SetReadLimit(maxFrame)
+	conn := newDaemonRelayConn(ws)
 
 	c.mu.Lock()
-	c.ws = ws
+	c.ws = conn
 	c.mu.Unlock()
 	connectionCtx, stopConnection := context.WithCancel(ctx)
 	devices := map[string]struct{}{}
+	requests := make(chan struct{}, maxConcurrentRequests)
+	mutationJobs := make(chan daemonRequestJob, maxConcurrentRequests)
 	var requestWG sync.WaitGroup
+	requestWG.Add(1)
+	go func() {
+		defer requestWG.Done()
+		runOrderedMutationQueue(
+			connectionCtx,
+			mutationJobs,
+			handler,
+			func(replyTo string, event protocol.Event) { c.sendReplyOn(conn, replyTo, event) },
+			func() { <-requests },
+		)
+	}()
 	defer func() {
 		stopConnection()
+		close(mutationJobs)
 		requestWG.Wait()
 		if c.OnDeviceDisconnected != nil {
 			for deviceID := range devices {
@@ -184,11 +205,11 @@ func (c *Client) connectOnce(
 			}
 		}
 		c.mu.Lock()
-		if c.ws == ws {
+		if c.ws == conn {
 			c.ws = nil
 		}
 		c.mu.Unlock()
-		ws.CloseNow()
+		_ = conn.Close()
 	}()
 
 	if c.OnStatus != nil {
@@ -200,8 +221,6 @@ func (c *Client) connectOnce(
 	if event := handler(connectionCtx, "", protocol.Request{Type: protocol.ReqListSessions}); event.Type != "" {
 		_ = c.Send(event)
 	}
-	requests := make(chan struct{}, maxConcurrentRequests)
-
 	for {
 		_, data, err := ws.Read(ctx)
 		if err != nil {
@@ -213,7 +232,7 @@ func (c *Client) connectOnce(
 			continue
 		}
 		if envelope.V != protocol.Version {
-			continue
+			return fmt.Errorf("daemon: relay uses incompatible protocol version %d", envelope.V)
 		}
 
 		if envelope.To == protocol.PeerRelay {
@@ -235,14 +254,32 @@ func (c *Client) connectOnce(
 			continue
 		}
 
-		// Each request is handled on its own goroutine so a slow page read
-		// cannot stall live events or another request behind it.
+		// Subscription ownership is connection state, not background work. Apply
+		// it synchronously so subscribe -> unsubscribe can never be reversed by
+		// the scheduler and leave a transcript follower running after navigation.
+		if req.Type == protocol.ReqSubscribe || req.Type == protocol.ReqUnsubscribe {
+			event := handler(connectionCtx, envelope.From, req)
+			if event.Type != "" {
+				c.sendReplyOn(conn, envelope.ID, event)
+			}
+			continue
+		}
+
+		// History reads remain concurrent, while terminal mutations enter one
+		// arrival-ordered queue. A mutex alone only prevents overlap; it does not
+		// promise FIFO and could send two rapid messages in reverse order.
 		select {
 		case requests <- struct{}{}:
 		default:
-			c.sendReplyOn(ws, envelope.ID, protocol.Event{
+			c.sendReplyOn(conn, envelope.ID, protocol.Event{
 				Type: protocol.EvtError, Error: "daemon is handling too many requests",
 			})
+			continue
+		}
+		if requestMutatesSession(req.Type) {
+			mutationJobs <- daemonRequestJob{
+				req: req, replyTo: envelope.ID, deviceID: envelope.From,
+			}
 			continue
 		}
 		requestWG.Add(1)
@@ -253,8 +290,35 @@ func (c *Client) connectOnce(
 			if event.Type == "" {
 				return // acknowledged with nothing to say (subscribe/unsubscribe)
 			}
-			c.sendReplyOn(ws, replyTo, event)
+			c.sendReplyOn(conn, replyTo, event)
 		}(req, envelope.ID, envelope.From)
+	}
+}
+
+type daemonRequestJob struct {
+	req      protocol.Request
+	replyTo  string
+	deviceID string
+}
+
+// runOrderedMutationQueue is deliberately a single consumer. Terminal and API
+// actions are not safely repeatable, and preserving their websocket arrival
+// order is more important than parallelizing a user's button taps.
+func runOrderedMutationQueue(
+	ctx context.Context,
+	jobs <-chan daemonRequestJob,
+	handler func(context.Context, string, protocol.Request) protocol.Event,
+	reply func(string, protocol.Event),
+	release func(),
+) {
+	for job := range jobs {
+		if ctx.Err() == nil {
+			event := handler(ctx, job.deviceID, job.req)
+			if event.Type != "" {
+				reply(job.replyTo, event)
+			}
+		}
+		release()
 	}
 }
 
@@ -274,7 +338,7 @@ func (c *Client) handleControl(envelope protocol.Envelope) string {
 	return ""
 }
 
-func (c *Client) sendReplyOn(ws *websocket.Conn, replyTo string, event protocol.Event) {
+func (c *Client) sendReplyOn(conn *daemonRelayConn, replyTo string, event protocol.Event) {
 	envelope, err := protocol.NewEnvelope(newID(), protocol.PeerApp, event)
 	if err != nil {
 		return
@@ -284,9 +348,117 @@ func (c *Client) sendReplyOn(ws *websocket.Conn, replyTo string, event protocol.
 	if err != nil || len(frame) > maxFrame {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
-	defer cancel()
-	_ = ws.Write(ctx, websocket.MessageText, frame)
+	_ = conn.Send(frame)
+}
+
+var (
+	errRelayConnectionClosed = errors.New("daemon: relay connection closed")
+	errRelayQueueFull        = errors.New("daemon: relay outbound queue full")
+)
+
+// daemonSocket is the write half used by daemonRelayConn. The narrow contract
+// makes slow-writer and ordering behavior deterministic to test.
+type daemonSocket interface {
+	Write(context.Context, websocket.MessageType, []byte) error
+	Ping(context.Context) error
+	CloseNow() error
+}
+
+// daemonRelayConn is the single writer for one relay websocket. Daemon event
+// producers enqueue without performing network I/O; one goroutine preserves
+// event/reply order and owns both data writes and keepalive pings.
+type daemonRelayConn struct {
+	ws          daemonSocket
+	outbound    chan []byte
+	done        chan struct{}
+	close       sync.Once
+	queueMu     sync.Mutex
+	queuedBytes int
+}
+
+func newDaemonRelayConn(ws daemonSocket) *daemonRelayConn {
+	return newDaemonRelayConnWithQueue(ws, relayOutboundQueue)
+}
+
+func newDaemonRelayConnWithQueue(ws daemonSocket, capacity int) *daemonRelayConn {
+	conn := &daemonRelayConn{
+		ws: ws, outbound: make(chan []byte, capacity), done: make(chan struct{}),
+	}
+	go conn.writeLoop()
+	return conn
+}
+
+func (c *daemonRelayConn) Send(frame []byte) error {
+	select {
+	case <-c.done:
+		return errRelayConnectionClosed
+	default:
+	}
+	c.queueMu.Lock()
+	if c.queuedBytes > relayOutboundBytes-len(frame) {
+		c.queueMu.Unlock()
+		_ = c.Close()
+		return errRelayQueueFull
+	}
+	c.queuedBytes += len(frame)
+	select {
+	case c.outbound <- frame:
+		c.queueMu.Unlock()
+		select {
+		case <-c.done:
+			return errRelayConnectionClosed
+		default:
+			return nil
+		}
+	default:
+		c.queuedBytes -= len(frame)
+		c.queueMu.Unlock()
+		_ = c.Close()
+		return errRelayQueueFull
+	}
+}
+
+func (c *daemonRelayConn) Close() error {
+	c.close.Do(func() {
+		close(c.done)
+		_ = c.ws.CloseNow()
+	})
+	return nil
+}
+
+func (c *daemonRelayConn) writeLoop() {
+	ticker := time.NewTicker(relayPingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.done:
+			return
+		default:
+		}
+		select {
+		case <-c.done:
+			return
+		case frame := <-c.outbound:
+			ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+			err := c.ws.Write(ctx, websocket.MessageText, frame)
+			cancel()
+			c.queueMu.Lock()
+			c.queuedBytes -= len(frame)
+			c.queueMu.Unlock()
+			if err != nil {
+				_ = c.Close()
+				return
+			}
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+			err := c.ws.Ping(ctx)
+			cancel()
+			if err != nil {
+				_ = c.Close()
+				return
+			}
+		}
+	}
 }
 
 func normalizeWS(raw string) string {

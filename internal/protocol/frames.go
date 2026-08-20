@@ -4,7 +4,7 @@ import "encoding/json"
 
 // Version is the wire protocol version. Bumped only on a breaking change, so
 // an old app talking to a new relay fails loudly rather than subtly.
-const Version = 1
+const Version = 2
 
 // Peer names a routing destination.
 type Peer string
@@ -65,7 +65,8 @@ type Request struct {
 	Limit  int    `json:"limit,omitempty"`
 	Text   string `json:"text,omitempty"`
 	// OptionKey selects an option on ReqAnswer.
-	OptionKey string `json:"optionKey,omitempty"`
+	QuestionID string `json:"questionId,omitempty"`
+	OptionKey  string `json:"optionKey,omitempty"`
 	// OptionKeys and AnswerText support API questions that allow several
 	// selections or a custom response. OptionKey remains the terminal-menu path.
 	OptionKeys []string `json:"optionKeys,omitempty"`

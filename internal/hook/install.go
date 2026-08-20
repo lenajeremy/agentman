@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -39,6 +40,12 @@ type Plan struct {
 	// Err is set when this agent cannot be configured, without preventing
 	// other agents from being configured.
 	Err error
+	// beforeExists and beforeDigest bind this plan to the exact filesystem
+	// state it inspected. They stay private because Installer.Plans, rather
+	// than a caller displaying the plan, owns that optimistic-concurrency
+	// precondition.
+	beforeExists bool
+	beforeDigest [sha256.Size]byte
 }
 
 // Plans computes the changes for every supported agent without applying them.
@@ -69,6 +76,9 @@ func (p Plan) Apply() error {
 	if err := os.MkdirAll(filepath.Dir(p.Path), 0o700); err != nil {
 		return err
 	}
+	if err := p.verifySourceUnchanged(); err != nil {
+		return err
+	}
 	// Back up whatever is there now. These are the user's real agent configs;
 	// a one-command undo matters more than tidiness.
 	if p.Before != "" {
@@ -76,7 +86,33 @@ func (p Plan) Apply() error {
 			return err
 		}
 	}
+	// Writing and syncing the backup takes time. Re-check immediately before
+	// the atomic replacement so an editor or agent process that saved during
+	// that interval is caught as well.
+	if err := p.verifySourceUnchanged(); err != nil {
+		return err
+	}
 	return writeFileAtomic(p.Path, []byte(p.After), 0o600)
+}
+
+func (p Plan) verifySourceUnchanged() error {
+	raw, err := os.ReadFile(p.Path)
+	switch {
+	case err == nil:
+		if p.beforeExists && sha256.Sum256(raw) == p.beforeDigest {
+			return nil
+		}
+	case os.IsNotExist(err):
+		if !p.beforeExists {
+			return nil
+		}
+	default:
+		return fmt.Errorf("hook: re-read %q before applying changes: %w", p.Path, err)
+	}
+	return fmt.Errorf(
+		"hook: refusing to apply a stale plan: %q changed after it was inspected; re-run the install or uninstall command to merge the newer configuration",
+		p.Path,
+	)
 }
 
 /* --------------------------------- Claude -------------------------------- */
@@ -91,6 +127,8 @@ func (in Installer) planClaude(home, token string, remove bool) Plan {
 		return plan
 	}
 	plan.Before = string(raw)
+	plan.beforeExists = err == nil
+	plan.beforeDigest = sha256.Sum256(raw)
 
 	// Preserve unknown keys and their order as far as Go allows: decode into a
 	// generic map so settings we know nothing about survive the round trip.
@@ -159,6 +197,8 @@ func (in Installer) planCodex(home, token string, remove bool) Plan {
 		return plan
 	}
 	plan.Before = string(raw)
+	plan.beforeExists = err == nil
+	plan.beforeDigest = sha256.Sum256(raw)
 
 	base, _ := stripCodexNotifyBlock(plan.Before)
 	if remove {

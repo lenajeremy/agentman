@@ -19,6 +19,16 @@ import {
   loadCredentials,
 } from "./client";
 import {
+  applyAgentActionResult,
+  applyPendingSendResult,
+  clearQueuedForSessionTransitions,
+  clearQueuedForTurn,
+  questionIdentity,
+  reconcileAgentActions,
+  upsertAgentAction,
+  type PendingAgentAction,
+} from "./action-state";
+import {
   CATCH_UP_PAGE,
   needsAnotherPage,
   newestTimestamp,
@@ -33,6 +43,9 @@ import {
   saveDismissals,
   type Dismissals,
 } from "./dismissed";
+import { draftNamespace } from "./draft-policy";
+import { clearDraft } from "./drafts";
+import { newFrameId } from "./id";
 import {
   DaemonEvent,
   Message,
@@ -46,6 +59,10 @@ import {
   sessionNeedsAnswer,
   updateQuestionAlerts,
 } from "./question-alerts";
+import {
+  MAX_RETAINED_MESSAGES,
+  mergeRetainedMessages,
+} from "./retention";
 
 /** A message the user sent that has not been confirmed yet. */
 export interface PendingSend {
@@ -54,6 +71,16 @@ export interface PendingSend {
   text: string;
   status: "sending" | SendStatus;
   error?: string;
+  /** Account scope whose persisted composer this send will settle. */
+  draftScope?: string;
+}
+
+interface PageState {
+  cursor?: string;
+  hasMore: boolean;
+  loading: boolean;
+  /** The phone stopped at its bounded cache window; older rows remain on Mac. */
+  retentionLimited?: boolean;
 }
 
 interface Store {
@@ -70,8 +97,9 @@ interface Store {
    *  notification for one would lead to a screen that cannot load. */
   visibleSessions: Session[];
   messages: Record<string, Message[]>;
-  pageState: Record<string, { cursor?: string; hasMore: boolean; loading: boolean }>;
+  pageState: Record<string, PageState>;
   pending: PendingSend[];
+  actions: PendingAgentAction[];
 
   signIn(creds: Credentials): void;
   signOut(): Promise<void>;
@@ -79,7 +107,7 @@ interface Store {
   openSession(sessionId: string): void;
   closeSession(sessionId: string): void;
   loadOlder(sessionId: string): void;
-  sendMessage(sessionId: string, text: string): void;
+  sendMessage(sessionId: string, text: string): string;
   interruptSession(sessionId: string): void;
   answerQuestion(sessionId: string, answer: QuestionAnswer): void;
   dismissPending(clientId: string): void;
@@ -101,16 +129,15 @@ export function useStore(): Store {
   return store;
 }
 
-/** Merge by id, newest wins — a live-tailed message can also arrive in a page. */
-function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
-  if (incoming.length === 0) return existing;
-  const byId = new Map<string, Message>();
-  for (const message of existing) byId.set(message.id, message);
-  for (const message of incoming) byId.set(message.id, message);
-  return Array.from(byId.values()).sort((a, b) => {
-    if (a.ts !== b.ts) return a.ts - b.ts;
-    return a.id < b.id ? -1 : 1;
-  });
+/** Clear drafts only for sends proven to have left pending state successfully. */
+function clearSettledDrafts(before: PendingSend[], after: PendingSend[]): void {
+  const remaining = new Set(after.map((item) => item.clientId));
+  for (const item of before) {
+    if (item.status !== "queued" || remaining.has(item.clientId) || !item.draftScope) {
+      continue;
+    }
+    void clearDraft(item.draftScope, item.sessionId);
+  }
 }
 
 function notifyQuestion(session: Session) {
@@ -137,8 +164,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
   const [pageState, setPageState] = useState<Store["pageState"]>({});
   const [pending, setPending] = useState<PendingSend[]>([]);
+  const [actions, setActions] = useState<PendingAgentAction[]>([]);
   const [dismissals, setDismissals] = useState<Dismissals>({});
   const sessionsRef = useRef<Session[]>([]);
+  const messagesRef = useRef<Record<string, Message[]>>({});
 
   const clientRef = useRef<Client | null>(null);
   /** Maps a fetch_messages frame id to the session that asked, so a page can be
@@ -149,16 +178,66 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    *  the newest end of the feed, so letting it set the scroll cursor would make
    *  "load older" jump over everything in between. */
   const catchUpRequests = useRef(new Map<string, CatchUpState>());
+  /** Navigation can beat secure credential loading on a notification cold start.
+   *  Keep intent outside the socket so attach() can fulfill it later. */
+  const desiredSubscriptions = useRef(new Set<string>());
+  const pendingInitialLoads = useRef(new Set<string>());
+  const pendingCatchUps = useRef(new Map<string, CatchUpState>());
   /** Sessions whose current blocked period has already produced an alert. */
   const announcedQuestions = useRef(new Set<string>());
+
+  const mergeSessionMessages = useCallback((sessionId: string, incoming: Message[]) => {
+    const retained = mergeRetainedMessages(
+      messagesRef.current[sessionId] ?? [],
+      incoming,
+    );
+    messagesRef.current = {
+      ...messagesRef.current,
+      [sessionId]: retained.messages,
+    };
+    setMessages(messagesRef.current);
+    return retained;
+  }, []);
 
   const handleEvent = useCallback((event: DaemonEvent, replyTo?: string) => {
     switch (event.type) {
       case "sessions": {
         const list = event.sessions ?? [];
+        const previous = sessionsRef.current;
+        const liveIds = new Set(list.map((session) => session.id));
+        const removedIds = Object.keys(messagesRef.current).filter((id) => !liveIds.has(id));
+        if (removedIds.length > 0) {
+          const nextMessages = { ...messagesRef.current };
+          for (const id of removedIds) {
+            delete nextMessages[id];
+            desiredSubscriptions.current.delete(id);
+            pendingInitialLoads.current.delete(id);
+            pendingCatchUps.current.delete(id);
+            clientRef.current?.forgetSession(id);
+          }
+          for (const [requestId, sessionId] of pageRequests.current) {
+            if (!liveIds.has(sessionId)) pageRequests.current.delete(requestId);
+          }
+          for (const [requestId, state] of catchUpRequests.current) {
+            if (!liveIds.has(state.sessionId)) catchUpRequests.current.delete(requestId);
+          }
+          messagesRef.current = nextMessages;
+          setMessages(nextMessages);
+          setPageState((current) => {
+            const nextPages = { ...current };
+            for (const id of removedIds) delete nextPages[id];
+            return nextPages;
+          });
+        }
         const alerts = reconcileQuestionAlerts(announcedQuestions.current, list);
         announcedQuestions.current = alerts.announced;
         for (const session of alerts.newlyPending) notifyQuestion(session);
+        setPending((current) => {
+          const next = clearQueuedForSessionTransitions(current, previous, list);
+          clearSettledDrafts(current, next);
+          return next;
+        });
+        setActions((current) => reconcileAgentActions(current, list));
         sessionsRef.current = list;
         setSessions(list);
         // A full list from a connected daemon is the only safe moment to prune:
@@ -180,12 +259,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const alert = updateQuestionAlerts(announcedQuestions.current, updated);
         announcedQuestions.current = alert.announced;
         if (alert.newlyPending) notifyQuestion(alert.newlyPending);
-        const currentIndex = sessionsRef.current.findIndex((session) => session.id === updated.id);
-        sessionsRef.current = currentIndex < 0
-          ? [...sessionsRef.current, updated]
-          : sessionsRef.current.map((session, index) =>
+        const previous = sessionsRef.current;
+        const currentIndex = previous.findIndex((session) => session.id === updated.id);
+        const next = currentIndex < 0
+          ? [...previous, updated]
+          : previous.map((session, index) =>
               index === currentIndex ? updated : session,
             );
+        setPending((current) => {
+          const nextPending = clearQueuedForSessionTransitions(current, previous, next);
+          clearSettledDrafts(current, nextPending);
+          return nextPending;
+        });
+        setActions((current) => reconcileAgentActions(current, next));
+        sessionsRef.current = next;
         setSessions((current) => {
           const index = current.findIndex((s) => s.id === updated.id);
           if (index === -1) return [...current, updated];
@@ -196,19 +283,63 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         break;
       }
 
-      case "session_gone":
+      case "session_gone": {
         if (event.sessionId) announcedQuestions.current.delete(event.sessionId);
-        sessionsRef.current = sessionsRef.current.filter((session) => session.id !== event.sessionId);
+        const previous = sessionsRef.current;
+        const next = previous.filter((session) => session.id !== event.sessionId);
+        setPending((current) =>
+          current.filter((item) => item.sessionId !== event.sessionId),
+        );
+        setActions((current) => reconcileAgentActions(current, next));
+        if (event.sessionId) {
+          const nextMessages = { ...messagesRef.current };
+          delete nextMessages[event.sessionId];
+          messagesRef.current = nextMessages;
+          setMessages(nextMessages);
+          setPageState((current) => {
+            const nextPages = { ...current };
+            delete nextPages[event.sessionId!];
+            return nextPages;
+          });
+          for (const [requestId, sessionId] of pageRequests.current) {
+            if (sessionId === event.sessionId) pageRequests.current.delete(requestId);
+          }
+          for (const [requestId, state] of catchUpRequests.current) {
+            if (state.sessionId === event.sessionId) catchUpRequests.current.delete(requestId);
+          }
+          pendingInitialLoads.current.delete(event.sessionId);
+          pendingCatchUps.current.delete(event.sessionId);
+          desiredSubscriptions.current.delete(event.sessionId);
+          clientRef.current?.forgetSession(event.sessionId);
+        }
+        sessionsRef.current = next;
         setSessions((current) => current.filter((s) => s.id !== event.sessionId));
         break;
+      }
 
       case "messages": {
         const sessionId = event.sessionId;
         if (!sessionId || !event.messages) break;
-        setMessages((current) => ({
-          ...current,
-          [sessionId]: mergeMessages(current[sessionId] ?? [], event.messages!),
-        }));
+        if (
+          !desiredSubscriptions.current.has(sessionId) &&
+          !sessionsRef.current.some((session) => session.id === sessionId)
+        ) break;
+        const retained = mergeSessionMessages(sessionId, event.messages);
+        if (retained.limited || retained.messages.length >= MAX_RETAINED_MESSAGES) {
+          setPageState((current) => {
+            const state = current[sessionId];
+            if (!retained.limited && !state?.hasMore) return current;
+            return {
+              ...current,
+              [sessionId]: {
+                ...state,
+                hasMore: false,
+                loading: false,
+                retentionLimited: true,
+              },
+            };
+          });
+        }
         break;
       }
 
@@ -219,13 +350,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // A catch-up page: merge it, and keep walking back until it overlaps
         // what we already had. Anything else would leave a silent hole.
         const catching = replyTo ? catchUpRequests.current.get(replyTo) : undefined;
+        const requestedSession = replyTo
+          ? pageRequests.current.get(replyTo)
+          : undefined;
+        // A removed session can still have a page goroutine completing on the
+        // daemon. Its correlation was deleted during cleanup; do not recreate
+        // the transcript cache from that late response.
+        if (replyTo && !catching && !requestedSession) break;
         if (catching) {
           catchUpRequests.current.delete(replyTo!);
           const sessionId = page.sessionId || catching.sessionId;
-          setMessages((current) => ({
-            ...current,
-            [sessionId]: mergeMessages(current[sessionId] ?? [], page.messages),
-          }));
+          const retained = mergeSessionMessages(sessionId, page.messages);
+          if (
+            retained.limited ||
+            (retained.messages.length >= MAX_RETAINED_MESSAGES && page.hasMore)
+          ) {
+            setPageState((current) => ({
+              ...current,
+              [sessionId]: {
+                ...current[sessionId],
+                hasMore: false,
+                loading: false,
+                retentionLimited: true,
+              },
+            }));
+          }
 
           if (needsAnotherPage(page.messages, page.hasMore, catching)) {
             const id = clientRef.current?.send({
@@ -241,22 +390,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           break;
         }
 
-        const sessionId = page.sessionId || (replyTo ? pageRequests.current.get(replyTo) : undefined);
+        const sessionId = page.sessionId || requestedSession;
         if (!sessionId) break;
         if (replyTo) pageRequests.current.delete(replyTo);
 
-        setMessages((current) => ({
-          ...current,
-          [sessionId]: mergeMessages(current[sessionId] ?? [], page.messages),
-        }));
+        const retained = mergeSessionMessages(sessionId, page.messages);
+        const retentionLimited = retained.limited ||
+          (retained.messages.length >= MAX_RETAINED_MESSAGES && page.hasMore);
         setPageState((current) => ({
           ...current,
-          [sessionId]: { cursor: page.nextCursor, hasMore: page.hasMore, loading: false },
+          [sessionId]: {
+            cursor: page.nextCursor,
+            hasMore: retentionLimited ? false : page.hasMore,
+            loading: false,
+            retentionLimited: current[sessionId]?.retentionLimited || retentionLimited,
+          },
         }));
         break;
       }
 
       case "turn_complete": {
+        setPending((pendingSends) => {
+          const next = clearQueuedForTurn(pendingSends, event.sessionId);
+          clearSettledDrafts(pendingSends, next);
+          return next;
+        });
         const current = sessionsRef.current.find((session) => session.id === event.sessionId);
         if (current && sessionNeedsAnswer(current)) break;
         // The whole point of the product: tell the user their agent finished.
@@ -281,13 +439,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       case "send_result": {
         if (!event.clientId) break;
-        setPending((current) =>
-          current.map((item) =>
-            item.clientId === event.clientId
-              ? { ...item, status: event.status ?? "failed", error: event.error }
-              : item,
-          ),
-        );
+        setPending((current) => {
+          if (event.status === "delivered") {
+            const sent = current.find((item) => item.clientId === event.clientId);
+            if (sent?.draftScope) void clearDraft(sent.draftScope, sent.sessionId);
+          }
+          return applyPendingSendResult(current, event);
+        });
+        setActions((current) => applyAgentActionResult(current, event));
         break;
       }
 
@@ -309,16 +468,58 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 		break;
 	  }
     }
-  }, []);
+  }, [mergeSessionMessages]);
 
   const attach = useCallback(
     (creds: Credentials) => {
       clientRef.current?.close();
       const client = new Client(creds, {
         onEvent: handleEvent,
-        onControl: (control) => {
+        onControl: (control, replyTo) => {
           if (control.type === "daemon_offline" && control.lastSeenAt) {
             setLastSeenAt(control.lastSeenAt);
+          }
+          // An offline Mac is transient, so the Client retains idempotent reads
+          // for replay. A relay error is permanent for that exact request and
+          // must retire both its replay entry and UI correlation.
+          if (replyTo && (control.type === "daemon_offline" || control.type === "error")) {
+            const sessionId = pageRequests.current.get(replyTo) ??
+              catchUpRequests.current.get(replyTo)?.sessionId;
+            if (control.type === "error") {
+              pageRequests.current.delete(replyTo);
+              catchUpRequests.current.delete(replyTo);
+            }
+            if (sessionId) {
+              setPageState((current) => ({
+                ...current,
+                [sessionId]: {
+                  ...current[sessionId],
+                  hasMore: control.type === "error"
+                    ? false
+                    : (current[sessionId]?.hasMore ?? true),
+                  loading: false,
+                },
+              }));
+            }
+          }
+          if (
+            control.type === "daemon_online" ||
+            (control.type === "hello" && control.daemonOnline === true)
+          ) {
+            const waiting = new Set(pageRequests.current.values());
+            if (waiting.size > 0) {
+              setPageState((current) => {
+                const next = { ...current };
+                for (const sessionId of waiting) {
+                  next[sessionId] = {
+                    ...next[sessionId],
+                    hasMore: next[sessionId]?.hasMore ?? true,
+                    loading: true,
+                  };
+                }
+                return next;
+              });
+            }
           }
         },
         onConnectionChange: (state, online) => {
@@ -327,6 +528,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         },
       });
       clientRef.current = client;
+
+      for (const sessionId of desiredSubscriptions.current) client.subscribe(sessionId);
+      for (const sessionId of pendingInitialLoads.current) {
+        const id = client.send({ type: "fetch_messages", sessionId, limit: 40 });
+        if (id) pageRequests.current.set(id, sessionId);
+        else {
+          setPageState((current) => ({
+            ...current,
+            [sessionId]: { hasMore: true, loading: false },
+          }));
+        }
+      }
+      pendingInitialLoads.current.clear();
+      for (const [sessionId, state] of pendingCatchUps.current) {
+        const id = client.send({
+          type: "fetch_messages",
+          sessionId,
+          limit: CATCH_UP_PAGE,
+        });
+        if (id) catchUpRequests.current.set(id, state);
+      }
+      pendingCatchUps.current.clear();
       client.connect();
     },
     [handleEvent],
@@ -374,16 +597,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       messages,
       pageState,
       pending,
+      actions,
 
       signIn(creds) {
 		// Pairing to another daemon is an account boundary. Never retain the
 		// previous machine's transcripts or pending messages on the new board.
 		pageRequests.current.clear();
 		catchUpRequests.current.clear();
+		desiredSubscriptions.current.clear();
+		pendingInitialLoads.current.clear();
+		pendingCatchUps.current.clear();
 		setSessions([]);
+		messagesRef.current = {};
 		setMessages({});
 		setPageState({});
 		setPending([]);
+		setActions([]);
 		setDismissals({});
 		announcedQuestions.current.clear();
 		sessionsRef.current = [];
@@ -398,11 +627,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         await clearCredentials();
         setCredentials(null);
         setSessions([]);
+        messagesRef.current = {};
         setMessages({});
 		setPageState({});
 		setPending([]);
+		setActions([]);
 		pageRequests.current.clear();
 		catchUpRequests.current.clear();
+		desiredSubscriptions.current.clear();
+		pendingInitialLoads.current.clear();
+		pendingCatchUps.current.clear();
 		announcedQuestions.current.clear();
 		sessionsRef.current = [];
 		setDaemonOnline(false);
@@ -417,6 +651,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
 
       openSession(sessionId) {
+        desiredSubscriptions.current.add(sessionId);
         clientRef.current?.subscribe(sessionId);
 
         const known = messages[sessionId] ?? [];
@@ -426,6 +661,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ...current,
             [sessionId]: { hasMore: true, loading: true },
           }));
+          if (!clientRef.current) {
+            pendingInitialLoads.current.add(sessionId);
+            return;
+          }
           const id = clientRef.current?.send({
             type: "fetch_messages",
             sessionId,
@@ -452,6 +691,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // than pulling a whole transcript down a phone connection. The rest is
         // still reachable by scrolling up.
         const newest = newestTimestamp(known);
+        if (!clientRef.current) {
+          pendingCatchUps.current.set(sessionId, {
+            sessionId,
+            sinceTs: newest,
+            depth: 0,
+          });
+          return;
+        }
         const id = clientRef.current?.send({
           type: "fetch_messages",
           sessionId,
@@ -463,12 +710,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       closeSession(sessionId) {
         // Unsubscribing on blur is what keeps idle sessions free: the daemon
         // stops tailing a transcript nobody is looking at.
+        desiredSubscriptions.current.delete(sessionId);
+        pendingInitialLoads.current.delete(sessionId);
+        pendingCatchUps.current.delete(sessionId);
         clientRef.current?.unsubscribe(sessionId);
       },
 
       loadOlder(sessionId) {
         const state = pageState[sessionId];
         if (!state?.hasMore || state.loading) return;
+        // A relay-deferred request retains its correlation for replay. Do not
+        // pile duplicate reads onto it while its spinner is intentionally down.
+        if ([...pageRequests.current.values()].includes(sessionId)) return;
         setPageState((current) => ({
           ...current,
           [sessionId]: { ...state, loading: true },
@@ -490,10 +743,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
 
       sendMessage(sessionId, text) {
-        const clientId = `send-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const clientId = `send-${newFrameId()}`;
+        const draftScope = credentials ? draftNamespace(credentials) : undefined;
         setPending((current) => [
           ...current,
-          { clientId, sessionId, text, status: "sending" },
+          { clientId, sessionId, text, status: "sending", draftScope },
         ]);
         const sent = clientRef.current?.send({
           type: "send_message",
@@ -510,23 +764,61 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ),
           );
         }
+        return clientId;
       },
 
       interruptSession(sessionId) {
-        clientRef.current?.send({
+        const clientId = `interrupt-${newFrameId()}`;
+        const action: PendingAgentAction = {
+          clientId,
+          sessionId,
+          kind: "interrupt",
+          status: "sending",
+        };
+        setActions((current) => upsertAgentAction(current, action));
+        const sent = clientRef.current?.send({
           type: "interrupt",
           sessionId,
-          clientId: `interrupt-${Date.now()}`,
+          clientId,
         });
+        if (!sent) {
+          setActions((current) =>
+            applyAgentActionResult(current, {
+              clientId,
+              status: "failed",
+              error: "Your Mac is not connected.",
+            }),
+          );
+        }
       },
 
       answerQuestion(sessionId, answer) {
-        clientRef.current?.send({
+        const clientId = `answer-${newFrameId()}`;
+        const question = sessions.find((session) => session.id === sessionId)?.question;
+        const action: PendingAgentAction = {
+          clientId,
+          sessionId,
+          kind: "answer",
+          status: "sending",
+          questionIdentity: question ? questionIdentity(question) : undefined,
+        };
+        setActions((current) => upsertAgentAction(current, action));
+        const sent = clientRef.current?.send({
           type: "answer_question",
           sessionId,
           ...answer,
-          clientId: `answer-${Date.now()}`,
+          questionId: question?.id,
+          clientId,
         });
+        if (!sent) {
+          setActions((current) =>
+            applyAgentActionResult(current, {
+              clientId,
+              status: "failed",
+              error: "Your Mac is not connected.",
+            }),
+          );
+        }
         // The question clears itself on the next discovery sweep, so the row
         // is left alone rather than optimistically hidden — if the keystroke
         // did not land, the user needs to still see the choice.
@@ -565,7 +857,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         });
       },
     }),
-    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, dismissals, attach],
+    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, attach],
   );
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;

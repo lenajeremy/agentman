@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/lenajeremy/agentman/internal/speech"
 )
 
 // DefaultPort is where the daemon listens for hook deliveries. It binds
@@ -26,6 +29,9 @@ type Config struct {
 	// HookAddr is the loopback listener selected by `am serve -addr`. Hooks are
 	// separate processes, so persisting it is what makes a custom port usable.
 	HookAddr string `json:"hookAddr,omitempty"`
+	// Speech reads finished turns out loud. Off unless asked for: audio that
+	// starts on its own is a bad surprise, particularly in an office.
+	Speech speech.Config `json:"speech,omitempty"`
 }
 
 // ListenAddr returns the configured safe loopback listener or the default.
@@ -69,15 +75,25 @@ func LoadConfig(home string) (Config, error) {
 	switch {
 	case err == nil:
 		var cfg Config
-		if json.Unmarshal(raw, &cfg) == nil && cfg.Token != "" {
-			// Repair permissive modes left by older releases or manual copies.
-			if err := os.Chmod(path, 0o600); err != nil {
-				return Config{}, err
-			}
-			return cfg, nil
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			return Config{}, fmt.Errorf(
+				"hook: invalid config %q: malformed JSON: %w; restore this file, or remove it and pair devices again to create a new identity",
+				path, err,
+			)
 		}
-		// Corrupt or tokenless: fall through and mint a new one rather than
-		// leaving the daemon unable to authenticate anything.
+		if strings.TrimSpace(cfg.Token) == "" {
+			return Config{}, fmt.Errorf(
+				"hook: invalid config %q: authentication token is missing; restore this file, or remove it and pair devices again to create a new identity",
+				path,
+			)
+		}
+		// Repair permissive modes left by older releases or manual copies only
+		// after the contents have been validated. Invalid files must remain
+		// untouched so their previous identity can still be recovered.
+		if err := os.Chmod(path, 0o600); err != nil {
+			return Config{}, err
+		}
+		return cfg, nil
 	case !os.IsNotExist(err):
 		return Config{}, err
 	}

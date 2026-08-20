@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +24,25 @@ type scriptedSource struct {
 	reply    string
 	failed   string
 	question *protocol.Question
+}
+
+type inspectingClaudeSource struct {
+	streamingSource
+	question      *protocol.Question
+	inspectErrors int
+}
+
+func (s *inspectingClaudeSource) CurrentQuestion(
+	context.Context,
+	string,
+) (*protocol.Question, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.inspectErrors > 0 {
+		s.inspectErrors--
+		return nil, errors.New("tmux capture timed out")
+	}
+	return s.question, nil
 }
 
 func (s *scriptedSource) set(state protocol.State) {
@@ -136,6 +156,187 @@ func TestTurnCompleteWithoutHooks(t *testing.T) {
 	}
 }
 
+func TestTwoShortTurnsBothNotify(t *testing.T) {
+	registry := source.NewRegistry()
+	scripted := &scriptedSource{state: protocol.StateBusy, reply: "Done."}
+	registry.Add(scripted)
+	sink := &recordingSink{}
+	agent := New(registry, sink)
+	ctx := context.Background()
+
+	agent.refresh(ctx, true)
+	scripted.set(protocol.StateIdle)
+	agent.refresh(ctx, false)
+	scripted.set(protocol.StateBusy)
+	agent.refresh(ctx, false)
+	scripted.set(protocol.StateIdle)
+	agent.refresh(ctx, false)
+
+	if got := len(sink.turnCompletes()); got != 2 {
+		t.Fatalf("two busy→idle turns produced %d notifications, want 2", got)
+	}
+}
+
+func TestDuplicateClaudeStopHookNotifiesOnce(t *testing.T) {
+	sink := &recordingSink{}
+	registry := source.NewRegistry()
+	registry.Add(&inspectingClaudeSource{})
+	agent := New(registry, sink)
+	agent.turnDelay = 0
+	agent.sessions["claude:s1"] = protocol.Session{
+		ID: "claude:s1", Kind: protocol.KindClaude, Name: "checkout", State: protocol.StateIdle,
+	}
+	event := hook.Event{
+		Kind: protocol.KindClaude, Name: hook.NameStop, SessionID: "claude:s1",
+		Payload: hook.Payload{LastAssistantMessage: "Done."},
+	}
+	agent.handleHook(event)
+	agent.handleHook(event)
+
+	if got := len(sink.turnCompletes()); got != 1 {
+		t.Fatalf("duplicate Claude Stop hooks produced %d notifications, want 1", got)
+	}
+}
+
+func TestClaudeStopChecksLiveQuestionWithoutWaitingForFullDiscovery(t *testing.T) {
+	registry := source.NewRegistry()
+	registry.Add(&inspectingClaudeSource{question: &protocol.Question{
+		ID: "terminal-current", Prompt: "Choose a path",
+		Options: []protocol.QuestionOption{{Key: "1", Label: "Local"}},
+	}})
+	sink := &recordingSink{}
+	agent := New(registry, sink)
+	agent.turnDelay = 0
+	agent.sessions["claude:s1"] = protocol.Session{
+		ID: "claude:s1", Kind: protocol.KindClaude, Name: "checkout", State: protocol.StateIdle,
+	}
+
+	agent.handleHook(hook.Event{
+		Kind: protocol.KindClaude, Name: hook.NameStop, SessionID: "claude:s1",
+		Payload: hook.Payload{LastAssistantMessage: "Done."},
+	})
+
+	if got := len(sink.turnCompletes()); got != 0 {
+		t.Fatalf("question-producing Stop hook emitted %d completion notifications", got)
+	}
+	agent.mu.Lock()
+	current := agent.sessions["claude:s1"]
+	agent.mu.Unlock()
+	if current.State != protocol.StateWaitingInput || current.Question == nil ||
+		current.Question.ID != "terminal-current" {
+		t.Fatalf("live question was not surfaced by targeted inspection: %+v", current)
+	}
+}
+
+func TestClaudeStopRetriesInspectionErrorInsteadOfFalseCompletion(t *testing.T) {
+	registry := source.NewRegistry()
+	registry.Add(&inspectingClaudeSource{
+		inspectErrors: 1,
+		question: &protocol.Question{
+			ID: "terminal-current", Prompt: "Choose a path",
+			Options: []protocol.QuestionOption{{Key: "1", Label: "Local"}},
+		},
+	})
+	sink := &recordingSink{}
+	agent := New(registry, sink)
+	agent.turnDelay = 0
+	agent.questionRetryDelay = 5 * time.Millisecond
+	agent.sessions["claude:s1"] = protocol.Session{
+		ID: "claude:s1", Kind: protocol.KindClaude, Name: "checkout", State: protocol.StateIdle,
+	}
+
+	agent.handleHook(hook.Event{
+		Kind: protocol.KindClaude, Name: hook.NameStop, SessionID: "claude:s1",
+	})
+	t.Cleanup(agent.stopPendingTurns)
+
+	deadline := time.Now().Add(250 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		agent.mu.Lock()
+		current := agent.sessions["claude:s1"]
+		agent.mu.Unlock()
+		if current.Question != nil {
+			if got := len(sink.turnCompletes()); got != 0 {
+				t.Fatalf("capture error produced %d false completion notifications", got)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("targeted question inspection did not recover after transient capture error")
+}
+
+func TestEachCodexNotifyRepresentsANewTurn(t *testing.T) {
+	sink := &recordingSink{}
+	agent := New(source.NewRegistry(), sink)
+	agent.turnDelay = 0
+	agent.sessions["codex:s1"] = protocol.Session{
+		ID: "codex:s1", Kind: protocol.KindCodex, NativeID: "s1",
+		Name: "checkout", State: protocol.StateIdle,
+	}
+	event := hook.Event{
+		Kind: protocol.KindCodex, Name: hook.NameStop, SessionID: "codex:s1",
+		Payload: hook.Payload{LastAssistantMessage: "Done."},
+	}
+	agent.handleHook(event)
+	event.Payload.LastAssistantMessage = "Done again."
+	agent.handleHook(event)
+
+	if got := len(sink.turnCompletes()); got != 2 {
+		t.Fatalf("two Codex notify callbacks produced %d notifications, want 2", got)
+	}
+}
+
+func TestStalePollCannotUndoBusyHook(t *testing.T) {
+	registry := source.NewRegistry()
+	scripted := &scriptedSource{state: protocol.StateIdle, reply: "Done."}
+	registry.Add(scripted)
+	sink := &recordingSink{}
+	agent := New(registry, sink)
+	ctx := context.Background()
+	agent.refresh(ctx, true)
+
+	agent.handleHook(hook.Event{
+		Kind: protocol.KindOpenCode, Name: hook.NameUserPromptSubmit,
+		SessionID: "opencode:s1", ReceivedAt: time.Now().UnixMilli(),
+	})
+	// The source is deliberately still idle: this is the one-sweep lag that
+	// used to overwrite the hook and emit a false completion immediately.
+	agent.refresh(ctx, false)
+
+	agent.mu.Lock()
+	state := agent.sessions["opencode:s1"].State
+	agent.mu.Unlock()
+	if state != protocol.StateBusy {
+		t.Fatalf("stale poll overwrote busy hook with %q", state)
+	}
+	if got := len(sink.turnCompletes()); got != 0 {
+		t.Fatalf("stale poll produced %d false completion notifications", got)
+	}
+}
+
+func TestWaitingHookPersistsAcrossIdlePolls(t *testing.T) {
+	registry := source.NewRegistry()
+	scripted := &scriptedSource{state: protocol.StateIdle}
+	registry.Add(scripted)
+	agent := New(registry, &recordingSink{})
+	ctx := context.Background()
+	agent.refresh(ctx, true)
+
+	agent.handleHook(hook.Event{
+		Kind: protocol.KindOpenCode, Name: hook.NameNotification,
+		SessionID: "opencode:s1", ReceivedAt: time.Now().Add(-time.Hour).UnixMilli(),
+	})
+	agent.refresh(ctx, false)
+
+	agent.mu.Lock()
+	state := agent.sessions["opencode:s1"].State
+	agent.mu.Unlock()
+	if state != protocol.StateWaitingInput {
+		t.Fatalf("idle poll erased an unresolved waiting hook: %q", state)
+	}
+}
+
 // TestHookWinsOverPolling checks the two paths do not both fire for one turn.
 //
 // Claude Code delivers hooks *and* is polled, so without suppression every
@@ -169,6 +370,36 @@ func TestHookWinsOverPolling(t *testing.T) {
 	}
 }
 
+func TestCodexHookUsesStableTmuxSessionID(t *testing.T) {
+	sink := &recordingSink{}
+	agent := New(source.NewRegistry(), sink)
+	agent.turnDelay = 0
+	agent.sessions["codex:tmux-pane-1"] = protocol.Session{
+		ID: "codex:tmux-pane-1", Kind: protocol.KindCodex,
+		NativeID: "thread-123", Name: "agentman", State: protocol.StateBusy,
+	}
+
+	agent.handleHook(hook.Event{
+		Kind: protocol.KindCodex, Name: hook.NameStop,
+		SessionID: "codex:thread-123",
+		Payload:   hook.Payload{LastAssistantMessage: "Done."},
+	})
+
+	events := sink.turnCompletes()
+	if len(events) != 1 {
+		t.Fatalf("turn completes = %+v, want one", events)
+	}
+	if events[0].SessionID != "codex:tmux-pane-1" || events[0].SessionName != "agentman" {
+		t.Fatalf("hook was not canonicalized: %+v", events[0])
+	}
+	if _, invented := agent.sessions["codex:thread-123"]; invented {
+		t.Fatal("hook created state under the native thread id")
+	}
+	if got := agent.sessions["codex:tmux-pane-1"].State; got != protocol.StateIdle {
+		t.Fatalf("canonical session state = %q, want idle", got)
+	}
+}
+
 // Claude uses the same Stop hook when a turn finishes and when AskUserQuestion
 // blocks. Discovery sees the tmux question on the next sweep; the delayed hook
 // announcement must yield to that more specific state.
@@ -187,7 +418,7 @@ func TestQuestionSuppressesHookCompletion(t *testing.T) {
 		Kind: protocol.KindClaude, Name: hook.NameStop, SessionID: "opencode:s1",
 	})
 	scripted.setQuestion(protocol.StateWaitingInput, &protocol.Question{
-		Prompt: "Which database?",
+		ID: "terminal-database", Prompt: "Which database?",
 		Options: []protocol.QuestionOption{
 			{Key: "1", Label: "Postgres"},
 			{Key: "2", Label: "SQLite"},

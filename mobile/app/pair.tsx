@@ -1,8 +1,9 @@
 import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -16,7 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Appear } from "../components/Appear";
 import { ContentColumn } from "../components/ContentColumn";
 import { MotionPressable } from "../components/MotionPressable";
-import { pair } from "../lib/client";
+import { pair, pairWithToken } from "../lib/client";
 import { DEFAULT_RELAY } from "../lib/pairing";
 import { useStore } from "../lib/store";
 import { PAIRING_CODE_LENGTH } from "../lib/protocol";
@@ -26,14 +27,75 @@ export default function Pair() {
   const store = useStore();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{
+    relay?: string | string[];
+    token?: string | string[];
+  }>();
   const [relayUrl, setRelayUrl] = useState(DEFAULT_RELAY);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [relayFocused, setRelayFocused] = useState(false);
   const [codeFocused, setCodeFocused] = useState(false);
+  const handledLink = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!store.ready) return;
+    const token = firstParam(params.token);
+    if (!token) return;
+    const relay = firstParam(params.relay) || DEFAULT_RELAY;
+    const identity = `${relay}\u0000${token}`;
+    if (handledLink.current === identity) return;
+    handledLink.current = identity;
+
+    const redeem = async () => {
+      setBusy(true);
+      setError(null);
+      try {
+        const creds = await pairWithToken(relay, token);
+        store.signIn(creds);
+        if (Platform.OS !== "web") {
+          void Haptics.notificationAsync(
+            Haptics.NotificationFeedbackType.Success,
+          ).catch(() => {});
+        }
+        router.replace("/");
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Could not redeem this pairing link. Generate a fresh link and try again.",
+        );
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    if (!store.credentials) {
+      void redeem();
+      return;
+    }
+
+    Alert.alert(
+      "Pair with a different Mac?",
+      "This will replace the relay currently paired with Agentman on this phone.",
+      [
+        {
+          text: "Cancel",
+          style: "cancel",
+          onPress: () => router.replace("/"),
+        },
+        {
+          text: "Pair",
+          onPress: () => void redeem(),
+        },
+      ],
+      { cancelable: false },
+    );
+  }, [params.relay, params.token, router, store]);
 
   const canSubmit =
+    store.ready &&
     relayUrl.trim().length > 0 &&
     code.replace(/\D/g, "").length === PAIRING_CODE_LENGTH;
 
@@ -204,6 +266,10 @@ export default function Pair() {
       </ScrollView>
     </KeyboardAvoidingView>
   );
+}
+
+function firstParam(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
 }
 
 const styles = StyleSheet.create({

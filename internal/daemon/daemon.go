@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/lenajeremy/agentman/internal/hook"
@@ -28,16 +29,32 @@ import (
 // what a human notices.
 const discoverInterval = time.Second
 
-// turnNotifyWindow is how long a hook-delivered notification suppresses the
-// polled one for the same session. Comfortably longer than the gap between a
-// Stop hook and the discovery sweep that sees the same transition.
-const turnNotifyWindow = 15 * time.Second
+// Session mutations are serialized before an adapter validates the current
+// terminal state. This prevents two devices (or a double tap) from both
+// validating question A and then typing the second answer into question B.
+// A fixed stripe set avoids retaining one mutex for every session ever seen;
+// rare hash collisions merely serialize unrelated actions briefly.
+const actionLockStripes = 64
 
 // turnQuestionGrace gives discovery time to distinguish "the turn finished"
 // from "Claude stopped because it opened a question". Claude emits the same
 // Stop hook for both, while the question exists only in the tmux pane and is
 // normally found on the next one-second sweep.
 const turnQuestionGrace = 2 * discoverInterval
+
+// Hooks are authoritative but source files and APIs can lag behind them. Keep
+// short-lived busy/idle states long enough for polling to catch up; a waiting
+// state remains until newer activity or another hook resolves it because an
+// unanswered permission prompt has no natural timeout.
+const hookStateGrace = 5 * discoverInterval
+
+const maxHookQuestionInspectionRetries = 3
+
+// A discovery sweep can change hundreds of sessions at once (daemon restart,
+// agent upgrade, large workspace). One full snapshot is both smaller and less
+// bursty than enough individual updates to overflow an otherwise healthy
+// websocket's bounded queue.
+const maxIncrementalSessionEvents = 6
 
 // Transport is how the daemon reaches the app. Abstracted so the daemon can
 // run over a relay websocket, a LAN listener, or an in-process pipe in tests.
@@ -55,18 +72,26 @@ type Daemon struct {
 	// sessions is the last discovered list, kept so hook events can be matched
 	// against a known session without re-scanning the disk.
 	sessions map[string]protocol.Session
-	// notifiedAt records when a turn-complete was last announced for a session,
-	// so the hook path and the polled path cannot both fire for the same turn.
-	notifiedAt map[string]time.Time
+	// turns gives hook and polling completions one shared generation to claim.
+	// Unlike a time window, it permits two real short turns to notify while
+	// still making duplicate hook/poll reports for one turn idempotent.
+	turns map[string]turnState
+	// hookStates prevent the next stale discovery snapshot from immediately
+	// undoing a state transition delivered by an agent hook.
+	hookStates map[string]hookState
 	// pendingTurns delays hook completion just long enough for discovery to
 	// reveal a blocking question. Timers are keyed so duplicate hooks cannot
 	// schedule duplicate alerts.
-	pendingTurns map[string]pendingTurn
-	turnDelay    time.Duration
+	pendingTurns       map[string]pendingTurn
+	turnDelay          time.Duration
+	questionRetryDelay time.Duration
 	// follows holds the active live tail for each watched session. Only
 	// sessions the app is actually watching appear here, which is what keeps
 	// idle sessions free.
 	follows map[string]*follow
+	// actionLocks cover send, answer, and interrupt from validation through the
+	// adapter action. Read-only history requests remain fully concurrent.
+	actionLocks [actionLockStripes]sync.Mutex
 }
 
 // follow is one live tail. It is tracked by pointer identity so that a
@@ -77,20 +102,35 @@ type follow struct {
 }
 
 type pendingTurn struct {
-	timer *time.Timer
-	token *byte
+	timer      *time.Timer
+	token      *byte
+	generation uint64
+	attempt    int
+}
+
+type turnState struct {
+	generation uint64
+	notified   bool
+}
+
+type hookState struct {
+	state protocol.State
+	at    int64
+	until time.Time
 }
 
 // New creates a daemon.
 func New(registry *source.Registry, sink Transport) *Daemon {
 	return &Daemon{
-		registry:     registry,
-		sink:         sink,
-		sessions:     map[string]protocol.Session{},
-		follows:      map[string]*follow{},
-		notifiedAt:   map[string]time.Time{},
-		pendingTurns: map[string]pendingTurn{},
-		turnDelay:    turnQuestionGrace,
+		registry:           registry,
+		sink:               sink,
+		sessions:           map[string]protocol.Session{},
+		follows:            map[string]*follow{},
+		turns:              map[string]turnState{},
+		hookStates:         map[string]hookState{},
+		pendingTurns:       map[string]pendingTurn{},
+		turnDelay:          turnQuestionGrace,
+		questionRetryDelay: discoverInterval,
 	}
 }
 
@@ -133,23 +173,56 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 		_ = d.sink.Send(protocol.Event{Type: protocol.EvtError, Error: err.Error()})
 	}
 
+	found = normalizeDiscoveredSessions(found)
 	d.mu.Lock()
 	previous := d.sessions
 	current := make(map[string]protocol.Session, len(found))
 	for _, session := range found {
+		session = d.applyHookStateLocked(session, time.Now())
 		current[session.ID] = session
+		before, existed := previous[session.ID]
+		if session.State == protocol.StateBusy && (!existed || before.State != protocol.StateBusy) {
+			d.startTurnLocked(session.ID)
+		}
 	}
-	d.sessions = current
+	// Publish a distinct map. Hook/timer callbacks mutate d.sessions under d.mu,
+	// while the immutable local snapshot below is diffed and emitted after the
+	// lock is released. Sharing the map here creates a real concurrent
+	// iteration/write panic window.
+	d.sessions = cloneSessionMap(current)
 	d.mu.Unlock()
 
 	if initial {
-		_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessions, Sessions: found})
+		_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessions, Sessions: fitSessionList(found)})
 		return
+	}
+
+	changed := make(map[string]struct{})
+	for id, session := range current {
+		before, existed := previous[id]
+		if !existed || !before.SameAs(session) {
+			changed[id] = struct{}{}
+		}
+	}
+	var gone []string
+	for id := range previous {
+		if _, still := current[id]; !still {
+			gone = append(gone, id)
+		}
+	}
+	bulk := len(changed)+len(gone) > maxIncrementalSessionEvents
+	if bulk {
+		list := make([]protocol.Session, 0, len(current))
+		for _, session := range current {
+			list = append(list, session)
+		}
+		source.SortSessions(list)
+		_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessions, Sessions: fitSessionList(list)})
 	}
 
 	for id, session := range current {
 		before, existed := previous[id]
-		if !existed || !before.SameAs(session) {
+		if _, didChange := changed[id]; didChange && !bulk {
 			s := session
 			_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessionUpdate, Session: &s})
 		}
@@ -162,12 +235,28 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 			d.announceTurnComplete(ctx, session)
 		}
 	}
-	for id := range previous {
-		if _, still := current[id]; !still {
-			d.stopFollowAll(id)
+	for _, id := range gone {
+		d.mu.Lock()
+		delete(d.turns, id)
+		delete(d.hookStates, id)
+		if pending, ok := d.pendingTurns[id]; ok {
+			pending.timer.Stop()
+			delete(d.pendingTurns, id)
+		}
+		d.mu.Unlock()
+		d.stopFollowAll(id)
+		if !bulk {
 			_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessionGone, SessionID: id})
 		}
 	}
+}
+
+func cloneSessionMap(sessions map[string]protocol.Session) map[string]protocol.Session {
+	cloned := make(map[string]protocol.Session, len(sessions))
+	for id, session := range sessions {
+		cloned[id] = session
+	}
+	return cloned
 }
 
 // announceTurnComplete rings the phone for a turn that ended, unless a hook
@@ -178,13 +267,10 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 // the hook wins and this fills the gap behind it.
 func (d *Daemon) announceTurnComplete(ctx context.Context, session protocol.Session) {
 	d.mu.Lock()
-	last, seen := d.notifiedAt[session.ID]
-	recent := seen && time.Since(last) < turnNotifyWindow
-	if !recent {
-		d.notifiedAt[session.ID] = time.Now()
-	}
+	generation := d.ensureTurnLocked(session.ID)
+	claimed := d.claimTurnLocked(session.ID, generation)
 	d.mu.Unlock()
-	if recent {
+	if !claimed {
 		return
 	}
 
@@ -233,8 +319,21 @@ func (d *Daemon) handleHook(event hook.Event) {
 	state, hasState := event.State()
 
 	d.mu.Lock()
+	event.SessionID = d.canonicalHookSessionIDLocked(event)
 	session, known := d.sessions[event.SessionID]
+	if hasState && state == protocol.StateBusy && (!known || session.State != protocol.StateBusy) {
+		d.startTurnLocked(event.SessionID)
+	}
 	if known && hasState && session.State != state {
+		receivedAt := event.ReceivedAt
+		if receivedAt == 0 {
+			receivedAt = time.Now().UnixMilli()
+		}
+		lease := hookState{state: state, at: receivedAt}
+		if state != protocol.StateWaitingInput {
+			lease.until = time.Now().Add(hookStateGrace)
+		}
+		d.hookStates[event.SessionID] = lease
 		session.State = state
 		session.LastActivityAt = event.ReceivedAt
 		d.sessions[event.SessionID] = session
@@ -263,29 +362,102 @@ func (d *Daemon) handleHook(event hook.Event) {
 	}
 }
 
+// applyHookStateLocked reconciles a polled snapshot with a newer hook event.
+// d.mu must be held by the caller.
+func (d *Daemon) applyHookStateLocked(session protocol.Session, now time.Time) protocol.Session {
+	latest, ok := d.hookStates[session.ID]
+	if !ok {
+		return session
+	}
+	// A parsed question is more specific than Claude's ambiguous Stop=idle
+	// hook. Never hide it behind an older lifecycle state.
+	if session.Question != nil || session.State == protocol.StateWaitingInput {
+		if latest.state != protocol.StateWaitingInput {
+			delete(d.hookStates, session.ID)
+		}
+		return session
+	}
+	if session.LastActivityAt > latest.at {
+		delete(d.hookStates, session.ID)
+		return session
+	}
+	if session.State == latest.state {
+		if latest.state != protocol.StateWaitingInput {
+			delete(d.hookStates, session.ID)
+		}
+		return session
+	}
+	if latest.state != protocol.StateWaitingInput && !latest.until.After(now) {
+		delete(d.hookStates, session.ID)
+		return session
+	}
+	session.State = latest.state
+	session.LastActivityAt = max(session.LastActivityAt, latest.at)
+	return session
+}
+
+// canonicalHookSessionIDLocked maps an agent-native hook id onto the stable
+// app-visible session id. Codex tmux sessions are deliberately keyed by pane
+// before their rollout exists, so the hook reports codex:<thread> while the
+// phone knows codex:tmux-<pane>. NativeID is the bridge between the two.
+// d.mu must be held by the caller.
+func (d *Daemon) canonicalHookSessionIDLocked(event hook.Event) string {
+	if _, known := d.sessions[event.SessionID]; known {
+		return event.SessionID
+	}
+	_, nativeID, ok := strings.Cut(event.SessionID, ":")
+	if !ok || nativeID == "" {
+		return event.SessionID
+	}
+	for id, session := range d.sessions {
+		if session.Kind == event.Kind && session.NativeID == nativeID {
+			return id
+		}
+	}
+	return event.SessionID
+}
+
 func (d *Daemon) scheduleHookTurn(event protocol.Event) {
 	d.mu.Lock()
 	delay := d.turnDelay
+	generation := d.ensureTurnLocked(event.SessionID)
+	// Codex exposes only a completion hook. When polling never catches its busy
+	// state, each delivered notify callback is the only evidence of a new turn.
+	// Claude has UserPromptSubmit and must instead keep duplicate Stop hooks on
+	// the same generation.
+	if state := d.turns[event.SessionID]; event.SessionID != "" &&
+		strings.HasPrefix(event.SessionID, string(protocol.KindCodex)+":") && state.notified {
+		d.startTurnLocked(event.SessionID)
+		generation = d.turns[event.SessionID].generation
+	}
 	if previous, ok := d.pendingTurns[event.SessionID]; ok {
 		previous.timer.Stop()
 	}
 	if delay <= 0 {
 		delete(d.pendingTurns, event.SessionID)
 		d.mu.Unlock()
-		d.finishHookTurn(event, nil)
+		d.finishHookTurn(event, nil, generation, 0)
 		return
 	}
 	token := new(byte)
-	timer := time.AfterFunc(delay, func() { d.finishHookTurn(event, token) })
-	d.pendingTurns[event.SessionID] = pendingTurn{timer: timer, token: token}
+	timer := time.AfterFunc(delay, func() { d.finishHookTurn(event, token, generation, 0) })
+	d.pendingTurns[event.SessionID] = pendingTurn{
+		timer: timer, token: token, generation: generation, attempt: 0,
+	}
 	d.mu.Unlock()
 }
 
-func (d *Daemon) finishHookTurn(event protocol.Event, token *byte) {
+func (d *Daemon) finishHookTurn(
+	event protocol.Event,
+	token *byte,
+	generation uint64,
+	attempt int,
+) {
 	d.mu.Lock()
 	if token != nil {
 		pending, ok := d.pendingTurns[event.SessionID]
-		if !ok || pending.token != token {
+		if !ok || pending.token != token || pending.generation != generation ||
+			pending.attempt != attempt {
 			d.mu.Unlock()
 			return
 		}
@@ -296,11 +468,108 @@ func (d *Daemon) finishHookTurn(event protocol.Event, token *byte) {
 		d.mu.Unlock()
 		return
 	}
-	// Claim the window only for a real completion. A suppressed question must
-	// not silence the completion notification for the next actual turn.
-	d.notifiedAt[event.SessionID] = time.Now()
 	d.mu.Unlock()
+
+	// Claude's Stop hook is ambiguous: it also fires when AskUserQuestion opens.
+	// Whole-registry discovery can be delayed by an unrelated API adapter, so
+	// inspect this one terminal pane directly before announcing completion.
+	if strings.HasPrefix(event.SessionID, string(protocol.KindClaude)+":") {
+		inspectCtx, cancel := context.WithTimeout(context.Background(), discoverInterval)
+		question, inspectErr := d.registry.CurrentQuestion(inspectCtx, event.SessionID)
+		cancel()
+		if inspectErr != nil {
+			if attempt < maxHookQuestionInspectionRetries {
+				d.retryHookQuestionInspection(event, generation, attempt+1)
+			}
+			// Never translate "could not inspect" into "definitely finished".
+			return
+		}
+		if question != nil {
+			d.mu.Lock()
+			current, stillKnown := d.sessions[event.SessionID]
+			if stillKnown {
+				current.Question = question
+				current.State = protocol.StateWaitingInput
+				d.sessions[event.SessionID] = current
+			}
+			d.mu.Unlock()
+			if stillKnown {
+				_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessionUpdate, Session: &current})
+			}
+			return
+		}
+	}
+
+	d.mu.Lock()
+	// Discovery may have completed while the targeted pane check was running.
+	// Reconcile that newer snapshot before claiming the completion generation.
+	session, known = d.sessions[event.SessionID]
+	if known && (session.State == protocol.StateWaitingInput || session.Question != nil) {
+		d.mu.Unlock()
+		return
+	}
+	// Claim the generation only for a real completion. A suppressed question must
+	// not silence the completion notification for the next actual turn.
+	claimed := d.claimTurnLocked(event.SessionID, generation)
+	d.mu.Unlock()
+	if !claimed {
+		return
+	}
 	_ = d.sink.Send(event)
+}
+
+func (d *Daemon) retryHookQuestionInspection(
+	event protocol.Event,
+	generation uint64,
+	attempt int,
+) {
+	d.mu.Lock()
+	state := d.turns[event.SessionID]
+	if state.generation != generation || state.notified {
+		d.mu.Unlock()
+		return
+	}
+	if previous, ok := d.pendingTurns[event.SessionID]; ok {
+		previous.timer.Stop()
+	}
+	token := new(byte)
+	delay := d.questionRetryDelay
+	if delay <= 0 {
+		delay = discoverInterval
+	}
+	timer := time.AfterFunc(delay, func() {
+		d.finishHookTurn(event, token, generation, attempt)
+	})
+	d.pendingTurns[event.SessionID] = pendingTurn{
+		timer: timer, token: token, generation: generation, attempt: attempt,
+	}
+	d.mu.Unlock()
+}
+
+func (d *Daemon) startTurnLocked(sessionID string) uint64 {
+	state := d.turns[sessionID]
+	state.generation++
+	state.notified = false
+	d.turns[sessionID] = state
+	return state.generation
+}
+
+func (d *Daemon) ensureTurnLocked(sessionID string) uint64 {
+	state := d.turns[sessionID]
+	if state.generation == 0 {
+		return d.startTurnLocked(sessionID)
+	}
+	return state.generation
+}
+
+func (d *Daemon) claimTurnLocked(sessionID string, generation uint64) bool {
+	state := d.turns[sessionID]
+	if state.generation != generation || state.notified {
+		return false
+	}
+	state.notified = true
+	d.turns[sessionID] = state
+	return true
 }
 
 func (d *Daemon) stopPendingTurns() {
@@ -335,6 +604,11 @@ func (d *Daemon) HandleFrom(
 		}
 		return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
 	}
+	if requestMutatesSession(req.Type) {
+		lock := d.actionLock(req.SessionID)
+		lock.Lock()
+		defer lock.Unlock()
+	}
 
 	switch req.Type {
 	case protocol.ReqListSessions:
@@ -363,6 +637,16 @@ func (d *Daemon) HandleFrom(
 		return protocol.Event{}
 
 	case protocol.ReqSendMessage:
+		d.mu.Lock()
+		current, known := d.sessions[req.SessionID]
+		d.mu.Unlock()
+		if known && current.Question != nil {
+			return protocol.Event{
+				Type: protocol.EvtSendResult, SessionID: req.SessionID,
+				ClientID: req.ClientID, Status: protocol.StatusFailed,
+				Error: "daemon: answer the pending question before sending a message",
+			}
+		}
 		mode, err := d.registry.Inject(ctx, req.SessionID, req.Text)
 		result := protocol.Event{
 			Type:      protocol.EvtSendResult,
@@ -383,9 +667,10 @@ func (d *Daemon) HandleFrom(
 
 	case protocol.ReqAnswer:
 		answer := protocol.QuestionAnswer{
-			OptionKey: req.OptionKey,
-			Options:   req.OptionKeys,
-			Text:      req.AnswerText,
+			QuestionID: req.QuestionID,
+			OptionKey:  req.OptionKey,
+			Options:    req.OptionKeys,
+			Text:       req.AnswerText,
 		}
 		if err := d.registry.Answer(ctx, req.SessionID, answer); err != nil {
 			return protocol.Event{
@@ -417,6 +702,25 @@ func (d *Daemon) HandleFrom(
 	}
 }
 
+func requestMutatesSession(kind protocol.RequestType) bool {
+	return kind == protocol.ReqSendMessage || kind == protocol.ReqAnswer ||
+		kind == protocol.ReqInterrupt
+}
+
+func (d *Daemon) actionLock(sessionID string) *sync.Mutex {
+	// FNV-1a, inlined to keep this hot path allocation-free.
+	const (
+		offset64 = uint64(14695981039346656037)
+		prime64  = uint64(1099511628211)
+	)
+	hash := offset64
+	for index := range len(sessionID) {
+		hash ^= uint64(sessionID[index])
+		hash *= prime64
+	}
+	return &d.actionLocks[hash%actionLockStripes]
+}
+
 const (
 	maxSessionIDBytes = 512
 	maxCursorBytes    = 4096
@@ -431,6 +735,17 @@ const (
 	maxPageMessages     = 40
 	maxWireMessageBytes = 256 << 10
 	maxWireToolBytes    = 32 << 10
+	maxWireSessions     = 512
+	maxWireOptions      = 64
+	// These caps also account for JSON's worst-case six-byte escaping of one
+	// control byte. A single normalized session_update, including 64 full
+	// options, must remain below maxEventBytes—not only aggregate lists.
+	maxWireNameBytes    = 2 << 10
+	maxWirePathBytes    = 8 << 10
+	maxWirePromptBytes  = 8 << 10
+	maxWireDetailBytes  = 16 << 10
+	maxWireOptionBytes  = 1 << 10
+	maxWirePreviewBytes = 2 << 10
 )
 
 const wireTruncation = "\n\n[output truncated by agentman]"
@@ -442,7 +757,8 @@ func validateRequest(req protocol.Request) error {
 	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
 		return fmt.Errorf("daemon: invalid session id")
 	}
-	if len(req.Before) > maxCursorBytes || len(req.ClientID) > maxClientIDBytes {
+	if len(req.Before) > maxCursorBytes || len(req.ClientID) > maxClientIDBytes ||
+		len(req.QuestionID) > maxClientIDBytes {
 		return fmt.Errorf("daemon: request metadata is too large")
 	}
 	switch req.Type {
@@ -456,19 +772,23 @@ func validateRequest(req protocol.Request) error {
 		if len(req.Text) > maxMessageBytes {
 			return fmt.Errorf("daemon: message exceeds %d bytes", maxMessageBytes)
 		}
+		if containsTerminalControl(req.Text) {
+			return fmt.Errorf("daemon: message contains terminal control characters")
+		}
 		return nil
 	case protocol.ReqAnswer:
-		if len(req.OptionKeys) > 64 || len(req.AnswerText) > maxMessageBytes {
+		if req.QuestionID == "" || len(req.OptionKeys) > 64 || len(req.AnswerText) > maxMessageBytes {
 			return fmt.Errorf("daemon: invalid question answer")
 		}
 		total := len(req.OptionKey)
 		for _, option := range req.OptionKeys {
-			if option == "" || len(option) > maxOptionKeyBytes {
+			if option == "" || len(option) > maxOptionKeyBytes || containsTerminalControl(option) {
 				return fmt.Errorf("daemon: invalid question answer")
 			}
 			total += len(option)
 		}
 		if len(req.OptionKey) > maxOptionKeyBytes || total > maxMessageBytes ||
+			containsTerminalControl(req.OptionKey) || containsTerminalControl(req.AnswerText) ||
 			(req.OptionKey == "" && len(req.OptionKeys) == 0 && strings.TrimSpace(req.AnswerText) == "") {
 			return fmt.Errorf("daemon: invalid question answer")
 		}
@@ -476,6 +796,18 @@ func validateRequest(req protocol.Request) error {
 	default:
 		return fmt.Errorf("unsupported request: %s", req.Type)
 	}
+}
+
+func containsTerminalControl(text string) bool {
+	for _, character := range text {
+		if character == '\n' || character == '\t' {
+			continue
+		}
+		if unicode.IsControl(character) {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *Daemon) snapshot() []protocol.Session {
@@ -488,7 +820,96 @@ func (d *Daemon) snapshot() []protocol.Session {
 		out = append(out, session)
 	}
 	source.SortSessions(out)
-	return out
+	return fitSessionList(out)
+}
+
+func normalizeDiscoveredSessions(found []protocol.Session) []protocol.Session {
+	if len(found) > maxWireSessions {
+		found = found[:maxWireSessions]
+	}
+	normalized := make([]protocol.Session, 0, len(found))
+	for _, session := range found {
+		if session.ID == "" || len(session.ID) > maxSessionIDBytes ||
+			len(session.NativeID) > maxSessionIDBytes {
+			continue
+		}
+		session.Name = truncateWireText(session.Name, maxWireNameBytes)
+		session.Cwd = truncateWireText(session.Cwd, maxWirePathBytes)
+		session.Model = truncateWireText(session.Model, maxWireNameBytes)
+		if question := session.Question; question != nil {
+			copyQuestion := *question
+			unsupportedReason := ""
+			// Question IDs are round-trip concurrency tokens and cannot be
+			// truncated without making every answer fail the adapter's stale
+			// question check. A source that cannot produce a bounded token does
+			// not get to expose an unsafe, unanswerable question on the wire.
+			if copyQuestion.ID == "" || len(copyQuestion.ID) > maxClientIDBytes {
+				session.Question = nil
+				if session.State == protocol.StateWaitingInput {
+					session.State = protocol.StateIdle
+				}
+				normalized = append(normalized, session)
+				continue
+			}
+			copyQuestion.Title = truncateWireText(copyQuestion.Title, maxWireNameBytes)
+			copyQuestion.Prompt = truncateWireText(copyQuestion.Prompt, maxWirePromptBytes)
+			copyQuestion.Detail = truncateWireText(copyQuestion.Detail, maxWireDetailBytes)
+			options := copyQuestion.Options
+			if len(options) > maxWireOptions {
+				options = nil
+				unsupportedReason = "This question has too many options to answer safely from the app. Answer it in the terminal."
+			}
+			copyQuestion.Options = make([]protocol.QuestionOption, 0, len(options))
+			for _, option := range options {
+				// Keys are round-tripped to the adapter and cannot be truncated.
+				if option.Key == "" || len(option.Key) > maxOptionKeyBytes ||
+					containsTerminalControl(option.Key) {
+					unsupportedReason = "This question contains an option that cannot be represented safely in the app. Answer it in the terminal."
+					continue
+				}
+				option.Label = truncateWireText(option.Label, maxWireOptionBytes)
+				option.Description = truncateWireText(option.Description, maxWireOptionBytes)
+				option.Preview = truncateWireText(option.Preview, maxWirePreviewBytes)
+				copyQuestion.Options = append(copyQuestion.Options, option)
+			}
+			if unsupportedReason != "" {
+				// A partial decision is worse than no remote decision: hidden checked
+				// options could be silently changed when the visible subset is sent.
+				copyQuestion.Options = nil
+				copyQuestion.Custom = false
+				copyQuestion.Multiple = false
+				copyQuestion.Detail = truncateWireText(
+					strings.TrimSpace(copyQuestion.Detail)+"\n\n"+unsupportedReason,
+					maxWireDetailBytes,
+				)
+			}
+			if len(copyQuestion.Options) == 0 && !copyQuestion.Custom && unsupportedReason == "" {
+				session.Question = nil
+				if session.State == protocol.StateWaitingInput {
+					session.State = protocol.StateIdle
+				}
+			} else {
+				session.Question = &copyQuestion
+			}
+		}
+		normalized = append(normalized, session)
+	}
+	return normalized
+}
+
+func fitSessionList(sessions []protocol.Session) []protocol.Session {
+	fitted := make([]protocol.Session, 0, len(sessions))
+	// Leave room for the surrounding event/envelope and JSON escaping variance.
+	remaining := maxEventBytes - 4096
+	for _, session := range sessions {
+		encoded, err := json.Marshal(session)
+		if err != nil || len(encoded)+1 > remaining {
+			continue
+		}
+		fitted = append(fitted, session)
+		remaining -= len(encoded) + 1
+	}
+	return fitted
 }
 
 // startFollow begins live-tailing a session, if it is not already followed.

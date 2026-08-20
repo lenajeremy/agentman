@@ -1,9 +1,11 @@
 package hook
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
@@ -290,6 +292,97 @@ func TestInstallBacksUpPreviousConfig(t *testing.T) {
 	}
 	if string(backup) != realisticSettings {
 		t.Error("backup does not match the original file")
+	}
+}
+
+func TestClaudeInstallRefusesStalePlan(t *testing.T) {
+	home := t.TempDir()
+	path := writeSettings(t, home, `{"model":"alpha"}`)
+	in := Installer{Home: home, Binary: "/usr/local/bin/am"}
+	plans, err := in.Plans("tok", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var plan Plan
+	for _, candidate := range plans {
+		if candidate.Kind == protocol.KindClaude {
+			plan = candidate
+			break
+		}
+	}
+	if !plan.Changed || plan.Err != nil {
+		t.Fatalf("unexpected Claude plan: %+v", plan)
+	}
+
+	// Keep the same byte length so a size-only or coarse-mtime fingerprint
+	// would miss this edit.
+	newer := []byte(`{"model":"bravo"}`)
+	if err := os.WriteFile(path, newer, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.Apply(); err == nil ||
+		!strings.Contains(err.Error(), "changed after it was inspected") ||
+		!strings.Contains(err.Error(), "re-run") {
+		t.Fatalf("Apply error = %v, want actionable stale-plan refusal", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, newer) {
+		t.Fatalf("Claude's newer config was overwritten:\n got: %q\nwant: %q", got, newer)
+	}
+	if _, err := os.Stat(path + ".agentman.bak"); !os.IsNotExist(err) {
+		t.Fatalf("stale plan unexpectedly wrote a backup: %v", err)
+	}
+}
+
+func TestCodexInstallRefusesStalePlan(t *testing.T) {
+	home := t.TempDir()
+	path := codexConfigPath(home)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("model = \"alpha\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in := Installer{Home: home, Binary: "/usr/local/bin/am"}
+	plans, err := in.Plans("tok", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var plan Plan
+	for _, candidate := range plans {
+		if candidate.Kind == protocol.KindCodex {
+			plan = candidate
+			break
+		}
+	}
+	if !plan.Changed || plan.Err != nil {
+		t.Fatalf("unexpected Codex plan: %+v", plan)
+	}
+
+	// Same-length replacement specifically exercises the content digest.
+	newer := []byte("model = \"bravo\"\n")
+	if err := os.WriteFile(path, newer, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.Apply(); err == nil ||
+		!strings.Contains(err.Error(), "changed after it was inspected") ||
+		!strings.Contains(err.Error(), "re-run") {
+		t.Fatalf("Apply error = %v, want actionable stale-plan refusal", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, newer) {
+		t.Fatalf("Codex's newer config was overwritten:\n got: %q\nwant: %q", got, newer)
+	}
+	if _, err := os.Stat(path + ".agentman.bak"); !os.IsNotExist(err) {
+		t.Fatalf("stale plan unexpectedly wrote a backup: %v", err)
 	}
 }
 

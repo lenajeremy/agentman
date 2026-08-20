@@ -3,6 +3,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
@@ -24,8 +25,10 @@ import { Pulse } from "../../components/Pulse";
 import { QuestionCard } from "../../components/QuestionCard";
 import { Thinking } from "../../components/Thinking";
 import { ToolRow } from "../../components/ToolRow";
+import { draftNamespace } from "../../lib/draft-policy";
 import { clearDraft, loadDraft, saveDraft } from "../../lib/drafts";
 import { Message } from "../../lib/protocol";
+import { sessionNeedsAnswer } from "../../lib/question-alerts";
 import { PendingSend, useStore } from "../../lib/store";
 import { color, font, layout, radius, shortPath, size, space, stateStyle } from "../../lib/theme";
 
@@ -42,13 +45,17 @@ export default function SessionScreen() {
   const { height: viewportHeight } = useWindowDimensions();
   const listRef = useRef<FlatList<Row>>(null);
   const [draft, setDraft] = useState("");
+  const [draftReady, setDraftReady] = useState(false);
+  const [submittedClientId, setSubmittedClientId] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(
     () => Platform.OS !== "web" && Keyboard.isVisible(),
   );
   // Restored before the user can type, so an in-progress instruction survives
   // leaving the screen, backgrounding the app, or a reconnect.
-  const draftLoaded = useRef(false);
+  const draftRef = useRef("");
+  const draftReadyRef = useRef(false);
+  const draftWriteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Rows present on first render are the backlog and must not animate in;
   // otherwise opening a session is a cascade of fades.
   const settled = useRef<Set<string> | null>(null);
@@ -56,6 +63,19 @@ export default function SessionScreen() {
   const session = store.sessions.find((s) => s.id === sessionId);
   const messages = store.messages[sessionId] ?? [];
   const paging = store.pageState[sessionId];
+  const answerAction = store.actions.find(
+    (action) => action.sessionId === sessionId && action.kind === "answer",
+  );
+  const interruptAction = store.actions.find(
+    (action) => action.sessionId === sessionId && action.kind === "interrupt",
+  );
+  const effectiveState = session && sessionNeedsAnswer(session)
+    ? "waiting_input"
+    : session?.state;
+  const draftScope = useMemo(
+    () => store.credentials ? draftNamespace(store.credentials) : null,
+    [store.credentials],
+  );
 
   // Subscribe on focus, unsubscribe on blur. This is what keeps the whole
   // zero-storage design affordable: the daemon only tails the one transcript
@@ -67,20 +87,51 @@ export default function SessionScreen() {
   }, [sessionId]);
 
   useEffect(() => {
-    draftLoaded.current = false;
-    void loadDraft(sessionId).then((saved) => {
+    setDraftReady(false);
+    draftReadyRef.current = false;
+    setDraft("");
+    draftRef.current = "";
+    if (!draftScope) return;
+    let active = true;
+    void loadDraft(draftScope, sessionId).then((saved) => {
+      if (!active) return;
       // Do not clobber anything typed while the read was in flight.
-      setDraft((current) => (current === "" ? saved : current));
-      draftLoaded.current = true;
+      setDraft((current) => {
+        const restored = current === "" ? saved : current;
+        draftRef.current = restored;
+        return restored;
+      });
+      draftReadyRef.current = true;
+      setDraftReady(true);
     });
-  }, [sessionId]);
+    return () => {
+      active = false;
+    };
+  }, [draftScope, sessionId]);
 
   useEffect(() => {
-    // Skip the write until the restore has landed, or an empty initial value
-    // would immediately erase what was saved.
-    if (!draftLoaded.current) return;
-    void saveDraft(sessionId, draft);
-  }, [sessionId, draft]);
+    draftRef.current = draft;
+    draftReadyRef.current = draftReady;
+    // Skip writes until restore lands, or the initial empty state would erase
+    // the saved value. Coalesce phone keystrokes instead of hitting storage on
+    // every character.
+    if (!draftReady || !draftScope) return;
+    if (draftWriteTimer.current) clearTimeout(draftWriteTimer.current);
+    draftWriteTimer.current = setTimeout(() => {
+      draftWriteTimer.current = null;
+      void saveDraft(draftScope, sessionId, draftRef.current);
+    }, 350);
+  }, [draft, draftReady, draftScope, sessionId]);
+
+  useEffect(() => () => {
+    // Navigation can happen inside the debounce window; flush the final value
+    // so leaving quickly never loses the last few characters.
+    if (draftWriteTimer.current) clearTimeout(draftWriteTimer.current);
+    draftWriteTimer.current = null;
+    if (draftReadyRef.current && draftScope) {
+      void saveDraft(draftScope, sessionId, draftRef.current);
+    }
+  }, [draftScope, sessionId]);
 
   useEffect(() => {
     if (settled.current === null && messages.length > 0) {
@@ -121,19 +172,67 @@ export default function SessionScreen() {
   // would sit unread.
   const blocked = Boolean(session?.question);
   const canSend = session ? session.inject !== "none" && !blocked : false;
+  const submittedSend = submittedClientId
+    ? store.pending.find((item) => item.clientId === submittedClientId)
+    : undefined;
+  const awaitingSend = submittedClientId !== null;
+
+  useEffect(() => {
+    if (!submittedClientId) return;
+    if (submittedSend?.status === "failed") {
+      // The exact text stays in the composer for a deliberate retry.
+      setSubmittedClientId(null);
+      return;
+    }
+    if (submittedSend) return;
+    if (!session) {
+      // A removed session also drops its pending row, but that is not proof the
+      // text landed. Keep the account-scoped draft for inspection/recovery.
+      setSubmittedClientId(null);
+      return;
+    }
+    // Pending entries disappear only after delivery (or after a confirmed
+    // queued handoff), so this is the first safe time to clear the draft.
+    setSubmittedClientId(null);
+    setDraft("");
+    draftRef.current = "";
+    if (draftScope) void clearDraft(draftScope, sessionId);
+  }, [draftScope, session, sessionId, submittedClientId, submittedSend]);
 
   const submit = useCallback(() => {
     const text = draft.trim();
-    if (!text || !canSend) return;
+    if (!text || !canSend || awaitingSend) return;
     if (Platform.OS !== "web") {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     }
-    store.sendMessage(sessionId, text);
-    setDraft("");
-    void clearDraft(sessionId);
+    setSubmittedClientId(store.sendMessage(sessionId, text));
     // No scroll call needed: an inverted list is already anchored to the
     // newest row, so the sent message appears in place.
-  }, [draft, canSend, sessionId, store]);
+  }, [draft, canSend, awaitingSend, sessionId, store]);
+
+  const requestInterrupt = useCallback(() => {
+    if (!store.daemonOnline) return;
+    if (interruptAction?.status === "sending" || interruptAction?.status === "delivered") {
+      return;
+    }
+    const perform = () => store.interruptSession(sessionId);
+    if (Platform.OS === "web") {
+      if (globalThis.confirm("Stop the agent’s current turn?")) perform();
+      return;
+    }
+    Alert.alert(
+      "Stop the current turn?",
+      "The agent will be interrupted immediately. Work already completed stays in the transcript.",
+      [
+        { text: "Keep working", style: "cancel" },
+        { text: "Stop turn", style: "destructive", onPress: perform },
+      ],
+    );
+  }, [interruptAction?.status, sessionId, store]);
+
+  const interruptLocked = !store.daemonOnline ||
+    interruptAction?.status === "sending" ||
+    interruptAction?.status === "delivered";
 
   return (
     <View style={[styles.page, { paddingTop: insets.top }]}>
@@ -164,31 +263,40 @@ export default function SessionScreen() {
           </View>
           {session?.state === "busy" ? (
             <MotionPressable
-              onPress={() => store.interruptSession(sessionId)}
+              onPress={requestInterrupt}
+              disabled={interruptLocked}
               hitSlop={10}
-              style={styles.stop}
+              style={[styles.stop, interruptLocked && styles.stopDisabled]}
               pressedScale={0.92}
               accessibilityRole="button"
               accessibilityLabel="Stop current turn"
+              accessibilityState={{
+                disabled: interruptLocked,
+                busy: interruptAction?.status === "sending",
+              }}
             >
-              <View style={styles.stopGlyph} />
+              {interruptAction?.status === "sending" ? (
+                <ActivityIndicator size="small" color={color.error} />
+              ) : (
+                <View style={styles.stopGlyph} />
+              )}
             </MotionPressable>
           ) : null}
           {session ? (
             <View
               style={[
                 styles.statePill,
-                session.state === "waiting_input" && styles.statePillAttention,
+                effectiveState === "waiting_input" && styles.statePillAttention,
               ]}
             >
-              <Pulse state={session.state} size={6} />
+              <Pulse state={effectiveState ?? session.state} size={6} />
               <Text
                 style={[
                   styles.stateLabel,
-                  { color: stateStyle(session.state).color },
+                  { color: stateStyle(effectiveState ?? session.state).color },
                 ]}
               >
-                {stateStyle(session.state).label}
+                {stateStyle(effectiveState ?? session.state).label}
               </Text>
             </View>
           ) : null}
@@ -199,6 +307,16 @@ export default function SessionScreen() {
         style={styles.keyboardAvoider}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
+        {!store.daemonOnline ? (
+          <ContentColumn>
+            <ConnectionNote />
+          </ContentColumn>
+        ) : null}
+        {interruptAction ? (
+          <ContentColumn>
+            <InterruptNote status={interruptAction.status} error={interruptAction.error} />
+          </ContentColumn>
+        ) : null}
         {session && !session.question && (
           <ContentColumn>
             <DeliveryNote inject={session.inject} state={session.state} />
@@ -248,6 +366,10 @@ export default function SessionScreen() {
         ListFooterComponent={
           paging?.loading ? (
             <ActivityIndicator style={styles.spinner} color={color.faint} />
+          ) : paging?.retentionLimited ? (
+            <Text style={styles.startOfSession}>
+              Older messages remain available on your Mac.
+            </Text>
           ) : paging && !paging.hasMore && messages.length > 0 ? (
             <Text style={styles.startOfSession}>Start of session</Text>
           ) : null
@@ -277,6 +399,9 @@ export default function SessionScreen() {
               <QuestionCard
                 question={session.question}
                 onAnswer={(answer) => store.answerQuestion(sessionId, answer)}
+                disabled={!store.daemonOnline}
+                submissionStatus={answerAction?.status}
+                submissionError={answerAction?.error}
               />
             </ScrollView>
           </ContentColumn>
@@ -299,11 +424,13 @@ export default function SessionScreen() {
               onChangeText={setDraft}
               onFocus={() => setInputFocused(true)}
               onBlur={() => setInputFocused(false)}
-              editable={canSend}
+              editable={canSend && !awaitingSend}
               placeholder={
                 blocked
                   ? "Answer the question above first"
-                  : canSend
+                  : awaitingSend
+                    ? "Waiting for delivery…"
+                    : canSend
                     ? "Send an instruction…"
                     : "This session can't receive messages"
               }
@@ -315,21 +442,78 @@ export default function SessionScreen() {
             />
             <MotionPressable
               onPress={submit}
-              disabled={!canSend || draft.trim().length === 0}
+              disabled={!canSend || awaitingSend || draft.trim().length === 0}
               style={[
                 styles.send,
-                (!canSend || draft.trim().length === 0) && styles.sendDisabled,
+                (!canSend || awaitingSend || draft.trim().length === 0) &&
+                  styles.sendDisabled,
               ]}
               pressedScale={0.92}
               hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel="Send instruction"
+              accessibilityState={{
+                disabled: !canSend || awaitingSend || draft.trim().length === 0,
+                busy: submittedSend?.status === "sending",
+              }}
             >
-              <Text style={styles.sendGlyph}>↑</Text>
+              {submittedSend?.status === "sending" ? (
+                <ActivityIndicator size="small" color={color.faint} />
+              ) : (
+                <Text style={styles.sendGlyph}>↑</Text>
+              )}
             </MotionPressable>
           </ContentColumn>
         </View>
       </KeyboardAvoidingView>
+    </View>
+  );
+}
+
+function ConnectionNote() {
+  return (
+    <View
+      style={[styles.note, styles.connectionNote]}
+      accessibilityRole="alert"
+      accessibilityLiveRegion="polite"
+    >
+      <View style={[styles.noteIcon, styles.connectionNoteIcon]}>
+        <Text style={[styles.noteGlyph, { color: color.error }]}>!</Text>
+      </View>
+      <Text style={styles.noteText}>
+        Your Mac is offline. Answers and turn controls unlock when it reconnects.
+      </Text>
+    </View>
+  );
+}
+
+function InterruptNote({
+  status,
+  error,
+}: {
+  status: "sending" | "delivered" | "queued" | "failed";
+  error?: string;
+}) {
+  const failed = status === "failed";
+  const text = failed
+    ? `Couldn’t stop the turn${error ? `: ${error}` : "."} Use Stop to try again.`
+    : status === "delivered"
+      ? "Stop signal sent. Waiting for the agent to settle…"
+      : "Stopping the current turn…";
+  return (
+    <View
+      style={[styles.note, failed && styles.interruptFailed]}
+      accessibilityRole={failed ? "alert" : "text"}
+      accessibilityLiveRegion="polite"
+    >
+      <View style={styles.noteIcon}>
+        {status === "sending" ? (
+          <ActivityIndicator size="small" color={color.error} />
+        ) : (
+          <Text style={[styles.noteGlyph, { color: failed ? color.error : color.muted }]}>■</Text>
+        )}
+      </View>
+      <Text style={[styles.noteText, failed && { color: color.error }]}>{text}</Text>
     </View>
   );
 }
@@ -472,6 +656,7 @@ const styles = StyleSheet.create({
     borderColor: "#563039",
   },
   stopGlyph: { width: 10, height: 10, borderRadius: 2, backgroundColor: color.error },
+  stopDisabled: { opacity: 0.55 },
   title: { fontFamily: font.monoMedium, fontSize: size.title, color: color.text },
   subtitle: { fontFamily: font.mono, fontSize: size.label, color: color.muted, marginTop: 1 },
   statePill: {
@@ -510,6 +695,9 @@ const styles = StyleSheet.create({
   },
   noteGlyph: { fontFamily: font.sansMedium, fontSize: size.label, color: color.muted },
   noteText: { flex: 1, fontFamily: font.sans, fontSize: size.caption, lineHeight: 17, color: color.muted },
+  connectionNote: { backgroundColor: color.errorWash, borderColor: "#563039" },
+  connectionNoteIcon: { backgroundColor: "#402127" },
+  interruptFailed: { backgroundColor: color.errorWash, borderColor: "#563039" },
 
   // Inverted, so paddingTop is the gap under the newest row. Without it the
   // last message sits behind the composer and gets clipped.

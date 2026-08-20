@@ -1,8 +1,16 @@
 import * as Haptics from "expo-haptics";
-import { useEffect, useMemo, useState } from "react";
-import { Platform, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 
-import { Question, QuestionAnswer } from "../lib/protocol";
+import { questionSnapshotIdentity } from "../lib/action-state";
+import { Question, QuestionAnswer, SendStatus } from "../lib/protocol";
 import { color, font, radius, size, space } from "../lib/theme";
 import { MotionPressable } from "./MotionPressable";
 
@@ -31,49 +39,54 @@ export function QuestionCard({
   question,
   onAnswer,
   compact,
+  disabled = false,
+  submissionStatus,
+  submissionError,
 }: {
   question: Question;
   onAnswer: (answer: QuestionAnswer) => void;
   /** In a list row, show the question without the choices. */
   compact?: boolean;
+  /** The daemon is unreachable, so no answer can safely leave the device. */
+  disabled?: boolean;
+  /** Result of the answer command currently associated with this question. */
+  submissionStatus?: "sending" | SendStatus;
+  submissionError?: string;
 }) {
   const [selected, setSelected] = useState<string[]>(() => terminalOptionKeys(question));
   const [custom, setCustom] = useState("");
-  const identity = useMemo(
-    () =>
-      [
-        question.title,
-        question.prompt,
-        question.detail,
-        question.multiple,
-        question.custom,
-        ...question.options.flatMap((option) => [
-          option.key,
-          option.label,
-          option.description,
-          option.preview,
-          option.selected,
-          option.checked,
-        ]),
-      ].join("\u0000"),
-    [question],
-  );
+  const identity = useMemo(() => questionSnapshotIdentity(question), [question]);
   const terminalSelection = useMemo(() => terminalOptionKeys(question), [identity]);
+  // React state does not update until after an event handler returns. This
+  // synchronous latch closes the tiny window in which a fast double-tap could
+  // type the same terminal answer twice.
+  const commitLock = useRef(false);
   useEffect(() => {
     setSelected(terminalSelection);
     setCustom("");
+    commitLock.current = false;
   }, [identity, terminalSelection]);
+  useEffect(() => {
+    if (submissionStatus !== "sending" && submissionStatus !== "delivered") {
+      commitLock.current = false;
+    }
+  }, [submissionStatus]);
 
   const hasPreviews = question.options.some((option) => Boolean(option.preview));
   const advanced = Boolean(question.multiple || question.custom || hasPreviews);
   const customText = custom.trim();
   const answerCount = selected.length + (customText ? 1 : 0);
   const canSubmit = answerCount > 0 && (question.multiple || answerCount === 1);
+  const submitting = submissionStatus === "sending";
+  const submitted = submissionStatus === "delivered";
+  const interactionDisabled = disabled || submitting || submitted;
   const activePreview = question.options.find(
     (option) => selected.includes(option.key) && option.preview,
   )?.preview;
 
   const commit = (answer: QuestionAnswer) => {
+    if (interactionDisabled || commitLock.current) return;
+    commitLock.current = true;
     if (Platform.OS !== "web") {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     }
@@ -81,7 +94,9 @@ export function QuestionCard({
   };
 
   const choose = (key: string) => {
+    if (interactionDisabled || commitLock.current) return;
     if (!advanced) {
+      setSelected([key]);
       commit({ optionKey: key });
       return;
     }
@@ -142,17 +157,23 @@ export function QuestionCard({
               <MotionPressable
                 key={option.key}
                 onPress={() => choose(option.key)}
+                disabled={interactionDisabled}
                 style={[
                   styles.option,
                   affirmative && styles.optionAffirmative,
                   selected.includes(option.key) && styles.optionSelected,
+                  interactionDisabled && styles.controlDisabled,
                 ]}
                 pressedScale={0.985}
-                accessibilityRole="button"
+                accessibilityRole={question.multiple ? "checkbox" : "radio"}
                 accessibilityLabel={
                   option.description ? `${option.label}. ${option.description}` : option.label
                 }
-                accessibilityState={{ selected: selected.includes(option.key) }}
+                accessibilityState={
+                  question.multiple
+                    ? { checked: selected.includes(option.key), disabled: interactionDisabled }
+                    : { selected: selected.includes(option.key), disabled: interactionDisabled }
+                }
               >
                 <View style={styles.optionKeyWrap}>
                   <Text style={styles.optionKey}>{option.key}</Text>
@@ -179,6 +200,7 @@ export function QuestionCard({
             <TextInput
               style={styles.customInput}
               value={custom}
+              editable={!interactionDisabled}
               onChangeText={(value) => {
                 setCustom(value);
                 if (!question.multiple && value.trim()) setSelected([]);
@@ -187,6 +209,7 @@ export function QuestionCard({
               placeholderTextColor={color.faint}
               multiline
               accessibilityLabel="Custom answer"
+              accessibilityState={{ disabled: interactionDisabled }}
             />
           ) : null}
           {activePreview ? (
@@ -200,19 +223,73 @@ export function QuestionCard({
           {advanced ? (
             <MotionPressable
               onPress={submit}
-              disabled={!canSubmit}
+              disabled={!canSubmit || interactionDisabled}
               style={[
                 styles.submit,
-                !canSubmit && styles.submitDisabled,
+                (!canSubmit || interactionDisabled) && styles.submitDisabled,
               ]}
               accessibilityRole="button"
               accessibilityLabel="Submit answer"
+              accessibilityState={{
+                disabled: !canSubmit || interactionDisabled,
+                busy: submitting,
+              }}
             >
-              <Text style={styles.submitLabel}>Submit answer</Text>
+              {submitting ? (
+                <ActivityIndicator color={color.ink} />
+              ) : (
+                <Text style={styles.submitLabel}>
+                  {submitted ? "Answer sent" : "Submit answer"}
+                </Text>
+              )}
             </MotionPressable>
+          ) : null}
+          {submissionStatus || disabled ? (
+            <AnswerStatus
+              status={submissionStatus}
+              error={submissionError}
+              offline={disabled}
+            />
           ) : null}
         </View>
       )}
+    </View>
+  );
+}
+
+function AnswerStatus({
+  status,
+  error,
+  offline,
+}: {
+  status?: "sending" | SendStatus;
+  error?: string;
+  offline: boolean;
+}) {
+  const failed = status === "failed";
+  const text = failed
+    ? `Couldn’t submit the answer${error ? `: ${error}` : "."} Check the terminal, then choose an answer to retry.`
+    : status === "sending"
+      ? "Submitting answer…"
+      : status === "delivered"
+        ? "Answer sent. Waiting for the agent to continue…"
+        : offline
+          ? "Reconnect to your Mac to answer."
+          : "";
+
+  if (!text) return null;
+  return (
+    <View
+      style={[styles.answerStatus, failed && styles.answerStatusFailed]}
+      accessibilityRole={failed ? "alert" : "text"}
+      accessibilityLiveRegion="polite"
+    >
+      {status === "sending" ? (
+        <ActivityIndicator size="small" color={color.needsYou} />
+      ) : null}
+      <Text style={[styles.answerStatusText, failed && styles.answerStatusTextFailed]}>
+        {text}
+      </Text>
     </View>
   );
 }
@@ -290,6 +367,7 @@ const styles = StyleSheet.create({
   },
   optionAffirmative: { borderColor: color.needsYou },
   optionSelected: { backgroundColor: "#302A1E", borderColor: color.needsYou },
+  controlDisabled: { opacity: 0.58 },
   optionKeyWrap: {
     minWidth: 26,
     height: 26,
@@ -369,4 +447,28 @@ const styles = StyleSheet.create({
     fontFamily: font.sansMedium,
     fontSize: size.body,
   },
+  answerStatus: {
+    minHeight: 40,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radius.md,
+    backgroundColor: color.sunken,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.line,
+  },
+  answerStatusFailed: {
+    backgroundColor: color.errorWash,
+    borderColor: color.error,
+  },
+  answerStatusText: {
+    flex: 1,
+    fontFamily: font.sans,
+    fontSize: size.caption,
+    lineHeight: 18,
+    color: color.muted,
+  },
+  answerStatusTextFailed: { color: color.error },
 });

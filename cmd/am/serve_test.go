@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/base64"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestResolveRelayPrecedence(t *testing.T) {
@@ -52,6 +55,65 @@ func TestResolveRelayPrecedence(t *testing.T) {
 			t.Errorf("got %q, want the trimmed environment value", got)
 		}
 	})
+}
+
+func TestNormalizeRelayURLRequiresEncryptedRemoteTransport(t *testing.T) {
+	tests := []struct {
+		raw     string
+		want    string
+		wantErr bool
+	}{
+		{raw: "relay.example.com", want: "https://relay.example.com"},
+		{raw: "https://relay.example.com/", want: "https://relay.example.com"},
+		{raw: "wss://relay.example.com", want: "https://relay.example.com"},
+		{raw: "http://127.0.0.1:8080", want: "http://127.0.0.1:8080"},
+		{raw: "ws://[::1]:8080", want: "http://[::1]:8080"},
+		{raw: "http://localhost:8080", want: "http://localhost:8080"},
+		{raw: "http://192.168.1.20:8080", wantErr: true},
+		{raw: "ws://relay.example.com", wantErr: true},
+		{raw: "ftp://relay.example.com", wantErr: true},
+		{raw: "https://relay.example.com/path", wantErr: true},
+		{raw: "https://user:pass@relay.example.com", wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.raw, func(t *testing.T) {
+			got, err := normalizeRelayURL(test.raw)
+			if test.wantErr {
+				if err == nil {
+					t.Fatalf("normalizeRelayURL(%q) = %q, want error", test.raw, got)
+				}
+				return
+			}
+			if err != nil || got != test.want {
+				t.Fatalf("normalizeRelayURL(%q) = %q, %v; want %q", test.raw, got, err, test.want)
+			}
+		})
+	}
+}
+
+func TestReadPairCodeResponseIsBoundedAndValidated(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	token := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef"))
+	valid := fmt.Sprintf(`{"code":"1234567890","token":%q,"expiresAt":%d}`,
+		token, now.Add(time.Minute).UnixMilli())
+	body, err := readPairCodeResponse(strings.NewReader(valid), now)
+	if err != nil || body.Code != "1234567890" || body.Token != token {
+		t.Fatalf("valid response = %+v, %v", body, err)
+	}
+
+	tests := []string{
+		strings.Repeat("x", maxPairCodeResponse+1),
+		`{"code":"123","token":"bad","expiresAt":0}`,
+		fmt.Sprintf(`{"code":"12345x7890","token":%q,"expiresAt":%d}`,
+			token, now.Add(time.Minute).UnixMilli()),
+		fmt.Sprintf(`{"code":"1234567890","token":%q,"expiresAt":%d}`,
+			token, now.Add(-time.Minute).UnixMilli()),
+	}
+	for _, raw := range tests {
+		if _, err := readPairCodeResponse(strings.NewReader(raw), now); err == nil {
+			t.Errorf("accepted invalid pairing response %q", raw[:min(len(raw), 80)])
+		}
+	}
 }
 
 func TestPairingURLOmitsOnlyTheDefaultRelay(t *testing.T) {

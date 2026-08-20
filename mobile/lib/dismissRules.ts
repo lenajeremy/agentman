@@ -33,6 +33,7 @@ export type Dismissals = Record<string, Dismissal>;
 export function isHidden(session: Session, dismissals: Dismissals): boolean {
   const dismissal = dismissals[session.id];
   if (!dismissal) return false;
+  if (needsAnswer(session)) return false;
   if (session.state !== "idle") return false;
   return session.lastActivityAt <= dismissal.activityAt;
 }
@@ -74,5 +75,11 @@ export function canDismiss(session: Session): boolean {
   // Only idle sessions. A busy one is working and would reappear immediately;
   // a waiting_input one is blocked on you specifically, and hiding that is how
   // an agent sits untouched for an hour.
-  return session.state === "idle";
+  return session.state === "idle" && !needsAnswer(session);
+}
+
+// Kept local so this dependency-free rules module still runs directly under
+// Node's test runner. It must match question-alerts.sessionNeedsAnswer.
+function needsAnswer(session: Pick<Session, "state" | "question">): boolean {
+  return session.state === "waiting_input" || Boolean(session.question);
 }
