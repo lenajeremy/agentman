@@ -101,7 +101,7 @@ func (q *Question) sameAs(other *Question) bool {
 		return q == other
 	}
 	if q.Prompt != other.Prompt || q.Title != other.Title || q.Detail != other.Detail ||
-		q.Multiple != other.Multiple || q.Custom != other.Custom {
+		q.ID != other.ID || q.Multiple != other.Multiple || q.Custom != other.Custom {
 		return false
 	}
 	if len(q.Options) != len(other.Options) {
@@ -117,6 +117,10 @@ func (q *Question) sameAs(other *Question) bool {
 
 // Question is a pending decision an agent is waiting on.
 type Question struct {
+	// ID is an opaque revision for the exact pending decision. Returning it with
+	// an answer lets the daemon reject a stale tap after another device has
+	// already advanced the agent to a different question.
+	ID      string           `json:"id,omitempty"`
 	Prompt  string           `json:"prompt"`
 	Title   string           `json:"title,omitempty"`
 	Detail  string           `json:"detail,omitempty"`
@@ -141,9 +145,10 @@ type QuestionOption struct {
 // Terminal menus use OptionKey; API-backed agents may accept several choices
 // and/or custom text.
 type QuestionAnswer struct {
-	OptionKey string
-	Options   []string
-	Text      string
+	QuestionID string
+	OptionKey  string
+	Options    []string
+	Text       string
 }
 
 // Role is who produced a message.
