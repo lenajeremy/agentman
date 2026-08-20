@@ -44,6 +44,7 @@ import {
   type Dismissals,
 } from "./dismissed";
 import { draftNamespace } from "./draft-policy";
+import { isPushActive, obtainPushToken, setPushActive } from "./push";
 import { clearDraft } from "./drafts";
 import { newFrameId } from "./id";
 import {
@@ -142,6 +143,10 @@ function clearSettledDrafts(before: PendingSend[], after: PendingSend[]): void {
 
 function notifyQuestion(session: Session) {
   if (Platform.OS === "web") return;
+  // Once the Mac has a push token it sends these itself, and it can reach a
+  // suspended app that this cannot. Scheduling here too would double every
+  // alert.
+  if (isPushActive()) return;
   void Notifications.scheduleNotificationAsync({
     content: {
       title: `${session.name || session.kind} needs your answer`,
@@ -420,7 +425,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // The whole point of the product: tell the user their agent finished.
         // Guarded because neither module exists on web, where an unhandled
         // rejection here takes the whole screen down.
-        if (Platform.OS !== "web") {
+        if (Platform.OS !== "web" && !isPushActive()) {
           void Notifications.scheduleNotificationAsync({
             content: {
               title: `${event.sessionName ?? "Agent"} finished`,
@@ -528,6 +533,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         },
       });
       clientRef.current = client;
+
+      // Hand the Mac a push token so it can reach this phone once iOS suspends
+      // the app. Best-effort: on a simulator, without permission, or in Expo Go
+      // there is no token, and the app falls back to local notifications.
+      void obtainPushToken()
+        .then((token) => {
+          if (!token || clientRef.current !== client) return;
+          client.registerPush(token);
+          setPushActive(true);
+        })
+        .catch(() => {});
 
       for (const sessionId of desiredSubscriptions.current) client.subscribe(sessionId);
       for (const sessionId of pendingInitialLoads.current) {

@@ -13,7 +13,10 @@
     },
     "android": {
       "package": "dev.agentman.app",
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
     },
     "plugins": [
       "expo-router",
@@ -26,10 +29,18 @@
           "recordAudioAndroid": false
         }
       ],
+      "expo-notifications",
       "./plugins/withIosBuildFixes"
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "5526986e-22be-46f7-8e5e-a4a0a2307197"
+      }
+    },
+    "owner": "jeremiahlena13"
   }
 }

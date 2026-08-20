@@ -169,7 +169,7 @@ sequenceDiagram
 | The daemon normalizes every agent behind a source adapter. | Agent-specific formats do not leak into the relay or mobile UI. |
 | Only the visible session is followed live. | Idle sessions do not continuously stream transcript data. |
 | Terminal parsing is conservative. | Ambiguous terminal text is ignored instead of being exposed as a false question. |
-| Notifications are scheduled locally after a WebSocket event. | No APNs or FCM backend is required, but alerts are not reliable after the OS suspends the app. |
+| The daemon posts push notifications straight to Expo. | Alerts reach a suspended phone without the relay seeing them, but the daemon needs outbound internet. Falls back to local notifications when no device is registered. |
 | Transport uses TLS without end-to-end payload authentication or encryption. | A relay operator can inspect, alter, or inject live control traffic; self-host when that trust boundary is unacceptable. |
 
 ## Agent adapters
@@ -279,10 +279,33 @@ For a connected iPhone release build:
 APPLE_TEAM_ID=<team-id> npm run device
 ```
 
-The default build removes the unused Apple push entitlement so a free Apple
-developer team can sign it. Set `APPLE_PUSH=1` only when intentionally adding a
-remote push implementation. Current alerts are local notifications triggered
-by events received through the live relay WebSocket.
+The default build removes the Apple push entitlement so a free Apple developer
+team can sign it. Such a build still alerts, but only through local
+notifications fired while the WebSocket is alive — nothing arrives once iOS
+suspends the app.
+
+Set `APPLE_PUSH=1` with a paid team to keep the entitlement. The app then hands
+the daemon an Expo push token, and the daemon posts alerts directly to Expo
+when a turn completes or an agent becomes blocked on a question. The relay is
+not involved, so a self-hosted relay needs no push configuration.
+
+Push payloads carry a session name and a reason, never transcript content,
+because they pass through Expo and Apple. To include a short excerpt, set
+`push.includePreview` in `~/.agentman/config.json`:
+
+```json
+{ "push": { "includePreview": true } }
+```
+
+### EAS builds
+
+```bash
+cd mobile
+npx eas-cli@latest build --platform ios --profile production
+npx eas-cli@latest submit --platform ios --profile production
+```
+
+The first build prompts for Apple credentials and stores them with EAS.
 
 ## Self-hosting the relay
 

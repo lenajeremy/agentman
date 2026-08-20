@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/lenajeremy/agentman/internal/push"
 	"github.com/lenajeremy/agentman/internal/speech"
 )
 
@@ -32,6 +33,9 @@ type Config struct {
 	// Speech reads finished turns out loud. Off unless asked for: audio that
 	// starts on its own is a bad surprise, particularly in an office.
 	Speech speech.Config `json:"speech,omitempty"`
+	// Push reaches the phone once iOS has suspended the app and the websocket
+	// is gone. The daemon posts straight to Expo, so the relay stays out of it.
+	Push push.Config `json:"push,omitempty"`
 }
 
 // ListenAddr returns the configured safe loopback listener or the default.

@@ -119,14 +119,15 @@ function withSigningTeam(config) {
  *   Personal development teams, including "...", do not support the Push
  *   Notifications capability.
  *
- * Nothing is lost by removing it. The app only ever fires *local*
- * notifications — scheduleNotificationAsync with `trigger: null`, driven by
- * question/session updates and turn_complete frames that already arrived
- * through the relay websocket — and those need no entitlement. There is no
- * APNs round trip to authorise.
+ * What this costs depends on the account. Without the entitlement the app falls
+ * back to *local* notifications — scheduleNotificationAsync with `trigger:
+ * null`, driven by frames that already arrived over the relay websocket. Those
+ * need no entitlement, but they can only fire while the socket is alive, so
+ * nothing arrives once iOS suspends the app.
  *
- * Set APPLE_PUSH=1 to keep it, which is what a paid account doing real remote
- * push would want.
+ * Set APPLE_PUSH=1 with a paid team to keep it. That is what lets the daemon
+ * reach a suspended phone through APNs, which is the case local notifications
+ * cannot cover and the one users actually care about.
  */
 function withoutPushEntitlement(config) {
   if (process.env.APPLE_PUSH === "1") return config;

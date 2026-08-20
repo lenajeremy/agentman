@@ -19,6 +19,7 @@ import (
 
 	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/push"
 	"github.com/lenajeremy/agentman/internal/source"
 )
 
@@ -92,6 +93,13 @@ type Daemon struct {
 	// actionLocks cover send, answer, and interrupt from validation through the
 	// adapter action. Read-only history requests remain fully concurrent.
 	actionLocks [actionLockStripes]sync.Mutex
+	// push reaches a phone whose websocket is gone because iOS suspended the
+	// app — the case a live-socket notification cannot cover. Nil until the CLI
+	// supplies one, so tests and `-relay none` need no push configuration.
+	push *push.Sender
+	// pushedQuestions remembers the last question announced per session, so a
+	// prompt sitting unanswered across many sweeps rings the phone once.
+	pushedQuestions map[string]string
 }
 
 // follow is one live tail. It is tracked by pointer identity so that a
@@ -131,7 +139,83 @@ func New(registry *source.Registry, sink Transport) *Daemon {
 		pendingTurns:       map[string]pendingTurn{},
 		turnDelay:          turnQuestionGrace,
 		questionRetryDelay: discoverInterval,
+		pushedQuestions:    map[string]string{},
 	}
+}
+
+// SetPush installs the push sender. Separate from New so that a daemon without
+// push configured is the default rather than a special case.
+func (d *Daemon) SetPush(sender *push.Sender) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.push = sender
+}
+
+// alert delivers a notification to phones that are not currently listening.
+//
+// Fired in the background: the callers are a discovery sweep and a hook
+// callback, and neither can afford to wait on a third-party HTTP request.
+func (d *Daemon) alert(title, body, sessionID string) {
+	d.mu.Lock()
+	sender := d.push
+	d.mu.Unlock()
+	if sender == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = sender.Send(ctx, push.Alert{Title: title, Body: body, SessionID: sessionID})
+	}()
+}
+
+// alertTurnComplete pushes a finished turn. The preview only travels when the
+// user has opted in, since it leaves the machine.
+func (d *Daemon) alertTurnComplete(event protocol.Event) {
+	d.mu.Lock()
+	sender := d.push
+	d.mu.Unlock()
+	if sender == nil {
+		return
+	}
+	name := event.SessionName
+	if name == "" {
+		name = event.SessionID
+	}
+	body := sender.Preview(event.Preview)
+	if body == "" {
+		body = "Finished its turn."
+	}
+	d.alert(name, body, event.SessionID)
+}
+
+// alertNeedsAnswer pushes a session that has become blocked on a decision, once
+// per distinct question.
+func (d *Daemon) alertNeedsAnswer(session protocol.Session) {
+	if session.Question == nil {
+		return
+	}
+	d.mu.Lock()
+	previous, seen := d.pushedQuestions[session.ID]
+	if seen && previous == session.Question.ID {
+		d.mu.Unlock()
+		return
+	}
+	d.pushedQuestions[session.ID] = session.Question.ID
+	sender := d.push
+	d.mu.Unlock()
+	if sender == nil {
+		return
+	}
+	name := session.Name
+	if name == "" {
+		name = session.ID
+	}
+	body := sender.Preview(session.Question.Prompt)
+	if body == "" {
+		body = "Waiting on you to choose."
+	}
+	d.alert(name+" needs your answer", body, session.ID)
 }
 
 // Run drives discovery and hook handling until ctx is cancelled.
@@ -234,11 +318,22 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 		if existed && before.State == protocol.StateBusy && session.State == protocol.StateIdle {
 			d.announceTurnComplete(ctx, session)
 		}
+		// A blocked agent is the most actionable thing the daemon knows, and the
+		// one most likely to be missed: the phone is asleep precisely because the
+		// user walked away. Announced once per distinct question.
+		if session.Question != nil {
+			d.alertNeedsAnswer(session)
+		} else {
+			d.mu.Lock()
+			delete(d.pushedQuestions, id)
+			d.mu.Unlock()
+		}
 	}
 	for _, id := range gone {
 		d.mu.Lock()
 		delete(d.turns, id)
 		delete(d.hookStates, id)
+		delete(d.pushedQuestions, id)
 		if pending, ok := d.pendingTurns[id]; ok {
 			pending.timer.Stop()
 			delete(d.pendingTurns, id)
@@ -296,12 +391,14 @@ func (d *Daemon) announceTurnComplete(ctx context.Context, session protocol.Sess
 		}
 	}
 
-	_ = d.sink.Send(protocol.Event{
+	event := protocol.Event{
 		Type:        protocol.EvtTurnComplete,
 		SessionID:   session.ID,
 		SessionName: session.Name,
 		Preview:     preview,
-	})
+	}
+	_ = d.sink.Send(event)
+	d.alertTurnComplete(event)
 }
 
 func clipPreview(text string) string {
@@ -516,6 +613,7 @@ func (d *Daemon) finishHookTurn(
 		return
 	}
 	_ = d.sink.Send(event)
+	d.alertTurnComplete(event)
 }
 
 func (d *Daemon) retryHookQuestionInspection(
@@ -634,6 +732,21 @@ func (d *Daemon) HandleFrom(
 
 	case protocol.ReqUnsubscribe:
 		d.stopFollow(subscriberID, req.SessionID)
+		return protocol.Event{}
+
+	case protocol.ReqRegisterPush:
+		d.mu.Lock()
+		sender := d.push
+		d.mu.Unlock()
+		if sender == nil || sender.Store == nil {
+			return protocol.Event{
+				Type:  protocol.EvtError,
+				Error: "daemon: push notifications are not configured on this machine",
+			}
+		}
+		if _, err := sender.Store.Register(req.PushToken); err != nil {
+			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
+		}
 		return protocol.Event{}
 
 	case protocol.ReqSendMessage:
@@ -756,6 +869,11 @@ func validateRequest(req protocol.Request) error {
 		req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqAnswer
 	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
 		return fmt.Errorf("daemon: invalid session id")
+	}
+	// The token is handed to a third-party API, so it is checked for shape here
+	// rather than being forwarded on trust.
+	if req.Type == protocol.ReqRegisterPush && !push.ValidToken(req.PushToken) {
+		return fmt.Errorf("daemon: invalid push token")
 	}
 	if len(req.Before) > maxCursorBytes || len(req.ClientID) > maxClientIDBytes ||
 		len(req.QuestionID) > maxClientIDBytes {

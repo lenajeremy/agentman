@@ -50,6 +50,11 @@ const (
 	ReqInterrupt     RequestType = "interrupt"
 	// ReqAnswer selects an option in a pending question.
 	ReqAnswer RequestType = "answer_question"
+	// ReqRegisterPush hands the daemon an Expo push token so it can reach the
+	// phone once iOS has suspended the app and the websocket is gone. Additive:
+	// a daemon that predates it rejects the type and the app carries on with
+	// local notifications, so this needs no protocol version bump.
+	ReqRegisterPush RequestType = "register_push"
 )
 
 // Request is anything the app asks of the daemon.
@@ -74,6 +79,8 @@ type Request struct {
 	// ClientID is echoed on SendResult so the app can settle its optimistic
 	// message bubble.
 	ClientID string `json:"clientId,omitempty"`
+	// PushToken carries an Expo push token on ReqRegisterPush.
+	PushToken string `json:"pushToken,omitempty"`
 }
 
 /* ----------------------------- daemon → app ------------------------------ */
