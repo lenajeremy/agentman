@@ -649,3 +649,37 @@ func readFixture(t *testing.T, path string) string {
 	}
 	return string(raw)
 }
+
+// Captured verbatim while the app reported the session as idle and showed no
+// card, with the question plainly on the terminal.
+//
+// Claude Code paints its task list beneath the live control. The guard that
+// rejects anything unrecognised after the options — there to stop a numbered
+// list in an assistant reply becoming remotely answerable — treated those rows
+// as proof the menu had been answered and scrolled past, so Detect returned
+// nil and every question went invisible to the phone. It only began once a
+// task list existed, which is why it looked like a sudden regression.
+func TestDetectsAQuestionWithATaskListBelowIt(t *testing.T) {
+	q := Detect(readFixture(t, "testdata/claude_task_list_below_real_pane.txt"))
+	if q == nil {
+		t.Fatal("the task list hid a live question from the app")
+	}
+	if q.Title != "Android next" {
+		t.Errorf("Title = %q", q.Title)
+	}
+	if q.Prompt != "The Android AAB is building. Once it finishes, what should happen with it?" {
+		t.Errorf("Prompt = %q", q.Prompt)
+	}
+	// The three real answers. "Type something" and "Chat about this" are rows
+	// AskUserQuestion always adds and are not listed answers; the first becomes
+	// Custom, the second is dropped.
+	if len(q.Options) != 3 {
+		t.Fatalf("Options = %d, want 3", len(q.Options))
+	}
+	if q.Options[1].Label != "Submit to Play internal testing" {
+		t.Errorf("Options[1].Label = %q", q.Options[1].Label)
+	}
+	if !q.Custom {
+		t.Error("Custom = false, want true — the pane offers a free-text row")
+	}
+}
