@@ -21,16 +21,23 @@ FONT_INDEX = 2  # Futura Bold
 
 INK = (9, 12, 18)
 INK_TOP = (18, 25, 38)
-AMBER = (255, 184, 74)
-AMBER_DEEP = (176, 106, 24)
+# The letters run blue to cyan down their height; the intersection is the
+# theme's green, so the join reads as its own thing rather than a shadow.
+LETTER_TOP = (77, 163, 255)
+LETTER_BOTTOM = (69, 224, 232)
+MERGE = (82, 223, 163)
 
 SIZE = 1024
 # Fraction of the canvas the monogram spans. iOS masks the corners, so the mark
 # has to sit well inside the square or it reads as cramped.
 MARK_WIDTH = 0.62
-# How far M is pulled into A, as a fraction of A's width. Enough to force a real
-# intersection; more than this and the A stops being readable.
-OVERLAP = 0.30
+# How far M is pulled into A, as a fraction of A's width.
+#
+# Tuned by eye against the alternatives. Below this the two legs cross and then
+# diverge again, leaving a stray sliver under the join that reads as a mistake.
+# Above it, A's apex cuts a notch clean through M's left stem and both letters
+# stop being legible. 0.40 is where the intersection is a single clean wedge.
+OVERLAP = 0.40
 
 
 def glyph_mask(character: str, point_size: int) -> Image.Image:
@@ -41,6 +48,22 @@ def glyph_mask(character: str, point_size: int) -> Image.Image:
         (point_size, point_size), character, font=font, fill=255
     )
     return canvas.crop(canvas.getbbox())
+
+
+def gradient(
+    width: int, height: int, top: tuple[int, int, int], bottom: tuple[int, int, int]
+) -> Image.Image:
+    """A vertical two-stop ramp, used to fill the letterforms."""
+    ramp = Image.new("RGBA", (width, height))
+    draw = ImageDraw.Draw(ramp)
+    for y in range(height):
+        t = y / max(1, height - 1)
+        draw.line(
+            [(0, y), (width, y)],
+            fill=tuple(round(top[i] + (bottom[i] - top[i]) * t) for i in range(3))
+            + (255,),
+        )
+    return ramp
 
 
 def monogram(size: int, width_fraction: float) -> Image.Image:
@@ -62,8 +85,8 @@ def monogram(size: int, width_fraction: float) -> Image.Image:
     intersection = ImageChops.darker(a_layer, m_layer)
 
     mark = Image.new("RGBA", (raw_width, raw_height), (0, 0, 0, 0))
-    mark.paste(Image.new("RGBA", mark.size, AMBER + (255,)), (0, 0), union)
-    mark.paste(Image.new("RGBA", mark.size, AMBER_DEEP + (255,)), (0, 0), intersection)
+    mark.paste(gradient(raw_width, raw_height, LETTER_TOP, LETTER_BOTTOM), (0, 0), union)
+    mark.paste(Image.new("RGBA", mark.size, MERGE + (255,)), (0, 0), intersection)
 
     target_width = int(size * width_fraction)
     scale = target_width / raw_width
