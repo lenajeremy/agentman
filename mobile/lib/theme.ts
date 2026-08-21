@@ -42,8 +42,8 @@ export const color = {
   faint: "#657086",
 
   /** An agent is working. */
-  working: "#63D0FF",
-  workingWash: "#102431",
+  working: "#6AAECD",
+  workingWash: "#141F27",
   /** An agent is blocked on the user — the most actionable state there is. */
   needsYou: "#FFB84A",
   needsYouWash: "#271F12",
