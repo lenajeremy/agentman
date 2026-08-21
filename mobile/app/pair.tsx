@@ -1,4 +1,6 @@
 import * as Haptics from "expo-haptics";
+import Feather from "@expo/vector-icons/Feather";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -171,12 +173,12 @@ export default function Pair() {
               style={styles.scanButton}
               accessibilityRole="button"
             >
-              <ScanGlyph />
+              <Ionicons name="qr-code-outline" size={24} color={color.ink} />
               <View style={styles.buttonCopy}>
                 <Text style={styles.buttonText}>Scan the QR code</Text>
                 <Text style={styles.buttonHint}>Fastest and most secure</Text>
               </View>
-              <Text style={styles.buttonChevron}>›</Text>
+              <Feather name="chevron-right" size={20} color={color.ink} />
             </MotionPressable>
           </Appear>
 
@@ -229,7 +231,7 @@ export default function Pair() {
 
             {error ? (
               <View style={styles.errorBox} accessibilityRole="alert">
-                <Text style={styles.errorGlyph}>!</Text>
+                <Feather name="alert-circle" size={14} color={color.error} />
                 <Text style={styles.error}>{error}</Text>
               </View>
             ) : null}
@@ -363,22 +365,6 @@ const styles = StyleSheet.create({
     paddingVertical: space.md,
     paddingHorizontal: space.lg,
   },
-  scanGlyph: {
-    width: 26,
-    height: 26,
-    borderWidth: 2,
-    borderColor: color.ink,
-    borderRadius: radius.sm,
-  },
-  scanGlyphCore: {
-    position: "absolute",
-    width: 8,
-    height: 8,
-    left: 7,
-    top: 7,
-    borderRadius: 2,
-    backgroundColor: color.ink,
-  },
   buttonCopy: { flex: 1 },
   buttonText: { fontFamily: font.sansBold, fontSize: size.body, color: color.ink },
   buttonHint: {
@@ -386,12 +372,6 @@ const styles = StyleSheet.create({
     fontSize: size.label,
     color: "#183543",
     marginTop: 1,
-  },
-  buttonChevron: {
-    fontFamily: font.sans,
-    fontSize: 26,
-    lineHeight: 28,
-    color: color.ink,
   },
 
   field: { gap: space.sm },
@@ -433,7 +413,6 @@ const styles = StyleSheet.create({
     padding: space.md,
     backgroundColor: color.errorWash,
   },
-  errorGlyph: { fontFamily: font.sansBold, fontSize: size.caption, color: color.error },
   error: { flex: 1, fontFamily: font.sans, fontSize: size.caption, color: color.error },
 
   pairButton: {
@@ -488,10 +467,3 @@ const styles = StyleSheet.create({
   },
 });
 
-function ScanGlyph() {
-  return (
-    <View style={styles.scanGlyph}>
-      <View style={styles.scanGlyphCore} />
-    </View>
-  );
-}

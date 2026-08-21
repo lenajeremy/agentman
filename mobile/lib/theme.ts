@@ -11,23 +11,29 @@
  *   needs you    — amber, the borrowed vocabulary of a real control panel
  *   idle         — no colour at all; nothing is happening, so nothing glows
  *
- * The base is a deep blue-black rather than pure black: agents run at night,
- * on a phone, and #000 on OLED next to coloured state reads as a hole in the
- * screen instead of a surface.
+ * The base is a neutral near-black. A hair off #000 rather than pure, so an
+ * OLED panel has a surface to render instead of switching pixels off entirely
+ * beside lit colour — but neutral, not tinted, so the state colours are the
+ * only hue on screen.
+ *
+ * A card is drawn by its border, not by being a paler rectangle. Filling every
+ * surface produces a stack of grey slabs; outlining them keeps the ground
+ * continuous and lets the border carry the structure.
  */
 export const color = {
   /** Page background. */
-  ink: "#090C12",
-  /** Raised surface — cards, the composer bar. */
-  surface: "#131823",
-  /** A surface that needs to read independently from the page. */
-  surfaceRaised: "#181E2A",
+  ink: "#08080A",
+  /** A card. Barely lifted: on this ground a card is defined by its border,
+   *  not by being a paler rectangle. */
+  surface: "#101012",
+  /** Controls — buttons, pills, segmented tracks. These do read as filled. */
+  surfaceRaised: "#1C1C20",
   /** A pressed or nested surface. */
-  sunken: "#0D1119",
+  sunken: "#0B0B0D",
   /** Hairlines and dividers. */
-  line: "#252C3A",
+  line: "#2A2A2E",
   /** A stronger divider, for section boundaries. */
-  lineStrong: "#364055",
+  lineStrong: "#3A3A41",
 
   text: "#F0F3F9",
   /** Secondary text: paths, timestamps, tool summaries. */

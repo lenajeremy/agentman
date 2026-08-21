@@ -1,3 +1,4 @@
+import Feather from "@expo/vector-icons/Feather";
 import { useRouter } from "expo-router";
 import { Alert, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -42,7 +43,7 @@ export default function Settings() {
           accessibilityRole="button"
           accessibilityLabel="Back"
         >
-          <Text style={styles.backGlyph}>‹</Text>
+          <Feather name="chevron-left" size={22} color={color.text} />
         </MotionPressable>
         <View>
           <Text style={styles.eyebrow}>Agentman</Text>
@@ -169,7 +170,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: color.line,
   },
-  backGlyph: { color: color.text, fontSize: 30, lineHeight: 32, marginTop: -4 },
   eyebrow: {
     fontFamily: font.sansMedium,
     fontSize: size.label,
