@@ -153,15 +153,18 @@ export default function Pair() {
           </Appear>
 
           <Appear delay={45}>
-            <View style={styles.stepCard}>
-              <View style={styles.stepNumber}>
-                <Text style={styles.stepNumberText}>1</Text>
+            <View style={styles.card}>
+              <View style={styles.cardHeader}>
+                <Feather name="terminal" size={15} color={color.muted} />
+                <Text style={styles.cardHeaderLabel}>On your Mac</Text>
               </View>
-              <View style={styles.stepCopy}>
-                <Text style={styles.stepLabel}>Open a terminal on your Mac</Text>
+              <View style={styles.cardDivider} />
+              <View style={styles.cardBody}>
+                <Text style={styles.stepLabel}>
+                  Run <Text style={styles.code}>am pair</Text>
+                </Text>
                 <Text style={styles.stepBody}>
-                  Run <Text style={styles.code}>am pair</Text>. The QR code and
-                  ten-digit fallback expire after one minute.
+                  The QR code and ten-digit fallback both expire after one minute.
                 </Text>
               </View>
             </View>
@@ -182,13 +185,13 @@ export default function Pair() {
             </MotionPressable>
           </Appear>
 
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerLabel}>or enter the fallback code</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <View style={styles.formCard}>
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Feather name="hash" size={15} color={color.muted} />
+              <Text style={styles.cardHeaderLabel}>Or type the code</Text>
+            </View>
+            <View style={styles.cardDivider} />
+            <View style={styles.cardBody}>
             <View style={styles.field}>
               <Text style={styles.fieldLabel}>Relay address</Text>
               <TextInput
@@ -252,6 +255,7 @@ export default function Pair() {
                 <Text style={styles.pairButtonText}>Pair with this code</Text>
               )}
             </MotionPressable>
+            </View>
           </View>
 
           <View style={styles.privacyNote}>
@@ -318,30 +322,6 @@ const styles = StyleSheet.create({
     marginTop: space.sm,
   },
 
-  stepCard: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: space.md,
-    backgroundColor: color.surface,
-    borderRadius: radius.lg,
-    padding: space.lg,
-    borderWidth: 1,
-    borderColor: color.line,
-  },
-  stepNumber: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: color.workingWash,
-  },
-  stepNumberText: {
-    fontFamily: font.monoMedium,
-    fontSize: size.caption,
-    color: color.working,
-  },
-  stepCopy: { flex: 1, gap: space.xs },
   stepLabel: {
     fontFamily: font.sansMedium,
     fontSize: size.body,
@@ -397,14 +377,29 @@ const styles = StyleSheet.create({
   inputFocused: { borderColor: color.working },
   codeInput: { fontSize: 24, letterSpacing: 6, textAlign: "center" },
 
-  formCard: {
-    gap: space.lg,
+  // One anatomy for every card: a header naming it, a full-bleed rule, then the
+  // body. Sections read as parts of one container rather than as loose stacks.
+  card: {
     backgroundColor: color.surface,
     borderRadius: radius.lg,
-    padding: space.lg,
     borderWidth: 1,
     borderColor: color.line,
+    overflow: "hidden",
   },
+  cardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+  },
+  cardHeaderLabel: {
+    fontFamily: font.sansMedium,
+    fontSize: size.body,
+    color: color.muted,
+  },
+  cardDivider: { height: 1, backgroundColor: color.line },
+  cardBody: { padding: space.lg, gap: space.lg },
   errorBox: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -425,9 +420,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   buttonDisabled: { backgroundColor: color.line },
-  divider: { flexDirection: "row", alignItems: "center", gap: space.md },
-  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: color.line },
-  dividerLabel: { fontFamily: font.sans, fontSize: size.caption, color: color.faint },
   pairButtonText: { fontFamily: font.sansBold, fontSize: size.body, color: color.ink },
 
   privacyNote: {
