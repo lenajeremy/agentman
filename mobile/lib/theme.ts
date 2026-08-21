@@ -91,6 +91,8 @@ export const radius = {
   md: 12,
   lg: 16,
   xl: 20,
+  /** Cards and rows. The reference leans on generous rounding to read modern. */
+  xxl: 24,
   pill: 999,
 } as const;
 
