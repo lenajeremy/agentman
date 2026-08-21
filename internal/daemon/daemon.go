@@ -49,6 +49,18 @@ const turnQuestionGrace = 2 * discoverInterval
 // unanswered permission prompt has no natural timeout.
 const hookStateGrace = 5 * discoverInterval
 
+// hookWaitingGrace bounds a "blocked on the user" lease.
+//
+// Claude fires its Notification hook for two different situations: the agent
+// opened a permission prompt, and the prompt has simply sat idle for a while.
+// Only the first is actionable, and nothing in the event distinguishes them.
+// A lease that never expired pinned a session to "needs you" indefinitely on
+// the strength of the second, with no question to answer.
+//
+// Generous, because a real permission prompt has no natural timeout, but
+// finite, because being wrong here is worse than being late.
+const hookWaitingGrace = 10 * time.Minute
+
 const maxHookQuestionInspectionRetries = 3
 
 // A discovery sweep can change hundreds of sessions at once (daemon restart,
@@ -426,9 +438,9 @@ func (d *Daemon) handleHook(event hook.Event) {
 		if receivedAt == 0 {
 			receivedAt = time.Now().UnixMilli()
 		}
-		lease := hookState{state: state, at: receivedAt}
-		if state != protocol.StateWaitingInput {
-			lease.until = time.Now().Add(hookStateGrace)
+		lease := hookState{state: state, at: receivedAt, until: time.Now().Add(hookStateGrace)}
+		if state == protocol.StateWaitingInput {
+			lease.until = time.Now().Add(hookWaitingGrace)
 		}
 		d.hookStates[event.SessionID] = lease
 		session.State = state
@@ -474,6 +486,15 @@ func (d *Daemon) applyHookStateLocked(session protocol.Session, now time.Time) p
 		}
 		return session
 	}
+	// For a session we can see into, the pane settles what the hook could not.
+	// Discovery parses any prompt actually on screen, so reaching here — no
+	// question, on a tmux-backed session — means the notification was the idle
+	// kind rather than a real block. Believing it would show "needs you" with
+	// nothing to answer.
+	if latest.state == protocol.StateWaitingInput && session.Inject == protocol.InjectTmux {
+		delete(d.hookStates, session.ID)
+		return session
+	}
 	if session.LastActivityAt > latest.at {
 		delete(d.hookStates, session.ID)
 		return session
@@ -484,7 +505,7 @@ func (d *Daemon) applyHookStateLocked(session protocol.Session, now time.Time) p
 		}
 		return session
 	}
-	if latest.state != protocol.StateWaitingInput && !latest.until.After(now) {
+	if !latest.until.After(now) {
 		delete(d.hookStates, session.ID)
 		return session
 	}
