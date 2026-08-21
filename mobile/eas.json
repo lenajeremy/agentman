@@ -7,25 +7,33 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "env": { "APPLE_PUSH": "1" },
-      "ios": { "simulator": false }
+      "env": {
+        "APPLE_PUSH": "1"
+      },
+      "ios": {
+        "simulator": false
+      }
     },
     "preview": {
       "distribution": "internal",
-      "env": { "APPLE_PUSH": "1" },
-      "ios": { "resourceClass": "m-medium" }
+      "env": {
+        "APPLE_PUSH": "1"
+      },
+      "ios": {
+        "resourceClass": "m-medium"
+      }
     },
     "production": {
       "autoIncrement": true,
-      "env": { "APPLE_PUSH": "1" },
-      "ios": { "resourceClass": "m-medium" }
+      "env": {
+        "APPLE_PUSH": "1"
+      },
+      "ios": {
+        "resourceClass": "m-medium"
+      }
     }
   },
   "submit": {
-    "production": {
-      "ios": {
-        "ascAppId": "6803797170"
-      }
-    }
+    "production": {}
   }
 }

@@ -9,13 +9,13 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "dev.agentman.app",
+      "bundleIdentifier": "dev.agentman.mobile",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "dev.agentman.app",
+      "package": "dev.agentman.mobile",
       "edgeToEdgeEnabled": true,
       "permissions": [
         "android.permission.CAMERA"
