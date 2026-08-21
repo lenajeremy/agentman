@@ -158,7 +158,9 @@ sequenceDiagram
 | Terminal integration | [`internal/tmux`](internal/tmux), [`internal/question`](internal/question) | Capture prompts and safely drive interactive terminal forms |
 | Relay | [`cmd/relay`](cmd/relay), [`internal/relay`](internal/relay) | Authenticate and route live frames without persistent transcript storage |
 | Protocol | [`internal/protocol`](internal/protocol) | Shared session, message, question, and frame contracts |
-| Mobile app | [`mobile`](mobile) | Pairing, session list, transcript UI, controls, and local notifications |
+| Notifications | [`internal/push`](internal/push) | Reach a phone whose app is closed, by posting to Expo without the relay |
+| Speech | [`internal/speech`](internal/speech) | Read finished turns aloud, stripping what does not survive being spoken |
+| Mobile app | [`mobile`](mobile) | Pairing, session list, transcript UI, controls, and notifications |
 
 ### Architecture decisions
 
@@ -169,7 +171,8 @@ sequenceDiagram
 | The daemon normalizes every agent behind a source adapter. | Agent-specific formats do not leak into the relay or mobile UI. |
 | Only the visible session is followed live. | Idle sessions do not continuously stream transcript data. |
 | Terminal parsing is conservative. | Ambiguous terminal text is ignored instead of being exposed as a false question. |
-| The daemon posts push notifications straight to Expo. | Alerts reach a suspended phone without the relay seeing them, but the daemon needs outbound internet. Falls back to local notifications when no device is registered. |
+| The daemon posts push notifications straight to Expo. | Alerts reach a phone whose app is closed without the relay seeing them, but the daemon needs outbound internet and Expo is a third party in that path. |
+| Local notifications are the fallback when no device has registered a token. | They are scheduled by the app itself, so they only appear while it is open with a live connection — not a substitute for push, a weaker thing. |
 | Transport uses TLS without end-to-end payload authentication or encryption. | A relay operator can inspect, alter, or inject live control traffic; self-host when that trust boundary is unacceptable. |
 
 ## Agent adapters
@@ -240,6 +243,30 @@ am history claude:abc123 -limit 20
 am history claude:abc123 -limit 20 -before 319250377
 ```
 
+### Spoken turns
+
+The daemon can read a finished turn aloud on the machine it runs on. Off unless
+asked for: audio that starts on its own is a bad surprise, particularly in an
+office. Enable it in `~/.agentman/config.json`:
+
+```json
+{
+  "speech": {
+    "enabled": true,
+    "token": "<your token>",
+    "voice": "alloy",
+    "speed": 1.15
+  }
+}
+```
+
+Only `enabled` and `token` are required. `endpoint` points at a self-hosted
+speech server, and `instructions` directs the delivery rather than the words.
+
+Markdown, code fences, URLs, and file paths are stripped before anything is
+spoken, since none of them survive being read out, and sentences left as
+grammatical rubble once their references are gone are dropped rather than read.
+
 ### Relay selection
 
 The relay is resolved in this order:
@@ -289,6 +316,19 @@ the daemon an Expo push token, and the daemon posts alerts directly to Expo
 when a turn completes or an agent becomes blocked on a question. The relay is
 not involved, so a self-hosted relay needs no push configuration.
 
+Push requires a real build. Expo Go carries no push entitlement, so it falls
+back to local notifications, and a token minted by one build does not work for
+another: Apple binds it to that build's push environment, and sending a
+development token to production is refused as `BadDeviceToken`. After changing
+build type, delete `~/.agentman/push.json` and reopen the app so it registers
+again.
+
+**Android push is not configured.** It needs Firebase Cloud Messaging: a
+`google-services.json` referenced from `expo.android.googleServicesFile`, and
+the matching credential uploaded to Expo. Without it the Android app still
+runs and still shows local notifications, but nothing arrives while it is
+closed.
+
 Push payloads carry a session name and a reason, never transcript content,
 because they pass through Expo and Apple. To include a short excerpt, set
 `push.includePreview` in `~/.agentman/config.json`:
@@ -305,7 +345,16 @@ npx eas-cli@latest build --platform ios --profile production
 npx eas-cli@latest submit --platform ios --profile production
 ```
 
-The first build prompts for Apple credentials and stores them with EAS.
+The first build prompts for Apple credentials and stores them with EAS. The
+`production` profile builds for the store, so the result is installable only
+through TestFlight; `preview` produces an internal-distribution build that
+installs directly from a link and carries the same push entitlement.
+
+An App Store Connect app record has to exist before a submission has anywhere
+to land, and its bundle identifier is fixed the moment it is created. Deleting
+the record does not release that identifier — Apple keeps it claimed, and a new
+record cannot reuse it. The same is true on Google Play. If a record is wrong,
+work with it rather than deleting it.
 
 ## Self-hosting the relay
 
@@ -392,8 +441,8 @@ agent-specific behavior inside that adapter.
 Push a semantic version tag to run GoReleaser:
 
 ```bash
-git tag v0.4.0
-git push origin v0.4.0
+git tag v0.6.0
+git push origin v0.6.0
 ```
 
 The release workflow tests and cross-compiles the CLI, publishes GitHub
