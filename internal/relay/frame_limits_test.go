@@ -37,6 +37,13 @@ func dialPairedApp(t *testing.T, base, daemonToken string) *websocket.Conn {
 	return app
 }
 
+// Only the daemon side is covered here. The app-side cap has two enforcement
+// points — the socket read limit and a length check in pump — and with both
+// removed an oversized app frame still fails to reach the daemon, so a test
+// written against that behaviour passes no matter what the relay does. An
+// earlier version of this file shipped exactly that: it asserted nothing, and
+// its flakiness broke a release build. Better none than one that cannot fail.
+//
 // TestDaemonMayPublishLargeEvent pins the asymmetry the frame limits exist to
 // express. A daemon publishes history pages and session snapshots that are
 // legitimately far larger than any app request: it caps its own events at
@@ -86,40 +93,5 @@ func TestDaemonMayPublishLargeEvent(t *testing.T) {
 	}
 	if len(event.Error) != len(body) {
 		t.Fatalf("payload arrived truncated: %d bytes, want %d", len(event.Error), len(body))
-	}
-}
-
-// TestAppFrameIsCappedAtSocket is the other half: an app only ever sends
-// requests, so an oversized app frame must be rejected by the socket itself
-// rather than allocated first and length-checked afterwards.
-func TestAppFrameIsCappedAtSocket(t *testing.T) {
-	_, ts := newTestServer(t)
-	const daemonToken = "app-cap-token"
-	dialDaemon(t, ts.URL, daemonToken)
-	app := dialPairedApp(t, ts.URL, daemonToken)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	envelope, err := protocol.NewEnvelope("probe-2", protocol.PeerDaemon, protocol.Request{
-		Type: protocol.ReqSendMessage, SessionID: "claude:big",
-		Text: strings.Repeat("y", maxAppFrame),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	frame, err := json.Marshal(envelope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(frame) <= maxAppFrame {
-		t.Fatalf("probe frame is only %d bytes, want more than %d", len(frame), maxAppFrame)
-	}
-
-	// The write may succeed locally before the relay's close is observed; the
-	// read is what proves the relay refused the frame.
-	_ = app.Write(ctx, websocket.MessageText, frame)
-	if _, _, err := app.Read(ctx); err == nil {
-		t.Fatal("relay accepted an oversized app frame")
 	}
 }
