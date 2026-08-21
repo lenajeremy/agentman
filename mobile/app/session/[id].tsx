@@ -1,4 +1,5 @@
 import * as Haptics from "expo-haptics";
+import Feather from "@expo/vector-icons/Feather";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -246,7 +247,7 @@ export default function SessionScreen() {
             accessibilityRole="button"
             accessibilityLabel="Back to agents"
           >
-            <Text style={styles.backGlyph}>‹</Text>
+            <Feather name="chevron-left" size={22} color={color.text} />
           </MotionPressable>
           <View style={styles.headerBody}>
             <Text style={styles.title} numberOfLines={1}>
@@ -278,7 +279,7 @@ export default function SessionScreen() {
               {interruptAction?.status === "sending" ? (
                 <ActivityIndicator size="small" color={color.error} />
               ) : (
-                <View style={styles.stopGlyph} />
+                <Feather name="square" size={13} color={color.error} />
               )}
             </MotionPressable>
           ) : null}
@@ -414,12 +415,15 @@ export default function SessionScreen() {
               { paddingBottom: (keyboardVisible ? 0 : insets.bottom) + space.sm },
             ]}
           >
-            <TextInput
+            <View
               style={[
-                styles.input,
-                inputFocused && canSend && styles.inputFocused,
-                !canSend && styles.inputDisabled,
+                styles.field,
+                inputFocused && canSend && styles.fieldFocused,
+                !canSend && styles.fieldDisabled,
               ]}
+            >
+            <TextInput
+              style={styles.input}
               value={draft}
               onChangeText={setDraft}
               onFocus={() => setInputFocused(true)}
@@ -460,9 +464,10 @@ export default function SessionScreen() {
               {submittedSend?.status === "sending" ? (
                 <ActivityIndicator size="small" color={color.faint} />
               ) : (
-                <Text style={styles.sendGlyph}>↑</Text>
+                <Feather name="arrow-up" size={18} color={color.ink} />
               )}
             </MotionPressable>
+            </View>
           </ContentColumn>
         </View>
       </KeyboardAvoidingView>
@@ -478,7 +483,7 @@ function ConnectionNote() {
       accessibilityLiveRegion="polite"
     >
       <View style={[styles.noteIcon, styles.connectionNoteIcon]}>
-        <Text style={[styles.noteGlyph, { color: color.error }]}>!</Text>
+        <Feather name="alert-circle" size={13} color={color.error} />
       </View>
       <Text style={styles.noteText}>
         Your Mac is offline. Answers and turn controls unlock when it reconnects.
@@ -510,7 +515,7 @@ function InterruptNote({
         {status === "sending" ? (
           <ActivityIndicator size="small" color={color.error} />
         ) : (
-          <Text style={[styles.noteGlyph, { color: failed ? color.error : color.muted }]}>■</Text>
+          <Feather name="square" size={12} color={failed ? color.error : color.muted} />
         )}
       </View>
       <Text style={[styles.noteText, failed && { color: color.error }]}>{text}</Text>
@@ -538,7 +543,7 @@ function DeliveryNote({ inject, state }: { inject: string; state: string }) {
   return (
     <View style={styles.note}>
       <View style={styles.noteIcon}>
-        <Text style={styles.noteGlyph}>i</Text>
+        <Feather name="info" size={13} color={color.muted} />
       </View>
       <Text style={styles.noteText}>{text}</Text>
     </View>
@@ -636,26 +641,22 @@ const styles = StyleSheet.create({
   back: {
     width: 40,
     height: 40,
-    borderRadius: radius.md,
+    borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: color.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.line,
+    backgroundColor: color.surfaceRaised,
   },
-  backGlyph: { color: color.text, fontSize: 30, lineHeight: 32, marginTop: -4 },
   headerBody: { flex: 1 },
   stop: {
     width: 36,
     height: 36,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: radius.md,
+    borderRadius: radius.pill,
     backgroundColor: color.errorWash,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     borderColor: "#563039",
   },
-  stopGlyph: { width: 10, height: 10, borderRadius: 2, backgroundColor: color.error },
   stopDisabled: { opacity: 0.55 },
   title: { fontFamily: font.monoMedium, fontSize: size.title, color: color.text },
   subtitle: { fontFamily: font.mono, fontSize: size.label, color: color.muted, marginTop: 1 },
@@ -666,7 +667,7 @@ const styles = StyleSheet.create({
     paddingRight: space.sm,
     borderRadius: radius.pill,
     backgroundColor: color.surface,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     borderColor: color.line,
   },
   statePillAttention: { backgroundColor: color.needsYouWash, borderColor: "#594523" },
@@ -693,7 +694,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: color.surfaceRaised,
   },
-  noteGlyph: { fontFamily: font.sansMedium, fontSize: size.label, color: color.muted },
   noteText: { flex: 1, fontFamily: font.sans, fontSize: size.caption, lineHeight: 17, color: color.muted },
   connectionNote: { backgroundColor: color.errorWash, borderColor: "#563039" },
   connectionNoteIcon: { backgroundColor: "#402127" },
@@ -788,42 +788,42 @@ const styles = StyleSheet.create({
   questionScroll: { borderRadius: radius.lg },
   questionScrollContent: { paddingBottom: space.xs },
   thinking: { paddingTop: space.sm },
-  composerShell: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: color.line,
-    backgroundColor: color.ink,
-  },
-  composer: {
+  // No rule above the composer. The field has its own edge, and a second line
+  // right above it made the bar read as a separate panel bolted to the screen.
+  composerShell: { backgroundColor: color.ink },
+  composer: { paddingHorizontal: space.lg, paddingTop: space.sm },
+  // Input and send share one container rather than sitting side by side, so
+  // the send button reads as part of the field instead of next to it.
+  field: {
     flexDirection: "row",
     alignItems: "flex-end",
     gap: space.sm,
-    paddingHorizontal: space.lg,
-    paddingTop: space.md,
+    backgroundColor: color.surface,
+    borderRadius: radius.xxl,
+    borderWidth: 1,
+    borderColor: color.line,
+    paddingLeft: space.lg,
+    paddingRight: space.xs,
+    paddingVertical: space.xs,
   },
+  fieldFocused: { borderColor: color.working },
+  fieldDisabled: { opacity: 0.5 },
   input: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 38,
     maxHeight: 120,
-    backgroundColor: color.surface,
-    borderRadius: radius.lg,
-    paddingHorizontal: space.md,
     paddingVertical: space.sm,
     fontFamily: font.sans,
     fontSize: size.body,
     color: color.text,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.line,
   },
-  inputFocused: { borderColor: color.working },
-  inputDisabled: { opacity: 0.5 },
   send: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 36,
+    height: 36,
+    borderRadius: radius.pill,
     backgroundColor: color.working,
     alignItems: "center",
     justifyContent: "center",
   },
   sendDisabled: { backgroundColor: color.line },
-  sendGlyph: { color: color.ink, fontSize: 19, fontFamily: font.sansBold, marginTop: -2 },
 });

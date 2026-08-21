@@ -1,0 +1,35 @@
+  changed its footer wording, detection fails silently and
+  normalizeDiscoveredSessions then drops the question and resets the state
+  to idle — which is exactly what you saw.
+
+  This is one capture, not the loop you rejected — a single capture-pane
+  twelve seconds from now:
+
+  Ran 1 shell command
+───────────────────────────────────────────────────────────────────────────
+ ☐ Android next
+
+The Android AAB is building. Once it finishes, what should happen with it?
+
+❯ 1. Hold it — just give me the artifact
+     Leave the .aab on Expo's servers. Nothing goes to Google. Sensible if
+     you don't have a Play Console account yet, since submission needs one
+     ($25 one-off) and there's no rush.
+  2. Submit to Play internal testing
+     Upload it to Google Play's internal testing track, the Android
+     equivalent of TestFlight. Requires a Play Console account and an app
+     listing already created there.
+  3. Also build an installable APK
+     Kick off a second build from the preview profile producing an APK you
+     can sideload onto a device today, alongside the AAB waiting for Play.
+  4. Type something.
+───────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+
+  4 tasks (2 done, 1 in progress, 1 open)
+  ✔ Design and wire up the AM app icon
+  ◼ Refresh the UI to match the reference image
+  ✔ Finish TestFlight setup and install the build
+  ◻ Verify push notifications end to end

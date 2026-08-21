@@ -1,3 +1,4 @@
+import Feather from "@expo/vector-icons/Feather";
 import * as Haptics from "expo-haptics";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -129,7 +130,7 @@ export function QuestionCard({
     <View style={[styles.card, compact && styles.cardCompact]}>
       <View style={styles.header}>
         <View style={[styles.questionMark, compact && styles.questionMarkCompact]}>
-          <Text style={styles.questionGlyph}>?</Text>
+          <Feather name="help-circle" size={15} color={color.needsYou} />
         </View>
         <View style={styles.headerCopy}>
           <Text style={styles.eyebrow}>Agent needs you</Text>
@@ -190,7 +191,7 @@ export function QuestionCard({
                 </View>
                 {selected.includes(option.key) ? (
                   <View style={styles.checkMark}>
-                    <Text style={styles.checkGlyph}>✓</Text>
+                    <Feather name="check" size={13} color={color.ink} />
                   </View>
                 ) : null}
               </MotionPressable>
@@ -315,7 +316,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#3A2D16",
   },
   questionMarkCompact: { width: 28, height: 28, borderRadius: 14 },
-  questionGlyph: { fontFamily: font.sansBold, fontSize: size.body, color: color.needsYou },
   headerCopy: { flex: 1 },
   eyebrow: {
     fontFamily: font.sansMedium,
@@ -420,7 +420,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: color.needsYou,
   },
-  checkGlyph: { fontFamily: font.sansBold, fontSize: size.label, color: color.ink },
   customInput: {
     minHeight: 52,
     borderRadius: radius.md,

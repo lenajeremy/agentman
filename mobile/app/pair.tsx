@@ -1,4 +1,6 @@
 import * as Haptics from "expo-haptics";
+import Feather from "@expo/vector-icons/Feather";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -151,15 +153,18 @@ export default function Pair() {
           </Appear>
 
           <Appear delay={45}>
-            <View style={styles.stepCard}>
-              <View style={styles.stepNumber}>
-                <Text style={styles.stepNumberText}>1</Text>
+            <View style={styles.card}>
+              <View style={styles.cardHeader}>
+                <Feather name="terminal" size={15} color={color.muted} />
+                <Text style={styles.cardHeaderLabel}>On your Mac</Text>
               </View>
-              <View style={styles.stepCopy}>
-                <Text style={styles.stepLabel}>Open a terminal on your Mac</Text>
+              <View style={styles.cardDivider} />
+              <View style={styles.cardBody}>
+                <Text style={styles.stepLabel}>
+                  Run <Text style={styles.code}>am pair</Text>
+                </Text>
                 <Text style={styles.stepBody}>
-                  Run <Text style={styles.code}>am pair</Text>. The QR code and
-                  ten-digit fallback expire after one minute.
+                  The QR code and ten-digit fallback both expire after one minute.
                 </Text>
               </View>
             </View>
@@ -171,22 +176,22 @@ export default function Pair() {
               style={styles.scanButton}
               accessibilityRole="button"
             >
-              <ScanGlyph />
+              <Ionicons name="qr-code-outline" size={24} color={color.ink} />
               <View style={styles.buttonCopy}>
                 <Text style={styles.buttonText}>Scan the QR code</Text>
                 <Text style={styles.buttonHint}>Fastest and most secure</Text>
               </View>
-              <Text style={styles.buttonChevron}>›</Text>
+              <Feather name="chevron-right" size={20} color={color.ink} />
             </MotionPressable>
           </Appear>
 
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerLabel}>or enter the fallback code</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <View style={styles.formCard}>
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Feather name="hash" size={15} color={color.muted} />
+              <Text style={styles.cardHeaderLabel}>Or type the code</Text>
+            </View>
+            <View style={styles.cardDivider} />
+            <View style={styles.cardBody}>
             <View style={styles.field}>
               <Text style={styles.fieldLabel}>Relay address</Text>
               <TextInput
@@ -229,7 +234,7 @@ export default function Pair() {
 
             {error ? (
               <View style={styles.errorBox} accessibilityRole="alert">
-                <Text style={styles.errorGlyph}>!</Text>
+                <Feather name="alert-circle" size={14} color={color.error} />
                 <Text style={styles.error}>{error}</Text>
               </View>
             ) : null}
@@ -250,6 +255,7 @@ export default function Pair() {
                 <Text style={styles.pairButtonText}>Pair with this code</Text>
               )}
             </MotionPressable>
+            </View>
           </View>
 
           <View style={styles.privacyNote}>
@@ -316,30 +322,6 @@ const styles = StyleSheet.create({
     marginTop: space.sm,
   },
 
-  stepCard: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: space.md,
-    backgroundColor: color.surface,
-    borderRadius: radius.lg,
-    padding: space.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.line,
-  },
-  stepNumber: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: color.workingWash,
-  },
-  stepNumberText: {
-    fontFamily: font.monoMedium,
-    fontSize: size.caption,
-    color: color.working,
-  },
-  stepCopy: { flex: 1, gap: space.xs },
   stepLabel: {
     fontFamily: font.sansMedium,
     fontSize: size.body,
@@ -359,25 +341,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: space.md,
     backgroundColor: color.working,
-    borderRadius: radius.lg,
+    borderRadius: radius.xxl,
     paddingVertical: space.md,
     paddingHorizontal: space.lg,
-  },
-  scanGlyph: {
-    width: 26,
-    height: 26,
-    borderWidth: 2,
-    borderColor: color.ink,
-    borderRadius: radius.sm,
-  },
-  scanGlyphCore: {
-    position: "absolute",
-    width: 8,
-    height: 8,
-    left: 7,
-    top: 7,
-    borderRadius: 2,
-    backgroundColor: color.ink,
   },
   buttonCopy: { flex: 1 },
   buttonText: { fontFamily: font.sansBold, fontSize: size.body, color: color.ink },
@@ -386,12 +352,6 @@ const styles = StyleSheet.create({
     fontSize: size.label,
     color: "#183543",
     marginTop: 1,
-  },
-  buttonChevron: {
-    fontFamily: font.sans,
-    fontSize: 26,
-    lineHeight: 28,
-    color: color.ink,
   },
 
   field: { gap: space.sm },
@@ -403,50 +363,63 @@ const styles = StyleSheet.create({
     color: color.faint,
   },
   input: {
-    minHeight: 50,
+    minHeight: 52,
     backgroundColor: color.sunken,
-    borderRadius: radius.md,
-    paddingHorizontal: space.md,
+    borderRadius: radius.lg,
+    paddingHorizontal: space.lg,
     paddingVertical: space.md,
     fontFamily: font.mono,
     fontSize: size.body,
     color: color.text,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.lineStrong,
+    borderWidth: 1,
+    borderColor: color.line,
   },
   inputFocused: { borderColor: color.working },
   codeInput: { fontSize: 24, letterSpacing: 6, textAlign: "center" },
 
-  formCard: {
-    gap: space.lg,
+  // One anatomy for every card: a header naming it, a full-bleed rule, then the
+  // body. Sections read as parts of one container rather than as loose stacks.
+  card: {
     backgroundColor: color.surface,
     borderRadius: radius.lg,
-    padding: space.lg,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     borderColor: color.line,
+    overflow: "hidden",
   },
+  cardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+  },
+  cardHeaderLabel: {
+    fontFamily: font.sansMedium,
+    fontSize: size.body,
+    color: color.muted,
+  },
+  cardDivider: { height: 1, backgroundColor: color.line },
+  cardBody: { padding: space.lg, gap: space.lg },
   errorBox: {
     flexDirection: "row",
     alignItems: "flex-start",
     gap: space.sm,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     padding: space.md,
     backgroundColor: color.errorWash,
+    borderWidth: 1,
+    borderColor: "#563039",
   },
-  errorGlyph: { fontFamily: font.sansBold, fontSize: size.caption, color: color.error },
   error: { flex: 1, fontFamily: font.sans, fontSize: size.caption, color: color.error },
 
   pairButton: {
-    minHeight: 50,
+    minHeight: 52,
     backgroundColor: color.working,
-    borderRadius: radius.md,
+    borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
   },
   buttonDisabled: { backgroundColor: color.line },
-  divider: { flexDirection: "row", alignItems: "center", gap: space.md },
-  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: color.line },
-  dividerLabel: { fontFamily: font.sans, fontSize: size.caption, color: color.faint },
   pairButtonText: { fontFamily: font.sansBold, fontSize: size.body, color: color.ink },
 
   privacyNote: {
@@ -488,10 +461,3 @@ const styles = StyleSheet.create({
   },
 });
 
-function ScanGlyph() {
-  return (
-    <View style={styles.scanGlyph}>
-      <View style={styles.scanGlyphCore} />
-    </View>
-  );
-}

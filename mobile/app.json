@@ -9,11 +9,21 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "dev.agentman.app"
+      "bundleIdentifier": "dev.agentman.mobile",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
-      "package": "dev.agentman.app",
-      "edgeToEdgeEnabled": true
+      "package": "dev.agentman.mobile",
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.CAMERA"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#090C12"
+      }
     },
     "plugins": [
       "expo-router",
@@ -26,10 +36,22 @@
           "recordAudioAndroid": false
         }
       ],
+      "expo-notifications",
       "./plugins/withIosBuildFixes"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "5526986e-22be-46f7-8e5e-a4a0a2307197"
+      }
+    },
+    "owner": "jeremiahlena13",
+    "icon": "./assets/images/icon.png",
+    "web": {
+      "favicon": "./assets/images/favicon.png"
     }
   }
 }

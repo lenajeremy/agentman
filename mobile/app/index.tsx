@@ -1,3 +1,4 @@
+import Feather from "@expo/vector-icons/Feather";
 import { Redirect, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -93,7 +94,7 @@ export default function Agents() {
           accessibilityRole="button"
           accessibilityLabel="Settings"
         >
-          <SettingsGlyph />
+          <Feather name="menu" size={18} color={color.muted} />
         </MotionPressable>
       </ContentColumn>
 
@@ -275,7 +276,7 @@ function AgentRow({ session }: { session: Session }) {
           <Text style={styles.needsYouNote}>Waiting on your answer</Text>
         ) : null}
       </View>
-      <Text style={styles.chevron}>›</Text>
+      <Feather name="chevron-right" size={20} color={color.faint} style={styles.chevron} />
     </MotionPressable>
   );
 }
@@ -351,22 +352,6 @@ function Metric({
   );
 }
 
-function SettingsGlyph() {
-  return (
-    <View style={styles.settingsGlyph}>
-      <View style={styles.settingsLine}>
-        <View style={[styles.settingsKnob, { left: 5 }]} />
-      </View>
-      <View style={styles.settingsLine}>
-        <View style={[styles.settingsKnob, { right: 5 }]} />
-      </View>
-      <View style={styles.settingsLine}>
-        <View style={[styles.settingsKnob, { left: 9 }]} />
-      </View>
-    </View>
-  );
-}
-
 /**
  * Shown when every agent has been swiped away, instead of "Nothing running".
  *
@@ -400,7 +385,7 @@ function OfflineBanner({ lastSeenAt }: { lastSeenAt: number | null }) {
   return (
     <View style={styles.banner}>
       <View style={styles.offlineIcon}>
-        <Text style={styles.offlineGlyph}>!</Text>
+        <Feather name="wifi-off" size={15} color={color.error} />
       </View>
       <View style={styles.bannerCopy}>
         <Text style={styles.bannerText}>
@@ -416,7 +401,7 @@ function ProtocolBanner() {
   return (
     <View style={styles.banner} accessibilityRole="alert">
       <View style={styles.offlineIcon}>
-        <Text style={styles.offlineGlyph}>!</Text>
+        <Feather name="alert-triangle" size={15} color={color.error} />
       </View>
       <View style={styles.bannerCopy}>
         <Text style={styles.bannerText}>Agentman versions do not match</Text>
@@ -432,7 +417,7 @@ function EmptyState() {
   return (
     <View style={styles.empty}>
       <View style={styles.emptyIcon}>
-        <Text style={styles.emptyGlyph}>›_</Text>
+        <Feather name="terminal" size={20} color={color.working} />
       </View>
       <Text style={styles.emptyTitle}>Nothing running</Text>
       <Text style={styles.emptyBody}>
@@ -472,30 +457,18 @@ const styles = StyleSheet.create({
   gear: {
     width: 44,
     height: 44,
-    borderRadius: radius.md,
+    borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: color.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.line,
-  },
-  settingsGlyph: { width: 19, gap: 4 },
-  settingsLine: { height: 2, borderRadius: 1, backgroundColor: color.muted },
-  settingsKnob: {
-    position: "absolute",
-    top: -2,
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: color.text,
+    backgroundColor: color.surfaceRaised,
   },
 
   summaryWrap: { marginHorizontal: space.lg, marginTop: space.xs },
   summary: {
-    borderRadius: radius.xl,
-    padding: space.lg,
+    borderRadius: radius.lg,
+    padding: space.xl,
     backgroundColor: color.surface,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     borderColor: color.line,
   },
   summaryAttention: { borderColor: "#594523", backgroundColor: color.needsYouWash },
@@ -547,8 +520,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: space.lg,
-    marginTop: space.xl,
-    marginBottom: space.sm,
+    marginTop: space.xxl,
+    marginBottom: space.md,
   },
   groupLabel: {
     fontFamily: font.sansMedium,
@@ -562,13 +535,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     gap: space.sm,
-    paddingVertical: 14,
-    paddingHorizontal: space.md,
+    paddingVertical: space.lg,
+    paddingHorizontal: space.lg,
     marginHorizontal: space.lg,
     borderRadius: radius.lg,
     backgroundColor: color.surface,
-    marginBottom: space.sm,
-    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: space.md,
+    borderWidth: 1,
     borderColor: color.line,
     overflow: "hidden",
   },
@@ -603,19 +576,13 @@ const styles = StyleSheet.create({
   // from flickering into existence on the first reply.
   modelBadge: {
     maxWidth: "45%",
-    paddingHorizontal: 7,
-    paddingVertical: 2,
+    paddingHorizontal: space.sm,
+    paddingVertical: 3,
     borderRadius: radius.pill,
-    backgroundColor: color.sunken,
+    backgroundColor: color.surfaceRaised,
   },
   model: { fontFamily: font.mono, fontSize: size.label, color: color.faint },
-  chevron: {
-    alignSelf: "center",
-    color: color.faint,
-    fontFamily: font.sans,
-    fontSize: 22,
-    lineHeight: 24,
-  },
+  chevron: { alignSelf: "center" },
   needsYouNote: {
     fontFamily: font.sansMedium,
     fontSize: size.caption,
@@ -642,7 +609,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#402127",
   },
-  offlineGlyph: { color: color.error, fontFamily: font.sansBold, fontSize: size.body },
   bannerCopy: { flex: 1 },
   bannerText: { fontFamily: font.sansMedium, fontSize: size.caption, color: color.text },
   bannerHint: { fontFamily: font.sans, fontSize: size.caption, color: color.muted, marginTop: 2 },
@@ -668,7 +634,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: space.sm,
   },
-  emptyGlyph: { fontFamily: font.monoMedium, fontSize: size.title, color: color.working },
   emptyTitle: { fontFamily: font.sansBold, fontSize: size.heading, color: color.text },
   emptyBody: { fontFamily: font.sans, fontSize: size.body, color: color.muted, lineHeight: 22 },
   code: { fontFamily: font.mono, color: color.working },

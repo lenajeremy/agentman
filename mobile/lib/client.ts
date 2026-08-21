@@ -158,6 +158,8 @@ export class Client {
    * on screen instead of being overwritten by the close that follows it.
    */
   private incompatible = false;
+  /** Re-sent after every reconnect, like subscriptions. */
+  private pushToken: string | null = null;
   private attempt = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -234,6 +236,7 @@ export class Client {
       // state, so a reconnect starts from nothing on its side.
 	  this.sendSubscriptions();
 	  this.resendReplayable();
+	  if (this.pushToken) this.registerPush(this.pushToken);
 	  this.write(newFrameId(), { type: "list_sessions" });
     };
 
@@ -375,6 +378,17 @@ export class Client {
 	  return null;
 	}
 	return id;
+  }
+
+  /**
+   * Hands the Mac a push token so it can reach this phone once iOS has
+   * suspended the app. Re-sent on every connect: the daemon keeps tokens in a
+   * local file, and re-registering is what refreshes their last-seen stamp so
+   * an active phone is never aged out.
+   */
+  registerPush(token: string): void {
+    this.pushToken = token;
+    this.write(newFrameId(), { type: "register_push", pushToken: token });
   }
 
   private write(id: string, request: Request): boolean {

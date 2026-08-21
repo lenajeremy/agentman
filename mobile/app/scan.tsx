@@ -1,5 +1,6 @@
 import * as Haptics from "expo-haptics";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import Feather from "@expo/vector-icons/Feather";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -172,7 +173,7 @@ export default function Scan() {
             accessibilityRole="button"
             accessibilityLabel="Close scanner"
           >
-            <Text style={styles.closeGlyph}>×</Text>
+            <Feather name="x" size={22} color={color.text} />
           </MotionPressable>
           <View style={styles.scanHeading}>
             <Text style={styles.scanEyebrow}>Secure pairing</Text>
@@ -245,7 +246,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.18)",
   },
-  closeGlyph: { fontFamily: font.sans, fontSize: 26, lineHeight: 28, color: color.text },
   scanHeading: {
     flex: 1,
     alignItems: "center",

@@ -116,7 +116,8 @@ export type RequestType =
   | "fetch_messages"
   | "send_message"
   | "interrupt"
-  | "answer_question";
+  | "answer_question"
+  | "register_push";
 
 export interface Request {
   type: RequestType;
@@ -127,6 +128,8 @@ export interface Request {
   clientId?: string;
   /** Echoes the question snapshot the user actually answered. */
   questionId?: string;
+  /** Expo push token on register_push. */
+  pushToken?: string;
   /** Chooses an option on answer_question. */
   optionKey?: string;
   optionKeys?: string[];

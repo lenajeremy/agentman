@@ -1,3 +1,4 @@
+import Feather from "@expo/vector-icons/Feather";
 import { useRouter } from "expo-router";
 import { Alert, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -5,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Appear } from "../components/Appear";
 import { ContentColumn } from "../components/ContentColumn";
 import { MotionPressable } from "../components/MotionPressable";
+import { isPushActive, pushFailureReason } from "../lib/push";
 import { useStore } from "../lib/store";
 import { ago, color, font, radius, size, space } from "../lib/theme";
 
@@ -42,7 +44,7 @@ export default function Settings() {
           accessibilityRole="button"
           accessibilityLabel="Back"
         >
-          <Text style={styles.backGlyph}>‹</Text>
+          <Feather name="chevron-left" size={22} color={color.text} />
         </MotionPressable>
         <View>
           <Text style={styles.eyebrow}>Agentman</Text>
@@ -68,6 +70,19 @@ export default function Settings() {
                 }
                 tint={store.daemonOnline ? color.ok : color.muted}
                 status={store.daemonOnline ? "online" : "offline"}
+              />
+              <View style={styles.divider} />
+              {/* Push either works or it does not, and when it does not the
+                  app has the reason. Withholding it turns a one-line fix into
+                  a round of guessing against a ten-minute build. */}
+              <Row
+                label="Background alerts"
+                value={
+                  isPushActive()
+                    ? "On — this Mac can reach you when the app is closed"
+                    : pushFailureReason() || "Unavailable in this build"
+                }
+                tint={isPushActive() ? color.ok : color.muted}
               />
             </View>
           </Appear>
@@ -169,7 +184,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: color.line,
   },
-  backGlyph: { color: color.text, fontSize: 30, lineHeight: 32, marginTop: -4 },
   eyebrow: {
     fontFamily: font.sansMedium,
     fontSize: size.label,

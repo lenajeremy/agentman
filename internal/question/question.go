@@ -99,6 +99,15 @@ var formControl = regexp.MustCompile(`(?i)^\s*([❯›>»▸▶→*]?)\s*(?:next
 // option-position hint depending on its width and focus.
 var footerLine = regexp.MustCompile(`(?i)^\s*(?:enter to|esc to|press |↑/↓|←/→|tab (?:to|or)|ctrl\s*\+|option \d+/\d+)`)
 
+// taskChrome matches the rows Claude Code paints beneath a live control: its
+// task list, and the tick/box glyphs of the entries under it.
+//
+// These sit below the footer, so they are chrome drawn around the menu rather
+// than evidence the menu was answered and scrolled past. Only ever accepted
+// once a footer has already established that this control is live, which is
+// what keeps the guard against numbered prose intact.
+var taskChrome = regexp.MustCompile(`^\s*(?:\d+\s+tasks?\b|[✔✓✗☐☒◻◼▪·]\s+\S)`)
+
 // footerContinuation matches the second physical line of a wrapped hint row.
 // It is deliberately only accepted after footerLine has established that this
 // is a live control. Accepting one of these fragments by itself would weaken
@@ -174,6 +183,9 @@ func Detect(pane string) *Question {
 			continue
 		}
 		if footerSeen && footerContinuation.MatchString(line) {
+			continue
+		}
+		if footerSeen && taskChrome.MatchString(menuLine) {
 			continue
 		}
 		if !footerSeen && (formControl.MatchString(menuLine) ||

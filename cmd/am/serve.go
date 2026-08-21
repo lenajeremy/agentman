@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lenajeremy/agentman/internal/push"
 	"github.com/lenajeremy/agentman/internal/speech"
 	"github.com/mdp/qrterminal/v3"
 	qr "rsc.io/qr"
@@ -255,6 +256,17 @@ func runServe(ctx context.Context, args []string) error {
 	agent := daemon.New(registry, multiSink{sinks: sinks})
 	if client != nil {
 		client.OnDeviceDisconnected = agent.DisconnectSubscriber
+	}
+
+	// Push is what covers the gap a live socket cannot: once iOS suspends the
+	// app there is no websocket to deliver on, which is exactly when the user
+	// has walked away and most wants to be told.
+	if dir, dirErr := hook.ConfigDir(""); dirErr == nil {
+		store := push.NewStore(dir)
+		agent.SetPush(push.NewSender(store, cfg.Push))
+		if devices := len(store.Tokens()); devices > 0 {
+			fmt.Printf("push       %d device(s) registered\n", devices)
+		}
 	}
 
 	// Record hook activity for `am doctor`, then pass it to the daemon.

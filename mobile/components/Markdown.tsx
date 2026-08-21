@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { cellWidth, parseTable, type Table } from "../lib/markdown-table";
 import { color, font, radius, size, space } from "../lib/theme";
 
 const MAX_MARKDOWN_CHARS = 200_000;
@@ -8,7 +9,8 @@ const MAX_MARKDOWN_CHARS = 200_000;
 type Block =
   | { kind: "paragraph" | "quote" | "code"; text: string }
   | { kind: "heading"; level: number; text: string }
-  | { kind: "bullet" | "number"; marker: string; text: string };
+  | { kind: "bullet" | "number"; marker: string; text: string }
+  | { kind: "table"; table: Table };
 
 /**
  * Renders the small markdown vocabulary agents use in ordinary replies.
@@ -60,6 +62,8 @@ function BlockView({ block }: { block: Block }) {
           </Text>
         </View>
       );
+    case "table":
+      return <TableView table={block.table} />;
     case "bullet":
     case "number":
       return (
@@ -77,6 +81,65 @@ function BlockView({ block }: { block: Block }) {
         </Text>
       );
   }
+}
+
+function TableView({ table }: { table: Table }) {
+  // React Native has no table layout, so columns are measured here and given
+  // fixed widths. Without that, each row sizes independently and the columns
+  // do not line up with one another.
+  const widths = table.header.map((heading, index) => {
+    const longest = table.rows.reduce(
+      (worst, row) => Math.max(worst, cellWidth(row[index] ?? "")),
+      cellWidth(heading),
+    );
+    return Math.min(240, Math.max(76, longest * 7.6 + 24));
+  });
+
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.tableScroll}
+      contentContainerStyle={styles.tableScrollContent}
+    >
+      <View style={styles.table}>
+        <View style={[styles.tableRow, styles.tableHeadRow]}>
+          {table.header.map((heading, index) => (
+            <Text
+              key={index}
+              selectable
+              style={[
+                styles.tableCell,
+                styles.tableHeadCell,
+                { width: widths[index], textAlign: table.align[index] },
+              ]}
+            >
+              {renderInline(heading)}
+            </Text>
+          ))}
+        </View>
+        {table.rows.map((row, rowIndex) => (
+          <View
+            key={rowIndex}
+            style={[styles.tableRow, rowIndex > 0 && styles.tableRowRuled]}
+          >
+            {row.map((cell, index) => (
+              <Text
+                key={index}
+                selectable
+                style={[
+                  styles.tableCell,
+                  { width: widths[index], textAlign: table.align[index] },
+                ]}
+              >
+                {renderInline(cell)}
+              </Text>
+            ))}
+          </View>
+        ))}
+      </View>
+    </ScrollView>
+  );
 }
 
 function parseBlocks(source: string): Block[] {
@@ -98,7 +161,8 @@ function parseBlocks(source: string): Block[] {
     }
   };
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
     const trimmed = line.trimStart();
     if (trimmed.startsWith("```")) {
       if (code === null) {
@@ -138,6 +202,15 @@ function parseBlocks(source: string): Block[] {
     if (numbered) {
       flushParagraph();
       blocks.push(numbered);
+      continue;
+    }
+    // Checked late: a table only exists if the next line is a rule, so every
+    // cheaper block shape gets to claim the line first.
+    const table = parseTable(lines, index);
+    if (table) {
+      flushParagraph();
+      blocks.push({ kind: "table", table: table.table });
+      index = table.next - 1;
       continue;
     }
     paragraph.push(line);
@@ -238,6 +311,32 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   listText: { flex: 1 },
+  // A table is the one block with a natural width the screen cannot always
+  // give it, so it scrolls sideways inside its own container rather than
+  // forcing the whole feed to.
+  tableScroll: { marginVertical: space.xs },
+  tableScrollContent: { paddingRight: space.lg },
+  table: {
+    borderWidth: 1,
+    borderColor: color.line,
+    borderRadius: radius.md,
+    overflow: "hidden",
+  },
+  tableRow: { flexDirection: "row" },
+  // The header sits on a lifted strip, which is what separates it from the
+  // body without needing a heavier rule.
+  tableHeadRow: { backgroundColor: color.surfaceRaised },
+  tableRowRuled: { borderTopWidth: 1, borderTopColor: color.line },
+  tableCell: {
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    fontFamily: font.sans,
+    fontSize: size.caption,
+    lineHeight: 19,
+    color: color.text,
+  },
+  tableHeadCell: { fontFamily: font.sansMedium, color: color.muted },
+
   truncated: {
     fontFamily: font.sans,
     fontSize: size.caption,
