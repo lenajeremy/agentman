@@ -33,12 +33,32 @@ export function setPushActive(active: boolean): void {
   pushActive = active;
 }
 
-/** The EAS project the token is minted against. */
+/**
+ * The EAS project the token is minted against.
+ *
+ * Read from both places it can live. expoConfig is populated from the manifest
+ * and is reliably there in development, but a production build may have none —
+ * in which case the id is only on easConfig. Reading just the first returns
+ * undefined on exactly the builds where push is supposed to work.
+ */
 function projectId(): string | undefined {
   const extra = Constants.expoConfig?.extra as
     | { eas?: { projectId?: string } }
     | undefined;
-  return extra?.eas?.projectId ?? undefined;
+  return extra?.eas?.projectId ?? Constants.easConfig?.projectId ?? undefined;
+}
+
+/**
+ * Why the last attempt produced no token.
+ *
+ * Every failure here is expected somewhere — a simulator, Expo Go, a refusal —
+ * so none of them throw. That silence cost a build cycle of guessing, so the
+ * reason is now kept and surfaced rather than swallowed.
+ */
+let lastFailure = "";
+
+export function pushFailureReason(): string {
+  return lastFailure;
 }
 
 /**
@@ -49,7 +69,11 @@ function projectId(): string | undefined {
  * app must keep working on local notifications when it is unavailable.
  */
 export async function obtainPushToken(): Promise<string | null> {
-  if (Platform.OS === "web") return null;
+  lastFailure = "";
+  if (Platform.OS === "web") {
+    lastFailure = "Not supported on web.";
+    return null;
+  }
 
   try {
     const existing = await Notifications.getPermissionsAsync();
@@ -57,16 +81,28 @@ export async function obtainPushToken(): Promise<string | null> {
     if (!granted && existing.canAskAgain) {
       granted = (await Notifications.requestPermissionsAsync()).granted;
     }
-    if (!granted) return null;
+    if (!granted) {
+      lastFailure = "Notifications are turned off for this app in Settings.";
+      return null;
+    }
 
     const id = projectId();
-    if (!id) return null;
+    if (!id) {
+      lastFailure = "This build carries no EAS project id.";
+      return null;
+    }
 
     const token = await Notifications.getExpoPushTokenAsync({ projectId: id });
-    return looksLikePushToken(token.data) ? token.data : null;
-  } catch {
-    // A simulator has no APNs registration, and a development build without
-    // the entitlement throws here. Neither is worth surfacing to the user.
+    if (!looksLikePushToken(token.data)) {
+      lastFailure = `Apple returned an unexpected token: ${String(token.data).slice(0, 40)}`;
+      return null;
+    }
+    return token.data;
+  } catch (error) {
+    // A simulator has no APNs registration and Expo Go has no entitlement, so
+    // this path is reached legitimately. Recording why is what makes a real
+    // failure on a real device diagnosable instead of invisible.
+    lastFailure = error instanceof Error ? error.message : String(error);
     return null;
   }
 }
