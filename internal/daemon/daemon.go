@@ -902,7 +902,7 @@ func validateRequest(req protocol.Request) error {
 	}
 	switch req.Type {
 	case protocol.ReqListSessions, protocol.ReqSubscribe, protocol.ReqUnsubscribe,
-		protocol.ReqFetchMessages, protocol.ReqInterrupt:
+		protocol.ReqFetchMessages, protocol.ReqInterrupt, protocol.ReqRegisterPush:
 		return nil
 	case protocol.ReqSendMessage:
 		if strings.TrimSpace(req.Text) == "" {
