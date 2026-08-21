@@ -14,15 +14,9 @@ import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 
-/** Expo tokens look like `ExponentPushToken[…]`; the daemon checks this too. */
-export function looksLikePushToken(value: string): boolean {
-  return (
-    value.length >= 20 &&
-    value.length <= 256 &&
-    (value.startsWith("ExponentPushToken[") || value.startsWith("ExpoPushToken[")) &&
-    value.endsWith("]")
-  );
-}
+import { looksLikePushToken } from "./push-token";
+
+export { looksLikePushToken };
 
 /**
  * True once the Mac has accepted a push token, meaning alerts now arrive from
