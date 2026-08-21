@@ -415,12 +415,15 @@ export default function SessionScreen() {
               { paddingBottom: (keyboardVisible ? 0 : insets.bottom) + space.sm },
             ]}
           >
-            <TextInput
+            <View
               style={[
-                styles.input,
-                inputFocused && canSend && styles.inputFocused,
-                !canSend && styles.inputDisabled,
+                styles.field,
+                inputFocused && canSend && styles.fieldFocused,
+                !canSend && styles.fieldDisabled,
               ]}
+            >
+            <TextInput
+              style={styles.input}
               value={draft}
               onChangeText={setDraft}
               onFocus={() => setInputFocused(true)}
@@ -461,9 +464,10 @@ export default function SessionScreen() {
               {submittedSend?.status === "sending" ? (
                 <ActivityIndicator size="small" color={color.faint} />
               ) : (
-                <Feather name="arrow-up" size={19} color={color.ink} />
+                <Feather name="arrow-up" size={18} color={color.ink} />
               )}
             </MotionPressable>
+            </View>
           </ContentColumn>
         </View>
       </KeyboardAvoidingView>
@@ -784,38 +788,39 @@ const styles = StyleSheet.create({
   questionScroll: { borderRadius: radius.lg },
   questionScrollContent: { paddingBottom: space.xs },
   thinking: { paddingTop: space.sm },
-  composerShell: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: color.line,
-    backgroundColor: color.ink,
-  },
-  composer: {
+  // No rule above the composer. The field has its own edge, and a second line
+  // right above it made the bar read as a separate panel bolted to the screen.
+  composerShell: { backgroundColor: color.ink },
+  composer: { paddingHorizontal: space.lg, paddingTop: space.sm },
+  // Input and send share one container rather than sitting side by side, so
+  // the send button reads as part of the field instead of next to it.
+  field: {
     flexDirection: "row",
     alignItems: "flex-end",
     gap: space.sm,
-    paddingHorizontal: space.lg,
-    paddingTop: space.md,
+    backgroundColor: color.surface,
+    borderRadius: radius.xxl,
+    borderWidth: 1,
+    borderColor: color.line,
+    paddingLeft: space.lg,
+    paddingRight: space.xs,
+    paddingVertical: space.xs,
   },
+  fieldFocused: { borderColor: color.working },
+  fieldDisabled: { opacity: 0.5 },
   input: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 38,
     maxHeight: 120,
-    backgroundColor: color.surface,
-    borderRadius: radius.lg,
-    paddingHorizontal: space.lg,
-    paddingVertical: space.md,
+    paddingVertical: space.sm,
     fontFamily: font.sans,
     fontSize: size.body,
     color: color.text,
-    borderWidth: 1,
-    borderColor: color.line,
   },
-  inputFocused: { borderColor: color.working },
-  inputDisabled: { opacity: 0.5 },
   send: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 36,
+    height: 36,
+    borderRadius: radius.pill,
     backgroundColor: color.working,
     alignItems: "center",
     justifyContent: "center",
