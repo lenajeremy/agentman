@@ -46,6 +46,7 @@ Flags:
   -json                       Machine-readable output
   -limit <n>                  Messages per history page (default 30)
   -before <cursor>            Page further back, using a cursor from history
+  -reverse                    Print history newest-first
   -dry-run                    With install-hooks: show changes without writing
   -relay <url>                Relay to use. Defaults to the public relay;
                               set AGENTMAN_RELAY to change it, or pass
@@ -206,6 +207,7 @@ func runHistory(ctx context.Context, args []string) error {
 	limit := fs.Int("limit", 30, "messages per page")
 	before := fs.String("before", "", "cursor from a previous page")
 	asJSON := fs.Bool("json", false, "machine-readable output")
+	reverse := fs.Bool("reverse", false, "print newest messages first")
 	sessionID, err := parseWithPositional(fs, args)
 	if err != nil {
 		return err
@@ -234,6 +236,9 @@ func runHistory(ctx context.Context, args []string) error {
 	if *asJSON {
 		return json.NewEncoder(os.Stdout).Encode(page)
 	}
+	if *reverse {
+		reverseHistory(page.Messages)
+	}
 
 	for _, msg := range page.Messages {
 		printMessage(msg)
@@ -245,6 +250,13 @@ func runHistory(ctx context.Context, args []string) error {
 		fmt.Printf("\n%s\n", dim("beginning of session"))
 	}
 	return nil
+}
+
+func reverseHistory(messages []protocol.Message) {
+	// Keep the final item anchored so the pagination boundary remains stable.
+	for left, right := 0, len(messages)-2; left < right; left, right = left+1, right-1 {
+		messages[left], messages[right] = messages[right], messages[left]
+	}
 }
 
 func runWatch(ctx context.Context, args []string) error {
