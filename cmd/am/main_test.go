@@ -2,12 +2,37 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/lenajeremy/agentman/internal/source"
 )
+
+func TestVersionOutput(t *testing.T) {
+	old := version
+	version = "1.2.3-test"
+	defer func() { version = old }()
+
+	plain, err := formatVersion(false)
+	if err != nil || plain != "agentman 1.2.3-test\n" {
+		t.Fatalf("plain version = %q, %v", plain, err)
+	}
+	encoded, err := formatVersion(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(encoded), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Version != version {
+		t.Fatalf("JSON version = %q, want %q", payload.Version, version)
+	}
+}
 
 func TestHistoryPageLimitBoundary(t *testing.T) {
 	for _, limit := range []int{-1, 0, source.MaxPageMessages + 1, int(^uint(0) >> 1)} {
