@@ -96,8 +96,7 @@ func main() {
 	case "doctor":
 		err = runDoctor(ctx, args)
 	case "version", "--version", "-v":
-		fmt.Printf("agentman %s\n", version)
-		return
+		err = runVersion(args)
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return
@@ -110,6 +109,36 @@ func main() {
 		fmt.Fprintf(os.Stderr, "am: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func runVersion(args []string) error {
+	fs := flag.NewFlagSet("version", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "machine-readable output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("version: unexpected argument %q", fs.Arg(0))
+	}
+	output, err := formatVersion(*asJSON)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprint(os.Stdout, output)
+	return err
+}
+
+func formatVersion(asJSON bool) (string, error) {
+	if asJSON {
+		encoded, err := json.Marshal(struct {
+			Version string `json:"version"`
+		}{Version: version})
+		if err != nil {
+			return "", err
+		}
+		return string(encoded) + "\n", nil
+	}
+	return fmt.Sprintf("agentman %s\n", version), nil
 }
 
 // buildRegistry wires up every adapter. An adapter whose CLI is not installed
