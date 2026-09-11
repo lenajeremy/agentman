@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -437,11 +438,15 @@ func allDigits(value string) bool {
 // public relay would be a far worse outcome than a slightly taller square.
 func PairingURL(relayURL, token string) string {
 	relay := strings.TrimRight(relayURL, "/")
-	if relay == DefaultRelay {
-		return "agentman://pair?token=" + url.QueryEscape(token)
+	payload := struct {
+		Relay string `json:"r,omitempty"`
+		Token string `json:"t"`
+	}{Token: token}
+	if relay != DefaultRelay {
+		payload.Relay = relay
 	}
-	return fmt.Sprintf("agentman://pair?relay=%s&token=%s",
-		url.QueryEscape(relay), url.QueryEscape(token))
+	raw, _ := json.Marshal(payload)
+	return "agentman://pair/v2/" + base64.RawURLEncoding.EncodeToString(raw)
 }
 
 func printPairCode(relayURL, code, token string, expiresAt time.Time) {
