@@ -369,6 +369,7 @@ func newLiveTunnel(id string, account AccountID, port int, link string, session 
 			// allowedHosts, Django's ALLOWED_HOSTS), and they already accept
 			// the name they are listening under.
 			pr.Out.Host = local
+			presentLocalOrigin(pr.Out.Header, link, "http://"+local)
 		},
 		Transport: transport,
 		ModifyResponse: func(resp *http.Response) error {
@@ -395,6 +396,24 @@ func setPreviewHeaders(header http.Header, link string) {
 	// transport policy for a public domain.
 	if strings.HasPrefix(link, "https://") {
 		header.Set("Strict-Transport-Security", "max-age=31536000")
+	}
+}
+
+// presentLocalOrigin makes the page's own requests look same-origin to the
+// dev server.
+//
+// Browsers send Origin (and Referer) naming the link, and dev servers check it:
+// Expo's Metro answers "Unauthorized request" to every bundle and asset fetch
+// from an unfamiliar origin, and Vite does the same for its hot-reload socket.
+// Only the link's own origin is rewritten. A request from any other site keeps
+// its real Origin, so the dev server can still refuse cross-site requests,
+// which is what those checks exist to do.
+func presentLocalOrigin(header http.Header, link, local string) {
+	if header.Get("Origin") == link {
+		header.Set("Origin", local)
+	}
+	if referer := header.Get("Referer"); referer == link || strings.HasPrefix(referer, link+"/") {
+		header.Set("Referer", local+strings.TrimPrefix(referer, link))
 	}
 }
 

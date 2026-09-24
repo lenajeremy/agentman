@@ -480,3 +480,44 @@ func TestPreviewHeadersRequireHTTPSOnlyForHTTPSLinks(t *testing.T) {
 		t.Fatalf("plaintext local link got Strict-Transport-Security %q", got)
 	}
 }
+
+func TestPreviewPresentsTheLinkAsTheLocalOrigin(t *testing.T) {
+	type seen struct{ origin, referer string }
+	requests := make(chan seen, 2)
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- seen{r.Header.Get("Origin"), r.Header.Get("Referer")}
+	}))
+	defer app.Close()
+	appPort := portOf(t, app.URL)
+	local := "http://localhost:" + strconv.Itoa(appPort)
+
+	_, relay := newPreviewRelay(t)
+	hello, _ := startTunnel(t, relay.URL, appPort, "nonce-origin-rewrite")
+
+	// The page's own request, as Metro sees a bundle fetch.
+	req := linkRequest(t, http.MethodGet, relay.URL, hello.ID, "/index.bundle", nil)
+	req.Header.Set("Origin", hello.URL)
+	req.Header.Set("Referer", hello.URL+"/settings?tab=1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := <-requests; got.origin != local || got.referer != local+"/settings?tab=1" {
+		t.Fatalf("app saw %+v, want the link presented as %s", got, local)
+	}
+
+	// Another site's request keeps its real origin, so the dev server's
+	// cross-site protection still works.
+	req = linkRequest(t, http.MethodGet, relay.URL, hello.ID, "/", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Referer", "https://evil.example/page")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := <-requests; got.origin != "https://evil.example" || got.referer != "https://evil.example/page" {
+		t.Fatalf("a foreign origin was rewritten: %+v", got)
+	}
+}
