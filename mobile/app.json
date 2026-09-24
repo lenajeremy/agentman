@@ -22,7 +22,7 @@
       ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#090C12"
+        "backgroundColor": "#0F1012"
       }
     },
     "plugins": [
