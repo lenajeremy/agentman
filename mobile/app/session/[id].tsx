@@ -319,6 +319,22 @@ export default function SessionScreen() {
         ) : null}
       </ContentColumn>
 
+      {session ? (
+        <ContentColumn style={styles.workspaceBar}>
+          <MotionPressable
+            onPress={() => router.push(`/workspace/${encodeURIComponent(session.id)}`)}
+            style={styles.workspaceButton}
+            pressedScale={0.98}
+            accessibilityRole="button"
+            accessibilityLabel="Browse files and working tree changes"
+          >
+            <Feather name="folder" size={16} color={color.workingText} />
+            <Text style={styles.workspaceLabel}>Files & changes</Text>
+            <Feather name="chevron-right" size={15} color={color.faint} />
+          </MotionPressable>
+        </ContentColumn>
+      ) : null}
+
       <KeyboardAvoidingView
         style={styles.keyboardAvoider}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -683,6 +699,13 @@ const makeStyles = (c: Palette) =>
       borderColor: c.line,
     },
     headerBody: { flex: 1 },
+    workspaceBar: { paddingHorizontal: space.lg, paddingBottom: space.sm },
+    workspaceButton: {
+      flexDirection: "row", alignItems: "center", gap: space.sm,
+      minHeight: 38, paddingHorizontal: space.md, borderRadius: radius.md,
+      backgroundColor: c.surface, borderWidth: 1, borderColor: c.line,
+    },
+    workspaceLabel: { flex: 1, color: c.text, fontFamily: font.sansMedium, fontSize: size.caption },
     serversButton: {
       flexDirection: "row",
       alignItems: "center",
