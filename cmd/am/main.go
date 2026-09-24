@@ -33,6 +33,7 @@ Usage:
   am watch [session-id]       Follow sessions live (all, or one in detail)
   am serve                    Run the daemon (hooks + relay connection)
   am pair                     Print a pairing code for your phone
+  am expose <port>            Share a local port as a public link
   am claude [args...]         Start Claude Code so you can message it later
   am codex [args...]          Start Codex so you can message it later
   am opencode [args...]       Start OpenCode so you can message it later
@@ -84,6 +85,8 @@ func main() {
 		err = runInstallHooks(ctx, args, true)
 	case "pair":
 		err = runPair(ctx, args)
+	case "expose":
+		err = runExpose(ctx, args)
 	case "claude", "codex":
 		// Launch an agent inside tmux so it can receive messages later.
 		err = runWrap(ctx, command, args)

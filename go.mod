@@ -4,6 +4,7 @@ go 1.26.6
 
 require (
 	github.com/coder/websocket v1.8.15
+	github.com/hashicorp/yamux v0.1.2
 	github.com/mdp/qrterminal/v3 v3.2.1
 	rsc.io/qr v0.2.0
 )

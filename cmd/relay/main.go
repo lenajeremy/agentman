@@ -60,6 +60,16 @@ func main() {
 	}
 
 	server := relay.NewServer(secret, version, log, trustProxy)
+
+	// Preview links need a wildcard domain pointed at this relay, so they are
+	// off until the operator names one.
+	if origin := strings.TrimSpace(os.Getenv("AGENTMAN_PREVIEW_ORIGIN")); origin != "" {
+		if err := server.EnablePreviews(origin); err != nil {
+			log.Error("AGENTMAN_PREVIEW_ORIGIN is invalid", "error", err)
+			os.Exit(1)
+		}
+		log.Info("preview links enabled", "origin", origin)
+	}
 	httpServer := &http.Server{
 		Addr:              ":" + port,
 		Handler:           server.Handler(),
