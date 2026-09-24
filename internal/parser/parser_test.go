@@ -406,3 +406,145 @@ func TestClipTruncatesOnRuneBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestClipBlockKeepsLines(t *testing.T) {
+	out := ClipBlock("one\ntwo\nthree", 10, 100)
+	if out != "one\ntwo\nthree" {
+		t.Fatalf("lines were flattened: %q", out)
+	}
+}
+
+func TestClipBlockNormalizesEdges(t *testing.T) {
+	out := ClipBlock("\r\n\r\n  a  \r\nb\t\n\n\n", 10, 100)
+	if out != "  a\nb" {
+		t.Fatalf("edges not trimmed: %q", out)
+	}
+}
+
+func TestClipBlockCountsDroppedLines(t *testing.T) {
+	var lines []string
+	for i := 0; i < 50; i++ {
+		lines = append(lines, "line")
+	}
+	out := ClipBlock(strings.Join(lines, "\n"), 10, 10000)
+	if !strings.HasSuffix(out, "\n… 40 more lines") {
+		t.Fatalf("missing drop marker: %q", out)
+	}
+	if got := strings.Count(out, "\n"); got != 10 {
+		t.Fatalf("kept %d breaks, want 10", got)
+	}
+}
+
+func TestClipBlockSingleDroppedLineReadsAsOne(t *testing.T) {
+	out := ClipBlock("a\nb\nc", 2, 10000)
+	if !strings.HasSuffix(out, "\n… 1 more line") {
+		t.Fatalf("plural for one line: %q", out)
+	}
+}
+
+// The character cap must not leave a half-finished line pretending to be whole.
+func TestClipBlockDropsThePartialTrailingLine(t *testing.T) {
+	out := ClipBlock("aaaa\nbbbb\ncccc", 10, 7)
+	if !strings.HasPrefix(out, "aaaa\n…") {
+		t.Fatalf("partial line survived: %q", out)
+	}
+	if strings.Contains(out, "bb") {
+		t.Fatalf("partial line survived: %q", out)
+	}
+}
+
+// A single line longer than the budget has no whole line to fall back to, so
+// it is truncated in place and marked.
+func TestClipBlockTruncatesALoneLongLine(t *testing.T) {
+	out := ClipBlock(strings.Repeat("x", 100), 10, 20)
+	if out != strings.Repeat("x", 20)+"…" {
+		t.Fatalf("lone line clipped wrong: %q", out)
+	}
+}
+
+func TestClipBlockCountsRunesNotBytes(t *testing.T) {
+	out := ClipBlock(strings.Repeat("é", 10), 10, 10)
+	if out != strings.Repeat("é", 10) {
+		t.Fatalf("multibyte text was clipped early: %q", out)
+	}
+}
+
+func TestClipBlockEmpty(t *testing.T) {
+	if out := ClipBlock("  \n\n ", 10, 100); out != "" {
+		t.Fatalf("blank input produced %q", out)
+	}
+}
+
+func TestClaudeToolOutputKeepsItsLines(t *testing.T) {
+	// Regression: results went through clip, which joins strings.Fields with a
+	// space. Grep hits, numbered listings and stack traces all arrived on the
+	// phone as one reflowed monospace paragraph — the least readable form of
+	// the most structured thing an agent produces.
+	path := writeFixture(t, []any{
+		claudeAssistant("a1", []any{
+			obj{"type": "tool_use", "id": "toolu_1", "name": "Grep",
+				"input": obj{"pattern": "presentLocalOrigin"}},
+		}),
+		claudeToolResult("u2", "toolu_1", "internal/relay/tunnel.go\ninternal/relay/tunnel_test.go", false),
+	})
+
+	msgs := pageAll(t, path, NewClaudeParser("claude:s"), 20)
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1", len(msgs))
+	}
+	if got := msgs[0].Text; got != "internal/relay/tunnel.go\ninternal/relay/tunnel_test.go" {
+		t.Errorf("Text = %q, want the two hits on their own lines", got)
+	}
+}
+
+func TestClaudeCommandKeepsItsLines(t *testing.T) {
+	// A heredoc'd script flattened to one line is unreadable, and the row only
+	// ever shows the first line anyway.
+	script := "python3 - <<'PY'\nprint(1)\nPY"
+	path := writeFixture(t, []any{
+		claudeAssistant("a1", []any{
+			obj{"type": "tool_use", "id": "toolu_1", "name": "Bash",
+				"input": obj{"command": script}},
+		}),
+	})
+
+	msgs := pageAll(t, path, NewClaudeParser("claude:s"), 20)
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1", len(msgs))
+	}
+	if msgs[0].Tool.Summary != script {
+		t.Errorf("Summary = %q, want the script intact", msgs[0].Tool.Summary)
+	}
+}
+
+func TestClaudePathSummaryStaysOneLine(t *testing.T) {
+	path := writeFixture(t, []any{
+		claudeAssistant("a1", []any{
+			obj{"type": "tool_use", "id": "toolu_1", "name": "Read",
+				"input": obj{"file_path": "/repo/internal/relay/tunnel.go"}},
+		}),
+	})
+
+	msgs := pageAll(t, path, NewClaudeParser("claude:s"), 20)
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1", len(msgs))
+	}
+	if msgs[0].Tool.Summary != "/repo/internal/relay/tunnel.go" {
+		t.Errorf("Summary = %q", msgs[0].Tool.Summary)
+	}
+}
+
+func TestClipBlockDropsAnsiEscapes(t *testing.T) {
+	out := ClipBlock("\x1b[0;32mPASS\x1b[0m ok\n\x1b]0;title\x07next", 10, 1000)
+	if out != "PASS ok\nnext" {
+		t.Fatalf("escapes survived: %q", out)
+	}
+}
+
+func TestClipBlockHonoursCarriageReturnOverwrites(t *testing.T) {
+	// A progress bar rewrites one line; only its last state was ever visible.
+	out := ClipBlock("10%\r50%\r100%\ndone", 10, 1000)
+	if out != "100%\ndone" {
+		t.Fatalf("overwrites became lines: %q", out)
+	}
+}

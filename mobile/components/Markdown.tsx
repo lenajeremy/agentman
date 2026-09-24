@@ -11,6 +11,13 @@ type Styles = ReturnType<typeof makeStyles>;
 
 const MAX_MARKDOWN_CHARS = 200_000;
 
+/**
+ * Longest span rendered as a rounded chip. An inline View is a single
+ * unbreakable box, so beyond roughly this it would push past the column
+ * instead of wrapping; those fall back to a flat highlight that still wraps.
+ */
+const MAX_CODE_CHIP = 40;
+
 type Block =
   | { kind: "paragraph" | "quote" | "code"; text: string }
   | { kind: "heading"; level: number; text: string }
@@ -269,8 +276,18 @@ function renderInline(text: string, styles: Styles): ReactNode[] {
           </Text>
         );
       case "code":
-        return (
-          <Text key={key} style={styles.inlineCode}>
+        // A View, not a styled Text: a nested Text is an attributed-string
+        // span, and both platforms draw its background as a plain rectangle —
+        // the radius and padding set on it are silently dropped. A View
+        // nested in Text is laid out as an inline block, which does honour
+        // them. It cannot wrap internally though, so a long span stays flat
+        // text rather than becoming a chip that overflows the column.
+        return token.text.length <= MAX_CODE_CHIP ? (
+          <View key={key} style={styles.inlineCodeChip}>
+            <Text style={styles.inlineCode}>{token.text}</Text>
+          </View>
+        ) : (
+          <Text key={key} style={[styles.inlineCode, styles.inlineCodeFlat]}>
             {token.text}
           </Text>
         );
@@ -303,12 +320,32 @@ function makeStyles(c: Palette) {
     heading1: { fontSize: size.title },
     bold: { fontFamily: font.sansBold },
     link: { color: c.workingText, textDecorationLine: "underline" },
+    // A chip rather than a raw highlight: without the inset the background sits
+    // flush against the glyphs and reads as a sharp block mid-sentence.
+    //
+    // Only horizontal inset and a radius. Vertical padding on a nested Text is
+    // measured into the line box, so it pushes wrapped lines apart unevenly
+    // rather than growing the chip. Android ignores a radius on an inline span
+    // altogether — there it degrades to the flat highlight this replaces.
+    // The chip carries the ground and the shape; the text inside carries none,
+    // or the background would be drawn twice with only the outer one rounded.
+    inlineCodeChip: {
+      backgroundColor: c.fill,
+      borderRadius: 6,
+      paddingHorizontal: 6,
+      paddingVertical: 1,
+      // Nudges the box down so its text sits on the surrounding baseline
+      // rather than riding above it.
+      transform: [{ translateY: 3 }],
+    },
     inlineCode: {
       fontFamily: font.mono,
       fontSize: size.caption,
       color: c.textSecondary,
-      backgroundColor: c.fill,
+      lineHeight: 18,
     },
+    // The fallback keeps the old flat highlight, which wraps.
+    inlineCodeFlat: { backgroundColor: c.fill },
     codeBlock: {
       fontFamily: font.mono,
       fontSize: 12.5,

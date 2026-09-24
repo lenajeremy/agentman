@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lenajeremy/agentman/internal/parser"
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
 
@@ -1056,7 +1057,7 @@ func openCodeMessages(sessionID string, message ocMessage) []protocol.Message {
 				Text: clipOutput(text),
 				Tool: &protocol.Tool{
 					Name:    name,
-					Summary: clipOutput(part.State.Title),
+					Summary: clipTitle(part.State.Title),
 					Status:  status,
 				},
 			})
@@ -1106,14 +1107,20 @@ func openCodeErrorText(raw json.RawMessage) string {
 	return "OpenCode turn failed"
 }
 
+// clipOutput bounds a tool result while keeping its lines, matching how the
+// Claude and Codex parsers surface output.
 func clipOutput(text string) string {
+	return parser.ClipBlock(text, parser.PreviewLines, parser.PreviewChars)
+}
+
+// clipTitle bounds the one line a collapsed row shows.
+func clipTitle(text string) string {
 	flat := strings.Join(strings.Fields(text), " ")
-	const max = 400
 	runes := []rune(flat)
-	if len(runes) <= max {
+	if len(runes) <= parser.SummaryChars {
 		return flat
 	}
-	return string(runes[:max-1]) + "…"
+	return string(runes[:parser.SummaryChars-1]) + "…"
 }
 
 // Follow implements Source.

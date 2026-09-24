@@ -137,10 +137,10 @@ func (p *CodexParser) Parse(line string, offset int64) []protocol.Message {
 		}
 
 		base.Role = protocol.RoleTool
-		base.Text = clip(output, PreviewChars)
+		base.Text = ClipBlock(output, PreviewLines, PreviewChars)
 		base.Tool = &protocol.Tool{
 			Name:    "Shell",
-			Summary: clip(command, SummaryChars),
+			Summary: ClipBlock(command, CommandLines, CommandChars),
 			Status:  status,
 		}
 		return []protocol.Message{base}
