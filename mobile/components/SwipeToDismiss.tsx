@@ -144,7 +144,7 @@ export function SwipeToDismiss({
 
 const styles = StyleSheet.create({
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     marginHorizontal: space.lg,
     marginBottom: space.sm,
     borderRadius: radius.md,
