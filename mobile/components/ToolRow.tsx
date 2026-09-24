@@ -11,8 +11,11 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
+import { useRouter } from "expo-router";
+
 import { useStyles, useTheme } from "../lib/appearance";
 import { parseDiff } from "../lib/diff";
+import { workspaceImage } from "../lib/imagepath";
 import { Message } from "../lib/protocol";
 import { font, Palette, radius, size, space } from "../lib/theme";
 import { MotionPressable } from "./MotionPressable";
@@ -293,6 +296,42 @@ function OutputBlock({
 }
 
 /**
+ * A way into the picture a tool just read.
+ *
+ * It routes to the workspace file viewer rather than fetching the bytes here:
+ * that screen already pinches, pans and double-taps, and a feed that inlined
+ * every screenshot an agent touched would pay for all of them at once.
+ */
+function ImageLink({ sessionId, path }: { sessionId: string; path: string }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const router = useRouter();
+  const name = path.split("/").at(-1) ?? path;
+
+  return (
+    <MotionPressable
+      // The same URL form the workspace screen pushes: that screen decodes the
+      // id itself, so handing Expo an object to encode would not round-trip
+      // through it the same way.
+      onPress={() =>
+        router.push(
+          `/file/${encodeURIComponent(sessionId)}?path=${encodeURIComponent(path)}`,
+        )
+      }
+      style={styles.imageLink}
+      accessibilityRole="button"
+      accessibilityLabel={`View ${name}`}
+    >
+      <Feather name="image" size={14} color={color.working} />
+      <Text style={styles.imageLinkText} numberOfLines={1}>
+        View {name}
+      </Text>
+      <Feather name="chevron-right" size={14} color={color.faint} />
+    </MotionPressable>
+  );
+}
+
+/**
  * One tool call: what ran, and how it ended.
  *
  * The header is exactly one line, open or closed. It used to grow with the
@@ -324,7 +363,11 @@ export function ToolRow({
   const showCommand =
     !isPath(summary) &&
     (summary.includes("\n") || summary.length > INLINE_COMMAND);
-  const canOpen = Boolean(output) || showCommand;
+  // Reading an image produces no text worth showing — the parsers render it as
+  // "[image]" — so without this the row is the one place in the app that names
+  // a picture and then refuses to show it.
+  const image = workspaceImage(tool.name, summary, cwd);
+  const canOpen = Boolean(output) || showCommand || Boolean(image);
 
   return (
     <View style={styles.row}>
@@ -355,7 +398,13 @@ export function ToolRow({
       {expanded ? (
         <View style={styles.body}>
           {showCommand ? <CommandBlock text={summary} /> : null}
-          {output ? (
+          {image ? (
+            <ImageLink sessionId={message.sessionId} path={image} />
+          ) : null}
+          {/* "[image]" is the placeholder a parser leaves where it could not
+              carry the picture. Once the link above can actually show it, the
+              placeholder is a block that says nothing. */}
+          {output && !(image && output.trim() === "[image]") ? (
             <OutputBlock
               name={tool.name}
               command={summary || undefined}
@@ -469,6 +518,22 @@ const makeStyles = (c: Palette) =>
     diffAdd: { color: c.ok },
     diffRemove: { color: c.errorText },
     diffHunk: { color: c.faint },
+
+    imageLink: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingVertical: space.sm,
+      paddingHorizontal: space.md,
+      borderRadius: radius.md,
+      backgroundColor: c.fill,
+    },
+    imageLinkText: {
+      flex: 1,
+      fontFamily: font.sansMedium,
+      fontSize: size.caption,
+      color: c.text,
+    },
 
     footer: {
       flexDirection: "row",
