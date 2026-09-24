@@ -128,3 +128,47 @@ test("rejects nested fields that could crash rendering", () => {
     },
   }), null);
 });
+
+const baseSession = {
+  id: "claude:s", kind: "claude", nativeId: "s", name: "app", cwd: "/work/app",
+  state: "busy", inject: "tmux", startedAt: 1, lastActivityAt: 2,
+};
+
+test("accepts sessions with servers and rejects unsafe preview links", () => {
+  const withServers = {
+    ...baseSession,
+    servers: [
+      { port: 5173, command: "node", title: "Vite App" },
+      { port: 3000, link: "https://abc.agentman.online" },
+    ],
+  };
+  assert.ok(decodeDaemonEvent({ type: "session_update", session: withServers }));
+
+  for (const link of ["javascript:alert(1)", "agentman://pair?token=x", "https://a b"]) {
+    assert.equal(decodeDaemonEvent({
+      type: "session_update",
+      session: { ...baseSession, servers: [{ port: 3000, link }] },
+    }), null, link);
+  }
+  assert.equal(decodeDaemonEvent({
+    type: "session_update",
+    session: { ...baseSession, servers: [{ port: 70000 }] },
+  }), null);
+});
+
+test("decodes server_opened only with a port and an http(s) link", () => {
+  assert.ok(decodeDaemonEvent({
+    type: "server_opened", sessionId: "claude:s", port: 5173, link: "https://x.agentman.online",
+  }));
+  assert.equal(decodeDaemonEvent({
+    type: "server_opened", sessionId: "claude:s", port: 5173, link: "javascript:alert(1)",
+  }), null);
+  assert.equal(decodeDaemonEvent({ type: "server_opened", sessionId: "claude:s", port: 5173 }), null);
+});
+
+test("an agent this app does not know yet still loads", () => {
+  // A newer daemon adding Gemini must not blank the whole session list.
+  assert.ok(decodeDaemonEvent({
+    type: "sessions", sessions: [baseSession, { ...baseSession, id: "gemini:g", kind: "gemini" }],
+  }));
+});

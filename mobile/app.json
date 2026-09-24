@@ -37,7 +37,8 @@
         }
       ],
       "expo-notifications",
-      "./plugins/withIosBuildFixes"
+      "./plugins/withIosBuildFixes",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
