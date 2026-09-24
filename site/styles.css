@@ -38,6 +38,10 @@
   --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --gutter: 40px;
+  /* Overshoot easing: things settle with a small bounce, which is most of
+     what makes the page feel alive rather than merely animated. */
+  --spring: cubic-bezier(.34, 1.56, .64, 1);
+  --out: cubic-bezier(.22, 1, .36, 1);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -90,7 +94,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .hero p { margin: 0; font-size: 19px; line-height: 1.55; color: var(--muted); }
 .cta { display: flex; align-items: center; gap: 22px; margin-top: 26px; flex-wrap: wrap; }
 .agent-pills { margin-top: 18px; display: flex; gap: 8px; font-size: 12.5px; font-family: var(--mono); color: var(--faint); flex-wrap: wrap; }
-.agent-pills span { padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); transition: all .2s ease; }
+.agent-pills span { padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); transition: all .2s ease; display: inline-flex; align-items: center; gap: 6px; }
+.agent-pills svg { width: 12px; height: 12px; flex: none; }
 .agent-pills span.on { border-color: var(--cobalt-100); background: var(--cobalt-50); color: var(--cobalt-700); }
 
 /* ---------- Stage ---------- */
@@ -132,6 +137,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .names { margin-top: 24px; display: flex; justify-content: center; gap: 72px; font-size: 26px; font-weight: 600; letter-spacing: -0.8px; color: #8E9097; flex-wrap: wrap; }
 .names span { display: inline-flex; align-items: center; gap: 12px; }
 .names svg { width: 26px; height: 26px; }
+.names .logo-claude { color: #D97757; }
+.names .logo-ink { color: var(--ink); }
 
 /* ---------- Sections ---------- */
 section { scroll-margin-top: 24px; }
@@ -139,11 +146,26 @@ section { scroll-margin-top: 24px; }
 .why { text-align: center; padding: 110px 0 20px; }
 .why p { max-width: 640px; margin: 20px auto 0; font-size: 19px; line-height: 1.6; color: var(--ink-2); }
 .why p em { font-style: normal; text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 4px; }
-.dotrow { margin: 48px auto 0; display: grid; grid-template-columns: repeat(17, 22px); gap: 12px; justify-content: center; }
-.dotrow i { width: 22px; height: 22px; border-radius: 50%; background: var(--fill-2); }
+/* The fleet: a row of agents that work, idle, stop to ask, and get answered. */
+.fleet { position: relative; width: fit-content; margin: 48px auto 0; }
+.dotrow { display: grid; grid-template-columns: repeat(17, 22px); gap: 12px; justify-content: center; }
+.dotrow i { position: relative; width: 22px; height: 22px; border-radius: 50%; background: var(--fill-2); transition: background-color .35s ease, box-shadow .35s ease; }
 .dotrow i.c { background: var(--cobalt); }
-.dotrow i.t { background: var(--tang); box-shadow: 0 0 0 6px var(--tang-100); }
-.dotcap { margin-top: 20px; font-size: 15px; color: var(--muted); }
+.dotrow i.t { background: var(--tang); box-shadow: 0 0 0 6px var(--tang-100); cursor: pointer; }
+/* Hovering a dot names the agent, like the rows in the app. */
+.dotrow i::after { content: attr(data-name) " · " attr(data-state); position: absolute; left: 50%; bottom: calc(100% + 12px); transform: translate(-50%, 4px); padding: 5px 9px; border-radius: 8px; background: var(--ink); color: #fff; font: 500 12px/1 var(--mono); white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .15s ease, transform .25s var(--spring); z-index: 2; }
+.dotrow i:hover::after { opacity: 1; transform: translate(-50%, 0); }
+.finger { position: absolute; left: 0; top: 0; width: 34px; height: 34px; margin: -6px 0 0 -6px; border-radius: 50%; background: rgba(15,16,18,.16); border: 2px solid rgba(15,16,18,.28); opacity: 0; pointer-events: none; }
+.legend { margin-top: 26px; display: flex; justify-content: center; gap: 22px; font-size: 13.5px; color: var(--muted); flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.legend i { width: 10px; height: 10px; border-radius: 50%; background: var(--fill-2); }
+.legend i.c { background: var(--cobalt); }
+.legend i.t { background: var(--tang); }
+.dotcap { margin: 14px 0 0; min-height: 24px; font-size: 16px; color: var(--ink-2); transition: opacity .2s ease, transform .3s var(--spring); }
+.dotcap.swap { opacity: 0; transform: translateY(6px); }
+.dotcap b { font-family: var(--mono); font-weight: 500; font-size: 14.5px; }
+.dotcap .ask { color: var(--tang-700); }
+.dotcap .done { color: var(--cobalt-700); }
 .cards { margin-top: 72px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; text-align: center; }
 .card { background: var(--fill); border-radius: 20px; padding: 40px 32px 34px; }
 .card svg { width: 84px; height: 84px; margin: 0 auto; }
@@ -156,36 +178,171 @@ section { scroll-margin-top: 24px; }
 /* How it works */
 .how { padding: 130px 0 0; }
 .how .h2 { max-width: 760px; margin-top: 14px; }
-.panel { margin-top: 44px; position: relative; border-radius: 26px; background-color: var(--cobalt); height: 440px; overflow: hidden; background-image: radial-gradient(rgba(255,255,255,.22) 1.2px, transparent 1.3px); background-size: 18px 18px; }
-.panel .term2 { position: absolute; left: 44px; top: 48px; width: 430px; border-radius: 14px; background: var(--term); overflow: hidden; box-shadow: 0 30px 60px -20px rgba(8,12,60,.7); }
+.panel { margin-top: 44px; position: relative; border-radius: 26px; background-color: var(--cobalt); min-height: 600px; overflow: hidden; background-image: radial-gradient(rgba(255,255,255,.22) 1.2px, transparent 1.3px); background-size: 18px 18px; display: grid; }
+/* Scenes share one grid cell, so the panel is as tall as the tallest and
+   swapping between them never moves the page. */
+.scene { grid-area: 1 / 1; display: flex; align-items: center; justify-content: center; gap: 40px; padding: 32px 44px; }
+.scene[hidden] { display: flex; visibility: hidden; opacity: 0; }
+.term2 { width: 430px; flex: none; border-radius: 14px; background: var(--term); overflow: hidden; box-shadow: 0 30px 60px -20px rgba(8,12,60,.7); }
 .term2 .bar { height: 32px; display: flex; gap: 7px; align-items: center; padding: 0 12px; }
 .term2 .bar i { width: 10px; height: 10px; border-radius: 50%; background: #3A3B41; }
+.term2 .bar span { margin-left: 8px; font: 12px var(--mono); color: #6E717A; }
 .term2 pre { margin: 0; padding: 6px 18px 18px; font-family: var(--mono); font-size: 13px; line-height: 1.8; color: #A9ACB4; white-space: pre-wrap; }
+/* Line-by-line output: each line is its own block so it can animate in, and
+   the source's own line breaks are ignored rather than doubling the spacing. */
+.term2 pre.lines { white-space: normal; }
+.term2 .ln { display: block; white-space: pre-wrap; }
+.term2 .ln.gap { margin-top: 1.8em; }
 .term2 .p { color: #9DAAFF; }
 .term2 .w { color: #F2F3F5; }
 .term2 .c { color: #6E717A; }
-.diagram { position: absolute; right: 44px; top: 64px; width: 600px; height: 312px; background: var(--white); border-radius: 16px; box-shadow: 0 30px 60px -20px rgba(8,12,60,.55); padding: 18px 20px; }
-.diagram .head { font-size: 12.5px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+.term2 .t { color: #FFA37A; }
+.term2 .ok { color: #5BD69E; }
+
+/* Step 1: the Mac. */
+.window { width: 380px; flex: none; background: var(--white); border-radius: 16px; padding: 16px; box-shadow: 0 30px 60px -20px rgba(8,12,60,.55); display: grid; gap: 8px; }
+.window-head { font-size: 12.5px; color: var(--muted); display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
 .pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: var(--cobalt-50); color: var(--cobalt-700); }
 .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--cobalt); }
-.diagram svg.wires { position: absolute; inset: 0; width: 100%; height: 100%; }
-.node { position: absolute; border-radius: 12px; font-size: 13.5px; }
-.node.agent { left: 22px; width: 150px; height: 38px; background: var(--fill); display: flex; align-items: center; gap: 8px; padding: 0 12px; font-weight: 500; }
-.node.agent i { width: 8px; height: 8px; border-radius: 50%; background: var(--cobalt); }
-.node.agent i.t { background: var(--tang); }
-.node.daemon { left: 214px; top: 120px; width: 116px; height: 76px; background: var(--ink); color: #fff; display: grid; place-items: center; text-align: center; font-weight: 600; line-height: 1.3; }
-.node.daemon span { display: block; font-family: var(--mono); font-weight: 400; font-size: 11.5px; color: #A9ACB4; }
-.node.relay { left: 356px; top: 104px; width: 104px; height: 108px; border: 1.5px dashed var(--tang); background: var(--tang-50); display: grid; place-items: center; text-align: center; font-weight: 600; color: var(--tang-900); line-height: 1.3; }
-.node.relay span { display: block; font-weight: 400; font-size: 11.5px; color: var(--tang-700); }
-.node.phone-node { left: 488px; top: 96px; width: 72px; height: 124px; border-radius: 16px; border: 2.5px solid var(--ink); background: var(--white); }
-.node.phone-node::before { content: ""; position: absolute; left: 24px; top: 7px; width: 20px; height: 5px; border-radius: 3px; background: var(--ink); }
-.node.phone-node b { position: absolute; left: 10px; right: 10px; top: 28px; height: 18px; border-radius: 6px; background: var(--tang-50); border: 1px solid var(--tang-100); }
-.node.phone-node em { position: absolute; left: 10px; right: 10px; height: 10px; border-radius: 4px; background: var(--fill); }
+.srow { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 12px; border: 1px solid var(--line); }
+.srow.ask { border-color: var(--tang-100); background: var(--tang-50); }
+.av { width: 30px; height: 30px; flex: none; border-radius: 9px; background: var(--fill); display: grid; place-items: center; color: var(--ink); }
+.av svg { width: 17px; height: 17px; }
+.av .logo-claude { color: #D97757; }
+.nm { flex: 1; min-width: 0; font: 500 13px var(--mono); display: grid; gap: 1px; }
+.nm small { font: 11.5px var(--sans); color: var(--muted); }
+.st { flex: none; font-size: 11.5px; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: var(--fill); color: var(--muted); }
+.st.work { background: var(--cobalt-50); color: var(--cobalt-700); }
+.st.needs { background: var(--tang-50); color: var(--tang-700); }
+.srow.ask .st.needs { background: #fff; }
+
+/* Step 2: the relay. */
+.scene-relay { flex-direction: column; gap: 30px; }
+.route { display: flex; align-items: center; width: min(760px, 100%); }
+.end { flex: none; width: 128px; height: 116px; border-radius: 16px; background: var(--white); display: grid; place-items: center; align-content: center; gap: 4px; text-align: center; box-shadow: 0 20px 40px -20px rgba(8,12,60,.55); }
+.end .icon { width: 26px; height: 26px; stroke-width: 1.7; margin-bottom: 4px; }
+.end b { font-size: 14px; }
+.end span { font: 11.5px var(--mono); color: var(--muted); }
+.wire { position: relative; flex: 1; height: 2px; margin: 0 -1px; background: rgba(255,255,255,.55); }
+.packet { position: absolute; top: 50%; left: 0; transform: translate(0, -50%); opacity: 0; white-space: nowrap; padding: 4px 9px; border-radius: 999px; font: 500 11.5px var(--mono); background: var(--white); color: var(--cobalt-700); box-shadow: 0 6px 14px -6px rgba(8,12,60,.5); }
+.packet.back { background: var(--tang); color: #fff; }
+.relaybox { flex: none; width: 176px; padding: 18px 14px; border-radius: 18px; border: 2px dashed var(--tang-300); background: var(--tang-50); text-align: center; display: grid; gap: 4px; }
+.relaybox b { font-size: 16px; color: var(--tang-900); }
+.relaybox > span { font-size: 12px; color: var(--tang-700); }
+.ledger { margin-top: 8px; font: 12px var(--mono); color: var(--tang-700); }
+.ledger strong { display: inline-block; min-width: 22px; margin-left: 4px; padding: 1px 6px; border-radius: 6px; background: #fff; color: var(--tang-900); }
+.facts { margin: 0; padding: 0; list-style: none; display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.facts li { padding: 7px 12px 7px 30px; border-radius: 999px; background: rgba(255,255,255,.14); color: #fff; font-size: 13.5px; position: relative; }
+.facts li::before { content: "✓"; position: absolute; left: 12px; color: #9DE8C4; font-weight: 600; }
+
+/* Step 3: the phone.
+   Built at real iPhone size in points — a 393 x 852 screen inside titanium,
+   bezel and glass — then scaled as one piece by --s. Everything inside uses
+   the app's own measurements from mobile/lib/theme.ts. */
+.device { --s: .62; flex: none; width: calc(417px * var(--s)); height: calc(876px * var(--s)); }
+.iphone { position: relative; width: 417px; height: 876px; padding: 3.5px; border-radius: 67px; transform: scale(var(--s)); transform-origin: 0 0;
+  background: linear-gradient(140deg, #5b5b5f 0%, #2b2b2e 14%, #1b1b1d 48%, #2a2a2d 84%, #57575b 100%);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.35), inset 0 0 0 2.5px rgba(0,0,0,.55), 0 60px 100px -40px rgba(4,8,50,.9), 0 24px 44px -24px rgba(0,0,0,.65); }
+.hw { position: absolute; width: 4px; background: linear-gradient(90deg, #1e1e20, #626266 55%, #2c2c2f); }
+.hw.action, .hw.vol-up, .hw.vol-down { left: -3px; border-radius: 3px 0 0 3px; }
+.hw.action { top: 132px; height: 34px; }
+.hw.vol-up { top: 196px; height: 64px; }
+.hw.vol-down { top: 274px; height: 64px; }
+.hw.power { right: -3px; top: 220px; height: 102px; border-radius: 0 3px 3px 0; background: linear-gradient(270deg, #1e1e20, #626266 55%, #2c2c2f); }
+.bezel { height: 100%; padding: 8.5px; border-radius: 63.5px; background: #050506; box-shadow: inset 0 0 0 1px rgba(255,255,255,.07); }
+.screen { position: relative; height: 100%; border-radius: 55px; overflow: hidden; background: var(--paper); color: var(--ink); font-family: var(--sans); text-align: left; }
+/* A faint sweep of glare across the glass. */
+.screen::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(118deg, rgba(255,255,255,.2) 0%, rgba(255,255,255,0) 26%); }
+
+.statusbar { position: absolute; left: 0; right: 0; top: 0; height: 59px; display: flex; align-items: center; justify-content: space-between; font-family: -apple-system, "SF Pro Text", var(--sans); }
+.sb-time { width: 134px; text-align: center; font-size: 17px; font-weight: 600; letter-spacing: -.4px; padding-left: 6px; }
+.sb-icons { width: 134px; display: flex; align-items: center; justify-content: center; gap: 6px; padding-right: 6px; color: var(--ink); }
+.sb-icons svg { fill: currentColor; }
+.sb-signal { width: 17px; height: 11px; }
+.sb-wifi { width: 16px; height: 12px; }
+.sb-battery { width: 27px; height: 13px; }
+.island { position: absolute; top: 11px; left: 50%; width: 125px; height: 37px; margin-left: -62.5px; border-radius: 19px; background: #000; }
+.island i { position: absolute; right: 22px; top: 12.5px; width: 12px; height: 12px; border-radius: 50%; background: radial-gradient(circle at 38% 35%, #3a4a78 0 12%, #151b33 38%, #07080d 70%); box-shadow: 0 0 0 1.5px #0e0e10; }
+.home { position: absolute; left: 50%; bottom: 8px; width: 134px; height: 5px; margin-left: -67px; border-radius: 3px; background: rgba(15,16,18,.88); }
+
+/* The Agentman status board, as the app draws it. */
+.app { position: absolute; inset: 0; padding: 66px 16px 0; }
+.app svg { display: block; }
+.app-top { display: flex; align-items: center; justify-content: space-between; }
+.chip { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border-radius: 999px; background: #fff; border: 1px solid var(--line); font-size: 13px; font-weight: 500; color: var(--ink-2); }
+.chip i { width: 7px; height: 7px; border-radius: 50%; background: var(--mint); }
+.round { width: 40px; height: 40px; border-radius: 50%; background: #fff; border: 1px solid var(--line); display: grid; place-items: center; }
+.round svg, .chev { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.round svg { width: 17px; height: 17px; }
+.app-title { margin-top: 16px; font-size: 34px; line-height: 41px; font-weight: 600; letter-spacing: -1.2px; }
+.tiles { display: flex; gap: 8px; margin-top: 16px; }
+.tile-c { flex: 1; border-radius: 20px; padding: 12px; display: grid; gap: 2px; }
+.tile-c.needs { background: var(--tang-50); color: var(--tang-700); }
+.tile-c.work { background: var(--cobalt-50); color: var(--cobalt); }
+.tile-c.idle { background: var(--fill); color: var(--ink); }
+.tile-c > span { font-size: 13px; font-weight: 500; color: var(--muted); }
+.num { display: inline-grid; font-size: 28px; line-height: 34px; font-weight: 600; letter-spacing: -.8px; font-variant-numeric: tabular-nums; }
+.num > span { grid-area: 1 / 1; }
+.num .to { opacity: 0; }
+.group { display: flex; align-items: baseline; justify-content: space-between; margin: 24px 2px 8px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.group.needs { color: var(--tang-700); }
+.group .count { font: 12px var(--mono); letter-spacing: 0; color: var(--faint); }
+.ask { position: relative; background: #fff; border: 1px solid var(--tang-100); border-radius: 20px; padding: 16px; display: grid; gap: 8px; box-shadow: 0 8px 16px rgba(255,106,43,.12); }
+.ask-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.pills { display: inline-grid; }
+.pill-s { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.pill-s i { width: 6px; height: 6px; border-radius: 50%; }
+.pill-s.needs { background: var(--tang-50); color: var(--tang-700); }
+.pill-s.needs i { background: var(--tang); }
+.pill-s.work { background: var(--cobalt-50); color: var(--cobalt-700); opacity: 0; }
+.pill-s.work i { background: var(--cobalt); }
+.ask-name { flex: 1; font: 13px var(--mono); color: var(--ink-2); }
+.age { font-size: 12px; color: var(--faint); }
+.chev { width: 16px; height: 16px; color: var(--faint); flex: none; }
+.q-title { font-size: 17px; font-weight: 600; letter-spacing: -.3px; }
+.q-detail { background: var(--fill); border-radius: 12px; padding: 10px 12px; font: 13px/19px var(--mono); }
+.q-prompt { font-size: 13px; line-height: 18px; color: var(--muted); }
+.q-row { position: relative; margin-top: 4px; }
+.q-actions { display: flex; gap: 8px; }
+.q-yes { flex: 1; height: 44px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 15px; font-weight: 600; display: grid; place-items: center; }
+.q-more { flex: none; width: 44px; height: 44px; border-radius: 50%; background: #fff; border: 1px solid var(--fill-2); display: grid; place-items: center; }
+.q-more svg { width: 18px; height: 18px; fill: var(--ink); }
+.q-sent { position: absolute; inset: 0; border-radius: 999px; background: var(--cobalt-50); color: var(--cobalt-700); font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 7px; opacity: 0; }
+.q-sent svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.fingertip { position: absolute; left: calc(50% - 48px); top: -1px; width: 46px; height: 46px; border-radius: 50%; background: rgba(255,255,255,.62); border: 2px solid rgba(15,16,18,.22); box-shadow: 0 6px 16px -4px rgba(0,0,0,.35); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); opacity: 0; pointer-events: none; }
+.row-s { display: flex; align-items: center; gap: 12px; padding: 13px 14px; margin-bottom: 8px; background: #fff; border: 1px solid var(--line); border-radius: 20px; }
+.row-s .chev { width: 18px; height: 18px; }
+.avatar { position: relative; flex: none; width: 40px; height: 40px; border-radius: 12px; background: var(--fill); display: grid; place-items: center; color: var(--ink); }
+.avatar.work { background: var(--cobalt-50); }
+.avatar svg { width: 22px; height: 22px; }
+.avatar .logo-claude { color: #D97757; }
+.pulse { position: absolute; right: -3px; bottom: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--cobalt); border: 2px solid #fff; }
+.row-body { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.row-top { display: flex; align-items: baseline; gap: 8px; }
+.name { flex: 1; font: 500 14.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta { font: 12px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta em { font: normal 500 12px var(--sans); color: var(--cobalt-700); margin-right: .45em; }
+
+/* An iOS notification, which the phone step opens with. */
+.banner { position: absolute; left: 10px; right: 10px; top: 54px; display: flex; gap: 12px; align-items: flex-start; padding: 13px 14px; border-radius: 24px; background: rgba(246,246,244,.9); -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6); box-shadow: 0 16px 34px -14px rgba(0,0,0,.4), 0 0 0 .5px rgba(0,0,0,.08); font-family: -apple-system, "SF Pro Text", var(--sans); transform: translateY(-170%); }
+.banner img { width: 38px; height: 38px; border-radius: 9px; flex: none; }
+.banner-copy { flex: 1; min-width: 0; }
+.banner-top { display: flex; justify-content: space-between; gap: 8px; font-size: 15px; }
+.banner-top b { font-weight: 600; }
+.banner-top span { font-size: 13px; color: rgba(60,60,67,.6); }
+.banner p { margin: 2px 0 0; font-size: 15px; line-height: 20px; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.scene-phone .term2 { width: 400px; }
+
+/* The three steps double as tabs; the active one fills its top rule. */
 .tabs { margin-top: 36px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
-.tabs div { border-top: 2px solid var(--line); padding-top: 18px; }
-.tabs div:first-child { border-color: var(--ink); }
-.tabs h3 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.4px; }
-.tabs p { margin: 8px 0 0; font-size: 15px; line-height: 1.55; color: var(--muted); }
+.step { position: relative; text-align: left; padding-top: 18px; border-top: 2px solid var(--line); cursor: pointer; }
+.step .progress { position: absolute; left: 0; right: 0; top: -2px; height: 2px; overflow: hidden; }
+.step .progress i { display: block; height: 100%; background: var(--ink); transform: scaleX(0); transform-origin: left; }
+.step.is-on .progress i { transform: scaleX(1); }
+.step h3 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.4px; color: var(--faint); transition: color .2s ease; }
+.step p { margin: 8px 0 0; font-size: 15px; line-height: 1.55; color: var(--faint); transition: color .2s ease; }
+.step:hover h3, .step.is-on h3 { color: var(--ink); }
+.step:hover p, .step.is-on p { color: var(--muted); }
 
 /* Question moment */
 .moment { padding: 130px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; }
@@ -211,7 +368,8 @@ section { scroll-margin-top: 24px; }
 .tools { padding: 130px 0 0; }
 .tools .h2 span { color: var(--faint); }
 .grid { margin-top: 48px; display: grid; grid-template-columns: repeat(8, 1fr); grid-auto-rows: 104px; gap: 10px; }
-.tile { border-radius: 16px; display: grid; place-items: center; font-weight: 600; font-size: 15px; letter-spacing: -0.2px; text-align: center; padding: 8px; }
+.tile { border-radius: 16px; display: grid; place-items: center; align-content: center; gap: 10px; font-weight: 600; font-size: 15px; letter-spacing: -0.2px; text-align: center; padding: 8px; }
+.tile svg { width: 28px; height: 28px; }
 .tile.mono { font-family: var(--mono); font-weight: 500; font-size: 14px; }
 .tile.center { grid-column: 4 / span 2; grid-row: 1 / span 2; background: var(--ink); }
 .tile.center svg { width: 84px; height: 84px; }
@@ -226,6 +384,7 @@ section { scroll-margin-top: 24px; }
 .platform { height: 116px; border-radius: 16px; background: rgba(255,255,255,.1); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; font-size: 15px; color: #fff; transition: background .15s ease; }
 .platform:hover { background: rgba(255,255,255,.16); }
 .platform svg { width: 30px; height: 30px; stroke-width: 1.6; }
+.platform svg.logo { width: 26px; height: 26px; }
 .platform[aria-selected="true"] { background: #fff; color: var(--ink); }
 .panel-body { margin: 36px auto 0; max-width: 600px; }
 .panel-body[hidden] { display: none; }
@@ -258,7 +417,9 @@ section { scroll-margin-top: 24px; }
 @media (max-width: 1100px) {
   .term { width: 520px; right: 40px; }
   .notif { display: none; }
-  .diagram { transform: scale(.82); transform-origin: top right; }
+  .scene { gap: 20px; padding: 32px; }
+  .window { width: 340px; }
+  .term2 { width: 380px; }
 }
 @media (max-width: 900px) {
   :root { --gutter: 24px; }
@@ -270,9 +431,12 @@ section { scroll-margin-top: 24px; }
   .moment { grid-template-columns: 1fr; gap: 40px; }
   .band .wrap { grid-template-columns: 1fr; padding-block: 64px 40px; }
   .band-art { max-width: 420px; }
-  .panel { height: auto; padding: 20px; }
-  .panel .term2 { position: static; width: auto; }
-  .diagram { display: none; }
+  .scene { flex-direction: column; padding: 24px 18px; }
+  .term2, .window, .scene-phone .term2 { width: 100%; max-width: 460px; }
+  .route { flex-direction: row; }
+  .end { width: 92px; height: 96px; }
+  .relaybox { width: 128px; padding: 14px 8px; }
+  .packet { font-size: 10px; padding: 3px 7px; }
   .cards { grid-template-columns: 1fr; }
   .grid { grid-template-columns: repeat(4, 1fr); grid-auto-rows: 80px; }
   .tile.center { grid-column: 2 / span 2; }
@@ -292,7 +456,18 @@ section { scroll-margin-top: 24px; }
   .why { padding-top: 72px; }
   .why p { font-size: 17px; }
   .dotrow { grid-template-columns: repeat(9, 22px); gap: 10px; }
+  .dotrow i::after { display: none; }
   .stats, .tabs { grid-template-columns: 1fr; gap: 24px; }
+  .term2 pre { font-size: 11.5px; padding: 4px 14px 14px; }
+  .device { --s: .72; }
+  /* On a phone the relay step runs top to bottom: Mac, relay, phone. */
+  .route { flex-direction: column; width: auto; }
+  .end { width: 160px; height: 88px; }
+  .relaybox { width: 190px; }
+  .wire { flex: none; width: 2px; height: 64px; margin: -1px 0; }
+  .packet { left: 50%; top: 0; transform: translate(-50%, 0); }
+  .facts { flex-direction: column; align-items: stretch; }
+  .facts li { font-size: 12.5px; }
   .how, .tools, .moment { padding-top: 80px; }
   .moment .phones { height: 560px; }
   .moment .phones .phone { width: 260px; }
@@ -302,9 +477,183 @@ section { scroll-margin-top: 24px; }
   .start { padding: 64px 0; }
   .platforms { grid-template-columns: repeat(2, 1fr); }
   .command { font-size: 12.5px; padding-left: 14px; }
-  .tile { font-size: 12.5px; }
+  .tile { font-size: 12.5px; gap: 6px; }
+  .tile svg { width: 20px; height: 20px; }
   .tile.mono { font-size: 12px; }
   .tile.center svg { width: 56px; height: 56px; }
   .fcols { grid-template-columns: 1fr 1fr; }
   .fbottom { flex-direction: column; align-items: flex-start; }
 }
+
+/* ---------- Motion ----------
+   Everything that moves lives here, behind one media query, so someone who
+   has asked their device for less motion gets a still page that says the
+   same things. */
+@media (prefers-reduced-motion: no-preference) {
+  /* Scroll reveal. Only hidden once the script has marked the page, so
+     without JavaScript nothing ever stays invisible. */
+  /* Uses translate, not transform, so a revealed element's own hover
+     transform is never overridden. The script drops data-reveal once the
+     entrance is over, handing transitions back to the element. */
+  .js [data-reveal] { opacity: 0; translate: 0 18px; transition: opacity .6s var(--out), translate .7s var(--spring); transition-delay: calc(var(--i, 0) * 70ms); }
+  .js [data-reveal].in { opacity: 1; translate: none; }
+
+  /* Buttons lift, and their arrows lean toward where they go. */
+  .btn { transition: transform .35s var(--spring), background .15s ease, box-shadow .3s ease; }
+  .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 22px -12px rgba(15,16,18,.55); }
+  .btn:active { transform: translateY(0) scale(.97); transition-duration: .08s; }
+  .btn .icon { transition: transform .35s var(--spring); }
+  .btn:hover .icon { transform: translateX(4px); }
+  .text-link, .nav-group > a:not(.btn):not(.logo) { background: linear-gradient(currentColor, currentColor) 0 100% / 0 1.5px no-repeat; transition: background-size .35s var(--out), color .15s ease; padding-bottom: 2px; }
+  .text-link:hover, .nav-group > a:not(.btn):not(.logo):hover { background-size: 100% 1.5px; text-decoration: none; }
+  .logo svg { transition: transform .5s var(--spring); }
+  .logo:hover svg { transform: rotate(-10deg) scale(1.08); }
+  .stars:hover .count { animation: pop .45s var(--spring); }
+
+  .rotor { transition: opacity .25s ease, transform .45s var(--spring); }
+  .rotor.out { transform: translateY(10px) scale(.94); }
+  .agent-pills span { transition: all .3s var(--spring); }
+  .agent-pills span.on { transform: translateY(-2px); }
+
+  /* The terminal waits on its choice, and the notification keeps arriving. */
+  .caret { display: inline-block; width: 8px; height: 15px; margin-left: 6px; vertical-align: -2px; background: #9DAAFF; animation: blink 1.1s steps(1) infinite; }
+  .notif { animation: arrive 7s var(--spring) infinite; }
+
+  /* Agents in the "works with" strip. */
+  .names span { transition: color .2s ease; cursor: default; }
+  .names span:hover { color: var(--ink); }
+  .names span:hover svg { animation: wiggle .7s var(--spring); }
+
+  /* The fleet. */
+  .dotrow i.pop { animation: pop .5s var(--spring); }
+  .dotrow i.t::before { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--tang); animation: ping 1.4s var(--out) infinite; }
+  .dotrow i.tapped::before { content: ""; position: absolute; inset: -2px; border-radius: 50%; border: 2px solid var(--cobalt); animation: ripple .6s var(--out) forwards; }
+  .finger { transition: transform .75s var(--spring), opacity .25s ease; }
+  .finger.press { animation: press .3s ease; }
+
+  /* Feature cards: each icon acts out its own sentence. */
+  .card { transition: transform .5s var(--spring), background-color .25s ease, box-shadow .35s ease; }
+  .card:hover { transform: translateY(-8px); background: var(--white); box-shadow: 0 28px 50px -30px rgba(15,16,18,.4); }
+  .card svg * { transform-box: fill-box; transform-origin: center; }
+  .card:hover .art-live .ring2 { animation: breathe 1.6s ease-in-out infinite; }
+  .card:hover .art-live .ring1 { animation: breathe 1.6s ease-in-out .15s infinite; }
+  .card:hover .art-live .core { animation: pop .5s var(--spring); }
+  .card:hover .art-tap .key { animation: tap .9s var(--spring); }
+  .card:hover .art-tap .flag { animation: flag .9s var(--spring); }
+  .card:hover .art-tap .chev { animation: nudge .9s var(--spring) .1s; }
+  .card:hover .art-send .a1 { animation: send .8s var(--spring); }
+  .card:hover .art-send .a2 { animation: send .8s var(--spring) .08s; }
+  .card:hover .art-send .a3 { animation: send .8s var(--spring) .16s; }
+  .stats b.pop { animation: pop .5s var(--spring); }
+
+  /* How it works: each step plays its own scene, and the active tab's rule
+     fills as a timer until the next one. */
+  .scene { transition: opacity .45s var(--out), visibility .45s; }
+  .scene > * { transition: transform .6s var(--spring); }
+  .scene[hidden] > * { transform: translateY(14px) scale(.98); }
+  .step .progress i { transition: none; }
+  .steps.playing .step.is-on .progress i { animation: fill var(--step-ms, 6500ms) linear forwards; }
+  .steps.playing.paused .step.is-on .progress i { animation-play-state: paused; }
+  .step { transition: transform .35s var(--spring); }
+  .step:hover { transform: translateY(-2px); }
+
+  .scene-mac.is-on .ln { animation: rise .45s var(--out) both; }
+  .scene-mac.is-on .ln:nth-child(2) { animation-delay: .25s; }
+  .scene-mac.is-on .ln:nth-child(3) { animation-delay: .4s; }
+  .scene-mac.is-on .ln:nth-child(4) { animation-delay: .55s; }
+  .scene-mac.is-on .ln:nth-child(5) { animation-delay: 1.1s; }
+  .scene-mac.is-on .ln:nth-child(6) { animation-delay: 1.5s; }
+  .scene-mac.is-on .ln:nth-child(7) { animation-delay: 2.1s; }
+  .scene-mac.is-on .srow { animation: rise .5s var(--spring) both; }
+  .scene-mac.is-on .srow:nth-child(2) { animation-delay: .6s; }
+  .scene-mac.is-on .srow:nth-child(3) { animation-delay: .75s; }
+  .scene-mac.is-on .srow:nth-child(4) { animation-delay: .9s; }
+  .scene-mac.is-on .srow:nth-child(5) { animation-delay: 1.05s; }
+  .scene-mac.is-on .srow.ask { animation: rise .5s var(--spring) .75s both, nudge-y 1.6s ease-in-out 2.3s infinite; }
+  .scene-mac.is-on .st.work { animation: glow 1.8s ease-in-out infinite; }
+
+  .scene-relay.is-on .wire:nth-child(2) .packet.out { animation: go-right 4.8s var(--out) infinite; }
+  .scene-relay.is-on .wire:nth-child(4) .packet.out { animation: go-right 4.8s var(--out) 1.05s infinite; }
+  .scene-relay.is-on .wire:nth-child(4) .packet.back { animation: go-left 4.8s var(--out) 2.4s infinite; }
+  .scene-relay.is-on .wire:nth-child(2) .packet.back { animation: go-left 4.8s var(--out) 3.45s infinite; }
+  .scene-relay.is-on .relaybox { animation: relay 2.4s var(--spring) .9s infinite; }
+  .scene-relay.is-on .ledger strong { animation: pop .45s var(--spring) 1.9s 3 both; }
+  .scene-relay.is-on .end { animation: rise .5s var(--spring) both; }
+  .scene-relay.is-on .end:last-child { animation-delay: .12s; }
+  .scene-relay.is-on .facts li { animation: rise .5s var(--spring) both; }
+  .scene-relay.is-on .facts li:nth-child(2) { animation-delay: .1s; }
+  .scene-relay.is-on .facts li:nth-child(3) { animation-delay: .2s; }
+
+  .scene-phone.is-on .device { animation: rise .6s var(--spring) both; }
+  .scene-phone.is-on .banner { animation: banner 2.3s var(--spring) .35s both; }
+  .scene-phone.is-on .ask { animation: attention 1s ease 2.3s both, settle-ask .5s ease 3.4s forwards; }
+  .scene-phone.is-on .fingertip { animation: finger 1.25s var(--spring) 2.15s both; }
+  .scene-phone.is-on .q-yes { animation: press-yes .32s ease 3.05s both; }
+  .scene-phone.is-on .q-actions { animation: fade-out .25s ease 3.35s forwards; }
+  .scene-phone.is-on .q-sent { animation: rise .45s var(--spring) 3.45s both; }
+  .scene-phone.is-on .pill-s.needs { animation: fade-out .25s ease 3.4s forwards; }
+  .scene-phone.is-on .pill-s.work { animation: rise .45s var(--spring) 3.5s both; }
+  .scene-phone.is-on .num.swap .from { animation: count-out .3s ease 3.6s forwards; }
+  .scene-phone.is-on .num .to { animation: count-in .45s var(--spring) 3.7s both; }
+  .scene-phone.is-on .pulse { animation: breathe 1.6s ease-in-out infinite; }
+  .scene-phone.is-on .r1 { animation: rise .4s var(--out) 3.6s both; }
+  .scene-phone.is-on .r2 { animation: rise .4s var(--out) 4.3s both; }
+  .scene-phone.is-on .r3 { animation: rise .4s var(--out) 5.3s both; }
+
+  /* The question moment. */
+  .moment li::before { transition: transform .4s var(--spring), background .2s ease, color .2s ease; }
+  .moment li:hover::before { transform: scale(1.15) rotate(-6deg); background: var(--tang); color: #fff; }
+  .moment .phones .phone { transition: transform .6s var(--spring); }
+  .moment .phones:hover .phone:first-child { transform: rotate(-6deg) translate(-6px, 6px); }
+  .moment .phones:hover .phone:last-child { transform: rotate(5deg) translate(6px, -6px); }
+
+  /* Get started. */
+  .platform { transition: background .15s ease, transform .4s var(--spring); }
+  .platform:hover { transform: translateY(-4px); }
+  .platform:active { transform: scale(.96); transition-duration: .08s; }
+  .platform:hover svg { animation: hop .6s var(--spring); }
+  .copy.done { color: var(--mint); animation: pop .45s var(--spring); }
+  .relay-status.online i { animation: pulse 2s ease-in-out infinite; }
+  .fcols a { transition: color .15s ease, transform .3s var(--spring); }
+  .fcols a:hover { transform: translateX(3px); }
+}
+
+@keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.28); } 100% { transform: scale(1); } }
+@keyframes hop { 0%, 100% { transform: translateY(0); } 35% { transform: translateY(-7px) scale(1.08); } 65% { transform: translateY(1px) scale(.97); } }
+@keyframes wiggle { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-14deg) scale(1.1); } 45% { transform: rotate(10deg); } 70% { transform: rotate(-5deg); } }
+@keyframes ping { 0% { transform: scale(1); opacity: .9; } 100% { transform: scale(2.3); opacity: 0; } }
+@keyframes ripple { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(2.6); opacity: 0; } }
+@keyframes press { 0%, 100% { transform: var(--at) scale(1); } 45% { transform: var(--at) scale(.72); } }
+@keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+@keyframes tap { 0%, 100% { transform: scale(1); } 30% { transform: scale(.86); } 60% { transform: scale(1.04); } }
+@keyframes flag { 0%, 100% { transform: translate(0, 0) rotate(0); } 30% { transform: translate(4px, -4px) rotate(8deg); } 60% { transform: translate(-1px, 1px) rotate(-3deg); } }
+@keyframes nudge { 0%, 100% { transform: translateX(0); } 40% { transform: translateX(5px); } }
+@keyframes send { 0%, 100% { transform: translateX(0); } 40% { transform: translateX(9px); } 70% { transform: translateX(-2px); } }
+@keyframes flow { to { stroke-dashoffset: -28; } }
+@keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.45); opacity: .7; } }
+@keyframes blink { 50% { opacity: 0; } }
+@keyframes buzz { 0%, 70%, 100% { transform: translateX(0); } 74% { transform: translateX(-2px); } 78% { transform: translateX(2px); } 82% { transform: translateX(-1px); } 86% { transform: translateX(0); } }
+@keyframes arrive { 0%, 4% { transform: translateY(-24px) scale(.96); opacity: 0; } 12%, 80% { transform: none; opacity: 1; } 88%, 100% { transform: translateY(-8px) scale(.98); opacity: 0; } }
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(46,75,255,0); } 50% { box-shadow: 0 0 0 4px rgba(46,75,255,.12); } }
+@keyframes nudge-y { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(4px); } }
+@keyframes go-right { 0% { left: 0; opacity: 0; } 4% { opacity: 1; } 20% { opacity: 1; } 24% { left: calc(100% - 76px); opacity: 0; } 100% { left: calc(100% - 76px); opacity: 0; } }
+@keyframes go-left { 0% { left: calc(100% - 92px); opacity: 0; } 4% { opacity: 1; } 20% { opacity: 1; } 24% { left: 0; opacity: 0; } 100% { left: 0; opacity: 0; } }
+@keyframes relay { 0%, 100% { transform: scale(1); } 12% { transform: scale(1.05); box-shadow: 0 0 0 6px rgba(255,106,43,.18); } 30% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255,106,43,0); } }
+@keyframes press-yes { 50% { transform: scale(.94); } }
+@keyframes fade-out { to { opacity: 0; } }
+@media (max-width: 640px) and (prefers-reduced-motion: no-preference) {
+  .scene-relay.is-on .wire:nth-child(2) .packet.out { animation-name: go-down; }
+  .scene-relay.is-on .wire:nth-child(4) .packet.out { animation-name: go-down; }
+  .scene-relay.is-on .wire:nth-child(4) .packet.back { animation-name: go-up; }
+  .scene-relay.is-on .wire:nth-child(2) .packet.back { animation-name: go-up; }
+}
+@keyframes go-down { 0% { top: 0; opacity: 0; } 4% { opacity: 1; } 20% { opacity: 1; } 24% { top: calc(100% - 22px); opacity: 0; } 100% { top: calc(100% - 22px); opacity: 0; } }
+@keyframes go-up { 0% { top: calc(100% - 22px); opacity: 0; } 4% { opacity: 1; } 20% { opacity: 1; } 24% { top: 0; opacity: 0; } 100% { top: 0; opacity: 0; } }
+@keyframes banner { 0% { transform: translateY(-170%); } 20%, 78% { transform: translateY(0); } 100% { transform: translateY(-170%); } }
+@keyframes attention { 0%, 100% { box-shadow: 0 8px 16px rgba(255,106,43,.12); } 40% { box-shadow: 0 0 0 5px rgba(255,106,43,.22), 0 8px 16px rgba(255,106,43,.12); } }
+@keyframes settle-ask { to { border-color: var(--line); box-shadow: 0 8px 16px rgba(15,16,18,.05); } }
+@keyframes finger { 0% { opacity: 0; transform: translate(130px, 230px); } 20% { opacity: 1; } 65% { opacity: 1; transform: translate(0, 0); } 75% { opacity: 1; transform: scale(.82); } 88% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1); } }
+@keyframes count-out { to { opacity: 0; transform: translateY(-10px); } }
+@keyframes count-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
