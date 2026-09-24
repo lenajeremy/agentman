@@ -55,6 +55,11 @@ const (
 	// a daemon that predates it rejects the type and the app carries on with
 	// local notifications, so this needs no protocol version bump.
 	ReqRegisterPush RequestType = "register_push"
+	// ReqOpenServer shares one of a session's servers as a preview link, and
+	// ReqCloseServer stops sharing it. Additive, like register_push: an older
+	// daemon rejects the type and the app says the Mac needs updating.
+	ReqOpenServer  RequestType = "open_server"
+	ReqCloseServer RequestType = "close_server"
 )
 
 // Request is anything the app asks of the daemon.
@@ -81,6 +86,8 @@ type Request struct {
 	ClientID string `json:"clientId,omitempty"`
 	// PushToken carries an Expo push token on ReqRegisterPush.
 	PushToken string `json:"pushToken,omitempty"`
+	// Port names the server on ReqOpenServer and ReqCloseServer.
+	Port int `json:"port,omitempty"`
 }
 
 /* ----------------------------- daemon → app ------------------------------ */
@@ -96,7 +103,9 @@ const (
 	EvtPage          EventType = "page"
 	EvtTurnComplete  EventType = "turn_complete"
 	EvtSendResult    EventType = "send_result"
-	EvtError         EventType = "error"
+	// EvtServerOpened answers ReqOpenServer with the server's link.
+	EvtServerOpened EventType = "server_opened"
+	EvtError        EventType = "error"
 )
 
 // SendStatus is how far a sent message actually got.
@@ -128,6 +137,10 @@ type Event struct {
 	// Send results.
 	ClientID string     `json:"clientId,omitempty"`
 	Status   SendStatus `json:"status,omitempty"`
+
+	// Port and Link are set on EvtServerOpened.
+	Port int    `json:"port,omitempty"`
+	Link string `json:"link,omitempty"`
 
 	Error string `json:"error,omitempty"`
 }

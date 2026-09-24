@@ -26,6 +26,7 @@ import (
 	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/relay"
+	"github.com/lenajeremy/agentman/internal/servers"
 	"github.com/lenajeremy/agentman/internal/source"
 )
 
@@ -257,6 +258,16 @@ func runServe(ctx context.Context, args []string) error {
 	if client != nil {
 		client.OnDeviceDisconnected = agent.DisconnectSubscriber
 	}
+
+	// Servers agents start are found either way; sharing one as a preview
+	// link needs the relay.
+	var sharer daemon.ServerSharer
+	if relayURL != "" {
+		sharer = servers.NewSharer(relayURL, cfg.Token)
+	}
+	watcher := servers.NewWatcher()
+	ignoreHookPort(watcher)
+	agent.SetServers(watcher, sharer)
 
 	// Push is what covers the gap a live socket cannot: once iOS suspends the
 	// app there is no websocket to deliver on, which is exactly when the user

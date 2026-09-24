@@ -77,6 +77,27 @@ type Session struct {
 	// is what makes StateWaitingInput actionable rather than merely visible:
 	// the app renders the choices and the user taps one.
 	Question *Question `json:"question,omitempty"`
+	// Servers are the local web servers this agent has started, found by
+	// watching which listening ports belong to its processes. The phone lists
+	// them so the user can open one without touching the laptop.
+	Servers []Server `json:"servers,omitempty"`
+
+	// AgentPID is the agent's own process, when the adapter knows it. It
+	// never leaves the machine: it is only how the daemon tells which
+	// listening ports that agent's commands opened.
+	AgentPID int `json:"-"`
+}
+
+// Server is a local web server an agent started.
+type Server struct {
+	Port int `json:"port"`
+	// Command is the listening program ("node", "python3").
+	Command string `json:"command,omitempty"`
+	// Title is the page's <title>, when it serves HTML, so the list can say
+	// "Vite + React" rather than only a number.
+	Title string `json:"title,omitempty"`
+	// Link is the public preview link while the server is being shared.
+	Link string `json:"link,omitempty"`
 }
 
 // SameAs reports whether two snapshots of a session are equivalent.
@@ -88,12 +109,27 @@ type Session struct {
 // every second, which is the exact state where the user is most likely to be
 // watching their phone on cell data.
 func (s Session) SameAs(other Session) bool {
-	question, otherQuestion := s.Question, other.Question
-	s.Question, other.Question = nil, nil
-	if s != other {
+	// Field by field, because Servers makes the struct incomparable with !=.
+	// TestSameAsCoversEveryField fails if a new field is left out here.
+	return s.ID == other.ID && s.Kind == other.Kind && s.NativeID == other.NativeID &&
+		s.Name == other.Name && s.Cwd == other.Cwd && s.State == other.State &&
+		s.Inject == other.Inject && s.StartedAt == other.StartedAt &&
+		s.LastActivityAt == other.LastActivityAt && s.Model == other.Model &&
+		s.AgentPID == other.AgentPID &&
+		s.Question.sameAs(other.Question) && SameServers(s.Servers, other.Servers)
+}
+
+// SameServers reports whether two server lists are identical, in order.
+func SameServers(a, b []Server) bool {
+	if len(a) != len(b) {
 		return false
 	}
-	return question.sameAs(otherQuestion)
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (q *Question) sameAs(other *Question) bool {

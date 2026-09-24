@@ -34,6 +34,7 @@ Usage:
   am serve                    Run the daemon (hooks + relay connection)
   am pair                     Print a pairing code for your phone
   am expose <port>            Share a local port as a public link
+  am servers                  List the web servers your agents have started
   am claude [args...]         Start Claude Code so you can message it later
   am codex [args...]          Start Codex so you can message it later
   am opencode [args...]       Start OpenCode so you can message it later
@@ -87,6 +88,8 @@ func main() {
 		err = runPair(ctx, args)
 	case "expose":
 		err = runExpose(ctx, args)
+	case "servers":
+		err = runServers(ctx, args)
 	case "claude", "codex":
 		// Launch an agent inside tmux so it can receive messages later.
 		err = runWrap(ctx, command, args)

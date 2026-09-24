@@ -228,6 +228,7 @@ am send <session-id> <text> Send a message
 am serve                    Run the daemon and relay client
 am pair                     Create a mobile pairing code
 am expose <port>            Share a local port as a public preview link
+am servers                  List the web servers your agents have started
 am claude [args...]         Start Claude Code in managed tmux
 am codex [args...]          Start Codex in managed tmux
 am opencode [args...]       Start OpenCode with its local API
