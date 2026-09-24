@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import Feather from "@expo/vector-icons/Feather";
+import { ComponentProps, useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import Animated, {
   Easing,
@@ -10,24 +11,47 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
+import { useStyles, useTheme } from "../lib/appearance";
 import { Message } from "../lib/protocol";
-import { color, font, radius, size, space } from "../lib/theme";
+import { font, Palette, radius, size, space } from "../lib/theme";
 import { MotionPressable } from "./MotionPressable";
 
+type FeatherName = ComponentProps<typeof Feather>["name"];
+
 /**
- * The status glyph, drawn rather than typed.
- *
- * It used to be the characters ⏺ ◐ ✗. On the web those render as neat little
- * marks, which is how they passed review — but iOS gives U+23FA emoji
- * presentation, so on a real phone it became a heavy rounded square that sat
- * off the text baseline and made every tool row look ragged. Drawing the shape
- * sidesteps font and platform variance entirely and lets it be centred in a
- * fixed-width column, so names and commands line up down the whole feed.
+ * A glyph for the kind of work a tool does. Names come straight from each
+ * CLI (Claude's "Read", Codex's "shell", OpenCode's "webfetch"), so this
+ * matches on meaning rather than exact spelling, and anything unknown gets a
+ * neutral mark instead of a wrong one.
  */
-function StatusMark({ status }: { status?: string }) {
+export function toolIcon(name: string): FeatherName {
+  const n = name.toLowerCase();
+  if (/(bash|shell|exec|command|terminal)/.test(n)) return "terminal";
+  if (/(edit|write|patch|notebook)/.test(n)) return "edit-3";
+  if (/(read|view|cat|open)/.test(n)) return "file-text";
+  if (/(grep|glob|search|find|list|ls)/.test(n)) return "search";
+  if (/(web|fetch|http|url|browse)/.test(n)) return "globe";
+  if (/(todo|plan)/.test(n)) return "check-square";
+  if (/(task|agent)/.test(n)) return "git-branch";
+  return "tool";
+}
+
+/**
+ * What kind of tool ran and how it ended, in one fixed-size tile.
+ *
+ * Status used to be the characters ⏺ ◐ ✗. On the web those render as neat
+ * little marks — but iOS gives U+23FA emoji presentation, so on a real phone it
+ * became a heavy rounded square that sat off the text baseline. Drawing the
+ * mark avoids font and platform variance, and the fixed tile keeps names and
+ * commands lined up down the whole feed.
+ */
+function StatusTile({ status, name }: { status?: string; name: string }) {
   const spin = useSharedValue(0);
   const reduceMotion = useReducedMotion();
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
   const running = status === "running";
+  const failed = status === "error";
 
   useEffect(() => {
     if (!running || reduceMotion) {
@@ -47,39 +71,32 @@ function StatusMark({ status }: { status?: string }) {
     transform: [{ rotate: `${spin.value * 360}deg` }],
   }));
 
+  // An open arc reads as motion the moment it turns; a filled dot would not.
   if (running) {
-    if (reduceMotion) {
-      return (
-        <View style={styles.mark}>
-          <View style={[styles.dot, styles.dotRunning]} />
-        </View>
-      );
-    }
-    // An open arc reads as motion the moment it turns; a filled dot would not.
     return (
-      <View style={styles.mark}>
-        <Animated.View style={[styles.arc, spinStyle]} />
-      </View>
-    );
-  }
-
-  if (status === "error") {
-    return (
-      <View style={styles.mark}>
-        <View style={[styles.cross, styles.crossA]} />
-        <View style={[styles.cross, styles.crossB]} />
+      <View style={[styles.tile, styles.tileRunning]}>
+        {reduceMotion ? (
+          <View style={styles.runningDot} />
+        ) : (
+          <Animated.View style={[styles.arc, spinStyle]} />
+        )}
       </View>
     );
   }
 
   return (
-    <View style={styles.mark}>
-      <View style={styles.dot} />
+    <View style={[styles.tile, failed && styles.tileFailed]}>
+      <Feather
+        name={failed ? "x" : toolIcon(name)}
+        size={12}
+        color={failed ? color.errorText : color.muted}
+      />
     </View>
   );
 }
 
 function Chevron({ expanded }: { expanded: boolean }) {
+  const styles = useStyles(makeStyles);
   const rotation = useSharedValue(expanded ? 90 : 0);
   const reduceMotion = useReducedMotion();
 
@@ -109,6 +126,7 @@ function Chevron({ expanded }: { expanded: boolean }) {
  */
 export function ToolRow({ message }: { message: Message }) {
   const [expanded, setExpanded] = useState(false);
+  const styles = useStyles(makeStyles);
   const tool = message.tool;
   if (!tool) return null;
 
@@ -129,7 +147,7 @@ export function ToolRow({ message }: { message: Message }) {
       accessibilityState={{ expanded }}
     >
       <View style={styles.line}>
-        <StatusMark status={tool.status} />
+        <StatusTile status={tool.status} name={tool.name} />
         <Text style={[styles.name, failed && styles.nameFailed]}>{tool.name}</Text>
         {tool.summary ? (
           <Text style={styles.summary} numberOfLines={expanded ? undefined : 1}>
@@ -148,53 +166,55 @@ export function ToolRow({ message }: { message: Message }) {
   );
 }
 
-// A fixed-width column for the mark keeps every name on the same left edge.
-const MARK_COLUMN = 16;
+// A fixed-width column for the tile keeps every name on the same left edge.
+const TILE = 22;
 
-const styles = StyleSheet.create({
-  row: { borderRadius: radius.sm, marginHorizontal: -space.xs, paddingHorizontal: space.xs },
-  line: { flexDirection: "row", alignItems: "center", gap: space.sm },
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    row: { borderRadius: radius.sm, marginHorizontal: -space.xs, paddingHorizontal: space.xs },
+    line: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 28 },
 
-  mark: {
-    width: MARK_COLUMN,
-    height: MARK_COLUMN,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: color.faint },
-  dotRunning: { backgroundColor: color.working },
-  arc: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    borderWidth: 1.5,
-    borderColor: color.working,
-    // One transparent edge turns a ring into an arc, so rotation is visible.
-    borderTopColor: "transparent",
-  },
-  cross: { position: "absolute", width: 10, height: 1.5, backgroundColor: color.error },
-  crossA: { transform: [{ rotate: "45deg" }] },
-  crossB: { transform: [{ rotate: "-45deg" }] },
+    tile: {
+      width: TILE,
+      height: TILE,
+      borderRadius: 7,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.fill,
+    },
+    tileRunning: { backgroundColor: c.workingWash },
+    tileFailed: { backgroundColor: c.errorWash },
+    runningDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: c.working },
+    arc: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      borderWidth: 1.5,
+      borderColor: c.working,
+      // One transparent edge turns a ring into an arc, so rotation is visible.
+      borderTopColor: "transparent",
+    },
 
-  name: { fontFamily: font.monoMedium, fontSize: size.caption, color: color.text },
-  nameFailed: { color: color.error },
-  // flexShrink lets a long command truncate instead of pushing the chevron off.
-  summary: { flex: 1, fontFamily: font.mono, fontSize: size.caption, color: color.muted },
-  chevron: {
-    fontFamily: font.mono,
-    fontSize: size.caption,
-    color: color.faint,
-  },
+    name: { fontFamily: font.monoMedium, fontSize: size.caption, color: c.text },
+    nameFailed: { color: c.errorText },
+    // flex lets a long command truncate instead of pushing the chevron off.
+    summary: { flex: 1, fontFamily: font.mono, fontSize: size.caption, color: c.muted },
+    chevron: {
+      fontFamily: font.mono,
+      fontSize: size.body,
+      color: c.faint,
+    },
 
-  output: {
-    fontFamily: font.mono,
-    fontSize: size.caption,
-    color: color.muted,
-    lineHeight: 17,
-    marginTop: space.sm,
-    marginLeft: MARK_COLUMN + space.sm,
-    padding: space.sm,
-    backgroundColor: color.sunken,
-    borderRadius: radius.sm,
-  },
-});
+    output: {
+      fontFamily: font.mono,
+      fontSize: 12,
+      color: c.textSecondary,
+      lineHeight: 18,
+      marginTop: space.sm,
+      marginLeft: TILE + 10,
+      padding: space.md,
+      backgroundColor: c.fill,
+      borderRadius: radius.md,
+      overflow: "hidden",
+    },
+  });

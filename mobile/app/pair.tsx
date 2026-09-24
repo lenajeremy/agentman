@@ -1,6 +1,5 @@
 import * as Haptics from "expo-haptics";
 import Feather from "@expo/vector-icons/Feather";
-import Ionicons from "@expo/vector-icons/Ionicons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -17,18 +16,23 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Appear } from "../components/Appear";
+import { Wordmark } from "../components/BrandMark";
 import { ContentColumn } from "../components/ContentColumn";
+import { PairIllustration } from "../components/Illustrations";
 import { MotionPressable } from "../components/MotionPressable";
+import { useStyles, useTheme } from "../lib/appearance";
 import { pair, pairWithToken } from "../lib/client";
 import { DEFAULT_RELAY } from "../lib/pairing";
 import { useStore } from "../lib/store";
 import { PAIRING_CODE_LENGTH } from "../lib/protocol";
-import { color, font, radius, size, space } from "../lib/theme";
+import { font, Palette, radius, size, space } from "../lib/theme";
 
 export default function Pair() {
   const store = useStore();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
   const params = useLocalSearchParams<{
     relay?: string | string[];
     token?: string | string[];
@@ -39,6 +43,8 @@ export default function Pair() {
   const [error, setError] = useState<string | null>(null);
   const [relayFocused, setRelayFocused] = useState(false);
   const [codeFocused, setCodeFocused] = useState(false);
+  /** Typing is the fallback, so it stays folded away until asked for. */
+  const [manual, setManual] = useState(false);
   const handledLink = useRef<string | null>(null);
 
   useEffect(() => {
@@ -129,7 +135,7 @@ export default function Pair() {
         contentContainerStyle={[
           styles.content,
           {
-            paddingTop: insets.top + space.xl,
+            paddingTop: insets.top + space.md,
             paddingBottom: insets.bottom + space.xl,
           },
         ]}
@@ -137,140 +143,129 @@ export default function Pair() {
       >
         <ContentColumn narrow style={styles.column}>
           <Appear>
-            <View style={styles.brandRow}>
-              <View style={styles.brandMark}>
-                <Text style={styles.brandMonogram}>am</Text>
-              </View>
-              <Text style={styles.wordmark}>
-                agentman<Text style={styles.wordmarkAccent}>.</Text>
-              </Text>
-            </View>
-            <Text style={styles.title}>Take your agents with you.</Text>
-            <Text style={styles.lede}>
-              Pair this phone once to monitor live work, answer questions, and send the
-              next instruction from anywhere.
-            </Text>
+            <Wordmark />
           </Appear>
 
           <Appear delay={45}>
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Feather name="terminal" size={15} color={color.muted} />
-                <Text style={styles.cardHeaderLabel}>On your Mac</Text>
-              </View>
-              <View style={styles.cardDivider} />
-              <View style={styles.cardBody}>
-                <Text style={styles.stepLabel}>
-                  Run <Text style={styles.code}>am pair</Text>
-                </Text>
-                <Text style={styles.stepBody}>
-                  The QR code and ten-digit fallback both expire after one minute.
-                </Text>
-              </View>
+            <PairIllustration style={styles.art} />
+            <Text style={styles.title}>Pair with your Mac</Text>
+            <Text style={styles.lede}>
+              Run this on the Mac where your agents live, then scan the code it shows.
+            </Text>
+            <View style={styles.command}>
+              <Text style={styles.commandPrompt}>$</Text>
+              <Text style={styles.commandText} selectable>
+                am pair
+              </Text>
             </View>
           </Appear>
 
-          <Appear delay={90}>
+          {error && !manual ? <ErrorBox message={error} /> : null}
+
+          <Appear delay={90} style={styles.actions}>
             <MotionPressable
               onPress={() => router.push("/scan")}
-              style={styles.scanButton}
+              style={styles.primaryButton}
               accessibilityRole="button"
+              accessibilityHint="Opens the camera to read the code from your terminal"
             >
-              <Ionicons name="qr-code-outline" size={24} color={color.ink} />
-              <View style={styles.buttonCopy}>
-                <Text style={styles.buttonText}>Scan the QR code</Text>
-                <Text style={styles.buttonHint}>Fastest and most secure</Text>
-              </View>
-              <Feather name="chevron-right" size={20} color={color.ink} />
+              <Feather name="maximize" size={18} color={color.onInverse} />
+              <Text style={styles.primaryButtonText}>Scan QR code</Text>
             </MotionPressable>
+            {!manual ? (
+              <MotionPressable
+                onPress={() => setManual(true)}
+                style={styles.textButton}
+                accessibilityRole="button"
+              >
+                <Text style={styles.textButtonLabel}>Enter the code instead</Text>
+              </MotionPressable>
+            ) : null}
           </Appear>
 
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Feather name="hash" size={15} color={color.muted} />
-              <Text style={styles.cardHeaderLabel}>Or type the code</Text>
-            </View>
-            <View style={styles.cardDivider} />
-            <View style={styles.cardBody}>
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Relay address</Text>
-              <TextInput
-                style={[styles.input, relayFocused && styles.inputFocused]}
-                value={relayUrl}
-                onChangeText={setRelayUrl}
-                onFocus={() => setRelayFocused(true)}
-                onBlur={() => setRelayFocused(false)}
-                placeholder="relay.example.com"
-                placeholderTextColor={color.faint}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="url"
-                inputMode="url"
-                accessibilityLabel="Relay address"
-              />
-            </View>
-
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Pairing code</Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  styles.codeInput,
-                  codeFocused && styles.inputFocused,
-                ]}
-                value={code}
-                onChangeText={(text) =>
-                  setCode(text.replace(/\D/g, "").slice(0, PAIRING_CODE_LENGTH))
-                }
-                onFocus={() => setCodeFocused(true)}
-                onBlur={() => setCodeFocused(false)}
-                placeholder="0000000000"
-                placeholderTextColor={color.faint}
-                keyboardType="number-pad"
-                maxLength={PAIRING_CODE_LENGTH}
-                accessibilityLabel="Pairing code"
-              />
-            </View>
-
-            {error ? (
-              <View style={styles.errorBox} accessibilityRole="alert">
-                <Feather name="alert-circle" size={14} color={color.error} />
-                <Text style={styles.error}>{error}</Text>
+          {manual ? (
+            <Appear style={styles.card}>
+              <View style={styles.field}>
+                <Text style={styles.fieldLabel}>Relay address</Text>
+                <TextInput
+                  style={[styles.input, relayFocused && styles.inputFocused]}
+                  value={relayUrl}
+                  onChangeText={setRelayUrl}
+                  onFocus={() => setRelayFocused(true)}
+                  onBlur={() => setRelayFocused(false)}
+                  placeholder="relay.example.com"
+                  placeholderTextColor={color.faint}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                  inputMode="url"
+                  accessibilityLabel="Relay address"
+                />
               </View>
-            ) : null}
 
-            <MotionPressable
-              onPress={submit}
-              disabled={!canSubmit || busy}
-              style={[
-                styles.pairButton,
-                (!canSubmit || busy) && styles.buttonDisabled,
-              ]}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: !canSubmit || busy, busy }}
-            >
-              {busy ? (
-                <ActivityIndicator color={color.ink} />
-              ) : (
-                <Text style={styles.pairButtonText}>Pair with this code</Text>
-              )}
-            </MotionPressable>
-            </View>
-          </View>
+              <View style={styles.field}>
+                <Text style={styles.fieldLabel}>Pairing code</Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    styles.codeInput,
+                    codeFocused && styles.inputFocused,
+                  ]}
+                  value={code}
+                  onChangeText={(text) =>
+                    setCode(text.replace(/\D/g, "").slice(0, PAIRING_CODE_LENGTH))
+                  }
+                  onFocus={() => setCodeFocused(true)}
+                  onBlur={() => setCodeFocused(false)}
+                  placeholder="0000000000"
+                  placeholderTextColor={color.faint}
+                  keyboardType="number-pad"
+                  maxLength={PAIRING_CODE_LENGTH}
+                  accessibilityLabel="Pairing code"
+                  autoFocus
+                />
+              </View>
 
-          <View style={styles.privacyNote}>
-            <View style={styles.privacyMark}>
-              <View style={styles.lockBody} />
-              <View style={styles.lockLoop} />
-            </View>
-            <Text style={styles.footnote}>
-              Transcripts stay on your Mac. Live traffic passes through your relay, so
-              use an operator you trust or self-host.
-            </Text>
-          </View>
+              {error ? <ErrorBox message={error} /> : null}
+
+              <MotionPressable
+                onPress={submit}
+                disabled={!canSubmit || busy}
+                style={[
+                  styles.primaryButton,
+                  (!canSubmit || busy) && styles.buttonDisabled,
+                ]}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: !canSubmit || busy, busy }}
+              >
+                {busy ? (
+                  <ActivityIndicator color={color.onInverse} />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Pair with this code</Text>
+                )}
+              </MotionPressable>
+            </Appear>
+          ) : null}
+
+          <Text style={styles.footnote}>
+            Codes work once and expire after 60 seconds. Transcripts stay on your Mac;
+            live traffic passes through your relay, so use an operator you trust or
+            self-host one.
+          </Text>
         </ContentColumn>
       </ScrollView>
     </KeyboardAvoidingView>
+  );
+}
+
+function ErrorBox({ message }: { message: string }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  return (
+    <View style={styles.errorBox} accessibilityRole="alert">
+      <Feather name="alert-circle" size={15} color={color.errorText} />
+      <Text style={styles.error}>{message}</Text>
+    </View>
   );
 }
 
@@ -278,186 +273,118 @@ function firstParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? "" : value ?? "";
 }
 
-const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: color.ink },
-  content: { flexGrow: 1, paddingHorizontal: space.lg },
-  column: { gap: space.lg },
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    content: { flexGrow: 1, paddingHorizontal: space.lg },
+    column: { flex: 1, gap: space.lg },
 
-  brandRow: { flexDirection: "row", alignItems: "center", gap: space.md },
-  brandMark: {
-    width: 38,
-    height: 38,
-    borderRadius: radius.md,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: color.working,
-  },
-  brandMonogram: {
-    fontFamily: font.monoMedium,
-    fontSize: size.body,
-    color: color.ink,
-    letterSpacing: -0.5,
-  },
+    art: {
+      width: "100%",
+      aspectRatio: 340 / 214,
+      marginTop: space.md,
+      borderRadius: radius.sheet,
+      overflow: "hidden",
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    title: {
+      fontFamily: font.sansBold,
+      fontSize: 30,
+      lineHeight: 34,
+      letterSpacing: -1,
+      color: c.text,
+      marginTop: space.xl,
+    },
+    lede: {
+      fontFamily: font.sans,
+      fontSize: size.body,
+      color: c.muted,
+      lineHeight: 22,
+      marginTop: space.sm,
+    },
+    command: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      marginTop: space.lg,
+      paddingHorizontal: space.lg,
+      paddingVertical: 14,
+      borderRadius: radius.lg,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    commandPrompt: { fontFamily: font.mono, fontSize: 14, color: c.faint },
+    commandText: { fontFamily: font.mono, fontSize: 14, color: c.text },
 
-  wordmark: {
-    fontFamily: font.mono,
-    fontSize: 24,
-    color: color.text,
-    letterSpacing: -0.8,
-  },
-  wordmarkAccent: { color: color.working },
-  title: {
-    fontFamily: font.sansBold,
-    fontSize: 31,
-    lineHeight: 36,
-    letterSpacing: -0.8,
-    color: color.text,
-    marginTop: space.xl,
-  },
-  lede: {
-    fontFamily: font.sans,
-    fontSize: size.body,
-    color: color.muted,
-    lineHeight: 23,
-    marginTop: space.sm,
-  },
+    actions: { gap: space.xs, marginTop: space.sm },
+    primaryButton: {
+      minHeight: 56,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 10,
+      borderRadius: radius.pill,
+      backgroundColor: c.inverse,
+      paddingHorizontal: space.xl,
+    },
+    primaryButtonText: { fontFamily: font.sansBold, fontSize: 16, color: c.onInverse },
+    buttonDisabled: { opacity: 0.35 },
+    textButton: {
+      minHeight: 44,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    textButtonLabel: { fontFamily: font.sansMedium, fontSize: size.body, color: c.textSecondary },
 
-  stepLabel: {
-    fontFamily: font.sansMedium,
-    fontSize: size.body,
-    color: color.text,
-  },
-  stepBody: {
-    fontFamily: font.sans,
-    fontSize: size.caption,
-    color: color.muted,
-    lineHeight: 19,
-  },
-  code: { fontFamily: font.mono, color: color.working },
+    card: {
+      backgroundColor: c.surface,
+      borderRadius: radius.xxl,
+      borderWidth: 1,
+      borderColor: c.line,
+      padding: space.lg,
+      gap: space.lg,
+    },
+    field: { gap: space.sm },
+    fieldLabel: {
+      fontFamily: font.sansBold,
+      fontSize: size.caption,
+      color: c.muted,
+    },
+    input: {
+      minHeight: 52,
+      backgroundColor: c.fill,
+      borderRadius: radius.lg,
+      paddingHorizontal: space.lg,
+      paddingVertical: space.md,
+      fontFamily: font.mono,
+      fontSize: size.body,
+      color: c.text,
+      borderWidth: 1,
+      borderColor: "transparent",
+    },
+    inputFocused: { borderColor: c.working, backgroundColor: c.surface },
+    codeInput: { fontSize: 24, letterSpacing: 6, textAlign: "center" },
 
-  scanButton: {
-    minHeight: 68,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space.md,
-    backgroundColor: color.working,
-    borderRadius: radius.xxl,
-    paddingVertical: space.md,
-    paddingHorizontal: space.lg,
-  },
-  buttonCopy: { flex: 1 },
-  buttonText: { fontFamily: font.sansBold, fontSize: size.body, color: color.ink },
-  buttonHint: {
-    fontFamily: font.sans,
-    fontSize: size.label,
-    color: "#183543",
-    marginTop: 1,
-  },
+    errorBox: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: space.sm,
+      borderRadius: radius.lg,
+      padding: space.md,
+      backgroundColor: c.errorWash,
+    },
+    error: { flex: 1, fontFamily: font.sans, fontSize: size.caption, lineHeight: 18, color: c.errorText },
 
-  field: { gap: space.sm },
-  fieldLabel: {
-    fontFamily: font.sansMedium,
-    fontSize: size.label,
-    letterSpacing: 1.4,
-    textTransform: "uppercase",
-    color: color.faint,
-  },
-  input: {
-    minHeight: 52,
-    backgroundColor: color.sunken,
-    borderRadius: radius.lg,
-    paddingHorizontal: space.lg,
-    paddingVertical: space.md,
-    fontFamily: font.mono,
-    fontSize: size.body,
-    color: color.text,
-    borderWidth: 1,
-    borderColor: color.line,
-  },
-  inputFocused: { borderColor: color.working },
-  codeInput: { fontSize: 24, letterSpacing: 6, textAlign: "center" },
-
-  // One anatomy for every card: a header naming it, a full-bleed rule, then the
-  // body. Sections read as parts of one container rather than as loose stacks.
-  card: {
-    backgroundColor: color.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: color.line,
-    overflow: "hidden",
-  },
-  cardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space.sm,
-    paddingHorizontal: space.lg,
-    paddingVertical: space.md,
-  },
-  cardHeaderLabel: {
-    fontFamily: font.sansMedium,
-    fontSize: size.body,
-    color: color.muted,
-  },
-  cardDivider: { height: 1, backgroundColor: color.line },
-  cardBody: { padding: space.lg, gap: space.lg },
-  errorBox: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: space.sm,
-    borderRadius: radius.lg,
-    padding: space.md,
-    backgroundColor: color.errorWash,
-    borderWidth: 1,
-    borderColor: "#563039",
-  },
-  error: { flex: 1, fontFamily: font.sans, fontSize: size.caption, color: color.error },
-
-  pairButton: {
-    minHeight: 52,
-    backgroundColor: color.working,
-    borderRadius: radius.pill,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  buttonDisabled: { backgroundColor: color.line },
-  pairButtonText: { fontFamily: font.sansBold, fontSize: size.body, color: color.ink },
-
-  privacyNote: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: space.md,
-    padding: space.sm,
-  },
-  privacyMark: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: color.okWash,
-  },
-  lockBody: {
-    width: 9,
-    height: 7,
-    borderRadius: 2,
-    backgroundColor: color.ok,
-    marginTop: 5,
-  },
-  lockLoop: {
-    position: "absolute",
-    width: 7,
-    height: 7,
-    top: 7,
-    borderWidth: 1.5,
-    borderColor: color.ok,
-    borderRadius: 5,
-  },
-  footnote: {
-    flex: 1,
-    fontFamily: font.sans,
-    fontSize: size.caption,
-    color: color.faint,
-    lineHeight: 18,
-  },
-});
-
+    footnote: {
+      marginTop: "auto",
+      paddingTop: space.lg,
+      fontFamily: font.sans,
+      fontSize: size.label,
+      color: c.faint,
+      lineHeight: 17,
+      textAlign: "center",
+    },
+  });
