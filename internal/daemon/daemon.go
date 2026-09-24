@@ -112,6 +112,16 @@ type Daemon struct {
 	// pushedQuestions remembers the last question announced per session, so a
 	// prompt sitting unanswered across many sweeps rings the phone once.
 	pushedQuestions map[string]string
+
+	// serverWatcher finds the web servers each agent has started, and sharer
+	// turns one into a preview link on request. Both nil until SetServers.
+	serverWatcher ServerWatcher
+	sharer        ServerSharer
+	// serverLists is the latest watcher result, merged into each discovered
+	// session so a discovery sweep never erases what the watcher found.
+	serverLists map[string][]protocol.Server
+	// serverScanInterval is a field so tests can scan quickly.
+	serverScanInterval time.Duration
 }
 
 // follow is one live tail. It is tracked by pointer identity so that a
@@ -152,6 +162,8 @@ func New(registry *source.Registry, sink Transport) *Daemon {
 		turnDelay:          turnQuestionGrace,
 		questionRetryDelay: discoverInterval,
 		pushedQuestions:    map[string]string{},
+		serverLists:        map[string][]protocol.Server{},
+		serverScanInterval: serverScanInterval,
 	}
 }
 
@@ -238,6 +250,23 @@ func (d *Daemon) Run(ctx context.Context, hooks <-chan hook.Event) error {
 
 	d.refresh(ctx, true)
 
+	d.mu.Lock()
+	watcher, sharer := d.serverWatcher, d.sharer
+	d.mu.Unlock()
+	if sharer != nil {
+		defer sharer.CloseAll()
+	}
+	if watcher != nil {
+		// Its own loop: a scan runs lsof and probes ports, which can take a
+		// second or two, and must never delay a hook or a discovery sweep.
+		scanDone := make(chan struct{})
+		defer func() { <-scanDone }()
+		go func() {
+			defer close(scanDone)
+			d.watchServers(ctx)
+		}()
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -275,6 +304,7 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 	current := make(map[string]protocol.Session, len(found))
 	for _, session := range found {
 		session = d.applyHookStateLocked(session, time.Now())
+		session.Servers = d.serverLists[session.ID]
 		current[session.ID] = session
 		before, existed := previous[session.ID]
 		if session.State == protocol.StateBusy && (!existed || before.State != protocol.StateBusy) {
@@ -831,6 +861,13 @@ func (d *Daemon) HandleFrom(
 			ClientID: req.ClientID, Status: protocol.StatusDelivered,
 		}
 
+	case protocol.ReqOpenServer:
+		return d.openServer(ctx, req.SessionID, req.Port)
+
+	case protocol.ReqCloseServer:
+		d.closeServer(req.SessionID, req.Port)
+		return protocol.Event{}
+
 	default:
 		return protocol.Event{Type: protocol.EvtError, Error: "unsupported request: " + string(req.Type)}
 	}
@@ -887,7 +924,8 @@ const wireTruncation = "\n\n[output truncated by agentman]"
 func validateRequest(req protocol.Request) error {
 	requiresSession := req.Type == protocol.ReqSubscribe || req.Type == protocol.ReqUnsubscribe ||
 		req.Type == protocol.ReqFetchMessages || req.Type == protocol.ReqSendMessage ||
-		req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqAnswer
+		req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqAnswer ||
+		req.Type == protocol.ReqOpenServer || req.Type == protocol.ReqCloseServer
 	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
 		return fmt.Errorf("daemon: invalid session id")
 	}
@@ -903,6 +941,11 @@ func validateRequest(req protocol.Request) error {
 	switch req.Type {
 	case protocol.ReqListSessions, protocol.ReqSubscribe, protocol.ReqUnsubscribe,
 		protocol.ReqFetchMessages, protocol.ReqInterrupt, protocol.ReqRegisterPush:
+		return nil
+	case protocol.ReqOpenServer, protocol.ReqCloseServer:
+		if req.Port < 1 || req.Port > 65535 {
+			return fmt.Errorf("daemon: invalid server port")
+		}
 		return nil
 	case protocol.ReqSendMessage:
 		if strings.TrimSpace(req.Text) == "" {

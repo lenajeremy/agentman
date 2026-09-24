@@ -312,6 +312,9 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				LastActivityAt: lastActivity,
 			}
 			if tmuxName != "" {
+				// The pane's process is the root of everything codex runs, so
+				// servers it starts can be traced back to this session.
+				session.AgentPID = pane.PanePID
 				if q := detectQuestion(ctx, tmuxName); q != nil {
 					session.Question = q
 					session.State = protocol.StateWaitingInput
@@ -354,6 +357,7 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			Inject:         protocol.InjectTmux,
 			StartedAt:      started.UnixMilli(),
 			LastActivityAt: started.UnixMilli(),
+			AgentPID:       pane.PanePID,
 		}
 		if q := detectQuestion(ctx, pane.Name); q != nil {
 			session.Question = q

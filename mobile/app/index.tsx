@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Appear } from "../components/Appear";
+import { AgentIcon } from "../components/AgentIcon";
 import { ContentColumn } from "../components/ContentColumn";
 import { EmptyIllustration } from "../components/Illustrations";
 import { MotionPressable } from "../components/MotionPressable";
@@ -303,15 +304,7 @@ function AgentRow({ session }: { session: Session }) {
           needsYou && { backgroundColor: color.needsYouWash },
         ]}
       >
-        <Text
-          style={[
-            styles.avatarText,
-            busy && { color: color.working },
-            needsYou && { color: color.needsYouText },
-          ]}
-        >
-          {agent.short}
-        </Text>
+        <AgentIcon kind={session.kind} size={22} />
         {displayState !== "idle" && displayState !== "ended" ? (
           <View style={styles.avatarPulse}>
             <Pulse state={displayState} size={7} />
@@ -334,6 +327,14 @@ function AgentRow({ session }: { session: Session }) {
           {busy ? <Text style={styles.metaWorking}>Working · </Text> : null}
           {shortPath(session.cwd)} · {session.model ?? agent.name}
         </Text>
+        {session.servers?.length ? (
+          <View style={styles.serversLine}>
+            <Feather name="globe" size={11} color={color.ok} />
+            <Text style={styles.serversText} numberOfLines={1}>
+              {session.servers.map((server) => `:${server.port}`).join("  ")}
+            </Text>
+          </View>
+        ) : null}
         {needsYou ? <Text style={styles.needsYouNote}>Waiting on your answer</Text> : null}
       </View>
       <Feather name="chevron-right" size={18} color={color.faint} />
@@ -581,7 +582,8 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
       backgroundColor: c.fill,
     },
-    avatarText: { fontFamily: font.monoMedium, fontSize: 14, color: c.muted },
+    serversLine: { flexDirection: "row", alignItems: "center", gap: 5 },
+    serversText: { fontFamily: font.mono, fontSize: 12, color: c.muted },
     avatarPulse: {
       position: "absolute",
       right: -8,
