@@ -151,7 +151,9 @@
   if (!reduceMotion && "IntersectionObserver" in window) {
     document.documentElement.classList.add("js");
     const groups = [
-      ".why .h2", ".why > p", ".cards .card", ".stats > div", ".how .caps", ".how .h2",
+      ".why .h2", ".why > p", ".cards .card", ".stats > div",
+      ".workspace .caps", ".workspace .h2", ".workspace-intro",
+      ".workspace-copy", ".workspace-art", ".workspace-card", ".how .caps", ".how .h2",
       ".steps .step", ".moment li", ".moment .h2", ".start .h2", ".platform",
     ];
     const reveal = new IntersectionObserver((entries) => {
