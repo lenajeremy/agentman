@@ -99,6 +99,10 @@ type Request struct {
 	// Path is relative to the session's working directory. It is never an
 	// absolute path supplied by the phone.
 	Path string `json:"path,omitempty"`
+	// UploadIDs names images the phone left with the relay, to be collected by
+	// the daemon and handed to the agent as file paths. They are tickets, not
+	// filenames: nothing in them reaches the filesystem.
+	UploadIDs []string `json:"uploadIds,omitempty"`
 }
 
 /* ----------------------------- daemon → app ------------------------------ */

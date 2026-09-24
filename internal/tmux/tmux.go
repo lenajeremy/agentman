@@ -194,7 +194,9 @@ func Send(ctx context.Context, name, text string) error {
 	} else {
 		// -l sends the text literally, so nothing in it is interpreted as a
 		// key name: a message containing the word "Enter" stays that word.
-		if _, err := run(ctx, "send-keys", "-t", name, "-l", text); err != nil {
+		// "--" ends the flags, so a message beginning with a dash is typed
+		// rather than read by tmux as an option of its own.
+		if _, err := run(ctx, "send-keys", "-t", name, "-l", "--", text); err != nil {
 			return fmt.Errorf("tmux: could not type into session: %w", err)
 		}
 	}
@@ -414,7 +416,7 @@ func Answer(ctx context.Context, name, key string) error {
 	lock := actionLock(name)
 	lock.Lock()
 	defer lock.Unlock()
-	if _, err := run(ctx, "send-keys", "-t", name, "-l", key); err != nil {
+	if _, err := run(ctx, "send-keys", "-t", name, "-l", "--", key); err != nil {
 		return fmt.Errorf("tmux: could not answer: %w", err)
 	}
 	return nil
@@ -601,7 +603,7 @@ func AnswerForm(
 }
 
 func sendLiteral(ctx context.Context, name, text string) error {
-	_, err := run(ctx, "send-keys", "-t", name, "-l", text)
+	_, err := run(ctx, "send-keys", "-t", name, "-l", "--", text)
 	return err
 }
 
