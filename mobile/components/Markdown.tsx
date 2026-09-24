@@ -1,6 +1,8 @@
+import * as WebBrowser from "expo-web-browser";
 import { ReactNode } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { tokenizeInline } from "../lib/markdown-inline";
 import { cellWidth, parseTable, type Table } from "../lib/markdown-table";
 import { useStyles } from "../lib/appearance";
 import { font, Palette, radius, size, space } from "../lib/theme";
@@ -21,8 +23,9 @@ type Block =
  * This is intentionally local and linear rather than a general HTML/markdown
  * engine. Agent output is untrusted: the former parser dependency had known
  * quadratic-complexity advisories, could fetch remote images, and opened custom
- * URL schemes. This renderer never performs network or OS actions and bounds
- * the amount of one message it will parse.
+ * URL schemes. This renderer fetches nothing, bounds the amount of one message
+ * it will parse, and opens only http(s) links — in an in-app browser, so a
+ * tapped link can never reach the OS scheme handler. See lib/markdown-inline.
  */
 export function Markdown({ children }: { children: string }) {
   const clipped = children.length > MAX_MARKDOWN_CHARS;
@@ -240,38 +243,51 @@ function numberedLine(line: string): Block | null {
   return { kind: "number", marker: line.slice(0, end + 1), text: line.slice(end + 2) };
 }
 
-// Inline code and bold cover the high-value cases (paths, commands, result
-// labels) without auto-linking or interpreting arbitrary HTML.
+/**
+ * Opens a link the agent wrote.
+ *
+ * Deliberately the in-app browser rather than Linking.openURL: the tokenizer
+ * already refuses every scheme but http(s), and routing through WebBrowser
+ * means even a mistake there cannot hand a custom scheme to the OS. A failure
+ * to open is swallowed — a tap that does nothing beats a crash mid-transcript.
+ */
+function openLink(href: string) {
+  void WebBrowser.openBrowserAsync(href).catch(() => {});
+}
+
+// Bold, code spans and links cover the vocabulary agents actually use.
+// Tokenising is in lib/markdown-inline so it can be tested on Node.
 function renderInline(text: string, styles: Styles): ReactNode[] {
-  const out: ReactNode[] = [];
-  let cursor = 0;
-  let plainStart = 0;
-  let key = 0;
-  while (cursor < text.length) {
-    const marker = text.startsWith("**", cursor) ? "**" : text[cursor] === "`" ? "`" : "";
-    if (!marker) {
-      cursor += 1;
-      continue;
+  return tokenizeInline(text).map((token, key) => {
+    switch (token.kind) {
+      case "text":
+        return token.text;
+      case "bold":
+        return (
+          <Text key={key} style={styles.bold}>
+            {token.text}
+          </Text>
+        );
+      case "code":
+        return (
+          <Text key={key} style={styles.inlineCode}>
+            {token.text}
+          </Text>
+        );
+      case "link":
+        return (
+          <Text
+            key={key}
+            style={styles.link}
+            onPress={() => openLink(token.href)}
+            accessibilityRole="link"
+            accessibilityHint={`Opens ${token.href}`}
+          >
+            {token.text}
+          </Text>
+        );
     }
-    const contentStart = cursor + marker.length;
-    const close = text.indexOf(marker, contentStart);
-    if (close < 0) {
-      // There cannot be another occurrence of this marker, so continuing the
-      // single pass cannot repeatedly rescan the same suffix.
-      cursor += marker.length;
-      continue;
-    }
-    if (cursor > plainStart) out.push(text.slice(plainStart, cursor));
-    out.push(
-      <Text key={key++} style={marker === "`" ? styles.inlineCode : styles.bold}>
-        {text.slice(contentStart, close)}
-      </Text>,
-    );
-    cursor = close + marker.length;
-    plainStart = cursor;
-  }
-  if (plainStart < text.length) out.push(text.slice(plainStart));
-  return out;
+  });
 }
 
 function makeStyles(c: Palette) {
@@ -286,6 +302,7 @@ function makeStyles(c: Palette) {
     heading: { fontFamily: font.sansBold, marginTop: space.xs, letterSpacing: -0.2 },
     heading1: { fontSize: size.title },
     bold: { fontFamily: font.sansBold },
+    link: { color: c.workingText, textDecorationLine: "underline" },
     inlineCode: {
       fontFamily: font.mono,
       fontSize: size.caption,
