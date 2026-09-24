@@ -4,16 +4,27 @@ import { Alert, Platform, ScrollView, StyleSheet, Text, View } from "react-nativ
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Appear } from "../components/Appear";
+import { BrandMark } from "../components/BrandMark";
 import { ContentColumn } from "../components/ContentColumn";
 import { MotionPressable } from "../components/MotionPressable";
+import { useStyles, useTheme } from "../lib/appearance";
+import { AppearancePreference } from "../lib/appearance-policy";
 import { isPushActive, pushFailureReason } from "../lib/push";
 import { useStore } from "../lib/store";
-import { ago, color, font, radius, size, space } from "../lib/theme";
+import { ago, font, Palette, radius, size, space } from "../lib/theme";
+
+const APPEARANCES: { value: AppearancePreference; label: string }[] = [
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+  { value: "system", label: "Match phone" },
+];
 
 export default function Settings() {
   const store = useStore();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const styles = useStyles(makeStyles);
+  const { color, preference, setPreference } = useTheme();
 
   const unpair = () => {
     const perform = () => {
@@ -35,25 +46,24 @@ export default function Settings() {
 
   return (
     <View style={[styles.page, { paddingTop: insets.top }]}>
-      <ContentColumn style={styles.header}>
-        <MotionPressable
-          onPress={() => router.back()}
-          hitSlop={12}
-          pressedScale={0.92}
-          style={styles.back}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <Feather name="chevron-left" size={22} color={color.text} />
-        </MotionPressable>
-        <View>
-          <Text style={styles.eyebrow}>Agentman</Text>
-          <Text style={styles.title}>Settings</Text>
-        </View>
-      </ContentColumn>
-
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + space.xl }}>
         <ContentColumn style={styles.content}>
+          <View style={styles.topBar}>
+            <MotionPressable
+              onPress={() => router.back()}
+              hitSlop={12}
+              pressedScale={0.92}
+              style={styles.iconButton}
+              accessibilityRole="button"
+              accessibilityLabel="Back"
+            >
+              <Feather name="chevron-left" size={20} color={color.text} />
+            </MotionPressable>
+          </View>
+          <Text style={styles.title} accessibilityRole="header">
+            Settings
+          </Text>
+
           <Appear>
             <Text style={styles.sectionLabel}>Connection</Text>
             <View style={styles.card}>
@@ -63,12 +73,11 @@ export default function Settings() {
                 label="Your Mac"
                 value={
                   store.daemonOnline
-                    ? "Online and receiving updates"
+                    ? "Online"
                     : store.lastSeenAt
                       ? `Offline · last seen ${ago(store.lastSeenAt)} ago`
                       : "Offline"
                 }
-                tint={store.daemonOnline ? color.ok : color.muted}
                 status={store.daemonOnline ? "online" : "offline"}
               />
               <View style={styles.divider} />
@@ -79,30 +88,50 @@ export default function Settings() {
                 label="Background alerts"
                 value={
                   isPushActive()
-                    ? "On — this Mac can reach you when the app is closed"
+                    ? "On — your Mac can reach you when the app is closed"
                     : pushFailureReason() || "Unavailable in this build"
                 }
-                tint={isPushActive() ? color.ok : color.muted}
+                tint={isPushActive() ? color.ok : undefined}
               />
             </View>
           </Appear>
 
-          <Appear delay={45}>
+          <Appear delay={30}>
+            <Text style={styles.sectionLabel}>Appearance</Text>
+            <View style={styles.segmented} accessibilityRole="radiogroup">
+              {APPEARANCES.map((option) => {
+                const active = option.value === preference;
+                return (
+                  <MotionPressable
+                    key={option.value}
+                    onPress={() => setPreference(option.value)}
+                    style={[styles.segment, active && styles.segmentActive]}
+                    pressedScale={0.97}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: active }}
+                  >
+                    <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>
+                      {option.label}
+                    </Text>
+                  </MotionPressable>
+                );
+              })}
+            </View>
+          </Appear>
+
+          <Appear delay={60}>
             <Text style={styles.sectionLabel}>Privacy</Text>
-            <View style={styles.privacyCard}>
-              <View style={styles.privacyHeader}>
-                <View style={styles.privacyIcon}>
-                  <View style={styles.lockBody} />
-                  <View style={styles.lockLoop} />
-                </View>
-                <View style={styles.privacyCopy}>
-                  <Text style={styles.privacyTitle}>Your Mac stays the source of truth</Text>
-                  <Text style={styles.body}>
-                    Transcripts are not persisted by the relay. Live traffic does pass
-                    through it without end-to-end encryption, so use an operator you trust
-                    or self-host one.
-                  </Text>
-                </View>
+            <View style={[styles.card, styles.privacyCard]}>
+              <View style={styles.privacyIcon}>
+                <Feather name="lock" size={16} color={color.ok} />
+              </View>
+              <View style={styles.privacyCopy}>
+                <Text style={styles.privacyTitle}>Your Mac stays the source of truth</Text>
+                <Text style={styles.body}>
+                  Transcripts are not persisted by the relay. Live traffic does pass
+                  through it without end-to-end encryption, so use an operator you trust
+                  or self-host one.
+                </Text>
               </View>
             </View>
           </Appear>
@@ -119,6 +148,11 @@ export default function Settings() {
               Removes the relay credentials stored securely on this device.
             </Text>
           </Appear>
+
+          <View style={styles.signature}>
+            <BrandMark size={18} />
+            <Text style={styles.signatureText}>agentman</Text>
+          </View>
         </ContentColumn>
       </ScrollView>
     </View>
@@ -138,6 +172,8 @@ function Row({
   status?: "online" | "offline";
   tint?: string;
 }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
   return (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
@@ -165,121 +201,140 @@ function Row({
   );
 }
 
-const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: color.ink },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space.sm,
-    paddingHorizontal: space.lg,
-    paddingVertical: space.lg,
-  },
-  back: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: color.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.line,
-  },
-  eyebrow: {
-    fontFamily: font.sansMedium,
-    fontSize: size.label,
-    letterSpacing: 1.3,
-    textTransform: "uppercase",
-    color: color.faint,
-  },
-  title: { fontFamily: font.sansBold, fontSize: size.heading, color: color.text },
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    content: { paddingHorizontal: space.lg },
+    topBar: { flexDirection: "row", paddingTop: space.sm },
+    iconButton: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    title: {
+      fontFamily: font.sansBold,
+      fontSize: size.display,
+      letterSpacing: -1.2,
+      color: c.text,
+      marginTop: space.lg,
+      marginBottom: space.xs,
+    },
 
-  content: { paddingHorizontal: space.lg, gap: space.sm },
-  sectionLabel: {
-    fontFamily: font.sansMedium,
-    fontSize: size.label,
-    letterSpacing: 1.4,
-    textTransform: "uppercase",
-    color: color.faint,
-    marginLeft: space.xs,
-    marginTop: space.lg,
-    marginBottom: space.sm,
-  },
-  card: {
-    backgroundColor: color.surface,
-    borderRadius: radius.lg,
-    paddingHorizontal: space.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.line,
-  },
-  body: { fontFamily: font.sans, fontSize: size.caption, color: color.muted, lineHeight: 19 },
+    sectionLabel: {
+      fontFamily: font.sansBold,
+      fontSize: size.caption,
+      color: c.muted,
+      marginLeft: space.xxs,
+      marginTop: space.xl,
+      marginBottom: space.sm,
+    },
+    card: {
+      backgroundColor: c.surface,
+      borderRadius: radius.xl,
+      paddingHorizontal: space.lg,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    body: { fontFamily: font.sans, fontSize: size.caption, color: c.muted, lineHeight: 19 },
 
-  row: {
-    minHeight: 58,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: space.md,
-    paddingVertical: space.md,
-  },
-  rowLabel: { fontFamily: font.sans, fontSize: size.caption, color: color.muted },
-  valueWrap: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    gap: space.sm,
-  },
-  statusDot: { width: 7, height: 7, borderRadius: 4 },
-  rowValue: { flexShrink: 1, textAlign: "right", fontFamily: font.sans, fontSize: size.caption, color: color.text },
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: color.line },
+    row: {
+      minHeight: 56,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: space.md,
+      paddingVertical: space.md,
+    },
+    rowLabel: { fontFamily: font.sansMedium, fontSize: size.body, color: c.text },
+    valueWrap: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-end",
+      gap: space.sm,
+    },
+    statusDot: { width: 7, height: 7, borderRadius: 4 },
+    rowValue: {
+      flexShrink: 1,
+      textAlign: "right",
+      fontFamily: font.sans,
+      fontSize: size.caption,
+      color: c.muted,
+    },
+    divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.line },
 
-  privacyCard: {
-    backgroundColor: color.surface,
-    borderRadius: radius.lg,
-    padding: space.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.line,
-  },
-  privacyHeader: { flexDirection: "row", alignItems: "flex-start", gap: space.md },
-  privacyIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.md,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: color.okWash,
-  },
-  lockBody: { width: 11, height: 8, borderRadius: 2, backgroundColor: color.ok, marginTop: 6 },
-  lockLoop: {
-    position: "absolute",
-    width: 9,
-    height: 9,
-    top: 8,
-    borderWidth: 1.5,
-    borderColor: color.ok,
-    borderRadius: 5,
-  },
-  privacyCopy: { flex: 1, gap: space.xs },
-  privacyTitle: { fontFamily: font.sansMedium, fontSize: size.body, color: color.text },
+    segmented: {
+      flexDirection: "row",
+      padding: 4,
+      gap: 4,
+      borderRadius: radius.pill,
+      backgroundColor: c.fill,
+    },
+    segment: {
+      flex: 1,
+      minHeight: 40,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    segmentActive: {
+      backgroundColor: c.surface,
+      shadowColor: c.shadow,
+      shadowOpacity: 0.08,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 1,
+    },
+    segmentLabel: { fontFamily: font.sansMedium, fontSize: size.caption, color: c.muted },
+    segmentLabelActive: { fontFamily: font.sansBold, color: c.text },
 
-  unpair: {
-    minHeight: 50,
-    borderRadius: radius.lg,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: color.errorWash,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#563039",
-    marginTop: space.lg,
-  },
-  unpairText: { fontFamily: font.sansMedium, fontSize: size.body, color: color.error },
-  unpairHint: {
-    fontFamily: font.sans,
-    fontSize: size.label,
-    color: color.faint,
-    textAlign: "center",
-    lineHeight: 16,
-    marginTop: space.sm,
-    paddingHorizontal: space.lg,
-  },
-});
+    privacyCard: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: space.md,
+      paddingVertical: space.lg,
+    },
+    privacyIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: radius.md,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.okWash,
+    },
+    privacyCopy: { flex: 1, gap: space.xs },
+    privacyTitle: { fontFamily: font.sansBold, fontSize: size.body, color: c.text },
+
+    unpair: {
+      minHeight: 52,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.errorWash,
+      marginTop: space.xl,
+    },
+    unpairText: { fontFamily: font.sansBold, fontSize: size.body, color: c.errorText },
+    unpairHint: {
+      fontFamily: font.sans,
+      fontSize: size.label,
+      color: c.faint,
+      textAlign: "center",
+      lineHeight: 16,
+      marginTop: space.sm,
+      paddingHorizontal: space.lg,
+    },
+    signature: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: space.sm,
+      marginTop: space.xxl,
+      opacity: 0.55,
+    },
+    signatureText: { fontFamily: font.sansBold, fontSize: size.caption, color: c.text },
+  });

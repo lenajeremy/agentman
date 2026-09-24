@@ -10,7 +10,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-import { color } from "../lib/theme";
+import { useTheme } from "../lib/appearance";
 
 /**
  * The state indicator, and the only persistent motion on the status board.
@@ -27,6 +27,7 @@ export function Pulse({ state, size = 8 }: { state: string; size?: number }) {
   const scale = useSharedValue(1);
   const opacity = useSharedValue(0.5);
   const reduceMotion = useReducedMotion();
+  const { color } = useTheme();
 
   const isWorking = state === "busy";
 
@@ -98,7 +99,7 @@ export function Pulse({ state, size = 8 }: { state: string; size?: number }) {
           borderRadius: size / 2,
           backgroundColor: dotColor,
           // Idle needs to read as "nothing is happening" without disappearing.
-          opacity: state === "idle" ? 0.45 : 1,
+          opacity: state === "idle" ? 0.6 : 1,
         }}
       />
     </View>

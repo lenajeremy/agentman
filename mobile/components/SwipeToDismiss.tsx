@@ -13,7 +13,8 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-import { color, font, radius, space } from "../lib/theme";
+import { useStyles } from "../lib/appearance";
+import { font, Palette, radius } from "../lib/theme";
 
 /** How far the row must travel before letting go dismisses it. */
 const THRESHOLD = 88;
@@ -21,6 +22,8 @@ const THRESHOLD = 88;
 const FLICK_VELOCITY = 700;
 /** Wide enough that the row is off screen on a landscape tablet. */
 const OFF_SCREEN = 2000;
+/** The space rows leave between each other; the backdrop must not fill it. */
+export const ROW_GAP = 8;
 
 interface Props {
   children: ReactNode;
@@ -49,6 +52,7 @@ export function SwipeToDismiss({
   accessibilityLabel,
 }: Props) {
   const translateX = useSharedValue(0);
+  const styles = useStyles(makeStyles);
 
   const buzz = useCallback(() => {
     if (Platform.OS === "web") return;
@@ -142,20 +146,22 @@ export function SwipeToDismiss({
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    ...StyleSheet.absoluteFill,
-    marginHorizontal: space.lg,
-    marginBottom: space.sm,
-    borderRadius: radius.md,
-    backgroundColor: color.error,
-    alignItems: "flex-end",
-    justifyContent: "center",
-    paddingRight: space.lg,
-  },
-  backdropText: {
-    color: "#fff",
-    fontFamily: font.sansMedium,
-    fontSize: 15,
-  },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    // Sits exactly behind the row it belongs to, so it only ever shows through
+    // the gap the row leaves as it slides away.
+    backdrop: {
+      ...StyleSheet.absoluteFill,
+      marginBottom: ROW_GAP,
+      borderRadius: radius.xl,
+      backgroundColor: c.error,
+      alignItems: "flex-end",
+      justifyContent: "center",
+      paddingRight: 20,
+    },
+    backdropText: {
+      color: "#fff",
+      fontFamily: font.sansBold,
+      fontSize: 15,
+    },
+  });

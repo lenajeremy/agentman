@@ -26,11 +26,16 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Appear } from "../components/Appear";
 import { ContentColumn } from "../components/ContentColumn";
+import { PairIllustration } from "../components/Illustrations";
 import { MotionPressable } from "../components/MotionPressable";
+import { useStyles } from "../lib/appearance";
 import { pairWithToken } from "../lib/client";
 import { parsePairingPayload } from "../lib/pairing";
 import { useStore } from "../lib/store";
-import { color, font, radius, size, space } from "../lib/theme";
+import { font, Palette, radius, size, space } from "../lib/theme";
+
+/** Drawn over live camera video, which is dark whatever the theme. */
+const ON_CAMERA = "#FFFFFF";
 
 /**
  * Pairing by camera.
@@ -45,6 +50,7 @@ export default function Scan() {
   const store = useStore();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const styles = useStyles(makeStyles);
   const [permission, requestPermission] = useCameraPermissions();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -119,16 +125,11 @@ export default function Scan() {
       <View style={[styles.page, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         <ContentColumn narrow style={styles.permissionContent}>
           <Appear style={styles.permissionCard}>
-            <View style={styles.cameraIcon}>
-              <View style={styles.cameraBody}>
-                <View style={styles.cameraLens} />
-              </View>
-              <View style={styles.cameraTop} />
-            </View>
-            <Text style={styles.title}>Scan securely</Text>
+            <PairIllustration style={styles.art} />
+            <Text style={styles.title}>Allow the camera</Text>
             <Text style={styles.body}>
-              Camera access lets Agentman read the one-time QR code from your terminal.
-              Frames are never recorded or saved.
+              Agentman uses it to read the one-time code from your terminal. Frames are
+              never recorded or saved.
             </Text>
             <MotionPressable
               style={styles.button}
@@ -142,7 +143,7 @@ export default function Scan() {
               style={styles.secondaryButton}
               accessibilityRole="button"
             >
-              <Text style={styles.link}>Type the code instead</Text>
+              <Text style={styles.link}>Enter the code instead</Text>
             </MotionPressable>
           </Appear>
         </ContentColumn>
@@ -173,7 +174,7 @@ export default function Scan() {
             accessibilityRole="button"
             accessibilityLabel="Close scanner"
           >
-            <Feather name="x" size={22} color={color.text} />
+            <Feather name="x" size={22} color={ON_CAMERA} />
           </MotionPressable>
           <View style={styles.scanHeading}>
             <Text style={styles.scanEyebrow}>Secure pairing</Text>
@@ -191,7 +192,7 @@ export default function Scan() {
             <Corner style={styles.cornerTopRight} />
             <Corner style={styles.cornerBottomLeft} />
             <Corner style={styles.cornerBottomRight} />
-            {!busy ? <ScanLine /> : <ActivityIndicator color={color.working} />}
+            {!busy ? <ScanLine /> : <ActivityIndicator color={ON_CAMERA} />}
           </View>
           {error ? (
             <View style={styles.errorBox} accessibilityRole="alert">
@@ -205,230 +206,190 @@ export default function Scan() {
           style={styles.dismiss}
           accessibilityRole="button"
         >
-          <Text style={styles.dismissText}>Type the code instead</Text>
+          <Text style={styles.dismissText}>Enter the code instead</Text>
         </MotionPressable>
       </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: color.ink },
-  permissionContent: { flex: 1, justifyContent: "center", paddingHorizontal: space.lg },
-  permissionCard: {
-    alignItems: "center",
-    borderRadius: radius.xl,
-    padding: space.xl,
-    backgroundColor: color.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.line,
-  },
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    permissionContent: { flex: 1, justifyContent: "center", paddingHorizontal: space.lg },
+    permissionCard: { alignItems: "center" },
+    art: {
+      width: "100%",
+      aspectRatio: 340 / 214,
+      borderRadius: radius.sheet,
+      overflow: "hidden",
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+      marginBottom: space.xl,
+    },
 
-  overlay: {
-    ...StyleSheet.absoluteFill,
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: "rgba(4, 7, 12, 0.25)",
-  },
-  scanHeader: {
-    width: "100%",
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: space.lg,
-  },
-  closeButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: color.scrim,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255,255,255,0.18)",
-  },
-  scanHeading: {
-    flex: 1,
-    alignItems: "center",
-    marginHorizontal: space.sm,
-    paddingVertical: 6,
-    paddingHorizontal: space.md,
-    borderRadius: radius.md,
-    backgroundColor: color.scrim,
-  },
-  scanEyebrow: {
-    fontFamily: font.sansMedium,
-    fontSize: size.label,
-    textTransform: "uppercase",
-    letterSpacing: 1.3,
-    color: "#D1D8E5",
-  },
-  overlayTitle: {
-    fontFamily: font.sansBold,
-    fontSize: size.title,
-    color: color.text,
-  },
-  headerSpacer: { width: 44 },
-  scanCentre: { width: "100%", alignItems: "center", gap: space.lg },
-  scanHint: {
-    maxWidth: 290,
-    fontFamily: font.sans,
-    fontSize: size.caption,
-    lineHeight: 18,
-    textAlign: "center",
-    color: color.text,
-    backgroundColor: color.scrim,
-    paddingVertical: space.sm,
-    paddingHorizontal: space.md,
-    borderRadius: radius.pill,
-    overflow: "hidden",
-  },
-  reticle: {
-    width: 248,
-    height: 248,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: radius.xl,
-    backgroundColor: "rgba(9,12,18,0.08)",
-    overflow: "hidden",
-  },
-  corner: { position: "absolute", width: 42, height: 42, borderColor: color.working },
-  cornerTopLeft: {
-    top: 0,
-    left: 0,
-    borderTopWidth: 3,
-    borderLeftWidth: 3,
-    borderTopLeftRadius: radius.lg,
-  },
-  cornerTopRight: {
-    top: 0,
-    right: 0,
-    borderTopWidth: 3,
-    borderRightWidth: 3,
-    borderTopRightRadius: radius.lg,
-  },
-  cornerBottomLeft: {
-    bottom: 0,
-    left: 0,
-    borderBottomWidth: 3,
-    borderLeftWidth: 3,
-    borderBottomLeftRadius: radius.lg,
-  },
-  cornerBottomRight: {
-    bottom: 0,
-    right: 0,
-    borderBottomWidth: 3,
-    borderRightWidth: 3,
-    borderBottomRightRadius: radius.lg,
-  },
-  scanLine: {
-    width: 200,
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: color.working,
-    shadowColor: color.working,
-    shadowOpacity: 0.75,
-    shadowRadius: 8,
-  },
+    overlay: {
+      ...StyleSheet.absoluteFill,
+      alignItems: "center",
+      justifyContent: "space-between",
+      backgroundColor: "rgba(4, 7, 12, 0.25)",
+    },
+    scanHeader: {
+      width: "100%",
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: space.lg,
+    },
+    closeButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.cameraScrim,
+    },
+    scanHeading: {
+      flex: 1,
+      alignItems: "center",
+      marginHorizontal: space.sm,
+    },
+    scanEyebrow: {
+      fontFamily: font.sansMedium,
+      fontSize: size.label,
+      color: "rgba(255,255,255,0.72)",
+    },
+    overlayTitle: {
+      fontFamily: font.sansBold,
+      fontSize: size.title,
+      color: ON_CAMERA,
+    },
+    headerSpacer: { width: 44 },
+    scanCentre: { width: "100%", alignItems: "center", gap: space.lg },
+    scanHint: {
+      maxWidth: 290,
+      fontFamily: font.sansMedium,
+      fontSize: size.caption,
+      lineHeight: 18,
+      textAlign: "center",
+      color: ON_CAMERA,
+      backgroundColor: c.cameraScrim,
+      paddingVertical: space.sm,
+      paddingHorizontal: space.md,
+      borderRadius: radius.pill,
+      overflow: "hidden",
+    },
+    reticle: {
+      width: 248,
+      height: 248,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: radius.sheet,
+      overflow: "hidden",
+    },
+    corner: { position: "absolute", width: 46, height: 46, borderColor: ON_CAMERA },
+    cornerTopLeft: {
+      top: 0,
+      left: 0,
+      borderTopWidth: 4,
+      borderLeftWidth: 4,
+      borderTopLeftRadius: radius.sheet,
+    },
+    cornerTopRight: {
+      top: 0,
+      right: 0,
+      borderTopWidth: 4,
+      borderRightWidth: 4,
+      borderTopRightRadius: radius.sheet,
+    },
+    cornerBottomLeft: {
+      bottom: 0,
+      left: 0,
+      borderBottomWidth: 4,
+      borderLeftWidth: 4,
+      borderBottomLeftRadius: radius.sheet,
+    },
+    cornerBottomRight: {
+      bottom: 0,
+      right: 0,
+      borderBottomWidth: 4,
+      borderRightWidth: 4,
+      borderBottomRightRadius: radius.sheet,
+    },
+    scanLine: {
+      width: 200,
+      height: 2,
+      borderRadius: 1,
+      backgroundColor: "#8E9DFF",
+      shadowColor: "#8E9DFF",
+      shadowOpacity: 0.8,
+      shadowRadius: 8,
+    },
 
-  cameraIcon: {
-    width: 68,
-    height: 68,
-    borderRadius: radius.xl,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: color.workingWash,
-    marginBottom: space.lg,
-  },
-  cameraBody: {
-    width: 32,
-    height: 23,
-    borderRadius: radius.sm,
-    borderWidth: 2,
-    borderColor: color.working,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cameraLens: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    borderWidth: 2,
-    borderColor: color.working,
-  },
-  cameraTop: {
-    position: "absolute",
-    top: 19,
-    width: 13,
-    height: 5,
-    borderTopLeftRadius: 3,
-    borderTopRightRadius: 3,
-    backgroundColor: color.working,
-  },
-  title: {
-    fontFamily: font.sansBold,
-    fontSize: 28,
-    letterSpacing: -0.6,
-    color: color.text,
-    textAlign: "center",
-  },
-  body: {
-    fontFamily: font.sans,
-    fontSize: size.body,
-    color: color.muted,
-    lineHeight: 22,
-    textAlign: "center",
-    marginTop: space.sm,
-  },
-  errorBox: {
-    maxWidth: 320,
-    backgroundColor: color.scrim,
-    borderRadius: radius.md,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.error,
-  },
-  error: {
-    fontFamily: font.sans,
-    fontSize: size.caption,
-    color: color.error,
-    lineHeight: 18,
-    textAlign: "center",
-  },
+    title: {
+      fontFamily: font.sansBold,
+      fontSize: 28,
+      letterSpacing: -0.8,
+      color: c.text,
+      textAlign: "center",
+    },
+    body: {
+      fontFamily: font.sans,
+      fontSize: size.body,
+      color: c.muted,
+      lineHeight: 22,
+      textAlign: "center",
+      marginTop: space.sm,
+      maxWidth: 340,
+    },
+    errorBox: {
+      maxWidth: 320,
+      backgroundColor: c.cameraScrim,
+      borderRadius: radius.lg,
+      paddingHorizontal: space.md,
+      paddingVertical: space.sm,
+    },
+    error: {
+      fontFamily: font.sansMedium,
+      fontSize: size.caption,
+      color: "#FF9A9E",
+      lineHeight: 18,
+      textAlign: "center",
+    },
 
-  button: {
-    width: "100%",
-    minHeight: 50,
-    backgroundColor: color.working,
-    borderRadius: radius.lg,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: space.xl,
-  },
-  buttonText: { fontFamily: font.sansBold, fontSize: size.body, color: color.ink },
-  secondaryButton: {
-    paddingVertical: space.md,
-    paddingHorizontal: space.lg,
-    marginTop: space.sm,
-  },
-  link: { fontFamily: font.sansMedium, fontSize: size.body, color: color.working },
-  dismiss: {
-    minHeight: 44,
-    justifyContent: "center",
-    paddingHorizontal: space.lg,
-    borderRadius: radius.pill,
-    backgroundColor: color.scrim,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255,255,255,0.18)",
-  },
-  dismissText: { fontFamily: font.sansMedium, fontSize: size.body, color: color.text },
-});
+    button: {
+      alignSelf: "stretch",
+      minHeight: 56,
+      backgroundColor: c.inverse,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      marginTop: space.xl,
+    },
+    buttonText: { fontFamily: font.sansBold, fontSize: 16, color: c.onInverse },
+    secondaryButton: {
+      paddingVertical: space.md,
+      paddingHorizontal: space.lg,
+      marginTop: space.xs,
+    },
+    link: { fontFamily: font.sansMedium, fontSize: size.body, color: c.textSecondary },
+    dismiss: {
+      minHeight: 48,
+      justifyContent: "center",
+      paddingHorizontal: space.xl,
+      borderRadius: radius.pill,
+      backgroundColor: c.cameraScrim,
+    },
+    dismissText: { fontFamily: font.sansBold, fontSize: size.body, color: ON_CAMERA },
+  });
 
 function Corner({ style }: { style: StyleProp<ViewStyle> }) {
+  const styles = useStyles(makeStyles);
   return <View style={[styles.corner, style]} />;
 }
 
 function ScanLine() {
+  const styles = useStyles(makeStyles);
   const translateY = useSharedValue(-92);
   const reduceMotion = useReducedMotion();
 

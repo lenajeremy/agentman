@@ -1,13 +1,10 @@
 import {
-  IBMPlexMono_400Regular,
-  IBMPlexMono_500Medium,
-} from "@expo-google-fonts/ibm-plex-mono";
-import {
-  IBMPlexSans_400Regular,
-  IBMPlexSans_500Medium,
-  IBMPlexSans_600SemiBold,
+  Geist_400Regular,
+  Geist_500Medium,
+  Geist_600SemiBold,
   useFonts,
-} from "@expo-google-fonts/ibm-plex-sans";
+} from "@expo-google-fonts/geist";
+import { GeistMono_400Regular, GeistMono_500Medium } from "@expo-google-fonts/geist-mono";
 import * as Notifications from "expo-notifications";
 import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -16,8 +13,9 @@ import { Platform, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
+import { ThemeProvider, useTheme } from "../lib/appearance";
 import { StoreProvider } from "../lib/store";
-import { color } from "../lib/theme";
+import { palettes } from "../lib/theme";
 
 // Notifications are the product, not a nicety: an alert that arrives silently
 // while the app is open would defeat the point of walking away from the desk.
@@ -58,11 +56,11 @@ function NotificationNavigation() {
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
-    IBMPlexSans_400Regular,
-    IBMPlexSans_500Medium,
-    IBMPlexSans_600SemiBold,
-    IBMPlexMono_400Regular,
-    IBMPlexMono_500Medium,
+    Geist_400Regular,
+    Geist_500Medium,
+    Geist_600SemiBold,
+    GeistMono_400Regular,
+    GeistMono_500Medium,
   });
 
   useEffect(() => {
@@ -85,22 +83,34 @@ export default function RootLayout() {
     }
   }, []);
 
-  if (!fontsLoaded) {
-    return <View style={{ flex: 1, backgroundColor: color.ink }} />;
+  return (
+    <ThemeProvider>
+      <ThemedApp fontsLoaded={fontsLoaded} />
+    </ThemeProvider>
+  );
+}
+
+function ThemedApp({ fontsLoaded }: { fontsLoaded: boolean }) {
+  const { color, scheme, ready } = useTheme();
+
+  // Held until the stored appearance is known too, so someone who chose dark
+  // never sees a light frame first.
+  if (!fontsLoaded || !ready) {
+    return <View style={{ flex: 1, backgroundColor: palettes.light.paper }} />;
   }
 
   return (
     // Gesture handling has to be rooted above everything that uses it, or the
     // swipe on the status board silently does nothing on Android.
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: color.paper }}>
       <SafeAreaProvider>
         <StoreProvider>
           <NotificationNavigation />
-          <StatusBar style="light" />
+          <StatusBar style={scheme === "dark" ? "light" : "dark"} />
           <Stack
             screenOptions={{
               headerShown: false,
-              contentStyle: { backgroundColor: color.ink },
+              contentStyle: { backgroundColor: color.paper },
               animation: "slide_from_right",
             }}
           />

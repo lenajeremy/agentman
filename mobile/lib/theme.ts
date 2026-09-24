@@ -1,84 +1,135 @@
 /**
  * Design tokens.
  *
- * This is a status board, not a chat app. Its one job is to answer "what are
- * my agents doing, and does one of them need me?" — so the visual system is
- * built around that: a near-monochrome base where colour is earned only by
- * state, never spent on decoration.
+ * The app answers one question: "what are my agents doing, and does one of
+ * them need me?" Colour carries that answer, so each state owns one hue and
+ * nothing decorative competes with it:
  *
- * Three states matter, and each gets exactly one colour:
- *   working      — cyan, reads as instrumentation rather than a success tick
- *   needs you    — amber, the borrowed vocabulary of a real control panel
+ *   working      — cobalt, which is also the brand
+ *   needs you    — tangerine, the one colour that asks for a tap
  *   idle         — no colour at all; nothing is happening, so nothing glows
  *
- * The base is a neutral near-black. A hair off #000 rather than pure, so an
- * OLED panel has a surface to render instead of switching pixels off entirely
- * beside lit colour — but neutral, not tinted, so the state colours are the
- * only hue on screen.
+ * The ground is a warm off-white rather than pure white, so white cards read as
+ * objects without needing heavy borders. Cards are separated by fill and a
+ * hairline, not by shadows stacked on shadows.
  *
- * A card is drawn by its border, not by being a paler rectangle. Filling every
- * surface produces a stack of grey slabs; outlining them keeps the ground
- * continuous and lets the border carry the structure.
+ * Light is the default. Dark is the same system inverted, with the state
+ * colours lifted so they keep their contrast on a dark ground.
  */
-export const color = {
+const light = {
   /** Page background. */
-  ink: "#08080A",
-  /** A card. Barely lifted: on this ground a card is defined by its border,
-   *  not by being a paler rectangle. */
-  surface: "#101012",
-  /** Controls — buttons, pills, segmented tracks. These do read as filled. */
-  surfaceRaised: "#1C1C20",
-  /** A pressed or nested surface. */
-  sunken: "#0B0B0D",
-  /** Hairlines and dividers. */
-  line: "#2A2A2E",
-  /** A stronger divider, for section boundaries. */
-  lineStrong: "#3A3A41",
+  paper: "#F5F5F2",
+  /** Cards and sheets. */
+  surface: "#FFFFFF",
+  /** Tiles, code, secondary controls. */
+  fill: "#EDECE8",
+  /** Borders on controls, pressed fills. */
+  fillStrong: "#E4E3DE",
+  /** Hairlines and card edges. */
+  line: "#E3E2DD",
 
-  text: "#F0F3F9",
+  text: "#0F1012",
+  /** Body copy that should not compete with titles. */
+  textSecondary: "#34363B",
   /** Secondary text: paths, timestamps, tool summaries. */
-  muted: "#9AA5B8",
-  /** Tertiary: labels, section headers. */
-  faint: "#657086",
+  muted: "#6A6D75",
+  /** Tertiary: labels, placeholders, counts. */
+  faint: "#9C9EA5",
 
-  /** An agent is working. */
-  working: "#6AAECD",
-  workingWash: "#141F27",
+  /** Primary buttons are ink pills; this is their fill and label. */
+  inverse: "#0F1012",
+  onInverse: "#FFFFFF",
+  /** An accent that stays legible on the inverse fill (the undo bar). */
+  inverseAccent: "#9DAAFF",
+
+  /** An agent is working. Also the brand colour. */
+  working: "#2E4BFF",
+  workingText: "#1F35C7",
+  workingWash: "#EEF1FF",
+  workingSoft: "#D9DFFF",
   /** An agent is blocked on the user — the most actionable state there is. */
-  needsYou: "#FFB84A",
-  needsYouWash: "#271F12",
-  /** A tool call failed. */
-  error: "#FF747A",
-  errorWash: "#29171B",
-  /** Delivery confirmed. */
-  ok: "#52DFA3",
-  okWash: "#12251E",
-  /** Camera and modal chrome over unpredictable content. */
-  scrim: "rgba(5, 8, 13, 0.76)",
-} as const;
+  needsYou: "#FF6A2B",
+  needsYouText: "#C2451A",
+  needsYouWash: "#FFF2EB",
+  needsYouEdge: "#FFDCCB",
+  /** Delivery confirmed, Mac online. */
+  ok: "#12A66A",
+  okWash: "#E6F6EE",
+  /** A tool call failed, the Mac is offline. */
+  error: "#E5484D",
+  errorText: "#C4343A",
+  errorWash: "#FDEDEE",
+  errorEdge: "#F6C9CB",
+
+  /** Dims the page behind a sheet. */
+  scrim: "rgba(15, 16, 18, 0.32)",
+  /** Controls drawn over the camera, which is dark whatever the theme. */
+  cameraScrim: "rgba(10, 11, 13, 0.62)",
+  shadow: "#0F1012",
+};
+
+export type Palette = { [K in keyof typeof light]: string };
+
+const dark: Palette = {
+  paper: "#0E0F11",
+  surface: "#17181B",
+  fill: "#202226",
+  fillStrong: "#2C2E33",
+  line: "#25272C",
+
+  text: "#F2F3F5",
+  textSecondary: "#D2D4D9",
+  muted: "#9A9DA5",
+  faint: "#6E717A",
+
+  inverse: "#F2F3F5",
+  onInverse: "#0E0F11",
+  inverseAccent: "#2E4BFF",
+
+  working: "#6B80FF",
+  workingText: "#9DAAFF",
+  workingWash: "#1A1F3D",
+  workingSoft: "#28305E",
+  needsYou: "#FF7D45",
+  needsYouText: "#FF9A6C",
+  needsYouWash: "#2E1B12",
+  needsYouEdge: "#4A2818",
+  ok: "#2BC784",
+  okWash: "#10271D",
+  error: "#FF6B70",
+  errorText: "#FF8A8E",
+  errorWash: "#2C1517",
+  errorEdge: "#4D2226",
+
+  scrim: "rgba(0, 0, 0, 0.5)",
+  cameraScrim: "rgba(10, 11, 13, 0.62)",
+  shadow: "#000000",
+};
+
+export const palettes: Record<"light" | "dark", Palette> = { light, dark };
 
 /**
- * Monospace is not styling here — it marks machine-authored text. Paths,
- * session ids, shell commands, and agent names are all strings a program
- * produced, and setting them in mono tells you that at a glance. Prose the
- * model or the user wrote is set in the sans face.
+ * Geist for everything a person wrote or reads as interface; Geist Mono for
+ * machine-authored text. Paths, session ids, shell commands and agent names
+ * are strings a program produced, and setting them in mono says so at a
+ * glance.
  */
 export const font = {
-  sans: "IBMPlexSans_400Regular",
-  sansMedium: "IBMPlexSans_500Medium",
-  sansBold: "IBMPlexSans_600SemiBold",
-  mono: "IBMPlexMono_400Regular",
-  monoMedium: "IBMPlexMono_500Medium",
+  sans: "Geist_400Regular",
+  sansMedium: "Geist_500Medium",
+  sansBold: "Geist_600SemiBold",
+  mono: "GeistMono_400Regular",
+  monoMedium: "GeistMono_500Medium",
 } as const;
 
 export const size = {
-  /** Section labels. */
-  label: 11,
-  caption: 12,
+  /** Section labels, counts. */
+  label: 12,
+  caption: 13,
   body: 15,
-  title: 18,
+  title: 17,
   heading: 22,
-  display: 30,
+  display: 34,
 } as const;
 
 export const space = {
@@ -97,8 +148,8 @@ export const radius = {
   md: 12,
   lg: 16,
   xl: 20,
-  /** Cards and rows. The reference leans on generous rounding to read modern. */
   xxl: 24,
+  sheet: 28,
   pill: 999,
 } as const;
 
@@ -110,21 +161,41 @@ export const layout = {
 } as const;
 
 /** Per-state presentation, kept in one place so the list and detail agree. */
-export function stateStyle(state: string): {
+export function stateStyle(
+  state: string,
+  c: Palette,
+): {
   color: string;
+  /** A readable text colour for the label on the page background. */
+  text: string;
+  wash: string;
   label: string;
   /** Priority for grouping; lower sorts first. */
   rank: number;
 } {
   switch (state) {
     case "waiting_input":
-      return { color: color.needsYou, label: "Needs you", rank: 0 };
+      return { color: c.needsYou, text: c.needsYouText, wash: c.needsYouWash, label: "Needs you", rank: 0 };
     case "busy":
-      return { color: color.working, label: "Working", rank: 1 };
+      return { color: c.working, text: c.workingText, wash: c.workingWash, label: "Working", rank: 1 };
     case "idle":
-      return { color: color.faint, label: "Idle", rank: 2 };
+      return { color: c.faint, text: c.muted, wash: c.fill, label: "Idle", rank: 2 };
     default:
-      return { color: color.faint, label: "Ended", rank: 3 };
+      return { color: c.faint, text: c.muted, wash: c.fill, label: "Ended", rank: 3 };
+  }
+}
+
+/** Short, recognisable names for each CLI, used where a whole word won't fit. */
+export function agentLabel(kind: string): { name: string; short: string } {
+  switch (kind) {
+    case "claude":
+      return { name: "Claude Code", short: "cc" };
+    case "codex":
+      return { name: "Codex", short: "cx" };
+    case "opencode":
+      return { name: "OpenCode", short: "oc" };
+    default:
+      return { name: kind, short: kind.slice(0, 2) };
   }
 }
 

@@ -12,20 +12,34 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Appear } from "../components/Appear";
 import { ContentColumn } from "../components/ContentColumn";
+import { EmptyIllustration } from "../components/Illustrations";
 import { MotionPressable } from "../components/MotionPressable";
 import { Pulse } from "../components/Pulse";
 import { QuestionCard } from "../components/QuestionCard";
-import { SwipeToDismiss } from "../components/SwipeToDismiss";
+import { ROW_GAP, SwipeToDismiss } from "../components/SwipeToDismiss";
+import { useStyles, useTheme } from "../lib/appearance";
 import { canDismiss } from "../lib/dismissed";
 import { Session } from "../lib/protocol";
 import { sessionNeedsAnswer } from "../lib/question-alerts";
 import { useStore } from "../lib/store";
-import { ago, color, font, radius, shortPath, size, space, stateStyle } from "../lib/theme";
+import {
+  agentLabel,
+  ago,
+  font,
+  Palette,
+  radius,
+  shortPath,
+  size,
+  space,
+  stateStyle,
+} from "../lib/theme";
 
 export default function Agents() {
   const store = useStore();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
   const [refreshing, setRefreshing] = useState(false);
   /** The row just swiped away, offered back for a few seconds. */
   const [undo, setUndo] = useState<{ id: string; name: string } | null>(null);
@@ -44,8 +58,8 @@ export default function Agents() {
   }, [undo]);
 
   const groups = useMemo(
-    () => groupByState(store.visibleSessions),
-    [store.visibleSessions],
+    () => groupByState(store.visibleSessions, color),
+    [store.visibleSessions, color],
   );
   const hiddenCount = store.sessions.length - store.visibleSessions.length;
   const incompatible = store.connection === "incompatible";
@@ -65,47 +79,6 @@ export default function Agents() {
 
   return (
     <View style={[styles.page, { paddingTop: insets.top }]}>
-      <ContentColumn style={styles.header}>
-        <View>
-          <Text style={styles.wordmark}>
-            agentman<Text style={styles.wordmarkAccent}>.</Text>
-          </Text>
-          <View style={styles.connectionLine}>
-            <View
-              style={[
-                styles.connectionDot,
-                { backgroundColor: store.daemonOnline ? color.ok : color.error },
-              ]}
-            />
-            <Text style={styles.subhead}>
-              {store.daemonOnline
-                ? "Mac connected"
-                : incompatible
-                  ? "Update required"
-                  : "Trying to reconnect"}
-            </Text>
-          </View>
-        </View>
-        <MotionPressable
-          hitSlop={12}
-          style={styles.gear}
-          pressedScale={0.94}
-          onPress={() => router.push("/settings")}
-          accessibilityRole="button"
-          accessibilityLabel="Settings"
-        >
-          <Feather name="menu" size={18} color={color.muted} />
-        </MotionPressable>
-      </ContentColumn>
-
-      {!store.daemonOnline && (
-        <ContentColumn>
-          {incompatible
-            ? <ProtocolBanner />
-            : <OfflineBanner lastSeenAt={store.lastSeenAt} />}
-        </ContentColumn>
-      )}
-
       <SectionList
         style={styles.scroll}
         sections={groups.map((group) => ({
@@ -129,11 +102,48 @@ export default function Agents() {
           />
         }
         ListHeaderComponent={
-          <ContentColumn>
+          <ContentColumn style={styles.gutter}>
+            <View style={styles.topBar}>
+              <ConnectionChip
+                online={store.daemonOnline}
+                incompatible={incompatible}
+              />
+              <MotionPressable
+                hitSlop={12}
+                style={styles.iconButton}
+                pressedScale={0.94}
+                onPress={() => router.push("/settings")}
+                accessibilityRole="button"
+                accessibilityLabel="Settings"
+              >
+                <Feather name="sliders" size={17} color={color.text} />
+              </MotionPressable>
+            </View>
+
+            <Text style={styles.title} accessibilityRole="header">
+              Agents
+            </Text>
+
+            {!store.daemonOnline ? (
+              incompatible ? <ProtocolBanner /> : <OfflineBanner lastSeenAt={store.lastSeenAt} />
+            ) : null}
+
             {store.visibleSessions.length > 0 ? (
-            <Appear style={styles.summaryWrap}>
-              <DashboardSummary counts={counts} />
-            </Appear>
+              <Appear style={styles.tiles}>
+                <CountTile
+                  value={counts.needsYou}
+                  label="Needs you"
+                  tint={color.needsYouText}
+                  wash={color.needsYouWash}
+                />
+                <CountTile
+                  value={counts.working}
+                  label="Working"
+                  tint={color.working}
+                  wash={color.workingWash}
+                />
+                <CountTile value={counts.idle} label="Idle" tint={color.text} wash={color.fill} />
+              </Appear>
             ) : null}
 
             {store.visibleSessions.length === 0 && store.daemonOnline &&
@@ -145,24 +155,22 @@ export default function Agents() {
           </ContentColumn>
         }
         renderSectionHeader={({ section }) => (
-          <ContentColumn>
+          <ContentColumn style={styles.gutter}>
             <View style={styles.groupHeading}>
-              <Text style={[styles.groupLabel, { color: section.tint }]}>
-                {section.label}
-              </Text>
+              <Text style={[styles.groupLabel, { color: section.tint }]}>{section.label}</Text>
               <Text style={styles.groupCount}>{section.data.length}</Text>
             </View>
           </ContentColumn>
         )}
         renderItem={({ item: session }) => (
-          <ContentColumn>
+          <ContentColumn style={styles.gutter}>
             <SwipeToDismiss
               enabled={canDismiss(session)}
               onDismiss={() => {
                 store.dismissSession(session.id);
                 setUndo({ id: session.id, name: session.name });
               }}
-              accessibilityLabel={`${session.name}, ${stateStyle(effectiveSessionState(session)).label}`}
+              accessibilityLabel={`${session.name}, ${stateStyle(effectiveSessionState(session), color).label}`}
             >
               <AgentRow session={session} />
             </SwipeToDismiss>
@@ -204,16 +212,16 @@ export default function Agents() {
  * is the structure: blocked agents form their own section at the top, and the
  * section header is the answer rather than a decoration.
  */
-function groupByState(sessions: Session[]) {
+function groupByState(sessions: Session[], color: Palette) {
   const buckets = new Map<
     string,
     { label: string; tint: string; rank: number; sessions: Session[] }
   >();
   for (const session of sessions) {
-    const meta = stateStyle(effectiveSessionState(session));
+    const meta = stateStyle(effectiveSessionState(session), color);
     const bucket = buckets.get(meta.label) ?? {
       label: meta.label,
-      tint: meta.rank === 0 ? meta.color : color.faint,
+      tint: meta.rank === 0 ? meta.text : color.muted,
       rank: meta.rank,
       sessions: [],
     };
@@ -229,21 +237,86 @@ function groupByState(sessions: Session[]) {
 }
 
 function AgentRow({ session }: { session: Session }) {
+  const store = useStore();
   const router = useRouter();
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
   const needsYou = sessionNeedsAnswer(session);
   const displayState = effectiveSessionState(session);
+  const agent = agentLabel(session.kind);
+  const open = () => router.push(`/session/${encodeURIComponent(session.id)}`);
 
+  if (session.question) {
+    // The one row that raises its voice: an agent that cannot continue
+    // without the user. Simple prompts can be answered right here.
+    const answerAction = store.actions.find(
+      (action) => action.sessionId === session.id && action.kind === "answer",
+    );
+    return (
+      // Not one big pressable: that would fold the answer buttons into a single
+      // element for VoiceOver. The header opens the session; the buttons answer.
+      <View style={[styles.card, styles.askCard]}>
+        <MotionPressable
+          onPress={open}
+          style={styles.askHeader}
+          pressedScale={0.98}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={`${session.name}, needs you. Open session`}
+        >
+          <View style={styles.pill}>
+            <View style={[styles.pillDot, { backgroundColor: color.needsYou }]} />
+            <Text style={styles.pillLabel}>Needs you</Text>
+          </View>
+          <Text style={styles.askName} numberOfLines={1}>
+            {session.name}
+          </Text>
+          <Text style={styles.age}>{ago(session.lastActivityAt)}</Text>
+          <Feather name="chevron-right" size={16} color={color.faint} />
+        </MotionPressable>
+        <QuestionCard
+          question={session.question}
+          onAnswer={(answer) => store.answerQuestion(session.id, answer)}
+          onOpen={open}
+          disabled={!store.daemonOnline}
+          submissionStatus={answerAction?.status}
+          submissionError={answerAction?.error}
+          compact
+        />
+      </View>
+    );
+  }
+
+  const busy = displayState === "busy";
   return (
     <MotionPressable
-      onPress={() => router.push(`/session/${encodeURIComponent(session.id)}`)}
-      style={[styles.row, needsYou && styles.rowNeedsYou]}
+      onPress={open}
+      style={[styles.card, styles.row, needsYou && styles.rowNeedsYou]}
       pressedScale={0.985}
       accessibilityRole="button"
-      accessibilityLabel={`${session.name}, ${stateStyle(displayState).label}`}
+      accessibilityLabel={`${session.name}, ${stateStyle(displayState, color).label}`}
     >
-      {needsYou ? <View style={styles.priorityRail} /> : null}
-      <View style={styles.pulseWrap}>
-        <Pulse state={displayState} />
+      <View
+        style={[
+          styles.avatar,
+          busy && { backgroundColor: color.workingWash },
+          needsYou && { backgroundColor: color.needsYouWash },
+        ]}
+      >
+        <Text
+          style={[
+            styles.avatarText,
+            busy && { color: color.working },
+            needsYou && { color: color.needsYouText },
+          ]}
+        >
+          {agent.short}
+        </Text>
+        {displayState !== "idle" && displayState !== "ended" ? (
+          <View style={styles.avatarPulse}>
+            <Pulse state={displayState} size={7} />
+          </View>
+        ) : null}
       </View>
       <View style={styles.rowBody}>
         <View style={styles.rowTop}>
@@ -255,28 +328,15 @@ function AgentRow({ session }: { session: Session }) {
           <Text style={styles.age}>{ago(session.lastActivityAt)}</Text>
         </View>
         {/* Path and model share a line so the row does not grow a third one.
-            Both are machine-authored, so both are set in mono. */}
-        <View style={styles.rowMeta}>
-          <Text style={styles.path} numberOfLines={1}>
-            {shortPath(session.cwd)}
-          </Text>
-          <View style={styles.modelBadge}>
-            <Text style={styles.model} numberOfLines={1}>
-              {session.model ?? session.kind}
-            </Text>
-          </View>
-        </View>
-        {session.question ? (
-          <QuestionCard
-            question={session.question}
-            onAnswer={() => {}}
-            compact
-          />
-        ) : needsYou ? (
-          <Text style={styles.needsYouNote}>Waiting on your answer</Text>
-        ) : null}
+            The model, or the agent's name until it has replied once and named
+            one, keeps the line from flickering into existence. */}
+        <Text style={styles.meta} numberOfLines={1}>
+          {busy ? <Text style={styles.metaWorking}>Working · </Text> : null}
+          {shortPath(session.cwd)} · {session.model ?? agent.name}
+        </Text>
+        {needsYou ? <Text style={styles.needsYouNote}>Waiting on your answer</Text> : null}
       </View>
-      <Feather name="chevron-right" size={20} color={color.faint} style={styles.chevron} />
+      <Feather name="chevron-right" size={18} color={color.faint} />
     </MotionPressable>
   );
 }
@@ -285,69 +345,37 @@ function effectiveSessionState(session: Session): Session["state"] {
   return sessionNeedsAnswer(session) ? "waiting_input" : session.state;
 }
 
-function DashboardSummary({
-  counts,
-}: {
-  counts: { needsYou: number; working: number; idle: number };
-}) {
-  const total = counts.needsYou + counts.working + counts.idle;
-  const title = counts.needsYou
-    ? `${counts.needsYou} ${counts.needsYou === 1 ? "agent needs" : "agents need"} you`
-    : counts.working
-      ? `${counts.working} ${counts.working === 1 ? "agent is" : "agents are"} working`
-      : "Everything is caught up";
-  const detail = counts.needsYou
-    ? "A decision is blocking progress."
-    : counts.working
-      ? "You can step away — status updates live."
-      : `${total} ${total === 1 ? "agent is" : "agents are"} ready when you are.`;
-
+function ConnectionChip({ online, incompatible }: { online: boolean; incompatible: boolean }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
   return (
-    <View style={[styles.summary, counts.needsYou > 0 && styles.summaryAttention]}>
-      <View style={styles.summaryTop}>
-        <View style={styles.summaryCopy}>
-          <Text style={styles.eyebrow}>Live workspace</Text>
-          <Text style={styles.summaryTitle}>{title}</Text>
-          <Text style={styles.summaryDetail}>{detail}</Text>
-        </View>
-        <View
-          style={[
-            styles.summarySignal,
-            {
-              backgroundColor: counts.needsYou ? color.needsYouWash : color.workingWash,
-            },
-          ]}
-        >
-          <Pulse
-            state={counts.needsYou ? "waiting_input" : counts.working ? "busy" : "idle"}
-            size={9}
-          />
-        </View>
-      </View>
-      <View style={styles.metrics}>
-        <Metric label="Needs you" value={counts.needsYou} tint={color.needsYou} />
-        <View style={styles.metricDivider} />
-        <Metric label="Working" value={counts.working} tint={color.working} />
-        <View style={styles.metricDivider} />
-        <Metric label="Idle" value={counts.idle} tint={color.muted} />
-      </View>
+    <View style={styles.chip} accessibilityRole="text">
+      <View
+        style={[styles.chipDot, { backgroundColor: online ? color.ok : color.error }]}
+      />
+      <Text style={styles.chipText}>
+        {online ? "Mac connected" : incompatible ? "Update required" : "Reconnecting"}
+      </Text>
     </View>
   );
 }
 
-function Metric({
-  label,
+function CountTile({
   value,
+  label,
   tint,
+  wash,
 }: {
-  label: string;
   value: number;
+  label: string;
   tint: string;
+  wash: string;
 }) {
+  const styles = useStyles(makeStyles);
   return (
-    <View style={styles.metric}>
-      <Text style={[styles.metricValue, { color: tint }]}>{value}</Text>
-      <Text style={styles.metricLabel}>{label}</Text>
+    <View style={[styles.tile, { backgroundColor: wash }]} accessible accessibilityLabel={`${value} ${label}`}>
+      <Text style={[styles.tileValue, { color: tint }]}>{value}</Text>
+      <Text style={styles.tileLabel}>{label}</Text>
     </View>
   );
 }
@@ -360,8 +388,10 @@ function Metric({
  * the app would flatly lie about the second.
  */
 function AllHiddenState({ count, onShow }: { count: number; onShow(): void }) {
+  const styles = useStyles(makeStyles);
   return (
     <View style={styles.empty}>
+      <EmptyIllustration style={styles.emptyArt} />
       <Text style={styles.emptyTitle}>All caught up</Text>
       <Text style={styles.emptyBody}>
         {count} idle {count === 1 ? "agent is" : "agents are"} hidden. They come
@@ -371,21 +401,23 @@ function AllHiddenState({ count, onShow }: { count: number; onShow(): void }) {
           here — on a board that is empty solely because of hiding. */}
       <MotionPressable
         hitSlop={10}
-        style={styles.emptyActionButton}
+        style={styles.secondaryButton}
         onPress={onShow}
         accessibilityRole="button"
       >
-        <Text style={styles.emptyAction}>Show them anyway</Text>
+        <Text style={styles.secondaryButtonText}>Show them anyway</Text>
       </MotionPressable>
     </View>
   );
 }
 
 function OfflineBanner({ lastSeenAt }: { lastSeenAt: number | null }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
   return (
-    <View style={styles.banner}>
-      <View style={styles.offlineIcon}>
-        <Feather name="wifi-off" size={15} color={color.error} />
+    <View style={styles.banner} accessibilityRole="alert">
+      <View style={styles.bannerIcon}>
+        <Feather name="wifi-off" size={15} color={color.errorText} />
       </View>
       <View style={styles.bannerCopy}>
         <Text style={styles.bannerText}>
@@ -398,10 +430,12 @@ function OfflineBanner({ lastSeenAt }: { lastSeenAt: number | null }) {
 }
 
 function ProtocolBanner() {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
   return (
     <View style={styles.banner} accessibilityRole="alert">
-      <View style={styles.offlineIcon}>
-        <Feather name="alert-triangle" size={15} color={color.error} />
+      <View style={styles.bannerIcon}>
+        <Feather name="alert-triangle" size={15} color={color.errorText} />
       </View>
       <View style={styles.bannerCopy}>
         <Text style={styles.bannerText}>Agentman versions do not match</Text>
@@ -414,254 +448,267 @@ function ProtocolBanner() {
 }
 
 function EmptyState() {
+  const styles = useStyles(makeStyles);
   return (
     <View style={styles.empty}>
-      <View style={styles.emptyIcon}>
-        <Feather name="terminal" size={20} color={color.working} />
-      </View>
+      <EmptyIllustration style={styles.emptyArt} />
       <Text style={styles.emptyTitle}>Nothing running</Text>
       <Text style={styles.emptyBody}>
-        Start an agent on your Mac and it shows up here. Use{" "}
-        <Text style={styles.code}>am claude</Text> to start one you can message back.
+        Start an agent on your Mac and it shows up here, ready to take your messages.
+      </Text>
+      <View style={styles.command}>
+        <Text style={styles.commandPrompt}>$</Text>
+        <Text style={styles.commandText} selectable>
+          am claude
+        </Text>
+      </View>
+      <Text style={styles.emptyHint}>
+        Also <Text style={styles.inlineMono}>am codex</Text> and{" "}
+        <Text style={styles.inlineMono}>am opencode</Text>
       </Text>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: color.ink },
-  scroll: { flex: 1 },
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    scroll: { flex: 1 },
+    gutter: { paddingHorizontal: space.lg },
 
-  header: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    paddingHorizontal: space.lg,
-    paddingTop: space.lg,
-    paddingBottom: space.lg,
-  },
-  wordmark: {
-    fontFamily: font.mono,
-    fontSize: size.display,
-    color: color.text,
-    letterSpacing: -1.2,
-  },
-  wordmarkAccent: { color: color.working },
-  connectionLine: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 },
-  connectionDot: { width: 6, height: 6, borderRadius: 3 },
-  subhead: {
-    fontFamily: font.sans,
-    fontSize: size.caption,
-    color: color.muted,
-  },
-  gear: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.pill,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: color.surfaceRaised,
-  },
+    topBar: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingTop: space.md,
+    },
+    chip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+      height: 32,
+      paddingHorizontal: space.md,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    chipDot: { width: 7, height: 7, borderRadius: 4 },
+    chipText: { fontFamily: font.sansMedium, fontSize: size.caption, color: c.textSecondary },
+    iconButton: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    title: {
+      fontFamily: font.sansBold,
+      fontSize: size.display,
+      letterSpacing: -1.2,
+      color: c.text,
+      marginTop: space.lg,
+    },
 
-  summaryWrap: { marginHorizontal: space.lg, marginTop: space.xs },
-  summary: {
-    borderRadius: radius.lg,
-    padding: space.xl,
-    backgroundColor: color.surface,
-    borderWidth: 1,
-    borderColor: color.line,
-  },
-  summaryAttention: { borderColor: "#594523", backgroundColor: color.needsYouWash },
-  summaryTop: { flexDirection: "row", gap: space.md, alignItems: "flex-start" },
-  summaryCopy: { flex: 1 },
-  eyebrow: {
-    fontFamily: font.sansMedium,
-    fontSize: size.label,
-    letterSpacing: 1.4,
-    textTransform: "uppercase",
-    color: color.faint,
-  },
-  summaryTitle: {
-    fontFamily: font.sansBold,
-    fontSize: size.heading,
-    lineHeight: 27,
-    letterSpacing: -0.35,
-    color: color.text,
-    marginTop: space.xs,
-  },
-  summaryDetail: {
-    fontFamily: font.sans,
-    fontSize: size.caption,
-    lineHeight: 18,
-    color: color.muted,
-    marginTop: space.xs,
-  },
-  summarySignal: {
-    width: 42,
-    height: 42,
-    borderRadius: radius.md,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  metrics: {
-    flexDirection: "row",
-    marginTop: space.lg,
-    paddingTop: space.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: color.line,
-  },
-  metric: { flex: 1, alignItems: "center", gap: space.xxs },
-  metricValue: { fontFamily: font.monoMedium, fontSize: size.title },
-  metricLabel: { fontFamily: font.sans, fontSize: size.label, color: color.faint },
-  metricDivider: { width: StyleSheet.hairlineWidth, backgroundColor: color.line },
+    tiles: { flexDirection: "row", gap: space.sm, marginTop: space.lg },
+    tile: { flex: 1, borderRadius: radius.xl, paddingHorizontal: space.md, paddingVertical: space.md },
+    tileValue: {
+      fontFamily: font.sansBold,
+      fontSize: 28,
+      letterSpacing: -0.8,
+      fontVariant: ["tabular-nums"],
+    },
+    tileLabel: { fontFamily: font.sansMedium, fontSize: size.caption, color: c.muted, marginTop: 2 },
 
-  groupHeading: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: space.lg,
-    marginTop: space.xxl,
-    marginBottom: space.md,
-  },
-  groupLabel: {
-    fontFamily: font.sansMedium,
-    fontSize: size.label,
-    letterSpacing: 1.4,
-    textTransform: "uppercase",
-  },
-  groupCount: { fontFamily: font.mono, fontSize: size.label, color: color.faint },
+    groupHeading: {
+      flexDirection: "row",
+      alignItems: "baseline",
+      justifyContent: "space-between",
+      paddingHorizontal: space.xxs,
+      marginTop: space.xl,
+      marginBottom: space.sm,
+    },
+    groupLabel: { fontFamily: font.sansBold, fontSize: size.caption },
+    groupCount: { fontFamily: font.mono, fontSize: size.label, color: c.faint },
 
-  row: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: space.sm,
-    paddingVertical: space.lg,
-    paddingHorizontal: space.lg,
-    marginHorizontal: space.lg,
-    borderRadius: radius.lg,
-    backgroundColor: color.surface,
-    marginBottom: space.md,
-    borderWidth: 1,
-    borderColor: color.line,
-    overflow: "hidden",
-  },
-  // The one place the design raises its voice: an agent that cannot continue
-  // without the user.
-  rowNeedsYou: { borderColor: "#594523", backgroundColor: color.needsYouWash },
-  priorityRail: {
-    position: "absolute",
-    left: 0,
-    top: 14,
-    bottom: 14,
-    width: 3,
-    borderTopRightRadius: 2,
-    borderBottomRightRadius: 2,
-    backgroundColor: color.needsYou,
-  },
-  pulseWrap: { marginTop: -space.xs },
+    card: {
+      borderRadius: radius.xl,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+      marginBottom: ROW_GAP,
+    },
+    askCard: {
+      padding: space.lg,
+      gap: space.md,
+      borderColor: c.needsYouEdge,
+      shadowColor: c.needsYou,
+      shadowOpacity: 0.12,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 2,
+    },
+    askHeader: { flexDirection: "row", alignItems: "center", gap: space.sm },
+    pill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      height: 22,
+      paddingHorizontal: 9,
+      borderRadius: radius.pill,
+      backgroundColor: c.needsYouWash,
+    },
+    pillDot: { width: 6, height: 6, borderRadius: 3 },
+    pillLabel: { fontFamily: font.sansBold, fontSize: 11.5, color: c.needsYouText },
+    askName: { flex: 1, fontFamily: font.mono, fontSize: size.caption, color: c.textSecondary },
 
-  rowBody: { flex: 1, gap: space.xxs },
-  rowTop: { flexDirection: "row", alignItems: "baseline", gap: space.sm },
-  name: {
-    flex: 1,
-    fontFamily: font.monoMedium,
-    fontSize: size.body,
-    color: color.text,
-  },
-  age: { fontFamily: font.sans, fontSize: size.caption, color: color.faint },
-  rowMeta: { flexDirection: "row", alignItems: "center", gap: space.sm },
-  path: { flex: 1, fontFamily: font.mono, fontSize: size.caption, color: color.muted },
-  // The model, or the agent kind until the agent has replied once and named
-  // one. Falling back to the kind rather than showing nothing keeps the column
-  // from flickering into existence on the first reply.
-  modelBadge: {
-    maxWidth: "45%",
-    paddingHorizontal: space.sm,
-    paddingVertical: 3,
-    borderRadius: radius.pill,
-    backgroundColor: color.surfaceRaised,
-  },
-  model: { fontFamily: font.mono, fontSize: size.label, color: color.faint },
-  chevron: { alignSelf: "center" },
-  needsYouNote: {
-    fontFamily: font.sansMedium,
-    fontSize: size.caption,
-    color: color.needsYou,
-    marginTop: space.xs,
-  },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      paddingVertical: 13,
+      paddingHorizontal: 14,
+    },
+    rowNeedsYou: { borderColor: c.needsYouEdge },
+    avatar: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.md,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.fill,
+    },
+    avatarText: { fontFamily: font.monoMedium, fontSize: 14, color: c.muted },
+    avatarPulse: {
+      position: "absolute",
+      right: -8,
+      bottom: -8,
+    },
+    rowBody: { flex: 1, gap: 3 },
+    rowTop: { flexDirection: "row", alignItems: "baseline", gap: space.sm },
+    name: {
+      flex: 1,
+      fontFamily: font.monoMedium,
+      fontSize: 14.5,
+      color: c.text,
+    },
+    age: { fontFamily: font.sans, fontSize: size.label, color: c.faint },
+    meta: { fontFamily: font.mono, fontSize: 12, color: c.muted },
+    metaWorking: { fontFamily: font.sansMedium, color: c.workingText },
+    needsYouNote: {
+      fontFamily: font.sansMedium,
+      fontSize: size.caption,
+      color: c.needsYouText,
+      marginTop: space.xxs,
+    },
 
-  banner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space.md,
-    marginHorizontal: space.lg,
-    padding: space.md,
-    borderRadius: radius.lg,
-    backgroundColor: color.errorWash,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#563039",
-  },
-  offlineIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#402127",
-  },
-  bannerCopy: { flex: 1 },
-  bannerText: { fontFamily: font.sansMedium, fontSize: size.caption, color: color.text },
-  bannerHint: { fontFamily: font.sans, fontSize: size.caption, color: color.muted, marginTop: 2 },
+    banner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      marginTop: space.lg,
+      padding: space.md,
+      borderRadius: radius.xl,
+      backgroundColor: c.errorWash,
+      borderWidth: 1,
+      borderColor: c.errorEdge,
+    },
+    bannerIcon: {
+      width: 32,
+      height: 32,
+      borderRadius: radius.md,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+    },
+    bannerCopy: { flex: 1 },
+    bannerText: { fontFamily: font.sansBold, fontSize: size.caption, color: c.text },
+    bannerHint: { fontFamily: font.sans, fontSize: size.caption, color: c.muted, marginTop: 2 },
 
-  empty: {
-    marginHorizontal: space.lg,
-    marginTop: space.xl,
-    paddingHorizontal: space.xl,
-    paddingVertical: space.xxl,
-    alignItems: "center",
-    borderRadius: radius.xl,
-    backgroundColor: color.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.line,
-    gap: space.sm,
-  },
-  emptyIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: radius.lg,
-    backgroundColor: color.sunken,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: space.sm,
-  },
-  emptyTitle: { fontFamily: font.sansBold, fontSize: size.heading, color: color.text },
-  emptyBody: { fontFamily: font.sans, fontSize: size.body, color: color.muted, lineHeight: 22 },
-  code: { fontFamily: font.mono, color: color.working },
-  emptyAction: {
-    fontFamily: font.sansMedium,
-    fontSize: size.body,
-    color: color.working,
-  },
-  emptyActionButton: { paddingVertical: space.sm, paddingHorizontal: space.md },
+    empty: {
+      marginTop: space.xl,
+      alignItems: "center",
+      gap: space.sm,
+    },
+    emptyArt: {
+      width: "100%",
+      aspectRatio: 340 / 214,
+      borderRadius: radius.sheet,
+      overflow: "hidden",
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+      marginBottom: space.md,
+    },
+    emptyTitle: {
+      fontFamily: font.sansBold,
+      fontSize: 26,
+      letterSpacing: -0.8,
+      color: c.text,
+      textAlign: "center",
+    },
+    emptyBody: {
+      fontFamily: font.sans,
+      fontSize: size.body,
+      color: c.muted,
+      lineHeight: 22,
+      textAlign: "center",
+      maxWidth: 320,
+    },
+    command: {
+      alignSelf: "stretch",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      marginTop: space.md,
+      paddingHorizontal: space.lg,
+      paddingVertical: 14,
+      borderRadius: radius.lg,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    commandPrompt: { fontFamily: font.mono, fontSize: 14, color: c.faint },
+    commandText: { fontFamily: font.mono, fontSize: 14, color: c.text },
+    emptyHint: { fontFamily: font.sans, fontSize: size.caption, color: c.faint, marginTop: space.xs },
+    inlineMono: { fontFamily: font.mono, color: c.muted },
+    secondaryButton: {
+      marginTop: space.sm,
+      minHeight: 44,
+      paddingHorizontal: space.xl,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.fillStrong,
+    },
+    secondaryButtonText: { fontFamily: font.sansBold, fontSize: size.body, color: c.text },
 
-  undoBar: {
-    position: "absolute",
-    alignSelf: "center",
-    width: "90%",
-    maxWidth: 520,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: space.md,
-    paddingVertical: space.md,
-    paddingHorizontal: space.lg,
-    borderRadius: radius.lg,
-    backgroundColor: color.surfaceRaised,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.lineStrong,
-    zIndex: 20,
-  },
-  undoText: { flex: 1, fontFamily: font.sans, fontSize: size.body, color: color.muted },
-  undoAction: { fontFamily: font.sansMedium, fontSize: size.body, color: color.working },
-  undoButton: { paddingVertical: space.xs, paddingHorizontal: space.sm },
-});
+    undoBar: {
+      position: "absolute",
+      alignSelf: "center",
+      width: "90%",
+      maxWidth: 520,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: space.md,
+      paddingVertical: space.md,
+      paddingHorizontal: space.lg,
+      borderRadius: radius.pill,
+      backgroundColor: c.inverse,
+      shadowColor: c.shadow,
+      shadowOpacity: 0.2,
+      shadowRadius: 20,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 6,
+      zIndex: 20,
+    },
+    undoText: { flex: 1, fontFamily: font.sans, fontSize: size.body, color: c.onInverse },
+    undoAction: { fontFamily: font.sansBold, fontSize: size.body, color: c.inverseAccent },
+    undoButton: { paddingVertical: space.xs, paddingHorizontal: space.sm },
+  });

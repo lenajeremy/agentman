@@ -12,7 +12,8 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-import { color, font, size, space } from "../lib/theme";
+import { useStyles } from "../lib/appearance";
+import { font, Palette, size, space } from "../lib/theme";
 
 /**
  * Shown at the foot of the feed while the agent is mid-turn.
@@ -28,6 +29,7 @@ import { color, font, size, space } from "../lib/theme";
  */
 export function Thinking({ label = "Working" }: { label?: string }) {
   const reduceMotion = useReducedMotion();
+  const styles = useStyles(makeStyles);
 
   return (
     <View style={styles.row} accessibilityRole="progressbar" accessibilityLabel={label}>
@@ -43,6 +45,7 @@ export function Thinking({ label = "Working" }: { label?: string }) {
 
 function Dot({ index, still }: { index: number; still: boolean }) {
   const opacity = useSharedValue(0.25);
+  const styles = useStyles(makeStyles);
 
   useEffect(() => {
     if (still) {
@@ -70,16 +73,17 @@ function Dot({ index, still }: { index: number; still: boolean }) {
   return <Animated.View style={[styles.dot, style]} />;
 }
 
-const styles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", gap: space.sm },
-  dots: { flexDirection: "row", gap: 5, alignItems: "center" },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    // The same cyan the status dot uses for a working agent, so the two read
-    // as one signal in different places.
-    backgroundColor: color.working,
-  },
-  label: { fontFamily: font.sans, fontSize: size.caption, color: color.muted },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    row: { flexDirection: "row", alignItems: "center", gap: space.sm },
+    dots: { flexDirection: "row", gap: 5, alignItems: "center" },
+    dot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      // The same cobalt the status dot uses for a working agent, so the two
+      // read as one signal in different places.
+      backgroundColor: c.working,
+    },
+    label: { fontFamily: font.sansMedium, fontSize: size.caption, color: c.muted },
+  });

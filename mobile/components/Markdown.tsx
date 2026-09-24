@@ -2,7 +2,10 @@ import { ReactNode } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { cellWidth, parseTable, type Table } from "../lib/markdown-table";
-import { color, font, radius, size, space } from "../lib/theme";
+import { useStyles } from "../lib/appearance";
+import { font, Palette, radius, size, space } from "../lib/theme";
+
+type Styles = ReturnType<typeof makeStyles>;
 
 const MAX_MARKDOWN_CHARS = 200_000;
 
@@ -25,11 +28,12 @@ export function Markdown({ children }: { children: string }) {
   const clipped = children.length > MAX_MARKDOWN_CHARS;
   const source = clipped ? children.slice(0, MAX_MARKDOWN_CHARS) : children;
   const blocks = parseBlocks(source);
+  const styles = useStyles(makeStyles);
 
   return (
     <View style={styles.body}>
       {blocks.map((block, index) => (
-        <BlockView key={`${index}:${block.kind}`} block={block} />
+        <BlockView key={`${index}:${block.kind}`} block={block} styles={styles} />
       ))}
       {clipped ? (
         <Text style={styles.truncated}>
@@ -40,12 +44,12 @@ export function Markdown({ children }: { children: string }) {
   );
 }
 
-function BlockView({ block }: { block: Block }) {
+function BlockView({ block, styles }: { block: Block; styles: Styles }) {
   switch (block.kind) {
     case "heading":
       return (
         <Text selectable style={[styles.text, styles.heading, block.level === 1 && styles.heading1]}>
-          {renderInline(block.text)}
+          {renderInline(block.text, styles)}
         </Text>
       );
     case "code":
@@ -58,32 +62,32 @@ function BlockView({ block }: { block: Block }) {
       return (
         <View style={styles.quote}>
           <Text selectable style={[styles.text, styles.muted]}>
-            {renderInline(block.text)}
+            {renderInline(block.text, styles)}
           </Text>
         </View>
       );
     case "table":
-      return <TableView table={block.table} />;
+      return <TableView table={block.table} styles={styles} />;
     case "bullet":
     case "number":
       return (
         <View style={styles.listRow}>
           <Text style={styles.marker}>{block.marker}</Text>
           <Text selectable style={[styles.text, styles.listText]}>
-            {renderInline(block.text)}
+            {renderInline(block.text, styles)}
           </Text>
         </View>
       );
     default:
       return (
         <Text selectable style={styles.text}>
-          {renderInline(block.text)}
+          {renderInline(block.text, styles)}
         </Text>
       );
   }
 }
 
-function TableView({ table }: { table: Table }) {
+function TableView({ table, styles }: { table: Table; styles: Styles }) {
   // React Native has no table layout, so columns are measured here and given
   // fixed widths. Without that, each row sizes independently and the columns
   // do not line up with one another.
@@ -114,7 +118,7 @@ function TableView({ table }: { table: Table }) {
                 { width: widths[index], textAlign: table.align[index] },
               ]}
             >
-              {renderInline(heading)}
+              {renderInline(heading, styles)}
             </Text>
           ))}
         </View>
@@ -132,7 +136,7 @@ function TableView({ table }: { table: Table }) {
                   { width: widths[index], textAlign: table.align[index] },
                 ]}
               >
-                {renderInline(cell)}
+                {renderInline(cell, styles)}
               </Text>
             ))}
           </View>
@@ -238,7 +242,7 @@ function numberedLine(line: string): Block | null {
 
 // Inline code and bold cover the high-value cases (paths, commands, result
 // labels) without auto-linking or interpreting arbitrary HTML.
-function renderInline(text: string): ReactNode[] {
+function renderInline(text: string, styles: Styles): ReactNode[] {
   const out: ReactNode[] = [];
   let cursor = 0;
   let plainStart = 0;
@@ -270,77 +274,81 @@ function renderInline(text: string): ReactNode[] {
   return out;
 }
 
-const styles = StyleSheet.create({
-  body: { gap: space.sm },
-  text: {
-    fontFamily: font.sans,
-    fontSize: size.body,
-    color: color.text,
-    lineHeight: 22,
-  },
-  heading: { fontFamily: font.sansBold, marginTop: space.xs },
-  heading1: { fontSize: size.title },
-  bold: { fontFamily: font.sansBold },
-  inlineCode: {
-    fontFamily: font.mono,
-    fontSize: size.caption,
-    color: color.working,
-    backgroundColor: color.sunken,
-  },
-  codeBlock: {
-    fontFamily: font.mono,
-    fontSize: size.caption,
-    lineHeight: 18,
-    color: color.text,
-    backgroundColor: color.sunken,
-    borderRadius: radius.sm,
-    padding: space.sm,
-  },
-  quote: {
-    borderLeftWidth: 2,
-    borderLeftColor: color.line,
-    paddingLeft: space.sm,
-  },
-  muted: { color: color.muted },
-  listRow: { flexDirection: "row", alignItems: "flex-start", gap: space.sm },
-  marker: {
-    minWidth: 16,
-    fontFamily: font.mono,
-    fontSize: size.caption,
-    color: color.faint,
-    lineHeight: 22,
-  },
-  listText: { flex: 1 },
-  // A table is the one block with a natural width the screen cannot always
-  // give it, so it scrolls sideways inside its own container rather than
-  // forcing the whole feed to.
-  tableScroll: { marginVertical: space.xs },
-  tableScrollContent: { paddingRight: space.lg },
-  table: {
-    borderWidth: 1,
-    borderColor: color.line,
-    borderRadius: radius.md,
-    overflow: "hidden",
-  },
-  tableRow: { flexDirection: "row" },
-  // The header sits on a lifted strip, which is what separates it from the
-  // body without needing a heavier rule.
-  tableHeadRow: { backgroundColor: color.surfaceRaised },
-  tableRowRuled: { borderTopWidth: 1, borderTopColor: color.line },
-  tableCell: {
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-    fontFamily: font.sans,
-    fontSize: size.caption,
-    lineHeight: 19,
-    color: color.text,
-  },
-  tableHeadCell: { fontFamily: font.sansMedium, color: color.muted },
+function makeStyles(c: Palette) {
+  return StyleSheet.create({
+    body: { gap: space.sm },
+    text: {
+      fontFamily: font.sans,
+      fontSize: size.body,
+      color: c.text,
+      lineHeight: 23,
+    },
+    heading: { fontFamily: font.sansBold, marginTop: space.xs, letterSpacing: -0.2 },
+    heading1: { fontSize: size.title },
+    bold: { fontFamily: font.sansBold },
+    inlineCode: {
+      fontFamily: font.mono,
+      fontSize: size.caption,
+      color: c.textSecondary,
+      backgroundColor: c.fill,
+    },
+    codeBlock: {
+      fontFamily: font.mono,
+      fontSize: 12.5,
+      lineHeight: 19,
+      color: c.text,
+      backgroundColor: c.fill,
+      borderRadius: radius.md,
+      padding: space.md,
+      overflow: "hidden",
+    },
+    quote: {
+      borderLeftWidth: 3,
+      borderLeftColor: c.fillStrong,
+      paddingLeft: space.md,
+    },
+    muted: { color: c.muted },
+    listRow: { flexDirection: "row", alignItems: "flex-start", gap: space.sm },
+    marker: {
+      minWidth: 16,
+      fontFamily: font.mono,
+      fontSize: size.caption,
+      color: c.faint,
+      lineHeight: 23,
+    },
+    listText: { flex: 1 },
+    // A table is the one block with a natural width the screen cannot always
+    // give it, so it scrolls sideways inside its own container rather than
+    // forcing the whole feed to.
+    tableScroll: { marginVertical: space.xs },
+    tableScrollContent: { paddingRight: space.lg },
+    table: {
+      borderWidth: 1,
+      borderColor: c.line,
+      borderRadius: radius.md,
+      overflow: "hidden",
+      backgroundColor: c.surface,
+    },
+    tableRow: { flexDirection: "row" },
+    // The header sits on a filled strip, which is what separates it from the
+    // body without needing a heavier rule.
+    tableHeadRow: { backgroundColor: c.fill },
+    tableRowRuled: { borderTopWidth: 1, borderTopColor: c.line },
+    tableCell: {
+      paddingHorizontal: space.md,
+      paddingVertical: space.sm,
+      fontFamily: font.sans,
+      fontSize: size.caption,
+      lineHeight: 19,
+      color: c.text,
+    },
+    tableHeadCell: { fontFamily: font.sansMedium, color: c.muted },
 
-  truncated: {
-    fontFamily: font.sans,
-    fontSize: size.caption,
-    color: color.faint,
-    fontStyle: "italic",
-  },
-});
+    truncated: {
+      fontFamily: font.sans,
+      fontSize: size.caption,
+      color: c.faint,
+      fontStyle: "italic",
+    },
+  });
+}

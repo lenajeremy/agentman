@@ -30,8 +30,19 @@ import { draftNamespace } from "../../lib/draft-policy";
 import { clearDraft, loadDraft, saveDraft } from "../../lib/drafts";
 import { Message } from "../../lib/protocol";
 import { sessionNeedsAnswer } from "../../lib/question-alerts";
+import { useStyles, useTheme } from "../../lib/appearance";
 import { PendingSend, useStore } from "../../lib/store";
-import { color, font, layout, radius, shortPath, size, space, stateStyle } from "../../lib/theme";
+import {
+  agentLabel,
+  font,
+  layout,
+  Palette,
+  radius,
+  shortPath,
+  size,
+  space,
+  stateStyle,
+} from "../../lib/theme";
 
 type Row =
   | { kind: "message"; message: Message }
@@ -43,6 +54,8 @@ export default function SessionScreen() {
   const store = useStore();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
   const { height: viewportHeight } = useWindowDimensions();
   const listRef = useRef<FlatList<Row>>(null);
   const [draft, setDraft] = useState("");
@@ -235,74 +248,63 @@ export default function SessionScreen() {
     interruptAction?.status === "sending" ||
     interruptAction?.status === "delivered";
 
+  const displayState = effectiveState ?? session?.state ?? "ended";
+  const state = stateStyle(displayState, color);
+
   return (
     <View style={[styles.page, { paddingTop: insets.top }]}>
-      <View style={styles.headerShell}>
-        <ContentColumn style={styles.header}>
+      <ContentColumn style={styles.header}>
+        <MotionPressable
+          onPress={() => router.back()}
+          hitSlop={12}
+          style={styles.iconButton}
+          pressedScale={0.92}
+          accessibilityRole="button"
+          accessibilityLabel="Back to agents"
+        >
+          <Feather name="chevron-left" size={20} color={color.text} />
+        </MotionPressable>
+        <View style={styles.headerBody}>
+          <Text style={styles.title} numberOfLines={1}>
+            {session?.name ?? "Session"}
+          </Text>
+          <Text style={styles.subtitle} numberOfLines={1}>
+            {session
+              ? // Which model is answering you is worth knowing before you send
+                // it something — "Codex" says which CLI is open, not what is
+                // doing the work.
+                [session.model ?? agentLabel(session.kind).name, shortPath(session.cwd)].join(" · ")
+              : sessionId}
+          </Text>
+        </View>
+        {session ? (
+          <View style={[styles.statePill, { backgroundColor: state.wash }]}>
+            <Pulse state={displayState} size={6} />
+            <Text style={[styles.stateLabel, { color: state.text }]}>{state.label}</Text>
+          </View>
+        ) : null}
+        {session?.state === "busy" ? (
           <MotionPressable
-            onPress={() => router.back()}
-            hitSlop={12}
-            style={styles.back}
+            onPress={requestInterrupt}
+            disabled={interruptLocked}
+            hitSlop={10}
+            style={[styles.stop, interruptLocked && styles.stopDisabled]}
             pressedScale={0.92}
             accessibilityRole="button"
-            accessibilityLabel="Back to agents"
+            accessibilityLabel="Stop current turn"
+            accessibilityState={{
+              disabled: interruptLocked,
+              busy: interruptAction?.status === "sending",
+            }}
           >
-            <Feather name="chevron-left" size={22} color={color.text} />
+            {interruptAction?.status === "sending" ? (
+              <ActivityIndicator size="small" color={color.onInverse} />
+            ) : (
+              <View style={styles.stopGlyph} />
+            )}
           </MotionPressable>
-          <View style={styles.headerBody}>
-            <Text style={styles.title} numberOfLines={1}>
-              {session?.name ?? "Session"}
-            </Text>
-            <Text style={styles.subtitle} numberOfLines={1}>
-              {session
-                ? // Which model is answering you is worth knowing before you send
-                  // it something — "Codex" says which CLI is open, not what is
-                  // doing the work.
-                  [shortPath(session.cwd), session.model ?? session.kind].join("  ·  ")
-                : sessionId}
-            </Text>
-          </View>
-          {session?.state === "busy" ? (
-            <MotionPressable
-              onPress={requestInterrupt}
-              disabled={interruptLocked}
-              hitSlop={10}
-              style={[styles.stop, interruptLocked && styles.stopDisabled]}
-              pressedScale={0.92}
-              accessibilityRole="button"
-              accessibilityLabel="Stop current turn"
-              accessibilityState={{
-                disabled: interruptLocked,
-                busy: interruptAction?.status === "sending",
-              }}
-            >
-              {interruptAction?.status === "sending" ? (
-                <ActivityIndicator size="small" color={color.error} />
-              ) : (
-                <Feather name="square" size={13} color={color.error} />
-              )}
-            </MotionPressable>
-          ) : null}
-          {session ? (
-            <View
-              style={[
-                styles.statePill,
-                effectiveState === "waiting_input" && styles.statePillAttention,
-              ]}
-            >
-              <Pulse state={effectiveState ?? session.state} size={6} />
-              <Text
-                style={[
-                  styles.stateLabel,
-                  { color: stateStyle(effectiveState ?? session.state).color },
-                ]}
-              >
-                {stateStyle(effectiveState ?? session.state).label}
-              </Text>
-            </View>
-          ) : null}
-        </ContentColumn>
-      </View>
+        ) : null}
+      </ContentColumn>
 
       <KeyboardAvoidingView
         style={styles.keyboardAvoider}
@@ -382,108 +384,123 @@ export default function SessionScreen() {
         }
       />
 
-        {/* Pinned above the composer, not buried in the feed: an unanswered
-            question is the only thing on this screen that blocks the agent. */}
+        {/* A blocked agent reads nothing else until this is answered, so the
+            question takes the composer's place as a sheet docked to the
+            bottom: impossible to miss, but the transcript above stays
+            readable for context. */}
         {session?.question ? (
-          <ContentColumn
+          <View
             style={[
-              styles.questionWrap,
-              { maxHeight: Math.max(220, Math.min(440, viewportHeight * 0.52)) },
+              styles.sheet,
+              {
+                maxHeight: Math.max(260, Math.min(520, viewportHeight * 0.62)),
+                paddingBottom: (keyboardVisible ? 0 : insets.bottom) + space.md,
+              },
             ]}
           >
+            <View style={styles.grabber} />
             <ScrollView
-              style={styles.questionScroll}
-              contentContainerStyle={styles.questionScrollContent}
+              contentContainerStyle={styles.sheetContent}
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled
             >
-              <QuestionCard
-                question={session.question}
-                onAnswer={(answer) => store.answerQuestion(sessionId, answer)}
-                disabled={!store.daemonOnline}
-                submissionStatus={answerAction?.status}
-                submissionError={answerAction?.error}
-              />
+              <ContentColumn>
+                <QuestionCard
+                  question={session.question}
+                  onAnswer={(answer) => store.answerQuestion(sessionId, answer)}
+                  disabled={!store.daemonOnline}
+                  submissionStatus={answerAction?.status}
+                  submissionError={answerAction?.error}
+                />
+              </ContentColumn>
             </ScrollView>
-          </ContentColumn>
-        ) : null}
-
-        <View style={styles.composerShell}>
-          <ContentColumn
-            style={[
-              styles.composer,
-              { paddingBottom: (keyboardVisible ? 0 : insets.bottom) + space.sm },
-            ]}
-          >
-            <View
+          </View>
+        ) : (
+          <View style={styles.composerShell}>
+            <ContentColumn
               style={[
-                styles.field,
-                inputFocused && canSend && styles.fieldFocused,
-                !canSend && styles.fieldDisabled,
+                styles.composer,
+                { paddingBottom: (keyboardVisible ? 0 : insets.bottom) + space.sm },
               ]}
             >
-            <TextInput
-              style={styles.input}
-              value={draft}
-              onChangeText={setDraft}
-              onFocus={() => setInputFocused(true)}
-              onBlur={() => setInputFocused(false)}
-              editable={canSend && !awaitingSend}
-              placeholder={
-                blocked
-                  ? "Answer the question above first"
-                  : awaitingSend
-                    ? "Waiting for delivery…"
-                    : canSend
-                    ? "Send an instruction…"
-                    : "This session can't receive messages"
-              }
-              placeholderTextColor={color.faint}
-              multiline
-              onSubmitEditing={submit}
-              returnKeyType="send"
-              accessibilityLabel="Instruction"
-            />
-            <MotionPressable
-              onPress={submit}
-              disabled={!canSend || awaitingSend || draft.trim().length === 0}
-              style={[
-                styles.send,
-                (!canSend || awaitingSend || draft.trim().length === 0) &&
-                  styles.sendDisabled,
-              ]}
-              pressedScale={0.92}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Send instruction"
-              accessibilityState={{
-                disabled: !canSend || awaitingSend || draft.trim().length === 0,
-                busy: submittedSend?.status === "sending",
-              }}
-            >
-              {submittedSend?.status === "sending" ? (
-                <ActivityIndicator size="small" color={color.faint} />
-              ) : (
-                <Feather name="arrow-up" size={18} color={color.ink} />
-              )}
-            </MotionPressable>
-            </View>
-          </ContentColumn>
-        </View>
+              <View
+                style={[
+                  styles.field,
+                  inputFocused && canSend && styles.fieldFocused,
+                  !canSend && styles.fieldDisabled,
+                ]}
+              >
+                <TextInput
+                  style={styles.input}
+                  value={draft}
+                  onChangeText={setDraft}
+                  onFocus={() => setInputFocused(true)}
+                  onBlur={() => setInputFocused(false)}
+                  editable={canSend && !awaitingSend}
+                  placeholder={
+                    awaitingSend
+                      ? "Waiting for delivery…"
+                      : canSend
+                        ? `Message ${session ? agentLabel(session.kind).name : "the agent"}…`
+                        : "This session can't receive messages"
+                  }
+                  placeholderTextColor={color.faint}
+                  multiline
+                  onSubmitEditing={submit}
+                  returnKeyType="send"
+                  accessibilityLabel="Instruction"
+                />
+                <MotionPressable
+                  onPress={submit}
+                  disabled={!canSend || awaitingSend || draft.trim().length === 0}
+                  style={[
+                    styles.send,
+                    (!canSend || awaitingSend || draft.trim().length === 0) &&
+                      styles.sendDisabled,
+                  ]}
+                  pressedScale={0.92}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Send instruction"
+                  accessibilityState={{
+                    disabled: !canSend || awaitingSend || draft.trim().length === 0,
+                    busy: submittedSend?.status === "sending",
+                  }}
+                >
+                  {submittedSend?.status === "sending" ? (
+                    <ActivityIndicator size="small" color={color.faint} />
+                  ) : (
+                    <Feather
+                      name="arrow-up"
+                      size={18}
+                      color={
+                        !canSend || awaitingSend || draft.trim().length === 0
+                          ? color.faint
+                          : "#FFFFFF"
+                      }
+                    />
+                  )}
+                </MotionPressable>
+              </View>
+            </ContentColumn>
+          </View>
+        )}
       </KeyboardAvoidingView>
     </View>
   );
 }
 
 function ConnectionNote() {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
   return (
     <View
       style={[styles.note, styles.connectionNote]}
       accessibilityRole="alert"
       accessibilityLiveRegion="polite"
     >
-      <View style={[styles.noteIcon, styles.connectionNoteIcon]}>
-        <Feather name="alert-circle" size={13} color={color.error} />
+      <View style={styles.noteIcon}>
+        <Feather name="wifi-off" size={13} color={color.errorText} />
       </View>
       <Text style={styles.noteText}>
         Your Mac is offline. Answers and turn controls unlock when it reconnects.
@@ -499,6 +516,8 @@ function InterruptNote({
   status: "sending" | "delivered" | "queued" | "failed";
   error?: string;
 }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
   const failed = status === "failed";
   const text = failed
     ? `Couldn’t stop the turn${error ? `: ${error}` : "."} Use Stop to try again.`
@@ -513,12 +532,12 @@ function InterruptNote({
     >
       <View style={styles.noteIcon}>
         {status === "sending" ? (
-          <ActivityIndicator size="small" color={color.error} />
+          <ActivityIndicator size="small" color={color.errorText} />
         ) : (
-          <Feather name="square" size={12} color={failed ? color.error : color.muted} />
+          <Feather name="square" size={12} color={failed ? color.errorText : color.muted} />
         )}
       </View>
-      <Text style={[styles.noteText, failed && { color: color.error }]}>{text}</Text>
+      <Text style={[styles.noteText, failed && { color: color.errorText }]}>{text}</Text>
     </View>
   );
 }
@@ -531,6 +550,8 @@ function InterruptNote({
  * desk deserves to know which they are getting before they rely on it.
  */
 function DeliveryNote({ inject, state }: { inject: string; state: string }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
   if (inject === "tmux" || inject === "api") return null;
 
   const text =
@@ -551,6 +572,7 @@ function DeliveryNote({ inject, state }: { inject: string; state: string }) {
 }
 
 function MessageRow({ message, fresh }: { message: Message; fresh: boolean }) {
+  const styles = useStyles(makeStyles);
   if (message.role === "tool" && message.tool) {
     return (
       <Appear enabled={fresh}>
@@ -597,6 +619,8 @@ function PendingRow({
   pending: PendingSend;
   onDismiss: (clientId: string) => void;
 }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
   const failed = pending.status === "failed";
   const queued = pending.status === "queued";
 
@@ -608,7 +632,7 @@ function PendingRow({
       pressedScale={0.98}
     >
       <Text style={styles.userText}>{pending.text}</Text>
-      <Text style={[styles.pendingStatus, failed && { color: color.error }]}>
+      <Text style={[styles.pendingStatus, failed && { color: color.errorText }]}>
         {pending.status === "sending"
           ? "Sending…"
           : queued
@@ -621,209 +645,203 @@ function PendingRow({
   );
 }
 
-const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: color.ink },
-  keyboardAvoider: { flex: 1 },
-  feed: { flex: 1 },
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    keyboardAvoider: { flex: 1 },
+    feed: { flex: 1 },
 
-  headerShell: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: color.line,
-    backgroundColor: color.ink,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space.sm,
-    paddingHorizontal: space.lg,
-    paddingVertical: space.md,
-  },
-  back: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.pill,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: color.surfaceRaised,
-  },
-  headerBody: { flex: 1 },
-  stop: {
-    width: 36,
-    height: 36,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: radius.pill,
-    backgroundColor: color.errorWash,
-    borderWidth: 1,
-    borderColor: "#563039",
-  },
-  stopDisabled: { opacity: 0.55 },
-  title: { fontFamily: font.monoMedium, fontSize: size.title, color: color.text },
-  subtitle: { fontFamily: font.mono, fontSize: size.label, color: color.muted, marginTop: 1 },
-  statePill: {
-    minHeight: 30,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingRight: space.sm,
-    borderRadius: radius.pill,
-    backgroundColor: color.surface,
-    borderWidth: 1,
-    borderColor: color.line,
-  },
-  statePillAttention: { backgroundColor: color.needsYouWash, borderColor: "#594523" },
-  stateLabel: { fontFamily: font.sansMedium, fontSize: size.label },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      paddingHorizontal: space.lg,
+      paddingTop: space.sm,
+      paddingBottom: space.md,
+    },
+    iconButton: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    headerBody: { flex: 1 },
+    title: { fontFamily: font.monoMedium, fontSize: 15, color: c.text },
+    subtitle: { fontFamily: font.sans, fontSize: size.label, color: c.muted, marginTop: 2 },
+    statePill: {
+      height: 28,
+      flexDirection: "row",
+      alignItems: "center",
+      paddingRight: 10,
+      borderRadius: radius.pill,
+    },
+    stateLabel: { fontFamily: font.sansBold, fontSize: size.label },
+    stop: {
+      width: 36,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: radius.pill,
+      backgroundColor: c.inverse,
+    },
+    stopGlyph: { width: 11, height: 11, borderRadius: 3, backgroundColor: c.onInverse },
+    stopDisabled: { opacity: 0.4 },
 
-  note: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space.sm,
-    marginHorizontal: space.lg,
-    marginTop: space.sm,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-    borderRadius: radius.md,
-    backgroundColor: color.sunken,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.line,
-  },
-  noteIcon: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: color.surfaceRaised,
-  },
-  noteText: { flex: 1, fontFamily: font.sans, fontSize: size.caption, lineHeight: 17, color: color.muted },
-  connectionNote: { backgroundColor: color.errorWash, borderColor: "#563039" },
-  connectionNoteIcon: { backgroundColor: "#402127" },
-  interruptFailed: { backgroundColor: color.errorWash, borderColor: "#563039" },
+    note: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      marginHorizontal: space.lg,
+      marginBottom: space.sm,
+      paddingHorizontal: space.md,
+      paddingVertical: 10,
+      borderRadius: radius.lg,
+      backgroundColor: c.fill,
+    },
+    noteIcon: {
+      width: 24,
+      height: 24,
+      borderRadius: 8,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+    },
+    noteText: { flex: 1, fontFamily: font.sans, fontSize: size.caption, lineHeight: 18, color: c.textSecondary },
+    connectionNote: { backgroundColor: c.errorWash },
+    interruptFailed: { backgroundColor: c.errorWash },
 
-  // Inverted, so paddingTop is the gap under the newest row. Without it the
-  // last message sits behind the composer and gets clipped.
-  list: {
-    alignSelf: "center",
-    width: "100%",
-    maxWidth: layout.contentMax,
-    padding: space.lg,
-    paddingTop: space.md,
-    gap: space.xl,
-  },
-  spinner: { marginVertical: space.lg },
-  startOfSession: {
-    fontFamily: font.sans,
-    fontSize: size.caption,
-    color: color.faint,
-    textAlign: "center",
-    marginBottom: space.lg,
-  },
-  emptyFeed: {
-    fontFamily: font.sans,
-    fontSize: size.body,
-    color: color.faint,
-    textAlign: "center",
-    marginTop: space.xxl,
-  },
+    // Inverted, so paddingTop is the gap under the newest row. Without it the
+    // last message sits behind the composer and gets clipped.
+    list: {
+      alignSelf: "center",
+      width: "100%",
+      maxWidth: layout.contentMax,
+      padding: space.lg,
+      paddingTop: space.md,
+      gap: 18,
+    },
+    spinner: { marginVertical: space.lg },
+    startOfSession: {
+      fontFamily: font.sans,
+      fontSize: size.caption,
+      color: c.faint,
+      textAlign: "center",
+      marginBottom: space.lg,
+    },
+    emptyFeed: {
+      fontFamily: font.sans,
+      fontSize: size.body,
+      color: c.faint,
+      textAlign: "center",
+      marginTop: space.xxl,
+    },
 
-  // The user's own words get a surface; the agent's sit on the page. That is
-  // enough to tell them apart without turning a transcript into a chat app.
-  userRow: {
-    alignSelf: "flex-end",
-    maxWidth: "86%",
-    backgroundColor: color.surfaceRaised,
-    borderRadius: radius.lg,
-    borderTopRightRadius: radius.sm,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.line,
-  },
-  userText: { fontFamily: font.sans, fontSize: size.body, color: color.text, lineHeight: 21 },
+    // The user's own words get a bubble; the agent's sit on the page. That is
+    // enough to tell them apart without turning a transcript into a chat app.
+    userRow: {
+      alignSelf: "flex-end",
+      maxWidth: "84%",
+      backgroundColor: c.fill,
+      borderRadius: radius.xl,
+      borderBottomRightRadius: 6,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+    },
+    userText: { fontFamily: font.sans, fontSize: size.body, color: c.text, lineHeight: 21 },
 
-  assistantRow: { gap: space.xs },
-  assistantText: { fontFamily: font.sans, fontSize: size.body, color: color.text, lineHeight: 22 },
-  sidechain: {
-    fontFamily: font.sansMedium,
-    fontSize: size.label,
-    letterSpacing: 1,
-    textTransform: "uppercase",
-    color: color.faint,
-  },
+    assistantRow: { gap: space.xs },
+    sidechain: {
+      alignSelf: "flex-start",
+      fontFamily: font.sansBold,
+      fontSize: 11,
+      color: c.muted,
+      backgroundColor: c.fill,
+      borderRadius: radius.pill,
+      overflow: "hidden",
+      paddingHorizontal: space.sm,
+      paddingVertical: 2,
+    },
 
-  systemText: {
-    fontFamily: font.sans,
-    fontSize: size.caption,
-    color: color.faint,
-    textAlign: "center",
-  },
+    systemText: {
+      fontFamily: font.sans,
+      fontSize: size.caption,
+      color: c.faint,
+      textAlign: "center",
+    },
 
-  toolRow: { flexDirection: "row", gap: space.sm, alignItems: "flex-start" },
-  toolGlyph: { fontFamily: font.mono, fontSize: size.caption, color: color.faint, marginTop: 2 },
-  toolBody: { flex: 1 },
-  toolLine: { fontFamily: font.mono, fontSize: size.caption, color: color.muted },
-  toolName: { color: color.text },
-  toolOutput: {
-    fontFamily: font.mono,
-    fontSize: size.caption,
-    color: color.muted,
-    marginTop: space.sm,
-    padding: space.sm,
-    backgroundColor: color.sunken,
-    borderRadius: radius.sm,
-  },
+    pendingRow: { opacity: 0.7 },
+    pendingFailed: { opacity: 1, backgroundColor: c.errorWash },
+    pendingStatus: {
+      fontFamily: font.sans,
+      fontSize: size.label,
+      color: c.muted,
+      marginTop: space.xs,
+    },
 
-  pendingRow: { opacity: 0.75 },
-  pendingFailed: { opacity: 1, borderWidth: StyleSheet.hairlineWidth, borderColor: color.error },
-  pendingStatus: {
-    fontFamily: font.sans,
-    fontSize: size.label,
-    color: color.faint,
-    marginTop: space.xs,
-  },
-
-  questionWrap: {
-    paddingHorizontal: space.lg,
-    paddingBottom: space.sm,
-  },
-  questionScroll: { borderRadius: radius.lg },
-  questionScrollContent: { paddingBottom: space.xs },
-  thinking: { paddingTop: space.sm },
-  // No rule above the composer. The field has its own edge, and a second line
-  // right above it made the bar read as a separate panel bolted to the screen.
-  composerShell: { backgroundColor: color.ink },
-  composer: { paddingHorizontal: space.lg, paddingTop: space.sm },
-  // Input and send share one container rather than sitting side by side, so
-  // the send button reads as part of the field instead of next to it.
-  field: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: space.sm,
-    backgroundColor: color.surface,
-    borderRadius: radius.xxl,
-    borderWidth: 1,
-    borderColor: color.line,
-    paddingLeft: space.lg,
-    paddingRight: space.xs,
-    paddingVertical: space.xs,
-  },
-  fieldFocused: { borderColor: color.working },
-  fieldDisabled: { opacity: 0.5 },
-  input: {
-    flex: 1,
-    minHeight: 38,
-    maxHeight: 120,
-    paddingVertical: space.sm,
-    fontFamily: font.sans,
-    fontSize: size.body,
-    color: color.text,
-  },
-  send: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.pill,
-    backgroundColor: color.working,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sendDisabled: { backgroundColor: color.line },
-});
+    sheet: {
+      backgroundColor: c.surface,
+      borderTopLeftRadius: radius.sheet,
+      borderTopRightRadius: radius.sheet,
+      paddingTop: 10,
+      shadowColor: c.shadow,
+      shadowOpacity: 0.12,
+      shadowRadius: 24,
+      shadowOffset: { width: 0, height: -6 },
+      elevation: 12,
+    },
+    grabber: {
+      alignSelf: "center",
+      width: 38,
+      height: 5,
+      borderRadius: 3,
+      backgroundColor: c.fillStrong,
+      marginBottom: space.md,
+    },
+    sheetContent: { paddingHorizontal: 20, paddingBottom: space.xs },
+    thinking: { paddingTop: space.sm },
+    composerShell: { backgroundColor: c.paper },
+    composer: { paddingHorizontal: space.lg, paddingTop: space.sm },
+    // Input and send share one container, so the send button reads as part of
+    // the field instead of sitting next to it.
+    field: {
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: space.sm,
+      backgroundColor: c.surface,
+      borderRadius: radius.xxl,
+      borderWidth: 1,
+      borderColor: c.line,
+      paddingLeft: space.lg,
+      paddingRight: 6,
+      paddingVertical: 6,
+      shadowColor: c.shadow,
+      shadowOpacity: 0.06,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 2,
+    },
+    fieldFocused: { borderColor: c.working },
+    fieldDisabled: { opacity: 0.55 },
+    input: {
+      flex: 1,
+      minHeight: 38,
+      maxHeight: 120,
+      paddingVertical: space.sm,
+      fontFamily: font.sans,
+      fontSize: size.body,
+      color: c.text,
+    },
+    send: {
+      width: 36,
+      height: 36,
+      borderRadius: radius.pill,
+      backgroundColor: c.working,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    sendDisabled: { backgroundColor: c.fill },
+  });
