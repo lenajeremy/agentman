@@ -12,9 +12,11 @@ import (
 )
 
 type fakeWatcher struct {
-	mu     sync.Mutex
-	found  map[string][]protocol.Server
-	owners []servers.Owner
+	mu      sync.Mutex
+	found   map[string][]protocol.Server
+	owners  []servers.Owner
+	stopped []int
+	stopErr error
 }
 
 func (w *fakeWatcher) Update(_ context.Context, owners []servers.Owner) (map[string][]protocol.Server, error) {
@@ -26,6 +28,24 @@ func (w *fakeWatcher) Update(_ context.Context, owners []servers.Owner) (map[str
 		out[id] = append([]protocol.Server(nil), list...)
 	}
 	return out, nil
+}
+
+func (w *fakeWatcher) Stop(_ context.Context, _ []servers.Owner, sessionID string, port int) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.stopErr != nil {
+		return w.stopErr
+	}
+	w.stopped = append(w.stopped, port)
+	list := w.found[sessionID]
+	remaining := make([]protocol.Server, 0, len(list))
+	for _, server := range list {
+		if server.Port != port {
+			remaining = append(remaining, server)
+		}
+	}
+	w.found[sessionID] = remaining
+	return nil
 }
 
 func (w *fakeWatcher) set(found map[string][]protocol.Server) {
@@ -230,5 +250,52 @@ func TestServerRequestsValidatePort(t *testing.T) {
 		}); err == nil {
 			t.Errorf("port %d accepted", port)
 		}
+	}
+}
+
+func TestStopServerOnlyStopsPortsThisSessionReports(t *testing.T) {
+	agent, sink, watcher, sharer := newServerDaemon(t)
+	watcher.set(map[string][]protocol.Server{"claude:s1": {{Port: 5173}}})
+	agent.scanServers(context.Background())
+
+	// A port the session never reported must not be stoppable: a paired phone
+	// is trusted with the agents, not with naming processes to kill.
+	refused := agent.Handle(context.Background(), protocol.Request{
+		Type: protocol.ReqStopServer, SessionID: "claude:s1", Port: 22,
+	})
+	if refused.Type != protocol.EvtError || len(watcher.stopped) != 0 {
+		t.Fatalf("an unreported port was stopped: %+v", refused)
+	}
+
+	stopped := agent.Handle(context.Background(), protocol.Request{
+		Type: protocol.ReqStopServer, SessionID: "claude:s1", Port: 5173,
+	})
+	if stopped.Type != protocol.EvtServerStopped || stopped.Port != 5173 {
+		t.Fatalf("stop answered %+v", stopped)
+	}
+	if len(watcher.stopped) != 1 || watcher.stopped[0] != 5173 {
+		t.Fatalf("watcher saw %v", watcher.stopped)
+	}
+	// The share is withdrawn first, so no link outlives the port.
+	if len(sharer.closed) != 1 || sharer.closed[0] != 5173 {
+		t.Fatalf("sharer closed %v", sharer.closed)
+	}
+	// The row goes immediately rather than lingering until the next sweep.
+	if got := lastUpdate(t, sink); len(got.Servers) != 0 {
+		t.Fatalf("stopped server still listed: %+v", got.Servers)
+	}
+}
+
+func TestStopServerReportsFailure(t *testing.T) {
+	agent, _, watcher, _ := newServerDaemon(t)
+	watcher.set(map[string][]protocol.Server{"claude:s1": {{Port: 5173}}})
+	agent.scanServers(context.Background())
+	watcher.stopErr = errors.New("that server is no longer running")
+
+	event := agent.Handle(context.Background(), protocol.Request{
+		Type: protocol.ReqStopServer, SessionID: "claude:s1", Port: 5173,
+	})
+	if event.Type != protocol.EvtError || event.Error != "that server is no longer running" {
+		t.Fatalf("got %+v", event)
 	}
 }

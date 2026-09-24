@@ -60,6 +60,10 @@ const (
 	// daemon rejects the type and the app says the Mac needs updating.
 	ReqOpenServer  RequestType = "open_server"
 	ReqCloseServer RequestType = "close_server"
+	// ReqStopServer ends the process listening on a port. Unlike close_server,
+	// which only withdraws the public link, this one is not undoable from the
+	// phone: nothing here can start a dev server again.
+	ReqStopServer RequestType = "stop_server"
 )
 
 // Request is anything the app asks of the daemon.
@@ -105,7 +109,9 @@ const (
 	EvtSendResult    EventType = "send_result"
 	// EvtServerOpened answers ReqOpenServer with the server's link.
 	EvtServerOpened EventType = "server_opened"
-	EvtError        EventType = "error"
+	// EvtServerStopped answers ReqStopServer once the process is gone.
+	EvtServerStopped EventType = "server_stopped"
+	EvtError         EventType = "error"
 )
 
 // SendStatus is how far a sent message actually got.

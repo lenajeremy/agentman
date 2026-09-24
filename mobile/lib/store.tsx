@@ -124,6 +124,8 @@ interface Store {
   openServer(sessionId: string, port: number): Promise<string>;
   /** Stop sharing it. The link stops working immediately. */
   closeServer(sessionId: string, port: number): void;
+  /** End the process listening on a port. Nothing here can start it again. */
+  stopServer(sessionId: string, port: number): Promise<void>;
 }
 
 /** How long a tap on a server waits for the Mac to open its link. The daemon
@@ -470,6 +472,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       case "server_opened": {
         if (replyTo && event.link) settleServerRequest(replyTo, event.link);
+        break;
+      }
+
+      case "server_stopped": {
+        // The reply carries no link; an empty one settles the same pending
+        // map the open path uses.
+        if (replyTo) settleServerRequest(replyTo, "");
         break;
       }
 
@@ -931,6 +940,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       closeServer(sessionId, port) {
         clientRef.current?.send({ type: "close_server", sessionId, port });
+      },
+
+      stopServer(sessionId, port) {
+        return new Promise<void>((resolve, reject) => {
+          const client = clientRef.current;
+          const id = client?.send({ type: "stop_server", sessionId, port });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => {
+            settleServerRequest(id, undefined, "Your Mac took too long to stop this server.");
+          }, OPEN_SERVER_TIMEOUT_MS);
+          serverRequests.current.set(id, { resolve: () => resolve(), reject, timer });
+        });
       },
     }),
     [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, attach, settleServerRequest],

@@ -137,7 +137,8 @@ export type RequestType =
   | "answer_question"
   | "register_push"
   | "open_server"
-  | "close_server";
+  | "close_server"
+  | "stop_server";
 
 export interface Request {
   type: RequestType;
@@ -167,6 +168,7 @@ export type EventType =
   | "turn_complete"
   | "send_result"
   | "server_opened"
+  | "server_stopped"
   | "error";
 
 export type SendStatus = "delivered" | "queued" | "failed";
@@ -258,7 +260,7 @@ export function decodeControl(value: unknown): Control | null {
 export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
   if (!isRecord(value) || !isOneOf(value.type, [
     "sessions", "session_update", "session_gone", "messages", "page",
-    "turn_complete", "send_result", "server_opened", "error",
+    "turn_complete", "send_result", "server_opened", "server_stopped", "error",
   ] as const)) return null;
 
   switch (value.type) {
@@ -292,6 +294,9 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     case "server_opened":
       if (!boundedString(value.sessionId, 512, true) || !isPort(value.port) ||
           !isLink(value.link)) return null;
+      break;
+    case "server_stopped":
+      if (!boundedString(value.sessionId, 512, true) || !isPort(value.port)) return null;
       break;
     case "error":
       if (!boundedString(value.error, 64 * 1024, true) ||

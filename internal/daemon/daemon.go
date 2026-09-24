@@ -868,6 +868,9 @@ func (d *Daemon) HandleFrom(
 		d.closeServer(req.SessionID, req.Port)
 		return protocol.Event{}
 
+	case protocol.ReqStopServer:
+		return d.stopServer(ctx, req.SessionID, req.Port)
+
 	default:
 		return protocol.Event{Type: protocol.EvtError, Error: "unsupported request: " + string(req.Type)}
 	}
@@ -925,7 +928,8 @@ func validateRequest(req protocol.Request) error {
 	requiresSession := req.Type == protocol.ReqSubscribe || req.Type == protocol.ReqUnsubscribe ||
 		req.Type == protocol.ReqFetchMessages || req.Type == protocol.ReqSendMessage ||
 		req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqAnswer ||
-		req.Type == protocol.ReqOpenServer || req.Type == protocol.ReqCloseServer
+		req.Type == protocol.ReqOpenServer || req.Type == protocol.ReqCloseServer ||
+		req.Type == protocol.ReqStopServer
 	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
 		return fmt.Errorf("daemon: invalid session id")
 	}
@@ -942,7 +946,7 @@ func validateRequest(req protocol.Request) error {
 	case protocol.ReqListSessions, protocol.ReqSubscribe, protocol.ReqUnsubscribe,
 		protocol.ReqFetchMessages, protocol.ReqInterrupt, protocol.ReqRegisterPush:
 		return nil
-	case protocol.ReqOpenServer, protocol.ReqCloseServer:
+	case protocol.ReqOpenServer, protocol.ReqCloseServer, protocol.ReqStopServer:
 		if req.Port < 1 || req.Port > 65535 {
 			return fmt.Errorf("daemon: invalid server port")
 		}

@@ -14,9 +14,10 @@ import (
 // a few seconds after it starts is soon enough.
 const serverScanInterval = 3 * time.Second
 
-// ServerWatcher finds the servers each session has started.
+// ServerWatcher finds the servers each session has started, and can stop one.
 type ServerWatcher interface {
 	Update(ctx context.Context, owners []servers.Owner) (map[string][]protocol.Server, error)
+	Stop(ctx context.Context, owners []servers.Owner, sessionID string, port int) error
 }
 
 // ServerSharer turns a local port into a preview link.
@@ -135,6 +136,64 @@ func (d *Daemon) openServer(ctx context.Context, sessionID string, port int) pro
 	}
 	d.setServerLink(sessionID, port, link)
 	return protocol.Event{Type: protocol.EvtServerOpened, SessionID: sessionID, Port: port, Link: link}
+}
+
+// stopServer ends the process listening on a port.
+//
+// Only a port this session is already reporting may be stopped, the same rule
+// open_server follows: a paired phone is trusted with the agents, not with
+// naming arbitrary processes on the machine to kill. Any share is withdrawn
+// first, so no link is left pointing at a port that is about to close.
+func (d *Daemon) stopServer(ctx context.Context, sessionID string, port int) protocol.Event {
+	d.mu.Lock()
+	watcher, sharer := d.serverWatcher, d.sharer
+	sessions := make([]protocol.Session, 0, len(d.sessions))
+	for _, session := range d.sessions {
+		sessions = append(sessions, session)
+	}
+	session, known := d.sessions[sessionID]
+	d.mu.Unlock()
+
+	fail := func(message string) protocol.Event {
+		return protocol.Event{Type: protocol.EvtError, SessionID: sessionID, Port: port, Error: message}
+	}
+	if watcher == nil {
+		return fail("this Mac is not watching for servers")
+	}
+	if !known || !slices.ContainsFunc(session.Servers, func(s protocol.Server) bool { return s.Port == port }) {
+		return fail("that server is no longer running")
+	}
+	if sharer != nil {
+		sharer.Close(port)
+	}
+	if err := watcher.Stop(ctx, servers.OwnersOf(sessions), sessionID, port); err != nil {
+		return fail(err.Error())
+	}
+	// Report it gone now rather than waiting for the next sweep, so the row
+	// does not linger for a few seconds after the tap.
+	d.dropServer(sessionID, port)
+	return protocol.Event{Type: protocol.EvtServerStopped, SessionID: sessionID, Port: port}
+}
+
+// dropServer removes a stopped server from the session and tells every device.
+func (d *Daemon) dropServer(sessionID string, port int) {
+	d.mu.Lock()
+	session, known := d.sessions[sessionID]
+	if !known {
+		d.mu.Unlock()
+		return
+	}
+	remaining := make([]protocol.Server, 0, len(session.Servers))
+	for _, server := range session.Servers {
+		if server.Port != port {
+			remaining = append(remaining, server)
+		}
+	}
+	session.Servers = remaining
+	d.sessions[sessionID] = session
+	d.serverLists[sessionID] = remaining
+	d.mu.Unlock()
+	_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessionUpdate, Session: &session})
 }
 
 // closeServer stops sharing a port and tells every device it is private again.
