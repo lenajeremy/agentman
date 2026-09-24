@@ -38,3 +38,7 @@ web-build/
 # Python bytecode, from the icon generator
 __pycache__/
 *.pyc
+
+# Local dev-server config and UI iteration screenshots, not source.
+.claude/
+review-screenshots/
