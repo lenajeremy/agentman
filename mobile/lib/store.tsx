@@ -54,6 +54,7 @@ import {
   QuestionAnswer,
   SendStatus,
   Session,
+  WorkspaceResult,
 } from "./protocol";
 import {
   reconcileQuestionAlerts,
@@ -126,6 +127,7 @@ interface Store {
   closeServer(sessionId: string, port: number): void;
   /** End the process listening on a port. Nothing here can start it again. */
   stopServer(sessionId: string, port: number): Promise<void>;
+  workspace(sessionId: string, type: "list_files" | "read_file" | "list_changes" | "file_diff", path?: string): Promise<WorkspaceResult>;
 }
 
 /** How long a tap on a server waits for the Mac to open its link. The daemon
@@ -134,6 +136,12 @@ const OPEN_SERVER_TIMEOUT_MS = 25_000;
 
 interface ServerRequest {
   resolve(link: string): void;
+  reject(error: Error): void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+interface WorkspaceRequest {
+  resolve(result: WorkspaceResult): void;
   reject(error: Error): void;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -208,6 +216,27 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const announcedQuestions = useRef(new Set<string>());
   /** open_server requests waiting for their link, by frame id. */
   const serverRequests = useRef(new Map<string, ServerRequest>());
+  const workspaceRequests = useRef(new Map<string, WorkspaceRequest>());
+
+  const settleWorkspaceRequest = useCallback((replyTo: string, result?: WorkspaceResult, error?: string) => {
+    const request = workspaceRequests.current.get(replyTo);
+    if (!request) return false;
+    workspaceRequests.current.delete(replyTo);
+    clearTimeout(request.timer);
+    clientRef.current?.cancelRead(replyTo);
+    if (result) request.resolve(result);
+    else request.reject(new Error(error || "Could not read this workspace."));
+    return true;
+  }, []);
+
+  const clearWorkspaceRequests = useCallback(() => {
+    for (const [id, request] of workspaceRequests.current) {
+      clearTimeout(request.timer);
+      request.reject(new Error("The workspace connection changed."));
+      clientRef.current?.cancelRead(id);
+    }
+    workspaceRequests.current.clear();
+  }, []);
 
   const settleServerRequest = useCallback((replyTo: string, link?: string, error?: string) => {
     const request = serverRequests.current.get(replyTo);
@@ -482,6 +511,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         break;
       }
 
+      case "workspace": {
+        if (replyTo && event.workspace) settleWorkspaceRequest(replyTo, event.workspace);
+        break;
+      }
+
       case "send_result": {
         if (!event.clientId) break;
         setPending((current) => {
@@ -496,6 +530,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
 
 	  case "error": {
+		if (replyTo && settleWorkspaceRequest(replyTo, undefined, event.error)) break;
 		if (replyTo && settleServerRequest(replyTo, undefined, serverErrorMessage(event.error))) break;
 		// A failed history request must release its loading state. Otherwise a
 		// transient adapter error leaves the spinner and pagination disabled for
@@ -514,10 +549,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 		break;
 	  }
     }
-  }, [mergeSessionMessages, settleServerRequest]);
+  }, [mergeSessionMessages, settleServerRequest, settleWorkspaceRequest]);
 
   const attach = useCallback(
     (creds: Credentials) => {
+      clearWorkspaceRequests();
       clientRef.current?.close();
       const client = new Client(creds, {
         onEvent: handleEvent,
@@ -533,6 +569,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 ? "Your Mac is offline, so it cannot share this server."
                 : control.message,
             );
+          }
+          if (replyTo && control.type === "error") {
+            settleWorkspaceRequest(replyTo, undefined, control.message);
           }
           // An offline Mac is transient, so the Client retains idempotent reads
           // for replay. A relay error is permanent for that exact request and
@@ -618,7 +657,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       pendingCatchUps.current.clear();
       client.connect();
     },
-    [handleEvent],
+    [handleEvent, clearWorkspaceRequests],
   );
 
   useEffect(() => {
@@ -629,8 +668,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       else setConnection("unpaired");
       setReady(true);
     })();
-    return () => clientRef.current?.close();
-  }, [attach]);
+    return () => {
+      clearWorkspaceRequests();
+      clientRef.current?.close();
+    };
+  }, [attach, clearWorkspaceRequests]);
 
   // Restore what the user hid before the app was last closed.
   useEffect(() => {
@@ -688,6 +730,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
 
       async signOut() {
+        clearWorkspaceRequests();
         clientRef.current?.close();
         clientRef.current = null;
         await clearCredentials();
@@ -956,8 +999,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           serverRequests.current.set(id, { resolve: () => resolve(), reject, timer });
         });
       },
+
+      workspace(sessionId, type, path = "") {
+        return new Promise<WorkspaceResult>((resolve, reject) => {
+          const id = clientRef.current?.send({ type, sessionId, path });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => {
+            settleWorkspaceRequest(id, undefined, "The Mac took too long to read this workspace.");
+          }, 30_000);
+          workspaceRequests.current.set(id, { resolve, reject, timer });
+        });
+      },
     }),
-    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, attach, settleServerRequest],
+    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, attach, settleServerRequest, settleWorkspaceRequest],
   );
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;

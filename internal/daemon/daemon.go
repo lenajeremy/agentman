@@ -871,6 +871,9 @@ func (d *Daemon) HandleFrom(
 	case protocol.ReqStopServer:
 		return d.stopServer(ctx, req.SessionID, req.Port)
 
+	case protocol.ReqListFiles, protocol.ReqReadFile, protocol.ReqListChanges, protocol.ReqFileDiff:
+		return d.workspace(ctx, req)
+
 	default:
 		return protocol.Event{Type: protocol.EvtError, Error: "unsupported request: " + string(req.Type)}
 	}
@@ -929,7 +932,9 @@ func validateRequest(req protocol.Request) error {
 		req.Type == protocol.ReqFetchMessages || req.Type == protocol.ReqSendMessage ||
 		req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqAnswer ||
 		req.Type == protocol.ReqOpenServer || req.Type == protocol.ReqCloseServer ||
-		req.Type == protocol.ReqStopServer
+		req.Type == protocol.ReqStopServer ||
+		req.Type == protocol.ReqListFiles || req.Type == protocol.ReqReadFile ||
+		req.Type == protocol.ReqListChanges || req.Type == protocol.ReqFileDiff
 	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
 		return fmt.Errorf("daemon: invalid session id")
 	}
@@ -951,6 +956,9 @@ func validateRequest(req protocol.Request) error {
 			return fmt.Errorf("daemon: invalid server port")
 		}
 		return nil
+	case protocol.ReqListFiles, protocol.ReqReadFile, protocol.ReqListChanges, protocol.ReqFileDiff:
+		_, err := workspacePath(req.Path, req.Type == protocol.ReqListFiles || req.Type == protocol.ReqListChanges)
+		return err
 	case protocol.ReqSendMessage:
 		if strings.TrimSpace(req.Text) == "" {
 			return fmt.Errorf("daemon: refusing to send an empty message")
