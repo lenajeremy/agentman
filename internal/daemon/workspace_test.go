@@ -15,9 +15,12 @@ import (
 )
 
 func workspaceDaemon(dir string) *Daemon {
-	return &Daemon{sessions: map[string]protocol.Session{
-		"codex:test": {ID: "codex:test", Cwd: dir},
-	}}
+	return &Daemon{
+		sessions: map[string]protocol.Session{
+			"codex:test": {ID: "codex:test", Cwd: dir},
+		},
+		seen: newSeenPaths(),
+	}
 }
 
 func TestWorkspaceReadsAnImageWithoutExposingItAsText(t *testing.T) {

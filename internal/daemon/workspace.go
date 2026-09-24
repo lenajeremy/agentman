@@ -218,6 +218,15 @@ func listWorkspace(root *os.Root, rel string) ([]protocol.WorkspaceEntry, bool, 
 	return entries, truncated, hidden, nil
 }
 
+// readableImages is what the app can display, in one place so the two readers
+// that serve images cannot drift apart.
+var readableImages = map[string]struct{}{
+	"image/png":  {},
+	"image/jpeg": {},
+	"image/gif":  {},
+	"image/webp": {},
+}
+
 func readWorkspace(root *os.Root, rel string) (text, image, mime string, truncated bool, err error) {
 	f, err := root.Open(rel)
 	if err != nil {
@@ -235,7 +244,7 @@ func readWorkspace(root *os.Root, rel string) (text, image, mime string, truncat
 	n, _ := f.Read(head[:])
 	mime = http.DetectContentType(head[:n])
 	_, _ = f.Seek(0, io.SeekStart)
-	if mime == "image/png" || mime == "image/jpeg" || mime == "image/gif" || mime == "image/webp" {
+	if _, previewable := readableImages[mime]; previewable {
 		if info.Size() > maxImageFile {
 			return "", "", "", false, errors.New("image is too large to preview (2 MiB limit)")
 		}

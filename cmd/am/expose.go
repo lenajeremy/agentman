@@ -56,6 +56,12 @@ func runExpose(ctx context.Context, args []string) error {
 		RelayURL: relayURL,
 		Token:    cfg.Token,
 		Port:     port,
+		// A link is derived from the account and this nonce, so supplying one
+		// keeps the same address across restarts. Reconnecting already keeps
+		// it; this covers stopping and starting again, which is what a
+		// development loop does every time the binary is rebuilt — and a new
+		// address there silently unpairs the phone that was using it.
+		Nonce: os.Getenv("AGENTMAN_TUNNEL_NONCE"),
 		OnReady: func(hello tunnel.Hello) {
 			if announced {
 				fmt.Printf("%s %s\n", stamp(), dim("relay      reconnected — same link"))

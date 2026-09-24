@@ -142,7 +142,8 @@ export type RequestType =
   | "list_files"
   | "read_file"
   | "list_changes"
-  | "file_diff";
+  | "file_diff"
+  | "read_seen_file";
 
 export interface Request {
   type: RequestType;
@@ -162,6 +163,8 @@ export interface Request {
   /** The server on open_server and close_server. */
   port?: number;
   path?: string;
+  /** Tickets for images already left with the relay, on send_message. */
+  uploadIds?: string[];
 }
 
 export type EventType =

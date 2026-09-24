@@ -24,26 +24,48 @@ const PATH_TOOLS = /(read|write|edit|view|notebook)/i;
 /** A path, not a command: one or more plain segments and nothing to execute. */
 const PATH_SHAPE = /^\/?[\w.@+-]+(\/[\w.@+-]+)*$/;
 
+/** How the app should ask the daemon for a given image. */
+export interface ImageTarget {
+  /** A workspace-relative path, or the absolute path the tool named. */
+  path: string;
+  /**
+   * read_file is confined to the session's directory. read_seen_file serves
+   * any path the session's agent already opened, which is the only way to
+   * reach the temp directory an agent actually writes screenshots into.
+   */
+  request: "read_file" | "read_seen_file";
+}
+
 /**
- * The tool's target as a path the workspace can read, or "" when it is not an
- * image this session is allowed to open.
+ * How to open the image a tool named, or null when it named something else.
+ *
+ * An absolute path is not rejected for being outside the session any more.
+ * Agents write screenshots to temp directories, so that rule excluded exactly
+ * the files worth looking at. It is safe because the daemon grants nothing on
+ * the strength of this path: it serves an absolute path only when its own
+ * record of the transcript says that session's agent opened it, and this path
+ * came from that same transcript.
  */
-export function workspaceImage(name: string, summary: string, cwd: string): string {
-  if (!PATH_TOOLS.test(name)) return "";
+export function workspaceImage(name: string, summary: string, cwd: string): ImageTarget | null {
+  if (!PATH_TOOLS.test(name)) return null;
 
   const first = (summary.split("\n", 1)[0] ?? "").trim();
-  if (!first || !IMAGE.test(first)) return "";
+  if (!first || !IMAGE.test(first)) return null;
 
-  let rel = first.replace(/^\.\//, "");
   if (first.startsWith("/")) {
-    // "~" never reaches here: it fails PATH_SHAPE below, which is right —
-    // expanding it would mean guessing a home the daemon may not share.
+    if (!PATH_SHAPE.test(first)) return null;
+    if (first.split("/").some((part) => part === "..")) return null;
+    // Inside the session, the workspace reader is still the better route: it
+    // works on a daemon too old to know read_seen_file.
     const root = cwd.replace(/\/+$/, "");
-    if (!root || !first.startsWith(`${root}/`)) return "";
-    rel = first.slice(root.length + 1);
+    if (root && first.startsWith(`${root}/`)) {
+      return { path: first.slice(root.length + 1), request: "read_file" };
+    }
+    return { path: first, request: "read_seen_file" };
   }
 
-  if (!rel || !PATH_SHAPE.test(rel)) return "";
-  if (rel.split("/").some((part) => part === "..")) return "";
-  return rel;
+  const rel = first.replace(/^\.\//, "");
+  if (!rel || !PATH_SHAPE.test(rel)) return null;
+  if (rel.split("/").some((part) => part === "..")) return null;
+  return { path: rel, request: "read_file" };
 }

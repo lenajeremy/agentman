@@ -9,6 +9,7 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -26,8 +27,11 @@ import { Pulse } from "../../components/Pulse";
 import { QuestionCard } from "../../components/QuestionCard";
 import { Thinking } from "../../components/Thinking";
 import { ToolRow } from "../../components/ToolRow";
+import { AttachmentStrip } from "../../components/AttachmentStrip";
+import { chooseImageSource } from "../../lib/image-source-sheet";
 import { draftNamespace } from "../../lib/draft-policy";
 import { clearDraft, loadDraft, saveDraft } from "../../lib/drafts";
+import { useAttachments } from "../../lib/use-attachments";
 import { Message } from "../../lib/protocol";
 import { sessionNeedsAnswer } from "../../lib/question-alerts";
 import { useStyles, useTheme } from "../../lib/appearance";
@@ -59,6 +63,8 @@ export default function SessionScreen() {
   const { height: viewportHeight } = useWindowDimensions();
   const listRef = useRef<FlatList<Row>>(null);
   const [draft, setDraft] = useState("");
+  const images = useAttachments(store.credentials);
+  const [sendingImages, setSendingImages] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const [submittedClientId, setSubmittedClientId] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
@@ -213,16 +219,39 @@ export default function SessionScreen() {
     if (draftScope) void clearDraft(draftScope, sessionId);
   }, [draftScope, session, sessionId, submittedClientId, submittedSend]);
 
-  const submit = useCallback(() => {
+  // An image on its own is enough to send.
+  const nothingToSend = draft.trim().length === 0 && images.attachments.length === 0;
+
+  const submit = useCallback(async () => {
     const text = draft.trim();
-    if (!text || !canSend || awaitingSend) return;
+    // An image with no words is a real message: "look at this".
+    if ((!text && images.attachments.length === 0) || !canSend || awaitingSend) return;
+    if (sendingImages) return;
     if (Platform.OS !== "web") {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     }
-    setSubmittedClientId(store.sendMessage(sessionId, text));
+
+    // Uploaded here rather than when the image was chosen: the relay holds one
+    // for two minutes, and the gap between picking a screenshot and finishing
+    // the sentence about it is easily longer than that.
+    let uploadIds: string[] = [];
+    if (images.attachments.length > 0) {
+      setSendingImages(true);
+      try {
+        uploadIds = await images.upload();
+      } catch (reason) {
+        images.setError(reason instanceof Error ? reason.message : String(reason));
+        setSendingImages(false);
+        return;
+      }
+      setSendingImages(false);
+    }
+
+    setSubmittedClientId(store.sendMessage(sessionId, text, uploadIds));
+    images.clear();
     // No scroll call needed: an inverted list is already anchored to the
     // newest row, so the sent message appears in place.
-  }, [draft, canSend, awaitingSend, sessionId, store]);
+  }, [draft, canSend, awaitingSend, sessionId, store, images, sendingImages]);
 
   const requestInterrupt = useCallback(() => {
     if (!store.daemonOnline) return;
@@ -453,13 +482,64 @@ export default function SessionScreen() {
                 { paddingBottom: (keyboardVisible ? 0 : insets.bottom) + space.sm },
               ]}
             >
+              {images.error ? (
+                <Text style={styles.attachError}>{images.error}</Text>
+              ) : null}
               <View
                 style={[
                   styles.field,
+                  images.attachments.length > 0 && styles.fieldWithImages,
                   inputFocused && canSend && styles.fieldFocused,
                   !canSend && styles.fieldDisabled,
                 ]}
               >
+                <AttachmentStrip attachments={images.attachments} onRemove={images.remove} />
+                <View style={styles.fieldRow}>
+                {/* Two ways in, because copying a screenshot and choosing one
+                    from the library are different habits and neither
+                    substitutes for the other. Paste only appears when there is
+                    actually an image on the clipboard. */}
+                <MotionPressable
+                  onPress={() =>
+                    chooseImageSource(images.clipboardReady, (source) =>
+                      void (source === "paste" ? images.paste() : images.pick()),
+                    )
+                  }
+                  disabled={!canSend || awaitingSend || !images.canAdd || images.busy}
+                  style={styles.attach}
+                  pressedScale={0.92}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add an image"
+                  accessibilityState={{ disabled: !images.canAdd }}
+                >
+                  {images.busy ? (
+                    <ActivityIndicator size="small" color={color.faint} />
+                  ) : (
+                    <Feather
+                      name="plus"
+                      size={19}
+                      color={
+                        !canSend || awaitingSend || !images.canAdd ? color.faint : color.muted
+                      }
+                    />
+                  )}
+                </MotionPressable>
+                {/* iOS's own edit menu can paste text into a TextInput but not
+                    an image: RCTUITextView.paste: hands straight to UITextView,
+                    and no onPaste reaches JS. So a long press here offers the
+                    image instead, in the place the gesture already suggests. */}
+                <Pressable
+                  onLongPress={() => {
+                    if (!images.clipboardReady || !images.canAdd) return;
+                    void images.paste();
+                  }}
+                  delayLongPress={400}
+                  style={styles.inputWrap}
+                  accessibilityLabel={
+                    images.clipboardReady ? "Hold to paste the image on the clipboard" : undefined
+                  }
+                >
                 <TextInput
                   style={styles.input}
                   value={draft}
@@ -476,41 +556,38 @@ export default function SessionScreen() {
                   }
                   placeholderTextColor={color.faint}
                   multiline
-                  onSubmitEditing={submit}
+                  onSubmitEditing={() => void submit()}
                   returnKeyType="send"
                   accessibilityLabel="Instruction"
                 />
+                </Pressable>
                 <MotionPressable
-                  onPress={submit}
-                  disabled={!canSend || awaitingSend || draft.trim().length === 0}
+                  onPress={() => void submit()}
+                  disabled={!canSend || awaitingSend || nothingToSend}
                   style={[
                     styles.send,
-                    (!canSend || awaitingSend || draft.trim().length === 0) &&
-                      styles.sendDisabled,
+                    (!canSend || awaitingSend || nothingToSend) && styles.sendDisabled,
                   ]}
                   pressedScale={0.92}
                   hitSlop={8}
                   accessibilityRole="button"
                   accessibilityLabel="Send instruction"
                   accessibilityState={{
-                    disabled: !canSend || awaitingSend || draft.trim().length === 0,
-                    busy: submittedSend?.status === "sending",
+                    disabled: !canSend || awaitingSend || nothingToSend,
+                    busy: submittedSend?.status === "sending" || sendingImages,
                   }}
                 >
-                  {submittedSend?.status === "sending" ? (
+                  {submittedSend?.status === "sending" || sendingImages ? (
                     <ActivityIndicator size="small" color={color.faint} />
                   ) : (
                     <Feather
                       name="arrow-up"
                       size={18}
-                      color={
-                        !canSend || awaitingSend || draft.trim().length === 0
-                          ? color.faint
-                          : "#FFFFFF"
-                      }
+                      color={!canSend || awaitingSend || nothingToSend ? color.faint : "#FFFFFF"}
                     />
                   )}
                 </MotionPressable>
+                </View>
               </View>
             </ContentColumn>
           </View>
@@ -865,14 +942,11 @@ const makeStyles = (c: Palette) =>
     // Input and send share one container, so the send button reads as part of
     // the field instead of sitting next to it.
     field: {
-      flexDirection: "row",
-      alignItems: "flex-end",
-      gap: space.sm,
       backgroundColor: c.surface,
       borderRadius: radius.xxl,
       borderWidth: 1,
       borderColor: c.line,
-      paddingLeft: space.lg,
+      paddingLeft: 6,
       paddingRight: 6,
       paddingVertical: 6,
       shadowColor: c.shadow,
@@ -891,6 +965,30 @@ const makeStyles = (c: Palette) =>
       fontFamily: font.sans,
       fontSize: size.body,
       color: c.text,
+    },
+    // Thumbnails square off the pill: a row of 64pt pictures inside a fully
+    // rounded container loses its corners to the radius.
+    fieldWithImages: { borderRadius: radius.lg, paddingTop: space.sm, paddingLeft: space.sm },
+    fieldRow: { flexDirection: "row", alignItems: "flex-end", gap: space.xs },
+    // A wrapper so the long press has something to land on: the gesture cannot
+    // be attached to the TextInput itself without swallowing taps that should
+    // place the caret.
+    inputWrap: { flex: 1 },
+    attachError: {
+      fontFamily: font.sans,
+      fontSize: size.label,
+      color: c.errorText,
+      paddingHorizontal: space.md,
+      paddingBottom: space.xs,
+    },
+    // Square and unfilled against the send button's filled circle: one is the
+    // action, the other is a way of adding to it.
+    attach: {
+      width: 34,
+      height: 34,
+      borderRadius: radius.md,
+      alignItems: "center",
+      justifyContent: "center",
     },
     send: {
       width: 36,

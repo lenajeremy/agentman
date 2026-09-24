@@ -75,6 +75,8 @@ export interface PendingSend {
   error?: string;
   /** Account scope whose persisted composer this send will settle. */
   draftScope?: string;
+  /** How many images rode with this message, for the row that shows it. */
+  imageCount?: number;
 }
 
 interface PageState {
@@ -109,7 +111,7 @@ interface Store {
   openSession(sessionId: string): void;
   closeSession(sessionId: string): void;
   loadOlder(sessionId: string): void;
-  sendMessage(sessionId: string, text: string): string;
+  sendMessage(sessionId: string, text: string, uploadIds?: string[]): string;
   interruptSession(sessionId: string): void;
   answerQuestion(sessionId: string, answer: QuestionAnswer): void;
   dismissPending(clientId: string): void;
@@ -127,7 +129,7 @@ interface Store {
   closeServer(sessionId: string, port: number): void;
   /** End the process listening on a port. Nothing here can start it again. */
   stopServer(sessionId: string, port: number): Promise<void>;
-  workspace(sessionId: string, type: "list_files" | "read_file" | "list_changes" | "file_diff", path?: string): Promise<WorkspaceResult>;
+  workspace(sessionId: string, type: "list_files" | "read_file" | "list_changes" | "file_diff" | "read_seen_file", path?: string): Promise<WorkspaceResult>;
 }
 
 /** How long a tap on a server waits for the Mac to open its link. The daemon
@@ -851,18 +853,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 		}
       },
 
-      sendMessage(sessionId, text) {
+      sendMessage(sessionId, text, uploadIds) {
         const clientId = `send-${newFrameId()}`;
         const draftScope = credentials ? draftNamespace(credentials) : undefined;
         setPending((current) => [
           ...current,
-          { clientId, sessionId, text, status: "sending", draftScope },
+          {
+            clientId,
+            sessionId,
+            text,
+            status: "sending",
+            draftScope,
+            imageCount: uploadIds?.length,
+          },
         ]);
         const sent = clientRef.current?.send({
           type: "send_message",
           sessionId,
           text,
           clientId,
+          ...(uploadIds && uploadIds.length > 0 ? { uploadIds } : {}),
         });
         if (!sent) {
           setPending((current) =>

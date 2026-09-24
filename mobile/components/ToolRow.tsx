@@ -15,7 +15,7 @@ import { useRouter } from "expo-router";
 
 import { useStyles, useTheme } from "../lib/appearance";
 import { parseDiff } from "../lib/diff";
-import { workspaceImage } from "../lib/imagepath";
+import { workspaceImage, type ImageTarget } from "../lib/imagepath";
 import { Message } from "../lib/protocol";
 import { font, Palette, radius, size, space } from "../lib/theme";
 import { MotionPressable } from "./MotionPressable";
@@ -302,20 +302,24 @@ function OutputBlock({
  * that screen already pinches, pans and double-taps, and a feed that inlined
  * every screenshot an agent touched would pay for all of them at once.
  */
-function ImageLink({ sessionId, path }: { sessionId: string; path: string }) {
+function ImageLink({ sessionId, target }: { sessionId: string; target: ImageTarget }) {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
   const router = useRouter();
-  const name = path.split("/").at(-1) ?? path;
+  const name = target.path.split("/").at(-1) ?? target.path;
 
   return (
     <MotionPressable
       // The same URL form the workspace screen pushes: that screen decodes the
       // id itself, so handing Expo an object to encode would not round-trip
       // through it the same way.
+      // Built as whole template literals rather than concatenated: Expo's typed
+      // routes can check the shape of one, but a joined string is just a string.
       onPress={() =>
         router.push(
-          `/file/${encodeURIComponent(sessionId)}?path=${encodeURIComponent(path)}`,
+          target.request === "read_seen_file"
+            ? `/file/${encodeURIComponent(sessionId)}?path=${encodeURIComponent(target.path)}&seen=1`
+            : `/file/${encodeURIComponent(sessionId)}?path=${encodeURIComponent(target.path)}`,
         )
       }
       style={styles.imageLink}
@@ -399,7 +403,7 @@ export function ToolRow({
         <View style={styles.body}>
           {showCommand ? <CommandBlock text={summary} /> : null}
           {image ? (
-            <ImageLink sessionId={message.sessionId} path={image} />
+            <ImageLink sessionId={message.sessionId} target={image} />
           ) : null}
           {/* "[image]" is the placeholder a parser leaves where it could not
               carry the picture. Once the link above can actually show it, the

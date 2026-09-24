@@ -35,6 +35,16 @@ if [ ! -f "$SECRET_FILE" ]; then
 fi
 SECRET="$(cat "$SECRET_FILE")"
 
+# The same reasoning as the secret, for the address. A tunnel link is derived
+# from the account and a nonce, and `am expose` invents a fresh one per process
+# — so without this every rebuild hands out a new URL and the phone, which
+# stored the old one when it paired, quietly stops finding the relay.
+NONCE_FILE="$STATE/tunnel-nonce"
+if [ ! -f "$NONCE_FILE" ]; then
+  openssl rand -hex 16 > "$NONCE_FILE"
+fi
+export AGENTMAN_TUNNEL_NONCE="$(cat "$NONCE_FILE")"
+
 if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   echo "Port $PORT is already in use. Pass another port: scripts/dev-relay.sh 8100" >&2
   exit 1
