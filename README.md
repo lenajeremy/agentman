@@ -227,6 +227,7 @@ am history <session-id>     Print recent messages
 am send <session-id> <text> Send a message
 am serve                    Run the daemon and relay client
 am pair                     Create a mobile pairing code
+am expose <port>            Share a local port as a public preview link
 am claude [args...]         Start Claude Code in managed tmux
 am codex [args...]          Start Codex in managed tmux
 am opencode [args...]       Start OpenCode with its local API
@@ -385,10 +386,28 @@ railway domain
 | `AGENTMAN_RELAY_SECRET` | Yes | Stable signing secret, at least 16 characters |
 | `PORT` | No | HTTP port; defaults to `8080` |
 | `AGENTMAN_TRUST_PROXY` | No | Trust `X-Forwarded-For` only behind a proxy that overwrites it |
+| `AGENTMAN_PREVIEW_ORIGIN` | No | Enables `am expose` links, e.g. `https://agentman.online` |
 
 Changing `AGENTMAN_RELAY_SECRET` invalidates existing device tokens. Set
 `AGENTMAN_TRUST_PROXY=1` on Railway; do not enable it on a directly exposed
 relay where clients can supply forwarding headers.
+
+### Preview links
+
+`am expose 3000` gives `localhost:3000` a link like
+`https://<random-id>.agentman.online` for as long as the command runs. Anyone
+with the link can open it, so the id is 130 random bits. To offer this on your
+own relay:
+
+- Use a registrable domain of its own, never a subdomain of the relay's or your
+  site's. A phishing report against one link then blocks only previews, and
+  links cannot share cookies with anything else.
+- Point a wildcard record (`*.your-preview-domain`) at the relay and give it a
+  wildcard certificate. On Railway, add `*.your-preview-domain` as a custom
+  domain and create the two CNAME records it lists.
+- Set `AGENTMAN_PREVIEW_ORIGIN=https://your-preview-domain`.
+
+The relay keeps live tunnels in memory, so run a single instance.
 
 ## Security model
 

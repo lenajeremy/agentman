@@ -16,6 +16,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/tunnel"
 )
 
 const (
@@ -85,6 +86,12 @@ type Server struct {
 	connections       chan struct{}
 	connectionMu      sync.Mutex
 	clientConnections map[string]int
+
+	// previews is nil unless EnablePreviews was called; tunnels and links are
+	// refused until then.
+	previews        *previewOrigin
+	tunnels         *tunnelRegistry
+	previewRequests *limiter
 }
 
 // NewServer builds a relay.
@@ -111,6 +118,8 @@ func NewServer(secret, version string, log *slog.Logger, trustProxy bool) *Serve
 		trustProxy:         trustProxy,
 		connections:        make(chan struct{}, maxRelayConnections),
 		clientConnections:  map[string]int{},
+		tunnels:            newTunnelRegistry(),
+		previewRequests:    newLimiter(previewRequestsPerMinute, time.Minute),
 	}
 }
 
@@ -122,7 +131,22 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /ws/app", s.handleApp)
 	mux.HandleFunc("POST /pair", s.handlePair)
 	mux.HandleFunc("POST /pair/code", s.handlePairCode)
-	return withCORS(mux)
+	mux.HandleFunc("GET "+tunnel.Path, s.handleTunnel)
+	api := withCORS(mux)
+
+	// Preview links are told apart by Host, not path: each link is served at
+	// the root of its own subdomain, because dev servers load assets from
+	// absolute paths like /assets/app.js that a path prefix would break. They
+	// also skip withCORS on purpose — the app behind a link sets its own.
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.previews != nil {
+			if id, ok := s.previews.match(r.Host); ok {
+				s.servePreview(w, r, id)
+				return
+			}
+		}
+		api.ServeHTTP(w, r)
+	})
 }
 
 // withCORS allows browser clients to reach the HTTP endpoints.
