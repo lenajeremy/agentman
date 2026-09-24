@@ -374,6 +374,7 @@ export default function SessionScreen() {
           item.kind === "message" ? (
             <MessageRow
               message={item.message}
+              cwd={session?.cwd ?? ""}
               fresh={settled.current !== null && !settled.current.has(item.message.id)}
             />
           ) : (
@@ -600,12 +601,20 @@ function DeliveryNote({ inject, state }: { inject: string; state: string }) {
   );
 }
 
-function MessageRow({ message, fresh }: { message: Message; fresh: boolean }) {
+function MessageRow({
+  message,
+  cwd,
+  fresh,
+}: {
+  message: Message;
+  cwd: string;
+  fresh: boolean;
+}) {
   const styles = useStyles(makeStyles);
   if (message.role === "tool" && message.tool) {
     return (
       <Appear enabled={fresh}>
-        <ToolRow message={message} />
+        <ToolRow message={message} cwd={cwd} />
       </Appear>
     );
   }
