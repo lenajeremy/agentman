@@ -162,6 +162,8 @@ export interface Request {
   /** The server on open_server and close_server. */
   port?: number;
   path?: string;
+  /** Tickets for images already left with the relay, on send_message. */
+  uploadIds?: string[];
 }
 
 export type EventType =
