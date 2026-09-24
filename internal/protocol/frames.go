@@ -68,6 +68,10 @@ const (
 	ReqReadFile    RequestType = "read_file"
 	ReqListChanges RequestType = "list_changes"
 	ReqFileDiff    RequestType = "file_diff"
+	// ReqReadSeenFile reads one absolute path, and only one the session's
+	// agent already opened. It is what lets a screenshot written to a temp
+	// directory be looked at, without the daemon serving the whole disk.
+	ReqReadSeenFile RequestType = "read_seen_file"
 )
 
 // Request is anything the app asks of the daemon.

@@ -129,7 +129,7 @@ interface Store {
   closeServer(sessionId: string, port: number): void;
   /** End the process listening on a port. Nothing here can start it again. */
   stopServer(sessionId: string, port: number): Promise<void>;
-  workspace(sessionId: string, type: "list_files" | "read_file" | "list_changes" | "file_diff", path?: string): Promise<WorkspaceResult>;
+  workspace(sessionId: string, type: "list_files" | "read_file" | "list_changes" | "file_diff" | "read_seen_file", path?: string): Promise<WorkspaceResult>;
 }
 
 /** How long a tap on a server waits for the Mac to open its link. The daemon

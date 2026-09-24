@@ -113,6 +113,9 @@ type Daemon struct {
 	// attachments is nil on a daemon running without a relay, which is also
 	// the only configuration a phone cannot send images to.
 	attachments AttachmentStore
+	// seen is what a phone is allowed to read outside a session's directory:
+	// the files that session's agent already opened.
+	seen *seenPaths
 	// pushedQuestions remembers the last question announced per session, so a
 	// prompt sitting unanswered across many sweeps rings the phone once.
 	pushedQuestions map[string]string
@@ -168,6 +171,7 @@ func New(registry *source.Registry, sink Transport) *Daemon {
 		pushedQuestions:    map[string]string{},
 		serverLists:        map[string][]protocol.Server{},
 		serverScanInterval: serverScanInterval,
+		seen:               newSeenPaths(),
 	}
 }
 
@@ -813,6 +817,7 @@ func (d *Daemon) HandleFrom(
 		if err != nil {
 			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
 		}
+		d.seen.record(req.SessionID, page.Messages)
 		event := protocol.Event{Type: protocol.EvtPage, Page: &page}
 		return fitMessageEvent(event)
 
@@ -929,6 +934,9 @@ func (d *Daemon) HandleFrom(
 	case protocol.ReqListFiles, protocol.ReqReadFile, protocol.ReqListChanges, protocol.ReqFileDiff:
 		return d.workspace(ctx, req)
 
+	case protocol.ReqReadSeenFile:
+		return d.readSeenFile(req)
+
 	default:
 		return protocol.Event{Type: protocol.EvtError, Error: "unsupported request: " + string(req.Type)}
 	}
@@ -994,7 +1002,8 @@ func validateRequest(req protocol.Request) error {
 		req.Type == protocol.ReqOpenServer || req.Type == protocol.ReqCloseServer ||
 		req.Type == protocol.ReqStopServer ||
 		req.Type == protocol.ReqListFiles || req.Type == protocol.ReqReadFile ||
-		req.Type == protocol.ReqListChanges || req.Type == protocol.ReqFileDiff
+		req.Type == protocol.ReqListChanges || req.Type == protocol.ReqFileDiff ||
+		req.Type == protocol.ReqReadSeenFile
 	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
 		return fmt.Errorf("daemon: invalid session id")
 	}
@@ -1019,6 +1028,11 @@ func validateRequest(req protocol.Request) error {
 	case protocol.ReqListFiles, protocol.ReqReadFile, protocol.ReqListChanges, protocol.ReqFileDiff:
 		_, err := workspacePath(req.Path, req.Type == protocol.ReqListFiles || req.Type == protocol.ReqListChanges)
 		return err
+	case protocol.ReqReadSeenFile:
+		if !strings.HasPrefix(req.Path, "/") || len(req.Path) > maxWirePathBytes {
+			return fmt.Errorf("daemon: that is not an absolute path")
+		}
+		return nil
 	case protocol.ReqSendMessage:
 		// A message that is only images is a real message: "look at this".
 		if strings.TrimSpace(req.Text) == "" && len(req.UploadIDs) == 0 {
@@ -1218,6 +1232,7 @@ func (d *Daemon) startFollow(subscriberID, sessionID string) error {
 			case <-ctx.Done():
 				return
 			case batch := <-messages:
+				d.seen.record(sessionID, batch)
 				for len(batch) > 0 {
 					take := min(len(batch), maxPageMessages)
 					event := protocol.Event{

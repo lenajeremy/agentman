@@ -142,7 +142,8 @@ export type RequestType =
   | "list_files"
   | "read_file"
   | "list_changes"
-  | "file_diff";
+  | "file_diff"
+  | "read_seen_file";
 
 export interface Request {
   type: RequestType;

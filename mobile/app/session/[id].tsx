@@ -9,6 +9,7 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -524,6 +525,21 @@ export default function SessionScreen() {
                     />
                   )}
                 </MotionPressable>
+                {/* iOS's own edit menu can paste text into a TextInput but not
+                    an image: RCTUITextView.paste: hands straight to UITextView,
+                    and no onPaste reaches JS. So a long press here offers the
+                    image instead, in the place the gesture already suggests. */}
+                <Pressable
+                  onLongPress={() => {
+                    if (!images.clipboardReady || !images.canAdd) return;
+                    void images.paste();
+                  }}
+                  delayLongPress={400}
+                  style={styles.inputWrap}
+                  accessibilityLabel={
+                    images.clipboardReady ? "Hold to paste the image on the clipboard" : undefined
+                  }
+                >
                 <TextInput
                   style={styles.input}
                   value={draft}
@@ -544,6 +560,7 @@ export default function SessionScreen() {
                   returnKeyType="send"
                   accessibilityLabel="Instruction"
                 />
+                </Pressable>
                 <MotionPressable
                   onPress={() => void submit()}
                   disabled={!canSend || awaitingSend || nothingToSend}
@@ -953,6 +970,10 @@ const makeStyles = (c: Palette) =>
     // rounded container loses its corners to the radius.
     fieldWithImages: { borderRadius: radius.lg, paddingTop: space.sm, paddingLeft: space.sm },
     fieldRow: { flexDirection: "row", alignItems: "flex-end", gap: space.xs },
+    // A wrapper so the long press has something to land on: the gesture cannot
+    // be attached to the TextInput itself without swallowing taps that should
+    // place the caret.
+    inputWrap: { flex: 1 },
     attachError: {
       fontFamily: font.sans,
       fontSize: size.label,

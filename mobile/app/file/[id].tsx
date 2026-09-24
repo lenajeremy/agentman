@@ -16,7 +16,16 @@ import { useStore } from "../../lib/store";
 import { font, Palette, radius, size, space } from "../../lib/theme";
 
 export default function FileScreen() {
-  const { id, path: pathParam, tab: tabParam } = useLocalSearchParams<{ id: string; path: string; tab?: string }>();
+  const { id, path: pathParam, tab: tabParam, seen } = useLocalSearchParams<{
+    id: string;
+    path: string;
+    tab?: string;
+    seen?: string;
+  }>();
+  // A file outside the session's directory, reachable only because this
+  // session's agent opened it. It has no working tree to diff against and no
+  // folder above it to go back to, so the screen shows just the picture.
+  const seenOnly = seen === "1";
   const sessionId = decodeURIComponent(String(id));
   const filePath = typeof pathParam === "string" ? pathParam : "";
   const store = useStore();
@@ -38,13 +47,18 @@ export default function FileScreen() {
     setLoading(true);
     setError("");
     setResult(null);
-    void store.workspace(sessionId, tab === "code" ? "read_file" : "file_diff", filePath)
+    void store
+      .workspace(
+        sessionId,
+        seenOnly ? "read_seen_file" : tab === "code" ? "read_file" : "file_diff",
+        filePath,
+      )
       .then((value) => { if (current) setResult(value); })
       .catch((reason) => { if (current) setError(reason instanceof Error ? reason.message : String(reason)); })
       .finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, filePath, tab, refresh]);
+  }, [sessionId, filePath, tab, refresh, seenOnly]);
 
   const name = filePath.split("/").at(-1) || "File";
   const rows = useMemo(() => (result?.diff ? parseDiff(result.diff) : []), [result]);
@@ -64,8 +78,10 @@ export default function FileScreen() {
           <Feather name="refresh-cw" size={17} color={color.text} />
         </MotionPressable>
       </ContentColumn>
+      {/* A file outside the working tree has nothing to diff against, so the
+          tabs would offer a choice with one broken half. */}
       <ContentColumn style={styles.tabs}>
-        {(["code", "diff"] as const).map((value) => (
+        {(seenOnly ? [] : (["code", "diff"] as const)).map((value) => (
           <MotionPressable key={value} onPress={() => setTab(value)} style={[styles.tab, tab === value && styles.tabActive]} accessibilityRole="tab" accessibilityState={{ selected: tab === value }}>
             <Text style={[styles.tabText, tab === value && styles.tabTextActive]}>{value === "code" ? "File" : "Diff"}</Text>
           </MotionPressable>
