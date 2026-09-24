@@ -277,6 +277,19 @@ export default function SessionScreen() {
               : sessionId}
           </Text>
         </View>
+        {session?.servers?.length ? (
+          <MotionPressable
+            onPress={() => router.push(`/servers/${encodeURIComponent(session.id)}`)}
+            hitSlop={8}
+            style={styles.serversButton}
+            pressedScale={0.92}
+            accessibilityRole="button"
+            accessibilityLabel={`${session.servers.length} server${session.servers.length === 1 ? "" : "s"} running. Open servers`}
+          >
+            <Feather name="globe" size={15} color={color.text} />
+            <Text style={styles.serversCount}>{session.servers.length}</Text>
+          </MotionPressable>
+        ) : null}
         {session ? (
           <View style={[styles.statePill, { backgroundColor: state.wash }]}>
             <Pulse state={displayState} size={6} />
@@ -670,6 +683,18 @@ const makeStyles = (c: Palette) =>
       borderColor: c.line,
     },
     headerBody: { flex: 1 },
+    serversButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+      height: 32,
+      paddingHorizontal: 10,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    serversCount: { fontFamily: font.monoMedium, fontSize: 12, color: c.text },
     title: { fontFamily: font.monoMedium, fontSize: 15, color: c.text },
     subtitle: { fontFamily: font.sans, fontSize: size.label, color: c.muted, marginTop: 2 },
     statePill: {

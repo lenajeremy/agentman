@@ -1,6 +1,9 @@
 package protocol
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func waiting() Session {
 	return Session{
@@ -27,9 +30,6 @@ func TestSameAsIgnoresQuestionIdentity(t *testing.T) {
 
 	if first.Question == second.Question {
 		t.Fatal("the fixtures share a Question pointer, so this proves nothing")
-	}
-	if first == second {
-		t.Fatal("== now compares Questions by value; SameAs may be redundant")
 	}
 	if !first.SameAs(second) {
 		t.Error("two readings of the same unchanged prompt compared different")
@@ -122,5 +122,47 @@ func TestSameAsWithoutQuestions(t *testing.T) {
 	moved.LastActivityAt = 2000
 	if idle.SameAs(moved) {
 		t.Error("a genuine activity bump was ignored")
+	}
+}
+
+func TestSameAsSeesServerChanges(t *testing.T) {
+	base := waiting()
+	base.Servers = []Server{{Port: 5173, Command: "node", Title: "Vite App"}}
+	same := waiting()
+	same.Servers = []Server{{Port: 5173, Command: "node", Title: "Vite App"}}
+	if !base.SameAs(same) {
+		t.Fatal("identical server lists compared different")
+	}
+	shared := waiting()
+	shared.Servers = []Server{{Port: 5173, Command: "node", Title: "Vite App", Link: "https://x.agentman.online"}}
+	if base.SameAs(shared) {
+		t.Fatal("a server gaining a link is a change the phone must hear about")
+	}
+}
+
+// TestSameAsCoversEveryField guards the hand-written comparison: a field added
+// to Session but forgotten in SameAs would make changes to it invisible.
+func TestSameAsCoversEveryField(t *testing.T) {
+	base := waiting()
+	value := reflect.ValueOf(&base).Elem()
+	for i := range value.NumField() {
+		changed := waiting()
+		field := reflect.ValueOf(&changed).Elem().Field(i)
+		name := value.Type().Field(i).Name
+		switch field.Kind() {
+		case reflect.String:
+			field.SetString(field.String() + "-changed")
+		case reflect.Int, reflect.Int64:
+			field.SetInt(field.Int() + 1)
+		case reflect.Pointer:
+			field.Set(reflect.Zero(field.Type()))
+		case reflect.Slice:
+			field.Set(reflect.MakeSlice(field.Type(), 1, 1))
+		default:
+			t.Fatalf("no mutation for field %s of kind %s; extend this test", name, field.Kind())
+		}
+		if base.SameAs(changed) {
+			t.Errorf("SameAs ignores a change to %s", name)
+		}
 	}
 }

@@ -120,6 +120,20 @@ interface Store {
    *  one-way door: a session stays invisible until the agent happens to act,
    *  which for a finished session may be never. */
   restoreAllSessions(): void;
+  /** Share one of a session's servers and resolve with its preview link. */
+  openServer(sessionId: string, port: number): Promise<string>;
+  /** Stop sharing it. The link stops working immediately. */
+  closeServer(sessionId: string, port: number): void;
+}
+
+/** How long a tap on a server waits for the Mac to open its link. The daemon
+ *  gives up at 20 seconds; this leaves room for the round trip. */
+const OPEN_SERVER_TIMEOUT_MS = 25_000;
+
+interface ServerRequest {
+  resolve(link: string): void;
+  reject(error: Error): void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 const StoreContext = createContext<Store | null>(null);
@@ -190,6 +204,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const pendingCatchUps = useRef(new Map<string, CatchUpState>());
   /** Sessions whose current blocked period has already produced an alert. */
   const announcedQuestions = useRef(new Set<string>());
+  /** open_server requests waiting for their link, by frame id. */
+  const serverRequests = useRef(new Map<string, ServerRequest>());
+
+  const settleServerRequest = useCallback((replyTo: string, link?: string, error?: string) => {
+    const request = serverRequests.current.get(replyTo);
+    if (!request) return false;
+    serverRequests.current.delete(replyTo);
+    clearTimeout(request.timer);
+    if (link) request.resolve(link);
+    else request.reject(new Error(error || "The Mac could not share this server."));
+    return true;
+  }, []);
 
   const mergeSessionMessages = useCallback((sessionId: string, incoming: Message[]) => {
     const retained = mergeRetainedMessages(
@@ -442,6 +468,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         break;
       }
 
+      case "server_opened": {
+        if (replyTo && event.link) settleServerRequest(replyTo, event.link);
+        break;
+      }
+
       case "send_result": {
         if (!event.clientId) break;
         setPending((current) => {
@@ -456,6 +487,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
 
 	  case "error": {
+		if (replyTo && settleServerRequest(replyTo, undefined, serverErrorMessage(event.error))) break;
 		// A failed history request must release its loading state. Otherwise a
 		// transient adapter error leaves the spinner and pagination disabled for
 		// the rest of the app process.
@@ -473,7 +505,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 		break;
 	  }
     }
-  }, [mergeSessionMessages]);
+  }, [mergeSessionMessages, settleServerRequest]);
 
   const attach = useCallback(
     (creds: Credentials) => {
@@ -483,6 +515,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         onControl: (control, replyTo) => {
           if (control.type === "daemon_offline" && control.lastSeenAt) {
             setLastSeenAt(control.lastSeenAt);
+          }
+          if (replyTo && (control.type === "daemon_offline" || control.type === "error")) {
+            settleServerRequest(
+              replyTo,
+              undefined,
+              control.type === "daemon_offline"
+                ? "Your Mac is offline, so it cannot share this server."
+                : control.message,
+            );
           }
           // An offline Mac is transient, so the Client retains idempotent reads
           // for replay. A relay error is permanent for that exact request and
@@ -872,9 +913,38 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           return {};
         });
       },
+
+      openServer(sessionId, port) {
+        return new Promise<string>((resolve, reject) => {
+          const client = clientRef.current;
+          const id = client?.send({ type: "open_server", sessionId, port });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => {
+            settleServerRequest(id, undefined, "Your Mac took too long to share this server.");
+          }, OPEN_SERVER_TIMEOUT_MS);
+          serverRequests.current.set(id, { resolve, reject, timer });
+        });
+      },
+
+      closeServer(sessionId, port) {
+        clientRef.current?.send({ type: "close_server", sessionId, port });
+      },
     }),
-    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, attach],
+    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, attach, settleServerRequest],
   );
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
+}
+
+/** Turns a daemon refusal into something worth reading on a phone. */
+function serverErrorMessage(error?: string): string {
+  if (!error) return "The Mac could not share this server.";
+  // A daemon older than this feature rejects the request type outright.
+  if (error.includes("unsupported request")) {
+    return "Update agentman on your Mac to open servers from your phone.";
+  }
+  return error.replace(/^(daemon|servers): /, "");
 }

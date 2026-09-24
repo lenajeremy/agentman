@@ -192,6 +192,9 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 			Inject:         inject,
 			StartedAt:      file.StartedAt,
 			LastActivityAt: file.UpdatedAt,
+			// Claude's own registry names its process, so anything its tools
+			// start — a dev server included — descends from this pid.
+			AgentPID: file.PID,
 		}
 
 		transcript := s.transcriptPath(file.Cwd, file.SessionID)

@@ -15,7 +15,12 @@ export const PROTOCOL_VERSION = 2;
  */
 export const PAIRING_CODE_LENGTH = 10;
 
-export type AgentKind = "claude" | "codex" | "opencode";
+/**
+ * The agents the daemon knows today. Typed open-ended on purpose: a newer
+ * daemon adding an agent (Gemini, Grok) must not make this app reject the
+ * whole session list — the unknown agent shows with a generic icon instead.
+ */
+export type AgentKind = "claude" | "codex" | "opencode" | (string & {});
 export type SessionState = "busy" | "idle" | "waiting_input" | "ended";
 
 /**
@@ -72,6 +77,19 @@ export interface Session {
   model?: string;
   /** Present only while the agent is waiting on a decision. */
   question?: Question;
+  /** Web servers the agent has started. Absent from daemons that predate it. */
+  servers?: Server[];
+}
+
+/** A local web server an agent started, which the phone can open. */
+export interface Server {
+  port: number;
+  /** The listening program, e.g. "node". */
+  command?: string;
+  /** The page's <title>, when it serves HTML. */
+  title?: string;
+  /** The public preview link while the server is being shared. */
+  link?: string;
 }
 
 export interface Tool {
@@ -117,7 +135,9 @@ export type RequestType =
   | "send_message"
   | "interrupt"
   | "answer_question"
-  | "register_push";
+  | "register_push"
+  | "open_server"
+  | "close_server";
 
 export interface Request {
   type: RequestType;
@@ -134,6 +154,8 @@ export interface Request {
   optionKey?: string;
   optionKeys?: string[];
   answerText?: string;
+  /** The server on open_server and close_server. */
+  port?: number;
 }
 
 export type EventType =
@@ -144,6 +166,7 @@ export type EventType =
   | "page"
   | "turn_complete"
   | "send_result"
+  | "server_opened"
   | "error";
 
 export type SendStatus = "delivered" | "queued" | "failed";
@@ -159,6 +182,9 @@ export interface DaemonEvent {
   preview?: string;
   clientId?: string;
   status?: SendStatus;
+  /** Set on server_opened. */
+  port?: number;
+  link?: string;
   error?: string;
 }
 
@@ -232,7 +258,7 @@ export function decodeControl(value: unknown): Control | null {
 export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
   if (!isRecord(value) || !isOneOf(value.type, [
     "sessions", "session_update", "session_gone", "messages", "page",
-    "turn_complete", "send_result", "error",
+    "turn_complete", "send_result", "server_opened", "error",
   ] as const)) return null;
 
   switch (value.type) {
@@ -263,9 +289,14 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
           !optionalBoundedString(value.sessionId, 512) ||
           !optionalBoundedString(value.error, 64 * 1024)) return null;
       break;
+    case "server_opened":
+      if (!boundedString(value.sessionId, 512, true) || !isPort(value.port) ||
+          !isLink(value.link)) return null;
+      break;
     case "error":
       if (!boundedString(value.error, 64 * 1024, true) ||
-          !optionalBoundedString(value.sessionId, 512)) return null;
+          !optionalBoundedString(value.sessionId, 512) ||
+          (value.port !== undefined && !isPort(value.port))) return null;
       break;
   }
   return value as unknown as DaemonEvent;
@@ -274,7 +305,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
 function isSession(value: unknown): value is Session {
   if (!isRecord(value)) return false;
   return boundedString(value.id, 512, true) &&
-    isOneOf(value.kind, ["claude", "codex", "opencode"] as const) &&
+    boundedString(value.kind, 64, true) &&
     boundedString(value.nativeId, 512, true) &&
     boundedString(value.name, 4096) &&
     boundedString(value.cwd, 64 * 1024) &&
@@ -282,7 +313,25 @@ function isSession(value: unknown): value is Session {
     isOneOf(value.inject, ["api", "tmux", "hook", "none"] as const) &&
     finiteNumber(value.startedAt) && finiteNumber(value.lastActivityAt) &&
     optionalBoundedString(value.model, 4096) &&
-    (value.question === undefined || isQuestion(value.question));
+    (value.question === undefined || isQuestion(value.question)) &&
+    (value.servers === undefined || boundedArray(value.servers, 64, isServer));
+}
+
+function isServer(value: unknown): value is Server {
+  return isRecord(value) && isPort(value.port) &&
+    optionalBoundedString(value.command, 256) &&
+    optionalBoundedString(value.title, 1024) &&
+    (value.link === undefined || isLink(value.link));
+}
+
+function isPort(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 65535;
+}
+
+/** A preview link the app will open in a browser. Anything but http(s) — a
+ *  javascript: or custom-scheme URL from a compromised relay — is refused. */
+function isLink(value: unknown): value is string {
+  return boundedString(value, 2048, true) && /^https?:\/\/[^\s]+$/.test(value);
 }
 
 function isQuestion(value: unknown): value is Question {
