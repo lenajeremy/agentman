@@ -1,12 +1,13 @@
 import { StyleSheet, Text, View } from "react-native";
+import Svg, { Path } from "react-native-svg";
 
 import { useStyles, useTheme } from "../lib/appearance";
 import { font, Palette } from "../lib/theme";
 
 /**
- * The mark: a terminal with a notification waiting on it, which is the whole
- * product in one shape. Drawn from views so it is crisp at any size and takes
- * the theme's ink.
+ * The mark: a terminal prompt with a notification waiting on it, which is the
+ * whole product in one shape. Drawn rather than bundled as an image, so it is
+ * crisp at any size and takes the theme's ink.
  */
 export function BrandMark({
   size = 26,
@@ -29,17 +30,16 @@ export function BrandMark({
       }}
       accessible={false}
     >
-      <View
-        style={{
-          position: "absolute",
-          left: Math.round(size * 0.26),
-          bottom: Math.round(size * 0.27),
-          width: Math.round(size * 0.36),
-          height: Math.max(2, Math.round(size * 0.11)),
-          borderRadius: size,
-          backgroundColor: color.onInverse,
-        }}
-      />
+      <Svg width={size} height={size} viewBox="0 0 100 100">
+        <Path
+          d="M31 32.5 L55 51.25 L31 70"
+          fill="none"
+          stroke={color.onInverse}
+          strokeWidth={12}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </Svg>
       <View
         style={{
           position: "absolute",
