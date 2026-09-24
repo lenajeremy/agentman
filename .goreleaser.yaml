@@ -82,17 +82,25 @@ homebrew_casks:
     # Homebrew serves a prebuilt bottle, so this costs a download, not a build.
     dependencies:
       - formula: tmux
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            # The binary is downloaded rather than built locally and is not
-            # notarized, so Gatekeeper quarantines it and macOS refuses to run
-            # it at all. Stripping the attribute is what makes an unsigned
-            # cask usable.
-            system_command "/usr/bin/xattr",
-                           args: ["-dr", "com.apple.quarantine", "#{staged_path}/am"]
-          end
+    # The binary is downloaded rather than built locally and is not notarized,
+    # so Gatekeeper quarantines it and macOS kills it on the first run —
+    # verified by installing this same tarball without the step: the binary
+    # carries com.apple.quarantine and `am version` prints nothing at all.
+    # Stripping the attribute is what makes an unsigned cask usable.
+    #
+    # Written through custom_block rather than `hooks.post.install`, which
+    # GoReleaser still emits as Homebrew's deprecated `postflight` stanza (true
+    # as of v2.18.2). custom_block lands at the top of the cask, above
+    # `version`, which Homebrew accepts. `run` resolves args relative to chdir
+    # rather than expanding a staged_path string, so the path is "." plus a
+    # bare binary name. Fold this back into hooks.post.install once GoReleaser
+    # emits postflight_steps itself.
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "am"], chdir: "."
+        end
+      end
     caveats: |
       Get started:
 
