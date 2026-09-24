@@ -32,7 +32,7 @@ export function BrandMark({
     >
       <Svg width={size} height={size} viewBox="0 0 100 100">
         <Path
-          d="M31 32.5 L55 51.25 L31 70"
+          d="M38 31.25 L62 50 L38 68.75"
           fill="none"
           stroke={color.onInverse}
           strokeWidth={12}
