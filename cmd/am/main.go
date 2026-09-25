@@ -28,7 +28,7 @@ var version = "dev"
 const usage = `am — monitor your local coding agents
 
 Usage:
-  am list                     List running agent sessions
+  am list                     List live and recent agent sessions
   am history <session-id>     Print a session's recent messages
   am watch [session-id]       Follow sessions live (all, or one in detail)
   am serve                    Run the daemon (hooks + relay connection)
@@ -38,7 +38,10 @@ Usage:
   am claude [args...]         Start Claude Code so you can message it later
   am codex [args...]          Start Codex so you can message it later
   am opencode [args...]       Start OpenCode so you can message it later
+  am cursor [args...]         Start Cursor Agent CLI so you can message it later
   am send <session-id> <text> Send a message to a running session
+  am interrupt <session-id>   Stop the active turn in a managed session
+  am answer <session-id> <key> Answer a pending choice shown by an agent
   am install-hooks            Register agentman's hooks with your agents
   am uninstall-hooks          Remove them again
   am doctor                   Check that everything is wired up correctly
@@ -90,7 +93,7 @@ func main() {
 		err = runExpose(ctx, args)
 	case "servers":
 		err = runServers(ctx, args)
-	case "claude", "codex":
+	case "claude", "codex", "cursor":
 		// Launch an agent inside tmux so it can receive messages later.
 		err = runWrap(ctx, command, args)
 	case "opencode":
@@ -99,6 +102,10 @@ func main() {
 		err = runOpenCode(ctx, args)
 	case "send":
 		err = runSend(ctx, args)
+	case "interrupt":
+		err = runInterrupt(ctx, args)
+	case "answer":
+		err = runAnswer(ctx, args)
 	case "doctor":
 		err = runDoctor(ctx, args)
 	case "version", "--version", "-v":
@@ -142,6 +149,22 @@ func buildRegistry() (*source.Registry, error) {
 		return nil, err
 	}
 	registry.Add(openCode)
+
+	// Cursor is file-backed like Claude and Codex: discovery reads local
+	// agent transcripts, and the adapter stays silent when Cursor has never
+	// run. IDE chats remain read-only; the managed CLI uses the source below.
+	cursor, err := source.NewCursorSource("")
+	if err != nil {
+		return nil, err
+	}
+	registry.Add(cursor)
+
+	// Terminal chats use a separate store from IDE composer sessions.
+	cursorCLI, err := source.NewCursorCLISource("")
+	if err != nil {
+		return nil, err
+	}
+	registry.Add(cursorCLI)
 
 	return registry, nil
 }
@@ -191,12 +214,12 @@ func runList(ctx context.Context, args []string) error {
 	}
 
 	if len(sessions) == 0 {
-		fmt.Println("No running agent sessions.")
-		fmt.Println("Start one with `am claude`, `am codex`, or `am opencode` and run `am list` again.")
+		fmt.Println("No recent agent sessions.")
+		fmt.Println("Start one with `am claude`, `am codex`, `am opencode`, or `am cursor`.")
 		return discoverErr
 	}
 
-	fmt.Printf("%d running session(s)\n\n", len(sessions))
+	fmt.Printf("%d agent session(s)\n\n", len(sessions))
 	for _, s := range sessions {
 		fmt.Printf("  %s %-28s %s\n", stateDot(s.State), truncate(s.Name, 28), dim(s.ID))
 		fmt.Printf("     %-9s %-6s %s\n", s.Kind, s.State, dim(collapseHome(s.Cwd)))

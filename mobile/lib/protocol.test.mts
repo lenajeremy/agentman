@@ -34,6 +34,29 @@ test("accepts a valid daemon event envelope", () => {
   assert.ok(decodeDaemonEvent(envelope.payload));
 });
 
+test("accepts a read-only Cursor session and tools with unknown outcomes", () => {
+  const session = {
+    id: "cursor:session-1", kind: "cursor", nativeId: "session-1",
+    name: "Investigate build", cwd: "/work/app", state: "waiting_input",
+    inject: "none", startedAt: 1, lastActivityAt: 2,
+  };
+  const update = decodeDaemonEvent({ type: "session_update", session });
+  assert.ok(update);
+  assert.equal(update.type, "session_update");
+  assert.equal(update.session.inject, "none");
+
+  const messages = decodeDaemonEvent({
+    type: "messages", sessionId: session.id,
+    messages: [{
+      id: "o42:tool1", sessionId: session.id, role: "tool", ts: 2,
+      tool: { name: "Shell", summary: "pwd" },
+    }],
+  });
+  assert.ok(messages);
+  assert.equal(messages.type, "messages");
+  assert.equal(messages.messages[0].tool?.status, undefined);
+});
+
 test("rejects malformed websocket envelopes and payloads", () => {
   assert.equal(decodeEnvelope("not json"), null);
   assert.equal(decodeEnvelope(JSON.stringify({

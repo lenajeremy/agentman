@@ -194,6 +194,10 @@ export function agentLabel(kind: string): { name: string; short: string } {
       return { name: "Codex", short: "cx" };
     case "opencode":
       return { name: "OpenCode", short: "oc" };
+    case "cursor":
+      return { name: "Cursor", short: "cu" };
+    case "cursor-cli":
+      return { name: "Cursor CLI", short: "cu" };
     default:
       return { name: kind, short: kind.slice(0, 2) };
   }

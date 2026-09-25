@@ -225,7 +225,7 @@ export default function SessionScreen() {
   }, [draft, canSend, awaitingSend, sessionId, store]);
 
   const requestInterrupt = useCallback(() => {
-    if (!store.daemonOnline) return;
+    if (!store.daemonOnline || session?.inject === "none") return;
     if (interruptAction?.status === "sending" || interruptAction?.status === "delivered") {
       return;
     }
@@ -242,7 +242,7 @@ export default function SessionScreen() {
         { text: "Stop turn", style: "destructive", onPress: perform },
       ],
     );
-  }, [interruptAction?.status, sessionId, store]);
+  }, [interruptAction?.status, session?.inject, sessionId, store]);
 
   const interruptLocked = !store.daemonOnline ||
     interruptAction?.status === "sending" ||
@@ -296,7 +296,7 @@ export default function SessionScreen() {
             <Text style={[styles.stateLabel, { color: state.text }]}>{state.label}</Text>
           </View>
         ) : null}
-        {session?.state === "busy" ? (
+        {session?.state === "busy" && session.inject !== "none" ? (
           <MotionPressable
             onPress={requestInterrupt}
             disabled={interruptLocked}
@@ -335,7 +335,7 @@ export default function SessionScreen() {
         ) : null}
         {session && !session.question && (
           <ContentColumn>
-            <DeliveryNote inject={session.inject} state={session.state} />
+            <DeliveryNote kind={session.kind} inject={session.inject} state={session.state} />
           </ContentColumn>
         )}
 
@@ -562,17 +562,25 @@ function InterruptNote({
  * a queued message is not a sent one, and someone who walked away from their
  * desk deserves to know which they are getting before they rely on it.
  */
-function DeliveryNote({ inject, state }: { inject: string; state: string }) {
+function DeliveryNote({ kind, inject, state }: { kind: string; inject: string; state: string }) {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
   if (inject === "tmux" || inject === "api") return null;
 
-  const text =
-    inject === "hook"
-      ? state === "busy"
-        ? "Messages wait until this turn ends — it can't be interrupted."
-        : "Messages are handed over when this agent next finishes a turn."
-      : "Start this session with `am claude` to send it messages.";
+  let text: string;
+  if (inject === "hook") {
+    text = state === "busy"
+      ? "Messages wait until this turn ends — it can't be interrupted."
+      : "Messages are handed over when this agent next finishes a turn.";
+  } else if (kind === "cursor") {
+    text = "Cursor IDE chats are read-only here. Continue in the IDE on your Mac.";
+  } else if (kind === "cursor-cli") {
+    text = "Start Cursor Agent CLI with am cursor to send this chat messages remotely.";
+  } else if (kind === "claude" || kind === "codex") {
+    text = `Start this session with am ${kind} to send it messages.`;
+  } else {
+    text = "This session is read-only here. Continue in its agent app on your Mac.";
+  }
 
   return (
     <View style={styles.note}>
