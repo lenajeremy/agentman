@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LayoutChangeEvent, StyleSheet, Text, View } from "react-native";
+import { LayoutChangeEvent, StyleSheet, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   runOnJS,
@@ -8,27 +8,38 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-import { useTheme } from "../lib/appearance";
-import { font, Palette } from "../lib/theme";
-
 const MIN_SCALE = 1;
 const MAX_SCALE = 8;
 /** What a double tap jumps to, which is enough to read code in a screenshot. */
 const DOUBLE_TAP_SCALE = 3;
+/** How far an unzoomed downward drag goes before it counts as "put this away". */
+const DISMISS_DISTANCE = 120;
 
 /**
- * A pinch-and-pan image viewer.
+ * A photo viewer, in the sense Apple's Photos means it.
  *
- * A screenshot is the common case here — an agent's UI capture, a diagram —
- * and a fixed-height, contained image is unreadable on a phone: the detail
- * that matters is a few pixels tall. Gestures run on the UI thread through
- * Reanimated so a pinch stays smooth while the transcript is still streaming.
+ * The image owns the whole screen on black, and everything else is either
+ * overlaid on it or gone. What was here before was an image box inside a
+ * scrolling page: a fixed 420pt frame that left a screenshot letterboxed in
+ * the middle with a third of the display empty beneath it, which is the
+ * opposite of what you open a picture for.
+ *
+ * Black rather than a themed background because that is what a photo is
+ * shown on — it tints nothing at the edges and it is the only ground that
+ * disappears.
  */
-export function ImageViewer({ uri }: { uri: string }) {
-  const { color } = useTheme();
-  const styles = makeStyles(color);
+export function ImageViewer({
+  uri,
+  onTap,
+  onDismiss,
+}: {
+  uri: string;
+  /** Called on a single tap, for hiding and showing the chrome over the image. */
+  onTap?: () => void;
+  /** Called when the image is flung downward while unzoomed. */
+  onDismiss?: () => void;
+}) {
   const [frame, setFrame] = useState({ width: 0, height: 0 });
-  const [zoomed, setZoomed] = useState(false);
 
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -36,6 +47,8 @@ export function ImageViewer({ uri }: { uri: string }) {
   const y = useSharedValue(0);
   const savedX = useSharedValue(0);
   const savedY = useSharedValue(0);
+  /** Fades the ground as the image is dragged away, the way Photos does. */
+  const dismissProgress = useSharedValue(0);
 
   /**
    * How far the image may travel at a given scale: half the overflow in each
@@ -56,7 +69,6 @@ export function ImageViewer({ uri }: { uri: string }) {
       y.value = withTiming(0);
       savedX.value = 0;
       savedY.value = 0;
-      runOnJS(setZoomed)(false);
       return;
     }
     if (scale.value > MAX_SCALE) {
@@ -71,7 +83,6 @@ export function ImageViewer({ uri }: { uri: string }) {
     if (nextY !== y.value) y.value = withTiming(nextY);
     savedX.value = nextX;
     savedY.value = nextY;
-    runOnJS(setZoomed)(savedScale.value > 1.01);
   };
 
   const pinch = Gesture.Pinch()
@@ -83,41 +94,70 @@ export function ImageViewer({ uri }: { uri: string }) {
       settle();
     });
 
-  // A single finger may only pan once there is something to pan to, so at rest
-  // the gesture does not fight the page's own scrolling.
+  const zoomed = () => {
+    "worklet";
+    return savedScale.value > 1.01;
+  };
+
+  // One gesture, two jobs, decided by whether the image is zoomed: panning the
+  // picture when there is more of it than fits, and putting it away when there
+  // is not. That is the rule Photos uses and the one a thumb already expects.
   const pan = Gesture.Pan()
     .averageTouches(true)
     .onUpdate((event) => {
-      if (savedScale.value <= 1.01) return;
-      x.value = savedX.value + event.translationX;
-      y.value = savedY.value + event.translationY;
+      if (zoomed()) {
+        x.value = savedX.value + event.translationX;
+        y.value = savedY.value + event.translationY;
+        return;
+      }
+      if (!onDismiss || event.translationY <= 0) return;
+      y.value = event.translationY;
+      x.value = event.translationX;
+      dismissProgress.value = Math.min(1, event.translationY / (DISMISS_DISTANCE * 2));
     })
-    .onEnd(() => {
-      if (savedScale.value <= 1.01) return;
-      savedX.value = x.value;
-      savedY.value = y.value;
-      settle();
+    .onEnd((event) => {
+      if (zoomed()) {
+        savedX.value = x.value;
+        savedY.value = y.value;
+        settle();
+        return;
+      }
+      if (onDismiss && event.translationY > DISMISS_DISTANCE) {
+        runOnJS(onDismiss)();
+        return;
+      }
+      x.value = withTiming(0);
+      y.value = withTiming(0);
+      dismissProgress.value = withTiming(0);
     });
 
   const doubleTap = Gesture.Tap()
     .numberOfTaps(2)
     .onEnd(() => {
-      const target = savedScale.value > 1.01 ? MIN_SCALE : DOUBLE_TAP_SCALE;
+      const target = zoomed() ? MIN_SCALE : DOUBLE_TAP_SCALE;
       scale.value = withTiming(target);
       savedScale.value = target;
       x.value = withTiming(0);
       y.value = withTiming(0);
       savedX.value = 0;
       savedY.value = 0;
-      runOnJS(setZoomed)(target > 1.01);
     });
 
-  // Pinch and pan run together; the double tap only wins when neither began.
-  const gesture = Gesture.Simultaneous(pinch, Gesture.Exclusive(doubleTap, pan));
+  const singleTap = Gesture.Tap()
+    .numberOfTaps(1)
+    .onEnd(() => {
+      if (onTap) runOnJS(onTap)();
+    });
+
+  // The single tap must wait to be sure it is not the first half of a double
+  // one, or every zoom would flash the chrome on its way past.
+  const taps = Gesture.Exclusive(doubleTap, singleTap);
+  const gesture = Gesture.Simultaneous(pinch, Gesture.Race(pan, taps));
 
   const animated = useAnimatedStyle(() => ({
     transform: [{ translateX: x.value }, { translateY: y.value }, { scale: scale.value }],
   }));
+  const ground = useAnimatedStyle(() => ({ opacity: 1 - dismissProgress.value * 0.6 }));
 
   const onLayout = (event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
@@ -125,44 +165,22 @@ export function ImageViewer({ uri }: { uri: string }) {
   };
 
   return (
-    <View style={styles.wrap}>
-      <GestureDetector gesture={gesture}>
-        <View style={styles.frame} onLayout={onLayout} collapsable={false}>
-          <Animated.Image
-            source={{ uri }}
-            style={[styles.image, animated]}
-            resizeMode="contain"
-            accessibilityLabel="File preview. Pinch to zoom, drag to pan, double tap to fill."
-          />
-        </View>
-      </GestureDetector>
-      <Text style={styles.hint}>
-        {zoomed ? "Drag to pan · double tap to fit" : "Pinch or double tap to zoom"}
-      </Text>
-    </View>
+    <GestureDetector gesture={gesture}>
+      <View style={styles.frame} onLayout={onLayout} collapsable={false}>
+        <Animated.View style={[StyleSheet.absoluteFill, styles.ground, ground]} />
+        <Animated.Image
+          source={{ uri }}
+          style={[styles.image, animated]}
+          resizeMode="contain"
+          accessibilityLabel="Image. Pinch to zoom, drag to pan, double tap to fill, drag down to close."
+        />
+      </View>
+    </GestureDetector>
   );
 }
 
-const makeStyles = (c: Palette) =>
-  StyleSheet.create({
-    wrap: { flex: 1 },
-    // A dark ground rather than the page colour: it is the neutral every
-    // screenshot sits on without tinting its edges, and it marks the image
-    // area as a surface you can manipulate.
-    frame: {
-      flex: 1,
-      minHeight: 420,
-      backgroundColor: "#141518",
-      overflow: "hidden",
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    image: { width: "100%", height: "100%" },
-    hint: {
-      textAlign: "center",
-      paddingVertical: 10,
-      fontFamily: font.sans,
-      fontSize: 11.5,
-      color: c.faint,
-    },
-  });
+const styles = StyleSheet.create({
+  frame: { flex: 1, overflow: "hidden", alignItems: "center", justifyContent: "center" },
+  ground: { backgroundColor: "#000000" },
+  image: { width: "100%", height: "100%" },
+});
