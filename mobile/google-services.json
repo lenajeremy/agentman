@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "953762862905",
+    "project_id": "agentman-eda7c",
+    "storage_bucket": "agentman-eda7c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:953762862905:android:bfde3736319d162454bae8",
+        "android_client_info": {
+          "package_name": "dev.agentman.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB7vxHiZgsoqMeiOCpRnC2PuUFZMof5Jtw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

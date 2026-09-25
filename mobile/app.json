@@ -16,6 +16,7 @@
     },
     "android": {
       "package": "dev.agentman.mobile",
+      "googleServicesFile": "./google-services.json",
       "edgeToEdgeEnabled": true,
       "permissions": [
         "android.permission.CAMERA"

@@ -19,6 +19,8 @@ web-build/
 *.p8
 *.p12
 *.key
+*firebase-adminsdk*.json
+*service-account*.json
 *.mobileprovision
 
 # Local

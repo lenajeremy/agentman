@@ -326,11 +326,15 @@ development token to production is refused as `BadDeviceToken`. After changing
 build type, delete `~/.agentman/push.json` and reopen the app so it registers
 again.
 
-**Android push is not configured.** It needs Firebase Cloud Messaging: a
-`google-services.json` referenced from `expo.android.googleServicesFile`, and
-the matching credential uploaded to Expo. Without it the Android app still
-runs and still shows local notifications, but nothing arrives while it is
-closed.
+Android push uses the Agentman Firebase project (`agentman-eda7c`). The
+registered Android app is `dev.agentman.mobile`; its non-secret
+`mobile/google-services.json` is referenced by `expo.android.googleServicesFile`.
+The matching FCM V1 service-account key is assigned to this Android app in the
+Agentman Expo project's EAS credentials. Keep that private key out of Git.
+Build a fresh Android app after changing notification credentials, then open it
+on a device with Google Play services and grant notification permission so it
+can register a new Expo push token with the paired Mac. Expo Go can show local
+alerts while connected but cannot validate the standalone app's background push.
 
 Push payloads carry a session name and a reason, never transcript content,
 because they pass through Expo and Apple. To include a short excerpt, set
