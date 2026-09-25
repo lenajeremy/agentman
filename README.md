@@ -183,6 +183,25 @@ sequenceDiagram
 | Claude Code | Session registry and transcript JSONL | tmux while active; hook queue between turns | tmux prompt parser and terminal control |
 | Codex | Rollout JSONL plus tmux discovery before the first rollout exists | tmux | tmux prompt parser and terminal control |
 | OpenCode | Native HTTP API across the watched local port range | `prompt_async` API | Native question and permission APIs |
+| Cursor | Agent transcript JSONL under `~/.cursor/projects`, enriched from the IDE's `state.vscdb` composer index (exact timestamps, subtitle, blocking flag) | Read-only for now | Blocking flag surfaces as waiting input (view-only; resolve in the IDE) |
+| Cursor Agent CLI | Local chat store under `~/.cursor/chats`, including text, tool activity, and model name | tmux when started with `am cursor`; otherwise read-only | Shell approvals and workspace trust through the managed terminal; other prompts depend on the terminal menu shape |
+
+Cursor IDE discovery excludes CLI-owned transcripts, which Cursor also writes
+into the project directory. It shows IDE transcripts written in the last 30 minutes. Cursor does
+not expose a per-session process or open-session registry here, so an idle open
+session can disappear from Agentman after that window and a closed one can
+linger briefly. IDE chats cannot be sent messages or interrupted from Agentman;
+use the Cursor IDE for those actions. Cursor Agent CLI chats have separate
+history from IDE chats and do not sync into the IDE. Start a CLI chat with
+`agent login` once, then `am cursor` to make its terminal reachable from the
+phone; a chat started with
+`agent` directly remains read-only. When available, `lsof` identifies the
+exact chat database held open by a managed CLI process, even when several
+sessions share one directory. Without that signal Agentman only links a pane
+to a chat when the directory and update time identify one unambiguously.
+CLI chat history requires the `sqlite3`
+command on `PATH`. Without it, IDE transcripts still appear, but their
+optional metadata enrichment and CLI chat history are unavailable.
 
 Claude Code and Codex should be started with `am claude` or `am codex` when
 two-way control is required. Their CLIs do not expose a general input API, so

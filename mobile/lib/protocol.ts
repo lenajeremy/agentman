@@ -20,7 +20,7 @@ export const PAIRING_CODE_LENGTH = 10;
  * daemon adding an agent (Gemini, Grok) must not make this app reject the
  * whole session list — the unknown agent shows with a generic icon instead.
  */
-export type AgentKind = "claude" | "codex" | "opencode" | (string & {});
+export type AgentKind = "claude" | "codex" | "opencode" | "cursor" | (string & {});
 export type SessionState = "busy" | "idle" | "waiting_input" | "ended";
 
 /**

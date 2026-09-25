@@ -33,14 +33,18 @@ func attachPending(registry *source.Registry, queue *source.PendingQueue) {
 // The user's experience is meant to be unchanged: tmux is created detached and
 // then attached to immediately, so `am claude` looks and feels like `claude`.
 func runWrap(ctx context.Context, agent string, args []string) error {
-	binary, err := exec.LookPath(agent)
+	commandName := agent
+	if agent == "cursor" {
+		commandName = "agent"
+	}
+	binary, err := exec.LookPath(commandName)
 	if err != nil {
-		return fmt.Errorf("%s is not installed (or not on PATH)", agent)
+		return fmt.Errorf("%s is not installed (or not on PATH)", commandName)
 	}
 	if !tmux.Available() {
 		return fmt.Errorf(
 			"tmux is required to send messages to a session — install it with `brew install tmux`, "+
-				"or run `%s` directly to use it without sending", agent)
+				"or run `%s` directly to use it without sending", commandName)
 	}
 
 	cwd, err := os.Getwd()
@@ -105,4 +109,55 @@ func runSend(ctx context.Context, args []string) error {
 		fmt.Printf("%s could not deliver\n", dim("✗"))
 	}
 	return nil
+}
+
+// runInterrupt exercises the same routed cancellation path as the phone.
+func runInterrupt(ctx context.Context, args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("interrupt needs one session id (see `am list`)")
+	}
+	registry, err := buildRegistry()
+	if err != nil {
+		return err
+	}
+	if _, err := registry.Discover(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "am: warning: %v\n", err)
+	}
+	if err := registry.Interrupt(ctx, args[0]); err != nil {
+		return err
+	}
+	fmt.Printf("%s interrupted\n", dim("✓"))
+	return nil
+}
+
+// runAnswer resolves one currently displayed choice through the same
+// question-ID guarded path used by the phone.
+func runAnswer(ctx context.Context, args []string) error {
+	if len(args) != 2 {
+		return fmt.Errorf("answer needs a session id and option key (see `am list -json`)")
+	}
+	registry, err := buildRegistry()
+	if err != nil {
+		return err
+	}
+	sessions, err := registry.Discover(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "am: warning: %v\n", err)
+	}
+	for _, session := range sessions {
+		if session.ID != args[0] {
+			continue
+		}
+		if session.Question == nil {
+			return fmt.Errorf("session %s has no pending question", args[0])
+		}
+		if err := registry.Answer(ctx, session.ID, protocol.QuestionAnswer{
+			QuestionID: session.Question.ID, OptionKey: args[1],
+		}); err != nil {
+			return err
+		}
+		fmt.Printf("%s answered\n", dim("✓"))
+		return nil
+	}
+	return fmt.Errorf("unknown session %s", args[0])
 }

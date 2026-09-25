@@ -455,7 +455,7 @@ function EmptyState() {
       <EmptyIllustration style={styles.emptyArt} />
       <Text style={styles.emptyTitle}>Nothing running</Text>
       <Text style={styles.emptyBody}>
-        Start an agent on your Mac and it shows up here, ready to take your messages.
+        Start an agent on your Mac and it shows up here. Cursor sessions are view-only.
       </Text>
       <View style={styles.command}>
         <Text style={styles.commandPrompt}>$</Text>
@@ -465,7 +465,8 @@ function EmptyState() {
       </View>
       <Text style={styles.emptyHint}>
         Also <Text style={styles.inlineMono}>am codex</Text> and{" "}
-        <Text style={styles.inlineMono}>am opencode</Text>
+        <Text style={styles.inlineMono}>am opencode</Text>. Recent Cursor agent
+        sessions appear automatically in read-only mode.
       </Text>
     </View>
   );
