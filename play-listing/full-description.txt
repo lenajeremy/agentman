@@ -1,0 +1,9 @@
+Agentman keeps you connected to the coding agents running on your Mac. See what they are doing, get notified when they need you, and keep work moving from your phone.
+
+Follow live sessions and read the conversation. Answer supported permission prompts and questions, or send text and images to supported agents. Browse workspace files, read code with syntax highlighting, view images, and review working-tree diffs. When an agent starts a local website, open its live preview on your phone.
+
+Agentman works with Claude Code, Codex, OpenCode, Cursor IDE, and Cursor Agent CLI. Controls vary by agent: Cursor IDE chats are view-only, while managed Cursor Agent CLI sessions support remote messages and interruption.
+
+Pair with a one-time code. Your Mac keeps the session history; the relay forwards live updates without storing transcripts. Agentman requires its companion CLI and daemon on your Mac.
+
+Agentman is an independent, open-source companion app and is not affiliated with the makers of the supported coding agents.
