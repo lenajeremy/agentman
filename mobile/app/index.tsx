@@ -42,6 +42,9 @@ export default function Agents() {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
   const [refreshing, setRefreshing] = useState(false);
+  // Half a minute: fine enough that "now" turns into "1m" about when it should,
+  // coarse enough to be free.
+  useTicking(30_000);
   /** The row just swiped away, offered back for a few seconds. */
   const [undo, setUndo] = useState<{ id: string; name: string } | null>(null);
   // Relative times ("3m") go stale while the screen sits open.
@@ -126,7 +129,11 @@ export default function Agents() {
             </Text>
 
             {!store.daemonOnline ? (
-              incompatible ? <ProtocolBanner /> : <OfflineBanner lastSeenAt={store.lastSeenAt} />
+              incompatible ? (
+                <ProtocolBanner />
+              ) : (
+                <OfflineBanner lastSeenAt={store.lastSeenAt} />
+              )
             ) : null}
 
             {store.visibleSessions.length > 0 ? (
@@ -143,13 +150,22 @@ export default function Agents() {
                   tint={color.working}
                   wash={color.workingWash}
                 />
-                <CountTile value={counts.idle} label="Idle" tint={color.text} wash={color.fill} />
+                <CountTile
+                  value={counts.idle}
+                  label="Idle"
+                  tint={color.text}
+                  wash={color.fill}
+                />
               </Appear>
             ) : null}
 
-            {store.visibleSessions.length === 0 && store.daemonOnline &&
+            {store.visibleSessions.length === 0 &&
+              store.daemonOnline &&
               (hiddenCount > 0 ? (
-                <AllHiddenState count={hiddenCount} onShow={store.restoreAllSessions} />
+                <AllHiddenState
+                  count={hiddenCount}
+                  onShow={store.restoreAllSessions}
+                />
               ) : (
                 <EmptyState />
               ))}
@@ -158,7 +174,9 @@ export default function Agents() {
         renderSectionHeader={({ section }) => (
           <ContentColumn style={styles.gutter}>
             <View style={styles.groupHeading}>
-              <Text style={[styles.groupLabel, { color: section.tint }]}>{section.label}</Text>
+              <Text style={[styles.groupLabel, { color: section.tint }]}>
+                {section.label}
+              </Text>
               <Text style={styles.groupCount}>{section.data.length}</Text>
             </View>
           </ContentColumn>
@@ -232,7 +250,9 @@ function groupByState(sessions: Session[], color: Palette) {
   return Array.from(buckets.values())
     .map((bucket) => ({
       ...bucket,
-      sessions: bucket.sessions.sort((a, b) => b.lastActivityAt - a.lastActivityAt),
+      sessions: bucket.sessions.sort(
+        (a, b) => b.lastActivityAt - a.lastActivityAt,
+      ),
     }))
     .sort((a, b) => a.rank - b.rank);
 }
@@ -266,7 +286,9 @@ function AgentRow({ session }: { session: Session }) {
           accessibilityLabel={`${session.name}, needs you. Open session`}
         >
           <View style={styles.pill}>
-            <View style={[styles.pillDot, { backgroundColor: color.needsYou }]} />
+            <View
+              style={[styles.pillDot, { backgroundColor: color.needsYou }]}
+            />
             <Text style={styles.pillLabel}>Needs you</Text>
           </View>
           <Text style={styles.askName} numberOfLines={1}>
@@ -320,13 +342,25 @@ function AgentRow({ session }: { session: Session }) {
           </Text>
           <Text style={styles.age}>{ago(session.lastActivityAt)}</Text>
         </View>
-        {/* Path and model share a line so the row does not grow a third one.
-            The model, or the agent's name until it has replied once and named
-            one, keeps the line from flickering into existence. */}
-        <Text style={styles.meta} numberOfLines={1}>
-          {busy ? <Text style={styles.metaWorking}>Working · </Text> : null}
-          {shortPath(session.cwd)} · {session.model ?? agent.name}
-        </Text>
+        {/* Model then path, matching the session header, so the same two facts
+            read in the same order wherever you meet them.
+
+            "Working ·" used to lead this line. The avatar beside it is already
+            pulsing, which says the same thing faster and without spending
+            characters the path then loses at the other end. */}
+        <View style={styles.metaRow}>
+          <Text style={styles.meta} numberOfLines={1}>
+            {session.model ?? agent.name}
+            {" · "}
+          </Text>
+          <Text
+            style={[styles.meta, styles.metaPath]}
+            numberOfLines={1}
+            ellipsizeMode="head"
+          >
+            {shortPath(session.cwd)}
+          </Text>
+        </View>
         {session.servers?.length ? (
           <View style={styles.serversLine}>
             <Feather name="globe" size={11} color={color.ok} />
@@ -335,27 +369,58 @@ function AgentRow({ session }: { session: Session }) {
             </Text>
           </View>
         ) : null}
-        {needsYou ? <Text style={styles.needsYouNote}>Waiting on your answer</Text> : null}
+        {needsYou ? (
+          <Text style={styles.needsYouNote}>Waiting on your answer</Text>
+        ) : null}
       </View>
       <Feather name="chevron-right" size={18} color={color.faint} />
     </MotionPressable>
   );
 }
 
+/**
+ * Re-renders on a timer, so "2m" becomes "3m" on its own.
+ *
+ * ago() reads the clock when it renders and nothing was making it render
+ * again. A session the daemon has no news about would sit showing the age it
+ * happened to have when you arrived, which is the one number on the row that
+ * is supposed to be moving.
+ */
+function useTicking(everyMs: number) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick((value) => value + 1), everyMs);
+    return () => clearInterval(timer);
+  }, [everyMs]);
+}
+
 function effectiveSessionState(session: Session): Session["state"] {
   return sessionNeedsAnswer(session) ? "waiting_input" : session.state;
 }
 
-function ConnectionChip({ online, incompatible }: { online: boolean; incompatible: boolean }) {
+function ConnectionChip({
+  online,
+  incompatible,
+}: {
+  online: boolean;
+  incompatible: boolean;
+}) {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
   return (
     <View style={styles.chip} accessibilityRole="text">
       <View
-        style={[styles.chipDot, { backgroundColor: online ? color.ok : color.error }]}
+        style={[
+          styles.chipDot,
+          { backgroundColor: online ? color.ok : color.error },
+        ]}
       />
       <Text style={styles.chipText}>
-        {online ? "Mac connected" : incompatible ? "Update required" : "Reconnecting"}
+        {online
+          ? "Mac connected"
+          : incompatible
+            ? "Update required"
+            : "Reconnecting"}
       </Text>
     </View>
   );
@@ -374,7 +439,11 @@ function CountTile({
 }) {
   const styles = useStyles(makeStyles);
   return (
-    <View style={[styles.tile, { backgroundColor: wash }]} accessible accessibilityLabel={`${value} ${label}`}>
+    <View
+      style={[styles.tile, { backgroundColor: wash }]}
+      accessible
+      accessibilityLabel={`${value} ${label}`}
+    >
       <Text style={[styles.tileValue, { color: tint }]}>{value}</Text>
       <Text style={styles.tileLabel}>{label}</Text>
     </View>
@@ -422,9 +491,12 @@ function OfflineBanner({ lastSeenAt }: { lastSeenAt: number | null }) {
       </View>
       <View style={styles.bannerCopy}>
         <Text style={styles.bannerText}>
-          Your Mac is offline{lastSeenAt ? ` · last seen ${ago(lastSeenAt)} ago` : ""}
+          Your Mac is offline
+          {lastSeenAt ? ` · last seen ${ago(lastSeenAt)} ago` : ""}
         </Text>
-        <Text style={styles.bannerHint}>Agents appear here when it reconnects.</Text>
+        <Text style={styles.bannerHint}>
+          Agents appear here when it reconnects.
+        </Text>
       </View>
     </View>
   );
@@ -455,7 +527,8 @@ function EmptyState() {
       <EmptyIllustration style={styles.emptyArt} />
       <Text style={styles.emptyTitle}>Nothing running</Text>
       <Text style={styles.emptyBody}>
-        Start an agent on your Mac and it shows up here. Cursor sessions are view-only.
+        Start an agent on your Mac and it shows up here. Cursor sessions are
+        view-only.
       </Text>
       <View style={styles.command}>
         <Text style={styles.commandPrompt}>$</Text>
@@ -496,7 +569,11 @@ const makeStyles = (c: Palette) =>
       borderColor: c.line,
     },
     chipDot: { width: 7, height: 7, borderRadius: 4 },
-    chipText: { fontFamily: font.sansMedium, fontSize: size.caption, color: c.textSecondary },
+    chipText: {
+      fontFamily: font.sansMedium,
+      fontSize: size.caption,
+      color: c.textSecondary,
+    },
     iconButton: {
       width: 40,
       height: 40,
@@ -516,14 +593,24 @@ const makeStyles = (c: Palette) =>
     },
 
     tiles: { flexDirection: "row", gap: space.sm, marginTop: space.lg },
-    tile: { flex: 1, borderRadius: radius.xl, paddingHorizontal: space.md, paddingVertical: space.md },
+    tile: {
+      flex: 1,
+      borderRadius: radius.xl,
+      paddingHorizontal: space.md,
+      paddingVertical: space.md,
+    },
     tileValue: {
       fontFamily: font.sansBold,
       fontSize: 28,
       letterSpacing: -0.8,
       fontVariant: ["tabular-nums"],
     },
-    tileLabel: { fontFamily: font.sansMedium, fontSize: size.caption, color: c.muted, marginTop: 2 },
+    tileLabel: {
+      fontFamily: font.sansMedium,
+      fontSize: size.caption,
+      color: c.muted,
+      marginTop: 2,
+    },
 
     groupHeading: {
       flexDirection: "row",
@@ -564,8 +651,17 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.needsYouWash,
     },
     pillDot: { width: 6, height: 6, borderRadius: 3 },
-    pillLabel: { fontFamily: font.sansBold, fontSize: 11.5, color: c.needsYouText },
-    askName: { flex: 1, fontFamily: font.mono, fontSize: size.caption, color: c.textSecondary },
+    pillLabel: {
+      fontFamily: font.sansBold,
+      fontSize: 11.5,
+      color: c.needsYouText,
+    },
+    askName: {
+      flex: 1,
+      fontFamily: font.mono,
+      fontSize: size.caption,
+      color: c.textSecondary,
+    },
 
     row: {
       flexDirection: "row",
@@ -599,8 +695,11 @@ const makeStyles = (c: Palette) =>
       color: c.text,
     },
     age: { fontFamily: font.sans, fontSize: size.label, color: c.faint },
+    metaRow: { flexDirection: "row", alignItems: "center" },
+    // The model holds its width and the path gives way from its front: a
+    // path's last segment is the one that says which project this is.
+    metaPath: { flexShrink: 1 },
     meta: { fontFamily: font.mono, fontSize: 12, color: c.muted },
-    metaWorking: { fontFamily: font.sansMedium, color: c.workingText },
     needsYouNote: {
       fontFamily: font.sansMedium,
       fontSize: size.caption,
@@ -628,8 +727,17 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.surface,
     },
     bannerCopy: { flex: 1 },
-    bannerText: { fontFamily: font.sansBold, fontSize: size.caption, color: c.text },
-    bannerHint: { fontFamily: font.sans, fontSize: size.caption, color: c.muted, marginTop: 2 },
+    bannerText: {
+      fontFamily: font.sansBold,
+      fontSize: size.caption,
+      color: c.text,
+    },
+    bannerHint: {
+      fontFamily: font.sans,
+      fontSize: size.caption,
+      color: c.muted,
+      marginTop: 2,
+    },
 
     empty: {
       marginTop: space.xl,
@@ -676,7 +784,12 @@ const makeStyles = (c: Palette) =>
     },
     commandPrompt: { fontFamily: font.mono, fontSize: 14, color: c.faint },
     commandText: { fontFamily: font.mono, fontSize: 14, color: c.text },
-    emptyHint: { fontFamily: font.sans, fontSize: size.caption, color: c.faint, marginTop: space.xs },
+    emptyHint: {
+      fontFamily: font.sans,
+      fontSize: size.caption,
+      color: c.faint,
+      marginTop: space.xs,
+    },
     inlineMono: { fontFamily: font.mono, color: c.muted },
     secondaryButton: {
       marginTop: space.sm,
@@ -689,7 +802,11 @@ const makeStyles = (c: Palette) =>
       borderWidth: 1,
       borderColor: c.fillStrong,
     },
-    secondaryButtonText: { fontFamily: font.sansBold, fontSize: size.body, color: c.text },
+    secondaryButtonText: {
+      fontFamily: font.sansBold,
+      fontSize: size.body,
+      color: c.text,
+    },
 
     undoBar: {
       position: "absolute",
@@ -711,7 +828,16 @@ const makeStyles = (c: Palette) =>
       elevation: 6,
       zIndex: 20,
     },
-    undoText: { flex: 1, fontFamily: font.sans, fontSize: size.body, color: c.onInverse },
-    undoAction: { fontFamily: font.sansBold, fontSize: size.body, color: c.inverseAccent },
+    undoText: {
+      flex: 1,
+      fontFamily: font.sans,
+      fontSize: size.body,
+      color: c.onInverse,
+    },
+    undoAction: {
+      fontFamily: font.sansBold,
+      fontSize: size.body,
+      color: c.inverseAccent,
+    },
     undoButton: { paddingVertical: space.xs, paddingHorizontal: space.sm },
   });

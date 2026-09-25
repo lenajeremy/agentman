@@ -23,7 +23,23 @@ import { useTheme } from "../lib/appearance";
  * no shimmer. Motion means "something is happening right now", so anything
  * else that moved would dilute it.
  */
-export function Pulse({ state, size = 8 }: { state: string; size?: number }) {
+export function Pulse({
+  state,
+  size = 8,
+  inline = false,
+}: {
+  state: string;
+  size?: number;
+  /**
+   * Occupy only the dot, not the room its halo sweeps through.
+   *
+   * The halo is absolutely positioned, so it still draws outside these bounds
+   * — nothing clips it. What changes is layout: on a line of text the reserved
+   * box put twenty-three points of nothing before the dot, which read as the
+   * dot having been indented away from the line it belongs to.
+   */
+  inline?: boolean;
+}) {
   const scale = useSharedValue(1);
   const opacity = useSharedValue(0.5);
   const reduceMotion = useReducedMotion();
@@ -72,8 +88,8 @@ export function Pulse({ state, size = 8 }: { state: string; size?: number }) {
   return (
     <View
       style={{
-        width: size * 3,
-        height: size * 3,
+        width: inline ? size : size * 3,
+        height: inline ? size : size * 3,
         alignItems: "center",
         justifyContent: "center",
       }}
