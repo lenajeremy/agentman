@@ -249,15 +249,33 @@ func TestPreviewExplainsWhenNothingIsListening(t *testing.T) {
 	_, relay := newPreviewRelay(t)
 	hello, _ := startTunnel(t, relay.URL, port, "nonce-nothing-listens")
 
-	resp, err := http.DefaultClient.Do(linkRequest(t, http.MethodGet, relay.URL, hello.ID, "/", nil))
-	if err != nil {
-		t.Fatal(err)
+	// OnReady fires when the client receives its hello, and the relay writes
+	// that hello before it registers the session — it has to, because the
+	// client reads one plain text message and only then switches the socket to
+	// binary. So for a moment the client knows its URL while the relay would
+	// still answer "this preview link is not active". A person opening a link
+	// they were just handed never sees that window; a test firing a request the
+	// instant OnReady returns hits it on a loaded machine, which is how this
+	// passed locally and failed in CI.
+	var status int
+	var body []byte
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.DefaultClient.Do(linkRequest(t, http.MethodGet, relay.URL, hello.ID, "/", nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = io.ReadAll(resp.Body)
+		status = resp.StatusCode
+		resp.Body.Close()
+		if status != http.StatusNotFound {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadGateway ||
+	if status != http.StatusBadGateway ||
 		!strings.Contains(string(body), fmt.Sprintf("localhost:%d", port)) {
-		t.Fatalf("got %d %q, want a 502 naming the port", resp.StatusCode, body)
+		t.Fatalf("got %d %q, want a 502 naming the port", status, body)
 	}
 }
 
