@@ -90,6 +90,9 @@ type Daemon struct {
 	// Unlike a time window, it permits two real short turns to notify while
 	// still making duplicate hook/poll reports for one turn idempotent.
 	turns map[string]turnState
+	// lastAlert is when each session last produced a completion notification,
+	// so a burst of short turns becomes one.
+	lastAlert map[string]time.Time
 	// hookStates prevent the next stale discovery snapshot from immediately
 	// undoing a state transition delivered by an agent hook.
 	hookStates map[string]hookState
@@ -99,6 +102,10 @@ type Daemon struct {
 	pendingTurns       map[string]pendingTurn
 	turnDelay          time.Duration
 	questionRetryDelay time.Duration
+	// Fields rather than constants so a test can exercise the rules without
+	// waiting out a production interval, matching turnDelay above.
+	minAlertedTurn time.Duration
+	alertCoalesce  time.Duration
 	// follows holds the active live tail for each watched session. Only
 	// sessions the app is actually watching appear here, which is what keeps
 	// idle sessions free.
@@ -148,6 +155,9 @@ type pendingTurn struct {
 type turnState struct {
 	generation uint64
 	notified   bool
+	// startedAt is what makes a turn's length knowable, which is what decides
+	// whether finishing it is worth a notification.
+	startedAt time.Time
 }
 
 type hookState struct {
@@ -164,9 +174,12 @@ func New(registry *source.Registry, sink Transport) *Daemon {
 		sessions:           map[string]protocol.Session{},
 		follows:            map[string]*follow{},
 		turns:              map[string]turnState{},
+		lastAlert:          map[string]time.Time{},
 		hookStates:         map[string]hookState{},
 		pendingTurns:       map[string]pendingTurn{},
 		turnDelay:          turnQuestionGrace,
+		minAlertedTurn:     minAlertedTurn,
+		alertCoalesce:      alertCoalesce,
 		questionRetryDelay: discoverInterval,
 		pushedQuestions:    map[string]string{},
 		serverLists:        map[string][]protocol.Server{},
@@ -238,6 +251,45 @@ func (d *Daemon) alert(title, body, sessionID string) {
 	}()
 }
 
+// Notification rules for a finished turn.
+//
+// "Your agent is done" is worth interrupting someone for exactly when they
+// walked away. Every other time it is noise, and a feed of noise is one nobody
+// reads — which costs the notification that did matter.
+const (
+	// Under this, you did not have time to leave the machine.
+	minAlertedTurn = 30 * time.Second
+	// A session finishing several turns in a row is one event to a person.
+	alertCoalesce = 90 * time.Second
+)
+
+// suppressTurnAlert reports why a finished turn should not be announced, or ""
+// when it should be. Returning the reason rather than a bool keeps the rules
+// legible in tests, where "it did not fire" is otherwise indistinguishable
+// from "it fired for the wrong reason".
+func (d *Daemon) suppressTurnAlert(sessionID string, now time.Time) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Someone is looking at this session right now, so the completion is
+	// already on their screen. This is what serve.go always claimed push was
+	// for — covering the gap when the app is suspended and there is no socket
+	// to deliver on — and it was never actually checked.
+	if follow, ok := d.follows[sessionID]; ok && len(follow.subscribers) > 0 {
+		return "an app is watching this session"
+	}
+	if state, ok := d.turns[sessionID]; ok && !state.startedAt.IsZero() {
+		if now.Sub(state.startedAt) < d.minAlertedTurn {
+			return "the turn was too short to have left for"
+		}
+	}
+	if last, ok := d.lastAlert[sessionID]; ok && now.Sub(last) < d.alertCoalesce {
+		return "this session was announced a moment ago"
+	}
+	d.lastAlert[sessionID] = now
+	return ""
+}
+
 // alertTurnComplete pushes a finished turn. The preview only travels when the
 // user has opted in, since it leaves the machine.
 func (d *Daemon) alertTurnComplete(event protocol.Event) {
@@ -245,6 +297,9 @@ func (d *Daemon) alertTurnComplete(event protocol.Event) {
 	sender := d.push
 	d.mu.Unlock()
 	if sender == nil {
+		return
+	}
+	if reason := d.suppressTurnAlert(event.SessionID, time.Now()); reason != "" {
 		return
 	}
 	name := event.SessionName
@@ -744,6 +799,7 @@ func (d *Daemon) startTurnLocked(sessionID string) uint64 {
 	state := d.turns[sessionID]
 	state.generation++
 	state.notified = false
+	state.startedAt = time.Now()
 	d.turns[sessionID] = state
 	return state.generation
 }
