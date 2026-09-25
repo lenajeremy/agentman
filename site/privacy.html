@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#F5F5F2">
+  <meta name="description" content="How Agentman handles pairing, coding-agent sessions, files, images, notifications, and website visits.">
+  <title>Privacy Policy — Agentman</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon.png" sizes="48x48" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="wrap">
+    <nav class="nav" aria-label="Main">
+      <a class="logo" href="/" aria-label="Agentman home">agentman</a>
+      <a class="policy-back" href="/">Back to Agentman →</a>
+    </nav>
+
+    <main class="policy">
+      <header class="policy-header">
+        <span class="policy-eyebrow">Agentman / Legal</span>
+        <h1>Privacy policy</h1>
+        <p>Agentman lets you view and control coding agents running on your computer from a paired phone. This policy explains what data moves between your devices, what passes through our services, and how you can remove it.</p>
+        <p class="policy-date">Effective September 25, 2026</p>
+      </header>
+
+      <div class="policy-body">
+        <section aria-labelledby="who">
+          <h2 id="who">Who runs Agentman</h2>
+          <p>Agentman is operated by Jeremiah Lena. This policy covers the Agentman mobile app, the <code>am</code> companion on your computer, the public relay, and this website. If you use a relay operated by someone else, that operator may have different data practices.</p>
+        </section>
+
+        <section aria-labelledby="information">
+          <h2 id="information">Information Agentman handles</h2>
+          <ul>
+            <li><strong>Pairing and connection data.</strong> A one-time code or QR token pairs the phone with your computer. The app stores a relay address and device credential on your phone; the relay uses that credential to authenticate and route traffic. The service does not require an Agentman account, name, or email address.</li>
+            <li><strong>Agent and workspace content.</strong> When you use the app, session names, status, transcripts, prompts, answers, directory listings, file contents, working-tree diffs, and images you choose to view may pass through the relay to your phone. Messages and answers you send pass back to your computer. Agent history remains in the underlying coding agent's files on your computer; Agentman does not maintain a cloud transcript database.</li>
+            <li><strong>Images you choose to send.</strong> If you select a photo or paste an image, the app prepares it on your phone and uploads it through the relay for your computer to collect. The app accesses your camera only to scan a pairing QR code and requests photo access when you choose an image.</li>
+            <li><strong>Notifications.</strong> If you allow push notifications, an Expo push token is registered with your paired computer. The computer sends the token and an alert containing a session name and reason to Expo, which delivers it through Apple Push Notification service or Firebase Cloud Messaging. Transcript text is excluded by default. A computer-side setting can opt in to including a short output excerpt.</li>
+            <li><strong>Technical data.</strong> The relay and website hosting providers may process IP addresses, request metadata, and operational logs needed to deliver traffic, prevent abuse, and troubleshoot failures. If you email us, we receive the message and contact details you provide.</li>
+          </ul>
+          <p>Agentman does not include advertising or an in-app analytics SDK, and we do not sell your data.</p>
+        </section>
+
+        <section aria-labelledby="use">
+          <h2 id="use">How we use and share data</h2>
+          <p>We use this information to pair devices, show agent activity, deliver your requests and selected images, open temporary website previews, send requested notifications, keep the service working, and respond to support or privacy requests.</p>
+          <p>The public relay is hosted by Railway. It forwards live traffic between your computer and phone. It does not persist transcripts or messages, but its operator can inspect live payloads: traffic uses TLS in transit and is not end-to-end encrypted between your devices. You may self-host the relay if you prefer to control that part of the path.</p>
+          <p>Push notifications use Expo and, depending on your device, Apple or Google. The website is hosted by Vercel. If you open a live preview link created by <code>am expose</code>, anyone with that link can access the shared local website while the tunnel is running. Content in a preview may also be handled by the website you choose to expose. Coding agents and websites you use with Agentman have their own privacy practices.</p>
+        </section>
+
+        <section aria-labelledby="retention">
+          <h2 id="retention">Storage, retention, and deletion</h2>
+          <ul>
+            <li>Session history and files remain on your computer under the coding agent or project that created them. Agentman reads them when needed; removing the app does not delete those original files.</li>
+            <li>The relay holds uploaded images in memory until your computer collects them or, if uncollected, for up to two minutes. It does not keep a transcript or message database. Live connections, pairing requests, and preview tunnels are temporary.</li>
+            <li>The phone stores pairing credentials in protected device storage, plus local preferences, dismissed items, and unsent message drafts. Unpairing removes the stored pairing credential. You can remove remaining local app data by deleting the app or clearing its data in your device settings.</li>
+            <li>The paired computer stores registered push tokens locally and retires tokens that have not checked in for 60 days. You can also remove its local Agentman data or contact us about data handled by the public service.</li>
+            <li>Hosting providers may retain limited operational logs under their own retention practices. Support emails are kept only as long as needed to handle the request and any applicable obligations.</li>
+          </ul>
+          <p>To ask about access to or deletion of data handled by us, email <a href="mailto:jeremiahlena13@gmail.com">jeremiahlena13@gmail.com</a>. Because Agentman does not create a user account or centrally store your agent history, we may need details about the request to identify any relevant service data.</p>
+        </section>
+
+        <section aria-labelledby="security">
+          <h2 id="security">Security and your choices</h2>
+          <p>Pairing codes are single-use and short-lived. The app protects its native pairing credential in device secure storage. Network connections to remote relays use HTTPS or WSS. These measures do not make the relay end-to-end encrypted; use a relay operator you trust or self-host one. Keep preview links private when the exposed site contains sensitive information.</p>
+          <p>You can decline camera, photo, or notification permissions. You can unpair in the app's Settings, stop the computer companion, disable push notifications in your device settings, and stop a preview by ending <code>am expose</code>.</p>
+        </section>
+
+        <section aria-labelledby="children">
+          <h2 id="children">Children</h2>
+          <p>Agentman is a developer tool and is not directed to children. If you believe a child has provided personal information to us, contact us so we can address it.</p>
+        </section>
+
+        <section aria-labelledby="updates">
+          <h2 id="updates">Changes and contact</h2>
+          <p>We may update this policy when the product or its data practices change. We will post the revised policy here with a new effective date. For privacy questions or requests, contact <a href="mailto:jeremiahlena13@gmail.com">jeremiahlena13@gmail.com</a>.</p>
+        </section>
+      </div>
+    </main>
+
+    <footer class="policy-footer"><a href="/">Agentman</a><span>© 2026 Agentman</span></footer>
+  </div>
+</body>
+</html>

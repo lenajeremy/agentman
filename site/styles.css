@@ -503,6 +503,27 @@ section { scroll-margin-top: 24px; }
 .chips { display: flex; gap: 8px; }
 .chips span { border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; font-size: 12.5px; }
 
+/* Privacy policy */
+.policy-back { font-size: 14px; color: var(--muted); }
+.policy-back:hover { color: var(--ink); }
+.policy { max-width: 800px; margin: 0 auto; padding: 84px 0 120px; }
+.policy-eyebrow { font: 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--cobalt-700); }
+.policy-header { padding-bottom: 48px; border-bottom: 1px solid var(--line); }
+.policy-header h1 { margin: 18px 0 20px; font-size: clamp(48px, 8vw, 72px); line-height: 1.05; letter-spacing: -.05em; font-weight: 500; }
+.policy-header > p:not(.policy-date) { margin: 0; max-width: 680px; font-size: 19px; line-height: 1.6; color: var(--ink-2); }
+.policy-date { margin: 26px 0 0; font: 12px var(--mono); color: var(--muted); }
+.policy-body section { padding-top: 46px; }
+.policy-body h2 { margin: 0 0 16px; font-size: 26px; line-height: 1.25; letter-spacing: -.03em; font-weight: 600; }
+.policy-body p, .policy-body li { font-size: 16px; line-height: 1.75; color: var(--ink-2); }
+.policy-body p { margin: 0 0 18px; }
+.policy-body ul { margin: 0 0 18px; padding-left: 24px; }
+.policy-body li { padding-left: 4px; margin: 0 0 12px; }
+.policy-body strong { color: var(--ink); font-weight: 600; }
+.policy-body code { font: .9em var(--mono); background: var(--fill); border-radius: 4px; padding: 2px 4px; }
+.policy-body a { color: var(--cobalt-700); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.policy-footer { padding: 24px 0 40px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 16px; font-size: 13px; color: var(--muted); }
+.policy-footer a:hover { color: var(--ink); }
+
 /* ---------- Narrower screens ---------- */
 @media (max-width: 1100px) {
   .term { width: 520px; right: 40px; }
@@ -537,6 +558,8 @@ section { scroll-margin-top: 24px; }
 }
 @media (max-width: 640px) {
   :root { --gutter: 16px; }
+  .policy { padding: 64px 0 88px; }
+  .policy-body section { padding-top: 36px; }
   .nav { height: 64px; }
   .nav-group { gap: 16px; }
   .nav-group .hide-sm { display: none; }
