@@ -127,15 +127,14 @@ export default function Settings() {
                 <Feather name="lock" size={16} color={color.ok} />
               </View>
               <View style={styles.privacyCopy}>
-                <Text style={styles.privacyTitle}>Your Mac stays the source of truth</Text>
+                <Text style={styles.privacyTitle}>Your Mac keeps your history</Text>
                 <Text style={styles.body}>
-                  Transcripts are not persisted by the relay. Live traffic does pass
-                  through it without end-to-end encryption, so use an operator you trust
-                  or self-host one.
+                  The relay can read live traffic, but does not store transcripts.
                 </Text>
                 <MotionPressable
                   onPress={() => void Linking.openURL(PRIVACY_POLICY_URL)}
                   style={styles.privacyLink}
+                  hitSlop={10}
                   accessibilityRole="link"
                   accessibilityLabel="Read Agentman privacy policy"
                 >
@@ -306,7 +305,7 @@ const makeStyles = (c: Palette) =>
       flexDirection: "row",
       alignItems: "flex-start",
       gap: space.md,
-      paddingVertical: space.lg,
+      paddingVertical: space.md,
     },
     privacyIcon: {
       width: 36,
@@ -318,8 +317,8 @@ const makeStyles = (c: Palette) =>
     },
     privacyCopy: { flex: 1, gap: space.xs },
     privacyTitle: { fontFamily: font.sansBold, fontSize: size.body, color: c.text },
-    privacyLink: { alignSelf: "flex-start", justifyContent: "center", minHeight: 36, marginTop: space.xs },
-    privacyLinkText: { fontFamily: font.sansMedium, fontSize: size.label, color: c.workingText },
+    privacyLink: { alignSelf: "flex-start", justifyContent: "center", minHeight: 24, marginTop: space.xs },
+    privacyLinkText: { fontFamily: font.sansMedium, fontSize: size.label, color: c.ok },
 
     unpair: {
       minHeight: 52,

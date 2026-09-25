@@ -117,7 +117,7 @@ export default function Agents() {
                 accessibilityRole="button"
                 accessibilityLabel="Settings"
               >
-                <Feather name="sliders" size={17} color={color.text} />
+                <Feather name="settings" size={19} color={color.text} />
               </MotionPressable>
             </View>
 
