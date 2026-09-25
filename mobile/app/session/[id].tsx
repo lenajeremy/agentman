@@ -60,9 +60,6 @@ type Row =
  */
 const HEADER_HEIGHT = space.sm + 36 + space.md + 4;
 
-/** Where the title starts: the row's padding, the back control, and the gap. */
-const TITLE_INSET = space.md + 30 + space.xs;
-
 export default function SessionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const sessionId = decodeURIComponent(String(id));
@@ -1002,14 +999,10 @@ const makeStyles = (c: Palette) =>
       borderColor: c.line,
     },
     headerBody: { flex: 1 },
-    // Indented to the title's own left edge, so the name, the model, the
-    // directory and this all hang off one line instead of the bar starting
-    // somewhere the rest of the header does not.
-    workspaceBar: {
-      paddingLeft: TITLE_INSET,
-      paddingRight: space.md,
-      paddingBottom: space.sm,
-    },
+    // Full width rather than indented under the title. It is a banner about
+    // the session, not another line of the header's text, and inset it read as
+    // a stray tab stop.
+    workspaceBar: { paddingHorizontal: space.md, paddingBottom: space.sm },
     workspaceButton: {
       flexDirection: "row",
       alignItems: "center",
