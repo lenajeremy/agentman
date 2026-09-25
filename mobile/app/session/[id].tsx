@@ -403,7 +403,7 @@ export default function SessionScreen() {
                 accessibilityRole="text"
                 accessibilityLabel={state.label}
               >
-                <Pulse state={displayState} size={6} />
+                <Pulse state={displayState} size={6} inline />
               </View>
               {/* Which model is answering you is worth knowing before you send
                   it something — "Codex" says which CLI is open, not what is
@@ -483,7 +483,9 @@ export default function SessionScreen() {
         <ContentColumn style={styles.workspaceBar}>
           <MotionPressable
             onPress={() =>
-              router.push(`/workspace/${encodeURIComponent(session.id)}`)
+              router.push(
+                `/workspace/${encodeURIComponent(session.id)}?tab=changes`,
+              )
             }
             style={styles.workspaceButton}
             pressedScale={0.98}
@@ -1057,14 +1059,12 @@ const makeStyles = (c: Palette) =>
     // one whole one.
     subtitleModel: { flexShrink: 0 },
     subtitlePath: { flexShrink: 1 },
-    // A touch target around a 9pt dot, so the state is legible without being
-    // something you can miss with a thumb.
-    stateDot: {
-      width: 28,
-      height: 28,
-      alignItems: "center",
-      justifyContent: "center",
-    },
+    // No box around it. This was a 28pt touch target from when the dot was a
+    // control in the top row; on a line of text it centred a six point dot in
+    // twenty-eight, which pushed it clear of the title's left edge. It is a
+    // fact now, not a control, so it occupies exactly itself and starts where
+    // the title starts.
+    stateDot: { marginRight: 6 },
 
     note: {
       flexDirection: "row",
