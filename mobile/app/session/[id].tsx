@@ -28,8 +28,8 @@ import { QuestionCard } from "../../components/QuestionCard";
 import { Thinking } from "../../components/Thinking";
 import { ToolRow } from "../../components/ToolRow";
 import { AttachmentStrip } from "../../components/AttachmentStrip";
+import { Popover, type PopoverItem } from "../../components/Popover";
 import { chooseImageSource } from "../../lib/image-source-sheet";
-import { openSessionMenu } from "../../lib/session-menu";
 import { draftNamespace } from "../../lib/draft-policy";
 import { clearDraft, loadDraft, saveDraft } from "../../lib/drafts";
 import { useAttachments } from "../../lib/use-attachments";
@@ -52,6 +52,13 @@ import {
 type Row =
   | { kind: "message"; message: Message }
   | { kind: "pending"; pending: PendingSend };
+
+/**
+ * Where the popover hangs from: the header's own height, so the menu opens
+ * directly under the control that summoned it. space.sm above the row, a 36pt
+ * control, space.md below, and a few points of air.
+ */
+const HEADER_HEIGHT = space.sm + 36 + space.md + 4;
 
 export default function SessionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -294,8 +301,43 @@ export default function SessionScreen() {
     interruptAction?.status === "sending" ||
     interruptAction?.status === "delivered";
 
+  const [menuOpen, setMenuOpen] = useState(false);
   const menuServers = session?.servers?.length ?? 0;
   const canStopTurn = session?.state === "busy" && !interruptLocked;
+
+  // Built here rather than in the header so every entry sits beside the action
+  // it performs. An idle session simply has fewer rows — which is a popover
+  // shrinking, not a control changing shape.
+  const sessionMenuItems: PopoverItem[] = [];
+  if (session) {
+    sessionMenuItems.push({
+      key: "files",
+      label: "Files & changes",
+      icon: "folder",
+      onPress: () =>
+        router.push(`/workspace/${encodeURIComponent(session.id)}`),
+    });
+    if (menuServers > 0) {
+      sessionMenuItems.push({
+        key: "servers",
+        label: menuServers === 1 ? "Server" : "Servers",
+        icon: "globe",
+        detail: String(menuServers),
+        onPress: () =>
+          router.push(`/servers/${encodeURIComponent(session.id)}`),
+      });
+    }
+    if (session.state === "busy") {
+      sessionMenuItems.push({
+        key: "stop",
+        label: "Stop this turn",
+        icon: "square",
+        destructive: true,
+        disabled: interruptLocked,
+        onPress: requestInterrupt,
+      });
+    }
+  }
 
   const displayState = effectiveState ?? session?.state ?? "ended";
   const state = stateStyle(displayState, color);
@@ -322,7 +364,10 @@ export default function SessionScreen() {
               {/* Which model is answering you is worth knowing before you send
                   it something — "Codex" says which CLI is open, not what is
                   doing the work. */}
-              <Text style={[styles.subtitle, styles.subtitleModel]} numberOfLines={1}>
+              <Text
+                style={[styles.subtitle, styles.subtitleModel]}
+                numberOfLines={1}
+              >
                 {session.model ?? agentLabel(session.kind).name}
                 {" · "}
               </Text>
@@ -358,18 +403,7 @@ export default function SessionScreen() {
             read far more often than either of them gets pressed. */}
         {session && (menuServers > 0 || canStopTurn) ? (
           <MotionPressable
-            onPress={() =>
-              openSessionMenu(
-                { servers: menuServers, canStop: canStopTurn },
-                (action) => {
-                  if (action === "servers") {
-                    router.push(`/servers/${encodeURIComponent(session.id)}`);
-                    return;
-                  }
-                  requestInterrupt();
-                },
-              )
-            }
+            onPress={() => setMenuOpen(true)}
             hitSlop={10}
             style={styles.iconButton}
             pressedScale={0.92}
@@ -395,6 +429,15 @@ export default function SessionScreen() {
           </MotionPressable>
         ) : null}
       </ContentColumn>
+
+      {session ? (
+        <Popover
+          visible={menuOpen}
+          onDismiss={() => setMenuOpen(false)}
+          top={HEADER_HEIGHT}
+          items={sessionMenuItems}
+        />
+      ) : null}
 
       {session ? (
         <ContentColumn style={styles.workspaceBar}>
@@ -433,7 +476,11 @@ export default function SessionScreen() {
         ) : null}
         {session && !session.question && (
           <ContentColumn>
-            <DeliveryNote kind={session.kind} inject={session.inject} state={session.state} />
+            <DeliveryNote
+              kind={session.kind}
+              inject={session.inject}
+              state={session.state}
+            />
           </ContentColumn>
         )}
 
@@ -744,24 +791,36 @@ function InterruptNote({
  * a queued message is not a sent one, and someone who walked away from their
  * desk deserves to know which they are getting before they rely on it.
  */
-function DeliveryNote({ kind, inject, state }: { kind: string; inject: string; state: string }) {
+function DeliveryNote({
+  kind,
+  inject,
+  state,
+}: {
+  kind: string;
+  inject: string;
+  state: string;
+}) {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
   if (inject === "tmux" || inject === "api") return null;
 
   let text: string;
   if (inject === "hook") {
-    text = state === "busy"
-      ? "Messages wait until this turn ends — it can't be interrupted."
-      : "Messages are handed over when this agent next finishes a turn.";
+    text =
+      state === "busy"
+        ? "Messages wait until this turn ends — it can't be interrupted."
+        : "Messages are handed over when this agent next finishes a turn.";
   } else if (kind === "cursor") {
-    text = "Cursor IDE chats are read-only here. Continue in the IDE on your Mac.";
+    text =
+      "Cursor IDE chats are read-only here. Continue in the IDE on your Mac.";
   } else if (kind === "cursor-cli") {
-    text = "Start Cursor Agent CLI with am cursor to send this chat messages remotely.";
+    text =
+      "Start Cursor Agent CLI with am cursor to send this chat messages remotely.";
   } else if (kind === "claude" || kind === "codex") {
     text = `Start this session with am ${kind} to send it messages.`;
   } else {
-    text = "This session is read-only here. Continue in its agent app on your Mac.";
+    text =
+      "This session is read-only here. Continue in its agent app on your Mac.";
   }
 
   return (
