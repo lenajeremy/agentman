@@ -57,6 +57,21 @@ test("accepts a read-only Cursor session and tools with unknown outcomes", () =>
   assert.equal(messages.messages[0].tool?.status, undefined);
 });
 
+test("accepts bounded workspace views and rejects unsafe image payloads", () => {
+  assert.ok(decodeDaemonEvent({ type: "workspace", workspace: {
+    kind: "directory", sessionId: "codex:one", entries: [{ name: "app", directory: true }],
+  } }));
+  assert.ok(decodeDaemonEvent({ type: "workspace", workspace: {
+    kind: "file", sessionId: "codex:one", path: "icon.png", mime: "image/png", image: "aGVsbG8=",
+  } }));
+  assert.equal(decodeDaemonEvent({ type: "workspace", workspace: {
+    kind: "file", sessionId: "codex:one", mime: "text/html", image: "PHNjcmlwdD4=",
+  } }), null);
+  assert.equal(decodeDaemonEvent({ type: "workspace", workspace: {
+    kind: "changes", sessionId: "codex:one", changes: [{ path: "a", status: 4 }],
+  } }), null);
+});
+
 test("rejects malformed websocket envelopes and payloads", () => {
   assert.equal(decodeEnvelope("not json"), null);
   assert.equal(decodeEnvelope(JSON.stringify({

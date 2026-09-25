@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Agentman — remote control for your coding agents</title>
-  <meta name="description" content="Watch Claude Code, Codex and OpenCode from your phone. Answer their questions, send the next step, and get notified when a turn ends. Open source, no account.">
+  <meta name="description" content="Follow Claude Code, Codex and OpenCode from your phone. Browse files, review working-tree diffs, view and send images, and open live previews. Open source, no account.">
   <meta name="theme-color" content="#F5F5F2">
   <meta property="og:type" content="website">
   <meta property="og:title" content="Agentman — remote control for your coding agents">
-  <meta property="og:description" content="Watch Claude Code, Codex and OpenCode from your phone. Answer their questions and send the next step. Open source, no account.">
+  <meta property="og:description" content="Follow your coding agents from your phone. Browse files, review diffs, view and send images, and open live previews. Open source, no account.">
   <meta property="og:image" content="/og.png">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
@@ -72,7 +72,7 @@
         <span aria-hidden="true">Remote control for <span class="rotor" data-rotor>Claude Code</span></span>
       </h1>
       <div>
-        <p>Agentman puts the coding agents running on your Mac in your pocket. See what they're doing, answer their questions and send the next step, from anywhere.</p>
+        <p>Agentman puts the coding agents running on your Mac in your pocket. Follow the conversation, inspect the files they change, open a live preview and send the next step from anywhere.</p>
         <div class="cta">
           <a class="btn" href="#get-started">Install the CLI <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
           <a class="text-link" href="#get-started" data-platform-link="ios">Get the app</a>
@@ -127,7 +127,7 @@
 
     <section class="why" aria-labelledby="why-title">
       <h2 class="h2" id="why-title">Why Agentman?</h2>
-      <p>Agentman is an <em>open-source</em>, <em>account-free</em> remote control for coding agents, with <em>live status</em>, <em>one-tap answers</em> and a <em>relay that stores nothing</em>.</p>
+      <p>Agentman is an <em>open-source</em>, <em>account-free</em> remote control for coding agents, with <em>live status</em>, <em>one-tap answers</em>, <em>file and diff views</em> and a <em>relay that stores nothing</em>.</p>
       <div class="fleet" aria-hidden="true">
         <div class="dotrow" data-dots></div>
         <span class="finger" data-finger></span>
@@ -157,6 +157,73 @@
         <div><b data-count="60" data-suffix="s">60s</b><span>until a pairing code expires</span></div>
         <div><b data-count="0">0</b><span>transcripts kept on the relay</span></div>
         <div><b data-count="3">3</b><span>agents supported today</span></div>
+      </div>
+    </section>
+
+    <section class="workspace" id="workspace" aria-labelledby="workspace-title">
+      <div class="caps">Beyond the transcript</div>
+      <h2 class="h2" id="workspace-title">See what your agent changed.</h2>
+      <p class="workspace-intro">The conversation tells you what happened. The workspace lets you look for yourself.</p>
+
+      <div class="workspace-feature">
+        <div class="workspace-copy"><span class="workspace-kicker">Files</span><h3>Browse the workspace.</h3><p>Open folders in the agent's working directory and find the file you want. Code and images open in a read-only viewer; private files and symlinks stay hidden.</p></div>
+        <div class="workspace-art files-art" role="img" aria-label="Illustration of the Files tab showing folders and files in a session's workspace">
+          <div class="mock-window" aria-hidden="true">
+            <div class="mock-head"><span>‹</span><b>Workspace</b><span>↻</span></div>
+            <div class="mock-tabs"><b>Files</b><span>Changes</span></div>
+            <div class="mock-crumb">⌂ <span>›</span> storefront <span>›</span> src</div>
+            <div class="mock-list">
+              <div><i class="folder">▰</i><b>components</b><span>›</span></div>
+              <div><i class="folder">▰</i><b>lib</b><span>›</span></div>
+              <div><i class="code">{ }</i><b>App.tsx</b><small>3.2 KB</small><span>›</span></div>
+              <div><i class="code">#</i><b>styles.css</b><small>1.8 KB</small><span>›</span></div>
+              <div><i class="picture">▧</i><b>hero.png</b><small>284 KB</small><span>›</span></div>
+            </div>
+            <div class="mock-note">Files are read only.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="workspace-feature reverse">
+        <div class="workspace-copy"><span class="workspace-kicker">Changes</span><h3>Review the actual diff.</h3><p>See staged, unstaged and new files since the last commit. Open a change to compare lines, with additions and removals clearly marked.</p></div>
+        <div class="workspace-art diff-art" role="img" aria-label="Illustration of a working-tree diff with removed and added lines">
+          <div class="mock-window" aria-hidden="true">
+            <div class="mock-head"><span>‹</span><b>App.tsx</b><span>↻</span></div>
+            <div class="mock-tabs"><span>File</span><b>Diff</b></div>
+            <div class="mock-stat"><strong>+8</strong><em>−2</em><span>vs last commit</span></div>
+            <div class="mock-code">
+              <div><span>18</span><code><i>function</i> App() {</code></div>
+              <div class="remove"><span>19</span><code>− &lt;Hero title="Welcome" /&gt;</code></div>
+              <div class="add"><span>19</span><code>+ &lt;Hero title="Build faster" /&gt;</code></div>
+              <div class="add"><span>20</span><code>+ &lt;LivePreview /&gt;</code></div>
+              <div><span>21</span><code>}</code></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="workspace-more">
+        <article class="workspace-card">
+          <div class="mini-art read-art" role="img" aria-label="Illustration of syntax-highlighted code beside an image preview">
+            <div class="mini-code" aria-hidden="true"><span>App.tsx <b>File</b></span><code><i>const</i> image = <em>"hero.png"</em>;</code><code><i>return</i> &lt;Preview src={image} /&gt;;</code></div>
+            <div class="mini-image" aria-hidden="true"><div class="mini-sun"></div><div class="mini-hill"></div></div>
+          </div>
+          <h3>Read code and view images</h3><p>Open source files with syntax highlighting and line numbers, or inspect an image right on your phone.</p>
+        </article>
+        <article class="workspace-card">
+          <div class="mini-art preview-art" role="img" aria-label="Illustration of a running server opening its website in an in-app browser">
+            <div class="server-row" aria-hidden="true"><span>◉</span><div><b>storefront</b><small>:3000 · npm run dev</small></div><strong>Open ↗</strong></div>
+            <div class="preview-browser" aria-hidden="true"><div class="preview-browser-bar"><i></i><span>localhost:3000</span><i></i></div><div class="preview-page"><b>Build faster.</b><span>Preview your changes live</span><em>Explore →</em></div></div>
+          </div>
+          <h3>Open the live site</h3><p>Open a server your agent started in the app. Share a preview link or stop the server from your phone.</p>
+        </article>
+        <article class="workspace-card">
+          <div class="mini-art message-art" role="img" aria-label="Illustration of a message with an attached image ready to send to an agent">
+            <div class="message-bubble" aria-hidden="true">Done. How does this look?</div>
+            <div class="message-composer" aria-hidden="true"><div class="message-thumb"><div class="message-thumb-window"><i></i><i></i><i></i></div><span>×</span></div><div class="message-field"><b>＋</b><span>Fix the spacing here…</span><strong>↑</strong></div></div>
+          </div>
+          <h3>Send images with your message</h3><p>Attach a screenshot to show what you mean. Images your agent produces or inspects also open from the conversation.</p>
+        </article>
       </div>
     </section>
 
@@ -375,7 +442,8 @@
         <p class="steps-list">Build from a clone with Go 1.26, or download a binary for amd64 or arm64 from <a href="https://github.com/lenajeremy/agentman/releases/latest">the latest release</a>.</p>
       </div>
       <div class="panel-body" role="tabpanel" id="panel-ios" aria-labelledby="tab-ios" hidden>
-        <p class="panel-note">The iPhone app is on its way to the App Store. Until review finishes, it's available as a TestFlight beta, and the invite link will be here shortly.</p>
+        <a class="btn light" href="https://testflight.apple.com/join/UcJvsjED">Open the TestFlight invite <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+        <p class="panel-note">Apple is reviewing the first public beta build. The invite will accept testers after Apple approves it.</p>
       </div>
       <div class="panel-body" role="tabpanel" id="panel-android" aria-labelledby="tab-android" hidden>
         <p class="panel-note">Build the app from source with Expo. It runs and shows alerts while it's open; background push isn't set up on Android yet. <a href="https://github.com/lenajeremy/agentman#mobile-development">Mobile setup guide</a></p>
@@ -387,9 +455,9 @@
     <footer class="footer">
       <div class="fcols">
         <div class="about"><a class="logo" href="/"><svg aria-hidden="true"><use href="#mark"/></svg>agentman</a><p>A remote control for the coding agents on your Mac.</p></div>
-        <div><h4>Product</h4><a href="#how">How it works</a><a href="#agents">Agents</a><a href="#get-started">Get started</a></div>
+        <div><h4>Product</h4><a href="#how">How it works</a><a href="#workspace">Files and diffs</a><a href="#agents">Agents</a><a href="#get-started">Get started</a></div>
         <div><h4>Developers</h4><a href="https://github.com/lenajeremy/agentman#readme">Docs</a><a href="https://github.com/lenajeremy/agentman#cli-reference">CLI reference</a><a href="https://github.com/lenajeremy/agentman#self-hosting-the-relay">Self-hosting</a><a href="https://github.com/lenajeremy/agentman#security-model">Security model</a></div>
-        <div><h4>Project</h4><a href="https://github.com/lenajeremy/agentman">GitHub</a><a href="https://github.com/lenajeremy/agentman/issues">Issues</a><a href="https://github.com/lenajeremy/agentman/releases">Releases</a><a href="https://github.com/lenajeremy/agentman/blob/main/LICENSE">MIT license</a></div>
+        <div><h4>Project</h4><a href="https://github.com/lenajeremy/agentman">GitHub</a><a href="https://github.com/lenajeremy/agentman/issues">Issues</a><a href="https://github.com/lenajeremy/agentman/releases">Releases</a><a href="/privacy">Privacy policy</a><a href="https://github.com/lenajeremy/agentman/blob/main/LICENSE">MIT license</a></div>
       </div>
       <div class="fbottom">
         <span class="relay-status" data-relay><i></i><span>Public relay</span></span>

@@ -10,6 +10,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -109,6 +110,12 @@ type Daemon struct {
 	// app — the case a live-socket notification cannot cover. Nil until the CLI
 	// supplies one, so tests and `-relay none` need no push configuration.
 	push *push.Sender
+	// attachments is nil on a daemon running without a relay, which is also
+	// the only configuration a phone cannot send images to.
+	attachments AttachmentStore
+	// seen is what a phone is allowed to read outside a session's directory:
+	// the files that session's agent already opened.
+	seen *seenPaths
 	// pushedQuestions remembers the last question announced per session, so a
 	// prompt sitting unanswered across many sweeps rings the phone once.
 	pushedQuestions map[string]string
@@ -164,7 +171,45 @@ func New(registry *source.Registry, sink Transport) *Daemon {
 		pushedQuestions:    map[string]string{},
 		serverLists:        map[string][]protocol.Server{},
 		serverScanInterval: serverScanInterval,
+		seen:               newSeenPaths(),
 	}
+}
+
+// AttachmentStore collects an image a phone left with the relay and returns
+// where it landed on disk. An interface so a daemon without a relay simply has
+// none, and so tests need no network.
+type AttachmentStore interface {
+	Save(ctx context.Context, sessionID, uploadID string) (string, error)
+}
+
+// SetAttachments installs the store images are collected into.
+func (d *Daemon) SetAttachments(store AttachmentStore) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.attachments = store
+}
+
+// saveAttachments collects every image on one message, in order.
+//
+// All or nothing: a message that mentions two screenshots and arrives with one
+// is worse than one that fails and can be sent again, because the agent would
+// answer about the wrong picture.
+func (d *Daemon) saveAttachments(ctx context.Context, sessionID string, ids []string) ([]string, error) {
+	d.mu.Lock()
+	store := d.attachments
+	d.mu.Unlock()
+	if store == nil {
+		return nil, errors.New("this Mac cannot receive images — it is running without a relay")
+	}
+	paths := make([]string, 0, len(ids))
+	for _, id := range ids {
+		path, err := store.Save(ctx, sessionID, id)
+		if err != nil {
+			return nil, err
+		}
+		paths = append(paths, path)
+	}
+	return paths, nil
 }
 
 // SetPush installs the push sender. Separate from New so that a daemon without
@@ -772,6 +817,7 @@ func (d *Daemon) HandleFrom(
 		if err != nil {
 			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
 		}
+		d.seen.record(req.SessionID, page.Messages)
 		event := protocol.Event{Type: protocol.EvtPage, Page: &page}
 		return fitMessageEvent(event)
 
@@ -811,7 +857,21 @@ func (d *Daemon) HandleFrom(
 				Error: "daemon: answer the pending question before sending a message",
 			}
 		}
-		mode, err := d.registry.Inject(ctx, req.SessionID, req.Text)
+		text := req.Text
+		if len(req.UploadIDs) > 0 {
+			paths, saveErr := d.saveAttachments(ctx, req.SessionID, req.UploadIDs)
+			if saveErr != nil {
+				return protocol.Event{
+					Type: protocol.EvtSendResult, SessionID: req.SessionID,
+					ClientID: req.ClientID, Status: protocol.StatusFailed,
+					Error: saveErr.Error(),
+				}
+			}
+			// The paths lead, the way a person types them before saying what to
+			// look for. One line, so nothing submits early.
+			text = strings.TrimSpace(strings.Join(paths, " ") + " " + text)
+		}
+		mode, err := d.registry.Inject(ctx, req.SessionID, text)
 		result := protocol.Event{
 			Type:      protocol.EvtSendResult,
 			SessionID: req.SessionID,
@@ -868,6 +928,15 @@ func (d *Daemon) HandleFrom(
 		d.closeServer(req.SessionID, req.Port)
 		return protocol.Event{}
 
+	case protocol.ReqStopServer:
+		return d.stopServer(ctx, req.SessionID, req.Port)
+
+	case protocol.ReqListFiles, protocol.ReqReadFile, protocol.ReqListChanges, protocol.ReqFileDiff:
+		return d.workspace(ctx, req)
+
+	case protocol.ReqReadSeenFile:
+		return d.readSeenFile(req)
+
 	default:
 		return protocol.Event{Type: protocol.EvtError, Error: "unsupported request: " + string(req.Type)}
 	}
@@ -896,6 +965,11 @@ const (
 	maxSessionIDBytes = 512
 	maxCursorBytes    = 4096
 	maxMessageBytes   = 64 * 1024
+	// Images one message may carry. The relay holds ten per account at a time,
+	// so this is about what a single message can reasonably be about rather
+	// than about capacity.
+	maxUploadIDs      = 4
+	maxUploadIDBytes  = 64
 	maxOptionKeyBytes = 4096
 	maxClientIDBytes  = 256
 	// The relay accepts a 4 MiB websocket frame. Keep normalized events below
@@ -925,7 +999,11 @@ func validateRequest(req protocol.Request) error {
 	requiresSession := req.Type == protocol.ReqSubscribe || req.Type == protocol.ReqUnsubscribe ||
 		req.Type == protocol.ReqFetchMessages || req.Type == protocol.ReqSendMessage ||
 		req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqAnswer ||
-		req.Type == protocol.ReqOpenServer || req.Type == protocol.ReqCloseServer
+		req.Type == protocol.ReqOpenServer || req.Type == protocol.ReqCloseServer ||
+		req.Type == protocol.ReqStopServer ||
+		req.Type == protocol.ReqListFiles || req.Type == protocol.ReqReadFile ||
+		req.Type == protocol.ReqListChanges || req.Type == protocol.ReqFileDiff ||
+		req.Type == protocol.ReqReadSeenFile
 	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
 		return fmt.Errorf("daemon: invalid session id")
 	}
@@ -942,14 +1020,31 @@ func validateRequest(req protocol.Request) error {
 	case protocol.ReqListSessions, protocol.ReqSubscribe, protocol.ReqUnsubscribe,
 		protocol.ReqFetchMessages, protocol.ReqInterrupt, protocol.ReqRegisterPush:
 		return nil
-	case protocol.ReqOpenServer, protocol.ReqCloseServer:
+	case protocol.ReqOpenServer, protocol.ReqCloseServer, protocol.ReqStopServer:
 		if req.Port < 1 || req.Port > 65535 {
 			return fmt.Errorf("daemon: invalid server port")
 		}
 		return nil
+	case protocol.ReqListFiles, protocol.ReqReadFile, protocol.ReqListChanges, protocol.ReqFileDiff:
+		_, err := workspacePath(req.Path, req.Type == protocol.ReqListFiles || req.Type == protocol.ReqListChanges)
+		return err
+	case protocol.ReqReadSeenFile:
+		if !strings.HasPrefix(req.Path, "/") || len(req.Path) > maxWirePathBytes {
+			return fmt.Errorf("daemon: that is not an absolute path")
+		}
+		return nil
 	case protocol.ReqSendMessage:
-		if strings.TrimSpace(req.Text) == "" {
+		// A message that is only images is a real message: "look at this".
+		if strings.TrimSpace(req.Text) == "" && len(req.UploadIDs) == 0 {
 			return fmt.Errorf("daemon: refusing to send an empty message")
+		}
+		if len(req.UploadIDs) > maxUploadIDs {
+			return fmt.Errorf("daemon: too many images on one message")
+		}
+		for _, id := range req.UploadIDs {
+			if id == "" || len(id) > maxUploadIDBytes {
+				return fmt.Errorf("daemon: invalid image id")
+			}
 		}
 		if len(req.Text) > maxMessageBytes {
 			return fmt.Errorf("daemon: message exceeds %d bytes", maxMessageBytes)
@@ -1137,6 +1232,7 @@ func (d *Daemon) startFollow(subscriberID, sessionID string) error {
 			case <-ctx.Done():
 				return
 			case batch := <-messages:
+				d.seen.record(sessionID, batch)
 				for len(batch) > 0 {
 					take := min(len(batch), maxPageMessages)
 					event := protocol.Event{

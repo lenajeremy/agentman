@@ -137,7 +137,13 @@ export type RequestType =
   | "answer_question"
   | "register_push"
   | "open_server"
-  | "close_server";
+  | "close_server"
+  | "stop_server"
+  | "list_files"
+  | "read_file"
+  | "list_changes"
+  | "file_diff"
+  | "read_seen_file";
 
 export interface Request {
   type: RequestType;
@@ -156,6 +162,9 @@ export interface Request {
   answerText?: string;
   /** The server on open_server and close_server. */
   port?: number;
+  path?: string;
+  /** Tickets for images already left with the relay, on send_message. */
+  uploadIds?: string[];
 }
 
 export type EventType =
@@ -167,7 +176,32 @@ export type EventType =
   | "turn_complete"
   | "send_result"
   | "server_opened"
-  | "error";
+  | "server_stopped"
+  | "error"
+  | "workspace";
+
+export interface WorkspaceEntry { name: string; directory: boolean; size?: number }
+export interface WorkspaceChange {
+  path: string;
+  status: string;
+  /** Lines added and removed. Absent or zero for a binary file. */
+  added?: number;
+  removed?: number;
+}
+export interface WorkspaceResult {
+  kind: "directory" | "file" | "changes" | "diff";
+  sessionId: string;
+  path?: string;
+  entries?: WorkspaceEntry[];
+  changes?: WorkspaceChange[];
+  text?: string;
+  image?: string;
+  mime?: string;
+  diff?: string;
+  truncated?: boolean;
+  /** How many entries the daemon withheld as private. */
+  hidden?: number;
+}
 
 export type SendStatus = "delivered" | "queued" | "failed";
 
@@ -186,6 +220,7 @@ export interface DaemonEvent {
   port?: number;
   link?: string;
   error?: string;
+  workspace?: WorkspaceResult;
 }
 
 export type ControlType =
@@ -258,7 +293,7 @@ export function decodeControl(value: unknown): Control | null {
 export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
   if (!isRecord(value) || !isOneOf(value.type, [
     "sessions", "session_update", "session_gone", "messages", "page",
-    "turn_complete", "send_result", "server_opened", "error",
+    "turn_complete", "send_result", "server_opened", "server_stopped", "error", "workspace",
   ] as const)) return null;
 
   switch (value.type) {
@@ -293,13 +328,42 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
       if (!boundedString(value.sessionId, 512, true) || !isPort(value.port) ||
           !isLink(value.link)) return null;
       break;
+    case "server_stopped":
+      if (!boundedString(value.sessionId, 512, true) || !isPort(value.port)) return null;
+      break;
     case "error":
       if (!boundedString(value.error, 64 * 1024, true) ||
           !optionalBoundedString(value.sessionId, 512) ||
           (value.port !== undefined && !isPort(value.port))) return null;
       break;
+    case "workspace":
+      if (!isWorkspaceResult(value.workspace)) return null;
+      break;
   }
   return value as unknown as DaemonEvent;
+}
+
+function isWorkspaceResult(value: unknown): value is WorkspaceResult {
+  if (!isRecord(value) || !isOneOf(value.kind, ["directory", "file", "changes", "diff"] as const) ||
+      !boundedString(value.sessionId, 512, true) || !optionalBoundedString(value.path, 4096) ||
+      !optionalBoundedString(value.text, 256 * 1024) ||
+      !optionalBoundedString(value.image, 3 * 1024 * 1024) ||
+      !optionalBoundedString(value.diff, 256 * 1024) ||
+      !optionalBoundedString(value.mime, 128) ||
+      (value.truncated !== undefined && typeof value.truncated !== "boolean") ||
+      !optionalFiniteNumber(value.hidden)) return false;
+  if (value.entries !== undefined && !boundedArray(value.entries, 500, (entry): entry is WorkspaceEntry =>
+      isRecord(entry) && boundedString(entry.name, 4096, true) &&
+      typeof entry.directory === "boolean" && optionalFiniteNumber(entry.size))) return false;
+  if (value.changes !== undefined && !boundedArray(value.changes, 500, (change): change is WorkspaceChange =>
+      isRecord(change) && boundedString(change.path, 4096, true) && boundedString(change.status, 2, true) &&
+      optionalFiniteNumber(change.added) && optionalFiniteNumber(change.removed))) return false;
+  if (value.image !== undefined && (
+      typeof value.image !== "string" ||
+      !isOneOf(value.mime, ["image/png", "image/jpeg", "image/gif", "image/webp"] as const) ||
+      !/^[A-Za-z0-9+/]*={0,2}$/.test(value.image)
+  )) return false;
+  return true;
 }
 
 function isSession(value: unknown): value is Session {

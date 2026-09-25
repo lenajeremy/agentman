@@ -120,6 +120,7 @@ function ServerCard({ sessionId, server }: { sessionId: string; server: Server }
   const styles = useStyles(makeStyles);
   const { color, scheme } = useTheme();
   const [opening, setOpening] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const shared = Boolean(server.link);
   const name = server.title || `localhost:${server.port}`;
@@ -160,7 +161,7 @@ function ServerCard({ sessionId, server }: { sessionId: string; server: Server }
     ).catch(() => {});
   };
 
-  const stop = () => {
+  const unshare = () => {
     const perform = () => store.closeServer(sessionId, server.port);
     if (Platform.OS === "web") {
       if (globalThis.confirm("Stop sharing this server? Its link stops working.")) perform();
@@ -172,17 +173,40 @@ function ServerCard({ sessionId, server }: { sessionId: string; server: Server }
     ]);
   };
 
+  // Killing the process is the one action here that cannot be undone from the
+  // phone — nothing in the app can start a dev server again — so it always
+  // asks first, and names the port so the wrong row cannot be stopped blind.
+  const stopServer = () => {
+    const perform = () => {
+      setError(null);
+      setStopping(true);
+      void store.stopServer(sessionId, server.port)
+        .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)))
+        .finally(() => setStopping(false));
+    };
+    const question = `Stop the server on port ${server.port}? You will need your Mac to start it again.`;
+    if (Platform.OS === "web") {
+      if (globalThis.confirm(question)) perform();
+      return;
+    }
+    Alert.alert("Stop this server?", question, [
+      { text: "Keep running", style: "cancel" },
+      { text: "Stop server", style: "destructive", onPress: perform },
+    ]);
+  };
+
   return (
     <View style={styles.card}>
-      <MotionPressable
-        onPress={open}
-        disabled={opening || !store.daemonOnline}
-        style={styles.cardMain}
-        pressedScale={0.985}
-        accessibilityRole="button"
-        accessibilityLabel={`${name}, port ${server.port}. ${shared ? "Shared. " : ""}Open`}
-        accessibilityState={{ busy: opening, disabled: !store.daemonOnline }}
-      >
+      <View style={styles.cardMain}>
+        <MotionPressable
+          onPress={open}
+          disabled={opening || !store.daemonOnline}
+          style={styles.cardTap}
+          pressedScale={0.985}
+          accessibilityRole="button"
+          accessibilityLabel={`${name}, port ${server.port}. ${shared ? "Shared. " : ""}Open`}
+          accessibilityState={{ busy: opening, disabled: !store.daemonOnline }}
+        >
         <View style={[styles.serverIcon, shared && { backgroundColor: color.okWash }]}>
           <Feather name="globe" size={18} color={shared ? color.ok : color.muted} />
         </View>
@@ -196,15 +220,45 @@ function ServerCard({ sessionId, server }: { sessionId: string; server: Server }
             {shared ? " · shared" : ""}
           </Text>
         </View>
-        {opening ? (
-          <ActivityIndicator size="small" color={color.text} />
-        ) : (
-          <View style={[styles.openPill, !store.daemonOnline && styles.openPillDisabled]}>
-            <Text style={styles.openLabel}>Open</Text>
-            <Feather name="arrow-up-right" size={14} color={color.onInverse} />
-          </View>
-        )}
-      </MotionPressable>
+        </MotionPressable>
+
+        <MotionPressable
+          onPress={open}
+          disabled={opening || !store.daemonOnline}
+          style={[styles.openPill, !store.daemonOnline && styles.openPillDisabled]}
+          pressedScale={0.94}
+          accessibilityRole="button"
+          accessibilityLabel="Open in a browser"
+        >
+          {opening ? (
+            <ActivityIndicator size="small" color={color.onInverse} />
+          ) : (
+            <>
+              <Text style={styles.openLabel}>Open</Text>
+              <Feather name="arrow-up-right" size={14} color={color.onInverse} />
+            </>
+          )}
+        </MotionPressable>
+
+        {/* Square, the transport-control sense of stop, rather than a cross:
+            this ends the process, it does not dismiss the row. */}
+        <MotionPressable
+          onPress={stopServer}
+          disabled={stopping || !store.daemonOnline}
+          hitSlop={6}
+          style={[styles.stopButton, !store.daemonOnline && styles.openPillDisabled]}
+          pressedScale={0.9}
+          accessibilityRole="button"
+          accessibilityLabel={`Stop the server on port ${server.port}`}
+          accessibilityState={{ busy: stopping, disabled: !store.daemonOnline }}
+        >
+          {stopping ? (
+            <ActivityIndicator size="small" color={color.errorText} />
+          ) : (
+            <Feather name="square" size={14} color={scheme === "dark" ? color.errorText : color.error} />
+          )}
+        </MotionPressable>
+      </View>
 
       {error ? (
         <View style={styles.error}>
@@ -229,14 +283,14 @@ function ServerCard({ sessionId, server }: { sessionId: string; server: Server }
             <Feather name="share" size={15} color={color.text} />
           </MotionPressable>
           <MotionPressable
-            onPress={stop}
+            onPress={unshare}
             hitSlop={8}
             pressedScale={0.94}
             style={styles.linkAction}
             accessibilityRole="button"
             accessibilityLabel="Stop sharing"
           >
-            <Feather name="x-circle" size={15} color={scheme === "dark" ? color.errorText : color.error} />
+            <Feather name="eye-off" size={15} color={color.muted} />
           </MotionPressable>
         </View>
       ) : null}
@@ -297,10 +351,13 @@ const makeStyles = (c: Palette) =>
     cardMain: {
       flexDirection: "row",
       alignItems: "center",
-      gap: space.md,
+      gap: space.sm,
       paddingVertical: 13,
       paddingHorizontal: 14,
     },
+    // Only the identity opens the server; the two controls beside it are their
+    // own targets, so neither swallows the other's tap.
+    cardTap: { flex: 1, flexDirection: "row", alignItems: "center", gap: space.md, minWidth: 0 },
     serverIcon: {
       width: 40,
       height: 40,
@@ -324,6 +381,18 @@ const makeStyles = (c: Palette) =>
     openPillDisabled: { opacity: 0.35 },
     openLabel: { fontFamily: font.sansMedium, fontSize: size.caption, color: c.onInverse },
 
+    // A bordered square rather than a filled pill: it sits next to the filled
+    // "Open" without competing with it for the eye.
+    stopButton: {
+      width: 34,
+      height: 34,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: c.errorEdge,
+      backgroundColor: c.errorWash,
+    },
     error: {
       flexDirection: "row",
       alignItems: "flex-start",

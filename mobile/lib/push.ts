@@ -5,7 +5,7 @@
  * which only works while the socket is alive. iOS suspends a backgrounded app
  * and the socket dies with it — precisely when the user has walked away and
  * most wants to hear that their agent finished. A push token lets the Mac
- * reach the phone through APNs instead, with no socket involved.
+ * reach the phone through APNs or FCM instead, with no socket involved.
  *
  * The token goes only to the paired Mac, which posts directly to Expo. The
  * relay never sees it.
@@ -76,6 +76,18 @@ export async function obtainPushToken(): Promise<string | null> {
   }
 
   try {
+    // Android 13 requires a notification channel before requesting permission
+    // or obtaining an Expo push token. The root layout also creates this
+    // channel for local alerts, but token registration can race that effect.
+    if (Platform.OS === "android") {
+      await Notifications.setNotificationChannelAsync("default", {
+        name: "Agent alerts",
+        importance: Notifications.AndroidImportance.HIGH,
+        sound: "default",
+        vibrationPattern: [0, 200, 100, 200],
+      });
+    }
+
     const existing = await Notifications.getPermissionsAsync();
     let granted = existing.granted;
     if (!granted && existing.canAskAgain) {

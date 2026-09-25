@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -92,6 +93,9 @@ type Server struct {
 	previews        *previewOrigin
 	tunnels         *tunnelRegistry
 	previewRequests *limiter
+	// uploads holds images in flight from a phone to a daemon. See uploads.go
+	// for why they travel beside the websocket rather than through it.
+	uploads *uploadStore
 }
 
 // NewServer builds a relay.
@@ -119,6 +123,7 @@ func NewServer(secret, version string, log *slog.Logger, trustProxy bool) *Serve
 		connections:        make(chan struct{}, maxRelayConnections),
 		clientConnections:  map[string]int{},
 		tunnels:            newTunnelRegistry(),
+		uploads:            newUploadStore(),
 		previewRequests:    newLimiter(previewRequestsPerMinute, time.Minute),
 	}
 }
@@ -131,6 +136,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /ws/app", s.handleApp)
 	mux.HandleFunc("POST /pair", s.handlePair)
 	mux.HandleFunc("POST /pair/code", s.handlePairCode)
+	mux.HandleFunc("POST /upload", s.handleUpload)
+	mux.HandleFunc("GET /upload/{id}", s.handleUploadFetch)
 	mux.HandleFunc("GET "+tunnel.Path, s.handleTunnel)
 	api := withCORS(mux)
 
@@ -917,4 +924,96 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// handleUpload accepts one image from a paired phone and returns the ticket
+// the daemon will present to collect it.
+//
+// The token is verified before a single byte of the body is read: an
+// unauthenticated caller must never be able to make this process allocate.
+func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	account, err := VerifyDeviceToken(s.secret, bearer(r))
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid device token"})
+		return
+	}
+
+	body := http.MaxBytesReader(w, r.Body, maxUploadBytes+1)
+	defer body.Close()
+	// Sized from Content-Length rather than grown by ReadAll, which doubles as
+	// it goes and would transiently hold twice the cap. The length is a hint
+	// from the caller, so it is clamped and the read still bounded above.
+	hint := r.ContentLength
+	if hint < 0 || hint > maxUploadBytes {
+		hint = maxUploadBytes
+	}
+	data := make([]byte, 0, hint)
+	buf := make([]byte, 32<<10)
+	for {
+		n, readErr := body.Read(buf)
+		data = append(data, buf[:n]...)
+		if len(data) > maxUploadBytes {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+				"error": "that image is too large to send",
+			})
+			return
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not read the upload"})
+			return
+		}
+	}
+
+	mime, _, ok := sniffImage(data)
+	if !ok {
+		writeJSON(w, http.StatusUnsupportedMediaType, map[string]string{
+			"error": "only PNG, JPEG, GIF and WebP images can be sent",
+		})
+		return
+	}
+
+	id, err := s.uploads.put(account, mime, data, time.Now())
+	if err != nil {
+		if errors.Is(err, errUploadCapacity) {
+			writeJSON(w, http.StatusInsufficientStorage, map[string]string{
+				"error": "too many images in flight — wait for the current ones to arrive",
+			})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":        id,
+		"mime":      mime,
+		"expiresAt": time.Now().Add(uploadTTL).UnixMilli(),
+	})
+}
+
+// handleUploadFetch hands one image to the daemon that owns it, and forgets it.
+//
+// A ticket is good exactly once. The daemon presents its own token, which
+// derives the same account the phone uploaded under, so an upload can only
+// ever reach the Mac it was addressed to.
+func (s *Server) handleUploadFetch(w http.ResponseWriter, r *http.Request) {
+	token := bearer(r)
+	if token == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing daemon token"})
+		return
+	}
+	item, ok := s.uploads.take(DeriveAccount(token), r.PathValue("id"), time.Now())
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "that image is no longer available"})
+		return
+	}
+	w.Header().Set("Content-Type", item.mime)
+	w.Header().Set("Content-Length", strconv.Itoa(len(item.data)))
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(item.data)
 }

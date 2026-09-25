@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -23,6 +24,7 @@ import { MotionPressable } from "../components/MotionPressable";
 import { useStyles, useTheme } from "../lib/appearance";
 import { pair, pairWithToken } from "../lib/client";
 import { DEFAULT_RELAY } from "../lib/pairing";
+import { PRIVACY_POLICY_URL } from "../lib/privacy";
 import { useStore } from "../lib/store";
 import { PAIRING_CODE_LENGTH } from "../lib/protocol";
 import { font, Palette, radius, size, space } from "../lib/theme";
@@ -247,11 +249,20 @@ export default function Pair() {
             </Appear>
           ) : null}
 
-          <Text style={styles.footnote}>
-            Codes work once and expire after 60 seconds. Transcripts stay on your Mac;
-            live traffic passes through your relay, so use an operator you trust or
-            self-host one.
-          </Text>
+          <View style={styles.disclosure}>
+            <Text style={styles.footnote}>
+              Codes expire in 60 seconds. Live traffic passes through your relay.
+            </Text>
+            <MotionPressable
+              onPress={() => void Linking.openURL(PRIVACY_POLICY_URL)}
+              style={styles.policyLink}
+              hitSlop={8}
+              accessibilityRole="link"
+              accessibilityLabel="Read Agentman privacy policy"
+            >
+              <Text style={styles.policyLinkText}>Privacy policy</Text>
+            </MotionPressable>
+          </View>
         </ContentColumn>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -378,13 +389,20 @@ const makeStyles = (c: Palette) =>
     },
     error: { flex: 1, fontFamily: font.sans, fontSize: size.caption, lineHeight: 18, color: c.errorText },
 
+    disclosure: { marginTop: "auto", alignItems: "center", paddingTop: space.sm },
     footnote: {
-      marginTop: "auto",
-      paddingTop: space.lg,
       fontFamily: font.sans,
       fontSize: size.label,
       color: c.faint,
       lineHeight: 17,
       textAlign: "center",
     },
+    policyLink: {
+      minHeight: 32,
+      alignItems: "center",
+      justifyContent: "center",
+      marginTop: space.xs,
+      paddingHorizontal: space.md,
+    },
+    policyLinkText: { fontFamily: font.sansMedium, fontSize: size.label, color: c.ok },
   });

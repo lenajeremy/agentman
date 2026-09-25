@@ -180,7 +180,7 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 			if block.IsError {
 				status = protocol.ToolError
 			}
-			outcome := toolOutcome{status: status, preview: clip(flattenClaudeResult(block.Content), PreviewChars)}
+			outcome := toolOutcome{status: status, preview: ClipBlock(flattenClaudeResult(block.Content), PreviewLines, PreviewChars)}
 			p.outcomes.set(block.ToolUseID, outcome)
 
 			// Reading forwards the row already exists, so re-emit it under the
@@ -253,7 +253,9 @@ func summarizeToolInput(name string, raw json.RawMessage) string {
 
 	switch name {
 	case "Bash", "BashOutput":
-		return clip(pick("command", "description"), SummaryChars)
+		// A command keeps its newlines: a heredoc'd script flattened to one
+		// line is unreadable, and the row only ever shows the first line.
+		return ClipBlock(pick("command", "description"), CommandLines, CommandChars)
 	case "Read", "Write", "NotebookEdit":
 		return pick("file_path", "notebook_path")
 	case "Edit":

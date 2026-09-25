@@ -22,6 +22,7 @@ import (
 	"github.com/mdp/qrterminal/v3"
 	qr "rsc.io/qr"
 
+	"github.com/lenajeremy/agentman/internal/attachments"
 	"github.com/lenajeremy/agentman/internal/daemon"
 	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/protocol"
@@ -268,6 +269,32 @@ func runServe(ctx context.Context, args []string) error {
 	watcher := servers.NewWatcher()
 	ignoreHookPort(watcher)
 	agent.SetServers(watcher, sharer)
+
+	// Images a phone sends arrive through the relay and are written here, so a
+	// daemon without one simply cannot receive them.
+	if relayURL != "" {
+		if dir, dirErr := hook.ConfigDir(""); dirErr == nil {
+			store := attachments.New(dir, relayURL, cfg.Token)
+			agent.SetAttachments(store)
+			// At startup as well as on the hour: leave the daemon off for a
+			// fortnight and it should tidy up when it returns rather than wait.
+			if err := store.Sweep(time.Now()); err != nil {
+				fmt.Printf("%s\n", dim("images     could not tidy old images: "+err.Error()))
+			}
+			go func() {
+				ticker := time.NewTicker(time.Hour)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case now := <-ticker.C:
+						_ = store.Sweep(now)
+					}
+				}
+			}()
+		}
+	}
 
 	// Push is what covers the gap a live socket cannot: once iOS suspends the
 	// app there is no websocket to deliver on, which is exactly when the user

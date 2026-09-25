@@ -19,6 +19,8 @@ web-build/
 *.p8
 *.p12
 *.key
+*firebase-adminsdk*.json
+*service-account*.json
 *.mobileprovision
 
 # Local
@@ -38,3 +40,11 @@ web-build/
 # Python bytecode, from the icon generator
 __pycache__/
 *.pyc
+
+# Local dev-server config and UI iteration screenshots, not source.
+.claude/
+review-screenshots/
+
+# Not part of the project: a prompt and issue list from another tool.
+ISSUES.md
+.vercel

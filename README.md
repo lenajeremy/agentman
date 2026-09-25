@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go 1.26.6](https://img.shields.io/badge/go-1.26.6-00ADD8.svg)](https://go.dev)
-[![Expo SDK 54](https://img.shields.io/badge/Expo-SDK%2054-000020.svg)](https://expo.dev)
+[![Expo SDK 57](https://img.shields.io/badge/Expo-SDK%2057-000020.svg)](https://expo.dev)
 
 </div>
 
@@ -23,6 +23,7 @@ delivery, interactive question forms, and local notifications.
 - Send instructions through tmux or an agent's native API.
 - Answer single-select, multi-select, custom-text, preview, and review forms.
 - Receive local notifications when an agent completes a turn or needs input.
+- Browse a session's files, preview images, and inspect working tree diffs from the app.
 - Pair a phone without creating an account.
 - Self-host a stateless relay with no transcript database.
 
@@ -61,7 +62,7 @@ the mobile app.
 
 ### 3. Run the mobile app
 
-The app uses Expo SDK 54 and Node.js 24.
+The app uses Expo SDK 57 and Node.js 24.
 
 ```bash
 cd mobile
@@ -344,11 +345,15 @@ development token to production is refused as `BadDeviceToken`. After changing
 build type, delete `~/.agentman/push.json` and reopen the app so it registers
 again.
 
-**Android push is not configured.** It needs Firebase Cloud Messaging: a
-`google-services.json` referenced from `expo.android.googleServicesFile`, and
-the matching credential uploaded to Expo. Without it the Android app still
-runs and still shows local notifications, but nothing arrives while it is
-closed.
+Android push uses the Agentman Firebase project (`agentman-eda7c`). The
+registered Android app is `dev.agentman.mobile`; its non-secret
+`mobile/google-services.json` is referenced by `expo.android.googleServicesFile`.
+The matching FCM V1 service-account key is assigned to this Android app in the
+Agentman Expo project's EAS credentials. Keep that private key out of Git.
+Build a fresh Android app after changing notification credentials, then open it
+on a device with Google Play services and grant notification permission so it
+can register a new Expo push token with the paired Mac. Expo Go can show local
+alerts while connected but cannot validate the standalone app's background push.
 
 Push payloads carry a session name and a reason, never transcript content,
 because they pass through Expo and Apple. To include a short excerpt, set
@@ -446,6 +451,13 @@ The relay keeps live tunnels in memory, so run a single instance.
 - Wire protocol v2 rejects incompatible clients before forwarding their
   requests, preventing a partially compatible app from answering stale forms.
 - The relay does not persist transcripts, messages, or notification payloads.
+- Paired devices can request read-only files and diffs beneath a live session's
+  working directory. The daemon refuses symlinks at every path segment, and hides
+  the names that carry credentials — `.env*`, `.ssh`, `.aws`, `.docker`, `.npmrc`,
+  private keys, anything containing "secret" or "credential" — along with `.git`
+  itself. Other dot folders are shown, and the count of what was withheld travels
+  with each listing. File contents pass through the relay, which can inspect live
+  traffic.
 
 ## Development
 

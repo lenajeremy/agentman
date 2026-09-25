@@ -9,6 +9,7 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -26,8 +27,12 @@ import { Pulse } from "../../components/Pulse";
 import { QuestionCard } from "../../components/QuestionCard";
 import { Thinking } from "../../components/Thinking";
 import { ToolRow } from "../../components/ToolRow";
+import { AttachmentStrip } from "../../components/AttachmentStrip";
+import { chooseImageSource } from "../../lib/image-source-sheet";
+import { openSessionMenu } from "../../lib/session-menu";
 import { draftNamespace } from "../../lib/draft-policy";
 import { clearDraft, loadDraft, saveDraft } from "../../lib/drafts";
+import { useAttachments } from "../../lib/use-attachments";
 import { Message } from "../../lib/protocol";
 import { sessionNeedsAnswer } from "../../lib/question-alerts";
 import { useStyles, useTheme } from "../../lib/appearance";
@@ -59,8 +64,12 @@ export default function SessionScreen() {
   const { height: viewportHeight } = useWindowDimensions();
   const listRef = useRef<FlatList<Row>>(null);
   const [draft, setDraft] = useState("");
+  const images = useAttachments(store.credentials);
+  const [sendingImages, setSendingImages] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
-  const [submittedClientId, setSubmittedClientId] = useState<string | null>(null);
+  const [submittedClientId, setSubmittedClientId] = useState<string | null>(
+    null,
+  );
   const [inputFocused, setInputFocused] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(
     () => Platform.OS !== "web" && Keyboard.isVisible(),
@@ -83,11 +92,10 @@ export default function SessionScreen() {
   const interruptAction = store.actions.find(
     (action) => action.sessionId === sessionId && action.kind === "interrupt",
   );
-  const effectiveState = session && sessionNeedsAnswer(session)
-    ? "waiting_input"
-    : session?.state;
+  const effectiveState =
+    session && sessionNeedsAnswer(session) ? "waiting_input" : session?.state;
   const draftScope = useMemo(
-    () => store.credentials ? draftNamespace(store.credentials) : null,
+    () => (store.credentials ? draftNamespace(store.credentials) : null),
     [store.credentials],
   );
 
@@ -137,15 +145,18 @@ export default function SessionScreen() {
     }, 350);
   }, [draft, draftReady, draftScope, sessionId]);
 
-  useEffect(() => () => {
-    // Navigation can happen inside the debounce window; flush the final value
-    // so leaving quickly never loses the last few characters.
-    if (draftWriteTimer.current) clearTimeout(draftWriteTimer.current);
-    draftWriteTimer.current = null;
-    if (draftReadyRef.current && draftScope) {
-      void saveDraft(draftScope, sessionId, draftRef.current);
-    }
-  }, [draftScope, sessionId]);
+  useEffect(
+    () => () => {
+      // Navigation can happen inside the debounce window; flush the final value
+      // so leaving quickly never loses the last few characters.
+      if (draftWriteTimer.current) clearTimeout(draftWriteTimer.current);
+      draftWriteTimer.current = null;
+      if (draftReadyRef.current && draftScope) {
+        void saveDraft(draftScope, sessionId, draftRef.current);
+      }
+    },
+    [draftScope, sessionId],
+  );
 
   useEffect(() => {
     if (settled.current === null && messages.length > 0) {
@@ -213,20 +224,52 @@ export default function SessionScreen() {
     if (draftScope) void clearDraft(draftScope, sessionId);
   }, [draftScope, session, sessionId, submittedClientId, submittedSend]);
 
-  const submit = useCallback(() => {
+  // An image on its own is enough to send.
+  const nothingToSend =
+    draft.trim().length === 0 && images.attachments.length === 0;
+
+  const submit = useCallback(async () => {
     const text = draft.trim();
-    if (!text || !canSend || awaitingSend) return;
+    // An image with no words is a real message: "look at this".
+    if ((!text && images.attachments.length === 0) || !canSend || awaitingSend)
+      return;
+    if (sendingImages) return;
     if (Platform.OS !== "web") {
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
+        () => {},
+      );
     }
-    setSubmittedClientId(store.sendMessage(sessionId, text));
+
+    // Uploaded here rather than when the image was chosen: the relay holds one
+    // for two minutes, and the gap between picking a screenshot and finishing
+    // the sentence about it is easily longer than that.
+    let uploadIds: string[] = [];
+    if (images.attachments.length > 0) {
+      setSendingImages(true);
+      try {
+        uploadIds = await images.upload();
+      } catch (reason) {
+        images.setError(
+          reason instanceof Error ? reason.message : String(reason),
+        );
+        setSendingImages(false);
+        return;
+      }
+      setSendingImages(false);
+    }
+
+    setSubmittedClientId(store.sendMessage(sessionId, text, uploadIds));
+    images.clear();
     // No scroll call needed: an inverted list is already anchored to the
     // newest row, so the sent message appears in place.
-  }, [draft, canSend, awaitingSend, sessionId, store]);
+  }, [draft, canSend, awaitingSend, sessionId, store, images, sendingImages]);
 
   const requestInterrupt = useCallback(() => {
-    if (!store.daemonOnline || session?.inject === "none") return;
-    if (interruptAction?.status === "sending" || interruptAction?.status === "delivered") {
+    if (!store.daemonOnline) return;
+    if (
+      interruptAction?.status === "sending" ||
+      interruptAction?.status === "delivered"
+    ) {
       return;
     }
     const perform = () => store.interruptSession(sessionId);
@@ -244,9 +287,15 @@ export default function SessionScreen() {
     );
   }, [interruptAction?.status, session?.inject, sessionId, store]);
 
-  const interruptLocked = !store.daemonOnline ||
+  const interruptLocked =
+    !store.daemonOnline ||
+    // A session the daemon cannot type into cannot be interrupted either.
+    session?.inject === "none" ||
     interruptAction?.status === "sending" ||
     interruptAction?.status === "delivered";
+
+  const menuServers = session?.servers?.length ?? 0;
+  const canStopTurn = session?.state === "busy" && !interruptLocked;
 
   const displayState = effectiveState ?? session?.state ?? "ended";
   const state = stateStyle(displayState, color);
@@ -268,56 +317,102 @@ export default function SessionScreen() {
           <Text style={styles.title} numberOfLines={1}>
             {session?.name ?? "Session"}
           </Text>
-          <Text style={styles.subtitle} numberOfLines={1}>
-            {session
-              ? // Which model is answering you is worth knowing before you send
-                // it something — "Codex" says which CLI is open, not what is
-                // doing the work.
-                [session.model ?? agentLabel(session.kind).name, shortPath(session.cwd)].join(" · ")
-              : sessionId}
-          </Text>
+          {session ? (
+            <View style={styles.subtitleRow}>
+              {/* Which model is answering you is worth knowing before you send
+                  it something — "Codex" says which CLI is open, not what is
+                  doing the work. */}
+              <Text style={[styles.subtitle, styles.subtitleModel]} numberOfLines={1}>
+                {session.model ?? agentLabel(session.kind).name}
+                {" · "}
+              </Text>
+              {/* Truncated from the front, because a path's last segment is the
+                  one that says which project this is. Cut from the end,
+                  ~/Desktop/agentman became "~/Desktop/agent…", which identifies
+                  nothing. */}
+              <Text
+                style={[styles.subtitle, styles.subtitlePath]}
+                numberOfLines={1}
+                ellipsizeMode="head"
+              >
+                {shortPath(session.cwd)}
+              </Text>
+            </View>
+          ) : (
+            <Text style={styles.subtitle} numberOfLines={1}>
+              {sessionId}
+            </Text>
+          )}
         </View>
-        {session?.servers?.length ? (
-          <MotionPressable
-            onPress={() => router.push(`/servers/${encodeURIComponent(session.id)}`)}
-            hitSlop={8}
-            style={styles.serversButton}
-            pressedScale={0.92}
-            accessibilityRole="button"
-            accessibilityLabel={`${session.servers.length} server${session.servers.length === 1 ? "" : "s"} running. Open servers`}
-          >
-            <Feather name="globe" size={15} color={color.text} />
-            <Text style={styles.serversCount}>{session.servers.length}</Text>
-          </MotionPressable>
-        ) : null}
         {session ? (
           <View style={[styles.statePill, { backgroundColor: state.wash }]}>
             <Pulse state={displayState} size={6} />
-            <Text style={[styles.stateLabel, { color: state.text }]}>{state.label}</Text>
+            <Text style={[styles.stateLabel, { color: state.text }]}>
+              {state.label}
+            </Text>
           </View>
         ) : null}
-        {session?.state === "busy" && session.inject !== "none" ? (
+        {/* Servers and stop live behind this rather than beside the title. Five
+            controls across a phone-width row left the name under half of it and
+            cut the working directory to "~/Deskt…", and what a session is gets
+            read far more often than either of them gets pressed. */}
+        {session && (menuServers > 0 || canStopTurn) ? (
           <MotionPressable
-            onPress={requestInterrupt}
-            disabled={interruptLocked}
+            onPress={() =>
+              openSessionMenu(
+                { servers: menuServers, canStop: canStopTurn },
+                (action) => {
+                  if (action === "servers") {
+                    router.push(`/servers/${encodeURIComponent(session.id)}`);
+                    return;
+                  }
+                  requestInterrupt();
+                },
+              )
+            }
             hitSlop={10}
-            style={[styles.stop, interruptLocked && styles.stopDisabled]}
+            style={styles.iconButton}
             pressedScale={0.92}
             accessibilityRole="button"
-            accessibilityLabel="Stop current turn"
-            accessibilityState={{
-              disabled: interruptLocked,
-              busy: interruptAction?.status === "sending",
-            }}
+            accessibilityLabel={
+              menuServers > 0
+                ? `Session actions. ${menuServers} server${menuServers === 1 ? "" : "s"} running`
+                : "Session actions"
+            }
           >
             {interruptAction?.status === "sending" ? (
-              <ActivityIndicator size="small" color={color.onInverse} />
+              <ActivityIndicator size="small" color={color.text} />
             ) : (
-              <View style={styles.stopGlyph} />
+              <Feather name="more-horizontal" size={20} color={color.text} />
             )}
+            {/* The count still has to be visible without opening anything: a
+                running server is a fact about the session, not an action. */}
+            {menuServers > 0 ? (
+              <View style={styles.serverDot}>
+                <Text style={styles.serverDotText}>{menuServers}</Text>
+              </View>
+            ) : null}
           </MotionPressable>
         ) : null}
       </ContentColumn>
+
+      {session ? (
+        <ContentColumn style={styles.workspaceBar}>
+          <MotionPressable
+            onPress={() =>
+              router.push(`/workspace/${encodeURIComponent(session.id)}`)
+            }
+            style={styles.workspaceButton}
+            pressedScale={0.98}
+            accessibilityRole="button"
+            accessibilityLabel="Browse files and working tree changes"
+          >
+            <Feather name="folder" size={16} color={color.workingText} />
+            <Text style={styles.workspaceLabel}>Files & changes</Text>
+            <Feather name="chevron-right" size={15} color={color.faint} />
+          </MotionPressable>
+        </ContentColumn>
+      ) : null}
 
       <KeyboardAvoidingView
         style={styles.keyboardAvoider}
@@ -330,7 +425,10 @@ export default function SessionScreen() {
         ) : null}
         {interruptAction ? (
           <ContentColumn>
-            <InterruptNote status={interruptAction.status} error={interruptAction.error} />
+            <InterruptNote
+              status={interruptAction.status}
+              error={interruptAction.error}
+            />
           </ContentColumn>
         ) : null}
         {session && !session.question && (
@@ -339,63 +437,70 @@ export default function SessionScreen() {
           </ContentColumn>
         )}
 
-      {/* Inverted so the feed opens on the newest message and stays pinned
+        {/* Inverted so the feed opens on the newest message and stays pinned
           there as more arrive. Opening a long session at its beginning means
           scrolling through hours of history to find out what just happened,
           which is the opposite of what someone checking their phone wants.
           Inverting also makes "load older" the natural end-of-list action,
           and it leaves the scroll position alone when the user has
           deliberately scrolled up to read. */}
-      <FlatList
-        style={styles.feed}
-        ref={listRef}
-        data={rows}
-        inverted
-        keyExtractor={(row) =>
-          row.kind === "message" ? row.message.id : row.pending.clientId
-        }
-        renderItem={({ item }) =>
-          item.kind === "message" ? (
-            <MessageRow
-              message={item.message}
-              fresh={settled.current !== null && !settled.current.has(item.message.id)}
-            />
-          ) : (
-            <PendingRow pending={item.pending} onDismiss={store.dismissPending} />
-          )
-        }
-        contentContainerStyle={styles.list}
-        keyboardDismissMode="interactive"
-        keyboardShouldPersistTaps="handled"
-        // Inverted, so the header renders at the visual bottom — which is
-        // where a "still working" indicator belongs, under the last message.
-        ListHeaderComponent={
-          session?.state === "busy" ? (
-            <View style={styles.thinking}>
-              <Thinking />
-            </View>
-          ) : null
-        }
-        // With the list inverted, the "end" is the oldest message.
-        onEndReached={() => store.loadOlder(sessionId)}
-        onEndReachedThreshold={0.4}
-        ListFooterComponent={
-          paging?.loading ? (
-            <ActivityIndicator style={styles.spinner} color={color.faint} />
-          ) : paging?.retentionLimited ? (
-            <Text style={styles.startOfSession}>
-              Older messages remain available on your Mac.
-            </Text>
-          ) : paging && !paging.hasMore && messages.length > 0 ? (
-            <Text style={styles.startOfSession}>Start of session</Text>
-          ) : null
-        }
-        ListEmptyComponent={
-          paging?.loading ? null : (
-            <Text style={styles.emptyFeed}>No messages yet.</Text>
-          )
-        }
-      />
+        <FlatList
+          style={styles.feed}
+          ref={listRef}
+          data={rows}
+          inverted
+          keyExtractor={(row) =>
+            row.kind === "message" ? row.message.id : row.pending.clientId
+          }
+          renderItem={({ item }) =>
+            item.kind === "message" ? (
+              <MessageRow
+                message={item.message}
+                cwd={session?.cwd ?? ""}
+                fresh={
+                  settled.current !== null &&
+                  !settled.current.has(item.message.id)
+                }
+              />
+            ) : (
+              <PendingRow
+                pending={item.pending}
+                onDismiss={store.dismissPending}
+              />
+            )
+          }
+          contentContainerStyle={styles.list}
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+          // Inverted, so the header renders at the visual bottom — which is
+          // where a "still working" indicator belongs, under the last message.
+          ListHeaderComponent={
+            session?.state === "busy" ? (
+              <View style={styles.thinking}>
+                <Thinking />
+              </View>
+            ) : null
+          }
+          // With the list inverted, the "end" is the oldest message.
+          onEndReached={() => store.loadOlder(sessionId)}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={
+            paging?.loading ? (
+              <ActivityIndicator style={styles.spinner} color={color.faint} />
+            ) : paging?.retentionLimited ? (
+              <Text style={styles.startOfSession}>
+                Older messages remain available on your Mac.
+              </Text>
+            ) : paging && !paging.hasMore && messages.length > 0 ? (
+              <Text style={styles.startOfSession}>Start of session</Text>
+            ) : null
+          }
+          ListEmptyComponent={
+            paging?.loading ? null : (
+              <Text style={styles.emptyFeed}>No messages yet.</Text>
+            )
+          }
+        />
 
         {/* A blocked agent reads nothing else until this is answered, so the
             question takes the composer's place as a sheet docked to the
@@ -433,67 +538,137 @@ export default function SessionScreen() {
             <ContentColumn
               style={[
                 styles.composer,
-                { paddingBottom: (keyboardVisible ? 0 : insets.bottom) + space.sm },
+                {
+                  paddingBottom:
+                    (keyboardVisible ? 0 : insets.bottom) + space.sm,
+                },
               ]}
             >
+              {images.error ? (
+                <Text style={styles.attachError}>{images.error}</Text>
+              ) : null}
               <View
                 style={[
                   styles.field,
+                  images.attachments.length > 0 && styles.fieldWithImages,
                   inputFocused && canSend && styles.fieldFocused,
                   !canSend && styles.fieldDisabled,
                 ]}
               >
-                <TextInput
-                  style={styles.input}
-                  value={draft}
-                  onChangeText={setDraft}
-                  onFocus={() => setInputFocused(true)}
-                  onBlur={() => setInputFocused(false)}
-                  editable={canSend && !awaitingSend}
-                  placeholder={
-                    awaitingSend
-                      ? "Waiting for delivery…"
-                      : canSend
-                        ? `Message ${session ? agentLabel(session.kind).name : "the agent"}…`
-                        : "This session can't receive messages"
-                  }
-                  placeholderTextColor={color.faint}
-                  multiline
-                  onSubmitEditing={submit}
-                  returnKeyType="send"
-                  accessibilityLabel="Instruction"
+                <AttachmentStrip
+                  attachments={images.attachments}
+                  onRemove={images.remove}
                 />
-                <MotionPressable
-                  onPress={submit}
-                  disabled={!canSend || awaitingSend || draft.trim().length === 0}
-                  style={[
-                    styles.send,
-                    (!canSend || awaitingSend || draft.trim().length === 0) &&
-                      styles.sendDisabled,
-                  ]}
-                  pressedScale={0.92}
-                  hitSlop={8}
-                  accessibilityRole="button"
-                  accessibilityLabel="Send instruction"
-                  accessibilityState={{
-                    disabled: !canSend || awaitingSend || draft.trim().length === 0,
-                    busy: submittedSend?.status === "sending",
-                  }}
-                >
-                  {submittedSend?.status === "sending" ? (
-                    <ActivityIndicator size="small" color={color.faint} />
-                  ) : (
-                    <Feather
-                      name="arrow-up"
-                      size={18}
-                      color={
-                        !canSend || awaitingSend || draft.trim().length === 0
-                          ? color.faint
-                          : "#FFFFFF"
+                <View style={styles.fieldRow}>
+                  {/* Two ways in, because copying a screenshot and choosing one
+                    from the library are different habits and neither
+                    substitutes for the other. Paste only appears when there is
+                    actually an image on the clipboard. */}
+                  <MotionPressable
+                    onPress={() =>
+                      chooseImageSource(
+                        images.clipboardReady,
+                        (source) =>
+                          void (source === "paste"
+                            ? images.paste()
+                            : images.pick()),
+                      )
+                    }
+                    disabled={
+                      !canSend || awaitingSend || !images.canAdd || images.busy
+                    }
+                    style={styles.attach}
+                    pressedScale={0.92}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Add an image"
+                    accessibilityState={{ disabled: !images.canAdd }}
+                  >
+                    {images.busy ? (
+                      <ActivityIndicator size="small" color={color.faint} />
+                    ) : (
+                      <Feather
+                        name="plus"
+                        size={19}
+                        color={
+                          !canSend || awaitingSend || !images.canAdd
+                            ? color.faint
+                            : color.muted
+                        }
+                      />
+                    )}
+                  </MotionPressable>
+                  {/* iOS's own edit menu can paste text into a TextInput but not
+                    an image: RCTUITextView.paste: hands straight to UITextView,
+                    and no onPaste reaches JS. So a long press here offers the
+                    image instead, in the place the gesture already suggests. */}
+                  <Pressable
+                    onLongPress={() => {
+                      if (!images.clipboardReady || !images.canAdd) return;
+                      void images.paste();
+                    }}
+                    delayLongPress={400}
+                    style={styles.inputWrap}
+                    accessibilityLabel={
+                      images.clipboardReady
+                        ? "Hold to paste the image on the clipboard"
+                        : undefined
+                    }
+                  >
+                    <TextInput
+                      style={styles.input}
+                      value={draft}
+                      onChangeText={setDraft}
+                      onFocus={() => setInputFocused(true)}
+                      onBlur={() => setInputFocused(false)}
+                      editable={canSend && !awaitingSend}
+                      placeholder={
+                        awaitingSend
+                          ? "Waiting for delivery…"
+                          : canSend
+                            ? `Message ${session ? agentLabel(session.kind).name : "the agent"}…`
+                            : "This session can't receive messages"
                       }
+                      placeholderTextColor={color.faint}
+                      multiline
+                      onSubmitEditing={() => void submit()}
+                      returnKeyType="send"
+                      accessibilityLabel="Instruction"
                     />
-                  )}
-                </MotionPressable>
+                  </Pressable>
+                  <MotionPressable
+                    onPress={() => void submit()}
+                    disabled={!canSend || awaitingSend || nothingToSend}
+                    style={[
+                      styles.send,
+                      (!canSend || awaitingSend || nothingToSend) &&
+                        styles.sendDisabled,
+                    ]}
+                    pressedScale={0.92}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Send instruction"
+                    accessibilityState={{
+                      disabled: !canSend || awaitingSend || nothingToSend,
+                      busy:
+                        submittedSend?.status === "sending" || sendingImages,
+                    }}
+                  >
+                    {submittedSend?.status === "sending" || sendingImages ? (
+                      <ActivityIndicator size="small" color={color.faint} />
+                    ) : (
+                      <Feather
+                        name="arrow-up"
+                        size={18}
+                        color={
+                          !canSend || awaitingSend || nothingToSend
+                            ? color.faint
+                            : "#FFFFFF"
+                        }
+                      />
+                    )}
+                  </MotionPressable>
+                </View>
               </View>
             </ContentColumn>
           </View>
@@ -516,7 +691,8 @@ function ConnectionNote() {
         <Feather name="wifi-off" size={13} color={color.errorText} />
       </View>
       <Text style={styles.noteText}>
-        Your Mac is offline. Answers and turn controls unlock when it reconnects.
+        Your Mac is offline. Answers and turn controls unlock when it
+        reconnects.
       </Text>
     </View>
   );
@@ -547,10 +723,16 @@ function InterruptNote({
         {status === "sending" ? (
           <ActivityIndicator size="small" color={color.errorText} />
         ) : (
-          <Feather name="square" size={12} color={failed ? color.errorText : color.muted} />
+          <Feather
+            name="square"
+            size={12}
+            color={failed ? color.errorText : color.muted}
+          />
         )}
       </View>
-      <Text style={[styles.noteText, failed && { color: color.errorText }]}>{text}</Text>
+      <Text style={[styles.noteText, failed && { color: color.errorText }]}>
+        {text}
+      </Text>
     </View>
   );
 }
@@ -592,12 +774,20 @@ function DeliveryNote({ kind, inject, state }: { kind: string; inject: string; s
   );
 }
 
-function MessageRow({ message, fresh }: { message: Message; fresh: boolean }) {
+function MessageRow({
+  message,
+  cwd,
+  fresh,
+}: {
+  message: Message;
+  cwd: string;
+  fresh: boolean;
+}) {
   const styles = useStyles(makeStyles);
   if (message.role === "tool" && message.tool) {
     return (
       <Appear enabled={fresh}>
-        <ToolRow message={message} />
+        <ToolRow message={message} cwd={cwd} />
       </Appear>
     );
   }
@@ -649,11 +839,17 @@ function PendingRow({
     <MotionPressable
       onPress={() => failed && onDismiss(pending.clientId)}
       disabled={!failed}
-      style={[styles.userRow, styles.pendingRow, failed && styles.pendingFailed]}
+      style={[
+        styles.userRow,
+        styles.pendingRow,
+        failed && styles.pendingFailed,
+      ]}
       pressedScale={0.98}
     >
       <Text style={styles.userText}>{pending.text}</Text>
-      <Text style={[styles.pendingStatus, failed && { color: color.errorText }]}>
+      <Text
+        style={[styles.pendingStatus, failed && { color: color.errorText }]}
+      >
         {pending.status === "sending"
           ? "Sending…"
           : queued
@@ -691,20 +887,56 @@ const makeStyles = (c: Palette) =>
       borderColor: c.line,
     },
     headerBody: { flex: 1 },
-    serversButton: {
+    workspaceBar: { paddingHorizontal: space.lg, paddingBottom: space.sm },
+    workspaceButton: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 5,
-      height: 32,
-      paddingHorizontal: 10,
-      borderRadius: radius.pill,
+      gap: space.sm,
+      minHeight: 38,
+      paddingHorizontal: space.md,
+      borderRadius: radius.md,
       backgroundColor: c.surface,
       borderWidth: 1,
       borderColor: c.line,
     },
-    serversCount: { fontFamily: font.monoMedium, fontSize: 12, color: c.text },
+    workspaceLabel: {
+      flex: 1,
+      color: c.text,
+      fontFamily: font.sansMedium,
+      fontSize: size.caption,
+    },
+    // A count on the overflow control, so a running server is still visible
+    // without opening anything: it is a fact about the session, not an action.
+    serverDot: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      minWidth: 15,
+      height: 15,
+      borderRadius: 8,
+      paddingHorizontal: 3,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.working,
+    },
+    serverDotText: {
+      fontFamily: font.sansMedium,
+      fontSize: 9.5,
+      lineHeight: 12,
+      color: "#FFFFFF",
+    },
     title: { fontFamily: font.monoMedium, fontSize: 15, color: c.text },
-    subtitle: { fontFamily: font.sans, fontSize: size.label, color: c.muted, marginTop: 2 },
+    subtitleRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
+    subtitle: {
+      fontFamily: font.sans,
+      fontSize: size.label,
+      color: c.muted,
+    },
+    // The model holds its width and the path gives way. Without the explicit
+    // 0 both shrink, and you end up with two half-truncated facts instead of
+    // one whole one.
+    subtitleModel: { flexShrink: 0 },
+    subtitlePath: { flexShrink: 1 },
     statePill: {
       height: 28,
       flexDirection: "row",
@@ -713,16 +945,6 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.pill,
     },
     stateLabel: { fontFamily: font.sansBold, fontSize: size.label },
-    stop: {
-      width: 36,
-      height: 36,
-      alignItems: "center",
-      justifyContent: "center",
-      borderRadius: radius.pill,
-      backgroundColor: c.inverse,
-    },
-    stopGlyph: { width: 11, height: 11, borderRadius: 3, backgroundColor: c.onInverse },
-    stopDisabled: { opacity: 0.4 },
 
     note: {
       flexDirection: "row",
@@ -743,7 +965,13 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
       backgroundColor: c.surface,
     },
-    noteText: { flex: 1, fontFamily: font.sans, fontSize: size.caption, lineHeight: 18, color: c.textSecondary },
+    noteText: {
+      flex: 1,
+      fontFamily: font.sans,
+      fontSize: size.caption,
+      lineHeight: 18,
+      color: c.textSecondary,
+    },
     connectionNote: { backgroundColor: c.errorWash },
     interruptFailed: { backgroundColor: c.errorWash },
 
@@ -784,7 +1012,12 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: 14,
       paddingVertical: 10,
     },
-    userText: { fontFamily: font.sans, fontSize: size.body, color: c.text, lineHeight: 21 },
+    userText: {
+      fontFamily: font.sans,
+      fontSize: size.body,
+      color: c.text,
+      lineHeight: 21,
+    },
 
     assistantRow: { gap: space.xs },
     sidechain: {
@@ -841,14 +1074,11 @@ const makeStyles = (c: Palette) =>
     // Input and send share one container, so the send button reads as part of
     // the field instead of sitting next to it.
     field: {
-      flexDirection: "row",
-      alignItems: "flex-end",
-      gap: space.sm,
       backgroundColor: c.surface,
       borderRadius: radius.xxl,
       borderWidth: 1,
       borderColor: c.line,
-      paddingLeft: space.lg,
+      paddingLeft: 6,
       paddingRight: 6,
       paddingVertical: 6,
       shadowColor: c.shadow,
@@ -867,6 +1097,34 @@ const makeStyles = (c: Palette) =>
       fontFamily: font.sans,
       fontSize: size.body,
       color: c.text,
+    },
+    // Thumbnails square off the pill: a row of 64pt pictures inside a fully
+    // rounded container loses its corners to the radius.
+    fieldWithImages: {
+      borderRadius: radius.lg,
+      paddingTop: space.sm,
+      paddingLeft: space.sm,
+    },
+    fieldRow: { flexDirection: "row", alignItems: "flex-end", gap: space.xs },
+    // A wrapper so the long press has something to land on: the gesture cannot
+    // be attached to the TextInput itself without swallowing taps that should
+    // place the caret.
+    inputWrap: { flex: 1 },
+    attachError: {
+      fontFamily: font.sans,
+      fontSize: size.label,
+      color: c.errorText,
+      paddingHorizontal: space.md,
+      paddingBottom: space.xs,
+    },
+    // Square and unfilled against the send button's filled circle: one is the
+    // action, the other is a way of adding to it.
+    attach: {
+      width: 34,
+      height: 34,
+      borderRadius: radius.md,
+      alignItems: "center",
+      justifyContent: "center",
     },
     send: {
       width: 36,

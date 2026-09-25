@@ -279,7 +279,7 @@ export class Client {
 		const daemonEvent = decodeDaemonEvent(envelope.payload);
 		if (!daemonEvent) return;
 		if (envelope.replyTo) {
-		  if (daemonEvent.type === "page" || daemonEvent.type === "error") {
+		  if (daemonEvent.type === "page" || daemonEvent.type === "workspace" || daemonEvent.type === "error") {
 			this.replayable.delete(envelope.replyTo);
 		  }
 		  if (daemonEvent.type === "send_result") this.finishAction(envelope.replyTo);
@@ -355,7 +355,9 @@ export class Client {
 
   send(request: Request): string | null {
     const id = newFrameId();
-	if (request.type === "fetch_messages") {
+	if (request.type === "fetch_messages" || request.type === "list_files" ||
+	    request.type === "read_file" || request.type === "list_changes" ||
+	    request.type === "file_diff") {
 	  // Queue while offline and replay after a disconnect. Bound the queue so a
 	  // broken caller cannot retain arbitrary request state forever.
 	  if (this.replayable.size >= 64) return null;
@@ -444,6 +446,11 @@ export class Client {
       if (request.sessionId === sessionId) this.replayable.delete(id);
     }
     this.send({ type: "unsubscribe", sessionId });
+  }
+
+  /** Retire a timed-out read so it is not replayed after reconnecting. */
+  cancelRead(id: string): void {
+    this.replayable.delete(id);
   }
 
   close(): void {

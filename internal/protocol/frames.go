@@ -60,6 +60,18 @@ const (
 	// daemon rejects the type and the app says the Mac needs updating.
 	ReqOpenServer  RequestType = "open_server"
 	ReqCloseServer RequestType = "close_server"
+	// ReqStopServer ends the process listening on a port. Unlike close_server,
+	// which only withdraws the public link, this one is not undoable from the
+	// phone: nothing here can start a dev server again.
+	ReqStopServer  RequestType = "stop_server"
+	ReqListFiles   RequestType = "list_files"
+	ReqReadFile    RequestType = "read_file"
+	ReqListChanges RequestType = "list_changes"
+	ReqFileDiff    RequestType = "file_diff"
+	// ReqReadSeenFile reads one absolute path, and only one the session's
+	// agent already opened. It is what lets a screenshot written to a temp
+	// directory be looked at, without the daemon serving the whole disk.
+	ReqReadSeenFile RequestType = "read_seen_file"
 )
 
 // Request is anything the app asks of the daemon.
@@ -88,6 +100,13 @@ type Request struct {
 	PushToken string `json:"pushToken,omitempty"`
 	// Port names the server on ReqOpenServer and ReqCloseServer.
 	Port int `json:"port,omitempty"`
+	// Path is relative to the session's working directory. It is never an
+	// absolute path supplied by the phone.
+	Path string `json:"path,omitempty"`
+	// UploadIDs names images the phone left with the relay, to be collected by
+	// the daemon and handed to the agent as file paths. They are tickets, not
+	// filenames: nothing in them reaches the filesystem.
+	UploadIDs []string `json:"uploadIds,omitempty"`
 }
 
 /* ----------------------------- daemon → app ------------------------------ */
@@ -105,7 +124,10 @@ const (
 	EvtSendResult    EventType = "send_result"
 	// EvtServerOpened answers ReqOpenServer with the server's link.
 	EvtServerOpened EventType = "server_opened"
-	EvtError        EventType = "error"
+	// EvtServerStopped answers ReqStopServer once the process is gone.
+	EvtServerStopped EventType = "server_stopped"
+	EvtError         EventType = "error"
+	EvtWorkspace     EventType = "workspace"
 )
 
 // SendStatus is how far a sent message actually got.
@@ -139,10 +161,47 @@ type Event struct {
 	Status   SendStatus `json:"status,omitempty"`
 
 	// Port and Link are set on EvtServerOpened.
-	Port int    `json:"port,omitempty"`
-	Link string `json:"link,omitempty"`
+	Port      int              `json:"port,omitempty"`
+	Link      string           `json:"link,omitempty"`
+	Workspace *WorkspaceResult `json:"workspace,omitempty"`
 
 	Error string `json:"error,omitempty"`
+}
+
+// WorkspaceResult is a bounded, read-only view of one session's directory.
+type WorkspaceResult struct {
+	Kind      string            `json:"kind"`
+	SessionID string            `json:"sessionId"`
+	Path      string            `json:"path,omitempty"`
+	Entries   []WorkspaceEntry  `json:"entries,omitempty"`
+	Changes   []WorkspaceChange `json:"changes,omitempty"`
+	Text      string            `json:"text,omitempty"`
+	Image     string            `json:"image,omitempty"` // base64, only for supported small images
+	MIME      string            `json:"mime,omitempty"`
+	Diff      string            `json:"diff,omitempty"`
+	Truncated bool              `json:"truncated,omitempty"`
+	// Hidden counts entries withheld by privatePart. A listing that quietly
+	// drops things is worse than one that refuses: the app said "no changes"
+	// while twenty files were waiting, and nothing on screen could have told
+	// you otherwise.
+	Hidden int `json:"hidden,omitempty"`
+}
+
+type WorkspaceEntry struct {
+	Name      string `json:"name"`
+	Directory bool   `json:"directory"`
+	Size      int64  `json:"size,omitempty"`
+}
+
+type WorkspaceChange struct {
+	Path   string `json:"path"`
+	Status string `json:"status"`
+	// Added and Removed are line counts for this file. "Modified" says a file
+	// changed; "+48 -3" says how much, which is what decides whether it is
+	// worth opening on a phone. Zero for a binary file, where git reports no
+	// line counts at all.
+	Added   int `json:"added,omitempty"`
+	Removed int `json:"removed,omitempty"`
 }
 
 /* ------------------------------ relay control ---------------------------- */
