@@ -308,3 +308,47 @@ func TestWorkspaceCountsWhatItHidesWhenListingFiles(t *testing.T) {
 		t.Errorf("Hidden = %d, want 1", event.Workspace.Hidden)
 	}
 }
+
+// Regression: a new file's diff was built without a hunk header. The app drops
+// everything before the first @@ as preamble, so a complete diff arrived and
+// was parsed down to nothing, and the screen then said there were no changes
+// to show for a file that was entirely new.
+func TestNewFileDiffCarriesAHunkHeader(t *testing.T) {
+	dir := gitRepo(t)
+	write(t, dir, "fresh.go", "package main\n\nfunc main() {}\n")
+
+	d := workspaceDaemon(dir)
+	event := d.workspace(context.Background(), protocol.Request{
+		Type: protocol.ReqFileDiff, SessionID: "codex:test", Path: "fresh.go",
+	})
+	if event.Type != protocol.EvtWorkspace {
+		t.Fatalf("unexpected event: %+v", event)
+	}
+	diff := event.Workspace.Diff
+	if !strings.Contains(diff, "@@ -0,0 +1,3 @@") {
+		t.Errorf("no hunk header for three added lines:\n%s", diff)
+	}
+	for _, want := range []string{"+package main", "+func main() {}"} {
+		if !strings.Contains(diff, want) {
+			t.Errorf("missing %q in:\n%s", want, diff)
+		}
+	}
+}
+
+// The count in the header has to describe what actually follows, or a reader
+// is told about lines that are not there.
+func TestNewFileDiffHeaderCountsOnlyWhatItSends(t *testing.T) {
+	dir := gitRepo(t)
+	write(t, dir, "empty.txt", "")
+
+	d := workspaceDaemon(dir)
+	event := d.workspace(context.Background(), protocol.Request{
+		Type: protocol.ReqFileDiff, SessionID: "codex:test", Path: "empty.txt",
+	})
+	if event.Type != protocol.EvtWorkspace {
+		t.Fatalf("unexpected event: %+v", event)
+	}
+	if !strings.Contains(event.Workspace.Diff, "@@ -0,0 +1,0 @@") {
+		t.Errorf("empty file header wrong:\n%s", event.Workspace.Diff)
+	}
+}
