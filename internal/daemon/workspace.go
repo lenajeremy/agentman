@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -442,16 +443,34 @@ func fileDiff(ctx context.Context, cwd string, root *os.Root, rel string) (strin
 		if image != "" {
 			return "Binary image (new file)", false, nil
 		}
+		// Built before the header is written, because the header has to state
+		// how many lines follow and truncation can change that.
+		var added []string
+		size := 0
+		for _, line := range strings.SplitAfter(text, "\n") {
+			if line == "" {
+				continue
+			}
+			if size+len(line)+1 > maxGitOutput {
+				truncated = true
+				break
+			}
+			size += len(line) + 1
+			added = append(added, "+"+line)
+		}
+
 		var diff strings.Builder
 		diff.WriteString("--- /dev/null\n+++ b/" + rel + "\n")
-		for _, line := range strings.SplitAfter(text, "\n") {
-			if line != "" {
-				if diff.Len()+len(line)+1 > maxGitOutput {
-					truncated = true
-					break
-				}
-				diff.WriteString("+" + line)
-			}
+		// A hunk header, which real git emits and the app requires: it drops
+		// everything before the first @@ as preamble, so a new file's diff
+		// arrived complete and was parsed down to nothing, and the screen then
+		// reported there were no changes to show.
+		fmt.Fprintf(&diff, "@@ -0,0 +1,%d @@\n", len(added))
+		for _, line := range added {
+			diff.WriteString(line)
+		}
+		if !strings.HasSuffix(diff.String(), "\n") {
+			diff.WriteString("\n")
 		}
 		return diff.String(), truncated, nil
 	}
