@@ -60,6 +60,9 @@ type Row =
  */
 const HEADER_HEIGHT = space.sm + 36 + space.md + 4;
 
+/** Where the title starts: the row's padding, the back control, and the gap. */
+const TITLE_INSET = space.md + 30 + space.xs;
+
 export default function SessionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const sessionId = decodeURIComponent(String(id));
@@ -377,7 +380,7 @@ export default function SessionScreen() {
         <MotionPressable
           onPress={() => router.back()}
           hitSlop={12}
-          style={styles.iconButton}
+          style={styles.backButton}
           pressedScale={0.92}
           accessibilityRole="button"
           accessibilityLabel="Back to agents"
@@ -974,10 +977,19 @@ const makeStyles = (c: Palette) =>
     header: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 10,
-      paddingHorizontal: space.lg,
-      paddingTop: space.sm,
-      paddingBottom: space.md,
+      gap: space.xs,
+      paddingHorizontal: space.md,
+      paddingTop: space.xs,
+      paddingBottom: space.sm,
+    },
+    // No circle and no border: the chevron is unmistakable on its own, and the
+    // chrome around it was pushing the title a quarter of the way across the
+    // row before it started.
+    backButton: {
+      width: 30,
+      height: 34,
+      alignItems: "center",
+      justifyContent: "center",
     },
     iconButton: {
       width: 40,
@@ -990,7 +1002,14 @@ const makeStyles = (c: Palette) =>
       borderColor: c.line,
     },
     headerBody: { flex: 1 },
-    workspaceBar: { paddingHorizontal: space.lg, paddingBottom: space.sm },
+    // Indented to the title's own left edge, so the name, the model, the
+    // directory and this all hang off one line instead of the bar starting
+    // somewhere the rest of the header does not.
+    workspaceBar: {
+      paddingLeft: TITLE_INSET,
+      paddingRight: space.md,
+      paddingBottom: space.sm,
+    },
     workspaceButton: {
       flexDirection: "row",
       alignItems: "center",
@@ -1028,7 +1047,12 @@ const makeStyles = (c: Palette) =>
       lineHeight: 12,
       color: "#FFFFFF",
     },
-    title: { fontFamily: font.monoMedium, fontSize: 15, color: c.text },
+    title: {
+      fontFamily: font.monoMedium,
+      fontSize: 15,
+      letterSpacing: -0.4,
+      color: c.text,
+    },
     subtitleRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
     subtitle: {
       fontFamily: font.sans,
