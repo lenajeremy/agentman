@@ -72,6 +72,11 @@ func pushedDaemon(t *testing.T, stub *expoStub, cfg push.Config) (*Daemon, *sour
 	registry.Add(scripted)
 
 	agent := New(registry, &recordingSink{})
+	// These tests are about whether a push reaches Expo at all, not about when
+	// one is worth sending, so the rules that hold notifications back are
+	// switched off rather than waited out.
+	agent.minAlertedTurn = 0
+	agent.alertCoalesce = 0
 	store := push.NewStore(t.TempDir())
 	sender := push.NewSender(store, cfg)
 	sender.Endpoint = stub.server.URL
