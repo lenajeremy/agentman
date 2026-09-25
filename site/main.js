@@ -4,7 +4,7 @@
   // The headline cycles through the agents Agentman supports.
   const rotor = document.querySelector("[data-rotor]");
   const pills = Array.from(document.querySelectorAll("[data-pills] span"));
-  const agents = ["Claude Code", "Codex", "OpenCode"];
+  const agents = ["Claude Code", "Codex", "Cursor", "OpenCode"];
   if (rotor && !reduceMotion) {
     let index = 0;
     setInterval(() => {
