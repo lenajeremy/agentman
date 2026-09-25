@@ -235,6 +235,32 @@ export default function SessionScreen() {
   const nothingToSend =
     draft.trim().length === 0 && images.attachments.length === 0;
 
+  // Asked on open and again each time the agent settles, because finishing a
+  // turn is exactly when files appear. Polling would cost a git status a
+  // second per session for an answer that only changes when work stops.
+  const settledState = session?.state;
+  useEffect(() => {
+    if (!sessionId || !store.daemonOnline) {
+      setChangedFiles(null);
+      return;
+    }
+    let current = true;
+    void store
+      .workspace(sessionId, "list_changes")
+      .then((result) => {
+        if (current) setChangedFiles(result.changes?.length ?? 0);
+      })
+      .catch(() => {
+        // A session outside a repository, or a Mac that went away. Either way
+        // there is nothing to review, and saying so loudly helps nobody.
+        if (current) setChangedFiles(null);
+      });
+    return () => {
+      current = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, settledState, store.daemonOnline]);
+
   const submit = useCallback(async () => {
     const text = draft.trim();
     // An image with no words is a real message: "look at this".
@@ -302,6 +328,9 @@ export default function SessionScreen() {
     interruptAction?.status === "delivered";
 
   const [menuOpen, setMenuOpen] = useState(false);
+  // null until asked, so the bar is absent rather than flickering in and out
+  // while the answer is in flight.
+  const [changedFiles, setChangedFiles] = useState<number | null>(null);
   const menuServers = session?.servers?.length ?? 0;
   const canStopTurn = session?.state === "busy" && !interruptLocked;
 
@@ -361,6 +390,21 @@ export default function SessionScreen() {
           </Text>
           {session ? (
             <View style={styles.subtitleRow}>
+              {/* A colour, not a word, and sitting with the other facts about
+                  the session rather than as a control of its own. "Working"
+                  and "Idle" cost roughly eighty points of a phone-width row to
+                  repeat what the dot already said — and the dot says it
+                  faster, because it pulses while the agent runs. The words
+                  survive as a label, which is the one place a colour says
+                  nothing. */}
+              <View
+                style={styles.stateDot}
+                accessible
+                accessibilityRole="text"
+                accessibilityLabel={state.label}
+              >
+                <Pulse state={displayState} size={6} />
+              </View>
               {/* Which model is answering you is worth knowing before you send
                   it something — "Codex" says which CLI is open, not what is
                   doing the work. */}
@@ -389,14 +433,6 @@ export default function SessionScreen() {
             </Text>
           )}
         </View>
-        {session ? (
-          <View style={[styles.statePill, { backgroundColor: state.wash }]}>
-            <Pulse state={displayState} size={6} />
-            <Text style={[styles.stateLabel, { color: state.text }]}>
-              {state.label}
-            </Text>
-          </View>
-        ) : null}
         {/* Servers and stop live behind this rather than beside the title. Five
             controls across a phone-width row left the name under half of it and
             cut the working directory to "~/Deskt…", and what a session is gets
@@ -439,7 +475,11 @@ export default function SessionScreen() {
         />
       ) : null}
 
-      {session ? (
+      {/* A shortcut, not a fixture: it appears when the agent has actually
+          touched something, and the popover keeps the files reachable the rest
+          of the time. A row that is always there says nothing; one that turns
+          up when there is work to review says exactly one thing. */}
+      {session && changedFiles !== null && changedFiles > 0 ? (
         <ContentColumn style={styles.workspaceBar}>
           <MotionPressable
             onPress={() =>
@@ -448,10 +488,14 @@ export default function SessionScreen() {
             style={styles.workspaceButton}
             pressedScale={0.98}
             accessibilityRole="button"
-            accessibilityLabel="Browse files and working tree changes"
+            accessibilityLabel={`Review ${changedFiles} changed file${changedFiles === 1 ? "" : "s"}`}
           >
             <Feather name="folder" size={16} color={color.workingText} />
-            <Text style={styles.workspaceLabel}>Files & changes</Text>
+            <Text style={styles.workspaceLabel}>
+              {changedFiles === 1
+                ? "1 file changed"
+                : `${changedFiles} files changed`}
+            </Text>
             <Feather name="chevron-right" size={15} color={color.faint} />
           </MotionPressable>
         </ContentColumn>
@@ -996,14 +1040,14 @@ const makeStyles = (c: Palette) =>
     // one whole one.
     subtitleModel: { flexShrink: 0 },
     subtitlePath: { flexShrink: 1 },
-    statePill: {
+    // A touch target around a 9pt dot, so the state is legible without being
+    // something you can miss with a thumb.
+    stateDot: {
+      width: 28,
       height: 28,
-      flexDirection: "row",
       alignItems: "center",
-      paddingRight: 10,
-      borderRadius: radius.pill,
+      justifyContent: "center",
     },
-    stateLabel: { fontFamily: font.sansBold, fontSize: size.label },
 
     note: {
       flexDirection: "row",
