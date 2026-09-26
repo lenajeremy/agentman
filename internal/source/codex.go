@@ -42,16 +42,59 @@ const codexLiveWindow = 30 * time.Minute
 // a discovery sweep.
 const processCheckTimeout = 2 * time.Second
 
-// codexActivityScanBytes bounds the once-per-discovery search for a recent
-// turn boundary. Large tool records may require finishing one bounded JSONL
-// line beyond this budget, but a transcript containing no state events can no
-// longer consume an unbounded amount of work every second.
-const codexActivityScanBytes int64 = 1024 * 1024
+// codexActivityScanBytes bounds the search back through a rollout for its most
+// recent turn boundary.
+//
+// This used to run on every sweep, so it had to stay small — and a megabyte is
+// not enough: one 78MB rollout on this machine sat with its task_started a
+// megabyte behind the end, and past that the scan found no boundary at all and
+// the session was reported idle while it was plainly working.
+//
+// It now runs once per rollout, with a forward tail taking over afterwards, so
+// the budget only has to cover a cold start landing in the middle of a long
+// turn. The scan stops at the first boundary it meets, so a generous ceiling
+// costs nothing in the ordinary case where one is near the end.
+const codexActivityScanBytes int64 = 64 * 1024 * 1024
+
+// codexRebindReplayBytes bounds how much of a newly bound rollout a live
+// subscription will replay from its start.
+//
+// Codex copies the whole prior conversation into the rollout it opens when one
+// is resumed or forked, so a rebind is not always the arrival of new material:
+// past this budget it is almost certainly a transcript the app already holds.
+// A megabyte is enough for the case the replay is there to serve — a pane that
+// had no rollout when the subscription opened and has just written its first —
+// while a 78MB resume attaches at the end instead of pushing a megabyte per
+// tick for twenty seconds.
+const codexRebindReplayBytes int64 = 1024 * 1024
 
 // tmux reports session creation at whole-second precision while Codex records
 // rollout timestamps with sub-second precision. Allow a small boundary margin,
 // but never bind a clearly older conversation to a newly launched pane.
 const codexPaneStartTolerance = 2 * time.Second
+
+// How many days of rollout directories a sweep looks through.
+//
+// Reading a day's directory is one getdents on a handful of entries, so a
+// fortnight costs microseconds — and it is what makes a session that has been
+// open since last week visible at all on a freshly started daemon. Sessions
+// older than this are still found once seen, through the cache; see scanDirs.
+const codexScanDays = 14
+
+// codexPanePrefix names the tmux sessions agentman launches for Codex.
+//
+// This, not the running program's name, is what identifies a Codex pane. tmux
+// reports the foreground command, and that is only "codex" for an install
+// whose executable is a real binary — Homebrew's, or a downloaded release. An
+// npm install is a `#!/usr/bin/env node` script, so the pane reports `node`
+// and a match on the command name misses it completely. The name is the
+// stronger signal in any case: agentman chose it, and tmux.List returns
+// nothing else.
+const codexPanePrefix = tmux.Prefix + "codex-"
+
+// codexArgvPattern matches codex as a path component or bare word in a process
+// argument list: `codex`, `/opt/homebrew/bin/codex`, `node .../bin/codex.js`.
+const codexArgvPattern = `(^|[/[:space:]])codex(\.[cm]?js)?([[:space:]]|$)`
 
 // codexRunning reports whether any codex process is alive.
 //
@@ -64,7 +107,19 @@ func codexRunning(ctx context.Context) bool {
 	if _, err := exec.LookPath("pgrep"); err != nil {
 		return true
 	}
-	err := exec.CommandContext(ctx, "pgrep", "-x", "codex").Run()
+	// An exact name match is the cheap probe with no false positives, and it
+	// finds an install whose executable is a binary.
+	if exec.CommandContext(ctx, "pgrep", "-x", "codex").Run() == nil {
+		return true
+	}
+	// An npm install runs through Node, so the process is named `node` and the
+	// exact match above cannot see it. Before this second probe existed, such
+	// a machine failed the liveness check on every sweep and every Codex
+	// session was cleared away — Codex was not merely reported idle there, it
+	// was invisible. Matching the argument list can also match a process that
+	// only mentions codex, which is the harmless direction: a rollout still
+	// has to be recent before it surfaces as a session.
+	err := exec.CommandContext(ctx, "pgrep", "-f", codexArgvPattern).Run()
 	if err == nil {
 		return true
 	}
@@ -75,6 +130,25 @@ func codexRunning(ctx context.Context) bool {
 		return false
 	}
 	return true
+}
+
+// isCodexPane reports whether a tmux session agentman owns is running Codex.
+//
+// The command name is still accepted so a pane launched under an older naming
+// scheme keeps working, but the name alone is enough.
+func isCodexPane(pane tmux.Session) bool {
+	return strings.HasPrefix(pane.Name, codexPanePrefix) || pane.Command == "codex"
+}
+
+// anyCodexPane reports whether a Codex pane is open, which is direct proof
+// Codex is running and does not depend on pgrep recognising the install.
+func anyCodexPane(panes []tmux.Session) bool {
+	for _, pane := range panes {
+		if isCodexPane(pane) {
+			return true
+		}
+	}
+	return false
 }
 
 // CodexSource observes Codex rollout transcripts.
@@ -132,17 +206,39 @@ type codexRolloutCacheEntry struct {
 	activityVersion codexFileVersion
 	activityState   protocol.State
 	activitySet     bool
+	// tail follows the rollout forward from wherever state was last decided,
+	// so a sweep reads only what was appended since. See cachedCodexActivity.
+	tail *jsonl.Tail
 }
 
 // codexMeta is the session_meta record that opens every rollout file.
 type codexMeta struct {
 	Type    string `json:"type"`
 	Payload struct {
+		// Codex writes two identifiers and they are not the same thing. "id"
+		// is this rollout's own; "session_id" is the conversation it descends
+		// from, which a resumed or forked thread inherits from its ancestor.
+		// On this machine they differ in 62% of rollouts.
+		//
+		// Reading session_id made every thread in a lineage report the same
+		// id. Two rollouts then collided on one key, so one silently replaced
+		// the other in the session map, and the id stopped naming the
+		// transcript actually being read.
+		ID         string `json:"id"`
 		SessionID  string `json:"session_id"`
 		Cwd        string `json:"cwd"`
 		Timestamp  string `json:"timestamp"`
 		Originator string `json:"originator"`
 	} `json:"payload"`
+}
+
+// threadID is what identifies one rollout. Older Codex versions wrote only
+// session_id, so that remains the fallback rather than a hard requirement.
+func (m codexMeta) threadID() string {
+	if m.Payload.ID != "" {
+		return m.Payload.ID
+	}
+	return m.Payload.SessionID
 }
 
 // NewCodexSource creates an adapter rooted at the given home directory.
@@ -177,27 +273,6 @@ func (s *CodexSource) sessionsDir() string {
 
 // Discover implements Source.
 func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) {
-	if s.processCheck != nil && !s.processCheck(ctx) {
-		s.mu.Lock()
-		s.sessions = map[string]codexSession{}
-		s.mu.Unlock()
-		s.forgetCodexRollouts(nil)
-		return nil, nil
-	}
-
-	// Rollouts are filed by date, so only today and yesterday can hold a live
-	// session. Scanning those two directories keeps this cheap regardless of
-	// how much history has accumulated.
-	now := time.Now()
-	dirs := []string{
-		s.dayDir(now),
-		s.dayDir(now.AddDate(0, 0, -1)),
-	}
-
-	found := []protocol.Session{}
-	next := map[string]codexSession{}
-	cutoff := now.Add(-codexLiveWindow)
-
 	// Codex writes no pid to its rollout, so a session is matched to a tmux
 	// pane by working directory. That is weaker than Claude's pid ancestry —
 	// two Codex sessions in one directory would be ambiguous — so a directory
@@ -207,10 +282,46 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	if s.listPanes != nil {
 		panes, _ = s.listPanes(ctx)
 	}
+
+	// An open Codex pane is checked before the process probe, and not only to
+	// save a subprocess. It is the better evidence: pgrep cannot recognise
+	// every install, and this gate clears the whole session map when it says
+	// no, so a probe that fails to see a running Codex does not report it idle
+	// — it hides it. A pane agentman opened for Codex settles the question.
+	if !anyCodexPane(panes) && s.processCheck != nil && !s.processCheck(ctx) {
+		s.mu.Lock()
+		s.sessions = map[string]codexSession{}
+		s.mu.Unlock()
+		s.forgetCodexRollouts(nil)
+		return nil, nil
+	}
+
+	now := time.Now()
+	dirs := s.scanDirs(now)
+
+	found := []protocol.Session{}
+	next := map[string]codexSession{}
+	cutoff := now.Add(-codexLiveWindow)
+
+	// The rollout each tmux pane was reading last sweep. The live window exists
+	// to stop a rollout nobody is running from lingering as a session, but a
+	// pane that is still open is proof its session is alive — so a pause longer
+	// than the window must not unbind it. Without this, stepping away for half
+	// an hour turned a session into a bare pane with no history, and activity
+	// then re-attached it from scratch.
+	s.mu.RLock()
+	boundToPane := map[string]string{}
+	for _, previous := range s.sessions {
+		if previous.tmuxName != "" && previous.transcript != "" {
+			boundToPane[previous.transcript] = previous.tmuxName
+		}
+	}
+	s.mu.RUnlock()
+
 	paneByCwd := map[string]tmux.Session{}
 	ambiguous := map[string]bool{}
 	for _, pane := range panes {
-		if pane.Command != "codex" {
+		if !isCodexPane(pane) {
 			continue
 		}
 		if _, seen := paneByCwd[pane.Cwd]; seen {
@@ -235,6 +346,10 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 		path    string
 		modTime time.Time
 		info    os.FileInfo
+		// kept is true when the rollout is past the live window and is here
+		// only because a still-open pane was reading it. Such a rollout may
+		// keep its pane; it must never surface as a session of its own.
+		kept bool
 	}
 	var rollouts []rollout
 	for _, dir := range dirs {
@@ -247,13 +362,23 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				continue
 			}
 			info, err := entry.Info()
-			if err != nil || info.ModTime().Before(cutoff) {
+			if err != nil {
 				continue
 			}
+			path := filepath.Join(dir, entry.Name())
+			kept := false
+			if info.ModTime().Before(cutoff) {
+				pane, wasBound := boundToPane[path]
+				if !wasBound || !paneStillOpen(panes, pane) {
+					continue
+				}
+				kept = true
+			}
 			rollouts = append(rollouts, rollout{
-				path:    filepath.Join(dir, entry.Name()),
+				path:    path,
 				modTime: info.ModTime(),
 				info:    info,
+				kept:    kept,
 			})
 		}
 	}
@@ -277,7 +402,7 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				continue
 			}
 
-			id := string(protocol.KindCodex) + ":" + meta.Payload.SessionID
+			id := string(protocol.KindCodex) + ":" + meta.threadID()
 			state, lastActivity, err := s.cachedCodexActivity(ctx, path, entry.info)
 			if err != nil {
 				return nil, err
@@ -299,11 +424,16 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				// return under a new id on the user's first prompt.
 				id = string(protocol.KindCodex) + ":" + tmuxID(pane.Name)
 			}
+			// Kept only for its pane, and it lost the pane to a newer rollout:
+			// an old conversation nobody is running, so not a session.
+			if entry.kept && tmuxName == "" {
+				continue
+			}
 
 			session := protocol.Session{
 				ID:             id,
 				Kind:           protocol.KindCodex,
-				NativeID:       meta.Payload.SessionID,
+				NativeID:       meta.threadID(),
 				Name:           filepath.Base(meta.Payload.Cwd),
 				Cwd:            meta.Payload.Cwd,
 				State:          state,
@@ -392,6 +522,54 @@ func tmuxID(tmuxName string) string {
 	return "tmux-" + tmuxName
 }
 
+// paneStillOpen reports whether a tmux session of that name is still running
+// codex. A pane that has been closed, or has gone back to a shell, no longer
+// vouches for the rollout it was reading.
+func paneStillOpen(panes []tmux.Session, name string) bool {
+	for _, pane := range panes {
+		if pane.Name == name && isCodexPane(pane) {
+			return true
+		}
+	}
+	return false
+}
+
+// scanDirs lists the day directories a live rollout could be sitting in.
+//
+// A rollout is filed under the date its session *started* and appended to for
+// as long as that session lives, so "today and yesterday" — which is what this
+// scanned before — silently loses any conversation older than a day. Worse
+// than losing it: a finished rollout from a later day, in a directory that is
+// still scanned, then claims the same tmux pane and reports the session idle
+// forever. Injection keeps working, because that goes through the pane, which
+// is exactly the shape of the bug that prompted this: a Codex session visibly
+// working, reported idle, accepting messages and returning nothing.
+//
+// Two windows, because neither alone is both correct and cheap. A fixed span
+// of recent days catches ordinary long sessions on a cold start, and the
+// directories of rollouts already seen live are kept regardless of age, so a
+// session running for months keeps working once it has been observed once.
+func (s *CodexSource) scanDirs(now time.Time) []string {
+	seen := map[string]bool{}
+	dirs := make([]string, 0, codexScanDays+4)
+	add := func(dir string) {
+		if dir != "" && !seen[dir] {
+			seen[dir] = true
+			dirs = append(dirs, dir)
+		}
+	}
+	for day := 0; day < codexScanDays; day++ {
+		add(s.dayDir(now.AddDate(0, 0, -day)))
+	}
+
+	s.cacheMu.Lock()
+	for path := range s.rolloutCache {
+		add(filepath.Dir(path))
+	}
+	s.cacheMu.Unlock()
+	return dirs
+}
+
 func (s *CodexSource) dayDir(t time.Time) string {
 	return filepath.Join(s.sessionsDir(),
 		t.Format("2006"), t.Format("01"), t.Format("02"))
@@ -436,11 +614,49 @@ func (s *CodexSource) cachedCodexActivity(
 	if entry.activitySet && entry.activityVersion.matches(info) {
 		return entry.activityState, info.ModTime().UnixMilli(), nil
 	}
+
+	// Once a rollout's state is known, keep it by reading forward over what was
+	// appended rather than searching back from the end again.
+	//
+	// The backward search is bounded, and a long turn outruns it: on this
+	// machine a 78MB rollout had its task_started a megabyte behind the end,
+	// and the budget is a megabyte. Past that the scan finds no boundary at
+	// all, which used to be reported as idle — a session plainly working,
+	// shown as finished. Reading only the new bytes cannot outrun anything,
+	// because a sweep sees exactly what one second of writing produced.
+	if entry.activitySet && entry.tail != nil && s.readActivity == nil {
+		lines, err := entry.tail.Read()
+		if err == nil {
+			for _, line := range lines {
+				if state, ok := parser.CodexStateFromLine(line.Text); ok {
+					entry.activityState = state
+				}
+			}
+			entry.activityVersion = codexVersion(info)
+			s.rolloutCache[path] = entry
+			return entry.activityState, info.ModTime().UnixMilli(), nil
+		}
+		// A replaced or truncated file: fall through and start again.
+		entry.tail = nil
+	}
+
 	read := s.readActivity
 	if read == nil {
 		read = codexActivity
 	}
 	state, lastActivity, err := read(ctx, path, info.ModTime())
+	if state == "" && err == nil {
+		// No boundary within the budget. A busy turn writes steadily — one
+		// long one on this machine put its task_started a megabyte behind the
+		// end of a 78MB rollout — so treating silence as idle is how a session
+		// that is plainly working gets reported as finished. Keep what was
+		// last known instead, and fall back to idle only when nothing is.
+		if entry.activitySet {
+			state = entry.activityState
+		} else {
+			state = protocol.StateIdle
+		}
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return protocol.StateIdle, info.ModTime().UnixMilli(), ctx.Err()
@@ -456,6 +672,16 @@ func (s *CodexSource) cachedCodexActivity(
 	entry.activityVersion = codexVersion(info)
 	entry.activityState = state
 	entry.activitySet = true
+	// Follow from the end of what was just examined — info, not the file's
+	// end now. Codex appends while this runs, and seeking to a fresh end would
+	// step over whatever landed in between, including the task_complete that
+	// says the turn is over. Only real reads get a tail; an injected
+	// readActivity is a test double with no file behind it.
+	if s.readActivity == nil {
+		tail := jsonl.NewTail(path)
+		tail.SeekTo(info)
+		entry.tail = tail
+	}
 	s.rolloutCache[path] = entry
 	return state, lastActivity, nil
 }
@@ -510,7 +736,7 @@ func readCodexMeta(path string) (codexMeta, error) {
 	if err := json.Unmarshal([]byte(line), &meta); err != nil {
 		return codexMeta{}, err
 	}
-	if meta.Type != "session_meta" || meta.Payload.SessionID == "" {
+	if meta.Type != "session_meta" || meta.threadID() == "" {
 		return codexMeta{}, fmt.Errorf("source: %s: not a rollout header", path)
 	}
 	return meta, nil
@@ -520,7 +746,10 @@ func readCodexMeta(path string) (codexMeta, error) {
 // turn boundary. Without hooks this is the only signal available, and reading
 // a bounded tail is cheap enough to do whenever the rollout changes.
 func codexActivity(ctx context.Context, path string, modTime time.Time) (protocol.State, int64, error) {
-	state := protocol.StateIdle
+	// Empty, not idle. A scan that reaches its budget without meeting a turn
+	// boundary has learned nothing, and the caller is the one that knows what
+	// to fall back on.
+	state := protocol.State("")
 
 	result, err := jsonl.CollectBackwardContext(ctx, path, jsonl.BackwardOptions{
 		Want:         1,
@@ -662,6 +891,35 @@ func (s *CodexSource) Follow(ctx context.Context, sessionID string, out chan<- [
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			// The rollout a session is reading can change under it. Codex opens
+			// a new file when a conversation is resumed or forked, and
+			// discovery rebinds the pane to it — at which point a tail held on
+			// the old path is following a file nobody writes to again, and the
+			// phone simply stops receiving anything. Follow the rebinding.
+			s.mu.RLock()
+			current, stillLive := s.sessions[sessionID]
+			s.mu.RUnlock()
+			if !stillLive {
+				return fmt.Errorf("source: codex session %q ended", sessionID)
+			}
+			if current.transcript != "" && current.transcript != tail.Path() {
+				tail = jsonl.NewTail(current.transcript)
+				// A short rollout is read from its start: everything in it
+				// belongs to this session and has never been sent, and the app
+				// upserts by id so a record seen twice costs nothing. A long
+				// one is a resumed conversation carrying its own history, and
+				// replaying that pushes a transcript the app already holds
+				// back to the phone a megabyte at a time. Attach at the end
+				// and let the app pull the backlog on demand, as a first
+				// attach to a running session already does.
+				if info, err := os.Stat(current.transcript); err == nil && info.Size() > codexRebindReplayBytes {
+					// Seeking to the size just observed rather than to wherever
+					// the end is by now keeps whatever Codex appends in between
+					// from being stepped over and never reported.
+					tail.SeekTo(info)
+				}
+			}
+
 			lines, err := tail.Read()
 			if err != nil {
 				if os.IsNotExist(err) {

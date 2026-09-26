@@ -403,6 +403,19 @@ func (t *Tail) SeekToEnd() error {
 	return nil
 }
 
+// SeekTo positions the tail at the end of a file as it was when info was
+// taken, rather than wherever the end happens to be now.
+//
+// The difference matters to a caller that has just examined the file: between
+// its read and a SeekToEnd, the writer may have appended, and those bytes
+// would be stepped over and never reported. Passing the same FileInfo the
+// examination used closes that window.
+func (t *Tail) SeekTo(info os.FileInfo) {
+	t.offset = info.Size()
+	t.carry = nil
+	t.identity = info
+}
+
 // Read returns complete lines appended since the previous call, and nothing
 // when the file is idle.
 func (t *Tail) Read() ([]Line, error) {
