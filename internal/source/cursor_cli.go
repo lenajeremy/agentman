@@ -25,8 +25,30 @@ import (
 // transcripts. A chat can be read from its local SQLite store, but only an
 // `am cursor` tmux pane gives Agentman a supported terminal input channel.
 const (
-	cursorCLIWindow      = 12 * time.Hour
-	cursorCLIDBTimeout   = 5 * time.Second
+	cursorCLIWindow    = 12 * time.Hour
+	cursorCLIDBTimeout = 5 * time.Second
+	// cursorCLIBusyTimeout is how long a read waits for Cursor to finish
+	// writing before giving up.
+	//
+	// Cursor owns this database and writes to it throughout a turn, so a reader
+	// meeting a write lock is ordinary rather than exceptional. Without this the
+	// sqlite3 CLI returns "database is locked" immediately, which used to end a
+	// live subscription outright and leave the phone silently not updating.
+	// Kept below cursorCLIDBTimeout so the command still exits before its own
+	// deadline does.
+	cursorCLIBusyTimeout = 3 * time.Second
+	// cursorCLIFollowFailures is how many consecutive failed polls end a
+	// subscription. At the follow interval this is a few seconds of a store
+	// that cannot be read at all, which is a real fault worth reporting.
+	cursorCLIFollowFailures = 20
+)
+
+// cursorCLITimeoutCommand sets the busy timeout through sqlite3's dot-command
+// form, which prints nothing. A `PRAGMA busy_timeout` would return its value as
+// a row and, under -json, land in the output the caller is about to parse.
+var cursorCLITimeoutCommand = fmt.Sprintf(".timeout %d", cursorCLIBusyTimeout.Milliseconds())
+
+const (
 	cursorCLIMaxDBOutput = 16 * 1024 * 1024
 	cursorCLIMaxChats    = 200
 	cursorCLIPanePrefix  = tmux.Prefix + "cursor-"
@@ -173,7 +195,8 @@ func queryCursorCLIModel(ctx context.Context, store string) string {
 	const query = "SELECT json_extract(data,'$.content[0].providerOptions.cursor.modelName') AS model " +
 		"FROM blobs WHERE json_valid(data)=1 AND json_extract(data,'$.role')='assistant' " +
 		"AND model IS NOT NULL ORDER BY rowid DESC LIMIT 1"
-	output, err := exec.CommandContext(ctx, bin, "-json", "-readonly", "file:"+store+"?mode=ro", query).Output()
+	output, err := exec.CommandContext(ctx, bin, "-json", "-readonly",
+		"-cmd", cursorCLITimeoutCommand, "file:"+store+"?mode=ro", query).Output()
 	if err != nil || len(output) > 4096 {
 		return ""
 	}
@@ -417,7 +440,8 @@ func queryCursorCLIRows(ctx context.Context, store string, before int64, limit i
 	query := "SELECT rowid,id,CAST(data AS TEXT) AS data FROM blobs WHERE json_valid(data)=1" +
 		" AND json_extract(data,'$.role') IN ('user','assistant','tool')" + where +
 		" ORDER BY rowid DESC LIMIT " + strconv.Itoa(limit)
-	cmd := exec.CommandContext(ctx, bin, "-json", "-readonly", "file:"+store+"?mode=ro", query)
+	cmd := exec.CommandContext(ctx, bin, "-json", "-readonly",
+		"-cmd", cursorCLITimeoutCommand, "file:"+store+"?mode=ro", query)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
@@ -566,10 +590,10 @@ func (s *CursorCLISource) Follow(ctx context.Context, sessionID string, out chan
 	if err != nil {
 		return err
 	}
-	seen := make(map[string]bool)
-	for _, msg := range page.Messages {
-		seen[msg.ID] = true
-	}
+	seen := make(map[string]openCodeSeenMessage)
+	var generation uint64 = 1
+	_ = updateOpenCodeSeen(seen, page.Messages, generation)
+	failures := 0
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
 	for {
@@ -579,17 +603,21 @@ func (s *CursorCLISource) Follow(ctx context.Context, sessionID string, out chan
 		case <-ticker.C:
 			page, err := s.Page(ctx, sessionID, "", 100)
 			if err != nil {
-				return err
-			}
-			var fresh []protocol.Message
-			nextSeen := make(map[string]bool, len(page.Messages))
-			for _, msg := range page.Messages {
-				nextSeen[msg.ID] = true
-				if !seen[msg.ID] {
-					fresh = append(fresh, msg)
+				// Reading Cursor's store can fail for reasons that pass: it
+				// holds a write lock for longer than the busy timeout, or is
+				// mid-checkpoint. Ending the subscription for one of those
+				// stops the phone updating for the rest of the session, which
+				// is far worse than a late poll, so keep going and only give
+				// up once it has failed for long enough to mean something.
+				failures++
+				if failures > cursorCLIFollowFailures {
+					return err
 				}
+				continue
 			}
-			seen = nextSeen
+			failures = 0
+			generation++
+			fresh := updateOpenCodeSeen(seen, page.Messages, generation)
 			if len(fresh) > 0 {
 				select {
 				case out <- fresh:

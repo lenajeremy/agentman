@@ -50,6 +50,10 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+	listenAddr := strings.TrimSpace(os.Getenv("AGENTMAN_RELAY_LISTEN_ADDR"))
+	if listenAddr == "" {
+		listenAddr = ":" + port
+	}
 
 	// Railway overwrites X-Forwarded-For, so it can be believed there; a relay
 	// exposed straight to the internet receives whatever the client sent.
@@ -71,7 +75,7 @@ func main() {
 		log.Info("preview links enabled", "origin", origin)
 	}
 	httpServer := &http.Server{
-		Addr:              ":" + port,
+		Addr:              listenAddr,
 		Handler:           server.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		MaxHeaderBytes:    16 * 1024,
@@ -90,7 +94,7 @@ func main() {
 		_ = httpServer.Shutdown(shutdownCtx)
 	}()
 
-	log.Info("relay listening", "port", port, "version", version, "storage", "none")
+	log.Info("relay listening", "addr", listenAddr, "version", version, "storage", "none")
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("server failed", "error", err)
 		os.Exit(1)

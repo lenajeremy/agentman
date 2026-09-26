@@ -72,6 +72,10 @@ const (
 	// agent already opened. It is what lets a screenshot written to a temp
 	// directory be looked at, without the daemon serving the whole disk.
 	ReqReadSeenFile RequestType = "read_seen_file"
+	// A paired phone can browse launchable folders beneath the Mac user's home
+	// and start a new local agent process in one of them.
+	ReqListDirectories RequestType = "list_directories"
+	ReqStartSession    RequestType = "start_session"
 )
 
 // Request is anything the app asks of the daemon.
@@ -100,13 +104,16 @@ type Request struct {
 	PushToken string `json:"pushToken,omitempty"`
 	// Port names the server on ReqOpenServer and ReqCloseServer.
 	Port int `json:"port,omitempty"`
-	// Path is relative to the session's working directory. It is never an
-	// absolute path supplied by the phone.
+	// Path is relative to the session's working directory for workspace reads,
+	// or relative to the Mac user's home for launch directory requests. It is
+	// never an absolute path supplied by the phone.
 	Path string `json:"path,omitempty"`
 	// UploadIDs names images the phone left with the relay, to be collected by
 	// the daemon and handed to the agent as file paths. They are tickets, not
 	// filenames: nothing in them reaches the filesystem.
 	UploadIDs []string `json:"uploadIds,omitempty"`
+	// Kind and Path select a local agent and a directory relative to home.
+	Kind Kind `json:"kind,omitempty"`
 }
 
 /* ----------------------------- daemon → app ------------------------------ */
@@ -125,9 +132,11 @@ const (
 	// EvtServerOpened answers ReqOpenServer with the server's link.
 	EvtServerOpened EventType = "server_opened"
 	// EvtServerStopped answers ReqStopServer once the process is gone.
-	EvtServerStopped EventType = "server_stopped"
-	EvtError         EventType = "error"
-	EvtWorkspace     EventType = "workspace"
+	EvtServerStopped  EventType = "server_stopped"
+	EvtError          EventType = "error"
+	EvtWorkspace      EventType = "workspace"
+	EvtDirectories    EventType = "directories"
+	EvtSessionStarted EventType = "session_started"
 )
 
 // SendStatus is how far a sent message actually got.
@@ -164,6 +173,9 @@ type Event struct {
 	Port      int              `json:"port,omitempty"`
 	Link      string           `json:"link,omitempty"`
 	Workspace *WorkspaceResult `json:"workspace,omitempty"`
+	// Directory names only; the app never needs the Mac's absolute home path.
+	Directories []string `json:"directories,omitempty"`
+	Path        string   `json:"path,omitempty"`
 
 	Error string `json:"error,omitempty"`
 }

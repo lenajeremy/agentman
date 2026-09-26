@@ -1,4 +1,4 @@
-import type { Question, SendStatus, Session } from "./protocol";
+import type { Message, Question, SendStatus, Session } from "./protocol";
 
 export type AgentActionKind = "answer" | "interrupt";
 
@@ -18,6 +18,9 @@ interface PendingSendLike {
   sessionId: string;
   status: "sending" | SendStatus;
   error?: string;
+  text?: string;
+  retainUntilTranscript?: boolean;
+  knownUserMessageIds?: string[];
 }
 
 interface SendResult {
@@ -60,20 +63,50 @@ export function questionSnapshotIdentity(question: Question): string {
   ]);
 }
 
-/** Delivered message bubbles are removed; their transcript row is authoritative. */
+/** Cursor's transcript can lag behind the terminal acknowledgement. */
 export function applyPendingSendResult<T extends PendingSendLike>(
   pending: readonly T[],
   result: SendResult,
 ): T[] {
   if (!result.clientId) return pending as T[];
   if (result.status === "delivered") {
-    return pending.filter((item) => item.clientId !== result.clientId);
+    return pending.flatMap((item) =>
+      item.clientId !== result.clientId
+        ? [item]
+        : item.retainUntilTranscript
+          ? [{ ...item, status: "delivered" as const }]
+          : [],
+    );
   }
   return pending.map((item) =>
     item.clientId === result.clientId
       ? { ...item, status: result.status ?? "failed", error: result.error }
       : item,
   );
+}
+
+/** Replace a Cursor send echo only when its actual user row has arrived. */
+export function reconcileCursorSendEchoes<T extends PendingSendLike>(
+  pending: readonly T[],
+  sessionId: string,
+  messages: readonly Message[],
+): T[] {
+  const userRows = messages.filter(
+    (message) => message.sessionId === sessionId && message.role === "user",
+  );
+  const claimed = new Set<string>();
+  return pending.filter((item) => {
+    if (item.sessionId !== sessionId || !item.retainUntilTranscript ||
+        item.status === "failed" || !item.text) return true;
+    const row = userRows.find((message) =>
+      message.text === item.text &&
+      !item.knownUserMessageIds?.includes(message.id) &&
+      !claimed.has(message.id),
+    );
+    if (!row) return true;
+    claimed.add(row.id);
+    return item.status !== "delivered";
+  });
 }
 
 /** Apply the daemon's acknowledgement to an answer or interrupt command. */

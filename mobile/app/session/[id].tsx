@@ -113,7 +113,7 @@ export default function SessionScreen() {
     store.openSession(sessionId);
     return () => store.closeSession(sessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId]);
+  }, [sessionId, session?.id]);
 
   useEffect(() => {
     setDraftReady(false);
@@ -189,7 +189,7 @@ export default function SessionScreen() {
 
   const rows = useMemo<Row[]>(() => {
     const sent = store.pending
-      .filter((p) => p.sessionId === sessionId && p.status !== "delivered")
+      .filter((p) => p.sessionId === sessionId)
       .map((pending) => ({ kind: "pending" as const, pending }));
     const chronological: Row[] = [
       ...messages.map((message) => ({ kind: "message" as const, message })),
@@ -216,15 +216,15 @@ export default function SessionScreen() {
       setSubmittedClientId(null);
       return;
     }
-    if (submittedSend) return;
+    if (submittedSend && submittedSend.status !== "delivered") return;
     if (!session) {
       // A removed session also drops its pending row, but that is not proof the
       // text landed. Keep the account-scoped draft for inspection/recovery.
       setSubmittedClientId(null);
       return;
     }
-    // Pending entries disappear only after delivery (or after a confirmed
-    // queued handoff), so this is the first safe time to clear the draft.
+    // Cursor keeps its delivered bubble until the local transcript catches up.
+    // Delivery still settles the composer immediately.
     setSubmittedClientId(null);
     setDraft("");
     draftRef.current = "";
@@ -590,7 +590,9 @@ export default function SessionScreen() {
           }
           ListEmptyComponent={
             paging?.loading ? null : (
-              <Text style={styles.emptyFeed}>No messages yet.</Text>
+              <Text style={styles.emptyFeed}>
+                {session ? "No messages yet." : "Waiting for session status from your Mac…"}
+              </Text>
             )
           }
         />
@@ -939,11 +941,12 @@ function PendingRow({
   const { color } = useTheme();
   const failed = pending.status === "failed";
   const queued = pending.status === "queued";
+  const delivered = pending.status === "delivered";
 
   return (
     <MotionPressable
-      onPress={() => failed && onDismiss(pending.clientId)}
-      disabled={!failed}
+      onPress={() => (failed || delivered) && onDismiss(pending.clientId)}
+      disabled={!failed && !delivered}
       style={[
         styles.userRow,
         styles.pendingRow,
@@ -961,6 +964,8 @@ function PendingRow({
             ? "Queued — arrives when this turn ends"
             : failed
               ? `Didn't send${pending.error ? `: ${pending.error}` : ""} · tap to dismiss`
+              : delivered
+                ? "Sent · syncing…"
               : ""}
       </Text>
     </MotionPressable>

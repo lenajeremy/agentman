@@ -30,6 +30,45 @@ const claudePermission = ` I'll run that for you.
 
  Esc to cancel · Tab to amend · ctrl+e to explain`
 
+const claudeWorkspaceTrust = `────────────────────────────────────────────────────────────────────────────────
+ Accessing workspace:
+
+ /Users/mac/Documents/wflow/claude
+
+ Quick safety check: Is this a project you created or one you trust? (Like your
+ own code, a well-known open source project, or work from your team). If not,
+ take a moment to review what's in this folder first.
+
+ Claude Code'll be able to read, edit, and execute files here.
+
+ Security guide
+
+ ❯ No, exit
+   Yes, I trust this folder
+
+ Enter to confirm · Esc to cancel
+`
+
+func TestDetectsClaudeWorkspaceTrust(t *testing.T) {
+	q := Detect(claudeWorkspaceTrust)
+	if q == nil || !q.WorkspaceTrust {
+		t.Fatalf("workspace trust prompt was not detected: %+v", q)
+	}
+	if q.Detail != "/Users/mac/Documents/wflow/claude" || q.FocusIndex != 0 ||
+		len(q.Options) != 2 || q.Options[1].Key != "yes" {
+		t.Fatalf("workspace trust choices = %+v", q)
+	}
+	selectedYes := strings.Replace(claudeWorkspaceTrust,
+		"❯ No, exit\n   Yes, I trust this folder",
+		"  No, exit\n ❯ Yes, I trust this folder", 1)
+	if selected := Detect(selectedYes); selected == nil || selected.FocusIndex != 1 {
+		t.Fatalf("selected Yes was not detected: %+v", selected)
+	}
+	if stale := Detect(claudeWorkspaceTrust + "\nAgent is working\n"); stale != nil {
+		t.Fatalf("stale workspace trust prompt was answerable: %+v", stale)
+	}
+}
+
 func TestDetectsClaudePermissionPrompt(t *testing.T) {
 	q := Detect(claudePermission)
 	if q == nil {

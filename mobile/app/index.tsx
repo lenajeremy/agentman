@@ -112,16 +112,19 @@ export default function Agents() {
                 online={store.daemonOnline}
                 incompatible={incompatible}
               />
-              <MotionPressable
-                hitSlop={12}
-                style={styles.iconButton}
-                pressedScale={0.94}
-                onPress={() => router.push("/settings")}
-                accessibilityRole="button"
-                accessibilityLabel="Settings"
-              >
-                <Feather name="settings" size={19} color={color.text} />
-              </MotionPressable>
+              <View style={styles.topActions}>
+                <MotionPressable hitSlop={12} style={styles.iconButton} pressedScale={0.94}
+                  onPress={() => router.push("/new-session")} accessibilityRole="button"
+                  accessibilityLabel="New session" disabled={!store.daemonOnline}>
+                  <Feather name="plus" size={22}
+                    color={store.daemonOnline ? color.text : color.faint} />
+                </MotionPressable>
+                <MotionPressable hitSlop={12} style={styles.iconButton} pressedScale={0.94}
+                  onPress={() => router.push("/settings")} accessibilityRole="button"
+                  accessibilityLabel="Settings">
+                  <Feather name="settings" size={19} color={color.text} />
+                </MotionPressable>
+              </View>
             </View>
 
             <Text style={styles.title} accessibilityRole="header">
@@ -527,8 +530,8 @@ function EmptyState() {
       <EmptyIllustration style={styles.emptyArt} />
       <Text style={styles.emptyTitle}>Nothing running</Text>
       <Text style={styles.emptyBody}>
-        Start an agent on your Mac and it shows up here. Cursor sessions are
-        view-only.
+        Tap + to start an agent in a folder on your Mac, or start one from its
+        terminal. Cursor IDE sessions are view-only.
       </Text>
       <View style={styles.command}>
         <Text style={styles.commandPrompt}>$</Text>
@@ -538,8 +541,8 @@ function EmptyState() {
       </View>
       <Text style={styles.emptyHint}>
         Also <Text style={styles.inlineMono}>am codex</Text> and{" "}
-        <Text style={styles.inlineMono}>am opencode</Text>. Recent Cursor agent
-        sessions appear automatically in read-only mode.
+        <Text style={styles.inlineMono}>am opencode</Text>. Recent Cursor IDE
+        chats appear automatically in read-only mode.
       </Text>
     </View>
   );
@@ -557,6 +560,7 @@ const makeStyles = (c: Palette) =>
       justifyContent: "space-between",
       paddingTop: space.md,
     },
+    topActions: { flexDirection: "row", gap: space.sm },
     chip: {
       flexDirection: "row",
       alignItems: "center",
