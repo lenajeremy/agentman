@@ -55,6 +55,7 @@ Flags:
   -relay <url>                Relay to use. Defaults to the public relay;
                               set AGENTMAN_RELAY to change it, or pass
                               "none" to run without one.
+  -config-home <dir>          Separate Agentman state for serve and pair.
 `
 
 func main() {
