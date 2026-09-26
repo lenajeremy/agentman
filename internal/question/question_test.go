@@ -651,6 +651,70 @@ func TestDetectsCodexQuestionAfterFormAdvances(t *testing.T) {
 	}
 }
 
+func TestDetectsCodex156QueuedQuestions(t *testing.T) {
+	const hidden = `• Working (16s • esc to interrupt)
+
+• Queued follow-up inputs
+  ? 2 questions
+    shift+← to answer
+
+› Ask Codex to do anything
+  GPT-6-Sol high · ~/project`
+	if !CodexQueued(hidden) {
+		t.Fatal("current Codex's collapsed question tray was missed")
+	}
+	if !CodexQueued(strings.Replace(hidden, "? 2 questions", "? 2 questions · 11s", 1)) {
+		t.Fatal("Codex's auto-resolution countdown hid a queued question")
+	}
+	if q := Detect(hidden); q != nil {
+		t.Fatalf("a collapsed tray is not yet an answerable menu: %+v", q)
+	}
+
+	const first = `• Queued follow-up inputs
+
+  1 of 2
+  What should we focus on next?
+
+  › 1. A task
+    2. An idea
+    3. Other
+
+  enter submit   ctrl+] skip   ⌥+↓ main prompt   shift+← next question`
+	q := Detect(first)
+	if q == nil || q.Prompt != "What should we focus on next?" || q.Detail != "" || len(q.Options) != 2 || !q.Custom || q.CustomKey != "3" {
+		t.Fatalf("first queued question = %+v", q)
+	}
+
+	const second = `• Queued follow-up inputs
+
+  How detailed should my replies be?
+
+  › 1. Brief
+    2. Detailed
+    3. Other
+
+  enter submit   ctrl+] skip   ⌥+↓ main prompt`
+	q = Detect(second)
+	if q == nil || q.Prompt != "How detailed should my replies be?" || q.Detail != "" || len(q.Options) != 2 || !q.Custom || q.CustomKey != "3" {
+		t.Fatalf("second queued question = %+v", q)
+	}
+	if CodexQueued(second) {
+		t.Fatal("an expanded question must not be revealed again")
+	}
+}
+
+func TestCodexQueuedRequiresCurrentTraySignature(t *testing.T) {
+	for _, pane := range []string{
+		"• Queued follow-up inputs\n  ? 2 questions",
+		"? 2 questions\nshift+← to answer",
+		"The transcript says Queued follow-up inputs and shift+← to answer",
+	} {
+		if CodexQueued(pane) {
+			t.Fatalf("untrusted pane text was treated as a live question: %q", pane)
+		}
+	}
+}
+
 func TestLiveMenuRequiresFooter(t *testing.T) {
 	const unfinishedTranscript = `A suggested sequence:
 › 1. First choice

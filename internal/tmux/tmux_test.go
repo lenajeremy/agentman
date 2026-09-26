@@ -9,7 +9,58 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lenajeremy/agentman/internal/question"
 )
+
+// Set AGENTMAN_TEST_CODEX_PANE to a disposable Codex pane whose async
+// question is queued. This exercises the actual CLI shortcut across versions.
+func TestLiveCodexQueuedQuestionReveal(t *testing.T) {
+	name := os.Getenv("AGENTMAN_TEST_CODEX_PANE")
+	if name == "" {
+		t.Skip("requires a disposable Codex pane with a queued question")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	for {
+		pane, err := Capture(ctx, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if question.CodexQueued(pane) {
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatal("Codex never queued its test question")
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	pane, err := RevealCodexQuestion(ctx, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := question.Detect(pane)
+	if first == nil || len(first.Options) < 2 {
+		t.Fatalf("queued Codex question did not become answerable: %+v", first)
+	}
+	secondPane, err := RevealCodexQuestion(ctx, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := question.Detect(secondPane)
+	if second == nil || second.Prompt != first.Prompt {
+		t.Fatalf("repeated discovery changed the active question: %+v then %+v", first, second)
+	}
+}
+
+func TestCodexCustomAnswerEchoIsBoundToQuestion(t *testing.T) {
+	if !codexAnswerEchoed("› > Which season do you prefer?\n\n  Orange\n\n• Working", "Orange") {
+		t.Fatal("submitted custom answer was missed")
+	}
+	if codexAnswerEchoed("• Codex mentioned Orange\n\n› Ask Codex to do anything", "Orange") {
+		t.Fatal("ordinary transcript text was treated as a submitted answer")
+	}
+}
 
 // These tests drive a real tmux, because the whole point of this package is
 // that the interaction with tmux behaves as expected. They are skipped when

@@ -25,6 +25,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/lenajeremy/agentman/internal/question"
 )
 
 // Prefix marks the tmux sessions we own, so agentman never types into a tmux
@@ -400,6 +402,25 @@ func Capture(ctx context.Context, name string) (string, error) {
 	return out, nil
 }
 
+// RevealCodexQuestion opens Codex's collapsed async question tray when it is
+// the active bottom-of-pane control. Capture and the key are serialized with
+// other Agentman terminal actions so a concurrent phone send cannot receive
+// the shortcut instead. A normal pane is left untouched.
+func RevealCodexQuestion(ctx context.Context, name string) (string, error) {
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	pane, err := Capture(ctx, name)
+	if err != nil || question.Detect(pane) != nil || !question.CodexQueued(pane) {
+		return pane, err
+	}
+	if _, err := run(ctx, "send-keys", "-t", name, "S-Left"); err != nil {
+		return "", fmt.Errorf("tmux: could not reveal Codex question: %w", err)
+	}
+	time.Sleep(80 * time.Millisecond)
+	return Capture(ctx, name)
+}
+
 // Answer chooses an option in a menu the agent is showing.
 //
 // Deliberately not Send: a menu takes a single keystroke, and Send's
@@ -420,6 +441,88 @@ func Answer(ctx context.Context, name, key string) error {
 		return fmt.Errorf("tmux: could not answer: %w", err)
 	}
 	return nil
+}
+
+// AnswerCodexCustom fills the current Codex follow-up question's Other field.
+// Codex needs Enter to open the field and commit its text. Some layouts then
+// submit immediately; others need a final Enter. Verify the pane before
+// sending that final Enter so it cannot act on an unrelated composer.
+func AnswerCodexCustom(ctx context.Context, name, key, text string) error {
+	text = strings.TrimSpace(text)
+	if text == "" || strings.ContainsAny(text, "\r\n") || len([]rune(text)) > 200 {
+		return errors.New("tmux: Codex custom answers must be one line of at most 200 characters")
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	pane, err := Capture(ctx, name)
+	if err != nil {
+		return err
+	}
+	initial := question.Detect(pane)
+	if initial == nil || !initial.Custom || initial.CustomKey != key {
+		return errors.New("tmux: Codex custom question is no longer current")
+	}
+	if err := sendLiteral(ctx, name, key); err != nil {
+		return fmt.Errorf("tmux: could not select Codex custom answer: %w", err)
+	}
+	time.Sleep(45 * time.Millisecond)
+	if _, err := run(ctx, "send-keys", "-t", name, "Enter"); err != nil {
+		return fmt.Errorf("tmux: could not open Codex custom answer: %w", err)
+	}
+	time.Sleep(45 * time.Millisecond)
+	if err := sendLiteral(ctx, name, text); err != nil {
+		return fmt.Errorf("tmux: could not type Codex custom answer: %w", err)
+	}
+	time.Sleep(60 * time.Millisecond)
+	if _, err := run(ctx, "send-keys", "-t", name, "Enter"); err != nil {
+		return fmt.Errorf("tmux: could not commit Codex custom answer: %w", err)
+	}
+	time.Sleep(60 * time.Millisecond)
+	pane, err = Capture(ctx, name)
+	if err != nil {
+		return err
+	}
+	committed := question.Detect(pane)
+	if committed == nil && !question.CodexQueued(pane) && codexAnswerEchoed(pane, text) {
+		// Some current Codex layouts submit on the first Enter after text;
+		// sending another would act on an unrelated composer.
+		return nil
+	}
+	prefix := []rune(text)
+	if len(prefix) > 16 {
+		prefix = prefix[:16]
+	}
+	matched := false
+	if committed != nil && committed.Prompt == initial.Prompt {
+		for _, option := range committed.Options {
+			if option.Key == key && option.Selected && strings.HasPrefix(option.Label, string(prefix)) {
+				matched = true
+			}
+		}
+	}
+	if !matched {
+		return errors.New("tmux: Codex did not show the custom answer; finish it in the terminal")
+	}
+	if _, err := run(ctx, "send-keys", "-t", name, "Enter"); err != nil {
+		return fmt.Errorf("tmux: could not submit Codex custom answer: %w", err)
+	}
+	return nil
+}
+
+func codexAnswerEchoed(pane, text string) bool {
+	lines := strings.Split(pane, "\n")
+	for i := len(lines) - 1; i >= 0 && i >= len(lines)-16; i-- {
+		if strings.TrimSpace(lines[i]) != text {
+			continue
+		}
+		for j := i - 1; j >= 0 && j >= i-5; j-- {
+			if strings.Contains(lines[j], "› > ") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // AnswerWorkspaceTrust selects Claude's unnumbered first-run folder prompt.

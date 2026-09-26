@@ -43,6 +43,18 @@ func TestTerminalInjectRechecksLivePaneForQuestion(t *testing.T) {
 	}
 }
 
+func TestCodexSendRejectsCollapsedQueuedQuestion(t *testing.T) {
+	const pane = "• Queued follow-up inputs\n  ? 1 question · 11s\n    shift+← to answer\n\n› Ask Codex to do anything"
+	s := &CodexSource{
+		capturePane: func(context.Context, string) (string, error) { return pane, nil },
+		sessions:    map[string]codexSession{"codex:s1": {tmuxName: "agentman-codex-test"}},
+	}
+	if _, err := s.Inject(context.Background(), "codex:s1", "new prompt"); err == nil ||
+		!strings.Contains(err.Error(), "pending question") {
+		t.Fatalf("send entered a collapsed Codex question: %v", err)
+	}
+}
+
 func TestTerminalInjectFailsClosedWhenPaneCannotBeInspected(t *testing.T) {
 	want := errors.New("capture failed")
 	capture := func(context.Context, string) (string, error) { return "", want }

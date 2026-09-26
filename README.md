@@ -181,7 +181,7 @@ sequenceDiagram
 | Agent | Discovery and history | Message delivery | Questions |
 |---|---|---|---|
 | Claude Code | Session registry and transcript JSONL | tmux while active; hook queue between turns | tmux prompt parser and terminal control |
-| Codex | Rollout JSONL plus tmux discovery before the first rollout exists | tmux | tmux prompt parser and terminal control |
+| Codex | Rollout JSONL plus tmux discovery before the first rollout exists; current question, search, image, and collaboration events appear in history | tmux | Managed tmux sessions reveal queued follow-up questions and answer listed or custom choices; older numbered menus remain supported |
 | OpenCode | Native HTTP API across the watched local port range | `prompt_async` API | Native question and permission APIs |
 | Cursor | Agent transcript JSONL under `~/.cursor/projects`, enriched from the IDE's `state.vscdb` composer index (exact timestamps, subtitle, blocking flag) | Read-only for now | Blocking flag surfaces as waiting input (view-only; resolve in the IDE) |
 | Cursor Agent CLI | Local chat store for terminal chats; Agentman transcript for phone-created ACP chats | ACP with live reply chunks for phone-created chats; tmux for `am cursor`; other terminal chats read-only | ACP permissions, questions, plans, and cancellation for phone-created chats; terminal prompts for `am cursor` |

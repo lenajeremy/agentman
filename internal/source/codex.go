@@ -17,6 +17,7 @@ import (
 	"github.com/lenajeremy/agentman/internal/jsonl"
 	"github.com/lenajeremy/agentman/internal/parser"
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/question"
 	"github.com/lenajeremy/agentman/internal/tmux"
 )
 
@@ -224,12 +225,22 @@ type codexMeta struct {
 		// id. Two rollouts then collided on one key, so one silently replaced
 		// the other in the session map, and the id stopped naming the
 		// transcript actually being read.
-		ID         string `json:"id"`
-		SessionID  string `json:"session_id"`
-		Cwd        string `json:"cwd"`
-		Timestamp  string `json:"timestamp"`
-		Originator string `json:"originator"`
+		ID         string          `json:"id"`
+		SessionID  string          `json:"session_id"`
+		Cwd        string          `json:"cwd"`
+		Timestamp  string          `json:"timestamp"`
+		Originator string          `json:"originator"`
+		Source     json.RawMessage `json:"source"`
 	} `json:"payload"`
+}
+
+func (m codexMeta) isSubagent() bool {
+	var source map[string]json.RawMessage
+	if json.Unmarshal(m.Payload.Source, &source) == nil {
+		return source["subagent"] != nil || source["subAgent"] != nil
+	}
+	var kind string
+	return json.Unmarshal(m.Payload.Source, &kind) == nil && strings.HasPrefix(strings.ToLower(kind), "subagent")
 }
 
 // threadID is what identifies one rollout. Older Codex versions wrote only
@@ -266,6 +277,25 @@ func NewCodexSource(home string) (*CodexSource, error) {
 
 // Kind implements Source.
 func (s *CodexSource) Kind() protocol.Kind { return protocol.KindCodex }
+
+// CurrentQuestion reads only this pane for Stop-hook reconciliation, including
+// Codex's collapsed async question tray.
+func (s *CodexSource) CurrentQuestion(ctx context.Context, sessionID string) (*protocol.Question, error) {
+	s.mu.RLock()
+	session, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("source: unknown codex session %q", sessionID)
+	}
+	if session.tmuxName == "" {
+		return session.meta.Question, nil
+	}
+	pane, err := tmux.RevealCodexQuestion(ctx, session.tmuxName)
+	if err != nil {
+		return nil, err
+	}
+	return protocolQuestionOrNil(question.Detect(pane)), nil
+}
 
 func (s *CodexSource) sessionsDir() string {
 	return filepath.Join(s.home, ".codex", "sessions")
@@ -401,6 +431,9 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			if err != nil {
 				continue
 			}
+			if meta.isSubagent() {
+				continue
+			}
 
 			id := string(protocol.KindCodex) + ":" + meta.threadID()
 			state, lastActivity, err := s.cachedCodexActivity(ctx, path, entry.info)
@@ -445,7 +478,7 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				// The pane's process is the root of everything codex runs, so
 				// servers it starts can be traced back to this session.
 				session.AgentPID = pane.PanePID
-				if q := detectQuestion(ctx, tmuxName); q != nil {
+				if q := detectCodexQuestion(ctx, tmuxName); q != nil {
 					session.Question = q
 					session.State = protocol.StateWaitingInput
 				}
@@ -489,7 +522,7 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			LastActivityAt: started.UnixMilli(),
 			AgentPID:       pane.PanePID,
 		}
-		if q := detectQuestion(ctx, pane.Name); q != nil {
+		if q := detectCodexQuestion(ctx, pane.Name); q != nil {
 			session.Question = q
 			session.State = protocol.StateWaitingInput
 		}

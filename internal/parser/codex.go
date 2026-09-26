@@ -23,11 +23,16 @@ import (
 // than as raw tool-call payloads.
 type CodexParser struct {
 	sessionID string
+	// A function-call result can be encountered before its call during backward
+	// pagination, or after it during a live forward tail.
+	questionCalls   map[string]protocol.Message
+	questionResults map[string]bool
 }
 
 // NewCodexParser creates a parser bound to one session.
 func NewCodexParser(sessionID string) *CodexParser {
-	return &CodexParser{sessionID: sessionID}
+	return &CodexParser{sessionID: sessionID,
+		questionCalls: map[string]protocol.Message{}, questionResults: map[string]bool{}}
 }
 
 type codexRecord struct {
@@ -37,8 +42,11 @@ type codexRecord struct {
 }
 
 type codexPayload struct {
-	Type string     `json:"type"`
-	Item *codexItem `json:"item"`
+	Type      string     `json:"type"`
+	Item      *codexItem `json:"item"`
+	Name      string     `json:"name"`
+	CallID    string     `json:"call_id"`
+	Arguments string     `json:"arguments"`
 }
 
 type codexItem struct {
@@ -60,6 +68,13 @@ type codexItem struct {
 	// McpToolCall
 	Server string `json:"server"`
 	Tool   string `json:"tool"`
+
+	// Extension and ImageView
+	Kind      string          `json:"kind"`
+	Query     string          `json:"query"`
+	SavedPath string          `json:"savedPath"`
+	Path      string          `json:"path"`
+	Failure   json.RawMessage `json:"failure"`
 }
 
 type codexContent struct {
@@ -77,6 +92,9 @@ func (p *CodexParser) Parse(line string, offset int64) []protocol.Message {
 	var rec codexRecord
 	if !decode(line, &rec) {
 		return nil
+	}
+	if rec.Type == "response_item" && rec.Payload != nil {
+		return p.parseQuestionCall(rec)
 	}
 	if rec.Type != "event_msg" || rec.Payload == nil {
 		return nil
@@ -172,7 +190,11 @@ func (p *CodexParser) Parse(line string, offset int64) []protocol.Message {
 		}
 
 		base.Role = protocol.RoleTool
-		base.Tool = &protocol.Tool{Name: "Edit", Summary: clip(summary, SummaryChars), Status: protocol.ToolOK}
+		status := protocol.ToolOK
+		if item.Status == "failed" || item.Status == "declined" {
+			status = protocol.ToolError
+		}
+		base.Tool = &protocol.Tool{Name: "Edit", Summary: clip(summary, SummaryChars), Status: status}
 		return []protocol.Message{base}
 
 	case "McpToolCall":
@@ -196,11 +218,117 @@ func (p *CodexParser) Parse(line string, offset int64) []protocol.Message {
 		base.Text = "Context compacted"
 		return []protocol.Message{base}
 
+	case "WebSearch":
+		base.Role = protocol.RoleTool
+		base.Tool = &protocol.Tool{Name: "Web search", Summary: clip(item.Query, SummaryChars), Status: protocol.ToolOK}
+		return []protocol.Message{base}
+
+	case "Extension":
+		base.Role = protocol.RoleTool
+		tool := &protocol.Tool{Status: protocol.ToolOK}
+		switch item.Kind {
+		case "web.search":
+			tool.Name, tool.Summary = "Web search", clip(item.Query, SummaryChars)
+		case "clock.sleep":
+			tool.Name = "Wait"
+		case "image_gen.generation":
+			tool.Name, tool.Summary = "Image generation", clip(item.SavedPath, SummaryChars)
+			if len(item.Failure) > 0 && string(item.Failure) != "null" {
+				tool.Status = protocol.ToolError
+			}
+		default:
+			tool.Name, tool.Summary = "Extension", clip(item.Kind, SummaryChars)
+		}
+		base.Tool = tool
+		return []protocol.Message{base}
+
+	case "ImageView":
+		base.Role = protocol.RoleTool
+		base.Tool = &protocol.Tool{Name: "View image", Summary: clip(item.Path, SummaryChars), Status: protocol.ToolOK}
+		return []protocol.Message{base}
+
+	case "CollabAgentToolCall":
+		status := protocol.ToolOK
+		if item.Status == "failed" {
+			status = protocol.ToolError
+		}
+		base.Role = protocol.RoleTool
+		base.Tool = &protocol.Tool{Name: "Agent", Summary: clip(item.Tool, SummaryChars), Status: status}
+		return []protocol.Message{base}
+
+	case "SubAgentActivity":
+		base.Role = protocol.RoleSystem
+		base.Text = "Subagent: " + clip(item.Kind, SummaryChars)
+		return []protocol.Message{base}
+
+	case "EnteredReviewMode":
+		base.Role = protocol.RoleSystem
+		base.Text = "Review started"
+		return []protocol.Message{base}
+
+	case "ExitedReviewMode":
+		base.Role = protocol.RoleSystem
+		base.Text = "Review finished"
+		return []protocol.Message{base}
+
 	default:
 		// "Reasoning" is dropped for the same reason as Claude's "thinking"
 		// blocks: long, largely opaque, and not what a phone glance is for.
 		return nil
 	}
+}
+
+func (p *CodexParser) parseQuestionCall(rec codexRecord) []protocol.Message {
+	call := rec.Payload
+	if call.CallID == "" {
+		return nil
+	}
+	switch call.Type {
+	case "function_call":
+		if call.Name != "request_user_input" && call.Name != "request_user_input_async" {
+			return nil
+		}
+		var args struct {
+			Questions []struct {
+				Title    string `json:"title"`
+				Question string `json:"question"`
+			} `json:"questions"`
+		}
+		_ = json.Unmarshal([]byte(call.Arguments), &args)
+		summary := "Asked for input"
+		if len(args.Questions) == 1 {
+			summary = args.Questions[0].Title
+			if summary == "" {
+				summary = args.Questions[0].Question
+			}
+		} else if len(args.Questions) > 1 {
+			summary = fmt.Sprintf("Asked %d questions", len(args.Questions))
+		}
+		status := protocol.ToolRunning
+		if p.questionResults[call.CallID] {
+			status = protocol.ToolOK
+			delete(p.questionResults, call.CallID)
+		}
+		message := protocol.Message{
+			ID: "codex-question:" + call.CallID, SessionID: p.sessionID,
+			Role: protocol.RoleTool, Ts: parseTime(rec.Timestamp),
+			Tool: &protocol.Tool{Name: "Question", Summary: clip(summary, SummaryChars), Status: status},
+		}
+		if status == protocol.ToolRunning {
+			p.questionCalls[call.CallID] = message
+		}
+		return []protocol.Message{message}
+	case "function_call_output":
+		if message, ok := p.questionCalls[call.CallID]; ok {
+			delete(p.questionCalls, call.CallID)
+			settled := *message.Tool
+			settled.Status = protocol.ToolOK
+			message.Tool = &settled
+			return []protocol.Message{message}
+		}
+		p.questionResults[call.CallID] = true
+	}
+	return nil
 }
 
 // CodexStateFromLine reads turn-level transitions from the same event stream.
