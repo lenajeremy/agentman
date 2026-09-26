@@ -566,10 +566,9 @@ func (s *CursorCLISource) Follow(ctx context.Context, sessionID string, out chan
 	if err != nil {
 		return err
 	}
-	seen := make(map[string]bool)
-	for _, msg := range page.Messages {
-		seen[msg.ID] = true
-	}
+	seen := make(map[string]openCodeSeenMessage)
+	var generation uint64 = 1
+	_ = updateOpenCodeSeen(seen, page.Messages, generation)
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
 	for {
@@ -581,15 +580,8 @@ func (s *CursorCLISource) Follow(ctx context.Context, sessionID string, out chan
 			if err != nil {
 				return err
 			}
-			var fresh []protocol.Message
-			nextSeen := make(map[string]bool, len(page.Messages))
-			for _, msg := range page.Messages {
-				nextSeen[msg.ID] = true
-				if !seen[msg.ID] {
-					fresh = append(fresh, msg)
-				}
-			}
-			seen = nextSeen
+			generation++
+			fresh := updateOpenCodeSeen(seen, page.Messages, generation)
 			if len(fresh) > 0 {
 				select {
 				case out <- fresh:

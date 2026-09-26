@@ -95,6 +95,34 @@ func TestCursorCLIChatHistoryPagesAndExcludesSystemAndReasoning(t *testing.T) {
 	}
 }
 
+func TestCursorCLIFollowEmitsGrowingAssistantRow(t *testing.T) {
+	_, source, store := cursorCLIFixture(t)
+	sessions, err := source.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	out := make(chan []protocol.Message, 1)
+	done := make(chan error, 1)
+	go func() { done <- source.Follow(ctx, sessions[0].ID, out) }()
+	time.Sleep(100 * time.Millisecond)
+	update := `UPDATE blobs SET data='{"role":"assistant","content":[{"type":"text","text":"First reply, continued"}]}' WHERE id='blob-3'`
+	if output, err := exec.Command("sqlite3", store, update).CombinedOutput(); err != nil {
+		t.Fatalf("update fixture: %v: %s", err, output)
+	}
+	select {
+	case batch := <-out:
+		if len(batch) != 1 || batch[0].Text != "First reply, continued" {
+			t.Fatalf("unexpected updated row: %+v", batch)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("growing Cursor CLI reply was not followed")
+	}
+	cancel()
+	<-done
+}
+
 func TestCursorCLIManagedPaneKeepsStableSessionIDWhenChatAppears(t *testing.T) {
 	cwd, source, store := cursorCLIFixture(t)
 	ctx := context.Background()
@@ -142,6 +170,34 @@ func TestCursorCLIManagedPaneKeepsStableSessionIDWhenChatAppears(t *testing.T) {
 	_, err = source.Inject(ctx, "cursor-cli:chat:chat-123", "wrong session")
 	if err == nil {
 		t.Fatal("chat ID must not route to a managed pane")
+	}
+}
+
+func TestCursorCLIManagedPaneTracksBusyAndIdle(t *testing.T) {
+	cwd, source, _ := cursorCLIFixture(t)
+	pane := tmux.Session{
+		Name: "agentman-cursor-state", Cwd: cwd, Command: "agent",
+		Created: time.Now().Add(-2 * time.Minute),
+	}
+	source.listPanes = func(context.Context) ([]tmux.Session, error) {
+		return []tmux.Session{pane}, nil
+	}
+	visible := "→ Add a follow-up     ctrl+c to stop\n"
+	source.capturePane = func(context.Context, string) (string, error) { return visible, nil }
+	busy, err := source.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(busy) != 1 || busy[0].State != protocol.StateBusy || busy[0].Inject != protocol.InjectTmux {
+		t.Fatalf("managed pane did not enter busy state: %+v", busy)
+	}
+	visible = "→ Add a follow-up\nAuto · 9.5%\n"
+	idle, err := source.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(idle) != 1 || idle[0].State != protocol.StateIdle || idle[0].ID != busy[0].ID {
+		t.Fatalf("managed pane did not return to idle: %+v", idle)
 	}
 }
 

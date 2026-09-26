@@ -21,6 +21,7 @@ import {
 import {
   applyAgentActionResult,
   applyPendingSendResult,
+  reconcileCursorSendEchoes,
   clearQueuedForSessionTransitions,
   clearQueuedForTurn,
   questionIdentity,
@@ -77,6 +78,9 @@ export interface PendingSend {
   draftScope?: string;
   /** How many images rode with this message, for the row that shows it. */
   imageCount?: number;
+  /** Cursor may acknowledge tmux input before recording a transcript row. */
+  retainUntilTranscript?: boolean;
+  knownUserMessageIds?: string[];
 }
 
 interface PageState {
@@ -290,6 +294,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       [sessionId]: retained.messages,
     };
     setMessages(messagesRef.current);
+    setPending((current) => reconcileCursorSendEchoes(current, sessionId, retained.messages));
     return retained;
   }, []);
 
@@ -557,11 +562,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       case "send_result": {
         if (!event.clientId) break;
         setPending((current) => {
+          const sent = current.find((item) => item.clientId === event.clientId);
           if (event.status === "delivered") {
-            const sent = current.find((item) => item.clientId === event.clientId);
             if (sent?.draftScope) void clearDraft(sent.draftScope, sent.sessionId);
           }
-          return applyPendingSendResult(current, event);
+          const next = applyPendingSendResult(current, event);
+          return event.status === "delivered" && sent?.retainUntilTranscript
+            ? reconcileCursorSendEchoes(
+                next,
+                sent.sessionId,
+                messagesRef.current[sent.sessionId] ?? [],
+              )
+            : next;
         });
         setActions((current) => applyAgentActionResult(current, event));
         break;
@@ -897,6 +909,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       sendMessage(sessionId, text, uploadIds) {
         const clientId = `send-${newFrameId()}`;
         const draftScope = credentials ? draftNamespace(credentials) : undefined;
+        const retainUntilTranscript = sessionsRef.current.some(
+          (session) => session.id === sessionId && session.kind === "cursor-cli",
+        );
+        const knownUserMessageIds = retainUntilTranscript
+          ? (messagesRef.current[sessionId] ?? [])
+              .filter((message) => message.role === "user" && message.text === text)
+              .map((message) => message.id)
+          : undefined;
         setPending((current) => [
           ...current,
           {
@@ -906,6 +926,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             status: "sending",
             draftScope,
             imageCount: uploadIds?.length,
+            retainUntilTranscript,
+            knownUserMessageIds,
           },
         ]);
         const sent = clientRef.current?.send({
