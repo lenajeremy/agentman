@@ -562,13 +562,15 @@ func (s *CodexSource) cachedCodexActivity(
 	entry.activityVersion = codexVersion(info)
 	entry.activityState = state
 	entry.activitySet = true
-	// Follow from the end of what was just examined. Only real reads get a
-	// tail; an injected readActivity is a test double with no file behind it.
+	// Follow from the end of what was just examined — info, not the file's
+	// end now. Codex appends while this runs, and seeking to a fresh end would
+	// step over whatever landed in between, including the task_complete that
+	// says the turn is over. Only real reads get a tail; an injected
+	// readActivity is a test double with no file behind it.
 	if s.readActivity == nil {
 		tail := jsonl.NewTail(path)
-		if tail.SeekToEnd() == nil {
-			entry.tail = tail
-		}
+		tail.SeekTo(info)
+		entry.tail = tail
 	}
 	s.rolloutCache[path] = entry
 	return state, lastActivity, nil
@@ -779,6 +781,24 @@ func (s *CodexSource) Follow(ctx context.Context, sessionID string, out chan<- [
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			// The rollout a session is reading can change under it. Codex opens
+			// a new file when a conversation is resumed or forked, and
+			// discovery rebinds the pane to it — at which point a tail held on
+			// the old path is following a file nobody writes to again, and the
+			// phone simply stops receiving anything. Follow the rebinding.
+			s.mu.RLock()
+			current, stillLive := s.sessions[sessionID]
+			s.mu.RUnlock()
+			if !stillLive {
+				return fmt.Errorf("source: codex session %q ended", sessionID)
+			}
+			if current.transcript != "" && current.transcript != tail.Path() {
+				// From the start of the new rollout, not its end: everything in
+				// it belongs to this session and has never been sent. The app
+				// upserts by id, so a record seen twice costs nothing.
+				tail = jsonl.NewTail(current.transcript)
+			}
+
 			lines, err := tail.Read()
 			if err != nil {
 				if os.IsNotExist(err) {

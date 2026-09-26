@@ -304,3 +304,65 @@ func appendJSONL(t *testing.T, path string, record any) {
 		t.Fatal(err)
 	}
 }
+
+// Regression: Follow captured the transcript once and tailed that path for the
+// life of the subscription. Codex opens a new rollout when a conversation is
+// resumed or forked and discovery rebinds the session to it — after which the
+// old tail followed a file nobody writes to again and the phone simply stopped
+// receiving anything, while the session still looked alive.
+func TestCodexFollowSwitchesWhenTheTranscriptIsRebound(t *testing.T) {
+	home := t.TempDir()
+	now := time.Now()
+	first := writeCodexRollout(t, home, "thread-first", "thread-first", "/work/api",
+		now, now.Add(-time.Minute), "task_started")
+
+	src, err := NewCodexSource(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.processCheck = alwaysRunning
+	src.listPanes = noPanes
+	if _, err := src.Discover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out := make(chan []protocol.Message, 8)
+	done := make(chan error, 1)
+	go func() { done <- src.Follow(ctx, "codex:thread-first", out) }()
+
+	// A resumed conversation: a new rollout, carrying the first one's lineage.
+	second := writeCodexRollout(t, home, "thread-second", "thread-first", "/work/api",
+		now.Add(time.Second), time.Now(), "task_started")
+	appendJSONL(t, second, obj{"timestamp": time.Now().Format(time.RFC3339Nano),
+		"type": "event_msg", "payload": obj{"type": "item_completed", "item": obj{
+			"type": "AgentMessage", "id": "am-after-resume",
+			"content": []any{obj{"type": "Text", "text": "carried on"}}}}})
+
+	// Rebind the subscription's session to the new rollout, as discovery does.
+	src.mu.Lock()
+	session := src.sessions["codex:thread-first"]
+	session.transcript = second
+	src.sessions["codex:thread-first"] = session
+	src.mu.Unlock()
+	_ = first
+
+	deadline := time.After(8 * time.Second)
+	for {
+		select {
+		case batch := <-out:
+			for _, message := range batch {
+				if strings.Contains(message.Text, "carried on") {
+					cancel()
+					<-done
+					return
+				}
+			}
+		case <-deadline:
+			cancel()
+			<-done
+			t.Fatal("nothing arrived from the rollout the session was rebound to")
+		}
+	}
+}
