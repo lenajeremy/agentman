@@ -5,7 +5,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -20,6 +19,7 @@ import { Appear } from "../components/Appear";
 import { ContentColumn } from "../components/ContentColumn";
 import { MotionPressable } from "../components/MotionPressable";
 import { pair, pairWithToken } from "../lib/client";
+import { confirmPairingReplacement } from "../lib/confirm";
 import { DEFAULT_RELAY } from "../lib/pairing";
 import { useStore } from "../lib/store";
 import { PAIRING_CODE_LENGTH } from "../lib/protocol";
@@ -63,6 +63,7 @@ export default function Pair() {
         }
         router.replace("/");
       } catch (err) {
+        handledLink.current = null;
         setError(
           err instanceof Error
             ? err.message
@@ -78,21 +79,11 @@ export default function Pair() {
       return;
     }
 
-    Alert.alert(
+    confirmPairingReplacement(
       "Pair with a different Mac?",
       "This will replace the relay currently paired with Agentman on this phone.",
-      [
-        {
-          text: "Cancel",
-          style: "cancel",
-          onPress: () => router.replace("/"),
-        },
-        {
-          text: "Pair",
-          onPress: () => void redeem(),
-        },
-      ],
-      { cancelable: false },
+      () => void redeem(),
+      () => router.replace("/"),
     );
   }, [params.relay, params.token, router, store]);
 
@@ -460,4 +451,3 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 });
-

@@ -5,7 +5,6 @@ import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   StyleProp,
   StyleSheet,
@@ -28,6 +27,7 @@ import { Appear } from "../components/Appear";
 import { ContentColumn } from "../components/ContentColumn";
 import { MotionPressable } from "../components/MotionPressable";
 import { pairWithToken } from "../lib/client";
+import { confirmPairingReplacement } from "../lib/confirm";
 import { parsePairingPayload } from "../lib/pairing";
 import { useStore } from "../lib/store";
 import { color, font, radius, size, space } from "../lib/theme";
@@ -83,24 +83,14 @@ export default function Scan() {
       if (store.credentials) {
         // Redeeming a QR consumes its one-time token. Confirm before doing that
         // or silently replacing the Mac this phone is already paired with.
-        Alert.alert(
+        confirmPairingReplacement(
           "Replace current pairing?",
-          "This QR code points to a different Agentman setup.",
-          [
-            {
-              text: "Cancel",
-              style: "cancel",
-              onPress: () => {
-                setBusy(false);
-                handled.current = false;
-              },
-            },
-            {
-              text: "Replace",
-              style: "destructive",
-              onPress: () => void redeem(),
-            },
-          ],
+          "This will replace the relay currently paired with Agentman on this phone.",
+          () => void redeem(),
+          () => {
+            setBusy(false);
+            handled.current = false;
+          },
         );
         return;
       }

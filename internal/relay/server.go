@@ -651,10 +651,17 @@ func (s *Server) pump(
 				// nothing, and a prompt failure is more honest than a message
 				// that silently arrives an hour later.
 				online, lastSeen := s.hub.DaemonOnline(account)
-				_ = online
-				notice := protocol.Control{Type: protocol.CtlDaemonOffline}
-				if !lastSeen.IsZero() {
-					notice.LastSeenAt = lastSeen.UnixMilli()
+				notice := protocol.Control{}
+				if online {
+					// A replacement daemon may have won the race after ToDaemon
+					// took its snapshot. Do not send a stale offline transition
+					// after the replacement's online event.
+					notice = protocol.Control{Type: protocol.CtlError, Message: "daemon connection changed; retry the request"}
+				} else {
+					notice.Type = protocol.CtlDaemonOffline
+					if !lastSeen.IsZero() {
+						notice.LastSeenAt = lastSeen.UnixMilli()
+					}
 				}
 				_ = sendControlReply(conn, envelope.ID, notice)
 			}
