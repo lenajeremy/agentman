@@ -285,6 +285,18 @@ func (s *ClaudeSource) Answer(ctx context.Context, sessionID string, answer prot
 	if !sameQuestion(session.meta.Question, protocolQuestion(current)) {
 		return fmt.Errorf("source: that question is no longer on screen; refresh the session")
 	}
+	if current.WorkspaceTrust {
+		if answer.Text != "" || len(answer.Options) > 0 ||
+			(answer.OptionKey != "yes" && answer.OptionKey != "no") {
+			return fmt.Errorf("source: select a listed workspace trust choice")
+		}
+		target := 0
+		if answer.OptionKey == "yes" {
+			target = 1
+		}
+		return tmux.AnswerWorkspaceTrust(ctx, session.tmuxName, answer.OptionKey,
+			target-current.FocusIndex)
+	}
 
 	if current.Multiple {
 		return answerClaudeMultiple(ctx, session.tmuxName, current, answer)

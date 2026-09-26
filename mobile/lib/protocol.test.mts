@@ -72,6 +72,17 @@ test("accepts bounded workspace views and rejects unsafe image payloads", () => 
   } }), null);
 });
 
+test("accepts launch replies and bounds directory listings", () => {
+  assert.ok(decodeDaemonEvent({ type: "directories", path: "Desktop",
+    directories: ["agentman", "project"] }));
+  assert.ok(decodeDaemonEvent({ type: "directories", path: "Desktop/empty" }));
+  assert.ok(decodeDaemonEvent({ type: "session_started", sessionId: "claude:abc" }));
+  assert.equal(decodeDaemonEvent({ type: "session_started", sessionId: "" }), null);
+  assert.equal(decodeDaemonEvent({ type: "directories", directories: [4] }), null);
+  assert.equal(decodeDaemonEvent({ type: "directories",
+    directories: Array.from({ length: 201 }, (_, index) => `dir-${index}`) }), null);
+});
+
 test("rejects malformed websocket envelopes and payloads", () => {
   assert.equal(decodeEnvelope("not json"), null);
   assert.equal(decodeEnvelope(JSON.stringify({

@@ -53,6 +53,8 @@ type Question struct {
 	// PreviewLayout means numeric shortcuts are not accepted. The option must
 	// be focused with arrows and selected with Enter before any tab advance.
 	PreviewLayout bool `json:"-"`
+	// WorkspaceTrust is Claude's unnumbered first-run folder confirmation.
+	WorkspaceTrust bool `json:"-"`
 }
 
 // Option is one selectable answer.
@@ -142,6 +144,9 @@ func Detect(pane string) *Question {
 	lines := strings.Split(strings.TrimRight(pane, "\n"), "\n")
 	if len(lines) > maxScan {
 		lines = lines[len(lines)-maxScan:]
+	}
+	if trust := detectWorkspaceTrust(lines); trust != nil {
+		return trust
 	}
 	previewColumn := findPreviewColumn(lines)
 	advanceWithTab := strings.Contains(
@@ -470,6 +475,56 @@ func Detect(pane string) *Question {
 		return nil
 	}
 	return q
+}
+
+// Claude's first-run workspace prompt has arrow-key choices instead of the
+// numbered options used by its other approval menus.
+func detectWorkspaceTrust(lines []string) *Question {
+	end := len(lines) - 1
+	for end >= 0 && strings.TrimSpace(lines[end]) == "" {
+		end--
+	}
+	if end < 0 || strings.TrimSpace(lines[end]) != "Enter to confirm · Esc to cancel" {
+		return nil
+	}
+	var path string
+	no, yes := false, false
+	focus := -1
+	for index, line := range lines[:end] {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "Accessing workspace:" {
+			for next := index + 1; next < end; next++ {
+				if value := strings.TrimSpace(lines[next]); value != "" {
+					path = value
+					break
+				}
+			}
+		}
+		switch trimmed {
+		case "No, exit", "❯ No, exit":
+			no = true
+			if strings.HasPrefix(trimmed, "❯") {
+				focus = 0
+			}
+		case "Yes, I trust this folder", "❯ Yes, I trust this folder":
+			yes = true
+			if strings.HasPrefix(trimmed, "❯") {
+				focus = 1
+			}
+		}
+	}
+	if !strings.HasPrefix(path, "/") || !no || !yes || focus < 0 ||
+		!strings.Contains(strings.Join(lines[:end], "\n"), "Quick safety check: Is this a project you created or one you trust?") {
+		return nil
+	}
+	return &Question{
+		Title: "Workspace trust", Prompt: "Do you trust this folder?", Detail: path,
+		Options: []Option{
+			{Key: "no", Label: "No, exit", Selected: focus == 0},
+			{Key: "yes", Label: "Yes, I trust this folder", Selected: focus == 1},
+		},
+		FocusIndex: focus, WorkspaceTrust: true,
+	}
 }
 
 func isReviewOptions(options []Option) bool {

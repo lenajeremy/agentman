@@ -279,10 +279,12 @@ export class Client {
 		const daemonEvent = decodeDaemonEvent(envelope.payload);
 		if (!daemonEvent) return;
 		if (envelope.replyTo) {
-		  if (daemonEvent.type === "page" || daemonEvent.type === "workspace" || daemonEvent.type === "error") {
+		  if (daemonEvent.type === "page" || daemonEvent.type === "workspace" ||
+		      daemonEvent.type === "directories" || daemonEvent.type === "error") {
 			this.replayable.delete(envelope.replyTo);
 		  }
-		  if (daemonEvent.type === "send_result") this.finishAction(envelope.replyTo);
+		  if (daemonEvent.type === "send_result" || daemonEvent.type === "session_started" ||
+		      daemonEvent.type === "error") this.finishAction(envelope.replyTo);
 		}
 	    this.handlers.onEvent(daemonEvent, envelope.replyTo);
 	  }
@@ -357,7 +359,7 @@ export class Client {
     const id = newFrameId();
 	if (request.type === "fetch_messages" || request.type === "list_files" ||
 	    request.type === "read_file" || request.type === "list_changes" ||
-	    request.type === "file_diff") {
+	    request.type === "file_diff" || request.type === "list_directories") {
 	  // Queue while offline and replay after a disconnect. Bound the queue so a
 	  // broken caller cannot retain arbitrary request state forever.
 	  if (this.replayable.size >= 64) return null;
@@ -373,7 +375,7 @@ export class Client {
 		  id,
 		  "The daemon did not confirm this action in time. Check the session before retrying.",
 		);
-	  }, ACTION_TIMEOUT_MS));
+	  }, request.type === "start_session" ? 30_000 : ACTION_TIMEOUT_MS));
 	}
 	if (!this.write(id, request)) {
 	  this.finishAction(id);
@@ -413,6 +415,10 @@ export class Client {
 	const request = this.inFlightActions.get(id);
 	if (!request) return;
 	this.finishAction(id);
+	if (request.type === "start_session") {
+	  this.handlers.onEvent({ type: "error", error: message }, id);
+	  return;
+	}
 	this.handlers.onEvent({
 	  type: "send_result",
 	  sessionId: request.sessionId,
@@ -469,7 +475,7 @@ export class Client {
 
 function isAction(request: Request): boolean {
   return request.type === "send_message" || request.type === "interrupt" ||
-    request.type === "answer_question";
+	    request.type === "answer_question" || request.type === "start_session";
 }
 
 // React Native supports upgrade headers in the third constructor argument,

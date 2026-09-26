@@ -422,6 +422,43 @@ func Answer(ctx context.Context, name, key string) error {
 	return nil
 }
 
+// AnswerWorkspaceTrust selects Claude's unnumbered first-run folder prompt.
+// Verify the exact active control after moving focus; Enter on a stale pane
+// could otherwise approve a different action that appeared in the meantime.
+func AnswerWorkspaceTrust(ctx context.Context, name, choice string, focusDistance int) error {
+	if choice != "yes" && choice != "no" {
+		return errors.New("tmux: invalid workspace trust choice")
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	if err := moveFocus(ctx, name, focusDistance); err != nil {
+		return err
+	}
+	if focusDistance != 0 {
+		time.Sleep(45 * time.Millisecond)
+	}
+	pane, err := Capture(ctx, name)
+	if err != nil {
+		return err
+	}
+	label := "Yes, I trust this folder"
+	if choice == "no" {
+		label = "No, exit"
+	}
+	lines := strings.Split(strings.TrimSpace(pane), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[len(lines)-1]) != "Enter to confirm · Esc to cancel" ||
+		!strings.Contains(pane, "Accessing workspace:") ||
+		!regexp.MustCompile(`(?m)^\s*❯\s*`+regexp.QuoteMeta(label)+`\s*$`).MatchString(
+			strings.Join(lines[max(0, len(lines)-8):], "\n")) {
+		return errors.New("tmux: Claude's workspace trust choice changed; refresh the session")
+	}
+	if _, err := run(ctx, "send-keys", "-t", name, "Enter"); err != nil {
+		return fmt.Errorf("tmux: could not answer workspace trust: %w", err)
+	}
+	return nil
+}
+
 // AnswerSingleForm records a single choice in Claude's tabbed or preview
 // question form. Those layouts do not accept numeric shortcuts: the desired
 // row has to receive focus and Enter before Tab can advance the form.
