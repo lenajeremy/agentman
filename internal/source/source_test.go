@@ -74,12 +74,21 @@ func fakeClaudeHome(t *testing.T, cwd, sessionID, status string) string {
 	return home
 }
 
-func TestClaudeDiscoverReportsLiveSession(t *testing.T) {
-	home := fakeClaudeHome(t, "/Users/me/work/proj", "sess-1", "busy")
+func isolatedClaudeSource(t *testing.T, home string) *ClaudeSource {
+	t.Helper()
 	src, err := NewClaudeSource(home)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Unit fixtures must not inherit Agentman panes running on the developer's
+	// Mac. Pane discovery has its own focused tests.
+	src.listPanes = nil
+	return src
+}
+
+func TestClaudeDiscoverReportsLiveSession(t *testing.T) {
+	home := fakeClaudeHome(t, "/Users/me/work/proj", "sess-1", "busy")
+	src := isolatedClaudeSource(t, home)
 
 	sessions, err := src.Discover(context.Background())
 	if err != nil {
@@ -114,7 +123,7 @@ func TestClaudeIgnoresSessionsWhoseProcessIsGone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	src, _ := NewClaudeSource(home)
+	src := isolatedClaudeSource(t, home)
 	sessions, err := src.Discover(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -212,7 +221,7 @@ func TestClaudeFindsTranscriptWhenSlugRuleFails(t *testing.T) {
 }
 
 func TestClaudeDiscoverOnMachineWithoutClaude(t *testing.T) {
-	src, _ := NewClaudeSource(t.TempDir())
+	src := isolatedClaudeSource(t, t.TempDir())
 	sessions, err := src.Discover(context.Background())
 	if err != nil {
 		t.Fatalf("a missing install must not be an error: %v", err)
@@ -367,7 +376,7 @@ func TestRegistryPreservesLastSnapshotAcrossTransientAdapterFailure(t *testing.T
 
 func TestRegistryRoutesAndOrders(t *testing.T) {
 	home := fakeClaudeHome(t, "/Users/me/work/proj", "sess-1", "busy")
-	claude, _ := NewClaudeSource(home)
+	claude := isolatedClaudeSource(t, home)
 
 	reg := NewRegistry()
 	reg.Add(claude)
