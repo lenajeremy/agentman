@@ -368,6 +368,108 @@ func TestCodexFollowSwitchesWhenTheTranscriptIsRebound(t *testing.T) {
 	}
 }
 
+// Regression: an npm-installed Codex was not merely reported idle, it was
+// invisible.
+//
+// The npm package is a `#!/usr/bin/env node` script, so tmux reports `node` as
+// the pane's command and `pgrep -x codex` matches nothing. Discovery skipped
+// the pane for having the wrong command name, and the failing process probe
+// then cleared every Codex session on the machine on every sweep.
+func TestCodexSeesAnNpmInstallWhosePaneReportsNode(t *testing.T) {
+	home := t.TempDir()
+	now := time.Now()
+	writeCodexRollout(t, home, "thread-npm", "thread-npm", "/work/api",
+		now.Add(-time.Minute), now.Add(-10*time.Second), "task_started")
+
+	src, err := NewCodexSource(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// pgrep -x codex finds nothing: the process is named node.
+	src.processCheck = func(context.Context) bool { return false }
+	src.listPanes = func(context.Context) ([]tmux.Session, error) {
+		return []tmux.Session{{
+			Name:    "agentman-codex-1758900000000-ab12",
+			Command: "node",
+			Cwd:     "/work/api",
+			PanePID: 4242,
+			Created: now.Add(-2 * time.Minute),
+		}}, nil
+	}
+
+	found, err := src.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 {
+		t.Fatalf("got %d sessions, want the one running under node", len(found))
+	}
+	if found[0].State != protocol.StateBusy {
+		t.Errorf("state = %s, want busy", found[0].State)
+	}
+	if found[0].Inject != protocol.InjectTmux {
+		t.Errorf("inject = %v, want tmux: nothing can be sent to the session otherwise", found[0].Inject)
+	}
+}
+
+// A Codex pane is proof Codex is running even when the process probe disagrees,
+// because that gate does not downgrade a session — it deletes it.
+func TestCodexKeepsSessionsWhenTheProcessProbeCannotSeeTheInstall(t *testing.T) {
+	home := t.TempDir()
+	now := time.Now()
+	writeCodexRollout(t, home, "thread-npm", "thread-npm", "/work/api",
+		now.Add(-time.Minute), now.Add(-10*time.Second), "task_started")
+
+	src, err := NewCodexSource(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probed := false
+	src.processCheck = func(context.Context) bool { probed = true; return false }
+	src.listPanes = func(context.Context) ([]tmux.Session, error) {
+		return []tmux.Session{{
+			Name: "agentman-codex-1758900000000-ab12", Command: "node",
+			Cwd: "/work/api", PanePID: 4242, Created: now.Add(-2 * time.Minute),
+		}}, nil
+	}
+	if _, err := src.Discover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	src.mu.RLock()
+	tracked := len(src.sessions)
+	src.mu.RUnlock()
+	if tracked == 0 {
+		t.Error("the session map was cleared while a Codex pane was open")
+	}
+	if probed {
+		t.Error("an open Codex pane already settles liveness; pgrep should not have run")
+	}
+}
+
+// With no pane to vouch for it, a negative probe still clears everything — the
+// ghost sessions that check exists to remove.
+func TestCodexClearsSessionsWhenNothingIsRunning(t *testing.T) {
+	home := t.TempDir()
+	now := time.Now()
+	writeCodexRollout(t, home, "thread-gone", "thread-gone", "/work/api",
+		now.Add(-time.Minute), now.Add(-10*time.Second), "task_started")
+
+	src, err := NewCodexSource(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.processCheck = func(context.Context) bool { return false }
+	src.listPanes = noPanes
+	found, err := src.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 0 {
+		t.Errorf("got %d sessions, want none: no codex process and no pane", len(found))
+	}
+}
+
 // Regression: stepping away for half an hour cost a session its history.
 //
 // The live window exists to stop a rollout nobody is running from lingering as

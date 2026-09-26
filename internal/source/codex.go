@@ -69,6 +69,21 @@ const codexPaneStartTolerance = 2 * time.Second
 // older than this are still found once seen, through the cache; see scanDirs.
 const codexScanDays = 14
 
+// codexPanePrefix names the tmux sessions agentman launches for Codex.
+//
+// This, not the running program's name, is what identifies a Codex pane. tmux
+// reports the foreground command, and that is only "codex" for an install
+// whose executable is a real binary — Homebrew's, or a downloaded release. An
+// npm install is a `#!/usr/bin/env node` script, so the pane reports `node`
+// and a match on the command name misses it completely. The name is the
+// stronger signal in any case: agentman chose it, and tmux.List returns
+// nothing else.
+const codexPanePrefix = tmux.Prefix + "codex-"
+
+// codexArgvPattern matches codex as a path component or bare word in a process
+// argument list: `codex`, `/opt/homebrew/bin/codex`, `node .../bin/codex.js`.
+const codexArgvPattern = `(^|[/[:space:]])codex(\.[cm]?js)?([[:space:]]|$)`
+
 // codexRunning reports whether any codex process is alive.
 //
 // A missing pgrep (or any other failure) returns true rather than false: it is
@@ -80,7 +95,19 @@ func codexRunning(ctx context.Context) bool {
 	if _, err := exec.LookPath("pgrep"); err != nil {
 		return true
 	}
-	err := exec.CommandContext(ctx, "pgrep", "-x", "codex").Run()
+	// An exact name match is the cheap probe with no false positives, and it
+	// finds an install whose executable is a binary.
+	if exec.CommandContext(ctx, "pgrep", "-x", "codex").Run() == nil {
+		return true
+	}
+	// An npm install runs through Node, so the process is named `node` and the
+	// exact match above cannot see it. Before this second probe existed, such
+	// a machine failed the liveness check on every sweep and every Codex
+	// session was cleared away — Codex was not merely reported idle there, it
+	// was invisible. Matching the argument list can also match a process that
+	// only mentions codex, which is the harmless direction: a rollout still
+	// has to be recent before it surfaces as a session.
+	err := exec.CommandContext(ctx, "pgrep", "-f", codexArgvPattern).Run()
 	if err == nil {
 		return true
 	}
@@ -91,6 +118,25 @@ func codexRunning(ctx context.Context) bool {
 		return false
 	}
 	return true
+}
+
+// isCodexPane reports whether a tmux session agentman owns is running Codex.
+//
+// The command name is still accepted so a pane launched under an older naming
+// scheme keeps working, but the name alone is enough.
+func isCodexPane(pane tmux.Session) bool {
+	return strings.HasPrefix(pane.Name, codexPanePrefix) || pane.Command == "codex"
+}
+
+// anyCodexPane reports whether a Codex pane is open, which is direct proof
+// Codex is running and does not depend on pgrep recognising the install.
+func anyCodexPane(panes []tmux.Session) bool {
+	for _, pane := range panes {
+		if isCodexPane(pane) {
+			return true
+		}
+	}
+	return false
 }
 
 // CodexSource observes Codex rollout transcripts.
@@ -215,7 +261,22 @@ func (s *CodexSource) sessionsDir() string {
 
 // Discover implements Source.
 func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) {
-	if s.processCheck != nil && !s.processCheck(ctx) {
+	// Codex writes no pid to its rollout, so a session is matched to a tmux
+	// pane by working directory. That is weaker than Claude's pid ancestry —
+	// two Codex sessions in one directory would be ambiguous — so a directory
+	// running more than one is left unmatched rather than risking delivery to
+	// the wrong agent.
+	var panes []tmux.Session
+	if s.listPanes != nil {
+		panes, _ = s.listPanes(ctx)
+	}
+
+	// An open Codex pane is checked before the process probe, and not only to
+	// save a subprocess. It is the better evidence: pgrep cannot recognise
+	// every install, and this gate clears the whole session map when it says
+	// no, so a probe that fails to see a running Codex does not report it idle
+	// — it hides it. A pane agentman opened for Codex settles the question.
+	if !anyCodexPane(panes) && s.processCheck != nil && !s.processCheck(ctx) {
 		s.mu.Lock()
 		s.sessions = map[string]codexSession{}
 		s.mu.Unlock()
@@ -245,19 +306,10 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	}
 	s.mu.RUnlock()
 
-	// Codex writes no pid to its rollout, so a session is matched to a tmux
-	// pane by working directory. That is weaker than Claude's pid ancestry —
-	// two Codex sessions in one directory would be ambiguous — so a directory
-	// running more than one is left unmatched rather than risking delivery to
-	// the wrong agent.
-	var panes []tmux.Session
-	if s.listPanes != nil {
-		panes, _ = s.listPanes(ctx)
-	}
 	paneByCwd := map[string]tmux.Session{}
 	ambiguous := map[string]bool{}
 	for _, pane := range panes {
-		if pane.Command != "codex" {
+		if !isCodexPane(pane) {
 			continue
 		}
 		if _, seen := paneByCwd[pane.Cwd]; seen {
@@ -463,7 +515,7 @@ func tmuxID(tmuxName string) string {
 // vouches for the rollout it was reading.
 func paneStillOpen(panes []tmux.Session, name string) bool {
 	for _, pane := range panes {
-		if pane.Name == name && pane.Command == "codex" {
+		if pane.Name == name && isCodexPane(pane) {
 			return true
 		}
 	}
