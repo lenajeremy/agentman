@@ -10,8 +10,36 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/tmux"
 )
+
+func TestPhoneLaunchedClaudeVisibleBeforeRegistryExists(t *testing.T) {
+	home := t.TempDir()
+	source, err := NewClaudeSource(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const uuid = "550e8400-e29b-41d4-a716-446655440000"
+	pane := tmux.Session{Name: tmux.Prefix + "claude-" + uuid,
+		PanePID: 12345, Cwd: "/Users/me/project", Created: time.Now()}
+	source.listPanes = func(context.Context) ([]tmux.Session, error) {
+		return []tmux.Session{pane}, nil
+	}
+	source.snapshotProcesses = nil
+	sessions, err := source.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].ID != "claude:"+uuid ||
+		sessions[0].Inject != protocol.InjectTmux {
+		t.Fatalf("early Claude session = %+v", sessions)
+	}
+	page, err := source.Page(context.Background(), sessions[0].ID, "", 10)
+	if err != nil || len(page.Messages) != 0 {
+		t.Fatalf("page before transcript = %+v, %v", page, err)
+	}
+}
 
 func TestClaudeDiscoveryTakesOneProcessSnapshotForManyCandidates(t *testing.T) {
 	home := t.TempDir()

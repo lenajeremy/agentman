@@ -136,6 +136,9 @@ type Daemon struct {
 	serverLists map[string][]protocol.Server
 	// serverScanInterval is a field so tests can scan quickly.
 	serverScanInterval time.Duration
+	// A launch request is never replayed automatically, but a manual retry with
+	// the same client ID must return the original process rather than fork it.
+	launches map[string]string
 }
 
 // follow is one live tail. It is tracked by pointer identity so that a
@@ -185,6 +188,7 @@ func New(registry *source.Registry, sink Transport) *Daemon {
 		serverLists:        map[string][]protocol.Server{},
 		serverScanInterval: serverScanInterval,
 		seen:               newSeenPaths(),
+		launches:           map[string]string{},
 	}
 }
 
@@ -864,6 +868,20 @@ func (d *Daemon) HandleFrom(
 	case protocol.ReqListSessions:
 		return protocol.Event{Type: protocol.EvtSessions, Sessions: d.snapshot()}
 
+	case protocol.ReqListDirectories:
+		names, err := listLaunchDirectories(req.Path)
+		if err != nil {
+			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
+		}
+		return protocol.Event{Type: protocol.EvtDirectories, Path: req.Path, Directories: names}
+
+	case protocol.ReqStartSession:
+		id, err := d.startLocalSession(ctx, req)
+		if err != nil {
+			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
+		}
+		return protocol.Event{Type: protocol.EvtSessionStarted, SessionID: id}
+
 	case protocol.ReqFetchMessages:
 		limit := req.Limit
 		if limit <= 0 || limit > maxPageMessages {
@@ -1000,7 +1018,7 @@ func (d *Daemon) HandleFrom(
 
 func requestMutatesSession(kind protocol.RequestType) bool {
 	return kind == protocol.ReqSendMessage || kind == protocol.ReqAnswer ||
-		kind == protocol.ReqInterrupt
+		kind == protocol.ReqInterrupt || kind == protocol.ReqStartSession
 }
 
 func (d *Daemon) actionLock(sessionID string) *sync.Mutex {
@@ -1075,6 +1093,17 @@ func validateRequest(req protocol.Request) error {
 	switch req.Type {
 	case protocol.ReqListSessions, protocol.ReqSubscribe, protocol.ReqUnsubscribe,
 		protocol.ReqFetchMessages, protocol.ReqInterrupt, protocol.ReqRegisterPush:
+		return nil
+	case protocol.ReqListDirectories:
+		return validateLaunchPath(req.Path, true)
+	case protocol.ReqStartSession:
+		if req.ClientID == "" || validateLaunchPath(req.Path, false) != nil ||
+			(req.Kind != protocol.KindClaude && req.Kind != protocol.KindCodex &&
+				req.Kind != protocol.KindCursorCLI && req.Kind != protocol.KindOpenCode) ||
+			strings.TrimSpace(req.Text) == "" || len(req.Text) > maxMessageBytes ||
+			containsTerminalControl(req.Text) {
+			return fmt.Errorf("daemon: invalid session launch")
+		}
 		return nil
 	case protocol.ReqOpenServer, protocol.ReqCloseServer, protocol.ReqStopServer:
 		if req.Port < 1 || req.Port > 65535 {

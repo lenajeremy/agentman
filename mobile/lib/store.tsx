@@ -130,6 +130,8 @@ interface Store {
   /** End the process listening on a port. Nothing here can start it again. */
   stopServer(sessionId: string, port: number): Promise<void>;
   workspace(sessionId: string, type: "list_files" | "read_file" | "list_changes" | "file_diff" | "read_seen_file", path?: string): Promise<WorkspaceResult>;
+  listDirectories(path: string): Promise<string[]>;
+  startSession(kind: "claude" | "codex" | "cursor-cli" | "opencode", path: string, text: string): Promise<string>;
 }
 
 /** How long a tap on a server waits for the Mac to open its link. The daemon
@@ -144,6 +146,12 @@ interface ServerRequest {
 
 interface WorkspaceRequest {
   resolve(result: WorkspaceResult): void;
+  reject(error: Error): void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+interface LaunchRequest {
+  resolve(event: DaemonEvent): void;
   reject(error: Error): void;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -219,6 +227,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   /** open_server requests waiting for their link, by frame id. */
   const serverRequests = useRef(new Map<string, ServerRequest>());
   const workspaceRequests = useRef(new Map<string, WorkspaceRequest>());
+  const launchRequests = useRef(new Map<string, LaunchRequest>());
+
+  const settleLaunchRequest = useCallback((replyTo: string, event?: DaemonEvent) => {
+    const request = launchRequests.current.get(replyTo);
+    if (!request) return false;
+    launchRequests.current.delete(replyTo);
+    clearTimeout(request.timer);
+    clientRef.current?.cancelRead(replyTo);
+    if (event?.type === "error") request.reject(new Error(event.error || "The Mac could not start this agent."));
+    else if (event) request.resolve(event);
+    else request.reject(new Error("The Mac did not answer. Check Agents before trying again."));
+    return true;
+  }, []);
+
+  const clearLaunchRequests = useCallback(() => {
+    for (const [id, request] of launchRequests.current) {
+      clearTimeout(request.timer);
+      clientRef.current?.cancelRead(id);
+      request.reject(new Error("The Mac connection changed."));
+    }
+    launchRequests.current.clear();
+  }, []);
 
   const settleWorkspaceRequest = useCallback((replyTo: string, result?: WorkspaceResult, error?: string) => {
     const request = workspaceRequests.current.get(replyTo);
@@ -518,6 +548,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         break;
       }
 
+      case "directories":
+      case "session_started": {
+        if (replyTo) settleLaunchRequest(replyTo, event);
+        break;
+      }
+
       case "send_result": {
         if (!event.clientId) break;
         setPending((current) => {
@@ -532,6 +568,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
 
 	  case "error": {
+		if (replyTo && settleLaunchRequest(replyTo, event)) break;
 		if (replyTo && settleWorkspaceRequest(replyTo, undefined, event.error)) break;
 		if (replyTo && settleServerRequest(replyTo, undefined, serverErrorMessage(event.error))) break;
 		// A failed history request must release its loading state. Otherwise a
@@ -551,11 +588,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 		break;
 	  }
     }
-  }, [mergeSessionMessages, settleServerRequest, settleWorkspaceRequest]);
+  }, [mergeSessionMessages, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest]);
 
   const attach = useCallback(
     (creds: Credentials) => {
       clearWorkspaceRequests();
+      clearLaunchRequests();
       clientRef.current?.close();
       const client = new Client(creds, {
         onEvent: handleEvent,
@@ -574,6 +612,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           }
           if (replyTo && control.type === "error") {
             settleWorkspaceRequest(replyTo, undefined, control.message);
+            settleLaunchRequest(replyTo, { type: "error", error: control.message || "The relay rejected this request." });
           }
           // An offline Mac is transient, so the Client retains idempotent reads
           // for replay. A relay error is permanent for that exact request and
@@ -659,7 +698,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       pendingCatchUps.current.clear();
       client.connect();
     },
-    [handleEvent, clearWorkspaceRequests],
+    [handleEvent, clearWorkspaceRequests, clearLaunchRequests, settleLaunchRequest],
   );
 
   useEffect(() => {
@@ -672,9 +711,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     })();
     return () => {
       clearWorkspaceRequests();
+      clearLaunchRequests();
       clientRef.current?.close();
     };
-  }, [attach, clearWorkspaceRequests]);
+  }, [attach, clearWorkspaceRequests, clearLaunchRequests]);
 
   // Restore what the user hid before the app was last closed.
   useEffect(() => {
@@ -733,6 +773,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       async signOut() {
         clearWorkspaceRequests();
+        clearLaunchRequests();
         clientRef.current?.close();
         clientRef.current = null;
         await clearCredentials();
@@ -1023,8 +1064,41 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           workspaceRequests.current.set(id, { resolve, reject, timer });
         });
       },
+
+      listDirectories(path) {
+        return new Promise<string[]>((resolve, reject) => {
+          const id = clientRef.current?.send({ type: "list_directories", path });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
+          launchRequests.current.set(id, {
+            resolve: (event) => resolve(event.directories ?? []), reject, timer,
+          });
+        });
+      },
+
+      startSession(kind, path, text) {
+        return new Promise<string>((resolve, reject) => {
+          const id = clientRef.current?.send({
+            type: "start_session", kind, path, text, clientId: newFrameId(),
+          });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
+          launchRequests.current.set(id, {
+            resolve: (event) => {
+              if (event.sessionId) resolve(event.sessionId);
+              else reject(new Error("The Mac started an agent but returned no session ID."));
+            }, reject, timer,
+          });
+        });
+      },
     }),
-    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, attach, settleServerRequest, settleWorkspaceRequest],
+    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest],
   );
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
