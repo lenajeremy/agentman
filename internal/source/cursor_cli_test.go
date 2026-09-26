@@ -103,24 +103,49 @@ func TestCursorCLIFollowEmitsGrowingAssistantRow(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	out := make(chan []protocol.Message, 1)
+	out := make(chan []protocol.Message, 16)
 	done := make(chan error, 1)
 	go func() { done <- source.Follow(ctx, sessions[0].ID, out) }()
-	time.Sleep(100 * time.Millisecond)
-	update := `UPDATE blobs SET data='{"role":"assistant","content":[{"type":"text","text":"First reply, continued"}]}' WHERE id='blob-3'`
-	if output, err := exec.Command("sqlite3", store, update).CombinedOutput(); err != nil {
-		t.Fatalf("update fixture: %v: %s", err, output)
-	}
-	select {
-	case batch := <-out:
-		if len(batch) != 1 || batch[0].Text != "First reply, continued" {
-			t.Fatalf("unexpected updated row: %+v", batch)
+
+	// Follow takes its baseline from the store when it starts, so a single
+	// update written after a fixed sleep is a race with two ways to lose: the
+	// sleep is not long enough on a loaded machine, or the update lands first
+	// and becomes the baseline, after which the row never changes again and
+	// there is nothing to emit. Keep rewriting the row with a new value until
+	// one of them comes back — whatever baseline Follow holds, the next poll
+	// differs from it.
+	const grown = "First reply, continued"
+	deadline := time.Now().Add(20 * time.Second)
+	for attempt := 0; ; attempt++ {
+		if time.Now().After(deadline) {
+			t.Fatal("growing Cursor CLI reply was not followed")
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("growing Cursor CLI reply was not followed")
+		text := fmt.Sprintf("%s %d", grown, attempt)
+		// busy_timeout because the poller holds a read lock while it reads, and
+		// a write that arrives during one is normal rather than a failure. A
+		// lock that outlasts even that is still not a failure here: the next
+		// attempt writes the same kind of change a moment later.
+		update := fmt.Sprintf(
+			`PRAGMA busy_timeout=5000; UPDATE blobs SET data='{"role":"assistant","content":[{"type":"text","text":%q}]}' WHERE id='blob-3'`,
+			text)
+		if output, err := exec.Command("sqlite3", store, update).CombinedOutput(); err != nil {
+			if !strings.Contains(string(output), "locked") {
+				t.Fatalf("update fixture: %v: %s", err, output)
+			}
+		}
+		select {
+		case batch := <-out:
+			if len(batch) != 1 || !strings.HasPrefix(batch[0].Text, grown) {
+				t.Fatalf("unexpected updated row: %+v", batch)
+			}
+			cancel()
+			<-done
+			return
+		case err := <-done:
+			t.Fatalf("the subscription ended after %d attempts: %v", attempt, err)
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
-	cancel()
-	<-done
 }
 
 func TestCursorCLIManagedPaneKeepsStableSessionIDWhenChatAppears(t *testing.T) {
