@@ -42,11 +42,19 @@ const codexLiveWindow = 30 * time.Minute
 // a discovery sweep.
 const processCheckTimeout = 2 * time.Second
 
-// codexActivityScanBytes bounds the once-per-discovery search for a recent
-// turn boundary. Large tool records may require finishing one bounded JSONL
-// line beyond this budget, but a transcript containing no state events can no
-// longer consume an unbounded amount of work every second.
-const codexActivityScanBytes int64 = 1024 * 1024
+// codexActivityScanBytes bounds the search back through a rollout for its most
+// recent turn boundary.
+//
+// This used to run on every sweep, so it had to stay small — and a megabyte is
+// not enough: one 78MB rollout on this machine sat with its task_started a
+// megabyte behind the end, and past that the scan found no boundary at all and
+// the session was reported idle while it was plainly working.
+//
+// It now runs once per rollout, with a forward tail taking over afterwards, so
+// the budget only has to cover a cold start landing in the middle of a long
+// turn. The scan stops at the first boundary it meets, so a generous ceiling
+// costs nothing in the ordinary case where one is near the end.
+const codexActivityScanBytes int64 = 64 * 1024 * 1024
 
 // tmux reports session creation at whole-second precision while Codex records
 // rollout timestamps with sub-second precision. Allow a small boundary margin,
@@ -140,6 +148,9 @@ type codexRolloutCacheEntry struct {
 	activityVersion codexFileVersion
 	activityState   protocol.State
 	activitySet     bool
+	// tail follows the rollout forward from wherever state was last decided,
+	// so a sweep reads only what was appended since. See cachedCodexActivity.
+	tail *jsonl.Tail
 }
 
 // codexMeta is the session_meta record that opens every rollout file.
@@ -493,11 +504,49 @@ func (s *CodexSource) cachedCodexActivity(
 	if entry.activitySet && entry.activityVersion.matches(info) {
 		return entry.activityState, info.ModTime().UnixMilli(), nil
 	}
+
+	// Once a rollout's state is known, keep it by reading forward over what was
+	// appended rather than searching back from the end again.
+	//
+	// The backward search is bounded, and a long turn outruns it: on this
+	// machine a 78MB rollout had its task_started a megabyte behind the end,
+	// and the budget is a megabyte. Past that the scan finds no boundary at
+	// all, which used to be reported as idle — a session plainly working,
+	// shown as finished. Reading only the new bytes cannot outrun anything,
+	// because a sweep sees exactly what one second of writing produced.
+	if entry.activitySet && entry.tail != nil && s.readActivity == nil {
+		lines, err := entry.tail.Read()
+		if err == nil {
+			for _, line := range lines {
+				if state, ok := parser.CodexStateFromLine(line.Text); ok {
+					entry.activityState = state
+				}
+			}
+			entry.activityVersion = codexVersion(info)
+			s.rolloutCache[path] = entry
+			return entry.activityState, info.ModTime().UnixMilli(), nil
+		}
+		// A replaced or truncated file: fall through and start again.
+		entry.tail = nil
+	}
+
 	read := s.readActivity
 	if read == nil {
 		read = codexActivity
 	}
 	state, lastActivity, err := read(ctx, path, info.ModTime())
+	if state == "" && err == nil {
+		// No boundary within the budget. A busy turn writes steadily — one
+		// long one on this machine put its task_started a megabyte behind the
+		// end of a 78MB rollout — so treating silence as idle is how a session
+		// that is plainly working gets reported as finished. Keep what was
+		// last known instead, and fall back to idle only when nothing is.
+		if entry.activitySet {
+			state = entry.activityState
+		} else {
+			state = protocol.StateIdle
+		}
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return protocol.StateIdle, info.ModTime().UnixMilli(), ctx.Err()
@@ -513,6 +562,14 @@ func (s *CodexSource) cachedCodexActivity(
 	entry.activityVersion = codexVersion(info)
 	entry.activityState = state
 	entry.activitySet = true
+	// Follow from the end of what was just examined. Only real reads get a
+	// tail; an injected readActivity is a test double with no file behind it.
+	if s.readActivity == nil {
+		tail := jsonl.NewTail(path)
+		if tail.SeekToEnd() == nil {
+			entry.tail = tail
+		}
+	}
 	s.rolloutCache[path] = entry
 	return state, lastActivity, nil
 }
@@ -577,7 +634,10 @@ func readCodexMeta(path string) (codexMeta, error) {
 // turn boundary. Without hooks this is the only signal available, and reading
 // a bounded tail is cheap enough to do whenever the rollout changes.
 func codexActivity(ctx context.Context, path string, modTime time.Time) (protocol.State, int64, error) {
-	state := protocol.StateIdle
+	// Empty, not idle. A scan that reaches its budget without meeting a turn
+	// boundary has learned nothing, and the caller is the one that knows what
+	// to fall back on.
+	state := protocol.State("")
 
 	result, err := jsonl.CollectBackwardContext(ctx, path, jsonl.BackwardOptions{
 		Want:         1,

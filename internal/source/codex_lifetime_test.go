@@ -2,11 +2,14 @@ package source
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lenajeremy/agentman/internal/protocol"
 )
 
 // writeCodexRollout places one rollout in the day directory of startedAt, the
@@ -163,4 +166,141 @@ func keysOf(m map[string]codexSession) []string {
 // session returns another thread's history.
 func idNamesTranscript(id, transcript string) bool {
 	return strings.Contains(filepath.Base(transcript), strings.TrimPrefix(id, "codex:"))
+}
+
+// Regression: the backward search for a turn boundary is bounded, and a long
+// turn outruns it — a 78MB rollout on the machine this was found on had its
+// task_started a megabyte behind the end. When the scan met its budget without
+// finding a boundary it returned idle, so a session plainly working was
+// reported as finished. An exhausted scan now keeps what was last known.
+func TestCodexKeepsTheLastKnownStateWhenAScanFindsNothing(t *testing.T) {
+	home := t.TempDir()
+	now := time.Now()
+	path := writeCodexRollout(t, home, "thread-long", "thread-long", "/work/api",
+		now, now.Add(-time.Minute), "task_started")
+
+	src, err := NewCodexSource(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.processCheck = alwaysRunning
+	src.listPanes = noPanes
+
+	// First sweep sees the boundary.
+	answers := []protocol.State{"busy", ""}
+	call := 0
+	src.readActivity = func(context.Context, string, time.Time) (protocol.State, int64, error) {
+		state := answers[min(call, len(answers)-1)]
+		call++
+		return state, time.Now().UnixMilli(), nil
+	}
+	if _, err := src.Discover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := stateOf(t, src, "codex:thread-long"); got != "busy" {
+		t.Fatalf("first sweep state = %s, want busy", got)
+	}
+
+	// Second sweep's scan finds no boundary at all.
+	touch(t, path, time.Now())
+	if _, err := src.Discover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := stateOf(t, src, "codex:thread-long"); got != "busy" {
+		t.Fatalf("state after an exhausted scan = %s, want the last known busy", got)
+	}
+}
+
+// With nothing known yet, an exhausted scan still has to answer something, and
+// idle is the safe answer — it is what the session looks like to a phone that
+// has just connected.
+func TestCodexFallsBackToIdleWhenNothingIsKnown(t *testing.T) {
+	home := t.TempDir()
+	now := time.Now()
+	writeCodexRollout(t, home, "thread-new", "thread-new", "/work/api",
+		now, now.Add(-time.Minute), "task_started")
+
+	src, err := NewCodexSource(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.processCheck = alwaysRunning
+	src.listPanes = noPanes
+	src.readActivity = func(context.Context, string, time.Time) (protocol.State, int64, error) {
+		return "", time.Now().UnixMilli(), nil
+	}
+	if _, err := src.Discover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := stateOf(t, src, "codex:thread-new"); got != protocol.StateIdle {
+		t.Fatalf("state = %s, want idle when nothing has been observed", got)
+	}
+}
+
+// Once state is known, a sweep reads forward over what was appended rather than
+// searching back from the end again, so a boundary written since the last look
+// is picked up however large the rollout has become.
+func TestCodexPicksUpABoundaryAppendedSinceTheLastSweep(t *testing.T) {
+	home := t.TempDir()
+	now := time.Now()
+	path := writeCodexRollout(t, home, "thread-tail", "thread-tail", "/work/api",
+		now, now.Add(-time.Minute), "task_started")
+
+	src, err := NewCodexSource(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.processCheck = alwaysRunning
+	src.listPanes = noPanes
+	if _, err := src.Discover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := stateOf(t, src, "codex:thread-tail"); got != "busy" {
+		t.Fatalf("state = %s, want busy", got)
+	}
+
+	appendJSONL(t, path, obj{"timestamp": time.Now().Format(time.RFC3339Nano),
+		"type": "event_msg", "payload": obj{"type": "task_complete"}})
+	touch(t, path, time.Now())
+
+	if _, err := src.Discover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := stateOf(t, src, "codex:thread-tail"); got != protocol.StateIdle {
+		t.Fatalf("state = %s, want idle after task_complete was appended", got)
+	}
+}
+
+func stateOf(t *testing.T, src *CodexSource, id string) protocol.State {
+	t.Helper()
+	src.mu.RLock()
+	defer src.mu.RUnlock()
+	session, ok := src.sessions[id]
+	if !ok {
+		t.Fatalf("session %s not discovered", id)
+	}
+	return session.meta.State
+}
+
+func touch(t *testing.T, path string, when time.Time) {
+	t.Helper()
+	if err := os.Chtimes(path, when, when); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func appendJSONL(t *testing.T, path string, record any) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	body, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(append(body, '\n')); err != nil {
+		t.Fatal(err)
+	}
 }
