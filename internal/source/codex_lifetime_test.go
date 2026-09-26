@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -332,6 +333,7 @@ func TestCodexFollowSwitchesWhenTheTranscriptIsRebound(t *testing.T) {
 	out := make(chan []protocol.Message, 8)
 	done := make(chan error, 1)
 	go func() { done <- src.Follow(ctx, "codex:thread-first", out) }()
+	awaitCodexAttached(t, first, out)
 
 	// A resumed conversation: a new rollout, carrying the first one's lineage.
 	second := writeCodexRollout(t, home, "thread-second", "thread-first", "/work/api",
@@ -347,7 +349,6 @@ func TestCodexFollowSwitchesWhenTheTranscriptIsRebound(t *testing.T) {
 	session.transcript = second
 	src.sessions["codex:thread-first"] = session
 	src.mu.Unlock()
-	_ = first
 
 	deadline := time.After(8 * time.Second)
 	for {
@@ -467,6 +468,147 @@ func TestCodexClearsSessionsWhenNothingIsRunning(t *testing.T) {
 	}
 	if len(found) != 0 {
 		t.Errorf("got %d sessions, want none: no codex process and no pane", len(found))
+	}
+}
+
+// Regression: a rebind replayed the whole of the rollout it switched to.
+//
+// Codex copies the conversation it is resuming into the rollout it opens, so on
+// a long one that replay is a transcript the app already holds — delivered a
+// megabyte per tick, which on the 78MB rollout this was found on is twenty
+// seconds of flooding. Past the budget the tail attaches at the end instead.
+func TestCodexDoesNotReplayALongRolloutOnRebind(t *testing.T) {
+	home := t.TempDir()
+	now := time.Now()
+	first := writeCodexRollout(t, home, "thread-first", "thread-first", "/work/api",
+		now, now.Add(-time.Minute), "task_started")
+
+	src, err := NewCodexSource(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.processCheck = alwaysRunning
+	src.listPanes = noPanes
+	if _, err := src.Discover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	out := make(chan []protocol.Message, 64)
+	done := make(chan error, 1)
+	go func() { done <- src.Follow(ctx, "codex:thread-first", out) }()
+	awaitCodexAttached(t, first, out)
+
+	// A resumed conversation, carrying the history Codex copied into it, and
+	// long enough to be past the replay budget.
+	second := writeCodexRollout(t, home, "thread-second", "thread-first", "/work/api",
+		now.Add(time.Second), time.Now(), "task_started")
+	appendJSONL(t, second, codexAgentMessage("am-replayed", "carried over from before"))
+	appendCodexPadding(t, second, codexRebindReplayBytes+512*1024)
+
+	src.mu.Lock()
+	session := src.sessions["codex:thread-first"]
+	session.transcript = second
+	src.sessions["codex:thread-first"] = session
+	src.mu.Unlock()
+
+	// Written repeatedly so the test does not depend on landing after the tick
+	// that swapped the tail: whenever that happens, a later append follows it.
+	go func() {
+		for n := 0; ctx.Err() == nil; n++ {
+			appendJSONL(t, second, codexAgentMessage(
+				fmt.Sprintf("am-live-%d", n), "written after the rebind"))
+			time.Sleep(150 * time.Millisecond)
+		}
+	}()
+
+	deadline := time.After(20 * time.Second)
+	for {
+		select {
+		case batch := <-out:
+			for _, message := range batch {
+				if strings.Contains(message.Text, "carried over from before") {
+					cancel()
+					<-done
+					t.Fatal("the rebind replayed history the app already had")
+				}
+				if strings.Contains(message.Text, "written after the rebind") {
+					cancel()
+					<-done
+					return
+				}
+			}
+		case <-deadline:
+			cancel()
+			<-done
+			t.Fatal("nothing arrived from the rollout the session was rebound to")
+		}
+	}
+}
+
+// awaitCodexAttached blocks until a live subscription is reading path, by
+// appending to it until something it appended comes back.
+//
+// Starting a Follow and rebinding it straight away is a race the test would
+// lose silently: Follow may read the session only after the rebind, attach
+// directly to the new transcript, and seek past everything the test wrote.
+func awaitCodexAttached(t *testing.T, path string, out <-chan []protocol.Message) {
+	t.Helper()
+	deadline := time.After(15 * time.Second)
+	for n := 0; ; n++ {
+		appendJSONL(t, path, codexAgentMessage(
+			fmt.Sprintf("am-attach-%d", n), "attach probe"))
+		select {
+		case batch := <-out:
+			for _, message := range batch {
+				if strings.Contains(message.Text, "attach probe") {
+					return
+				}
+			}
+		case <-time.After(200 * time.Millisecond):
+		case <-deadline:
+			t.Fatalf("the subscription never attached to %s", filepath.Base(path))
+		}
+	}
+}
+
+// codexAgentMessage is one rollout record the parser turns into a message.
+func codexAgentMessage(id, text string) obj {
+	return obj{"timestamp": time.Now().Format(time.RFC3339Nano), "type": "event_msg",
+		"payload": obj{"type": "item_completed", "item": obj{
+			"type": "AgentMessage", "id": id,
+			"content": []any{obj{"type": "Text", "text": text}}}}}
+}
+
+// appendCodexPadding grows a rollout past a size with records that carry no
+// messages, standing in for the bulk of a long conversation.
+func appendCodexPadding(t *testing.T, path string, want int64) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	line := func() []byte {
+		record, err := json.Marshal(obj{
+			"timestamp": time.Now().Format(time.RFC3339Nano),
+			"type":      "turn_context",
+			"payload":   obj{"pad": strings.Repeat("x", 4096)},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return append(record, '\n')
+	}()
+	info, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for size := info.Size(); size < want; size += int64(len(line)) {
+		if _, err := f.Write(line); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

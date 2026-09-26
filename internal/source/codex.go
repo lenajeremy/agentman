@@ -56,6 +56,18 @@ const processCheckTimeout = 2 * time.Second
 // costs nothing in the ordinary case where one is near the end.
 const codexActivityScanBytes int64 = 64 * 1024 * 1024
 
+// codexRebindReplayBytes bounds how much of a newly bound rollout a live
+// subscription will replay from its start.
+//
+// Codex copies the whole prior conversation into the rollout it opens when one
+// is resumed or forked, so a rebind is not always the arrival of new material:
+// past this budget it is almost certainly a transcript the app already holds.
+// A megabyte is enough for the case the replay is there to serve — a pane that
+// had no rollout when the subscription opened and has just written its first —
+// while a 78MB resume attaches at the end instead of pushing a megabyte per
+// tick for twenty seconds.
+const codexRebindReplayBytes int64 = 1024 * 1024
+
 // tmux reports session creation at whole-second precision while Codex records
 // rollout timestamps with sub-second precision. Allow a small boundary margin,
 // but never bind a clearly older conversation to a newly launched pane.
@@ -891,10 +903,21 @@ func (s *CodexSource) Follow(ctx context.Context, sessionID string, out chan<- [
 				return fmt.Errorf("source: codex session %q ended", sessionID)
 			}
 			if current.transcript != "" && current.transcript != tail.Path() {
-				// From the start of the new rollout, not its end: everything in
-				// it belongs to this session and has never been sent. The app
-				// upserts by id, so a record seen twice costs nothing.
 				tail = jsonl.NewTail(current.transcript)
+				// A short rollout is read from its start: everything in it
+				// belongs to this session and has never been sent, and the app
+				// upserts by id so a record seen twice costs nothing. A long
+				// one is a resumed conversation carrying its own history, and
+				// replaying that pushes a transcript the app already holds
+				// back to the phone a megabyte at a time. Attach at the end
+				// and let the app pull the backlog on demand, as a first
+				// attach to a running session already does.
+				if info, err := os.Stat(current.transcript); err == nil && info.Size() > codexRebindReplayBytes {
+					// Seeking to the size just observed rather than to wherever
+					// the end is by now keeps whatever Codex appends in between
+					// from being stepped over and never reported.
+					tail.SeekTo(info)
+				}
 			}
 
 			lines, err := tail.Read()
