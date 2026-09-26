@@ -88,6 +88,40 @@ func linkRequest(t *testing.T, method, relayURL, id, path string, body io.Reader
 	return req
 }
 
+// awaitLink polls a preview link until it answers the way the caller is waiting
+// for, and returns whatever it last answered.
+//
+// Registration is asynchronous on both sides of a tunnel, and it has to be. The
+// relay writes a client's hello before it registers the session, because the
+// client reads one plain text message and only then switches its socket to
+// binary — registering first would mean forwarding a request to a client that
+// is not yet reading binary frames. A replacement connection is likewise
+// registered after the client that opened it has been told its URL. So there is
+// a window where the link is known but not yet serving, or is still served by
+// the connection being replaced. Nobody opening a link they were just handed
+// sees it; a test firing the instant OnReady returns hits it on a loaded
+// machine, which is how these passed locally and failed in CI.
+func awaitLink(t *testing.T, relayURL, id string, ready func(int, string) bool) (int, string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		resp, err := http.DefaultClient.Do(linkRequest(t, http.MethodGet, relayURL, id, "/", nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		status, body := resp.StatusCode, string(raw)
+		if ready(status, body) || !time.Now().Before(deadline) {
+			return status, body
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func TestPreviewProxiesToTheSharedPort(t *testing.T) {
 	type seen struct{ host, forwardedHost, forwardedProto string }
 	requests := make(chan seen, 1)
@@ -249,32 +283,14 @@ func TestPreviewExplainsWhenNothingIsListening(t *testing.T) {
 	_, relay := newPreviewRelay(t)
 	hello, _ := startTunnel(t, relay.URL, port, "nonce-nothing-listens")
 
-	// OnReady fires when the client receives its hello, and the relay writes
-	// that hello before it registers the session — it has to, because the
-	// client reads one plain text message and only then switches the socket to
-	// binary. So for a moment the client knows its URL while the relay would
-	// still answer "this preview link is not active". A person opening a link
-	// they were just handed never sees that window; a test firing a request the
-	// instant OnReady returns hits it on a loaded machine, which is how this
-	// passed locally and failed in CI.
-	var status int
-	var body []byte
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		resp, err := http.DefaultClient.Do(linkRequest(t, http.MethodGet, relay.URL, hello.ID, "/", nil))
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, _ = io.ReadAll(resp.Body)
-		status = resp.StatusCode
-		resp.Body.Close()
-		if status != http.StatusNotFound {
-			break
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	if status != http.StatusBadGateway ||
-		!strings.Contains(string(body), fmt.Sprintf("localhost:%d", port)) {
+	// Two windows to wait out, not one: the link is briefly unregistered, and
+	// then briefly registered to a client that is not yet serving, which answers
+	// with the generic "did not respond" 502 rather than one naming the port.
+	wanted := fmt.Sprintf("localhost:%d", port)
+	status, body := awaitLink(t, relay.URL, hello.ID, func(status int, body string) bool {
+		return status == http.StatusBadGateway && strings.Contains(body, wanted)
+	})
+	if status != http.StatusBadGateway || !strings.Contains(body, wanted) {
 		t.Fatalf("got %d %q, want a 502 naming the port", status, body)
 	}
 }
@@ -422,14 +438,14 @@ func TestReconnectingTunnelKeepsItsLinkAndReplacesTheOld(t *testing.T) {
 		t.Fatalf("link changed across reconnect: %s -> %s", a.URL, b.URL)
 	}
 
-	resp, err := http.DefaultClient.Do(linkRequest(t, http.MethodGet, relay.URL, b.ID, "/", nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if string(body) != "second" {
-		t.Fatalf("got %q, want the newest connection to serve the link", body)
+	// Until the replacement is registered the link is still served by the
+	// connection it replaces, which is the better of the two things to do with a
+	// request that arrives mid-reconnect. What matters is where it settles.
+	status, body := awaitLink(t, relay.URL, b.ID, func(_ int, body string) bool {
+		return body == "second"
+	})
+	if body != "second" {
+		t.Fatalf("got %d %q, want the newest connection to serve the link", status, body)
 	}
 }
 
