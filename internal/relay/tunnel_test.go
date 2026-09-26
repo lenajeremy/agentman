@@ -36,7 +36,20 @@ func newPreviewRelay(t *testing.T) (*Server, *httptest.Server) {
 }
 
 // startTunnel runs an `am expose` client for port and waits for its link.
-func startTunnel(t *testing.T, relayURL string, port int, nonce string) (tunnel.Hello, *tunnel.Client) {
+// startTunnel brings up a tunnel and returns once the relay has registered its
+// link, rather than once the client has been told its URL.
+//
+// Those are not the same moment. The relay writes the hello first and has to:
+// the client reads one plain text message and only then switches its socket to
+// binary, so registering earlier would forward a request to a client that is not
+// reading binary frames yet. Returning at the hello left every caller free to
+// address a link the relay would still answer "not active" for, which is a 404
+// out of nowhere — and for a websocket, a dial that fails its handshake.
+//
+// Waiting on the registry rather than probing over HTTP keeps this usable by the
+// tests that count what their own server saw: a probe request would land in
+// those counts.
+func startTunnel(t *testing.T, server *Server, relayURL string, port int, nonce string) (tunnel.Hello, *tunnel.Client) {
 	t.Helper()
 	ready := make(chan tunnel.Hello, 4)
 	client := &tunnel.Client{
@@ -55,6 +68,7 @@ func startTunnel(t *testing.T, relayURL string, port int, nonce string) (tunnel.
 	})
 	select {
 	case hello := <-ready:
+		awaitRegistered(t, server, hello.ID)
 		return hello, client
 	case err := <-done:
 		t.Fatalf("tunnel exited before it was ready: %v", err)
@@ -62,6 +76,18 @@ func startTunnel(t *testing.T, relayURL string, port int, nonce string) (tunnel.
 		t.Fatal("tunnel never became ready")
 	}
 	return tunnel.Hello{}, nil
+}
+
+// awaitRegistered blocks until the relay will route a link to a tunnel.
+func awaitRegistered(t *testing.T, server *Server, id string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for server.tunnels.get(id) == nil {
+		if !time.Now().Before(deadline) {
+			t.Fatalf("the relay never registered link %s", id)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func portOf(t *testing.T, rawURL string) int {
@@ -178,8 +204,8 @@ func TestPreviewProxiesToTheSharedPort(t *testing.T) {
 	defer app.Close()
 	appPort := portOf(t, app.URL)
 
-	_, relay := newPreviewRelay(t)
-	hello, _ := startTunnel(t, relay.URL, appPort, "nonce-proxies-to-port")
+	relayServer, relay := newPreviewRelay(t)
+	hello, _ := startTunnel(t, relayServer, relay.URL, appPort, "nonce-proxies-to-port")
 	if !validTunnelID(hello.ID) || hello.URL != "http://"+hello.ID+".localhost" {
 		t.Fatalf("unexpected hello %+v", hello)
 	}
@@ -220,8 +246,8 @@ func TestPreviewStreamsLargeBodiesBothWays(t *testing.T) {
 	}))
 	defer app.Close()
 
-	_, relay := newPreviewRelay(t)
-	hello, _ := startTunnel(t, relay.URL, portOf(t, app.URL), "nonce-large-bodies-x")
+	relayServer, relay := newPreviewRelay(t)
+	hello, _ := startTunnel(t, relayServer, relay.URL, portOf(t, app.URL), "nonce-large-bodies-x")
 
 	resp, err := linkClient.Do(
 		linkRequest(t, http.MethodPost, relay.URL, hello.ID, "/echo", bytes.NewReader(payload)))
@@ -246,8 +272,8 @@ func TestPreviewHandlesConcurrentRequests(t *testing.T) {
 	}))
 	defer app.Close()
 
-	_, relay := newPreviewRelay(t)
-	hello, _ := startTunnel(t, relay.URL, portOf(t, app.URL), "nonce-concurrent-reqs")
+	relayServer, relay := newPreviewRelay(t)
+	hello, _ := startTunnel(t, relayServer, relay.URL, portOf(t, app.URL), "nonce-concurrent-reqs")
 
 	var wg sync.WaitGroup
 	errs := make(chan error, 40)
@@ -293,8 +319,8 @@ func TestPreviewCarriesWebsocketUpgrades(t *testing.T) {
 	}))
 	defer app.Close()
 
-	_, relay := newPreviewRelay(t)
-	hello, _ := startTunnel(t, relay.URL, portOf(t, app.URL), "nonce-websocket-hmr")
+	relayServer, relay := newPreviewRelay(t)
+	hello, _ := startTunnel(t, relayServer, relay.URL, portOf(t, app.URL), "nonce-websocket-hmr")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -326,8 +352,8 @@ func TestPreviewExplainsWhenNothingIsListening(t *testing.T) {
 	port := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
 
-	_, relay := newPreviewRelay(t)
-	hello, _ := startTunnel(t, relay.URL, port, "nonce-nothing-listens")
+	relayServer, relay := newPreviewRelay(t)
+	hello, _ := startTunnel(t, relayServer, relay.URL, port, "nonce-nothing-listens")
 
 	// The 502 wanted here is the client's own, naming the port it could not
 	// reach. Until the link is serving the relay answers instead, so wait for a
@@ -353,8 +379,8 @@ func TestPreviewReachesIPv6OnlyServers(t *testing.T) {
 	app.Start()
 	defer app.Close()
 
-	_, relay := newPreviewRelay(t)
-	hello, _ := startTunnel(t, relay.URL, listener.Addr().(*net.TCPAddr).Port, "nonce-ipv6-only-app")
+	relayServer, relay := newPreviewRelay(t)
+	hello, _ := startTunnel(t, relayServer, relay.URL, listener.Addr().(*net.TCPAddr).Port, "nonce-ipv6-only-app")
 
 	resp, err := linkClient.Do(linkRequest(t, http.MethodGet, relay.URL, hello.ID, "/", nil))
 	if err != nil {
@@ -375,8 +401,8 @@ func TestPreviewRewritesRedirectsToLocalhost(t *testing.T) {
 	defer app.Close()
 	appPort = portOf(t, app.URL)
 
-	_, relay := newPreviewRelay(t)
-	hello, _ := startTunnel(t, relay.URL, appPort, "nonce-redirect-rewrite")
+	relayServer, relay := newPreviewRelay(t)
+	hello, _ := startTunnel(t, relayServer, relay.URL, appPort, "nonce-redirect-rewrite")
 
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
@@ -450,9 +476,9 @@ func TestTunnelRefusalsArePermanent(t *testing.T) {
 }
 
 func TestTunnelCapPerAccount(t *testing.T) {
-	_, relay := newPreviewRelay(t)
+	relayServer, relay := newPreviewRelay(t)
 	for i := range maxTunnelsPerAccount {
-		startTunnel(t, relay.URL, 3000+i, fmt.Sprintf("nonce-account-cap-%02d", i))
+		startTunnel(t, relayServer, relay.URL, 3000+i, fmt.Sprintf("nonce-account-cap-%02d", i))
 	}
 	client := &tunnel.Client{
 		RelayURL: relay.URL, Token: testDaemonToken, Port: 4000, Nonce: "nonce-account-cap-over",
@@ -475,11 +501,11 @@ func TestReconnectingTunnelKeepsItsLinkAndReplacesTheOld(t *testing.T) {
 	}))
 	defer second.Close()
 
-	_, relay := newPreviewRelay(t)
+	relayServer, relay := newPreviewRelay(t)
 	const nonce = "nonce-same-process-x"
-	a, _ := startTunnel(t, relay.URL, portOf(t, first.URL), nonce)
+	a, _ := startTunnel(t, relayServer, relay.URL, portOf(t, first.URL), nonce)
 	// A second connection with the same nonce is what a reconnect looks like.
-	b, _ := startTunnel(t, relay.URL, portOf(t, second.URL), nonce)
+	b, _ := startTunnel(t, relayServer, relay.URL, portOf(t, second.URL), nonce)
 	if a.URL != b.URL {
 		t.Fatalf("link changed across reconnect: %s -> %s", a.URL, b.URL)
 	}
@@ -571,8 +597,8 @@ func TestPreviewPresentsTheLinkAsTheLocalOrigin(t *testing.T) {
 	appPort := portOf(t, app.URL)
 	local := "http://localhost:" + strconv.Itoa(appPort)
 
-	_, relay := newPreviewRelay(t)
-	hello, _ := startTunnel(t, relay.URL, appPort, "nonce-origin-rewrite")
+	relayServer, relay := newPreviewRelay(t)
+	hello, _ := startTunnel(t, relayServer, relay.URL, appPort, "nonce-origin-rewrite")
 
 	// The page's own request, as Metro sees a bundle fetch.
 	getLink(t, func() *http.Request {

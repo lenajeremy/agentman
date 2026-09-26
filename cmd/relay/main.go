@@ -23,6 +23,26 @@ import (
 // version is stamped at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
+// deployedVersion is what the relay reports it is running.
+//
+// The build-time stamp is the one to trust, but it is easy to lose: a Dockerfile
+// build only sees a variable an ARG declares, and Railway's own git variables
+// are injected at run time rather than being readable while building — so the
+// stamp arrives empty or defaulted more often than anyone notices, and "which
+// commit is in production?" stops having an answer. Falling back to the run-time
+// variable costs nothing and means the question is always answerable.
+func deployedVersion() string {
+	if v := strings.TrimSpace(version); v != "" && v != "dev" {
+		return v
+	}
+	for _, name := range []string{"VERSION", "RAILWAY_GIT_COMMIT_SHA"} {
+		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+			return v
+		}
+	}
+	return "dev"
+}
+
 func isTruthy(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "1", "true", "yes", "on":
@@ -63,7 +83,8 @@ func main() {
 			"hint", "set AGENTMAN_TRUST_PROXY=1 when a proxy in front overwrites X-Forwarded-For")
 	}
 
-	server := relay.NewServer(secret, version, log, trustProxy)
+	running := deployedVersion()
+	server := relay.NewServer(secret, running, log, trustProxy)
 
 	// Preview links need a wildcard domain pointed at this relay, so they are
 	// off until the operator names one.
@@ -94,7 +115,7 @@ func main() {
 		_ = httpServer.Shutdown(shutdownCtx)
 	}()
 
-	log.Info("relay listening", "addr", listenAddr, "version", version, "storage", "none")
+	log.Info("relay listening", "addr", listenAddr, "version", running, "storage", "none")
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("server failed", "error", err)
 		os.Exit(1)
