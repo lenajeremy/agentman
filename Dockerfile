@@ -21,6 +21,12 @@ COPY . .
 # "dev" forever, and "which commit is actually deployed?" has no answer — a
 # question that already cost us once, when a hand-deploy left production ahead
 # of main without anything showing it.
+#
+# On Railway the value comes from a service variable named VERSION, set to
+# ${{RAILWAY_GIT_COMMIT_SHA}}. A Dockerfile build sees a Railway variable only
+# where an ARG declares it, which is what this line is for. railway.json used to
+# carry the same thing under build.buildArgs; that is not honoured, and it went
+# unnoticed because the ARG default below is a perfectly plausible answer.
 ARG VERSION=dev
 
 # Static, stripped, and reproducible. CGO is off so the result runs on scratch.
