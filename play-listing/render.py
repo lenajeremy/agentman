@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""Render Play Store graphics using the landing page's titanium phone geometry."""
+"""Render Play Store graphics using the captured Device Hub phone frame."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = Path(__file__).resolve().parent / "assets"
-S = 3  # Draw the 417 x 876 point landing-page device at 3x, then downsample.
-PHONE = (417, 876)
-SCREEN = (12, 12, 393, 852)
+FRAME_CAPTURE = Path(__file__).resolve().parent / "sources/devicehub-pairing.png"
+# Display boundaries measured from the captured iPhone frame, in source pixels.
+DISPLAY = (38, 32, 810, 1707)
+DISPLAY_RADIUS = 113
+STATUS_BOTTOM = 145
+CONTENT_BOTTOM = 1620
 FONT = ROOT / "mobile/node_modules/@expo-google-fonts/geist"
 MONO = ROOT / "mobile/node_modules/@expo-google-fonts/geist-mono"
 INK = "#0F1012"
@@ -27,68 +30,47 @@ def font(size: int, weight: str = "600SemiBold", mono: bool = False) -> ImageFon
     return ImageFont.truetype(family / weight / f"{stem}_{weight}.ttf", size)
 
 
-def rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
-    mask = Image.new("L", size, 0)
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, size[0] - 1, size[1] - 1), radius, fill=255)
-    return mask
-
-
-def rect(box: tuple[float, float, float, float]) -> tuple[int, int, int, int]:
-    return tuple(round(value * S) for value in box)  # type: ignore[return-value]
-
-
-def status_bar(screen: Image.Image) -> None:
-    draw = ImageDraw.Draw(screen)
-    draw.text((53 * S, 17 * S), "9:41", font=font(17 * S), fill=INK)
-    draw.rounded_rectangle(rect((134, 11, 259, 48)), radius=19 * S, fill="#050506")
-    draw.ellipse(rect((235, 23, 246, 34)), fill="#141A31")
-    for x, height in ((304, 6), (311, 8), (318, 10), (325, 12)):
-        draw.rounded_rectangle(rect((x, 30 - height, x + 4, 30)), radius=S, fill=INK)
-    draw.arc(rect((338, 19, 355, 34)), 205, 335, fill=INK, width=2 * S)
-    draw.arc(rect((342, 24, 351, 33)), 205, 335, fill=INK, width=2 * S)
-    draw.ellipse(rect((346, 31, 348, 33)), fill=INK)
-    draw.rounded_rectangle(rect((364, 20, 387, 33)), radius=4 * S, outline=INK, width=S)
-    draw.rounded_rectangle(rect((366, 22, 383, 31)), radius=2 * S, fill=INK)
-    draw.rounded_rectangle(rect((387, 24, 390, 29)), radius=S, fill=INK)
-    draw.rounded_rectangle(rect((129, 839, 264, 844)), radius=3 * S, fill=INK)
+def display_mask(size: tuple[int, int]) -> Image.Image:
+    scale = 4
+    mask = Image.new("L", (size[0] * scale, size[1] * scale), 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        tuple(value * scale for value in DISPLAY), radius=DISPLAY_RADIUS * scale, fill=255
+    )
+    return mask.resize(size, Image.Resampling.LANCZOS)
 
 
 def phone(screenshot: Path, content_only: bool) -> Image.Image:
-    """Build the site's 417 x 876 phone with any screenshot under the glass."""
-    width, height = (dimension * S for dimension in PHONE)
-    result = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(result)
-
-    # Hardware buttons and layered titanium edge follow site/styles.css.
-    for box in ((0, 132, 5, 166), (0, 196, 5, 260), (0, 274, 5, 338), (412, 220, 417, 322)):
-        draw.rounded_rectangle(rect(box), radius=2 * S, fill="#67676B")
-    draw.rounded_rectangle(rect((3, 0, 414, 876)), radius=67 * S, fill="#444448")
-    draw.rounded_rectangle(rect((5, 2, 412, 874)), radius=65 * S, fill="#222225", outline="#77777A", width=S)
-    draw.rounded_rectangle(rect((7, 4, 410, 872)), radius=64 * S, fill="#050506")
-
-    sx, sy, sw, sh = SCREEN
-    sw *= S
-    sh *= S
-    screen = Image.new("RGB", (sw, sh), "white")
+    """Put a screenshot inside the real bezel, with safe space for system UI."""
+    frame = devicehub_cutout(FRAME_CAPTURE)
     with Image.open(screenshot) as opened:
         source = ImageOps.exif_transpose(opened).convert("RGB")
+    x0, y0, x1, y1 = DISPLAY
+    # Match the screenshot's own page background in the status and safe areas.
+    page_background = source.getpixel((0, 0))
+    display = Image.new("RGB", frame.size, page_background)
     if content_only:
-        content = ImageOps.fit(source, (sw, (852 - 59) * S), Image.Resampling.LANCZOS)
-        screen.paste(content, (0, 59 * S))
-        status_bar(screen)
+        width, height = x1 - x0 - 8, CONTENT_BOTTOM - STATUS_BOTTOM
+        content = ImageOps.contain(source, (width, height), Image.Resampling.LANCZOS)
+        display.paste(content, ((frame.width - content.width) // 2, STATUS_BOTTOM))
+        # Keep the real, correctly positioned island and status icons.
+        status = frame.crop((0, y0, frame.width, STATUS_BOTTOM)).convert("RGB")
+        pixels = status.load()
+        assert pixels is not None
+        for y in range(status.height):
+            for x in range(x0, x1):
+                r, g, b = pixels[x, y]
+                if 239 <= r <= 249 and abs(r - g) <= 2 and 0 <= r - b <= 7:
+                    pixels[x, y] = page_background
+        display.paste(status, (0, y0))
+        ImageDraw.Draw(display).rounded_rectangle((355, 1662, 493, 1668), radius=3, fill=INK)
     else:
-        screen.paste(ImageOps.fit(source, (sw, sh), Image.Resampling.LANCZOS))
-    result.paste(screen, (sx * S, sy * S), rounded_mask((sw, sh), 55 * S))
-
-    # A soft glass highlight, like the landing page's .screen::after.
-    glare = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
-    overlay = ImageDraw.Draw(glare)
-    for x in range(0, 85 * S, 3 * S):
-        opacity = round(15 * (1 - x / (85 * S)))
-        overlay.line((x, 0, max(0, x - 42 * S), sh), fill=(255, 255, 255, opacity), width=3 * S)
-    glare.putalpha(Image.composite(glare.getchannel("A"), Image.new("L", (sw, sh), 0), rounded_mask((sw, sh), 55 * S)))
-    result.alpha_composite(glare, (sx * S, sy * S))
-    return result
+        content = ImageOps.fit(source, (x1 - x0, y1 - y0), Image.Resampling.LANCZOS)
+        display.paste(content, (x0, y0))
+    mask = display_mask(frame.size)
+    display.putalpha(mask)
+    # Keep the bezel, buttons, and their antialiasing from the real capture.
+    frame.putalpha(ImageChops.subtract(frame.getchannel("A"), mask))
+    return Image.alpha_composite(display, frame)
 
 
 def fit_headline(draw: ImageDraw.ImageDraw, words: str, max_width: int, max_size: int) -> tuple[str, ImageFont.FreeTypeFont]:
@@ -100,6 +82,10 @@ def fit_headline(draw: ImageDraw.ImageDraw, words: str, max_width: int, max_size
 
 
 def phone_asset(screenshot: Path, output: Path, headline: str, content_only: bool) -> None:
+    compose_phone_asset(phone(screenshot, content_only), output, headline)
+
+
+def compose_phone_asset(device: Image.Image, output: Path, headline: str) -> None:
     canvas = Image.new("RGB", (1080, 1920), PAPER)
     draw = ImageDraw.Draw(canvas)
     draw.ellipse((690, 260, 1340, 910), fill="#E5EAFF")
@@ -109,7 +95,6 @@ def phone_asset(screenshot: Path, output: Path, headline: str, content_only: boo
     draw.text((76, 122), title, font=face, fill=INK)
     draw.rounded_rectangle((80, 229, 168, 237), radius=4, fill=ORANGE)
 
-    device = phone(screenshot, content_only)
     device.thumbnail((766, 1608), Image.Resampling.LANCZOS)
     x = (canvas.width - device.width) // 2
     y = 272
@@ -121,6 +106,31 @@ def phone_asset(screenshot: Path, output: Path, headline: str, content_only: boo
     canvas.alpha_composite(device, (x, y))
     output.parent.mkdir(parents=True, exist_ok=True)
     canvas.convert("RGB").save(output, "PNG", optimize=True)
+
+
+def devicehub_cutout(capture: Path) -> Image.Image:
+    """Remove the entire canvas outside a Device Hub phone, preserving its pixels."""
+    with Image.open(capture) as opened:
+        source = ImageOps.exif_transpose(opened).convert("RGB")
+    result = source.convert("RGBA")
+    original = source.load()
+    output = result.load()
+    assert original is not None and output is not None
+    for y in range(source.height):
+        # The dark bezel surrounds the display. Find its outermost point on
+        # this scanline; side-button rows naturally expand to include buttons.
+        bezel = [x for x in range(source.width) if max(original[x, y]) < 190]
+        if not bezel:
+            for x in range(source.width):
+                output[x, y] = (0, 0, 0, 0)
+            continue
+        left, right = bezel[0], bezel[-1]
+        for x in (*range(left), *range(right + 1, source.width)):
+            # The source canvas is white. Recover a soft dark edge from the
+            # antialiased pixels rather than leaving a white fringe.
+            alpha = 255 - min(original[x, y])
+            output[x, y] = (0, 0, 0, alpha)
+    return result
 
 
 def feature_asset(screenshot: Path, output: Path) -> None:
@@ -152,6 +162,11 @@ def build() -> None:
     )
     for source, name, headline in items:
         phone_asset(sources / source, OUT / name, headline, content_only=True)
+    capture = Path(__file__).resolve().parent / "sources/devicehub-pairing.png"
+    if capture.exists():
+        cutout = devicehub_cutout(capture)
+        cutout.save(OUT / "devicehub-pairing-cutout.png", "PNG", optimize=True)
+        compose_phone_asset(cutout, OUT / "04-pairing-devicehub.png", "Connect to your Mac")
     feature_asset(sources / "app-agents.png", OUT / "feature-graphic.png")
     with Image.open(ROOT / "mobile/assets/images/icon.png") as source:
         icon = source.convert("RGBA").resize((512, 512), Image.Resampling.LANCZOS)
@@ -167,11 +182,23 @@ def main() -> None:
     custom.add_argument("output", type=Path)
     custom.add_argument("--headline", required=True)
     custom.add_argument("--content-only", action="store_true", help="Input excludes the status bar")
+    framed = commands.add_parser("devicehub", help="Remove the full Device Hub canvas and use the real phone frame")
+    framed.add_argument("input", type=Path)
+    framed.add_argument("output", type=Path)
+    framed.add_argument("--headline", required=True)
+    cutout = commands.add_parser("cutout", help="Save the real Device Hub phone with a transparent exterior")
+    cutout.add_argument("input", type=Path)
+    cutout.add_argument("output", type=Path)
     args = parser.parse_args()
     if args.command == "build":
         build()
-    else:
+    elif args.command == "phone":
         phone_asset(args.input, args.output, args.headline, args.content_only)
+    elif args.command == "devicehub":
+        compose_phone_asset(devicehub_cutout(args.input), args.output, args.headline)
+    else:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        devicehub_cutout(args.input).save(args.output, "PNG", optimize=True)
 
 
 if __name__ == "__main__":
