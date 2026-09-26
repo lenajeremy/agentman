@@ -53,6 +53,14 @@ const codexActivityScanBytes int64 = 1024 * 1024
 // but never bind a clearly older conversation to a newly launched pane.
 const codexPaneStartTolerance = 2 * time.Second
 
+// How many days of rollout directories a sweep looks through.
+//
+// Reading a day's directory is one getdents on a handful of entries, so a
+// fortnight costs microseconds — and it is what makes a session that has been
+// open since last week visible at all on a freshly started daemon. Sessions
+// older than this are still found once seen, through the cache; see scanDirs.
+const codexScanDays = 14
+
 // codexRunning reports whether any codex process is alive.
 //
 // A missing pgrep (or any other failure) returns true rather than false: it is
@@ -138,11 +146,30 @@ type codexRolloutCacheEntry struct {
 type codexMeta struct {
 	Type    string `json:"type"`
 	Payload struct {
+		// Codex writes two identifiers and they are not the same thing. "id"
+		// is this rollout's own; "session_id" is the conversation it descends
+		// from, which a resumed or forked thread inherits from its ancestor.
+		// On this machine they differ in 62% of rollouts.
+		//
+		// Reading session_id made every thread in a lineage report the same
+		// id. Two rollouts then collided on one key, so one silently replaced
+		// the other in the session map, and the id stopped naming the
+		// transcript actually being read.
+		ID         string `json:"id"`
 		SessionID  string `json:"session_id"`
 		Cwd        string `json:"cwd"`
 		Timestamp  string `json:"timestamp"`
 		Originator string `json:"originator"`
 	} `json:"payload"`
+}
+
+// threadID is what identifies one rollout. Older Codex versions wrote only
+// session_id, so that remains the fallback rather than a hard requirement.
+func (m codexMeta) threadID() string {
+	if m.Payload.ID != "" {
+		return m.Payload.ID
+	}
+	return m.Payload.SessionID
 }
 
 // NewCodexSource creates an adapter rooted at the given home directory.
@@ -185,14 +212,8 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 		return nil, nil
 	}
 
-	// Rollouts are filed by date, so only today and yesterday can hold a live
-	// session. Scanning those two directories keeps this cheap regardless of
-	// how much history has accumulated.
 	now := time.Now()
-	dirs := []string{
-		s.dayDir(now),
-		s.dayDir(now.AddDate(0, 0, -1)),
-	}
+	dirs := s.scanDirs(now)
 
 	found := []protocol.Session{}
 	next := map[string]codexSession{}
@@ -277,7 +298,7 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				continue
 			}
 
-			id := string(protocol.KindCodex) + ":" + meta.Payload.SessionID
+			id := string(protocol.KindCodex) + ":" + meta.threadID()
 			state, lastActivity, err := s.cachedCodexActivity(ctx, path, entry.info)
 			if err != nil {
 				return nil, err
@@ -303,7 +324,7 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			session := protocol.Session{
 				ID:             id,
 				Kind:           protocol.KindCodex,
-				NativeID:       meta.Payload.SessionID,
+				NativeID:       meta.threadID(),
 				Name:           filepath.Base(meta.Payload.Cwd),
 				Cwd:            meta.Payload.Cwd,
 				State:          state,
@@ -390,6 +411,42 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 // tmuxID derives a stable session identifier from a tmux session name.
 func tmuxID(tmuxName string) string {
 	return "tmux-" + tmuxName
+}
+
+// scanDirs lists the day directories a live rollout could be sitting in.
+//
+// A rollout is filed under the date its session *started* and appended to for
+// as long as that session lives, so "today and yesterday" — which is what this
+// scanned before — silently loses any conversation older than a day. Worse
+// than losing it: a finished rollout from a later day, in a directory that is
+// still scanned, then claims the same tmux pane and reports the session idle
+// forever. Injection keeps working, because that goes through the pane, which
+// is exactly the shape of the bug that prompted this: a Codex session visibly
+// working, reported idle, accepting messages and returning nothing.
+//
+// Two windows, because neither alone is both correct and cheap. A fixed span
+// of recent days catches ordinary long sessions on a cold start, and the
+// directories of rollouts already seen live are kept regardless of age, so a
+// session running for months keeps working once it has been observed once.
+func (s *CodexSource) scanDirs(now time.Time) []string {
+	seen := map[string]bool{}
+	dirs := make([]string, 0, codexScanDays+4)
+	add := func(dir string) {
+		if dir != "" && !seen[dir] {
+			seen[dir] = true
+			dirs = append(dirs, dir)
+		}
+	}
+	for day := 0; day < codexScanDays; day++ {
+		add(s.dayDir(now.AddDate(0, 0, -day)))
+	}
+
+	s.cacheMu.Lock()
+	for path := range s.rolloutCache {
+		add(filepath.Dir(path))
+	}
+	s.cacheMu.Unlock()
+	return dirs
 }
 
 func (s *CodexSource) dayDir(t time.Time) string {
@@ -510,7 +567,7 @@ func readCodexMeta(path string) (codexMeta, error) {
 	if err := json.Unmarshal([]byte(line), &meta); err != nil {
 		return codexMeta{}, err
 	}
-	if meta.Type != "session_meta" || meta.Payload.SessionID == "" {
+	if meta.Type != "session_meta" || meta.threadID() == "" {
 		return codexMeta{}, fmt.Errorf("source: %s: not a rollout header", path)
 	}
 	return meta, nil
