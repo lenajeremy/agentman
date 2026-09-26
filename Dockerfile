@@ -22,11 +22,13 @@ COPY . .
 # question that already cost us once, when a hand-deploy left production ahead
 # of main without anything showing it.
 #
-# On Railway the value comes from a service variable named VERSION, set to
-# ${{RAILWAY_GIT_COMMIT_SHA}}. A Dockerfile build sees a Railway variable only
-# where an ARG declares it, which is what this line is for. railway.json used to
-# carry the same thing under build.buildArgs; that is not honoured, and it went
-# unnoticed because the ARG default below is a perfectly plausible answer.
+# Nothing on Railway fills this in, which is worth stating because two plausible
+# ways to do it do not work: railway.json's build.buildArgs is not honoured, and
+# a service variable set to ${{RAILWAY_GIT_COMMIT_SHA}} resolves empty during a
+# build because Railway injects its git variables at run time. Both failures are
+# silent, since the default below reads like a real answer. The relay therefore
+# falls back to the run-time variable itself; see deployedVersion in cmd/relay.
+# This ARG stays for a plain `docker build --build-arg VERSION=...`.
 ARG VERSION=dev
 
 # Static, stripped, and reproducible. CGO is off so the result runs on scratch.
