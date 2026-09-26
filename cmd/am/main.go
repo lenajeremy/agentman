@@ -12,10 +12,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/source"
 )
@@ -55,6 +57,7 @@ Flags:
   -relay <url>                Relay to use. Defaults to the public relay;
                               set AGENTMAN_RELAY to change it, or pass
                               "none" to run without one.
+  -config-home <dir>          Separate Agentman state for serve and pair.
 `
 
 func main() {
@@ -109,8 +112,7 @@ func main() {
 	case "doctor":
 		err = runDoctor(ctx, args)
 	case "version", "--version", "-v":
-		fmt.Printf("agentman %s\n", version)
-		return
+		err = runVersion(args)
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return
@@ -125,9 +127,43 @@ func main() {
 	}
 }
 
+func runVersion(args []string) error {
+	fs := flag.NewFlagSet("version", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "machine-readable output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("version: unexpected argument %q", fs.Arg(0))
+	}
+	output, err := formatVersion(*asJSON)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprint(os.Stdout, output)
+	return err
+}
+
+func formatVersion(asJSON bool) (string, error) {
+	if asJSON {
+		encoded, err := json.Marshal(struct {
+			Version string `json:"version"`
+		}{Version: version})
+		if err != nil {
+			return "", err
+		}
+		return string(encoded) + "\n", nil
+	}
+	return fmt.Sprintf("agentman %s\n", version), nil
+}
+
 // buildRegistry wires up every adapter. An adapter whose CLI is not installed
 // stays silent rather than failing, so this works on any machine.
 func buildRegistry() (*source.Registry, error) {
+	return buildRegistryWithConfigHome("")
+}
+
+func buildRegistryWithConfigHome(configHome string) (*source.Registry, error) {
 	registry := source.NewRegistry()
 
 	claude, err := source.NewClaudeSource("")
@@ -164,7 +200,15 @@ func buildRegistry() (*source.Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	registry.Add(cursorCLI)
+	configDir, err := hook.ConfigDir(configHome)
+	if err != nil {
+		return nil, err
+	}
+	acp, err := source.NewCursorACPSource(filepath.Join(configDir, "cursor-acp"))
+	if err != nil {
+		return nil, err
+	}
+	registry.Add(source.NewCursorCLIGroup(cursorCLI, acp))
 
 	return registry, nil
 }

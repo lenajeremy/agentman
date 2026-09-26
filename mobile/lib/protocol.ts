@@ -149,7 +149,9 @@ export type RequestType =
   | "read_file"
   | "list_changes"
   | "file_diff"
-  | "read_seen_file";
+  | "read_seen_file"
+  | "list_directories"
+  | "start_session";
 
 export interface Request {
   type: RequestType;
@@ -168,9 +170,12 @@ export interface Request {
   answerText?: string;
   /** The server on open_server and close_server. */
   port?: number;
+  /** Relative to session cwd for workspace reads, or Mac home for launches. */
   path?: string;
   /** Tickets for images already left with the relay, on send_message. */
   uploadIds?: string[];
+  /** Agent to launch; path is relative to the Mac user's home directory. */
+  kind?: AgentKind;
 }
 
 export type EventType =
@@ -184,7 +189,9 @@ export type EventType =
   | "server_opened"
   | "server_stopped"
   | "error"
-  | "workspace";
+  | "workspace"
+  | "directories"
+  | "session_started";
 
 export interface WorkspaceEntry { name: string; directory: boolean; size?: number }
 export interface WorkspaceChange {
@@ -227,6 +234,8 @@ export interface DaemonEvent {
   link?: string;
   error?: string;
   workspace?: WorkspaceResult;
+  directories?: string[];
+  path?: string;
 }
 
 export type ControlType =
@@ -300,6 +309,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
   if (!isRecord(value) || !isOneOf(value.type, [
     "sessions", "session_update", "session_gone", "messages", "page",
     "turn_complete", "send_result", "server_opened", "server_stopped", "error", "workspace",
+    "directories", "session_started",
   ] as const)) return null;
 
   switch (value.type) {
@@ -344,6 +354,15 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
       break;
     case "workspace":
       if (!isWorkspaceResult(value.workspace)) return null;
+      break;
+    case "directories":
+      if (!optionalBoundedString(value.path, 4096) ||
+          (value.directories !== undefined &&
+            !boundedArray(value.directories, 200, (name): name is string =>
+              boundedString(name, 256, true)))) return null;
+      break;
+    case "session_started":
+      if (!boundedString(value.sessionId, 512, true)) return null;
       break;
   }
   return value as unknown as DaemonEvent;

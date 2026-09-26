@@ -120,6 +120,7 @@ type openCodePending struct {
 // NewOpenCodeSource creates an adapter. An empty baseURL uses the default
 // local port, and OPENCODE_SERVER_PASSWORD is picked up when set.
 func NewOpenCodeSource(baseURL string) *OpenCodeSource {
+	baseURL = strings.TrimSpace(baseURL)
 	pinned := baseURL != ""
 	password := os.Getenv("OPENCODE_SERVER_PASSWORD")
 	configurationError := validateOpenCodeConfiguration(baseURL, password)

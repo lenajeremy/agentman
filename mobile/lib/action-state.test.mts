@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   applyAgentActionResult,
   applyPendingSendResult,
+  reconcileCursorSendEchoes,
   clearQueuedForSessionTransitions,
   clearQueuedForTurn,
   questionIdentity,
@@ -39,6 +40,39 @@ test("a delivered message leaves pending state instead of leaking invisibly", ()
   assert.deepEqual(
     applyPendingSendResult(pending, { clientId: "send-1", status: "delivered" }),
     [],
+  );
+});
+
+test("Cursor send stays visible until its new transcript row arrives", () => {
+  const pending = [{
+    clientId: "send-1", sessionId: "cursor-cli:pane:x", text: "hello",
+    status: "sending" as const, retainUntilTranscript: true,
+    knownUserMessageIds: ["old"],
+  }];
+  const delivered = applyPendingSendResult(pending, {
+    clientId: "send-1", status: "delivered",
+  });
+  assert.equal(delivered[0].status, "delivered");
+  const oldRow = {
+    id: "old", sessionId: pending[0].sessionId, role: "user" as const,
+    text: "hello", ts: 1,
+  };
+  assert.equal(reconcileCursorSendEchoes(delivered, pending[0].sessionId, [oldRow]).length, 1);
+  assert.equal(reconcileCursorSendEchoes(delivered, pending[0].sessionId, [
+    oldRow, { ...oldRow, id: "new", ts: 2 },
+  ]).length, 0);
+});
+
+test("repeated Cursor sends each need a distinct transcript row", () => {
+  const sessionId = "cursor-cli:pane:x";
+  const pending = ["a", "b"].map((clientId) => ({
+    clientId, sessionId, text: "again", status: "delivered" as const,
+    retainUntilTranscript: true,
+  }));
+  const row = { id: "new", sessionId, role: "user" as const, text: "again", ts: 1 };
+  assert.deepEqual(
+    reconcileCursorSendEchoes(pending, sessionId, [row]).map((item) => item.clientId),
+    ["b"],
   );
 });
 

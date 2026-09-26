@@ -115,11 +115,12 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 	}
 	entries, err := os.ReadDir(s.sessionsDir())
 	if err != nil {
-		// Claude Code simply is not installed, or has never run. Not an error.
-		if os.IsNotExist(err) {
-			return nil, nil
+		// The CLI may have launched but not written its registry yet. Keep
+		// looking for Agentman-owned panes so a fresh phone launch is visible.
+		if !os.IsNotExist(err) {
+			return nil, err
 		}
-		return nil, err
+		entries = nil
 	}
 
 	found := make([]protocol.Session, 0, len(entries))
@@ -135,7 +136,7 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 		}
 	}
 	var processes *tmux.ProcessTree
-	if len(panes) > 0 && s.snapshotProcesses != nil {
+	if len(entries) > 0 && len(panes) > 0 && s.snapshotProcesses != nil {
 		// One process-table command supports every session × pane comparison
 		// below. The old implementation spawned `ps` once per ancestor for every
 		// candidate pair, making discovery grow quadratically with open sessions.
@@ -229,6 +230,38 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 			pid:        file.PID,
 		}
 	}
+	// A phone-launched Claude process has a known UUID before Claude creates
+	// its registry. Publish the pane under that same ID so its first turn or a
+	// trust prompt never makes the app navigate to an unknown session.
+	for _, pane := range panes {
+		uuid, ok := launchedClaudeUUID(pane.Name)
+		if !ok || pane.Cwd == "" {
+			continue
+		}
+		id := string(protocol.KindClaude) + ":" + uuid
+		if _, registered := next[id]; registered {
+			continue
+		}
+		started := pane.Created.UnixMilli()
+		if pane.Created.IsZero() {
+			started = time.Now().UnixMilli()
+		}
+		meta := protocol.Session{
+			ID: id, Kind: protocol.KindClaude, NativeID: uuid,
+			Name: filepath.Base(pane.Cwd), Cwd: pane.Cwd,
+			State: protocol.StateIdle, Inject: protocol.InjectTmux,
+			StartedAt: started, LastActivityAt: started, AgentPID: pane.PanePID,
+		}
+		transcript := s.transcriptPath(pane.Cwd, uuid)
+		if q, err := captureQuestion(ctx, pane.Name); err == nil {
+			s.enrichClaudeQuestion(id, transcript, q)
+			meta.Question = protocolQuestion(q)
+			meta.State = protocol.StateWaitingInput
+		}
+		found = append(found, meta)
+		next[id] = claudeSession{meta: meta, transcript: transcript,
+			tmuxName: pane.Name, pid: pane.PanePID}
+	}
 
 	live := make(map[string]bool, len(next))
 	for id := range next {
@@ -242,6 +275,27 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 	s.mu.Unlock()
 
 	return found, nil
+}
+
+func launchedClaudeUUID(name string) (string, bool) {
+	const prefix = tmux.Prefix + "claude-"
+	if !strings.HasPrefix(name, prefix) {
+		return "", false
+	}
+	uuid := strings.TrimPrefix(name, prefix)
+	if len(uuid) != 36 {
+		return "", false
+	}
+	for i, character := range uuid {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if character != '-' {
+				return "", false
+			}
+		} else if !((character >= '0' && character <= '9') || (character >= 'a' && character <= 'f')) {
+			return "", false
+		}
+	}
+	return uuid, true
 }
 
 func readBoundedFile(path string, limit int64) ([]byte, error) {

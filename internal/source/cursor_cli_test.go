@@ -95,6 +95,59 @@ func TestCursorCLIChatHistoryPagesAndExcludesSystemAndReasoning(t *testing.T) {
 	}
 }
 
+func TestCursorCLIFollowEmitsGrowingAssistantRow(t *testing.T) {
+	_, source, store := cursorCLIFixture(t)
+	sessions, err := source.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	out := make(chan []protocol.Message, 16)
+	done := make(chan error, 1)
+	go func() { done <- source.Follow(ctx, sessions[0].ID, out) }()
+
+	// Follow takes its baseline from the store when it starts, so a single
+	// update written after a fixed sleep is a race with two ways to lose: the
+	// sleep is not long enough on a loaded machine, or the update lands first
+	// and becomes the baseline, after which the row never changes again and
+	// there is nothing to emit. Keep rewriting the row with a new value until
+	// one of them comes back — whatever baseline Follow holds, the next poll
+	// differs from it.
+	const grown = "First reply, continued"
+	deadline := time.Now().Add(20 * time.Second)
+	for attempt := 0; ; attempt++ {
+		if time.Now().After(deadline) {
+			t.Fatal("growing Cursor CLI reply was not followed")
+		}
+		text := fmt.Sprintf("%s %d", grown, attempt)
+		// busy_timeout because the poller holds a read lock while it reads, and
+		// a write that arrives during one is normal rather than a failure. A
+		// lock that outlasts even that is still not a failure here: the next
+		// attempt writes the same kind of change a moment later.
+		update := fmt.Sprintf(
+			`PRAGMA busy_timeout=5000; UPDATE blobs SET data='{"role":"assistant","content":[{"type":"text","text":%q}]}' WHERE id='blob-3'`,
+			text)
+		if output, err := exec.Command("sqlite3", store, update).CombinedOutput(); err != nil {
+			if !strings.Contains(string(output), "locked") {
+				t.Fatalf("update fixture: %v: %s", err, output)
+			}
+		}
+		select {
+		case batch := <-out:
+			if len(batch) != 1 || !strings.HasPrefix(batch[0].Text, grown) {
+				t.Fatalf("unexpected updated row: %+v", batch)
+			}
+			cancel()
+			<-done
+			return
+		case err := <-done:
+			t.Fatalf("the subscription ended after %d attempts: %v", attempt, err)
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
 func TestCursorCLIManagedPaneKeepsStableSessionIDWhenChatAppears(t *testing.T) {
 	cwd, source, store := cursorCLIFixture(t)
 	ctx := context.Background()
@@ -142,6 +195,34 @@ func TestCursorCLIManagedPaneKeepsStableSessionIDWhenChatAppears(t *testing.T) {
 	_, err = source.Inject(ctx, "cursor-cli:chat:chat-123", "wrong session")
 	if err == nil {
 		t.Fatal("chat ID must not route to a managed pane")
+	}
+}
+
+func TestCursorCLIManagedPaneTracksBusyAndIdle(t *testing.T) {
+	cwd, source, _ := cursorCLIFixture(t)
+	pane := tmux.Session{
+		Name: "agentman-cursor-state", Cwd: cwd, Command: "agent",
+		Created: time.Now().Add(-2 * time.Minute),
+	}
+	source.listPanes = func(context.Context) ([]tmux.Session, error) {
+		return []tmux.Session{pane}, nil
+	}
+	visible := "→ Add a follow-up     ctrl+c to stop\n"
+	source.capturePane = func(context.Context, string) (string, error) { return visible, nil }
+	busy, err := source.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(busy) != 1 || busy[0].State != protocol.StateBusy || busy[0].Inject != protocol.InjectTmux {
+		t.Fatalf("managed pane did not enter busy state: %+v", busy)
+	}
+	visible = "→ Add a follow-up\nAuto · 9.5%\n"
+	idle, err := source.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(idle) != 1 || idle[0].State != protocol.StateIdle || idle[0].ID != busy[0].ID {
+		t.Fatalf("managed pane did not return to idle: %+v", idle)
 	}
 }
 

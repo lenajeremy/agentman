@@ -169,6 +169,7 @@ func runServe(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	addrFlag := fs.String("addr", "", "loopback address for agent hook deliveries (persisted for installed hooks)")
 	relayFlag := fs.String("relay", "", relayFlagHelp)
+	configHome := fs.String("config-home", "", "separate home for Agentman daemon state (useful for a local test daemon)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -181,7 +182,7 @@ func runServe(ctx context.Context, args []string) error {
 		}
 	}
 
-	cfg, err := hook.LoadConfig("")
+	cfg, err := hook.LoadConfig(*configHome)
 	if err != nil {
 		return err
 	}
@@ -192,14 +193,16 @@ func runServe(ctx context.Context, args []string) error {
 	if err := hook.ValidateAddr(addr); err != nil {
 		return err
 	}
-	store, err := hook.NewStore("")
+	store, err := hook.NewStore(*configHome)
 	if err != nil {
 		return err
 	}
-	registry, err := buildRegistry()
+	registry, err := buildRegistryWithConfigHome(*configHome)
 	if err != nil {
 		return err
 	}
+	defer registry.Close()
+	registry.EnableAsyncCursor()
 
 	// Messages for sessions with no live input channel wait here until their
 	// next Stop hook, which is the only moment such a session can be reached.
@@ -224,7 +227,7 @@ func runServe(ctx context.Context, args []string) error {
 	}
 	if cfg.HookAddr != addr {
 		cfg.HookAddr = addr
-		if err := hook.SaveConfig("", cfg); err != nil {
+		if err := hook.SaveConfig(*configHome, cfg); err != nil {
 			_ = listener.Close()
 			return fmt.Errorf("save hook listener address: %w", err)
 		}
@@ -273,7 +276,7 @@ func runServe(ctx context.Context, args []string) error {
 	// Images a phone sends arrive through the relay and are written here, so a
 	// daemon without one simply cannot receive them.
 	if relayURL != "" {
-		if dir, dirErr := hook.ConfigDir(""); dirErr == nil {
+		if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
 			store := attachments.New(dir, relayURL, cfg.Token)
 			agent.SetAttachments(store)
 			// At startup as well as on the hour: leave the daemon off for a
@@ -299,7 +302,7 @@ func runServe(ctx context.Context, args []string) error {
 	// Push is what covers the gap a live socket cannot: once iOS suspends the
 	// app there is no websocket to deliver on, which is exactly when the user
 	// has walked away and most wants to be told.
-	if dir, dirErr := hook.ConfigDir(""); dirErr == nil {
+	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
 		store := push.NewStore(dir)
 		agent.SetPush(push.NewSender(store, cfg.Push))
 		if devices := len(store.Tokens()); devices > 0 {
@@ -335,6 +338,7 @@ func runServe(ctx context.Context, args []string) error {
 
 	daemonDone := make(chan error, 1)
 	go func() { daemonDone <- agent.Run(ctx, hookEvents) }()
+	registry.ResumeQueued()
 
 	select {
 	case <-ctx.Done():
@@ -375,6 +379,7 @@ func describeListenError(err error, addr string) error {
 func runPair(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("pair", flag.ExitOnError)
 	relayFlag := fs.String("relay", "", relayFlagHelp)
+	configHome := fs.String("config-home", "", "separate home for Agentman daemon state")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -387,7 +392,7 @@ func runPair(ctx context.Context, args []string) error {
 		return err
 	}
 
-	cfg, err := hook.LoadConfig("")
+	cfg, err := hook.LoadConfig(*configHome)
 	if err != nil {
 		return err
 	}
