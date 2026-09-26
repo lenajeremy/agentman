@@ -12,10 +12,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/source"
 )
@@ -129,6 +131,10 @@ func main() {
 // buildRegistry wires up every adapter. An adapter whose CLI is not installed
 // stays silent rather than failing, so this works on any machine.
 func buildRegistry() (*source.Registry, error) {
+	return buildRegistryWithConfigHome("")
+}
+
+func buildRegistryWithConfigHome(configHome string) (*source.Registry, error) {
 	registry := source.NewRegistry()
 
 	claude, err := source.NewClaudeSource("")
@@ -165,7 +171,15 @@ func buildRegistry() (*source.Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	registry.Add(cursorCLI)
+	configDir, err := hook.ConfigDir(configHome)
+	if err != nil {
+		return nil, err
+	}
+	acp, err := source.NewCursorACPSource(filepath.Join(configDir, "cursor-acp"))
+	if err != nil {
+		return nil, err
+	}
+	registry.Add(source.NewCursorCLIGroup(cursorCLI, acp))
 
 	return registry, nil
 }

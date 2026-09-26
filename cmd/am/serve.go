@@ -197,10 +197,12 @@ func runServe(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	registry, err := buildRegistry()
+	registry, err := buildRegistryWithConfigHome(*configHome)
 	if err != nil {
 		return err
 	}
+	defer registry.Close()
+	registry.EnableAsyncCursor()
 
 	// Messages for sessions with no live input channel wait here until their
 	// next Stop hook, which is the only moment such a session can be reached.
@@ -336,6 +338,7 @@ func runServe(ctx context.Context, args []string) error {
 
 	daemonDone := make(chan error, 1)
 	go func() { daemonDone <- agent.Run(ctx, hookEvents) }()
+	registry.ResumeQueued()
 
 	select {
 	case <-ctx.Done():

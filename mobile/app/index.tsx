@@ -541,8 +541,8 @@ function EmptyState() {
       </View>
       <Text style={styles.emptyHint}>
         Also <Text style={styles.inlineMono}>am codex</Text> and{" "}
-        <Text style={styles.inlineMono}>am opencode</Text>. Recent Cursor agent
-        sessions appear automatically in read-only mode.
+        <Text style={styles.inlineMono}>am opencode</Text>. Recent Cursor IDE
+        chats appear automatically in read-only mode.
       </Text>
     </View>
   );

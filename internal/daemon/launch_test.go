@@ -12,8 +12,50 @@ import (
 	"time"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/source"
 	"github.com/lenajeremy/agentman/internal/tmux"
 )
+
+type cursorLaunchStub struct {
+	cwd, prompt string
+	calls       int
+}
+
+func (*cursorLaunchStub) Kind() protocol.Kind                                  { return protocol.KindCursorCLI }
+func (*cursorLaunchStub) Discover(context.Context) ([]protocol.Session, error) { return nil, nil }
+func (*cursorLaunchStub) Page(_ context.Context, id, _ string, _ int) (protocol.Page, error) {
+	return protocol.NewPage(id, nil, "", false), nil
+}
+func (*cursorLaunchStub) Follow(ctx context.Context, _ string, _ chan<- []protocol.Message) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+func (s *cursorLaunchStub) Launch(_ context.Context, cwd, prompt string) (string, error) {
+	s.cwd, s.prompt = cwd, prompt
+	s.calls++
+	return "cursor-cli:acp:test-session", nil
+}
+
+func TestNewCursorSessionUsesStreamingLauncher(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, "project")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stub := &cursorLaunchStub{}
+	registry := source.NewRegistry()
+	registry.Add(stub)
+	d := New(registry, nil)
+	req := protocol.Request{ClientID: "new-cursor", Kind: protocol.KindCursorCLI, Path: "project", Text: "Hello Cursor"}
+	id, err := d.startLocalSession(context.Background(), req)
+	if err != nil || id != "cursor-cli:acp:test-session" || stub.cwd != dir || stub.prompt != req.Text {
+		t.Fatalf("launch = %s, %v, %+v", id, err, stub)
+	}
+	if _, err := d.startLocalSession(context.Background(), req); err != nil || stub.calls != 1 {
+		t.Fatalf("launch retry was not idempotent: %v, %d", err, stub.calls)
+	}
+}
 
 func TestLaunchDirectoriesStayInsideHome(t *testing.T) {
 	home := t.TempDir()

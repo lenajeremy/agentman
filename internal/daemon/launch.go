@@ -103,7 +103,9 @@ func (d *Daemon) startLocalSession(ctx context.Context, req protocol.Request) (s
 		return "", err
 	}
 	var id string
-	if req.Kind == protocol.KindOpenCode {
+	if req.Kind == protocol.KindCursorCLI {
+		id, err = d.registry.LaunchCursor(ctx, dir, req.Text)
+	} else if req.Kind == protocol.KindOpenCode {
 		id, err = startOpenCodeSession(ctx, dir, req.Text)
 	} else {
 		id, err = startTerminalSession(ctx, req.Kind, dir, req.Text)

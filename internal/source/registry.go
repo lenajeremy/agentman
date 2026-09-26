@@ -203,6 +203,52 @@ type Interrupter interface {
 	Interrupt(ctx context.Context, sessionID string) error
 }
 
+// LaunchCursor starts a new managed Cursor conversation through the adapter's
+// structured streaming channel. Terminal-launched chats stay on tmux.
+func (r *Registry) LaunchCursor(ctx context.Context, cwd, prompt string) (string, error) {
+	r.mu.RLock()
+	s := r.sources[protocol.KindCursorCLI]
+	r.mu.RUnlock()
+	launcher, ok := s.(interface {
+		Launch(context.Context, string, string) (string, error)
+	})
+	if !ok {
+		return "", fmt.Errorf("source: managed Cursor launch is unavailable")
+	}
+	return launcher.Launch(ctx, cwd, prompt)
+}
+
+// ResumeQueued starts durable managed-agent follow-ups after daemon startup.
+func (r *Registry) ResumeQueued() {
+	r.mu.RLock()
+	s := r.sources[protocol.KindCursorCLI]
+	r.mu.RUnlock()
+	if resumable, ok := s.(interface{ ResumeQueued() }); ok {
+		resumable.ResumeQueued()
+	}
+}
+
+// EnableAsyncCursor makes daemon sends acknowledge once ACP accepts the turn.
+// Standalone CLI sends remain attached until their child process finishes.
+func (r *Registry) EnableAsyncCursor() {
+	r.mu.RLock()
+	s := r.sources[protocol.KindCursorCLI]
+	r.mu.RUnlock()
+	if async, ok := s.(interface{ EnableAsync() }); ok {
+		async.EnableAsync()
+	}
+}
+
+func (r *Registry) Close() {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, s := range r.sources {
+		if closer, ok := s.(interface{ Close() }); ok {
+			closer.Close()
+		}
+	}
+}
+
 // Answer routes a decision to the adapter owning the session.
 func (r *Registry) Answer(ctx context.Context, sessionID string, answer protocol.QuestionAnswer) error {
 	s, err := r.forSession(sessionID)
