@@ -88,24 +88,70 @@ func linkRequest(t *testing.T, method, relayURL, id, path string, body io.Reader
 	return req
 }
 
-// awaitLink polls a preview link until it answers the way the caller is waiting
-// for, and returns whatever it last answered.
+// linkClient is used for every link request in these tests.
+//
+// http.DefaultClient has no timeout. A request that arrives while a link is
+// registering can be held rather than answered, and with no timeout the test
+// then waits for the package's ten minute deadline to kill it — which is how a
+// race here showed up once as a ten minute CI hang instead of a failure.
+var linkClient = &http.Client{Timeout: 10 * time.Second}
+
+// notServingYet reports whether the relay answered for a link of its own
+// accord, because nothing was there to forward the request to yet.
 //
 // Registration is asynchronous on both sides of a tunnel, and it has to be. The
 // relay writes a client's hello before it registers the session, because the
 // client reads one plain text message and only then switches its socket to
-// binary — registering first would mean forwarding a request to a client that
-// is not yet reading binary frames. A replacement connection is likewise
-// registered after the client that opened it has been told its URL. So there is
-// a window where the link is known but not yet serving, or is still served by
-// the connection being replaced. Nobody opening a link they were just handed
-// sees it; a test firing the instant OnReady returns hits it on a loaded
-// machine, which is how these passed locally and failed in CI.
+// binary — registering first would forward a request to a client that is not
+// reading binary frames yet. So a request can arrive before the link is
+// registered, and then before its client has begun serving. Nobody opening a
+// link they were handed sees either window; a test firing the instant OnReady
+// returns hits them on a loaded machine, which is how these passed locally and
+// failed in CI.
+func notServingYet(status int, body string) bool {
+	return (status == http.StatusNotFound && strings.Contains(body, "not active")) ||
+		(status == http.StatusBadGateway && strings.Contains(body, "did not respond"))
+}
+
+// getLink performs a link request and returns what answered it, retrying while
+// the relay is answering for a link that is not serving yet.
+//
+// The request is rebuilt each attempt so headers and body are never reused, and
+// only an attempt that reaches the far side has any effect on it — which is what
+// lets a test count the requests its own server saw.
+func getLink(t *testing.T, build func() *http.Request) (int, string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		resp, err := linkClient.Do(build())
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		status, body := resp.StatusCode, string(raw)
+		if !notServingYet(status, body) || !time.Now().Before(deadline) {
+			return status, body
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+// awaitLink polls a link until it answers the way the caller is waiting for.
+//
+// Used where what changes is not whether the link serves but which machine is
+// behind it, so notServingYet cannot say when to stop. The interval is coarse on
+// purpose: an earlier version polled every 5ms, and against a link whose target
+// port is closed that put thousands of doomed proxy attempts through the relay
+// and starved the rest of the package.
 func awaitLink(t *testing.T, relayURL, id string, ready func(int, string) bool) (int, string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		resp, err := http.DefaultClient.Do(linkRequest(t, http.MethodGet, relayURL, id, "/", nil))
+		resp, err := linkClient.Do(linkRequest(t, http.MethodGet, relayURL, id, "/", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -118,7 +164,7 @@ func awaitLink(t *testing.T, relayURL, id string, ready func(int, string) bool) 
 		if ready(status, body) || !time.Now().Before(deadline) {
 			return status, body
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(25 * time.Millisecond)
 	}
 }
 
@@ -138,7 +184,7 @@ func TestPreviewProxiesToTheSharedPort(t *testing.T) {
 		t.Fatalf("unexpected hello %+v", hello)
 	}
 
-	resp, err := http.DefaultClient.Do(linkRequest(t, http.MethodGet, relay.URL, hello.ID, "/some/page", nil))
+	resp, err := linkClient.Do(linkRequest(t, http.MethodGet, relay.URL, hello.ID, "/some/page", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +223,7 @@ func TestPreviewStreamsLargeBodiesBothWays(t *testing.T) {
 	_, relay := newPreviewRelay(t)
 	hello, _ := startTunnel(t, relay.URL, portOf(t, app.URL), "nonce-large-bodies-x")
 
-	resp, err := http.DefaultClient.Do(
+	resp, err := linkClient.Do(
 		linkRequest(t, http.MethodPost, relay.URL, hello.ID, "/echo", bytes.NewReader(payload)))
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +256,7 @@ func TestPreviewHandlesConcurrentRequests(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			want := strconv.Itoa(i)
-			resp, err := http.DefaultClient.Do(
+			resp, err := linkClient.Do(
 				linkRequest(t, http.MethodGet, relay.URL, hello.ID, "/?n="+want, nil))
 			if err != nil {
 				errs <- err
@@ -283,12 +329,12 @@ func TestPreviewExplainsWhenNothingIsListening(t *testing.T) {
 	_, relay := newPreviewRelay(t)
 	hello, _ := startTunnel(t, relay.URL, port, "nonce-nothing-listens")
 
-	// Two windows to wait out, not one: the link is briefly unregistered, and
-	// then briefly registered to a client that is not yet serving, which answers
-	// with the generic "did not respond" 502 rather than one naming the port.
+	// The 502 wanted here is the client's own, naming the port it could not
+	// reach. Until the link is serving the relay answers instead, so wait for a
+	// response that actually came from the far side.
 	wanted := fmt.Sprintf("localhost:%d", port)
-	status, body := awaitLink(t, relay.URL, hello.ID, func(status int, body string) bool {
-		return status == http.StatusBadGateway && strings.Contains(body, wanted)
+	status, body := getLink(t, func() *http.Request {
+		return linkRequest(t, http.MethodGet, relay.URL, hello.ID, "/", nil)
 	})
 	if status != http.StatusBadGateway || !strings.Contains(body, wanted) {
 		t.Fatalf("got %d %q, want a 502 naming the port", status, body)
@@ -310,7 +356,7 @@ func TestPreviewReachesIPv6OnlyServers(t *testing.T) {
 	_, relay := newPreviewRelay(t)
 	hello, _ := startTunnel(t, relay.URL, listener.Addr().(*net.TCPAddr).Port, "nonce-ipv6-only-app")
 
-	resp, err := http.DefaultClient.Do(linkRequest(t, http.MethodGet, relay.URL, hello.ID, "/", nil))
+	resp, err := linkClient.Do(linkRequest(t, http.MethodGet, relay.URL, hello.ID, "/", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +397,7 @@ func TestPreviewUnknownOrMalformedLinks(t *testing.T) {
 	for _, host := range []string{unknown + ".localhost", "not-a-link.localhost"} {
 		req, _ := http.NewRequest(http.MethodGet, relay.URL+"/health", nil)
 		req.Host = host
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := linkClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -529,29 +575,43 @@ func TestPreviewPresentsTheLinkAsTheLocalOrigin(t *testing.T) {
 	hello, _ := startTunnel(t, relay.URL, appPort, "nonce-origin-rewrite")
 
 	// The page's own request, as Metro sees a bundle fetch.
-	req := linkRequest(t, http.MethodGet, relay.URL, hello.ID, "/index.bundle", nil)
-	req.Header.Set("Origin", hello.URL)
-	req.Header.Set("Referer", hello.URL+"/settings?tab=1")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if got := <-requests; got.origin != local || got.referer != local+"/settings?tab=1" {
+	getLink(t, func() *http.Request {
+		req := linkRequest(t, http.MethodGet, relay.URL, hello.ID, "/index.bundle", nil)
+		req.Header.Set("Origin", hello.URL)
+		req.Header.Set("Referer", hello.URL+"/settings?tab=1")
+		return req
+	})
+	if got := nextRequest(t, requests); got.origin != local || got.referer != local+"/settings?tab=1" {
 		t.Fatalf("app saw %+v, want the link presented as %s", got, local)
 	}
 
 	// Another site's request keeps its real origin, so the dev server's
 	// cross-site protection still works.
-	req = linkRequest(t, http.MethodGet, relay.URL, hello.ID, "/", nil)
-	req.Header.Set("Origin", "https://evil.example")
-	req.Header.Set("Referer", "https://evil.example/page")
-	resp, err = http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if got := <-requests; got.origin != "https://evil.example" || got.referer != "https://evil.example/page" {
+	getLink(t, func() *http.Request {
+		req := linkRequest(t, http.MethodGet, relay.URL, hello.ID, "/", nil)
+		req.Header.Set("Origin", "https://evil.example")
+		req.Header.Set("Referer", "https://evil.example/page")
+		return req
+	})
+	if got := nextRequest(t, requests); got.origin != "https://evil.example" || got.referer != "https://evil.example/page" {
 		t.Fatalf("a foreign origin was rewritten: %+v", got)
+	}
+}
+
+// nextRequest reads what the server behind a link saw, and fails rather than
+// waiting forever when nothing reached it.
+//
+// A bare channel receive here is what turned a moment's unreadiness into a ten
+// minute hang: the request was answered by the relay, the server recorded
+// nothing, and the test sat on the channel until the package deadline killed it.
+func nextRequest[T any](t *testing.T, seen <-chan T) T {
+	t.Helper()
+	select {
+	case got := <-seen:
+		return got
+	case <-time.After(10 * time.Second):
+		var zero T
+		t.Fatal("nothing reached the server behind the link")
+		return zero
 	}
 }

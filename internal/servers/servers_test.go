@@ -295,17 +295,30 @@ func TestSharerOpensAndClosesLinks(t *testing.T) {
 		t.Fatalf("Links() = %v", sharer.Links())
 	}
 
+	// A timeout, because a request that arrives while the link is registering
+	// can be held rather than answered, and an untimed client then waits for the
+	// package deadline to kill the test instead of failing.
+	client := &http.Client{Timeout: 10 * time.Second}
 	get := func() int {
 		req, _ := http.NewRequest(http.MethodGet, relayHTTP.URL+"/", nil)
 		req.Host = strings.TrimPrefix(link, "http://")
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
 		resp.Body.Close()
 		return resp.StatusCode
 	}
-	if status := get(); status != http.StatusOK {
+	// The relay registers a link after the sharer has been handed it, so the
+	// first request can arrive before there is anything behind it. Wait for the
+	// link to serve rather than assuming it already does.
+	opened := time.Now().Add(10 * time.Second)
+	status := get()
+	for status != http.StatusOK && time.Now().Before(opened) {
+		time.Sleep(25 * time.Millisecond)
+		status = get()
+	}
+	if status != http.StatusOK {
 		t.Fatalf("link returned %d", status)
 	}
 
