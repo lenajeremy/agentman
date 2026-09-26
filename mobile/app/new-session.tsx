@@ -38,8 +38,6 @@ export default function NewSession() {
   const [loadingDirectories, setLoadingDirectories] = useState(false);
   const [prompt, setPrompt] = useState("Wait for my next instruction.");
   const [starting, setStarting] = useState(false);
-  const [launchedId, setLaunchedId] = useState<string | null>(null);
-  const [slow, setSlow] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -57,19 +55,6 @@ export default function NewSession() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, store.daemonOnline]);
 
-  useEffect(() => {
-    if (!launchedId) return;
-    if (store.sessions.some((session) => session.id === launchedId)) {
-      router.replace(`/session/${encodeURIComponent(launchedId)}`);
-    }
-  }, [launchedId, store.sessions, router]);
-
-  useEffect(() => {
-    if (!launchedId) return;
-    const timer = setTimeout(() => setSlow(true), 20_000);
-    return () => clearTimeout(timer);
-  }, [launchedId]);
-
   const up = () => setPath((current) => current.split("/").slice(0, -1).join("/"));
   const start = async () => {
     if (!path || !prompt.trim() || starting || !store.daemonOnline) return;
@@ -77,7 +62,7 @@ export default function NewSession() {
     setStarting(true);
     try {
       const id = await store.startSession(kind, path, prompt.trim());
-      setLaunchedId(id);
+      router.replace(`/session/${encodeURIComponent(id)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start the agent.");
       setStarting(false);
@@ -139,23 +124,13 @@ export default function NewSession() {
           <Text style={styles.hint}>This message starts the agent’s conversation.</Text>
 
           {error ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
-          {launchedId ? (
-            <View style={styles.status}>
-              <ActivityIndicator color={color.working} />
-              <Text style={styles.statusText}>
-                {slow ? "Started on your Mac. If it stays here, check for a sign-in or trust prompt." :
-                  "Started on your Mac. Waiting for the session…"}
-              </Text>
-            </View>
-          ) : (
-            <MotionPressable onPress={() => void start()}
-              style={[styles.start, (!path || !prompt.trim() || starting || !store.daemonOnline) && styles.disabled]}
-              disabled={!path || !prompt.trim() || starting || !store.daemonOnline}
-              accessibilityRole="button" accessibilityLabel="Start session">
-              {starting ? <ActivityIndicator color={color.onInverse} /> :
-                <Text style={styles.startText}>Start session</Text>}
-            </MotionPressable>
-          )}
+          <MotionPressable onPress={() => void start()}
+            style={[styles.start, (!path || !prompt.trim() || starting || !store.daemonOnline) && styles.disabled]}
+            disabled={!path || !prompt.trim() || starting || !store.daemonOnline}
+            accessibilityRole="button" accessibilityLabel="Start session">
+            {starting ? <ActivityIndicator color={color.onInverse} /> :
+              <Text style={styles.startText}>Start session</Text>}
+          </MotionPressable>
         </ContentColumn>
       </ScrollView>
     </View>
@@ -196,8 +171,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     fontFamily: font.sans, fontSize: size.body, color: c.text },
   hint: { marginTop: space.xs, fontFamily: font.sans, fontSize: size.caption, color: c.muted },
   error: { marginTop: space.md, fontFamily: font.sans, fontSize: size.label, color: c.errorText },
-  status: { marginTop: space.lg, flexDirection: "row", alignItems: "center", gap: space.md },
-  statusText: { flex: 1, fontFamily: font.sans, fontSize: size.label, color: c.muted },
   start: { marginTop: space.xl, minHeight: 52, borderRadius: radius.pill,
     backgroundColor: c.inverse, alignItems: "center", justifyContent: "center" },
   disabled: { opacity: 0.45 },

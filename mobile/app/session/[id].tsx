@@ -113,7 +113,7 @@ export default function SessionScreen() {
     store.openSession(sessionId);
     return () => store.closeSession(sessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId]);
+  }, [sessionId, session?.id]);
 
   useEffect(() => {
     setDraftReady(false);
@@ -590,7 +590,9 @@ export default function SessionScreen() {
           }
           ListEmptyComponent={
             paging?.loading ? null : (
-              <Text style={styles.emptyFeed}>No messages yet.</Text>
+              <Text style={styles.emptyFeed}>
+                {session ? "No messages yet." : "Waiting for session status from your Mac…"}
+              </Text>
             )
           }
         />
