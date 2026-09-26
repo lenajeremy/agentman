@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/tmux"
 )
 
 // writeCodexRollout places one rollout in the day directory of startedAt, the
@@ -364,5 +365,92 @@ func TestCodexFollowSwitchesWhenTheTranscriptIsRebound(t *testing.T) {
 			<-done
 			t.Fatal("nothing arrived from the rollout the session was rebound to")
 		}
+	}
+}
+
+// Regression: stepping away for half an hour cost a session its history.
+//
+// The live window exists to stop a rollout nobody is running from lingering as
+// a session, but a pane that is still open is proof its session is alive. Past
+// the window the rollout was dropped anyway; the pane was then rediscovered as
+// a session with no history at all, and activity re-attached it from scratch.
+func TestCodexKeepsAPausedSessionBoundToItsOpenPane(t *testing.T) {
+	home := t.TempDir()
+	now := time.Now()
+	rollout := writeCodexRollout(t, home, "thread-paused", "thread-paused", "/work/api",
+		now.Add(-2*time.Hour), now.Add(-time.Minute), "task_complete")
+
+	pane := tmux.Session{
+		Name: "agentman-codex-1758900000000-ab12", Command: "codex",
+		Cwd: "/work/api", PanePID: 4242, Created: now.Add(-3 * time.Hour),
+	}
+	src, err := NewCodexSource(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.processCheck = alwaysRunning
+	src.listPanes = func(context.Context) ([]tmux.Session, error) {
+		return []tmux.Session{pane}, nil
+	}
+
+	first, err := src.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("got %d sessions on the first sweep, want one", len(first))
+	}
+
+	// Nothing typed for longer than the live window, pane still open.
+	touch(t, rollout, now.Add(-45*time.Minute))
+	second, err := src.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 1 {
+		t.Fatalf("got %d sessions after the pause, want the one whose pane is open", len(second))
+	}
+	if second[0].ID != first[0].ID {
+		t.Errorf("id changed across the pause: %s then %s", first[0].ID, second[0].ID)
+	}
+	src.mu.RLock()
+	kept := src.sessions[second[0].ID]
+	src.mu.RUnlock()
+	if kept.transcript != rollout {
+		t.Errorf("transcript = %q, want the rollout it was already reading", kept.transcript)
+	}
+}
+
+// The other half of that guard: once the pane is gone, a rollout past the live
+// window is an old conversation nobody is running, and must not linger.
+func TestCodexDropsAPausedSessionOnceItsPaneIsGone(t *testing.T) {
+	home := t.TempDir()
+	now := time.Now()
+	rollout := writeCodexRollout(t, home, "thread-paused", "thread-paused", "/work/api",
+		now.Add(-2*time.Hour), now.Add(-time.Minute), "task_complete")
+
+	src, err := NewCodexSource(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.processCheck = alwaysRunning
+	src.listPanes = func(context.Context) ([]tmux.Session, error) {
+		return []tmux.Session{{
+			Name: "agentman-codex-1758900000000-ab12", Command: "codex",
+			Cwd: "/work/api", PanePID: 4242, Created: now.Add(-3 * time.Hour),
+		}}, nil
+	}
+	if _, err := src.Discover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	touch(t, rollout, now.Add(-45*time.Minute))
+	src.listPanes = noPanes
+	found, err := src.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 0 {
+		t.Errorf("got %d sessions, want none: the pane closed and the rollout is stale", len(found))
 	}
 }

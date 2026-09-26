@@ -230,6 +230,21 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	next := map[string]codexSession{}
 	cutoff := now.Add(-codexLiveWindow)
 
+	// The rollout each tmux pane was reading last sweep. The live window exists
+	// to stop a rollout nobody is running from lingering as a session, but a
+	// pane that is still open is proof its session is alive — so a pause longer
+	// than the window must not unbind it. Without this, stepping away for half
+	// an hour turned a session into a bare pane with no history, and activity
+	// then re-attached it from scratch.
+	s.mu.RLock()
+	boundToPane := map[string]string{}
+	for _, previous := range s.sessions {
+		if previous.tmuxName != "" && previous.transcript != "" {
+			boundToPane[previous.transcript] = previous.tmuxName
+		}
+	}
+	s.mu.RUnlock()
+
 	// Codex writes no pid to its rollout, so a session is matched to a tmux
 	// pane by working directory. That is weaker than Claude's pid ancestry —
 	// two Codex sessions in one directory would be ambiguous — so a directory
@@ -267,6 +282,10 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 		path    string
 		modTime time.Time
 		info    os.FileInfo
+		// kept is true when the rollout is past the live window and is here
+		// only because a still-open pane was reading it. Such a rollout may
+		// keep its pane; it must never surface as a session of its own.
+		kept bool
 	}
 	var rollouts []rollout
 	for _, dir := range dirs {
@@ -279,13 +298,23 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				continue
 			}
 			info, err := entry.Info()
-			if err != nil || info.ModTime().Before(cutoff) {
+			if err != nil {
 				continue
 			}
+			path := filepath.Join(dir, entry.Name())
+			kept := false
+			if info.ModTime().Before(cutoff) {
+				pane, wasBound := boundToPane[path]
+				if !wasBound || !paneStillOpen(panes, pane) {
+					continue
+				}
+				kept = true
+			}
 			rollouts = append(rollouts, rollout{
-				path:    filepath.Join(dir, entry.Name()),
+				path:    path,
 				modTime: info.ModTime(),
 				info:    info,
+				kept:    kept,
 			})
 		}
 	}
@@ -330,6 +359,11 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				// rollout appears — otherwise the session would vanish and
 				// return under a new id on the user's first prompt.
 				id = string(protocol.KindCodex) + ":" + tmuxID(pane.Name)
+			}
+			// Kept only for its pane, and it lost the pane to a newer rollout:
+			// an old conversation nobody is running, so not a session.
+			if entry.kept && tmuxName == "" {
+				continue
 			}
 
 			session := protocol.Session{
@@ -422,6 +456,18 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 // tmuxID derives a stable session identifier from a tmux session name.
 func tmuxID(tmuxName string) string {
 	return "tmux-" + tmuxName
+}
+
+// paneStillOpen reports whether a tmux session of that name is still running
+// codex. A pane that has been closed, or has gone back to a shell, no longer
+// vouches for the rollout it was reading.
+func paneStillOpen(panes []tmux.Session, name string) bool {
+	for _, pane := range panes {
+		if pane.Name == name && pane.Command == "codex" {
+			return true
+		}
+	}
+	return false
 }
 
 // scanDirs lists the day directories a live rollout could be sitting in.
