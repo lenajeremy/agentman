@@ -594,7 +594,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 		if (sessionId) {
 		  setPageState((current) => ({
 			...current,
-			[sessionId]: { ...current[sessionId], hasMore: false, loading: false },
+			// A transport/adapter error does not prove that the transcript has
+			// reached its beginning. Keep pagination retryable and avoid showing
+			// the misleading “Start of session” footer.
+			[sessionId]: { ...current[sessionId], hasMore: true, loading: false },
 		  }));
 		}
 		break;
@@ -715,11 +718,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     void (async () => {
-      const creds = await loadCredentials();
-      setCredentials(creds);
-      if (creds) attach(creds);
-      else setConnection("unpaired");
-      setReady(true);
+      try {
+        const creds = await loadCredentials();
+        setCredentials(creds);
+        if (creds) attach(creds);
+        else setConnection("unpaired");
+      } catch {
+        // SecureStore can reject after an OS restore or a keychain reset. Do
+        // not leave the provider permanently on its blank loading screen; let
+        // the user pair again and recover.
+        setCredentials(null);
+        setConnection("unpaired");
+      } finally {
+        setReady(true);
+      }
     })();
     return () => {
       clearWorkspaceRequests();

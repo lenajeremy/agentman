@@ -739,13 +739,18 @@ func (d *Daemon) finishHookTurn(
 		if question != nil {
 			d.mu.Lock()
 			current, stillKnown := d.sessions[event.SessionID]
-			if stillKnown {
+			state := d.turns[event.SessionID]
+			// The pane inspection is asynchronous. A new turn may have begun
+			// while it was in flight; never let an old question overwrite that
+			// newer busy state.
+			stillCurrent := state.generation == generation && !state.notified
+			if stillKnown && stillCurrent {
 				current.Question = question
 				current.State = protocol.StateWaitingInput
 				d.sessions[event.SessionID] = current
 			}
 			d.mu.Unlock()
-			if stillKnown {
+			if stillKnown && stillCurrent {
 				_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessionUpdate, Session: &current})
 			}
 			return

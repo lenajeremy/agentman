@@ -43,8 +43,14 @@ export async function loadCredentials(): Promise<Credentials | null> {
 	// One-time migration from releases that kept the bearer in AsyncStorage.
 	// Write the protected copy first; a crash between the operations leaves a
 	// duplicate to clean up, never a lost credential.
-	const legacy = parseCredentials(await AsyncStorage.getItem(STORAGE_KEY));
-	if (!legacy) return null;
+	const legacyRaw = await AsyncStorage.getItem(STORAGE_KEY);
+	const legacy = parseCredentials(legacyRaw);
+	if (!legacy) {
+		// Remove malformed or policy-rejected legacy bearer data as well; it is
+		// no longer usable and should not remain in plaintext storage forever.
+		if (legacyRaw) await AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
+		return null;
+	}
 	await SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify(legacy), SECURE_OPTIONS);
 	await AsyncStorage.removeItem(STORAGE_KEY);
 	return legacy;

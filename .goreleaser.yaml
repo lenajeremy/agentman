@@ -107,7 +107,7 @@ homebrew_casks:
 
       `am` uses the public relay by default. It has no transcript database but
       can observe live traffic. To run your own, see
-      https://github.com/lenajeremy/agentman#self-hosting-the-relay
+      https://github.com/lenajeremy/agentman/blob/main/docs/self-hosting.md
 
 release:
   # A re-run after a partial failure must be able to overwrite what the first

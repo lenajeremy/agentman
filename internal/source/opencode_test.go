@@ -22,6 +22,16 @@ func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error)
 	return fn(request)
 }
 
+func TestNewOpenCodeSourceTrimsWhitespaceBeforePinning(t *testing.T) {
+	source := NewOpenCodeSource("   \t")
+	if source.pinned {
+		t.Fatal("whitespace-only URL must not create a pinned source")
+	}
+	if source.baseURL == "" || strings.ContainsAny(source.baseURL, " \t\r\n") {
+		t.Fatalf("base URL was not normalized: %q", source.baseURL)
+	}
+}
+
 // ocFake is a stand-in for OpenCode's published HTTP API. Its response shapes
 // are copied from the OpenAPI document served by OpenCode 1.18.15 at /doc.
 type ocFake struct {
