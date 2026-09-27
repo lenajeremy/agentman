@@ -198,6 +198,10 @@ export function agentLabel(kind: string): { name: string; short: string } {
       return { name: "Cursor", short: "cu" };
     case "cursor-cli":
       return { name: "Cursor CLI", short: "cu" };
+    case "kiro":
+      return { name: "Kiro", short: "ki" };
+    case "antigravity":
+      return { name: "Antigravity", short: "ag" };
     default:
       return { name: kind, short: kind.slice(0, 2) };
   }

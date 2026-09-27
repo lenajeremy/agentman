@@ -864,7 +864,7 @@ function DeliveryNote({
   } else if (kind === "cursor-cli") {
     text =
       "Start Cursor Agent CLI with am cursor to send this chat messages remotely.";
-  } else if (kind === "claude" || kind === "codex") {
+  } else if (kind === "claude" || kind === "codex" || kind === "kiro" || kind === "antigravity") {
     text = `Start this session with am ${kind} to send it messages.`;
   } else {
     text =
