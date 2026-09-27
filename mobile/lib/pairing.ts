@@ -1,7 +1,7 @@
 /**
  * Parsing for the payload behind a pairing QR code.
  *
- * The daemon encodes `agentman://pair?relay=<url>&token=<secret>`. A URL rather
+ * The daemon encodes a compact `agentman://pair/v2/<payload>` link. A URL rather
  * than bare JSON so the same string doubles as a deep link: tapping it opens
  * the app straight into pairing, which is what makes this usable over a remote
  * shell where pointing a camera at the screen is not an option.
@@ -105,6 +105,28 @@ function isLoopbackHost(raw: string): boolean {
  */
 export function parsePairingPayload(raw: string): ScannedPairing | null {
   const text = raw.trim();
+  const compact = /^agentman:\/\/pair\/v2\/([a-z\d_-]+)$/i.exec(text);
+  if (compact) {
+    try {
+      // Some camera vendors return mixed-case QR payloads inconsistently, so
+      // canonicalize before decoding and credential validation.
+      const encoded = compact[1].toLowerCase();
+      const padded = encoded.replace(/-/g, "+").replace(/_/g, "/")
+        .padEnd(Math.ceil(encoded.length / 4) * 4, "=");
+      const binary = globalThis.atob(padded);
+      const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+      const payload = JSON.parse(new TextDecoder().decode(bytes)) as {
+        r?: unknown;
+        t?: unknown;
+      };
+      return normalizeCredentials({
+        relayUrl: typeof payload.r === "string" && payload.r ? payload.r : DEFAULT_RELAY,
+        token: payload.t,
+      });
+    } catch {
+      return null;
+    }
+  }
   if (!/^agentman:\/\/pair(?:\?|$)/i.test(text)) return null;
 
   // The URL class rejects unknown schemes on some engines, so read the query

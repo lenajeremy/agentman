@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -123,18 +124,32 @@ func TestPairingURLOmitsOnlyTheDefaultRelay(t *testing.T) {
 	// those sixty characters are the difference between sixteen printed rows
 	// and twenty.
 	got := PairingURL(DefaultRelay, token)
-	if strings.Contains(got, "relay=") {
-		t.Errorf("payload names the default relay, making the QR larger than it needs to be: %q", got)
+	if !strings.HasPrefix(got, "agentman://pair/v2/") {
+		t.Fatalf("payload did not use compact v2 format: %q", got)
 	}
-	if !strings.Contains(got, token) {
-		t.Errorf("payload lost the token: %q", got)
+	if strings.Contains(got, DefaultRelay) {
+		t.Errorf("payload names the default relay, making the QR larger than it needs to be: %q", got)
 	}
 
 	// Spelled out for anything else. A self-hoster whose QR silently pointed at
 	// the public relay would be a much worse outcome than a taller code.
 	got = PairingURL("https://relay.example.com", token)
-	if !strings.Contains(got, "relay=") {
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(got, "agentman://pair/v2/"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Relay string `json:"r"`
+		Token string `json:"t"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Relay != "https://relay.example.com" {
 		t.Errorf("a custom relay was dropped from the payload: %q", got)
+	}
+	if payload.Token != token {
+		t.Errorf("payload token = %q, want %q", payload.Token, token)
 	}
 
 	// A trailing slash must not defeat the comparison and force the long form.
