@@ -78,6 +78,39 @@ func runHook(ctx context.Context, args []string) error {
 	return nil
 }
 
+// stableBinaryPath returns the path to record in an agent's hook config.
+//
+// It deliberately does not resolve symlinks. Homebrew installs `am` at
+// /opt/homebrew/bin/am, a symlink into a version-pinned Caskroom directory
+// that the next upgrade deletes; writing the resolved path produces a hook
+// command that stops existing the moment agentman updates. That is not
+// hypothetical — hooks installed at 0.6.0 kept pointing into
+// Caskroom/agentman/0.6.0 and every Claude hook failed with ENOENT after an
+// upgrade, so sessions silently stopped reporting. The symlink is what the
+// package manager keeps pointing at the current version, so it is the stable
+// thing to name. Only a path that does not resolve at all falls back.
+func stableBinaryPath(path string) string {
+	if path == "" {
+		return path
+	}
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
+}
+
+// mustExecutable reports our own path, empty when it cannot be determined.
+func mustExecutable() string {
+	binary, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return binary
+}
+
 // runInstallHooks registers agentman's hooks with every supported agent.
 func runInstallHooks(ctx context.Context, args []string, remove bool) error {
 	fs := flag.NewFlagSet("install-hooks", flag.ExitOnError)
@@ -90,9 +123,7 @@ func runInstallHooks(ctx context.Context, args []string, remove bool) error {
 	if err != nil {
 		return fmt.Errorf("cannot determine own path: %w", err)
 	}
-	if resolved, err := filepath.EvalSymlinks(binary); err == nil {
-		binary = resolved
-	}
+	binary = stableBinaryPath(binary)
 
 	cfg, err := hook.LoadConfig("")
 	if err != nil {
@@ -204,10 +235,7 @@ func runDoctor(ctx context.Context, args []string) error {
 	}
 	check(cfg.Token != "", "local config", collapseHome(filepath.Join(home, ".agentman", "config.json")))
 
-	binary, _ := os.Executable()
-	if resolved, err := filepath.EvalSymlinks(binary); err == nil {
-		binary = resolved
-	}
+	binary := stableBinaryPath(mustExecutable())
 	plans, err := hook.Installer{Binary: binary}.Plans(cfg.Token, false)
 	if err != nil {
 		return err
