@@ -139,10 +139,11 @@ var antigravityModel = regexp.MustCompile(`^\s*\S.*·\s*(?:low|medium|high|max)\
 //	  No, exit
 //	  ↑/↓ Navigate · enter Confirm
 func DetectAntigravity(pane string) *Question {
-	if trust := detectAntigravityTrust(bottom(pane)); trust != nil {
+	lines := joinAntigravityWraps(bottom(pane))
+	if trust := detectAntigravityTrust(lines); trust != nil {
 		return trust
 	}
-	q := Detect(pane)
+	q := Detect(strings.Join(lines, "\n"))
 	if q == nil {
 		return nil
 	}
@@ -151,7 +152,6 @@ func DetectAntigravity(pane string) *Question {
 	// them on separate lines — the subject indented beneath the header, then
 	// the question — so read them back from there rather than guessing where
 	// a command ends and a sentence begins.
-	lines := bottom(pane)
 	for i := len(lines) - 1; i >= 0; i-- {
 		if strings.TrimSpace(lines[i]) != "Requesting permission for:" {
 			continue
@@ -177,6 +177,34 @@ func DetectAntigravity(pane string) *Question {
 	return q
 }
 
+// joinAntigravityWraps puts agy's wrapped option labels back on one line.
+//
+// agy wraps a long label itself and continues it at column 0, not under the
+// label, so tmux cannot rejoin it and the generic detector reads the
+// unindented remainder as the end of the menu. At 80 columns — the size a
+// phone-launched session starts at — that hid the permission prompt entirely,
+// and the "esc to cancel" footer beneath it left the session reported as
+// working until someone went to the Mac. Only lines that follow an option are
+// joined, so the question and the text above the menu are untouched.
+func joinAntigravityWraps(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	afterOption := false
+	for _, line := range lines {
+		switch {
+		case optionLine.MatchString(line):
+			afterOption = true
+		case afterOption && strings.TrimSpace(line) != "" && !strings.HasPrefix(line, " ") &&
+			!footerLine.MatchString(line) && len(out) > 0:
+			out[len(out)-1] = strings.TrimRight(out[len(out)-1], " ") + " " + strings.TrimSpace(line)
+			continue
+		default:
+			afterOption = false
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
 func detectAntigravityTrust(lines []string) *Question {
 	end := lastNonBlank(lines)
 	// The model label can sit beneath the footer on a line of its own.
@@ -196,11 +224,20 @@ func detectAntigravityTrust(lines []string) *Question {
 	for index, line := range lines[:end] {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "Accessing workspace:" {
+			// A path longer than the pane wraps onto following lines, broken
+			// wherever the width fell, so the pieces join with nothing between.
 			for next := index + 1; next < end; next++ {
-				if value := strings.TrimSpace(lines[next]); value != "" {
-					path = value
+				value := strings.TrimSpace(lines[next])
+				if value == "" {
+					if path != "" {
+						break
+					}
+					continue
+				}
+				if strings.HasPrefix(value, "Do you trust") {
 					break
 				}
+				path += value
 			}
 		}
 		label := strings.TrimSpace(strings.TrimPrefix(trimmed, ">"))
