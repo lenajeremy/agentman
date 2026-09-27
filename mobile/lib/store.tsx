@@ -135,7 +135,11 @@ interface Store {
   stopServer(sessionId: string, port: number): Promise<void>;
   workspace(sessionId: string, type: "list_files" | "read_file" | "list_changes" | "file_diff" | "read_seen_file", path?: string): Promise<WorkspaceResult>;
   listDirectories(path: string): Promise<string[]>;
-  startSession(kind: "claude" | "codex" | "cursor-cli" | "opencode", path: string, text: string): Promise<string>;
+  startSession(
+    kind: "claude" | "codex" | "cursor-cli" | "opencode" | "kiro" | "antigravity",
+    path: string,
+    text: string,
+  ): Promise<string>;
 }
 
 /** How long a tap on a server waits for the Mac to open its link. The daemon

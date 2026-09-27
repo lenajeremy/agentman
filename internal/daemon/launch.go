@@ -122,8 +122,13 @@ func (d *Daemon) startLocalSession(ctx context.Context, req protocol.Request) (s
 func startTerminalSession(ctx context.Context, kind protocol.Kind, dir, prompt string) (string, error) {
 	command := string(kind)
 	nameKind := command
-	if kind == protocol.KindCursorCLI {
+	switch kind {
+	case protocol.KindCursorCLI:
 		command, nameKind = "agent", "cursor"
+	case protocol.KindKiro:
+		command = "kiro-cli"
+	case protocol.KindAntigravity:
+		command = "agy"
 	}
 	binary, err := exec.LookPath(command)
 	if err != nil {
@@ -161,10 +166,33 @@ func startTerminalSession(ctx context.Context, kind protocol.Kind, dir, prompt s
 		id = "codex:tmux-" + name
 	case protocol.KindCursorCLI:
 		id = "cursor-cli:pane:" + name
+	case protocol.KindKiro:
+		// Kiro picks its own session id once it starts, so the pane is the
+		// only name that exists yet; the adapter keys the session on it.
+		argv = append(argv, "chat")
+		id = "kiro:tmux-" + name
+	case protocol.KindAntigravity:
+		id = "antigravity:tmux-" + name
 	default:
 		return "", errors.New("daemon: unsupported launch agent")
 	}
-	argv = append(argv, "--", prompt)
+	// Kiro and Antigravity are started without their first message, which is
+	// typed in once each is ready (see deliverFirstPrompt). Both accept one on
+	// the command line, and both mishandle it there, each found by launching:
+	//
+	//   - kiro-cli drops "--" when it hands arguments to its inner chat
+	//     process, so a message beginning with a dash — a bullet, "-v" — is
+	//     read as a flag, and Kiro exits with a usage error after the launch
+	//     has already reported success.
+	//   - agy, in a folder it has not been told to trust, files a conversation
+	//     started that way under its own scratch directory, so `ls` listed an
+	//     empty scratch folder instead of the project.
+	//
+	// Typed at the prompt, the message is text, and it runs where it was sent.
+	ready := firstPromptReady(kind)
+	if ready == nil {
+		argv = append(argv, "--", prompt)
+	}
 	if err := tmux.Launch(ctx, name, dir, argv); err != nil {
 		return "", err
 	}
@@ -175,11 +203,61 @@ func startTerminalSession(ctx context.Context, kind protocol.Kind, dir, prompt s
 	if err == nil {
 		for _, pane := range panes {
 			if pane.Name == name {
+				if ready != nil {
+					go deliverFirstPrompt(name, prompt, ready)
+				}
 				return id, nil
 			}
 		}
 	}
 	return "", fmt.Errorf("daemon: %s exited before its session started; check its login on the Mac", command)
+}
+
+// firstPromptReady returns how to tell that an agent launched without its
+// first message is ready to have it typed in, or nil for agents that take it
+// on the command line.
+func firstPromptReady(kind protocol.Kind) func(pane string) bool {
+	switch kind {
+	case protocol.KindKiro:
+		return source.KiroReadyForInput
+	case protocol.KindAntigravity:
+		return source.AntigravityReadyForInput
+	}
+	return nil
+}
+
+// firstPromptWait bounds how long a launch holds its first message — long
+// enough for the user to answer a folder trust prompt from the phone.
+const firstPromptWait = 30 * time.Minute
+
+// deliverFirstPrompt types a launch's first message in once ready says the
+// agent is idle at its prompt, leaving any open menu for the user to answer.
+//
+// It runs apart from the request because that answer can take minutes. The
+// pane disappearing — the agent exiting, or the user declining to trust the
+// folder — ends it, and so does the time limit, rather than typing into
+// whatever the pane shows much later.
+func deliverFirstPrompt(name, prompt string, ready func(pane string) bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), firstPromptWait)
+	defer cancel()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		pane, err := tmux.Capture(ctx, name)
+		if err != nil {
+			return
+		}
+		if !ready(pane) {
+			continue
+		}
+		_ = tmux.Send(ctx, name, prompt)
+		return
+	}
 }
 
 func newClaudeSessionID() (string, error) {

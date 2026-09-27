@@ -92,6 +92,8 @@ Use the wrappers when the session must accept messages or answers from the app:
 am claude
 am codex
 am opencode
+am kiro
+am antigravity
 ```
 
 The underlying CLI must already be installed and authenticated.
@@ -181,9 +183,11 @@ sequenceDiagram
 | Agent | Discovery and history | Message delivery | Questions |
 |---|---|---|---|
 | Claude Code | Session registry and transcript JSONL | tmux while active; hook queue between turns | tmux prompt parser and terminal control |
-| Codex | Rollout JSONL plus tmux discovery before the first rollout exists | tmux | tmux prompt parser and terminal control |
+| Codex | Rollout JSONL plus tmux discovery before the first rollout exists; current question, search, image, and collaboration events appear in history | tmux | Managed tmux sessions reveal queued follow-up questions and answer listed or custom choices; older numbered menus remain supported |
 | OpenCode | Native HTTP API across the watched local port range | `prompt_async` API | Native question and permission APIs |
 | Cursor | Agent transcript JSONL under `~/.cursor/projects`, enriched from the IDE's `state.vscdb` composer index (exact timestamps, subtitle, blocking flag) | Read-only for now | Blocking flag surfaces as waiting input (view-only; resolve in the IDE) |
+| Kiro CLI | Session files under `~/.kiro/sessions/cli`; the session lock names the owning process, which matches its tmux pane by ancestry | tmux for `am kiro`; other sessions read-only | Tool approvals, including Kiro's second-level trust options, answered from the pane |
+| Antigravity CLI | Trajectory transcript under `~/.gemini/antigravity-cli/brain`; running conversations found by what each `agy` process holds open (lsof) | tmux for `am antigravity`; other sessions read-only | Command permissions and first-run folder trust, answered from the pane |
 | Cursor Agent CLI | Local chat store for terminal chats; Agentman transcript for phone-created ACP chats | ACP with live reply chunks for phone-created chats; tmux for `am cursor`; other terminal chats read-only | ACP permissions, questions, plans, and cancellation for phone-created chats; terminal prompts for `am cursor` |
 
 Cursor IDE discovery excludes CLI-owned transcripts, which Cursor also writes
@@ -272,6 +276,8 @@ am servers                  List the web servers your agents have started
 am claude [args...]         Start Claude Code in managed tmux
 am codex [args...]          Start Codex in managed tmux
 am opencode [args...]       Start OpenCode with its local API
+am kiro [args...]           Start Kiro CLI (`kiro-cli chat`) in managed tmux
+am antigravity [args...]    Start Antigravity CLI (`agy`) in managed tmux; also `am agy`
 am install-hooks            Install completion hooks
 am uninstall-hooks          Remove Agentman hooks
 am doctor                   Validate the local setup

@@ -18,12 +18,14 @@ import { useStyles, useTheme } from "../lib/appearance";
 import { useStore } from "../lib/store";
 import { font, Palette, radius, size, space } from "../lib/theme";
 
-type LaunchKind = "claude" | "codex" | "cursor-cli" | "opencode";
+type LaunchKind = "claude" | "codex" | "cursor-cli" | "opencode" | "kiro" | "antigravity";
 const agents: { kind: LaunchKind; label: string }[] = [
   { kind: "claude", label: "Claude Code" },
   { kind: "codex", label: "Codex" },
   { kind: "cursor-cli", label: "Cursor CLI" },
   { kind: "opencode", label: "OpenCode" },
+  { kind: "kiro", label: "Kiro CLI" },
+  { kind: "antigravity", label: "Antigravity" },
 ];
 
 export default function NewSession() {

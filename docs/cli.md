@@ -16,6 +16,8 @@ daemon used by the mobile app.
 | `am claude [args...]` | Start Claude Code in managed tmux. |
 | `am codex [args...]` | Start Codex in managed tmux. |
 | `am opencode [args...]` | Start OpenCode with a discoverable local HTTP API. |
+| `am kiro [args...]` | Start Kiro CLI in managed tmux. Arguments go to `kiro-cli chat`. |
+| `am antigravity [args...]` | Start Antigravity CLI (`agy`) in managed tmux. `am agy` is the same command. |
 | `am install-hooks` | Install Agentman's Claude Code and Codex completion hooks. |
 | `am uninstall-hooks` | Remove only Agentman's hook entries. |
 | `am doctor` | Check hooks, daemon health, agent discovery, and transcript parsing. |
@@ -78,6 +80,9 @@ Delivery depends on the adapter:
 | Codex started with `am codex` | Sent immediately through tmux. |
 | Codex started directly | Not deliverable. Restart with `am codex`. |
 | OpenCode | Sent through `prompt_async` on the native API. |
+| Kiro CLI started with `am kiro` | Sent immediately through tmux. Mid-turn, Kiro treats it as steering for the running turn. |
+| Antigravity CLI started with `am antigravity` | Sent immediately through tmux. |
+| Kiro CLI or Antigravity CLI started directly | Not deliverable. Restart with the wrapper. |
 
 For terminal sessions, Agentman refuses normal messages while a detected
 question is on screen. Answer the question first.

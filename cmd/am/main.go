@@ -41,6 +41,8 @@ Usage:
   am codex [args...]          Start Codex so you can message it later
   am opencode [args...]       Start OpenCode so you can message it later
   am cursor [args...]         Start Cursor Agent CLI so you can message it later
+  am kiro [args...]           Start Kiro CLI so you can message it later
+  am antigravity [args...]    Start Antigravity CLI so you can message it later (or: am agy)
   am send <session-id> <text> Send a message to a running session
   am interrupt <session-id>   Stop the active turn in a managed session
   am answer <session-id> <key> Answer a pending choice shown by an agent
@@ -96,9 +98,13 @@ func main() {
 		err = runExpose(ctx, args)
 	case "servers":
 		err = runServers(ctx, args)
-	case "claude", "codex", "cursor":
+	case "claude", "codex", "cursor", "kiro", "antigravity", "agy":
 		// Launch an agent inside tmux so it can receive messages later.
-		err = runWrap(ctx, command, args)
+		agent := command
+		if agent == "agy" {
+			agent = "antigravity" // one pane prefix, whichever name was typed
+		}
+		err = runWrap(ctx, agent, args)
 	case "opencode":
 		// No tmux: OpenCode takes prompts over its API. What it needs instead
 		// is its API on the port the daemon watches.
@@ -209,6 +215,22 @@ func buildRegistryWithConfigHome(configHome string) (*source.Registry, error) {
 		return nil, err
 	}
 	registry.Add(source.NewCursorCLIGroup(cursorCLI, acp))
+
+	// Kiro CLI is file-backed, and its session lock names the owning process,
+	// so it matches a tmux pane as exactly as Claude does.
+	kiro, err := source.NewKiroSource("")
+	if err != nil {
+		return nil, err
+	}
+	registry.Add(kiro)
+
+	// Antigravity's own records lag the process, so a running agy is found by
+	// what it holds open: lsof maps each one to its conversation and directory.
+	antigravity, err := source.NewAntigravitySource("")
+	if err != nil {
+		return nil, err
+	}
+	registry.Add(antigravity)
 
 	return registry, nil
 }

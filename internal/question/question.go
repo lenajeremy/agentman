@@ -99,7 +99,7 @@ var formControl = regexp.MustCompile(`(?i)^\s*([❯›>»▸▶→*]?)\s*(?:next
 // text. Claude's AskUserQuestion footer starts with "Enter to select", while
 // Codex's multi-question form can start with Enter, arrows, Tab, Ctrl, or an
 // option-position hint depending on its width and focus.
-var footerLine = regexp.MustCompile(`(?i)^\s*(?:enter to|esc to|press |↑/↓|←/→|tab (?:to|or)|ctrl\s*\+|option \d+/\d+)`)
+var footerLine = regexp.MustCompile(`(?i)^\s*(?:enter (?:to|submit\b|continue\b)|esc (?:to|quit\b)|press |↑/↓|←/→|tab (?:to|or)|ctrl\s*\+|option \d+/\d+)`)
 
 // taskChrome matches the rows Claude Code paints beneath a live control: its
 // task list, and the tick/box glyphs of the entries under it.
@@ -124,7 +124,35 @@ var bareChatLine = regexp.MustCompile(`(?i)^\s*(?:[❯›>»▸▶→*]\s*)?chat
 // progressLine is UI chrome above a multi-question prompt. Treating it as a
 // context boundary prevents the previous transcript from being folded into a
 // newly displayed Codex question when the form advances from question 1 to 2.
-var progressLine = regexp.MustCompile(`(?i)^\s*questions?\s+\d+\s*(?:/|of)\s*\d+(?:\s*\([^)]*\))?\s*$`)
+var progressLine = regexp.MustCompile(`(?i)^\s*(?:questions?\s+)?\d+\s*(?:/|of)\s*\d+(?:\s*\([^)]*\))?\s*$|^\s*(?:•\s*)?queued follow-up inputs\s*$`)
+
+var codexQueuedCount = regexp.MustCompile(`^\?\s*[1-3]\s+questions?(?:\s*·\s*[0-9hms ]+)?$`)
+
+// CodexQueued reports the current Codex TUI's collapsed async question tray.
+// Only this exact bottom-of-pane control authorizes revealing the question;
+// arbitrary transcript text must never trigger a synthetic terminal key.
+func CodexQueued(pane string) bool {
+	lines := strings.Split(strings.TrimSpace(pane), "\n")
+	if len(lines) > 12 {
+		lines = lines[len(lines)-12:]
+	}
+	for i := range lines {
+		if strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[i]), "•")) != "Queued follow-up inputs" {
+			continue
+		}
+		for j := i + 1; j < len(lines) && j <= i+4; j++ {
+			if !codexQueuedCount.MatchString(strings.TrimSpace(lines[j])) {
+				continue
+			}
+			for k := j + 1; k < len(lines) && k <= j+3; k++ {
+				if strings.EqualFold(strings.TrimSpace(lines[k]), "shift+← to answer") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
 
 // inputLine matches the TUI's own input box, which sits above the transcript
 // and has nothing to do with the question. Without this the walk upward for
@@ -303,9 +331,19 @@ func Detect(pane string) *Question {
 	// user's text. In the captured checkbox layout it remains identifiable as
 	// the last checkbox before Next, followed by the numbered chat escape row.
 	customLine := -1
+	codexFollowUp := false
+	for i := first - 1; i >= 0 && i >= first-12; i-- {
+		if progressLine.MatchString(lines[i]) && strings.Contains(strings.ToLower(lines[i]), "queued follow-up inputs") {
+			codexFollowUp = true
+			break
+		}
+		if inputLine.MatchString(lines[i]) {
+			break
+		}
+	}
 	chatAfterSubmit := false
 	for _, raw := range rawOptions {
-		if isCustomOption(raw.label) {
+		if isCustomOption(raw.label) || codexFollowUp && strings.EqualFold(strings.TrimSpace(raw.label), "Other") {
 			customLine = raw.line
 		}
 		if submitLine >= 0 && raw.line > submitLine && isChatOption(raw.label) {

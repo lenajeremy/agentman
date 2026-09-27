@@ -698,3 +698,31 @@ func TestCodexDropsAPausedSessionOnceItsPaneIsGone(t *testing.T) {
 		t.Errorf("got %d sessions, want none: the pane closed and the rollout is stale", len(found))
 	}
 }
+
+func TestCodexDoesNotListSubagentRolloutsAsSessions(t *testing.T) {
+	home := t.TempDir()
+	day := time.Now()
+	dir := filepath.Join(home, ".codex", "sessions", day.Format("2006/01/02"))
+	for name, sourceKind := range map[string]any{
+		"root": "cli", "child": obj{"subagent": obj{"other": "guardian"}},
+	} {
+		writeJSONL(t, filepath.Join(dir, "rollout-"+name+".jsonl"), []any{
+			obj{"type": "session_meta", "timestamp": day.Format(time.RFC3339Nano), "payload": obj{
+				"id": name, "cwd": "/work/api", "timestamp": day.Format(time.RFC3339Nano), "source": sourceKind}},
+			obj{"type": "event_msg", "timestamp": day.Format(time.RFC3339Nano), "payload": obj{"type": "task_complete"}},
+		})
+	}
+	src, err := NewCodexSource(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.processCheck = alwaysRunning
+	src.listPanes = noPanes
+	found, err := src.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 || found[0].NativeID != "root" {
+		t.Fatalf("subagent appeared as an independent session: %+v", found)
+	}
+}

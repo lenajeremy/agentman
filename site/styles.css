@@ -134,11 +134,12 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 /* ---------- Works with ---------- */
 .strip { padding: 56px 0 8px; text-align: center; }
 .caps { font-family: var(--mono); font-size: 12.5px; letter-spacing: 1.5px; color: var(--muted); text-transform: uppercase; }
-.names { margin-top: 24px; display: flex; justify-content: center; gap: 72px; font-size: 26px; font-weight: 600; letter-spacing: -0.8px; color: #8E9097; flex-wrap: wrap; }
+.names { margin-top: 24px; display: flex; justify-content: center; gap: 48px; font-size: 24px; font-weight: 600; letter-spacing: -0.8px; color: #8E9097; flex-wrap: wrap; }
 .names span { display: inline-flex; align-items: center; gap: 12px; }
-.names svg { width: 26px; height: 26px; }
+.names svg { width: 24px; height: 24px; }
 .names .logo-claude { color: #D97757; }
 .names .logo-ink { color: var(--ink); }
+.names .logo-kiro { color: #9046FF; }
 
 /* ---------- Sections ---------- */
 section { scroll-margin-top: 24px; }
@@ -526,6 +527,9 @@ section { scroll-margin-top: 24px; }
 
 /* ---------- Narrower screens ---------- */
 @media (max-width: 1100px) {
+  /* Six agents no longer fit one row here; three and three reads as a set, where
+     wrapping left one name alone on a line of its own. */
+  .names { display: grid; grid-template-columns: repeat(3, max-content); justify-content: center; column-gap: 56px; row-gap: 18px; }
   .term { width: 520px; right: 40px; }
   .notif { display: none; }
   .scene { gap: 20px; padding: 32px; }
@@ -568,7 +572,7 @@ section { scroll-margin-top: 24px; }
   .hero p { font-size: 17px; }
   .stage { height: 560px; border-radius: 22px; }
   .stage .phone { transform: translateX(-50%) scale(.9); transform-origin: top center; top: 28px; }
-  .names { flex-direction: column; align-items: center; gap: 14px; font-size: 22px; }
+  .names { display: flex; flex-direction: column; align-items: center; gap: 14px; font-size: 22px; }
   .h2, .start .h2, .band .h2 { font-size: 36px; letter-spacing: -1.2px; }
   .why { padding-top: 72px; }
   .why p { font-size: 17px; }

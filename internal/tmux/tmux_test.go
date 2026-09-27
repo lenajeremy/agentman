@@ -9,7 +9,58 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lenajeremy/agentman/internal/question"
 )
+
+// Set AGENTMAN_TEST_CODEX_PANE to a disposable Codex pane whose async
+// question is queued. This exercises the actual CLI shortcut across versions.
+func TestLiveCodexQueuedQuestionReveal(t *testing.T) {
+	name := os.Getenv("AGENTMAN_TEST_CODEX_PANE")
+	if name == "" {
+		t.Skip("requires a disposable Codex pane with a queued question")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	for {
+		pane, err := Capture(ctx, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if question.CodexQueued(pane) {
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatal("Codex never queued its test question")
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	pane, err := RevealCodexQuestion(ctx, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := question.Detect(pane)
+	if first == nil || len(first.Options) < 2 {
+		t.Fatalf("queued Codex question did not become answerable: %+v", first)
+	}
+	secondPane, err := RevealCodexQuestion(ctx, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := question.Detect(secondPane)
+	if second == nil || second.Prompt != first.Prompt {
+		t.Fatalf("repeated discovery changed the active question: %+v then %+v", first, second)
+	}
+}
+
+func TestCodexCustomAnswerEchoIsBoundToQuestion(t *testing.T) {
+	if !codexAnswerEchoed("› > Which season do you prefer?\n\n  Orange\n\n• Working", "Orange") {
+		t.Fatal("submitted custom answer was missed")
+	}
+	if codexAnswerEchoed("• Codex mentioned Orange\n\n› Ask Codex to do anything", "Orange") {
+		t.Fatal("ordinary transcript text was treated as a submitted answer")
+	}
+}
 
 // These tests drive a real tmux, because the whole point of this package is
 // that the interaction with tmux behaves as expected. They are skipped when
@@ -375,5 +426,34 @@ func TestNewNameDoesNotCollideWithinOneSecond(t *testing.T) {
 			t.Fatalf("NewName returned duplicate %q", name)
 		}
 		seen[name] = struct{}{}
+	}
+}
+
+// The command column is the rest of the line, because macOS reports full
+// executable paths and some contain spaces. Taking a third field instead cut
+// Kiro's bundled runtime down to ".../Application".
+func TestProcessTreeKeepsCommandsWithSpaces(t *testing.T) {
+	processes := parseProcessTree(
+		"59753 59728 /Users/mac/.local/bin/kiro-cli-chat\n" +
+			"59728 59547 /Users/mac/Library/Application Support/kiro-cli/bun\n" +
+			"  900     1 agy\n" +
+			"10 9\n")
+	for pid, want := range map[int]string{
+		59753: "/Users/mac/.local/bin/kiro-cli-chat",
+		59728: "/Users/mac/Library/Application Support/kiro-cli/bun",
+		900:   "agy",
+		10:    "",
+	} {
+		if got := processes.Command(pid); got != want {
+			t.Errorf("Command(%d) = %q, want %q", pid, got, want)
+		}
+	}
+	// Two-column rows still build the tree, so ancestry keeps working when a
+	// platform's ps omits the command.
+	if !processes.OwnsPID(9, 10) {
+		t.Error("a two-column row was dropped from the tree")
+	}
+	if !processes.OwnsPID(59547, 59753) {
+		t.Error("ancestry broke once rows carried commands")
 	}
 }

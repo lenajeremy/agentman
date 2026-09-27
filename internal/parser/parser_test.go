@@ -287,6 +287,51 @@ func TestCodexIgnoresDuplicateHistoryStream(t *testing.T) {
 	}
 }
 
+func TestCodexCurrentQuestionCallSettlesUnderOneID(t *testing.T) {
+	path := writeFixture(t, []any{
+		obj{"timestamp": "2026-09-26T10:00:00Z", "type": "response_item", "payload": obj{
+			"type": "function_call", "name": "request_user_input_async", "call_id": "call-question",
+			"arguments": `{"questions":[{"title":"Which option?","options":["A","B"]}]}`}},
+		obj{"timestamp": "2026-09-26T10:00:05Z", "type": "response_item", "payload": obj{
+			"type": "function_call_output", "call_id": "call-question", "output": `{"answer":"A"}`}},
+	})
+	backward := pageAll(t, path, NewCodexParser("codex:s"), 10)
+	if len(backward) != 1 || backward[0].Tool == nil || backward[0].Tool.Name != "Question" ||
+		backward[0].Tool.Summary != "Which option?" || backward[0].Tool.Status != protocol.ToolOK {
+		t.Fatalf("backward question history = %+v", backward)
+	}
+	p := NewCodexParser("codex:s")
+	tail := jsonl.NewTail(path)
+	lines, err := tail.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var forward []protocol.Message
+	for _, line := range lines {
+		forward = append(forward, p.Parse(line.Text, line.Offset)...)
+	}
+	if len(forward) != 2 || forward[0].ID != forward[1].ID ||
+		forward[0].Tool.Status != protocol.ToolRunning || forward[1].Tool.Status != protocol.ToolOK {
+		t.Fatalf("live question did not update one row: %+v", forward)
+	}
+}
+
+func TestCodexCurrentExtensionAndImageItems(t *testing.T) {
+	path := writeFixture(t, []any{
+		codexEvent(obj{"type": "Extension", "id": "search-1", "kind": "web.search", "query": "Codex docs"}),
+		codexEvent(obj{"type": "ImageView", "id": "image-1", "path": "/project/mockup.png"}),
+		codexEvent(obj{"type": "FileChange", "id": "change-1", "status": "failed", "changes": obj{"/project/app.go": obj{}}}),
+		codexEvent(obj{"type": "WebSearch", "id": "legacy-search", "query": "old Codex docs"}),
+		codexEvent(obj{"type": "CollabAgentToolCall", "id": "agent-1", "tool": "spawn_agent", "status": "completed"}),
+	})
+	msgs := pageAll(t, path, NewCodexParser("codex:s"), 10)
+	if len(msgs) != 5 || msgs[0].Tool.Name != "Web search" || msgs[0].Tool.Summary != "Codex docs" ||
+		msgs[1].Tool.Name != "View image" || msgs[2].Tool.Status != protocol.ToolError ||
+		msgs[3].Tool.Name != "Web search" || msgs[4].Tool.Summary != "spawn_agent" {
+		t.Fatalf("current Codex items = %+v", msgs)
+	}
+}
+
 func TestCodexCommandsUseParsedFormAndExitStatus(t *testing.T) {
 	path := writeFixture(t, []any{
 		codexEvent(obj{

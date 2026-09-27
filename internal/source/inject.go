@@ -154,10 +154,25 @@ func rejectSendIntoLiveQuestion(
 		// cannot prove which of those states it is in.
 		return fmt.Errorf("source: could not safely inspect the terminal before sending: %w", err)
 	}
-	if question.Detect(pane) != nil {
+	if question.Detect(pane) != nil || question.CodexQueued(pane) {
 		return fmt.Errorf("source: answer the pending question before sending a message")
 	}
 	return nil
+}
+
+func detectCodexQuestion(ctx context.Context, tmuxName string) *protocol.Question {
+	pane, err := tmux.RevealCodexQuestion(ctx, tmuxName)
+	if err != nil {
+		return nil
+	}
+	return protocolQuestionOrNil(question.Detect(pane))
+}
+
+func protocolQuestionOrNil(found *question.Question) *protocol.Question {
+	if found == nil {
+		return nil
+	}
+	return protocolQuestion(found)
 }
 
 // detectQuestion reads a pane and reports any decision the agent is blocked on.
@@ -467,11 +482,26 @@ func (s *CodexSource) Answer(ctx context.Context, sessionID string, answer proto
 		answer.QuestionID != session.meta.Question.ID {
 		return fmt.Errorf("source: that question is no longer current; refresh the session")
 	}
-	if len(answer.Options) > 0 || answer.Text != "" {
-		return fmt.Errorf("source: this terminal question only accepts one listed option")
+	if len(answer.Options) > 0 || answer.Text != "" && answer.OptionKey != "" {
+		return fmt.Errorf("source: choose one listed option or provide one custom answer")
 	}
-	if err := validateCurrentQuestion(ctx, session.tmuxName, session.meta.Question, answer.OptionKey); err != nil {
-		return err
+	currentPane, err := tmux.RevealCodexQuestion(ctx, session.tmuxName)
+	if err != nil {
+		return fmt.Errorf("source: could not inspect the Codex question: %w", err)
+	}
+	found := question.Detect(currentPane)
+	current := protocolQuestionOrNil(found)
+	if !sameQuestion(session.meta.Question, current) {
+		return fmt.Errorf("source: that question or option is no longer current; refresh the session")
+	}
+	if answer.Text != "" {
+		if found == nil || !found.Custom || found.CustomKey == "" {
+			return fmt.Errorf("source: this Codex question has no custom answer")
+		}
+		return tmux.AnswerCodexCustom(ctx, session.tmuxName, found.CustomKey, answer.Text)
+	}
+	if !questionHasOption(current, answer.OptionKey) {
+		return fmt.Errorf("source: that question or option is no longer current; refresh the session")
 	}
 	return tmux.Answer(ctx, session.tmuxName, answer.OptionKey)
 }
