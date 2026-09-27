@@ -129,12 +129,20 @@ func (r *Registry) Discover(ctx context.Context) ([]protocol.Session, error) {
 // sessions blocked on the user first (they are the ones going nowhere without
 // attention), then busy ones, then everything else by recency.
 func SortSessions(sessions []protocol.Session) {
-	sort.SliceStable(sessions, func(i, j int) bool {
-		if pi, pj := statePriority(sessions[i].State), statePriority(sessions[j].State); pi != pj {
-			return pi < pj
+	// Insertion keeps equal sessions in their discovery order without relying
+	// on the standard library's comparator implementation details.
+	for i := 1; i < len(sessions); i++ {
+		for j := i; j > 0 && sessionBefore(sessions[j], sessions[j-1]); j-- {
+			sessions[j], sessions[j-1] = sessions[j-1], sessions[j]
 		}
-		return sessions[i].LastActivityAt > sessions[j].LastActivityAt
-	})
+	}
+}
+
+func sessionBefore(left, right protocol.Session) bool {
+	if lp, rp := statePriority(left.State), statePriority(right.State); lp != rp {
+		return lp < rp
+	}
+	return left.LastActivityAt > right.LastActivityAt
 }
 
 func statePriority(s protocol.State) int {
