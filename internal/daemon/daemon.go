@@ -1104,7 +1104,8 @@ func validateRequest(req protocol.Request) error {
 	case protocol.ReqStartSession:
 		if req.ClientID == "" || validateLaunchPath(req.Path, false) != nil ||
 			(req.Kind != protocol.KindClaude && req.Kind != protocol.KindCodex &&
-				req.Kind != protocol.KindCursorCLI && req.Kind != protocol.KindOpenCode) ||
+				req.Kind != protocol.KindCursorCLI && req.Kind != protocol.KindOpenCode &&
+				req.Kind != protocol.KindKiro && req.Kind != protocol.KindAntigravity) ||
 			strings.TrimSpace(req.Text) == "" || len(req.Text) > maxMessageBytes ||
 			containsTerminalControl(req.Text) {
 			return fmt.Errorf("daemon: invalid session launch")

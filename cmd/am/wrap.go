@@ -34,8 +34,17 @@ func attachPending(registry *source.Registry, queue *source.PendingQueue) {
 // then attached to immediately, so `am claude` looks and feels like `claude`.
 func runWrap(ctx context.Context, agent string, args []string) error {
 	commandName := agent
-	if agent == "cursor" {
+	var prefix []string
+	switch agent {
+	case "cursor":
 		commandName = "agent"
+	case "kiro":
+		// `kiro-cli` alone treats a first word as a subcommand, so a prompt
+		// would be misread. `chat` takes the prompt and the flags people
+		// actually reach for: --resume, --resume-id, --agent, --model.
+		commandName, prefix = "kiro-cli", []string{"chat"}
+	case "antigravity":
+		commandName = "agy"
 	}
 	binary, err := exec.LookPath(commandName)
 	if err != nil {
@@ -53,7 +62,7 @@ func runWrap(ctx context.Context, agent string, args []string) error {
 	}
 
 	name := tmux.NewName(agent)
-	command := append([]string{binary}, args...)
+	command := append(append([]string{binary}, prefix...), args...)
 
 	if err := tmux.Launch(ctx, name, cwd, command); err != nil {
 		return err

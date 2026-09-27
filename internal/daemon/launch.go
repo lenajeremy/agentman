@@ -122,8 +122,13 @@ func (d *Daemon) startLocalSession(ctx context.Context, req protocol.Request) (s
 func startTerminalSession(ctx context.Context, kind protocol.Kind, dir, prompt string) (string, error) {
 	command := string(kind)
 	nameKind := command
-	if kind == protocol.KindCursorCLI {
+	switch kind {
+	case protocol.KindCursorCLI:
 		command, nameKind = "agent", "cursor"
+	case protocol.KindKiro:
+		command = "kiro-cli"
+	case protocol.KindAntigravity:
+		command = "agy"
 	}
 	binary, err := exec.LookPath(command)
 	if err != nil {
@@ -161,10 +166,23 @@ func startTerminalSession(ctx context.Context, kind protocol.Kind, dir, prompt s
 		id = "codex:tmux-" + name
 	case protocol.KindCursorCLI:
 		id = "cursor-cli:pane:" + name
+	case protocol.KindKiro:
+		// Kiro picks its own session id once it starts, so the pane is the
+		// only name that exists yet; the adapter keys the session on it.
+		argv = append(argv, "chat")
+		id = "kiro:tmux-" + name
+	case protocol.KindAntigravity:
+		id = "antigravity:tmux-" + name
 	default:
 		return "", errors.New("daemon: unsupported launch agent")
 	}
-	argv = append(argv, "--", prompt)
+	if kind == protocol.KindAntigravity {
+		// agy has no "--" terminator: a separate argument beginning with a
+		// dash would be read as a flag. Joined with "=", it is always the value.
+		argv = append(argv, "--prompt-interactive="+prompt)
+	} else {
+		argv = append(argv, "--", prompt)
+	}
 	if err := tmux.Launch(ctx, name, dir, argv); err != nil {
 		return "", err
 	}
