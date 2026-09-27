@@ -416,6 +416,17 @@ func (t *Tail) SeekTo(info os.FileInfo) {
 	t.identity = info
 }
 
+// SeekToOffset positions the tail at an arbitrary byte offset.
+//
+// The offset need not fall on a line boundary, so the first line Read returns
+// afterwards may be the tail of one that started earlier. Callers that seek
+// into the middle of a file must discard it themselves.
+func (t *Tail) SeekToOffset(offset int64) {
+	t.offset = max(offset, 0)
+	t.carry = nil
+	t.identity = nil
+}
+
 // Read returns complete lines appended since the previous call, and nothing
 // when the file is idle.
 func (t *Tail) Read() ([]Line, error) {

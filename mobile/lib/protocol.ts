@@ -26,6 +26,8 @@ export type AgentKind =
   | "opencode"
   | "cursor"
   | "cursor-cli"
+  | "kiro"
+  | "antigravity"
   | (string & {});
 export type SessionState = "busy" | "idle" | "waiting_input" | "ended";
 

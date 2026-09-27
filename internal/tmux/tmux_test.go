@@ -428,3 +428,32 @@ func TestNewNameDoesNotCollideWithinOneSecond(t *testing.T) {
 		seen[name] = struct{}{}
 	}
 }
+
+// The command column is the rest of the line, because macOS reports full
+// executable paths and some contain spaces. Taking a third field instead cut
+// Kiro's bundled runtime down to ".../Application".
+func TestProcessTreeKeepsCommandsWithSpaces(t *testing.T) {
+	processes := parseProcessTree(
+		"59753 59728 /Users/mac/.local/bin/kiro-cli-chat\n" +
+			"59728 59547 /Users/mac/Library/Application Support/kiro-cli/bun\n" +
+			"  900     1 agy\n" +
+			"10 9\n")
+	for pid, want := range map[int]string{
+		59753: "/Users/mac/.local/bin/kiro-cli-chat",
+		59728: "/Users/mac/Library/Application Support/kiro-cli/bun",
+		900:   "agy",
+		10:    "",
+	} {
+		if got := processes.Command(pid); got != want {
+			t.Errorf("Command(%d) = %q, want %q", pid, got, want)
+		}
+	}
+	// Two-column rows still build the tree, so ancestry keeps working when a
+	// platform's ps omits the command.
+	if !processes.OwnsPID(9, 10) {
+		t.Error("a two-column row was dropped from the tree")
+	}
+	if !processes.OwnsPID(59547, 59753) {
+		t.Error("ancestry broke once rows carried commands")
+	}
+}

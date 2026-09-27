@@ -265,6 +265,23 @@ func Interrupt(ctx context.Context, name string) error {
 	return nil
 }
 
+// Escape sends one Escape key, which is how Kiro CLI and Antigravity CLI stop a
+// running turn. Both advertise it in their own footers ("esc to cancel"), and
+// Interrupt's Ctrl-C is a different request in their interfaces, not a
+// synonym for it.
+func Escape(ctx context.Context, name string) error {
+	if !Available() {
+		return ErrNotInstalled
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	if _, err := run(ctx, "send-keys", "-t", name, "Escape"); err != nil {
+		return fmt.Errorf("tmux: could not interrupt: %w", err)
+	}
+	return nil
+}
+
 // Kill terminates a session.
 func Kill(ctx context.Context, name string) error {
 	_, err := run(ctx, "kill-session", "-t", name)
@@ -294,6 +311,11 @@ func OwnsPID(panePID, pid int) bool {
 // process table halfway through the sweep.
 type ProcessTree struct {
 	parents map[int]int
+	// commands is each process's executable, used to check that a pid still
+	// belongs to the program that recorded it. Agents that leave a lock file
+	// naming their pid can crash without removing it, and the operating
+	// system eventually hands that pid to something unrelated.
+	commands map[int]string
 }
 
 // SnapshotProcessTree reads the process table with one cancellable ps command.
@@ -303,7 +325,7 @@ func SnapshotProcessTree(ctx context.Context) (*ProcessTree, error) {
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, "ps", "-axo", "pid=,ppid=").Output()
+	out, err := exec.CommandContext(ctx, "ps", "-axo", "pid=,ppid=,comm=").Output()
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -313,21 +335,52 @@ func SnapshotProcessTree(ctx context.Context) (*ProcessTree, error) {
 	return parseProcessTree(string(out)), nil
 }
 
+// ProcessTreeFromTable builds a snapshot from `ps -axo pid=,ppid=,comm=`
+// output. It exists so adapters can be tested against a process table they
+// describe, rather than whatever happens to be running on the test machine.
+func ProcessTreeFromTable(table string) *ProcessTree { return parseProcessTree(table) }
+
 func parseProcessTree(table string) *ProcessTree {
 	parents := make(map[int]int)
+	commands := make(map[int]string)
 	for _, line := range strings.Split(table, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) != 2 {
+		first, rest := cutField(line)
+		second, command := cutField(rest)
+		if first == "" || second == "" {
 			continue
 		}
-		pid, pidErr := strconv.Atoi(fields[0])
-		parent, parentErr := strconv.Atoi(fields[1])
+		pid, pidErr := strconv.Atoi(first)
+		parent, parentErr := strconv.Atoi(second)
 		if pidErr != nil || parentErr != nil || pid <= 0 || parent < 0 {
 			continue
 		}
 		parents[pid] = parent
+		// The command is everything after the second column, not a third
+		// field: macOS reports the full executable path, and paths like
+		// ".../Application Support/..." contain spaces.
+		if command = strings.TrimSpace(command); command != "" {
+			commands[pid] = command
+		}
 	}
-	return &ProcessTree{parents: parents}
+	return &ProcessTree{parents: parents, commands: commands}
+}
+
+// cutField splits off the first whitespace-delimited field of s.
+func cutField(s string) (field, rest string) {
+	s = strings.TrimLeft(s, " \t")
+	if end := strings.IndexAny(s, " \t"); end >= 0 {
+		return s[:end], s[end:]
+	}
+	return s, ""
+}
+
+// Command returns the executable a pid was running in this snapshot, or ""
+// when the snapshot does not know it.
+func (p *ProcessTree) Command(pid int) string {
+	if p == nil {
+		return ""
+	}
+	return p.commands[pid]
 }
 
 // OwnsPID reports whether pid is the pane process or one of its descendants in
@@ -558,6 +611,41 @@ func AnswerWorkspaceTrust(ctx context.Context, name, choice string, focusDistanc
 	}
 	if _, err := run(ctx, "send-keys", "-t", name, "Enter"); err != nil {
 		return fmt.Errorf("tmux: could not answer workspace trust: %w", err)
+	}
+	return nil
+}
+
+// AnswerArrowMenu answers a menu with no numbers to type: it moves focus by
+// distance rows, then presses Enter only if focused confirms, from a fresh
+// capture, that the intended row now carries the cursor.
+//
+// The check is what makes this safe to drive from a phone. The menu on screen
+// can change between the moment the phone read it and the moment its answer
+// arrives — the agent may have moved on, or a different prompt may have taken
+// its place — and pressing Enter on whatever row happens to be focused then
+// approves something the user never saw.
+func AnswerArrowMenu(ctx context.Context, name string, distance int, focused func(pane string) bool) error {
+	if !Available() {
+		return ErrNotInstalled
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	if err := moveFocus(ctx, name, distance); err != nil {
+		return err
+	}
+	if distance != 0 {
+		time.Sleep(45 * time.Millisecond)
+	}
+	pane, err := Capture(ctx, name)
+	if err != nil {
+		return err
+	}
+	if !focused(pane) {
+		return errors.New("tmux: that choice is no longer on screen; refresh the session")
+	}
+	if _, err := run(ctx, "send-keys", "-t", name, "Enter"); err != nil {
+		return fmt.Errorf("tmux: could not answer: %w", err)
 	}
 	return nil
 }

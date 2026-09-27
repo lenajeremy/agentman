@@ -12,11 +12,13 @@ package protocol
 type Kind string
 
 const (
-	KindClaude    Kind = "claude"
-	KindCodex     Kind = "codex"
-	KindOpenCode  Kind = "opencode"
-	KindCursor    Kind = "cursor"
-	KindCursorCLI Kind = "cursor-cli"
+	KindClaude      Kind = "claude"
+	KindCodex       Kind = "codex"
+	KindOpenCode    Kind = "opencode"
+	KindCursor      Kind = "cursor"
+	KindCursorCLI   Kind = "cursor-cli"
+	KindKiro        Kind = "kiro"
+	KindAntigravity Kind = "antigravity"
 )
 
 // State is a session's current disposition.
