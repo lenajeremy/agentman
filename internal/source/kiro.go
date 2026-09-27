@@ -303,6 +303,16 @@ func kiroPaneState(pane string) (protocol.State, bool) {
 	return "", false
 }
 
+// KiroReadyForInput reports whether a Kiro pane is idle at its prompt, with no
+// menu open — the point at which a launch's first message can be typed in.
+func KiroReadyForInput(pane string) bool {
+	if question.DetectKiro(pane) != nil {
+		return false
+	}
+	state, ok := kiroPaneState(pane)
+	return ok && state == protocol.StateIdle
+}
+
 func isKiroCommand(command string) bool {
 	return strings.HasPrefix(filepath.Base(command), "kiro-cli")
 }

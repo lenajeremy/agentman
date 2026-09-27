@@ -268,18 +268,33 @@ func (s *AntigravitySource) applyPane(ctx context.Context, session *protocol.Ses
 		session.State = protocol.StateWaitingInput
 		return
 	}
-	// The footer says what agy is doing. Only the bottom rows are read: the
-	// same words could appear in the conversation above.
+	if state, ok := antigravityPaneState(lines); ok {
+		session.State = state
+	}
+}
+
+// antigravityPaneState reads agy's footer, which says what it is doing. Only
+// the bottom rows are read: the same words could appear in the conversation.
+func antigravityPaneState(lines []string) (protocol.State, bool) {
 	for i := len(lines) - 1; i >= 0 && i >= len(lines)-3; i-- {
 		switch {
 		case strings.Contains(lines[i], "esc to cancel"):
-			session.State = protocol.StateBusy
-			return
+			return protocol.StateBusy, true
 		case strings.Contains(lines[i], "? for shortcuts"):
-			session.State = protocol.StateIdle
-			return
+			return protocol.StateIdle, true
 		}
 	}
+	return "", false
+}
+
+// AntigravityReadyForInput reports whether an agy pane is idle at its prompt,
+// with no menu open — past the folder trust prompt, in particular.
+func AntigravityReadyForInput(pane string) bool {
+	if question.DetectAntigravity(pane) != nil {
+		return false
+	}
+	state, ok := antigravityPaneState(strings.Split(strings.TrimRight(pane, "\n"), "\n"))
+	return ok && state == protocol.StateIdle
 }
 
 func lastNonBlankLine(lines []string) string {
