@@ -97,3 +97,25 @@ test("keeps balanced parentheses inside a url", () => {
     },
   ]);
 });
+
+// Regression: a refused target used to emit the label as one raw text token, so
+// its own markdown showed through. A real reply wrote
+// [`mobile/`](file:///Users/…/mobile) and the backticks rendered on the phone.
+// The target must still be refused; only the label's formatting is restored.
+test("a refused link keeps its label's formatting", () => {
+  assert.deepEqual(
+    tokenizeInline("the app ([`mobile/`](file:///Users/mac/Desktop/agentman/mobile)) exists"),
+    [
+      { kind: "text", text: "the app (" },
+      { kind: "code", text: "mobile/" },
+      { kind: "text", text: ") exists" },
+    ],
+  );
+  assert.equal(safeHref("file:///Users/mac/Desktop/agentman/mobile"), null);
+});
+
+test("a refused link with a bold label keeps the bold", () => {
+  assert.deepEqual(tokenizeInline("[**careful**](javascript:alert(1))"), [
+    { kind: "bold", text: "careful" },
+  ]);
+});

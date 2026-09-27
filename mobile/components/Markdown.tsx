@@ -2,8 +2,9 @@ import * as WebBrowser from "expo-web-browser";
 import { ReactNode } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { parseBlocks, type Block } from "../lib/markdown-blocks";
 import { tokenizeInline } from "../lib/markdown-inline";
-import { cellWidth, parseTable, type Table } from "../lib/markdown-table";
+import { cellWidth, type Table } from "../lib/markdown-table";
 import { useStyles } from "../lib/appearance";
 import { font, Palette, radius, size, space } from "../lib/theme";
 
@@ -17,12 +18,6 @@ const MAX_MARKDOWN_CHARS = 200_000;
  * instead of wrapping; those fall back to a flat highlight that still wraps.
  */
 const MAX_CODE_CHIP = 40;
-
-type Block =
-  | { kind: "paragraph" | "quote" | "code"; text: string }
-  | { kind: "heading"; level: number; text: string }
-  | { kind: "bullet" | "number"; marker: string; text: string }
-  | { kind: "table"; table: Table };
 
 /**
  * Renders the small markdown vocabulary agents use in ordinary replies.
@@ -54,14 +49,29 @@ export function Markdown({ children }: { children: string }) {
   );
 }
 
+/**
+ * Heading sizes.
+ *
+ * Only the top level is enlarged, which is what this renderer already did — the
+ * change here is that levels four to six reach this function at all instead of
+ * being left as literal hashes in a paragraph. Deeper levels stay at body size
+ * and separate themselves by weight; a reply is not a document, and six
+ * typographic ranks in a chat bubble would be noise.
+ */
+function headingSize(level: number, styles: Styles) {
+  return level === 1 ? styles.heading1 : undefined;
+}
+
 function BlockView({ block, styles }: { block: Block; styles: Styles }) {
   switch (block.kind) {
     case "heading":
       return (
-        <Text selectable style={[styles.text, styles.heading, block.level === 1 && styles.heading1]}>
+        <Text selectable style={[styles.text, styles.heading, headingSize(block.level, styles)]}>
           {renderInline(block.text, styles)}
         </Text>
       );
+    case "rule":
+      return <View style={styles.rule} />;
     case "code":
       return (
         <Text selectable style={styles.codeBlock}>
@@ -156,100 +166,6 @@ function TableView({ table, styles }: { table: Table; styles: Styles }) {
   );
 }
 
-function parseBlocks(source: string): Block[] {
-  const blocks: Block[] = [];
-  const lines = source.replace(/\r\n?/g, "\n").split("\n");
-  let paragraph: string[] = [];
-  let code: string[] | null = null;
-
-  const flushParagraph = () => {
-    if (paragraph.length > 0) {
-      blocks.push({ kind: "paragraph", text: paragraph.join("\n") });
-      paragraph = [];
-    }
-  };
-  const flushCode = () => {
-    if (code !== null) {
-      blocks.push({ kind: "code", text: code.join("\n") });
-      code = null;
-    }
-  };
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    const trimmed = line.trimStart();
-    if (trimmed.startsWith("```")) {
-      if (code === null) {
-        flushParagraph();
-        code = [];
-      } else {
-        flushCode();
-      }
-      continue;
-    }
-    if (code !== null) {
-      code.push(line);
-      continue;
-    }
-    if (trimmed === "") {
-      flushParagraph();
-      continue;
-    }
-
-    const heading = headingLine(trimmed);
-    if (heading) {
-      flushParagraph();
-      blocks.push(heading);
-      continue;
-    }
-    if (trimmed.startsWith("> ")) {
-      flushParagraph();
-      blocks.push({ kind: "quote", text: trimmed.slice(2) });
-      continue;
-    }
-    if (/^[-*+]\s/.test(trimmed)) {
-      flushParagraph();
-      blocks.push({ kind: "bullet", marker: "•", text: trimmed.slice(2) });
-      continue;
-    }
-    const numbered = numberedLine(trimmed);
-    if (numbered) {
-      flushParagraph();
-      blocks.push(numbered);
-      continue;
-    }
-    // Checked late: a table only exists if the next line is a rule, so every
-    // cheaper block shape gets to claim the line first.
-    const table = parseTable(lines, index);
-    if (table) {
-      flushParagraph();
-      blocks.push({ kind: "table", table: table.table });
-      index = table.next - 1;
-      continue;
-    }
-    paragraph.push(line);
-  }
-  flushParagraph();
-  flushCode();
-  return blocks;
-}
-
-function headingLine(line: string): Block | null {
-  let level = 0;
-  while (level < 3 && line[level] === "#") level += 1;
-  if (level === 0 || line[level] !== " ") return null;
-  return { kind: "heading", level, text: line.slice(level + 1) };
-}
-
-function numberedLine(line: string): Block | null {
-  let end = 0;
-  while (end < line.length && end < 6 && line.charCodeAt(end) >= 48 && line.charCodeAt(end) <= 57) {
-    end += 1;
-  }
-  if (end === 0 || line[end] !== "." || line[end + 1] !== " ") return null;
-  return { kind: "number", marker: line.slice(0, end + 1), text: line.slice(end + 2) };
-}
-
 /**
  * Opens a link the agent wrote.
  *
@@ -318,6 +234,13 @@ function makeStyles(c: Palette) {
     },
     heading: { fontFamily: font.sansBold, marginTop: space.xs, letterSpacing: -0.2 },
     heading1: { fontSize: size.title },
+    // Thematic breaks separate sections, so they need the air a paragraph gap
+    // does not give on its own.
+    rule: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: c.line,
+      marginVertical: space.sm,
+    },
     bold: { fontFamily: font.sansBold },
     link: { color: c.workingText, textDecorationLine: "underline" },
     // A chip rather than a raw highlight: without the inset the background sits
