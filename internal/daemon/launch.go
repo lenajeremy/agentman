@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/question"
 	"github.com/lenajeremy/agentman/internal/source"
 	"github.com/lenajeremy/agentman/internal/tmux"
 )
@@ -176,11 +177,14 @@ func startTerminalSession(ctx context.Context, kind protocol.Kind, dir, prompt s
 	default:
 		return "", errors.New("daemon: unsupported launch agent")
 	}
-	if kind == protocol.KindAntigravity {
-		// agy has no "--" terminator: a separate argument beginning with a
-		// dash would be read as a flag. Joined with "=", it is always the value.
-		argv = append(argv, "--prompt-interactive="+prompt)
-	} else {
+	// Antigravity is started without its first message, which is typed in
+	// once it is ready (see deliverFirstPrompt). agy can take a prompt on its
+	// command line, but in a folder it has not been told to trust it files
+	// that conversation under its own scratch directory — found by launching
+	// one, where `ls` then listed an empty scratch folder instead of the
+	// project. Typed after the trust prompt, the same message runs where it
+	// was sent.
+	if kind != protocol.KindAntigravity {
 		argv = append(argv, "--", prompt)
 	}
 	if err := tmux.Launch(ctx, name, dir, argv); err != nil {
@@ -193,11 +197,60 @@ func startTerminalSession(ctx context.Context, kind protocol.Kind, dir, prompt s
 	if err == nil {
 		for _, pane := range panes {
 			if pane.Name == name {
+				if kind == protocol.KindAntigravity {
+					go deliverFirstPrompt(name, prompt)
+				}
 				return id, nil
 			}
 		}
 	}
 	return "", fmt.Errorf("daemon: %s exited before its session started; check its login on the Mac", command)
+}
+
+// firstPromptWait bounds how long a launch holds its first message for the
+// user to answer agy's folder trust prompt from the phone.
+const firstPromptWait = 30 * time.Minute
+
+// deliverFirstPrompt types a launch's first message into agy once agy is at
+// its input, leaving any trust prompt for the user to answer first.
+//
+// It runs apart from the request because that answer can take minutes. The
+// pane disappearing — agy exiting, or the user declining to trust the folder —
+// ends it, and so does the time limit, rather than typing into whatever the
+// pane shows much later.
+func deliverFirstPrompt(name, prompt string) {
+	ctx, cancel := context.WithTimeout(context.Background(), firstPromptWait)
+	defer cancel()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		pane, err := tmux.Capture(ctx, name)
+		if err != nil {
+			return
+		}
+		if question.DetectAntigravity(pane) != nil || !antigravityAtInput(pane) {
+			continue
+		}
+		_ = tmux.Send(ctx, name, prompt)
+		return
+	}
+}
+
+// antigravityAtInput reports whether agy is idle at its prompt. Its footer
+// reads "? for shortcuts" there, and "esc to cancel" while it works.
+func antigravityAtInput(pane string) bool {
+	lines := strings.Split(strings.TrimRight(pane, "\n"), "\n")
+	for i := len(lines) - 1; i >= 0 && i >= len(lines)-3; i-- {
+		if strings.Contains(lines[i], "? for shortcuts") {
+			return true
+		}
+	}
+	return false
 }
 
 func newClaudeSessionID() (string, error) {

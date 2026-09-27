@@ -224,6 +224,14 @@ func buildRegistryWithConfigHome(configHome string) (*source.Registry, error) {
 	}
 	registry.Add(kiro)
 
+	// Antigravity's own records lag the process, so a running agy is found by
+	// what it holds open: lsof maps each one to its conversation and directory.
+	antigravity, err := source.NewAntigravitySource("")
+	if err != nil {
+		return nil, err
+	}
+	registry.Add(antigravity)
+
 	return registry, nil
 }
 

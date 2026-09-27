@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -372,6 +373,20 @@ func cutField(s string) (field, rest string) {
 		return s[:end], s[end:]
 	}
 	return s, ""
+}
+
+// PIDs lists every process whose command the snapshot knows, in ascending
+// order so callers iterate deterministically.
+func (p *ProcessTree) PIDs() []int {
+	if p == nil {
+		return nil
+	}
+	pids := make([]int, 0, len(p.commands))
+	for pid := range p.commands {
+		pids = append(pids, pid)
+	}
+	slices.Sort(pids)
+	return pids
 }
 
 // Command returns the executable a pid was running in this snapshot, or ""
