@@ -46,6 +46,17 @@ done
 
 [ -f .asc.env ] && . ./.asc.env
 
+# Apple refuses an App Store upload built with a beta Xcode — error 90534,
+# "Unsupported SDK or Xcode version", raised at validation after the whole
+# archive is already built. xcode-select on this machine points at the beta,
+# so the release install is chosen explicitly rather than inherited. Setting
+# DEVELOPER_DIR yourself still wins, and it covers altool too, which would
+# otherwise run out of whichever Xcode xcode-select names.
+if [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Applications/Xcode.app ]; then
+  export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+fi
+echo "==> $(xcodebuild -version | tr '\n' ' ')"
+
 : "${ASC_KEY_ID:?set ASC_KEY_ID (App Store Connect → Users and Access → Integrations)}"
 : "${ASC_ISSUER_ID:?set ASC_ISSUER_ID (the Issuer ID above the key table)}"
 
