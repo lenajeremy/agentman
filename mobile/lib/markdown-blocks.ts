@@ -17,7 +17,11 @@ import { parseTable, type Table } from "./markdown-table.ts";
 export const MAX_HEADING_LEVEL = 6;
 
 export type Block =
-  | { kind: "paragraph" | "quote" | "code"; text: string }
+  | { kind: "paragraph" | "quote"; text: string }
+  // The fence's info string, lowercased, when it names one: ```java. It is
+  // what lets a block be highlighted, and agents write it far more often
+  // than not.
+  | { kind: "code"; text: string; language?: string }
   | { kind: "heading"; level: number; text: string }
   | { kind: "bullet" | "number"; marker: string; text: string }
   | { kind: "rule" }
@@ -63,12 +67,25 @@ export function isThematicBreak(line: string): boolean {
   return /^-+$/.test(body) || /^\*+$/.test(body) || /^_+$/.test(body);
 }
 
+/**
+ * The language named by an opening fence, or "" when it names none.
+ *
+ * Kept forgiving: an info string may carry attributes after the language, and
+ * a fence may be written with more than three backticks.
+ */
+export function fenceLanguage(openingFence: string): string {
+  const info = openingFence.replace(/^`+/, "").trim();
+  const first = info.split(/[\s,{]/)[0] ?? "";
+  return /^[A-Za-z0-9_+#-]+$/.test(first) ? first.toLowerCase() : "";
+}
+
 /** Splits a message into the blocks the renderer draws. */
 export function parseBlocks(source: string): Block[] {
   const blocks: Block[] = [];
   const lines = source.replace(/\r\n?/g, "\n").split("\n");
   let paragraph: string[] = [];
   let code: string[] | null = null;
+  let codeLanguage = "";
 
   const flushParagraph = () => {
     if (paragraph.length > 0) {
@@ -78,8 +95,13 @@ export function parseBlocks(source: string): Block[] {
   };
   const flushCode = () => {
     if (code !== null) {
-      blocks.push({ kind: "code", text: code.join("\n") });
+      blocks.push(
+        codeLanguage
+          ? { kind: "code", text: code.join("\n"), language: codeLanguage }
+          : { kind: "code", text: code.join("\n") },
+      );
       code = null;
+      codeLanguage = "";
     }
   };
 
@@ -90,6 +112,9 @@ export function parseBlocks(source: string): Block[] {
       if (code === null) {
         flushParagraph();
         code = [];
+        // Only the first word: agents write ```ts twoslash and ```python
+        // {highlight=3}, and the rest is not a language.
+        codeLanguage = fenceLanguage(trimmed);
       } else {
         flushCode();
       }

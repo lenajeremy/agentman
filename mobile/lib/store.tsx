@@ -45,11 +45,13 @@ import {
   type Dismissals,
 } from "./dismissed";
 import { draftNamespace } from "./draft-policy";
+import { withinFolder } from "./folders";
 import { isPushActive, obtainPushToken, setPushActive } from "./push";
 import { clearDraft } from "./drafts";
 import { newFrameId } from "./id";
 import {
   DaemonEvent,
+  Folder,
   Message,
   Page,
   QuestionAnswer,
@@ -134,7 +136,34 @@ interface Store {
   /** End the process listening on a port. Nothing here can start it again. */
   stopServer(sessionId: string, port: number): Promise<void>;
   workspace(sessionId: string, type: "list_files" | "read_file" | "list_changes" | "file_diff" | "read_seen_file", path?: string): Promise<WorkspaceResult>;
-  listDirectories(path: string): Promise<string[]>;
+  /** Browse one directory: its child folders, and how many agents each has
+   *  under it. Counts are absent from a Mac too old to send them. */
+  listDirectories(path: string): Promise<{ names: string[]; folders: Folder[] }>;
+  /** Make one folder under the Mac user's home and resolve with the parent's
+   *  refreshed listing, so the new folder is simply there to tap. */
+  createDirectory(path: string): Promise<{ names: string[]; folders: Folder[] }>;
+  /** Every directory an agent has ever run in, most recent first. The only
+   *  route to one the browser skips: a dot-directory, or anything outside the
+   *  Mac user's home. */
+  listFolders(): Promise<Folder[]>;
+  /** The folder the list is narrowed to, or null for everything. */
+  folderFilter: string | null;
+  /** Narrow the list to one folder and its subtree, or clear it with null.
+   *  A folder's list includes sessions that have already ended, which no
+   *  amount of waiting on discovery would ever show. */
+  setFolderFilter(path: string | null): void;
+  /** True while a newly chosen folder is being read. */
+  folderLoading: boolean;
+  /** The one state the list is narrowed to, or null for all of them. */
+  stateFilter: Session["state"] | null;
+  setStateFilter(state: Session["state"] | null): void;
+  /** Reopen a session in a tmux pane so it can be typed into, and resolve
+   *  with the id to watch. Safe on a session that is already running: the
+   *  Mac does nothing and hands back the same id. */
+  resumeSession(sessionId: string): Promise<string>;
+  /** Close the pane a session runs in. The transcript survives, so it stays
+   *  in its folder's history and can be resumed again. */
+  endSession(sessionId: string): Promise<void>;
   startSession(
     kind: "claude" | "codex" | "cursor-cli" | "opencode" | "kiro" | "antigravity",
     path: string,
@@ -558,6 +587,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
 
       case "directories":
+      case "folders":
+      case "directory_sessions":
+      case "session_ended":
       case "session_started": {
         if (replyTo) settleLaunchRequest(replyTo, event);
         break;
@@ -758,10 +790,60 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.remove();
   }, []);
 
-  const visibleSessions = useMemo(
-    () => sessions.filter((session) => !isHidden(session, dismissals)),
-    [sessions, dismissals],
-  );
+  // The folder filter reads from a different place than the status board.
+  // Discovery streams what is running; a folder's list is fetched, because a
+  // session stops being discoverable the moment its process exits and no
+  // amount of waiting would ever stream it.
+  const [folderFilter, setFolderFilterPath] = useState<string | null>(null);
+  const [folderSessions, setFolderSessions] = useState<Session[]>([]);
+  const [folderLoading, setFolderLoading] = useState(false);
+  const [stateFilter, setStateFilter] = useState<Session["state"] | null>(null);
+
+  const loadFolderSessions = useCallback((path: string) => {
+    const id = clientRef.current?.send({ type: "directory_sessions", path });
+    if (!id) return;
+    setFolderLoading(true);
+    const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
+    launchRequests.current.set(id, {
+      resolve: (event) => {
+        setFolderSessions(event.sessions ?? []);
+        setFolderLoading(false);
+      },
+      reject: () => setFolderLoading(false),
+      timer,
+    });
+  }, [settleLaunchRequest]);
+
+  const setFolderFilter = useCallback((path: string | null) => {
+    setFolderFilterPath(path);
+    setFolderSessions([]);
+    if (path) loadFolderSessions(path);
+    else setFolderLoading(false);
+  }, [loadFolderSessions]);
+
+  // A folder's list is a snapshot, so it is re-read when the Mac comes back
+  // rather than left showing what was true before the connection dropped.
+  useEffect(() => {
+    if (daemonOnline && folderFilter) loadFolderSessions(folderFilter);
+  }, [daemonOnline, folderFilter, loadFolderSessions]);
+
+  const visibleSessions = useMemo(() => {
+    if (!folderFilter) {
+      return sessions.filter((session) => !isHidden(session, dismissals));
+    }
+    // Live wins over the snapshot: discovery knows the state, the question
+    // and whether the session can still be typed into, none of which a
+    // transcript on disk can say.
+    const live = new Map(sessions.map((session) => [session.id, session]));
+    const merged = folderSessions.map((session) => live.get(session.id) ?? session);
+    const seen = new Set(merged.map((session) => session.id));
+    for (const session of sessions) {
+      if (!seen.has(session.id) && withinFolder(session.cwd, folderFilter)) {
+        merged.push(session);
+      }
+    }
+    return merged.filter((session) => !isHidden(session, dismissals));
+  }, [sessions, folderSessions, folderFilter, dismissals]);
 
   const store: Store = useMemo(
     () => ({
@@ -1104,7 +1186,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
 
       listDirectories(path) {
-        return new Promise<string[]>((resolve, reject) => {
+        return new Promise<{ names: string[]; folders: Folder[] }>((resolve, reject) => {
           const id = clientRef.current?.send({ type: "list_directories", path });
           if (!id) {
             reject(new Error("Not connected to your Mac right now."));
@@ -1112,7 +1194,81 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           }
           const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
           launchRequests.current.set(id, {
-            resolve: (event) => resolve(event.directories ?? []), reject, timer,
+            resolve: (event) => resolve({
+              names: event.directories ?? [],
+              // A Mac that predates folder counts simply sends none, and the
+              // browser shows the folders without them.
+              folders: event.folders ?? [],
+            }),
+            reject,
+            timer,
+          });
+        });
+      },
+
+      createDirectory(path) {
+        return new Promise<{ names: string[]; folders: Folder[] }>((resolve, reject) => {
+          const id = clientRef.current?.send({ type: "create_directory", path });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
+          launchRequests.current.set(id, {
+            resolve: (event) => resolve({
+              names: event.directories ?? [],
+              folders: event.folders ?? [],
+            }),
+            reject,
+            timer,
+          });
+        });
+      },
+
+      listFolders() {
+        return new Promise<Folder[]>((resolve, reject) => {
+          const id = clientRef.current?.send({ type: "list_folders" });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
+          launchRequests.current.set(id, {
+            resolve: (event) => resolve(event.folders ?? []), reject, timer,
+          });
+        });
+      },
+
+      folderFilter,
+      folderLoading,
+      setFolderFilter,
+      stateFilter,
+      setStateFilter,
+
+      resumeSession(sessionId) {
+        return new Promise<string>((resolve, reject) => {
+          const id = clientRef.current?.send({ type: "resume_session", sessionId });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
+          launchRequests.current.set(id, {
+            resolve: (event) => resolve(event.sessionId ?? sessionId), reject, timer,
+          });
+        });
+      },
+
+      endSession(sessionId) {
+        return new Promise<void>((resolve, reject) => {
+          const id = clientRef.current?.send({ type: "end_session", sessionId });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
+          launchRequests.current.set(id, {
+            resolve: () => resolve(), reject, timer,
           });
         });
       },
@@ -1136,7 +1292,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         });
       },
     }),
-    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest],
+    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, folderFilter, folderLoading, setFolderFilter, stateFilter, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest],
   );
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;

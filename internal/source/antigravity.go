@@ -61,10 +61,18 @@ type AntigravitySource struct {
 	listPanes         func(context.Context) ([]tmux.Session, error)
 	snapshotProcesses func(context.Context) (*tmux.ProcessTree, error)
 	capturePane       func(context.Context, string) (string, error)
+	// captureScrollback reads the pane plus its history, which is the only
+	// place a reply exists while agy is writing it. Injectable for the same
+	// reason as the rest: tests must not read the host's tmux server.
+	captureScrollback func(context.Context, string, int) (string, error)
 	openConversations func(context.Context, string, []int) map[int]antigravityProcess
 
 	mu       sync.RWMutex
 	sessions map[string]antigravitySession
+
+	// past holds transcripts of sessions that have already exited, found by
+	// Past rather than by a sweep. See pastSessions.
+	past pastSessions
 
 	cacheMu sync.Mutex
 	states  map[string]kiroStateEntry
@@ -97,6 +105,7 @@ func NewAntigravitySource(home string) (*AntigravitySource, error) {
 		listPanes:         tmux.List,
 		snapshotProcesses: tmux.SnapshotProcessTree,
 		capturePane:       tmux.Capture,
+		captureScrollback: tmux.CaptureScrollback,
 		openConversations: antigravityOpenConversations,
 		sessions:          map[string]antigravitySession{},
 		states:            map[string]kiroStateEntry{},
@@ -444,10 +453,15 @@ func (s *AntigravitySource) session(sessionID string) (antigravitySession, error
 	s.mu.RLock()
 	session, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
-	if !ok {
-		return antigravitySession{}, fmt.Errorf("source: unknown antigravity session %q", sessionID)
+	if ok {
+		return session, nil
 	}
-	return session, nil
+	// A session Past found from the folder list reads like a live one with
+	// nothing appending to it.
+	if past, isPast := s.pastAntigravitySession(sessionID); isPast {
+		return past, nil
+	}
+	return antigravitySession{}, fmt.Errorf("source: unknown antigravity session %q", sessionID)
 }
 
 // Page implements Source. Every step carries its own time, so unlike Kiro this
@@ -532,6 +546,11 @@ func (s *AntigravitySource) Follow(ctx context.Context, sessionID string, out ch
 	}
 	attach(session.transcript, false)
 
+	// The reply being written, as last read off the pane. Kept so an
+	// unchanged preview is not re-sent every tick, and so the provisional
+	// message can be withdrawn the moment the real record lands.
+	var preview string
+
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
 	for {
@@ -564,6 +583,28 @@ func (s *AntigravitySource) Follow(ctx context.Context, sessionID string, out ch
 		for _, line := range lines {
 			batch = append(batch, p.Parse(line.Text, line.Offset)...)
 		}
+		// The record that just landed supersedes anything scraped off the
+		// pane for it. Clearing the preview here is what stops a finished
+		// reply being followed by a stale, pane-wrapped copy of itself.
+		if len(batch) > 0 {
+			preview = ""
+		}
+
+		// Sent under the id the finished step will carry, so the app updates
+		// that row in place. A message whose text grows under a stable id is
+		// already how OpenCode streams, so nothing downstream is new.
+		if partial, step, ok := s.streamingReply(ctx, current, p.NextStepIndex()); ok &&
+			partial != preview {
+			preview = partial
+			batch = append(batch, protocol.Message{
+				ID:        antigravityStreamID(step),
+				SessionID: sessionID,
+				Role:      protocol.RoleAssistant,
+				Ts:        time.Now().UnixMilli(),
+				Text:      partial,
+			})
+		}
+
 		if len(batch) == 0 {
 			continue
 		}
@@ -573,6 +614,31 @@ func (s *AntigravitySource) Follow(ctx context.Context, sessionID string, out ch
 			return ctx.Err()
 		}
 	}
+}
+
+// streamingReply reads the reply agy is writing from its pane.
+//
+// Only while a turn is actually running: outside one the pane shows the last
+// finished answer, which the transcript already carries and which must not be
+// re-sent as though it were new.
+func (s *AntigravitySource) streamingReply(
+	ctx context.Context, session antigravitySession, nextStep int,
+) (string, int, bool) {
+	if session.tmuxName == "" || s.captureScrollback == nil {
+		return "", 0, false
+	}
+	if session.meta.State != protocol.StateBusy {
+		return "", 0, false
+	}
+	pane, err := s.captureScrollback(ctx, session.tmuxName, antigravityScrollbackLines)
+	if err != nil {
+		return "", 0, false
+	}
+	partial := antigravityPartialReply(pane)
+	if partial == "" {
+		return "", 0, false
+	}
+	return partial, nextStep, true
 }
 
 // Inject implements Injector.

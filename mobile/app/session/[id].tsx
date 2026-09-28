@@ -29,6 +29,7 @@ import { Thinking } from "../../components/Thinking";
 import { ToolRow } from "../../components/ToolRow";
 import { AttachmentStrip } from "../../components/AttachmentStrip";
 import { Popover, type PopoverItem } from "../../components/Popover";
+import { canEnd, shouldResume } from "../../lib/resume";
 import { chooseImageSource } from "../../lib/image-source-sheet";
 import { draftNamespace } from "../../lib/draft-policy";
 import { clearDraft, loadDraft, saveDraft } from "../../lib/drafts";
@@ -328,6 +329,40 @@ export default function SessionScreen() {
     interruptAction?.status === "delivered";
 
   const [menuOpen, setMenuOpen] = useState(false);
+  // Opening a read-only session reopens it on the Mac.
+  //
+  // Most of what a folder holds has already ended, and every CLI can reopen
+  // one of its own sessions by id — so "read-only" was never a property of
+  // the session, only of whether anything was running. Attempted once per
+  // session, because a failure that retries on every render would be a loop
+  // that launches processes.
+  const [resuming, setResuming] = useState(false);
+  const [resumeError, setResumeError] = useState("");
+  const resumeTried = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!session || !store.daemonOnline) return;
+    if (!shouldResume(session)) return;
+    if (resumeTried.current === session.id) return;
+    resumeTried.current = session.id;
+    setResuming(true);
+    setResumeError("");
+    store
+      .resumeSession(session.id)
+      .then((id) => {
+        // Claude, Kiro, Antigravity and Cursor keep writing the transcript
+        // they were pointed at, so the id survives. Codex opens a rollout of
+        // its own, so the reopened session is a different one to watch.
+        if (id && id !== session.id) {
+          router.replace(`/session/${encodeURIComponent(id)}`);
+        }
+      })
+      .catch((err: Error) => setResumeError(err.message))
+      .finally(() => setResuming(false));
+    // store methods change identity as sessions update; this must run once
+    // per session, not once per update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.id, session?.inject, store.daemonOnline]);
   // null until asked, so the bar is absent rather than flickering in and out
   // while the answer is in flight.
   const [changedFiles, setChangedFiles] = useState<number | null>(null);
@@ -364,6 +399,21 @@ export default function SessionScreen() {
         destructive: true,
         disabled: interruptLocked,
         onPress: requestInterrupt,
+      });
+    }
+    // Closing the pane is what keeps opening sessions freely from leaving a
+    // dozen of them running. The transcript survives, so this is reversible:
+    // the session stays in its folder and opening it starts it again.
+    if (canEnd(session)) {
+      sessionMenuItems.push({
+        key: "end",
+        label: "End session",
+        icon: "x-circle",
+        destructive: true,
+        onPress: () => {
+          void store.endSession(session.id).catch(() => {});
+          router.back();
+        },
       });
     }
   }
@@ -526,6 +576,8 @@ export default function SessionScreen() {
               kind={session.kind}
               inject={session.inject}
               state={session.state}
+              resuming={resuming}
+              resumeError={resumeError}
             />
           </ContentColumn>
         )}
@@ -843,17 +895,28 @@ function DeliveryNote({
   kind,
   inject,
   state,
+  resuming,
+  resumeError,
 }: {
   kind: string;
   inject: string;
   state: string;
+  resuming: boolean;
+  resumeError: string;
 }) {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
   if (inject === "tmux" || inject === "api") return null;
 
   let text: string;
-  if (inject === "hook") {
+  if (resuming) {
+    // Reopening replaces the old advice entirely. Telling someone to run
+    // `am claude` on a Mac they are not sitting at was never useful, and it
+    // is now describing something already happening.
+    text = "Reopening this session on your Mac…";
+  } else if (resumeError) {
+    text = resumeError;
+  } else if (inject === "hook") {
     text =
       state === "busy"
         ? "Messages wait until this turn ends — it can't be interrupted."

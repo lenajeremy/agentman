@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -139,6 +140,11 @@ type Daemon struct {
 	// A launch request is never replayed automatically, but a manual retry with
 	// the same client ID must return the original process rather than fork it.
 	launches map[string]string
+
+	// folders remembers the sessions a folder listing returned, so an ended
+	// one can be reopened by naming it rather than by the phone describing
+	// it. See resume.go.
+	folders folderMemory
 }
 
 // follow is one live tail. It is tracked by pointer identity so that a
@@ -878,7 +884,61 @@ func (d *Daemon) HandleFrom(
 		if err != nil {
 			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
 		}
-		return protocol.Event{Type: protocol.EvtDirectories, Path: req.Path, Directories: names}
+		return protocol.Event{
+			Type: protocol.EvtDirectories, Path: req.Path, Directories: names,
+			Folders: d.annotateDirectories(ctx, req.Path, names),
+		}
+
+	case protocol.ReqListFolders:
+		folders, err := d.listFolders(ctx)
+		if err != nil && folders == nil {
+			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
+		}
+		return protocol.Event{Type: protocol.EvtFolders, Folders: folders}
+
+	case protocol.ReqDirectorySessions:
+		sessions, err := d.directorySessions(ctx, req.Path)
+		if err != nil {
+			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
+		}
+		// Remembered so resuming one of them names a session the daemon
+		// itself found, rather than trusting a kind and a directory sent up
+		// from the phone.
+		d.folders.remember(sessions)
+		return protocol.Event{Type: protocol.EvtDirectorySessions, Path: req.Path, Sessions: sessions}
+
+	case protocol.ReqResumeSession:
+		id, err := d.resumeSession(ctx, req.SessionID)
+		if err != nil {
+			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
+		}
+		return protocol.Event{Type: protocol.EvtSessionStarted, SessionID: id}
+
+	case protocol.ReqEndSession:
+		if err := d.endSession(ctx, req.SessionID); err != nil {
+			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
+		}
+		return protocol.Event{Type: protocol.EvtSessionEnded, SessionID: req.SessionID}
+
+	case protocol.ReqCreateDirectory:
+		created, err := createLaunchDirectory(req.Path)
+		if err != nil {
+			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
+		}
+		// Answered with the parent's listing, so the new folder is simply
+		// there to tap rather than something the phone has to splice in.
+		parent := path.Dir(created)
+		if parent == "." {
+			parent = ""
+		}
+		names, err := listLaunchDirectories(parent)
+		if err != nil {
+			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
+		}
+		return protocol.Event{
+			Type: protocol.EvtDirectories, Path: parent, Directories: names,
+			Folders: d.annotateDirectories(ctx, parent, names),
+		}
 
 	case protocol.ReqStartSession:
 		id, err := d.startLocalSession(ctx, req)
@@ -1101,6 +1161,17 @@ func validateRequest(req protocol.Request) error {
 		return nil
 	case protocol.ReqListDirectories:
 		return validateLaunchPath(req.Path, true)
+	case protocol.ReqCreateDirectory:
+		return validateLaunchPath(req.Path, false)
+	case protocol.ReqListFolders:
+		return nil
+	case protocol.ReqDirectorySessions:
+		return validateFolderPath(req.Path)
+	case protocol.ReqResumeSession, protocol.ReqEndSession:
+		if req.SessionID == "" || len(req.SessionID) > 512 {
+			return fmt.Errorf("daemon: invalid session")
+		}
+		return nil
 	case protocol.ReqStartSession:
 		if req.ClientID == "" || validateLaunchPath(req.Path, false) != nil ||
 			(req.Kind != protocol.KindClaude && req.Kind != protocol.KindCodex &&

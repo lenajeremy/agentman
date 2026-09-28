@@ -214,15 +214,35 @@ export function shortPath(path: string): string {
   return "~/" + parts.slice(-2).join("/");
 }
 
-/** Relative time, tuned for glanceability rather than precision. */
-export function ago(epochMillis: number): string {
+/**
+ * Relative time, tuned for glanceability rather than precision.
+ *
+ * Past a month it turns into a date. "412d" is a number nobody converts; "4
+ * Aug" is a day you might remember working. The year is added only when it is
+ * not this one, so the common case stays short.
+ */
+export function ago(epochMillis: number, now = Date.now()): string {
   if (!epochMillis) return "";
-  const seconds = Math.max(0, Math.floor((Date.now() - epochMillis) / 1000));
+  const seconds = Math.max(0, Math.floor((now - epochMillis) / 1000));
   if (seconds < 10) return "now";
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
+  const days = Math.floor(hours / 24);
+  if (days <= 30) return `${days}d`;
+  return onDate(new Date(epochMillis), new Date(now));
+}
+
+const months = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+] as const;
+
+function onDate(when: Date, now: Date): string {
+  const day = `${when.getDate()} ${months[when.getMonth()]}`;
+  return when.getFullYear() === now.getFullYear()
+    ? day
+    : `${day} ${String(when.getFullYear() % 100).padStart(2, "0")}`;
 }

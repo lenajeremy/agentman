@@ -153,7 +153,12 @@ export type RequestType =
   | "file_diff"
   | "read_seen_file"
   | "list_directories"
-  | "start_session";
+  | "start_session"
+  | "list_folders"
+  | "directory_sessions"
+  | "resume_session"
+  | "end_session"
+  | "create_directory";
 
 export interface Request {
   type: RequestType;
@@ -193,7 +198,10 @@ export type EventType =
   | "error"
   | "workspace"
   | "directories"
-  | "session_started";
+  | "session_started"
+  | "folders"
+  | "directory_sessions"
+  | "session_ended";
 
 export interface WorkspaceEntry { name: string; directory: boolean; size?: number }
 export interface WorkspaceChange {
@@ -238,6 +246,23 @@ export interface DaemonEvent {
   workspace?: WorkspaceResult;
   directories?: string[];
   path?: string;
+  /** Agent counts. The whole answer on "folders"; alongside `directories` on
+   *  a browse listing, one entry per child that has agents under it. */
+  folders?: Folder[];
+}
+
+/** One directory agents have run in.
+ *
+ *  Counts cover the whole subtree, because selecting a folder does too: a
+ *  repository's bin/ is the same project as its root. */
+export interface Folder {
+  /** Absolute on "folders"; the child's own name on a browse listing. */
+  path: string;
+  /** Every session ever recorded here, running or long gone. */
+  agents: number;
+  /** How many are alive now. */
+  running?: number;
+  lastActivityAt?: number;
 }
 
 export type ControlType =
@@ -311,7 +336,8 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
   if (!isRecord(value) || !isOneOf(value.type, [
     "sessions", "session_update", "session_gone", "messages", "page",
     "turn_complete", "send_result", "server_opened", "server_stopped", "error", "workspace",
-    "directories", "session_started",
+    "directories", "session_started", "folders", "directory_sessions",
+    "session_ended",
   ] as const)) return null;
 
   switch (value.type) {
@@ -361,13 +387,34 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
       if (!optionalBoundedString(value.path, 4096) ||
           (value.directories !== undefined &&
             !boundedArray(value.directories, 200, (name): name is string =>
-              boundedString(name, 256, true)))) return null;
+              boundedString(name, 256, true))) ||
+          !optionalFolders(value.folders)) return null;
+      break;
+    case "folders":
+      if (!optionalFolders(value.folders)) return null;
+      break;
+    case "directory_sessions":
+      if (!boundedArray(value.sessions, 10_000, isSession) ||
+          !optionalBoundedString(value.path, 4096)) return null;
       break;
     case "session_started":
+    case "session_ended":
       if (!boundedString(value.sessionId, 512, true)) return null;
       break;
   }
   return value as unknown as DaemonEvent;
+}
+
+function optionalFolders(value: unknown): boolean {
+  return value === undefined || boundedArray(value, 500, isFolder);
+}
+
+function isFolder(value: unknown): value is Folder {
+  return isRecord(value) &&
+    boundedString(value.path, 4096, true) &&
+    optionalFiniteNumber(value.agents) && typeof value.agents === "number" &&
+    optionalFiniteNumber(value.running) &&
+    optionalFiniteNumber(value.lastActivityAt);
 }
 
 function isWorkspaceResult(value: unknown): value is WorkspaceResult {

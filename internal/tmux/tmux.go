@@ -470,6 +470,26 @@ func Capture(ctx context.Context, name string) (string, error) {
 	return out, nil
 }
 
+// CaptureScrollback returns the pane plus up to lines of history above it.
+//
+// Capture is the right tool for a prompt, which always sits at the bottom of
+// the visible pane. A reply being written is not: it scrolls, and by the time
+// it is worth reading most of it is above the fold. An agent that renders to
+// the normal screen keeps that history in tmux, and this is how to reach it.
+func CaptureScrollback(ctx context.Context, name string, lines int) (string, error) {
+	if !Available() {
+		return "", ErrNotInstalled
+	}
+	if lines <= 0 {
+		return Capture(ctx, name)
+	}
+	out, err := run(ctx, "capture-pane", "-t", name, "-p", "-S", "-"+strconv.Itoa(lines))
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
 // RevealCodexQuestion opens Codex's collapsed async question tray when it is
 // the active bottom-of-pane control. Capture and the key are serialized with
 // other Agentman terminal actions so a concurrent phone send cannot receive

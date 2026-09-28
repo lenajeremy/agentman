@@ -1,3 +1,4 @@
+import { Image } from "react-native";
 import Svg, { Path } from "react-native-svg";
 
 import { agentMarks } from "./agentMarks";
@@ -24,6 +25,20 @@ export function AgentIcon({ kind, size = 22 }: { kind: string; size?: number }) 
           fill="none"
         />
       </Svg>
+    );
+  }
+
+  // A brand that ships its own artwork gets shown that artwork. Contained in
+  // a square box so a mark that is not square still lines up with the paths,
+  // which are all drawn in a 24x24 one.
+  if (mark.image) {
+    return (
+      <Image
+        source={mark.image}
+        style={{ width: size, height: size }}
+        resizeMode="contain"
+        accessibilityLabel={mark.label}
+      />
     );
   }
 

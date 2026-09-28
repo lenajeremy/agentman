@@ -61,6 +61,10 @@ type KiroSource struct {
 	mu       sync.RWMutex
 	sessions map[string]kiroSession
 
+	// past holds transcripts of sessions that have already exited, found by
+	// Past rather than by a sweep. See pastSessions.
+	past pastSessions
+
 	// cache keeps parsed metadata and each transcript's state keyed on file
 	// size and time, so an unchanged session costs one stat per sweep.
 	cacheMu sync.Mutex
@@ -440,10 +444,15 @@ func (s *KiroSource) session(sessionID string) (kiroSession, error) {
 	s.mu.RLock()
 	session, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
-	if !ok {
-		return kiroSession{}, fmt.Errorf("source: unknown kiro session %q", sessionID)
+	if ok {
+		return session, nil
 	}
-	return session, nil
+	// A session Past found from the folder list has a transcript and no live
+	// process, so it reads exactly like a live one with nothing appending.
+	if past, isPast := s.pastKiroSession(sessionID); isPast {
+		return past, nil
+	}
+	return kiroSession{}, fmt.Errorf("source: unknown kiro session %q", sessionID)
 }
 
 // Page implements Source.

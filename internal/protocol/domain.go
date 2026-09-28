@@ -104,6 +104,26 @@ type Server struct {
 	Link string `json:"link,omitempty"`
 }
 
+// Folder is one directory agents have run in.
+//
+// Counts are for the whole subtree, because that is what selecting a folder
+// gives you: a repository's bin/ or mobile/ is the same project as its root,
+// and a count that excluded them would not match the list it leads to.
+type Folder struct {
+	// Path is absolute. The phone only ever displays it, and hands it back as
+	// an opaque token, so a folder outside the Mac user's home — a dot
+	// directory, a temp checkout — stays reachable.
+	Path string `json:"path"`
+	// Agents is every session ever recorded under Path, running or long gone.
+	Agents int `json:"agents"`
+	// Running is how many of them are alive now, so the list can say which
+	// folder is worth opening first.
+	Running int `json:"running,omitempty"`
+	// LastActivityAt orders the list: the folder you touched last is the one
+	// you most likely want.
+	LastActivityAt int64 `json:"lastActivityAt,omitempty"`
+}
+
 // SameAs reports whether two snapshots of a session are equivalent.
 //
 // Deliberately not ==. Session holds a *Question, so the compiler compares

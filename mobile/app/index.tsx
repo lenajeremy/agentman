@@ -2,7 +2,9 @@ import Feather from "@expo/vector-icons/Feather";
 import { Redirect, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   RefreshControl,
+  ScrollView,
   SectionList,
   StyleSheet,
   Text,
@@ -20,6 +22,7 @@ import { QuestionCard } from "../components/QuestionCard";
 import { ROW_GAP, SwipeToDismiss } from "../components/SwipeToDismiss";
 import { useStyles, useTheme } from "../lib/appearance";
 import { canDismiss } from "../lib/dismissed";
+import { folderLabel } from "../lib/folders";
 import { Session } from "../lib/protocol";
 import { sessionNeedsAnswer } from "../lib/question-alerts";
 import { useStore } from "../lib/store";
@@ -34,6 +37,9 @@ import {
   space,
   stateStyle,
 } from "../lib/theme";
+
+/** The states a chip can narrow the list to. */
+type StateFilter = Session["state"];
 
 export default function Agents() {
   const store = useStore();
@@ -61,9 +67,12 @@ export default function Agents() {
     return () => clearTimeout(timer);
   }, [undo]);
 
+  // Filtering happens here rather than in visibleSessions, so every chip
+  // keeps showing its own count while another one is active. A chip whose
+  // number vanished when you tapped its neighbour would be unreadable.
   const groups = useMemo(
-    () => groupByState(store.visibleSessions, color),
-    [store.visibleSessions, color],
+    () => groupByState(store.visibleSessions, color, store.stateFilter),
+    [store.visibleSessions, color, store.stateFilter],
   );
   const hiddenCount = store.sessions.length - store.visibleSessions.length;
   const incompatible = store.connection === "incompatible";
@@ -71,14 +80,21 @@ export default function Agents() {
   if (!store.ready) return <View style={styles.page} />;
   if (!store.credentials) return <Redirect href="/pair" />;
 
+  // Three tiles, and ended sessions are in none of them. The board answers
+  // "does anything need me?", and a finished session never does — counting a
+  // folder's forty of them as Idle would drown the one agent that is.
   const counts = store.visibleSessions.reduce(
     (current, session) => {
+      if (session.state === "ended") {
+        current.ended += 1;
+        return current;
+      }
       if (sessionNeedsAnswer(session)) current.needsYou += 1;
       else if (session.state === "busy") current.working += 1;
       else current.idle += 1;
       return current;
     },
-    { needsYou: 0, working: 0, idle: 0 },
+    { needsYou: 0, working: 0, idle: 0, ended: 0 },
   );
 
   return (
@@ -139,28 +155,16 @@ export default function Agents() {
               )
             ) : null}
 
-            {store.visibleSessions.length > 0 ? (
-              <Appear style={styles.tiles}>
-                <CountTile
-                  value={counts.needsYou}
-                  label="Needs you"
-                  tint={color.needsYouText}
-                  wash={color.needsYouWash}
-                />
-                <CountTile
-                  value={counts.working}
-                  label="Working"
-                  tint={color.working}
-                  wash={color.workingWash}
-                />
-                <CountTile
-                  value={counts.idle}
-                  label="Idle"
-                  tint={color.text}
-                  wash={color.fill}
-                />
-              </Appear>
-            ) : null}
+            {/* One row of filters where there were three count tiles and a
+                pill on separate lines.
+
+                The tiles said "Working 1" directly above a section header
+                saying "Working 1", so a third of the screen was spent
+                repeating the list below it. Folding the counts into chips
+                keeps the glance — the numbers are still the first thing you
+                see — costs one row instead of three, and gives each number
+                something to do: tapping one narrows the list to that state. */}
+            <FilterBar counts={counts} ended={counts.ended} />
 
             {store.visibleSessions.length === 0 &&
               store.daemonOnline &&
@@ -170,7 +174,7 @@ export default function Agents() {
                   onShow={store.restoreAllSessions}
                 />
               ) : (
-                <EmptyState />
+                <EmptyState folder={store.folderFilter} />
               ))}
           </ContentColumn>
         }
@@ -228,19 +232,90 @@ export default function Agents() {
 }
 
 /**
+ * The one control the folder filter adds.
+ *
+ * Closed it reads "All folders" and the screen behaves exactly as it always
+ * has. Chosen, it carries the folder in mono — it is a path, which is machine
+ * text — and a separate button clears it, so the common way out is one tap
+ * and not a trip back through the picker.
+ */
+function FolderFilter() {
+  const store = useStore();
+  const router = useRouter();
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const chosen = store.folderFilter;
+
+  return (
+    <View style={styles.filterRow}>
+      <MotionPressable
+        onPress={() => router.push("/folders")}
+        style={[styles.filter, chosen && styles.filterOn]}
+        pressedScale={0.97}
+        disabled={!store.daemonOnline}
+        accessibilityRole="button"
+        accessibilityLabel={
+          chosen ? `Filtering by ${chosen}. Change folder` : "Filter by folder"
+        }
+      >
+        <Feather
+          name="folder"
+          size={15}
+          color={chosen ? color.workingText : color.muted}
+        />
+        <Text
+          style={[styles.filterLabel, chosen && styles.filterLabelOn]}
+          numberOfLines={1}
+          ellipsizeMode="head"
+        >
+          {chosen ? folderLabel(chosen) : "All folders"}
+        </Text>
+        {store.folderLoading ? (
+          <ActivityIndicator size="small" color={color.workingText} />
+        ) : (
+          <Feather
+            name="chevron-down"
+            size={16}
+            color={chosen ? color.workingText : color.faint}
+          />
+        )}
+      </MotionPressable>
+      {chosen ? (
+        <MotionPressable
+          onPress={() => store.setFolderFilter(null)}
+          style={styles.filterClear}
+          pressedScale={0.94}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Clear folder filter"
+        >
+          <Feather name="x" size={16} color={color.muted} />
+        </MotionPressable>
+      ) : null}
+    </View>
+  );
+}
+
+/**
  * Grouping by state rather than one flat list.
  *
  * The question this screen answers is "does anything need me?", so the answer
  * is the structure: blocked agents form their own section at the top, and the
  * section header is the answer rather than a decoration.
  */
-function groupByState(sessions: Session[], color: Palette) {
+function groupByState(
+  sessions: Session[],
+  color: Palette,
+  only: StateFilter | null = null,
+) {
   const buckets = new Map<
     string,
     { label: string; tint: string; rank: number; sessions: Session[] }
   >();
   for (const session of sessions) {
-    const meta = stateStyle(effectiveSessionState(session), color);
+    const state = effectiveSessionState(session);
+    if (only && state !== only) continue;
+    const meta = stateStyle(state, color);
     const bucket = buckets.get(meta.label) ?? {
       label: meta.label,
       tint: meta.rank === 0 ? meta.text : color.muted,
@@ -314,10 +389,11 @@ function AgentRow({ session }: { session: Session }) {
   }
 
   const busy = displayState === "busy";
+  const ended = displayState === "ended";
   return (
     <MotionPressable
       onPress={open}
-      style={[styles.card, styles.row, needsYou && styles.rowNeedsYou]}
+      style={[styles.card, styles.row, needsYou && styles.rowNeedsYou, ended && styles.rowEnded]}
       pressedScale={0.985}
       accessibilityRole="button"
       accessibilityLabel={`${session.name}, ${stateStyle(displayState, color).label}`}
@@ -327,6 +403,10 @@ function AgentRow({ session }: { session: Session }) {
           styles.avatar,
           busy && { backgroundColor: color.workingWash },
           needsYou && { backgroundColor: color.needsYouWash },
+          // Ended has no colour of its own, by the same rule idle has none:
+          // nothing is happening, so nothing glows. What separates the two is
+          // weight — an ended row recedes a step rather than lighting up.
+          ended && styles.avatarEnded,
         ]}
       >
         <AgentIcon kind={session.kind} size={22} />
@@ -340,7 +420,10 @@ function AgentRow({ session }: { session: Session }) {
         <View style={styles.rowTop}>
           {/* Session names are machine-generated, so they are set in mono —
               the same signal used for paths, ids, and commands. */}
-          <Text style={styles.name} numberOfLines={1}>
+          <Text
+            style={[styles.name, ended && styles.nameEnded]}
+            numberOfLines={1}
+          >
             {session.name}
           </Text>
           <Text style={styles.age}>{ago(session.lastActivityAt)}</Text>
@@ -352,17 +435,28 @@ function AgentRow({ session }: { session: Session }) {
             pulsing, which says the same thing faster and without spending
             characters the path then loses at the other end. */}
         <View style={styles.metaRow}>
-          <Text style={styles.meta} numberOfLines={1}>
-            {session.model ?? agent.name}
-            {" · "}
-          </Text>
-          <Text
-            style={[styles.meta, styles.metaPath]}
-            numberOfLines={1}
-            ellipsizeMode="head"
-          >
-            {shortPath(session.cwd)}
-          </Text>
+          {/* Filtered to one folder, the path is the same on every row and
+              says nothing. The agent's name takes the space instead, which
+              is the fact that does vary once a folder holds five CLIs. */}
+          {store.folderFilter ? (
+            <Text style={styles.meta} numberOfLines={1}>
+              {session.model ? `${agent.name} · ${session.model}` : agent.name}
+            </Text>
+          ) : (
+            <>
+              <Text style={styles.meta} numberOfLines={1}>
+                {session.model ?? agent.name}
+                {" · "}
+              </Text>
+              <Text
+                style={[styles.meta, styles.metaPath]}
+                numberOfLines={1}
+                ellipsizeMode="head"
+              >
+                {shortPath(session.cwd)}
+              </Text>
+            </>
+          )}
         </View>
         {session.servers?.length ? (
           <View style={styles.serversLine}>
@@ -429,27 +523,62 @@ function ConnectionChip({
   );
 }
 
-function CountTile({
-  value,
-  label,
-  tint,
-  wash,
+/**
+ * The one row of controls above the list.
+ *
+ * Folder on the left, then a count per state. Horizontally scrollable rather
+ * than wrapped: a second line here would put the first agent below the fold
+ * again, which is the thing this replaced.
+ */
+function FilterBar({
+  counts,
+  ended,
 }: {
-  value: number;
-  label: string;
-  tint: string;
-  wash: string;
+  counts: { needsYou: number; working: number; idle: number };
+  ended: number;
 }) {
+  const store = useStore();
   const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const chips: { key: StateFilter; label: string; value: number; tint: string }[] = [
+    { key: "waiting_input", label: "Needs you", value: counts.needsYou, tint: color.needsYouText },
+    { key: "busy", label: "Working", value: counts.working, tint: color.working },
+    { key: "idle", label: "Idle", value: counts.idle, tint: color.muted },
+  ];
+  // Ended only exists inside a folder, so its chip only does.
+  if (ended > 0) {
+    chips.push({ key: "ended", label: "Ended", value: ended, tint: color.muted });
+  }
+
   return (
-    <View
-      style={[styles.tile, { backgroundColor: wash }]}
-      accessible
-      accessibilityLabel={`${value} ${label}`}
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.filterBar}
+      contentContainerStyle={styles.filterBarRow}
+      keyboardShouldPersistTaps="handled"
     >
-      <Text style={[styles.tileValue, { color: tint }]}>{value}</Text>
-      <Text style={styles.tileLabel}>{label}</Text>
-    </View>
+      <FolderFilter />
+      {chips.map((chip) => {
+        const on = store.stateFilter === chip.key;
+        return (
+          <MotionPressable
+            key={chip.key}
+            onPress={() => store.setStateFilter(on ? null : chip.key)}
+            style={[styles.stateChip, on && styles.stateChipOn]}
+            pressedScale={0.96}
+            accessibilityRole="button"
+            accessibilityState={{ selected: on }}
+            accessibilityLabel={`${chip.value} ${chip.label}${on ? ", showing only these" : ""}`}
+          >
+            <Text style={[styles.stateChipValue, { color: on ? color.onInverse : chip.tint }]}>
+              {chip.value}
+            </Text>
+            <Text style={[styles.stateChipLabel, on && styles.stateChipLabelOn]}>{chip.label}</Text>
+          </MotionPressable>
+        );
+      })}
+    </ScrollView>
   );
 }
 
@@ -523,8 +652,23 @@ function ProtocolBanner() {
   );
 }
 
-function EmptyState() {
+function EmptyState({ folder }: { folder: string | null }) {
   const styles = useStyles(makeStyles);
+  // A filtered folder that turns up nothing is a different fact from having
+  // no agents at all, and the advice for it is different too: the fix is to
+  // widen the filter, not to open a terminal.
+  if (folder) {
+    return (
+      <View style={styles.empty}>
+        <EmptyIllustration style={styles.emptyArt} />
+        <Text style={styles.emptyTitle}>Nothing here yet</Text>
+        <Text style={styles.emptyBody}>
+          No agent has run in {folderLabel(folder)}. Pick another folder, or
+          clear the filter to see everything.
+        </Text>
+      </View>
+    );
+  }
   return (
     <View style={styles.empty}>
       <EmptyIllustration style={styles.emptyArt} />
@@ -596,26 +740,82 @@ const makeStyles = (c: Palette) =>
       marginTop: space.lg,
     },
 
-    tiles: { flexDirection: "row", gap: space.sm, marginTop: space.lg },
-    tile: {
-      flex: 1,
-      borderRadius: radius.xl,
-      paddingHorizontal: space.md,
-      paddingVertical: space.md,
+
+    filterBar: { marginTop: space.lg, marginHorizontal: -space.lg },
+    filterBarRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingHorizontal: space.lg,
     },
-    tileValue: {
+    stateChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.xs,
+      minHeight: 36,
+      paddingHorizontal: space.md,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.fillStrong,
+    },
+    stateChipOn: { backgroundColor: c.inverse, borderColor: c.inverse },
+    stateChipValue: {
       fontFamily: font.sansBold,
-      fontSize: 28,
-      letterSpacing: -0.8,
+      fontSize: size.caption,
       fontVariant: ["tabular-nums"],
     },
-    tileLabel: {
-      fontFamily: font.sansMedium,
+    stateChipLabel: {
+      fontFamily: font.sans,
       fontSize: size.caption,
       color: c.muted,
-      marginTop: 2,
     },
-
+    stateChipLabelOn: { color: c.onInverse },
+    rowEnded: { backgroundColor: c.paper },
+    avatarEnded: { opacity: 0.55 },
+    nameEnded: { color: c.textSecondary },
+    // No top margin: the filter row that contains this owns the spacing now.
+    filterRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+    },
+    filter: {
+      // Bounded rather than flexible: inside a horizontal scroller nothing
+      // would shrink it, so a deep path would push every chip off-screen.
+      maxWidth: 230,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      minHeight: 40,
+      paddingHorizontal: space.md,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.fillStrong,
+    },
+    filterOn: { backgroundColor: c.workingWash, borderColor: c.workingSoft },
+    filterLabel: {
+      flexShrink: 1,
+      fontFamily: font.sans,
+      fontSize: size.body,
+      color: c.textSecondary,
+    },
+    filterLabelOn: {
+      fontFamily: font.monoMedium,
+      fontSize: size.caption,
+      color: c.workingText,
+    },
+    filterClear: {
+      width: 40,
+      height: 40,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.fillStrong,
+    },
     groupHeading: {
       flexDirection: "row",
       alignItems: "baseline",

@@ -175,6 +175,10 @@ type CodexSource struct {
 
 	mu       sync.RWMutex
 	sessions map[string]codexSession
+
+	// past holds rollouts of sessions that have already exited, found by
+	// Past rather than by a sweep. See pastSessions.
+	past pastSessions
 }
 
 type codexSession struct {
@@ -838,15 +842,13 @@ func codexRolloutCanClaimPane(meta codexMeta, pane tmux.Session) bool {
 
 // Page implements Source.
 func (s *CodexSource) Page(ctx context.Context, sessionID, before string, limit int) (protocol.Page, error) {
-	s.mu.RLock()
-	session, ok := s.sessions[sessionID]
-	s.mu.RUnlock()
+	transcript, ok := s.rolloutFor(sessionID)
 	if !ok {
 		return protocol.Page{}, fmt.Errorf("source: unknown codex session %q", sessionID)
 	}
 
 	// A pane discovered before its first turn has no rollout to read.
-	if session.transcript == "" {
+	if transcript == "" {
 		return protocol.NewPage(sessionID, nil, "", false), nil
 	}
 
@@ -863,7 +865,7 @@ func (s *CodexSource) Page(ctx context.Context, sessionID, before string, limit 
 		opts.Before = &offset
 	}
 
-	result, err := jsonl.CollectBackwardContext(ctx, session.transcript, opts)
+	result, err := jsonl.CollectBackwardContext(ctx, transcript, opts)
 	if err != nil {
 		return protocol.Page{}, err
 	}
@@ -881,6 +883,13 @@ func (s *CodexSource) Follow(ctx context.Context, sessionID string, out chan<- [
 	session, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
 	if !ok {
+		// An ended rollout has nothing left to append. The app subscribes to
+		// every session it opens, so waiting quietly is the honest answer;
+		// an error would report a failure on a screen that is working.
+		if _, past := s.pastRollout(sessionID); past {
+			<-ctx.Done()
+			return ctx.Err()
+		}
 		return fmt.Errorf("source: unknown codex session %q", sessionID)
 	}
 

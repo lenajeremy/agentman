@@ -1,0 +1,26 @@
+────────────────────────────────────────────────────────────
+> Write 1200 words comparing B-trees and LSM trees. Write it now.
+
+▸ Thought for 6s
+  Considering how to best structure the comparison, I'll need to detail the...
+   B-Trees vs. LSM-Trees: The Architectural Battle for Storage Engine
+  Supremacy
+
+  Every database management system, key-value store, and persistent storage
+  engine fundamentally relies on an indexing mechanism to bridge the gap
+  between fast, volatile RAM and slow, non-volatile block storage. For
+  decades, the dominant paradigm was the B-Tree (specifically the B+ Tree),
+  an in-place update data structure designed to minimize disk block reads.
+
+  Over the last two decades, however, high-throughput web architectures,
+  append-only logs, and massive distributed systems have driven the rise of
+  the Log-Structured Merge-Tree (LSM-Tree). Where B-Trees prioritize
+  deterministic, low-latency reads by writing data directly into fixed-size
+  disk pages, LSM-Trees prioritize maximum write throughput by buffering
+  incoming writes in memory and writing them out sequentially as immutable
+  batches.
+
+──────────────────────────────────────────────────────────────────────────────
+>
+──────────────────────────────────────────────────────────────────────────────
+esc to cancel                                            Gemini 3.8 Flash · high

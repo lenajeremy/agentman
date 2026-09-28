@@ -50,6 +50,10 @@ type ClaudeSource struct {
 	mu       sync.RWMutex
 	sessions map[string]claudeSession
 
+	// past holds transcripts of sessions that have already exited, found by
+	// Past rather than by a sweep. See pastSessions.
+	past pastSessions
+
 	questionMu    sync.Mutex
 	questionSpecs map[string]claudeQuestionSpecCache
 }
@@ -374,9 +378,7 @@ func claudeState(status string) protocol.State {
 
 // Page implements Source.
 func (s *ClaudeSource) Page(ctx context.Context, sessionID, before string, limit int) (protocol.Page, error) {
-	s.mu.RLock()
-	session, ok := s.sessions[sessionID]
-	s.mu.RUnlock()
+	transcript, ok := s.transcriptFor(sessionID)
 	if !ok {
 		return protocol.Page{}, fmt.Errorf("source: unknown claude session %q", sessionID)
 	}
@@ -396,7 +398,7 @@ func (s *ClaudeSource) Page(ctx context.Context, sessionID, before string, limit
 		opts.Before = &offset
 	}
 
-	result, err := jsonl.CollectBackwardContext(ctx, session.transcript, opts)
+	result, err := jsonl.CollectBackwardContext(ctx, transcript, opts)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// The session exists but has not written anything yet.
@@ -423,6 +425,15 @@ func (s *ClaudeSource) Follow(ctx context.Context, sessionID string, out chan<- 
 	session, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
 	if !ok {
+		// An ended session read from the folder list has a transcript but no
+		// live process. Nothing will append to it, so following is a no-op
+		// rather than an error: the app subscribes on every session it opens,
+		// and refusing here would surface as a failure on a screen that is
+		// working exactly as intended.
+		if _, past := s.pastTranscript(sessionID); past {
+			<-ctx.Done()
+			return ctx.Err()
+		}
 		return fmt.Errorf("source: unknown claude session %q", sessionID)
 	}
 

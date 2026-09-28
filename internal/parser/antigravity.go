@@ -31,6 +31,9 @@ type AntigravityParser struct {
 	sessionID string
 	calls     *boundedMap[antigravityCall]
 	outcomes  *boundedMap[toolOutcome]
+	// lastStep is the highest step index seen, so the one being written can
+	// be named before agy records it. See NextStepIndex.
+	lastStep int
 }
 
 type antigravityCall struct {
@@ -70,6 +73,14 @@ var (
 
 func antigravityID(step int) string { return fmt.Sprintf("s%06d", step) }
 
+// NextStepIndex is the index the step now being written will carry.
+//
+// Antigravity writes a step only once it is finished, so a reply read off the
+// pane has no record and no index of its own yet. Predicting it is what lets
+// the preview and the finished record share an id, so the row updates in
+// place instead of appearing twice.
+func (p *AntigravityParser) NextStepIndex() int { return p.lastStep + 1 }
+
 // Parse implements Parser.
 func (p *AntigravityParser) Parse(line string, offset int64) []protocol.Message {
 	var step antigravityStep
@@ -77,6 +88,9 @@ func (p *AntigravityParser) Parse(line string, offset int64) []protocol.Message 
 		return nil
 	}
 	ts := parseTime(step.CreatedAt)
+	if step.StepIndex > p.lastStep {
+		p.lastStep = step.StepIndex
+	}
 
 	switch step.Type {
 	case "USER_INPUT":
