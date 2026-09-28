@@ -66,6 +66,10 @@ type AntigravitySource struct {
 	mu       sync.RWMutex
 	sessions map[string]antigravitySession
 
+	// past holds transcripts of sessions that have already exited, found by
+	// Past rather than by a sweep. See pastSessions.
+	past pastSessions
+
 	cacheMu sync.Mutex
 	states  map[string]kiroStateEntry
 	names   map[string]string
@@ -444,10 +448,15 @@ func (s *AntigravitySource) session(sessionID string) (antigravitySession, error
 	s.mu.RLock()
 	session, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
-	if !ok {
-		return antigravitySession{}, fmt.Errorf("source: unknown antigravity session %q", sessionID)
+	if ok {
+		return session, nil
 	}
-	return session, nil
+	// A session Past found from the folder list reads like a live one with
+	// nothing appending to it.
+	if past, isPast := s.pastAntigravitySession(sessionID); isPast {
+		return past, nil
+	}
+	return antigravitySession{}, fmt.Errorf("source: unknown antigravity session %q", sessionID)
 }
 
 // Page implements Source. Every step carries its own time, so unlike Kiro this

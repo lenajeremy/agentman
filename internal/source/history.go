@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
@@ -40,6 +41,33 @@ type History interface {
 	// holds 1,442 of them; counting entries is instant and reading them is
 	// not.
 	Directories(ctx context.Context) ([]protocol.Folder, error)
+}
+
+// pastSessions remembers where an ended session's transcript is.
+//
+// Kept apart from an adapter's live session map, which Discover replaces
+// wholesale on every sweep: a session opened from the folder list would
+// otherwise be forgotten a second later by a sweep that has no reason to know
+// about it. The zero value is ready to use.
+type pastSessions struct {
+	mu    sync.RWMutex
+	paths map[string]string
+}
+
+func (p *pastSessions) remember(id, path string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.paths == nil {
+		p.paths = map[string]string{}
+	}
+	p.paths[id] = path
+}
+
+func (p *pastSessions) path(id string) (string, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	path, ok := p.paths[id]
+	return path, ok
 }
 
 // DefaultPastLimit bounds one directory's history.

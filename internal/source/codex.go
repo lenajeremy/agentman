@@ -176,11 +176,9 @@ type CodexSource struct {
 	mu       sync.RWMutex
 	sessions map[string]codexSession
 
-	// pastMu guards rollouts of sessions that have already exited, found by
-	// Past. Kept out of sessions, which Discover replaces wholesale, so an
-	// ended session opened from the folder list survives the next sweep.
-	pastMu sync.RWMutex
-	past   map[string]string
+	// past holds rollouts of sessions that have already exited, found by
+	// Past rather than by a sweep. See pastSessions.
+	past pastSessions
 }
 
 type codexSession struct {
@@ -278,7 +276,6 @@ func NewCodexSource(home string) (*CodexSource, error) {
 		readActivity: codexActivity,
 		rolloutCache: map[string]codexRolloutCacheEntry{},
 		sessions:     map[string]codexSession{},
-		past:         map[string]string{},
 	}, nil
 }
 

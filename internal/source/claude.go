@@ -50,13 +50,9 @@ type ClaudeSource struct {
 	mu       sync.RWMutex
 	sessions map[string]claudeSession
 
-	// pastMu guards transcripts of sessions that have already exited, found
-	// by Past rather than by a sweep. They are kept out of sessions, which
-	// Discover replaces wholesale, so an ended session opened from the folder
-	// list is not forgotten a second later by a sweep with no reason to know
-	// about it.
-	pastMu sync.RWMutex
-	past   map[string]string
+	// past holds transcripts of sessions that have already exited, found by
+	// Past rather than by a sweep. See pastSessions.
+	past pastSessions
 
 	questionMu    sync.Mutex
 	questionSpecs map[string]claudeQuestionSpecCache
@@ -98,7 +94,6 @@ func NewClaudeSource(home string) (*ClaudeSource, error) {
 		home:              home,
 		models:            newModelCache(),
 		sessions:          map[string]claudeSession{},
-		past:              map[string]string{},
 		questionSpecs:     map[string]claudeQuestionSpecCache{},
 		listPanes:         tmux.List,
 		snapshotProcesses: tmux.SnapshotProcessTree,

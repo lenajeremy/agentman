@@ -88,6 +88,13 @@ type OpenCodeSource struct {
 
 	mu       sync.RWMutex
 	sessions map[string]openCodeSession
+
+	// pastRoutes says which server can still serve a session the idle window
+	// keeps off the status board. An OpenCode transcript is a server plus an
+	// id rather than a path, which is why this is a route and not the shared
+	// pastSessions.
+	pastMu     sync.RWMutex
+	pastRoutes map[string]openCodeSession
 	// A process can miss one health probe while it is busy or restarting. Misses
 	// are tracked per server: one healthy OpenCode instance must not make a
 	// second, temporarily unresponsive instance's sessions disappear.
@@ -961,9 +968,7 @@ func (s *OpenCodeSource) clearQuestionAnswers(answerKey string) {
 
 // Page implements Source.
 func (s *OpenCodeSource) Page(ctx context.Context, sessionID, before string, limit int) (protocol.Page, error) {
-	s.mu.RLock()
-	session, ok := s.sessions[sessionID]
-	s.mu.RUnlock()
+	session, ok := s.routeFor(sessionID)
 	if !ok {
 		return protocol.Page{}, fmt.Errorf("source: unknown opencode session %q", sessionID)
 	}

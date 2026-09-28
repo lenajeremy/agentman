@@ -93,9 +93,7 @@ func (s *CodexSource) Past(ctx context.Context, dir string, limit int) ([]protoc
 			Model:          model,
 		})
 
-		s.pastMu.Lock()
-		s.past[id] = rollout.path
-		s.pastMu.Unlock()
+		s.past.remember(id, rollout.path)
 	}
 	return found, nil
 }
@@ -192,10 +190,7 @@ func (s *CodexSource) rolloutFor(sessionID string) (string, bool) {
 
 // pastRollout resolves a session Past found and Discover cannot see.
 func (s *CodexSource) pastRollout(sessionID string) (string, bool) {
-	s.pastMu.RLock()
-	defer s.pastMu.RUnlock()
-	path, ok := s.past[sessionID]
-	return path, ok
+	return s.past.path(sessionID)
 }
 
 // codexRolloutPrompt reads the first thing the person typed in a rollout.

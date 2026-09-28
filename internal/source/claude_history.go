@@ -104,9 +104,7 @@ func (s *ClaudeSource) Past(ctx context.Context, dir string, limit int) ([]proto
 			Model:          model,
 		})
 
-		s.pastMu.Lock()
-		s.past[id] = candidate.path
-		s.pastMu.Unlock()
+		s.past.remember(id, candidate.path)
 	}
 	return found, nil
 }
@@ -168,10 +166,7 @@ func (s *ClaudeSource) transcriptFor(sessionID string) (string, bool) {
 
 // pastTranscript resolves a session Past found and Discover cannot see.
 func (s *ClaudeSource) pastTranscript(sessionID string) (string, bool) {
-	s.pastMu.RLock()
-	defer s.pastMu.RUnlock()
-	path, ok := s.past[sessionID]
-	return path, ok
+	return s.past.path(sessionID)
 }
 
 // claudeHead is what the opening lines of a transcript say about a session.

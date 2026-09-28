@@ -87,6 +87,10 @@ type CursorCLISource struct {
 	models      map[string]cursorCLIModelEntry
 	mu          sync.RWMutex
 	sessions    map[string]cursorCLISession
+
+	// past holds the stores of chats that have already ended, found by Past
+	// rather than by a sweep. See pastSessions.
+	past pastSessions
 }
 
 func NewCursorCLISource(home string) (*CursorCLISource, error) {
@@ -553,7 +557,11 @@ func (s *CursorCLISource) Page(ctx context.Context, sessionID, before string, li
 	session, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
 	if !ok {
-		return protocol.Page{}, fmt.Errorf("source: unknown Cursor CLI session %q", sessionID)
+		// A chat Past found from the folder list has a store and no pane, so
+		// it reads exactly like a live one with nothing appending.
+		if session, ok = s.pastCursorCLISession(sessionID); !ok {
+			return protocol.Page{}, fmt.Errorf("source: unknown Cursor CLI session %q", sessionID)
+		}
 	}
 	if session.store == "" {
 		return protocol.NewPage(sessionID, nil, "", false), nil
