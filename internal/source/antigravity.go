@@ -584,16 +584,21 @@ func (s *AntigravitySource) Follow(ctx context.Context, sessionID string, out ch
 			batch = append(batch, p.Parse(line.Text, line.Offset)...)
 		}
 		// The record that just landed supersedes anything scraped off the
-		// pane for it. Clearing the preview here is what stops a finished
-		// reply being followed by a stale, pane-wrapped copy of itself.
+		// A record for this step supersedes anything scraped for it, and the
+		// next turn starts from nothing.
 		if len(batch) > 0 {
 			preview = ""
 		}
 
+		// Only while the transcript's newest record is a prompt. Without that
+		// the finished reply is sent a second time the moment its record
+		// lands: the pane still shows it, and the session state that was
+		// meant to stop this lags a discovery sweep behind.
+		//
 		// Sent under the id the finished step will carry, so the app updates
 		// that row in place. A message whose text grows under a stable id is
 		// already how OpenCode streams, so nothing downstream is new.
-		if partial, step, ok := s.streamingReply(ctx, current, p.NextStepIndex()); ok &&
+		if partial, step, ok := s.streamingReply(ctx, current, p); ok &&
 			partial != preview {
 			preview = partial
 			batch = append(batch, protocol.Message{
@@ -622,12 +627,14 @@ func (s *AntigravitySource) Follow(ctx context.Context, sessionID string, out ch
 // finished answer, which the transcript already carries and which must not be
 // re-sent as though it were new.
 func (s *AntigravitySource) streamingReply(
-	ctx context.Context, session antigravitySession, nextStep int,
+	ctx context.Context, session antigravitySession, p *parser.AntigravityParser,
 ) (string, int, bool) {
 	if session.tmuxName == "" || s.captureScrollback == nil {
 		return "", 0, false
 	}
-	if session.meta.State != protocol.StateBusy {
+	// The transcript decides, not the session state: a reply is being written
+	// exactly while the newest record is a prompt.
+	if !p.AwaitingResponse() {
 		return "", 0, false
 	}
 	pane, err := s.captureScrollback(ctx, session.tmuxName, antigravityScrollbackLines)
@@ -638,7 +645,7 @@ func (s *AntigravitySource) streamingReply(
 	if partial == "" {
 		return "", 0, false
 	}
-	return partial, nextStep, true
+	return partial, p.NextStepIndex(), true
 }
 
 // Inject implements Injector.

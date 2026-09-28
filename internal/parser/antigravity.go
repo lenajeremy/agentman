@@ -34,6 +34,9 @@ type AntigravityParser struct {
 	// lastStep is the highest step index seen, so the one being written can
 	// be named before agy records it. See NextStepIndex.
 	lastStep int
+	// awaiting is true when the newest record is a prompt, which is the only
+	// time a reply is actually being written. See AwaitingResponse.
+	awaiting bool
 }
 
 type antigravityCall struct {
@@ -81,6 +84,16 @@ func antigravityID(step int) string { return fmt.Sprintf("s%06d", step) }
 // place instead of appearing twice.
 func (p *AntigravityParser) NextStepIndex() int { return p.lastStep + 1 }
 
+// AwaitingResponse reports whether the newest record is a prompt with no
+// reply yet — the only moment a reply is actually being written.
+//
+// The transcript answers this; the session's state does not. State comes from
+// discovery, which sweeps on its own timer, so for up to a sweep after a
+// reply lands it still reads busy. Streaming on that stale answer emitted the
+// finished reply a second time, scraped off the pane and wrapped to the
+// terminal's width — which is how a table came out as a column of rules.
+func (p *AntigravityParser) AwaitingResponse() bool { return p.awaiting }
+
 // Parse implements Parser.
 func (p *AntigravityParser) Parse(line string, offset int64) []protocol.Message {
 	var step antigravityStep
@@ -88,8 +101,9 @@ func (p *AntigravityParser) Parse(line string, offset int64) []protocol.Message 
 		return nil
 	}
 	ts := parseTime(step.CreatedAt)
-	if step.StepIndex > p.lastStep {
+	if step.StepIndex >= p.lastStep {
 		p.lastStep = step.StepIndex
+		p.awaiting = step.Type == "USER_INPUT"
 	}
 
 	switch step.Type {

@@ -98,3 +98,38 @@ func TestAntigravityThinkingOnlyResponseIsSilent(t *testing.T) {
 		t.Errorf("got %+v", got)
 	}
 }
+
+// A reply is being written exactly while the newest record is a prompt.
+//
+// The session's state cannot answer this: it comes from discovery, which
+// sweeps on its own timer and still reads busy for up to a sweep after a
+// reply lands. Streaming on that stale answer sent the finished reply a
+// second time, scraped off the pane and wrapped to the terminal's width.
+func TestAntigravityAwaitingResponseFollowsTheTranscript(t *testing.T) {
+	p := NewAntigravityParser("antigravity:c1")
+	if p.AwaitingResponse() {
+		t.Error("awaiting a reply before any prompt was seen")
+	}
+
+	p.Parse(`{"step_index":0,"type":"USER_INPUT","status":"DONE","content":"write it"}`, 0)
+	if !p.AwaitingResponse() {
+		t.Error("a prompt with no reply yet should be awaiting one")
+	}
+	if got := p.NextStepIndex(); got != 1 {
+		t.Errorf("next step = %d, want 1", got)
+	}
+
+	p.Parse(`{"step_index":1,"type":"PLANNER_RESPONSE","status":"DONE","content":"done"}`, 1)
+	if p.AwaitingResponse() {
+		t.Error("still awaiting a reply after its record landed; the pane copy would be sent again")
+	}
+
+	// And the next turn starts the cycle over.
+	p.Parse(`{"step_index":2,"type":"USER_INPUT","status":"DONE","content":"again"}`, 2)
+	if !p.AwaitingResponse() {
+		t.Error("a second prompt should be awaiting a reply")
+	}
+	if got := p.NextStepIndex(); got != 3 {
+		t.Errorf("next step = %d, want 3", got)
+	}
+}
