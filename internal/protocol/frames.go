@@ -86,6 +86,20 @@ const (
 	// "what have I run here", which no sweep can, because a session stops
 	// being discoverable the moment its process exits.
 	ReqDirectorySessions RequestType = "directory_sessions"
+	// ReqResumeSession reopens a session in a tmux pane so it can be typed
+	// into. Most of what a folder holds is read-only — the process is gone —
+	// but every CLI can reopen one of its own sessions by id, so read-only is
+	// a state to leave rather than a fact to live with.
+	ReqResumeSession RequestType = "resume_session"
+	// ReqEndSession closes the pane a session runs in.
+	//
+	// Not "stop the agent": the transcript survives and the session reappears
+	// in its folder's history. What ends is the cost of leaving it open,
+	// which is what made panes pile up once opening them became easy.
+	ReqEndSession RequestType = "end_session"
+	// ReqCreateDirectory makes one folder for a new session to start in.
+	// Starting an agent somewhere new should not need a trip to the Mac.
+	ReqCreateDirectory RequestType = "create_directory"
 )
 
 // Request is anything the app asks of the daemon.
@@ -149,6 +163,17 @@ const (
 	EvtSessionStarted EventType = "session_started"
 	// EvtFolders answers ReqListFolders.
 	EvtFolders EventType = "folders"
+	// EvtSessionEnded answers ReqEndSession once the pane is gone.
+	EvtSessionEnded EventType = "session_ended"
+	// EvtDirectorySessions answers ReqDirectorySessions.
+	//
+	// Deliberately not EvtSessions. That one is the authoritative live
+	// snapshot: the app replaces the status board with it and forgets the
+	// transcripts of everything missing from it. A folder's list is neither
+	// — it is a reply to one question, and most of it has already ended — so
+	// sending it under that type put a month of finished sessions on the
+	// board and left them there when the filter was cleared.
+	EvtDirectorySessions EventType = "directory_sessions"
 )
 
 // SendStatus is how far a sent message actually got.

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -91,6 +92,41 @@ func listLaunchDirectories(raw string) ([]string, error) {
 	return names, nil
 }
 
+// createLaunchDirectory makes one new folder for a session to start in.
+//
+// Held to exactly the rule a launch path is, because that is what it becomes:
+// beneath the Mac user's home, no dot-directories, no traversal, and every
+// parent a real directory rather than a symlink out. The only addition is
+// that the last segment must not exist yet — creating a folder that is
+// already there would quietly hand back someone else's.
+func createLaunchDirectory(raw string) (string, error) {
+	if err := validateLaunchPath(raw, false); err != nil {
+		return "", err
+	}
+	parent, leaf := path.Split(raw)
+	parent = strings.TrimSuffix(parent, "/")
+	if leaf == "" {
+		return "", errors.New("daemon: name the folder to create")
+	}
+	base, err := launchDirectory(parent, true)
+	if err != nil {
+		return "", err
+	}
+	target := filepath.Join(base, leaf)
+	if _, err := os.Lstat(target); err == nil {
+		return "", fmt.Errorf("daemon: %s already exists", leaf)
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("daemon: cannot create that folder: %w", err)
+	}
+	// 0o700 rather than 0o755: this is a folder an agent is about to be given
+	// a directory's worth of authority over, created by a request from a
+	// phone. Nothing else on the machine needs to read it.
+	if err := os.Mkdir(target, 0o700); err != nil {
+		return "", fmt.Errorf("daemon: cannot create that folder: %w", err)
+	}
+	return raw, nil
+}
+
 func (d *Daemon) startLocalSession(ctx context.Context, req protocol.Request) (string, error) {
 	d.mu.Lock()
 	if id := d.launches[req.ClientID]; id != "" {
@@ -119,17 +155,103 @@ func (d *Daemon) startLocalSession(ctx context.Context, req protocol.Request) (s
 	return id, nil
 }
 
-func startTerminalSession(ctx context.Context, kind protocol.Kind, dir, prompt string) (string, error) {
-	command := string(kind)
-	nameKind := command
+// agentCommand maps a kind to the program that runs it and the word its tmux
+// panes are named after.
+func agentCommand(kind protocol.Kind) (command, nameKind string) {
+	command = string(kind)
+	nameKind = command
 	switch kind {
 	case protocol.KindCursorCLI:
-		command, nameKind = "agent", "cursor"
+		return "agent", "cursor"
 	case protocol.KindKiro:
-		command = "kiro-cli"
+		return "kiro-cli", nameKind
 	case protocol.KindAntigravity:
-		command = "agy"
+		return "agy", nameKind
 	}
+	return command, nameKind
+}
+
+// startResumedSession reopens an existing session in a pane of its own.
+//
+// Unlike a launch, nothing is being created: the agent is pointed at a
+// transcript it already wrote, in the directory it wrote it in. The prompt is
+// the user's to type once it is up, which is why none is sent here.
+func startResumedSession(
+	ctx context.Context, kind protocol.Kind, dir string, resume []string,
+) (string, error) {
+	command, nameKind := agentCommand(kind)
+	binary, err := exec.LookPath(command)
+	if err != nil {
+		return "", fmt.Errorf("daemon: %s is not installed on this Mac", command)
+	}
+	if !tmux.Available() {
+		return "", errors.New("daemon: tmux is required to reopen a session")
+	}
+
+	name := tmux.NewName(nameKind)
+	argv := []string{binary}
+	// Kiro reads a bare first word as a subcommand, so its flags must follow
+	// `chat` exactly as they do in the wrapper.
+	if kind == protocol.KindKiro {
+		argv = append(argv, "chat")
+	}
+	argv = append(argv, resume...)
+
+	// The id discovery will give the reopened session. Claude, Kiro,
+	// Antigravity and Cursor all continue writing the transcript they were
+	// pointed at, so the session keeps the id it already had. Codex opens a
+	// new rollout with an id of its own, so its pane is the only name that
+	// exists until that rollout appears — the same rule a fresh launch uses.
+	id := ""
+	native := resume[len(resume)-1]
+	switch kind {
+	case protocol.KindClaude:
+		// The UUID in the pane name lets discovery bind the pane before
+		// Claude has rewritten its process registry.
+		name = tmux.Prefix + "claude-" + native
+		id = "claude:" + native
+	case protocol.KindCodex:
+		id = "codex:tmux-" + name
+	case protocol.KindCursorCLI:
+		id = "cursor-cli:" + native
+	case protocol.KindKiro:
+		id = "kiro:" + native
+	case protocol.KindAntigravity:
+		id = "antigravity:" + native
+	default:
+		return "", errors.New("daemon: this agent cannot be reopened by id")
+	}
+
+	if err := tmux.Launch(ctx, name, dir, argv); err != nil {
+		return "", err
+	}
+	if err := paneSurvivedLaunch(ctx, name, command); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// paneSurvivedLaunch reports whether the pane is still there a moment later.
+//
+// A missing login or a rejected argument makes the CLI exit at once, and tmux
+// takes the pane with it. Reporting success then sends the phone to a session
+// that never existed.
+func paneSurvivedLaunch(ctx context.Context, name, command string) error {
+	time.Sleep(250 * time.Millisecond)
+	panes, err := tmux.List(ctx)
+	if err != nil {
+		return nil // tmux is unreadable, not necessarily broken
+	}
+	for _, pane := range panes {
+		if pane.Name == name {
+			return nil
+		}
+	}
+	return fmt.Errorf("daemon: %s exited before its session started; check its login on the Mac", command)
+}
+
+func startTerminalSession(ctx context.Context, kind protocol.Kind, dir, prompt string) (string, error) {
+	command, nameKind := agentCommand(kind)
 	binary, err := exec.LookPath(command)
 	if err != nil {
 		return "", fmt.Errorf("daemon: %s is not installed on this Mac", command)

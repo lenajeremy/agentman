@@ -61,6 +61,11 @@ func runWrap(ctx context.Context, agent string, args []string) error {
 		return err
 	}
 
+	args, err = resolveResumeFlag(agent, args)
+	if err != nil {
+		return err
+	}
+
 	name := tmux.NewName(agent)
 	command := append(append([]string{binary}, prefix...), args...)
 
@@ -76,6 +81,49 @@ func runWrap(ctx context.Context, agent string, args []string) error {
 	// Replace this process with the tmux client so the user gets tmux's own
 	// terminal handling — signals, resizes, and scrollback all behave normally.
 	return tmux.Attach(name)
+}
+
+// resolveResumeFlag rewrites `am <agent> --resume <id>` into whatever that
+// CLI actually calls it.
+//
+// Every agent can reopen a session by id and every one spells it differently:
+// Codex wants a `resume` subcommand, Kiro `--resume-id`, Antigravity
+// `--conversation`. Typing the right one per agent is exactly the kind of
+// thing nobody should have to remember, and the phone needs one spelling to
+// send, so `--resume <id>` means the same thing everywhere here.
+//
+// A bare `--resume` with no id is left alone: several of these CLIs read that
+// as "show me a picker", which is a reasonable thing to want from a terminal
+// and is not ours to intercept.
+// wrapKind maps a wrapper's agent word to the kind the rest of the program
+// uses. Only cursor differs, and it matters: `am cursor` runs the Cursor CLI,
+// whose sessions are KindCursorCLI. KindCursor is the IDE, which has no CLI
+// to resume into at all.
+func wrapKind(agent string) protocol.Kind {
+	if agent == "cursor" {
+		return protocol.KindCursorCLI
+	}
+	return protocol.Kind(agent)
+}
+
+func resolveResumeFlag(agent string, args []string) ([]string, error) {
+	for i, arg := range args {
+		if arg != "--resume" || i+1 >= len(args) {
+			continue
+		}
+		id := args[i+1]
+		if strings.HasPrefix(id, "-") {
+			continue // the next word is another flag, so this is the picker
+		}
+		native, ok := source.ResumeArgs(wrapKind(agent), id)
+		if !ok {
+			return nil, fmt.Errorf("%s cannot resume a session by id", agent)
+		}
+		rewritten := append([]string{}, args[:i]...)
+		rewritten = append(rewritten, native...)
+		return append(rewritten, args[i+2:]...), nil
+	}
+	return args, nil
 }
 
 // runSend delivers a message to a running session from the terminal.
