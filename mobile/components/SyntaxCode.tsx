@@ -58,9 +58,8 @@ function decode(value: string): string {
 // highlight.js supplies the grammar. Convert its small span-only output into
 // native Text runs; rendering HTML in a WebView would expose file content to a
 // second browser context and lose native text selection.
-function tokens(source: string, filename: string): Token[] {
-  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
-  const language = filename.toLowerCase() === "dockerfile" ? "dockerfile" : languages[ext];
+function tokens(source: string, filename: string, named: string): Token[] {
+  const language = resolveLanguage(filename, named);
   if (!language) return [{ text: source, scope: "" }];
   let html: string;
   try { html = hljs.highlight(source, { language, ignoreIllegals: true }).value; }
@@ -77,6 +76,27 @@ function tokens(source: string, filename: string): Token[] {
     }
   }
   return out;
+}
+
+/**
+ * Picks a grammar from a filename's extension or a fence's info string.
+ *
+ * A markdown fence names its language outright (```java) while a file only
+ * implies it, so the explicit name wins where both exist. Either may name a
+ * language no grammar is registered for, and an unknown one renders as plain
+ * text rather than guessing.
+ */
+export function resolveLanguage(filename: string, named = ""): string {
+  const direct = named.toLowerCase();
+  if (direct) {
+    if (direct === "dockerfile") return "dockerfile";
+    if (languages[direct]) return languages[direct];
+    if (hljs.getLanguage(direct)) return direct;
+    return "";
+  }
+  if (filename.toLowerCase() === "dockerfile") return "dockerfile";
+  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+  return languages[ext] ?? "";
 }
 
 /**
@@ -101,16 +121,33 @@ function toLines(runs: Token[]): Token[][] {
 export function SyntaxCode({
   source,
   filename,
+  language = "",
   wrap,
+  lineNumbers = true,
+  maxLines,
+  frameless,
 }: {
   source: string;
+  /** Names the grammar for a file. Empty when the source is not one. */
   filename: string;
+  /** A markdown fence names its language outright; it wins over filename. */
+  language?: string;
   /** Wrapped is the phone default: panning a long line loses your place. */
   wrap: boolean;
+  /** Off for a snippet inside a message, where the numbers are noise: the
+   *  line a reader wants is the one they can see. */
+  lineNumbers?: boolean;
+  /** Clamp for a collapsed block. The remainder is reported, not dropped. */
+  maxLines?: number;
+  /** Drops the surrounding frame, for a caller that draws its own. */
+  frameless?: boolean;
 }) {
   const { scheme, color } = useTheme();
   const styles = makeStyles(color);
-  const lines = useMemo(() => toLines(tokens(source, filename)), [source, filename]);
+  const lines = useMemo(
+    () => toLines(tokens(source, filename, language)),
+    [source, filename, language],
+  );
   const dark = scheme === "dark";
   const tint: Record<string, string> = {
     keyword: dark ? "#C792EA" : "#7B3BB2",
@@ -127,7 +164,8 @@ export function SyntaxCode({
     property: dark ? "#89DDFF" : "#147286",
   };
 
-  const shown = lines.slice(0, MAX_RENDERED_LINES);
+  const ceiling = Math.min(maxLines ?? MAX_RENDERED_LINES, MAX_RENDERED_LINES);
+  const shown = lines.slice(0, ceiling);
   const hidden = lines.length - shown.length;
   // The gutter has to fit the widest number it will show, or the code column
   // shifts left as you scroll past line 99.
@@ -137,9 +175,11 @@ export function SyntaxCode({
     <View style={wrap ? styles.bodyWrap : undefined}>
       {shown.map((line, index) => (
         <View key={index} style={styles.row}>
-          <Text style={[styles.gutter, { width: gutterWidth }]} selectable={false}>
-            {index + 1}
-          </Text>
+          {lineNumbers ? (
+            <Text style={[styles.gutter, { width: gutterWidth }]} selectable={false}>
+              {index + 1}
+            </Text>
+          ) : null}
           <Text selectable style={[styles.code, wrap ? styles.codeWrap : null]}>
             {line.length === 0
               ? " "
@@ -151,7 +191,7 @@ export function SyntaxCode({
           </Text>
         </View>
       ))}
-      {hidden > 0 ? (
+      {hidden > 0 && maxLines === undefined ? (
         <Text style={styles.more}>
           {hidden.toLocaleString()} more {hidden === 1 ? "line" : "lines"} not shown on this device.
         </Text>
@@ -162,9 +202,13 @@ export function SyntaxCode({
   // Wrapped content must not sit in a horizontal scroller: the row would size
   // to its content instead of the screen and never wrap.
   return wrap ? (
-    <View style={styles.frame}>{body}</View>
+    <View style={frameless ? undefined : styles.frame}>{body}</View>
   ) : (
-    <ScrollView horizontal style={styles.frame} contentContainerStyle={styles.scroll}>
+    <ScrollView
+      horizontal
+      style={frameless ? undefined : styles.frame}
+      contentContainerStyle={styles.scroll}
+    >
       {body}
     </ScrollView>
   );

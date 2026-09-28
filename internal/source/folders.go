@@ -21,6 +21,21 @@ import (
 // behind it.
 const folderIndexTTL = 20 * time.Second
 
+// pastListingTTL is how long one directory's finished sessions are reused.
+//
+// Only the finished half is cached. Live sessions are merged in fresh on
+// every call, so a session that started a second ago is never hidden behind
+// this — and a session that ended weeks ago does not become more accurate for
+// being re-read. Reopening the same folder, or the refetch that follows a
+// reconnect, then costs nothing.
+const pastListingTTL = 20 * time.Second
+
+// pastListing is one directory's history as it was last read.
+type pastListing struct {
+	sessions []protocol.Session
+	builtAt  time.Time
+}
+
 // FolderIndex answers how many sessions have run under a directory.
 //
 // It holds one entry per exact working directory. A folder's number is the sum
@@ -169,27 +184,7 @@ func (r *Registry) InDirectory(ctx context.Context, dir string, limit int) ([]pr
 	}
 	limit = limitOrDefault(limit)
 
-	histories := r.histories()
-	var (
-		mu       sync.Mutex
-		past     []protocol.Session
-		failures []string
-		wg       sync.WaitGroup
-	)
-	for kind, h := range histories {
-		wg.Add(1)
-		go func(kind protocol.Kind, h History) {
-			defer wg.Done()
-			sessions, err := h.Past(ctx, dir, limit)
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				failures = append(failures, fmt.Sprintf("%s: %v", kind, err))
-			}
-			past = append(past, sessions...)
-		}(kind, h)
-	}
-	wg.Wait()
+	past, failures := r.pastIn(ctx, dir, limit)
 
 	live := map[string]bool{}
 	all := make([]protocol.Session, 0, len(past))
@@ -214,6 +209,51 @@ func (r *Registry) InDirectory(ctx context.Context, dir string, limit int) ([]pr
 		return all, fmt.Errorf("source: %s", strings.Join(failures, "; "))
 	}
 	return all, nil
+}
+
+// pastIn reads one directory's finished sessions, reusing a recent read.
+func (r *Registry) pastIn(ctx context.Context, dir string, limit int) ([]protocol.Session, []string) {
+	key := fmt.Sprintf("%s\x00%d", dir, limit)
+	r.folderMu.Lock()
+	if cached, ok := r.pastByDir[key]; ok && time.Since(cached.builtAt) < pastListingTTL {
+		sessions := cached.sessions
+		r.folderMu.Unlock()
+		return sessions, nil
+	}
+	r.folderMu.Unlock()
+
+	var (
+		mu       sync.Mutex
+		past     []protocol.Session
+		failures []string
+		wg       sync.WaitGroup
+	)
+	for kind, h := range r.histories() {
+		wg.Add(1)
+		go func(kind protocol.Kind, h History) {
+			defer wg.Done()
+			sessions, err := h.Past(ctx, dir, limit)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				failures = append(failures, fmt.Sprintf("%s: %v", kind, err))
+			}
+			past = append(past, sessions...)
+		}(kind, h)
+	}
+	wg.Wait()
+
+	// A partial read is not cached: the next open should try the adapter
+	// that failed rather than repeat its absence for twenty seconds.
+	if len(failures) == 0 {
+		r.folderMu.Lock()
+		if r.pastByDir == nil {
+			r.pastByDir = map[string]pastListing{}
+		}
+		r.pastByDir[key] = pastListing{sessions: past, builtAt: time.Now()}
+		r.folderMu.Unlock()
+	}
+	return past, failures
 }
 
 // histories returns the adapters that can look past what is running.

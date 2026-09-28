@@ -483,3 +483,49 @@ func TestRegistryFolderIndexRollsUpSubtrees(t *testing.T) {
 		t.Errorf("Recent = %v, want both working directories", paths)
 	}
 }
+
+// Only the finished half of a folder is cached. A session that started a
+// second ago must not be hidden behind a listing read before it existed —
+// which is the whole risk of caching this at all.
+func TestInDirectoryCachesHistoryButNotLiveSessions(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "code", "api")
+	writeClaudeTranscript(t, home, "11111111-1111-4111-8111-111111111111", work,
+		claudeUserLine(work, "finished work"))
+
+	claude, err := NewClaudeSource(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := NewRegistry()
+	r.Add(claude)
+
+	first, err := r.InDirectory(context.Background(), work, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("got %d sessions, want the one on disk", len(first))
+	}
+
+	// A session appears while the folder's history is still cached.
+	liveID := string(protocol.KindClaude) + ":99999999-9999-4999-8999-999999999999"
+	r.mu.Lock()
+	r.last[protocol.KindClaude] = []protocol.Session{{
+		ID: liveID, Kind: protocol.KindClaude, Name: "just started", Cwd: work,
+		State: protocol.StateBusy, Inject: protocol.InjectTmux,
+		LastActivityAt: time.Now().UnixMilli(),
+	}}
+	r.mu.Unlock()
+
+	second, err := r.InDirectory(context.Background(), work, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 2 {
+		t.Fatalf("got %d sessions, want the cached one plus the new live one", len(second))
+	}
+	if second[0].ID != liveID {
+		t.Errorf("a session that started after the cache was filled did not appear first: %+v", second)
+	}
+}

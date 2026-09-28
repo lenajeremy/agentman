@@ -41,6 +41,12 @@ export default function NewSession() {
   const [prompt, setPrompt] = useState("Wait for my next instruction.");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
+  // Naming a new folder happens inline rather than in a system prompt:
+  // Alert.prompt is iOS-only, and a row that expands keeps the list as the
+  // one place folders are chosen.
+  const [naming, setNaming] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     if (!store.daemonOnline) return;
@@ -48,7 +54,7 @@ export default function NewSession() {
     setLoadingDirectories(true);
     setError("");
     void store.listDirectories(path)
-      .then((names) => { if (live) setDirectories(names); })
+      .then((listing) => { if (live) setDirectories(listing.names); })
       .catch((err: Error) => { if (live) setError(err.message); })
       .finally(() => { if (live) setLoadingDirectories(false); });
     return () => { live = false; };
@@ -58,6 +64,26 @@ export default function NewSession() {
   }, [path, store.daemonOnline]);
 
   const up = () => setPath((current) => current.split("/").slice(0, -1).join("/"));
+
+  const createFolder = async () => {
+    const name = newName.trim();
+    if (!name || creating) return;
+    setError("");
+    setCreating(true);
+    try {
+      const listing = await store.createDirectory(path ? `${path}/${name}` : name);
+      setDirectories(listing.names);
+      setNaming(false);
+      setNewName("");
+      // Straight into it: naming a folder is how you say where the agent
+      // should work, so stopping at its parent would be half the action.
+      setPath((current) => (current ? `${current}/${name}` : name));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create that folder.");
+    } finally {
+      setCreating(false);
+    }
+  };
   const start = async () => {
     if (!path || !prompt.trim() || starting || !store.daemonOnline) return;
     setError("");
@@ -116,6 +142,36 @@ export default function NewSession() {
                 <Feather name="chevron-right" size={17} color={color.faint} />
               </MotionPressable>
             ))}
+            {naming ? (
+              <View style={styles.folder}>
+                <Feather name="folder-plus" size={18} color={color.working} />
+                <TextInput value={newName} onChangeText={setNewName} autoFocus
+                  style={styles.newFolderInput} placeholder="Folder name"
+                  placeholderTextColor={color.faint} autoCapitalize="none"
+                  autoCorrect={false} returnKeyType="done"
+                  onSubmitEditing={() => void createFolder()}
+                  accessibilityLabel="New folder name" />
+                {creating ? <ActivityIndicator size="small" color={color.working} /> : (
+                  <MotionPressable onPress={() => void createFolder()} hitSlop={10}
+                    disabled={!newName.trim()}
+                    accessibilityRole="button" accessibilityLabel="Create folder">
+                    <Feather name="check" size={18}
+                      color={newName.trim() ? color.working : color.faint} />
+                  </MotionPressable>
+                )}
+                <MotionPressable onPress={() => { setNaming(false); setNewName(""); }} hitSlop={10}
+                  accessibilityRole="button" accessibilityLabel="Cancel">
+                  <Feather name="x" size={17} color={color.muted} />
+                </MotionPressable>
+              </View>
+            ) : (
+              <MotionPressable onPress={() => setNaming(true)} style={styles.folder}
+                disabled={!store.daemonOnline}
+                accessibilityRole="button" accessibilityLabel="New folder">
+                <Feather name="folder-plus" size={18} color={color.muted} />
+                <Text style={[styles.folderName, styles.newFolder]}>New folder</Text>
+              </MotionPressable>
+            )}
           </View>
 
           <Text style={styles.label}>First message</Text>
@@ -167,6 +223,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingHorizontal: space.md, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: c.line },
   folderName: { flex: 1, fontFamily: font.sans, fontSize: size.body, color: c.text },
   empty: { padding: space.md, fontFamily: font.sans, color: c.muted },
+  newFolder: { color: c.muted },
+  newFolderInput: { flex: 1, paddingVertical: space.sm, fontFamily: font.mono,
+    fontSize: size.body, color: c.text },
   spinner: { margin: space.lg },
   prompt: { minHeight: 110, padding: space.md, borderRadius: radius.lg,
     borderWidth: 1, borderColor: c.line, backgroundColor: c.surface,

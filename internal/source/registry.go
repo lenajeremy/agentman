@@ -32,6 +32,8 @@ type Registry struct {
 	folderMu      sync.Mutex
 	folderIndex   *FolderIndex
 	folderBuiltAt time.Time
+	// pastByDir caches one directory's finished sessions; see pastListingTTL.
+	pastByDir map[string]pastListing
 }
 
 // MaxPageMessages bounds a direct history request. The relay-facing daemon

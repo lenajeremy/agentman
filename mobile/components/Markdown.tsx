@@ -1,11 +1,14 @@
+import Feather from "@expo/vector-icons/Feather";
 import * as WebBrowser from "expo-web-browser";
-import { ReactNode } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { ReactNode, useMemo, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { parseBlocks, type Block } from "../lib/markdown-blocks";
 import { tokenizeInline } from "../lib/markdown-inline";
 import { cellWidth, type Table } from "../lib/markdown-table";
-import { useStyles } from "../lib/appearance";
+import { useStyles, useTheme } from "../lib/appearance";
+import { CodeViewer } from "./CodeViewer";
+import { SyntaxCode } from "./SyntaxCode";
 import { font, Palette, radius, size, space } from "../lib/theme";
 
 type Styles = ReturnType<typeof makeStyles>;
@@ -18,6 +21,16 @@ const MAX_MARKDOWN_CHARS = 200_000;
  * instead of wrapping; those fall back to a flat highlight that still wraps.
  */
 const MAX_CODE_CHIP = 40;
+
+/**
+ * Lines of a code block shown before it asks to be opened.
+ *
+ * A reply that explains a change often carries the whole file after it, and a
+ * block that runs for four screens costs more to scroll past than it gave.
+ * Twelve matches what a tool's output is clamped to, so the two kinds of
+ * block in a feed behave the same way.
+ */
+const CODE_LINES = 12;
 
 /**
  * Renders the small markdown vocabulary agents use in ordinary replies.
@@ -62,6 +75,90 @@ function headingSize(level: number, styles: Styles) {
   return level === 1 ? styles.heading1 : undefined;
 }
 
+
+/**
+ * A fenced code block.
+ *
+ * Highlighted where the fence named a language, clamped to a dozen lines, and
+ * openable — the same three moves a tool's output already makes, because a
+ * reader meeting both in one feed should not have to learn two behaviours.
+ * Unhighlighted is not a failure state: a fence with no language, or one
+ * naming a grammar that is not bundled, renders as plain monospace and reads
+ * exactly as it did before.
+ */
+function CodeBlock({
+  source,
+  language,
+  styles,
+}: {
+  source: string;
+  language: string;
+  styles: Styles;
+}) {
+  const { color } = useTheme();
+  const [full, setFull] = useState(false);
+  const [viewer, setViewer] = useState(false);
+
+  const lines = useMemo(() => source.split("\n"), [source]);
+  const hidden = full ? 0 : Math.max(0, lines.length - CODE_LINES);
+
+  return (
+    <View>
+      <View style={styles.codeFrame}>
+        {language ? (
+          <View style={styles.codeHeader}>
+            <Text style={styles.codeLanguage}>{language}</Text>
+          </View>
+        ) : null}
+        <SyntaxCode
+          source={source}
+          filename=""
+          language={language}
+          wrap
+          lineNumbers={false}
+          frameless
+          maxLines={full ? undefined : CODE_LINES}
+        />
+      </View>
+      {/* Under the block, not over it: a control floating in the corner
+          covers the first line, which is the one most worth reading. */}
+      <View style={styles.codeFooter}>
+        {hidden > 0 ? (
+          <Pressable
+            onPress={() => setFull(true)}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={`Show ${hidden} more lines inline`}
+          >
+            <Text style={styles.codeAction}>
+              {hidden === 1
+                ? "Show 1 more line"
+                : `Show ${hidden.toLocaleString()} more lines`}
+            </Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          onPress={() => setViewer(true)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Open this code full screen"
+        >
+          <View style={styles.codeFullRow}>
+            <Feather name="maximize-2" size={11} color={color.muted} />
+            <Text style={styles.codeAction}>Full screen</Text>
+          </View>
+        </Pressable>
+      </View>
+      <CodeViewer
+        visible={viewer}
+        onClose={() => setViewer(false)}
+        source={source}
+        language={language}
+      />
+    </View>
+  );
+}
+
 function BlockView({ block, styles }: { block: Block; styles: Styles }) {
   switch (block.kind) {
     case "heading":
@@ -73,11 +170,7 @@ function BlockView({ block, styles }: { block: Block; styles: Styles }) {
     case "rule":
       return <View style={styles.rule} />;
     case "code":
-      return (
-        <Text selectable style={styles.codeBlock}>
-          {block.text}
-        </Text>
-      );
+      return <CodeBlock source={block.text} language={block.language ?? ""} styles={styles} />;
     case "quote":
       return (
         <View style={styles.quote}>
@@ -269,16 +362,38 @@ function makeStyles(c: Palette) {
     },
     // The fallback keeps the old flat highlight, which wraps.
     inlineCodeFlat: { backgroundColor: c.fill },
-    codeBlock: {
-      fontFamily: font.mono,
-      fontSize: 12.5,
-      lineHeight: 19,
-      color: c.text,
+    codeFrame: {
       backgroundColor: c.fill,
       borderRadius: radius.md,
-      padding: space.md,
+      paddingVertical: space.sm,
+      paddingHorizontal: space.md,
       overflow: "hidden",
     },
+    codeHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingBottom: space.xs,
+    },
+    // The language is the one thing a reader wants confirmed at a glance, and
+    // it is machine text, so it is set as such rather than as a label.
+    codeLanguage: {
+      fontFamily: font.mono,
+      fontSize: size.label,
+      color: c.faint,
+    },
+    codeFooter: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      paddingTop: space.xs,
+      paddingHorizontal: space.xs,
+    },
+    codeAction: {
+      fontFamily: font.sansMedium,
+      fontSize: size.label,
+      color: c.muted,
+    },
+    codeFullRow: { flexDirection: "row", alignItems: "center", gap: space.xs },
     quote: {
       borderLeftWidth: 3,
       borderLeftColor: c.fillStrong,

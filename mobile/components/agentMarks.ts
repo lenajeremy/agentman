@@ -4,7 +4,8 @@
  * Each agent is shown with the mark of the company behind its models: Claude
  * Code with Anthropic's Claude mark, Codex with OpenAI's. From LobeHub's
  * icon set (@lobehub/icons-static-svg, MIT), except Cursor's, which comes
- * from Simple Icons (CC0); the marks themselves remain
+ * from Simple Icons (CC0), and Antigravity's, which is the PNG Google serves
+ * on antigravity.google, unmodified; the marks themselves remain
  * their owners' trademarks and are used only to say which agent is which.
  *
  * Generated from the SVG sources rather than typed by hand. Gemini and Grok
@@ -16,6 +17,16 @@ export interface AgentMark {
   label: string;
   /** Fixed brand colour, or null to follow the text colour (monochrome marks). */
   color: string | null;
+  /**
+   * The owner's own artwork, for a mark that is not one shape in one colour.
+   *
+   * Antigravity's is a soft multi-colour wash rather than a flat fill, and
+   * redrawing it — as a gradient, or as its published mask-over-blurs markup
+   * — produced something that was recognisably not their logo. The file they
+   * ship is the logo, so the file is what is shown. `paths` stays as the
+   * fallback for anywhere an image cannot be drawn.
+   */
+  image?: number;
   paths: { d: string; evenOdd?: boolean }[];
 }
 
@@ -66,7 +77,9 @@ export const agentMarks: Record<string, AgentMark> = {
   // same logo could not be told apart in the list.
   antigravity: {
     label: "Antigravity",
-    color: null,
+    // The PNG Google serves at antigravity.google/assets/image/, unmodified.
+    image: require("../assets/images/agents/antigravity.png"),
+    color: "#3186FF",
     paths: [
       { d: "M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z", evenOdd: true },
     ],
