@@ -878,7 +878,24 @@ func (d *Daemon) HandleFrom(
 		if err != nil {
 			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
 		}
-		return protocol.Event{Type: protocol.EvtDirectories, Path: req.Path, Directories: names}
+		return protocol.Event{
+			Type: protocol.EvtDirectories, Path: req.Path, Directories: names,
+			Folders: d.annotateDirectories(ctx, req.Path, names),
+		}
+
+	case protocol.ReqListFolders:
+		folders, err := d.listFolders(ctx)
+		if err != nil && folders == nil {
+			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
+		}
+		return protocol.Event{Type: protocol.EvtFolders, Folders: folders}
+
+	case protocol.ReqDirectorySessions:
+		sessions, err := d.directorySessions(ctx, req.Path)
+		if err != nil {
+			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
+		}
+		return protocol.Event{Type: protocol.EvtSessions, Path: req.Path, Sessions: sessions}
 
 	case protocol.ReqStartSession:
 		id, err := d.startLocalSession(ctx, req)
@@ -1101,6 +1118,10 @@ func validateRequest(req protocol.Request) error {
 		return nil
 	case protocol.ReqListDirectories:
 		return validateLaunchPath(req.Path, true)
+	case protocol.ReqListFolders:
+		return nil
+	case protocol.ReqDirectorySessions:
+		return validateFolderPath(req.Path)
 	case protocol.ReqStartSession:
 		if req.ClientID == "" || validateLaunchPath(req.Path, false) != nil ||
 			(req.Kind != protocol.KindClaude && req.Kind != protocol.KindCodex &&

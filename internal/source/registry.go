@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
@@ -25,6 +26,12 @@ type Registry struct {
 	// tear down its live follows; the next successful empty snapshot is what
 	// confirms they are genuinely gone.
 	last map[protocol.Kind][]protocol.Session
+
+	// folderIndex caches the scan of every agent's store behind folderIndexTTL.
+	// See folders.go.
+	folderMu      sync.Mutex
+	folderIndex   *FolderIndex
+	folderBuiltAt time.Time
 }
 
 // MaxPageMessages bounds a direct history request. The relay-facing daemon

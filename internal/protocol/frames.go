@@ -76,6 +76,16 @@ const (
 	// and start a new local agent process in one of them.
 	ReqListDirectories RequestType = "list_directories"
 	ReqStartSession    RequestType = "start_session"
+	// ReqListFolders names every directory an agent has ever run in, with a
+	// count. It is what the folder filter's Recent list shows, and the only
+	// route to a directory the browser cannot reach: that one skips
+	// dot-directories and stops at the Mac user's home.
+	ReqListFolders RequestType = "list_folders"
+	// ReqDirectorySessions lists the sessions recorded under one directory,
+	// ended ones included. Discovery answers "what is running"; this answers
+	// "what have I run here", which no sweep can, because a session stops
+	// being discoverable the moment its process exits.
+	ReqDirectorySessions RequestType = "directory_sessions"
 )
 
 // Request is anything the app asks of the daemon.
@@ -137,6 +147,8 @@ const (
 	EvtWorkspace      EventType = "workspace"
 	EvtDirectories    EventType = "directories"
 	EvtSessionStarted EventType = "session_started"
+	// EvtFolders answers ReqListFolders.
+	EvtFolders EventType = "folders"
 )
 
 // SendStatus is how far a sent message actually got.
@@ -176,6 +188,11 @@ type Event struct {
 	// Directory names only; the app never needs the Mac's absolute home path.
 	Directories []string `json:"directories,omitempty"`
 	Path        string   `json:"path,omitempty"`
+	// Folders carries agent counts. On EvtFolders it is the whole answer; on
+	// EvtDirectories it rides alongside Directories, one entry per browsable
+	// child that has agents under it, so a phone too old to know the field
+	// simply browses without counts.
+	Folders []Folder `json:"folders,omitempty"`
 
 	Error string `json:"error,omitempty"`
 }
