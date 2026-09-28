@@ -284,6 +284,22 @@ function renderInline(text: string, styles: Styles): ReactNode[] {
             {token.text}
           </Text>
         );
+      case "italic":
+        return (
+          <Text key={key} style={styles.italic}>
+            {token.text}
+          </Text>
+        );
+      case "math":
+        // Not typeset — that would be a maths engine, and this renderer
+        // deliberately has no dependencies. Set in mono because that is what
+        // this system does with machine notation, which reads O(N^2)
+        // correctly and drops the dollars nobody meant to see.
+        return (
+          <Text key={key} style={styles.math}>
+            {token.text}
+          </Text>
+        );
       case "code":
         // A View, not a styled Text: a nested Text is an attributed-string
         // span, and both platforms draw its background as a plain rectangle —
@@ -362,6 +378,8 @@ function makeStyles(c: Palette) {
     },
     // The fallback keeps the old flat highlight, which wraps.
     inlineCodeFlat: { backgroundColor: c.fill },
+    italic: { fontStyle: "italic" },
+    math: { fontFamily: font.mono, fontSize: size.caption },
     codeFrame: {
       backgroundColor: c.fill,
       borderRadius: radius.md,

@@ -119,3 +119,74 @@ test("a refused link with a bold label keeps the bold", () => {
     { kind: "bold", text: "careful" },
   ]);
 });
+
+// Gemini leans on constructs the renderer had no support for: one reply in
+// testing carried eleven single-asterisk emphases and twenty-five inline TeX
+// spans, every one of which reached the phone as literal punctuation.
+test("single-asterisk and underscore emphasis are italic", () => {
+  assert.deepEqual(tokenizeInline("*emphasis*"), [{ kind: "italic", text: "emphasis" }]);
+  assert.deepEqual(tokenizeInline("_emphasis_"), [{ kind: "italic", text: "emphasis" }]);
+  assert.deepEqual(tokenizeInline("spot it *before* it melts"), [
+    { kind: "text", text: "spot it " },
+    { kind: "italic", text: "before" },
+    { kind: "text", text: " it melts" },
+  ]);
+});
+
+test("bold still wins over italic", () => {
+  assert.deepEqual(tokenizeInline("**bold**"), [{ kind: "bold", text: "bold" }]);
+  assert.deepEqual(tokenizeInline("**a** and *b*"), [
+    { kind: "bold", text: "a" },
+    { kind: "text", text: " and " },
+    { kind: "italic", text: "b" },
+  ]);
+});
+
+// The delimiters have to hug their text, or arithmetic and globbing become
+// emphasis on their way to the next asterisk.
+test("loose asterisks are not emphasis", () => {
+  for (const plain of ["a * b * c", "2 * 3 * 4", "ls *.go and *.ts"]) {
+    assert.deepEqual(tokenizeInline(plain), [{ kind: "text", text: plain }], plain);
+  }
+});
+
+// The rule that keeps an identifier intact.
+test("underscores inside a word are not emphasis", () => {
+  for (const plain of ["snake_case_name", "MAX_BUFFER_SIZE", "a_b_c"]) {
+    assert.deepEqual(tokenizeInline(plain), [{ kind: "text", text: plain }], plain);
+  }
+  assert.deepEqual(tokenizeInline("a _real_ word"), [
+    { kind: "text", text: "a " },
+    { kind: "italic", text: "real" },
+    { kind: "text", text: " word" },
+  ]);
+});
+
+// Nothing typesets this; it is set as the machine notation it is, without
+// the dollars that were never meant to be read.
+test("inline TeX becomes a math span", () => {
+  assert.deepEqual(tokenizeInline("hidden $O(N^2)$ loops"), [
+    { kind: "text", text: "hidden " },
+    { kind: "math", text: "O(N^2)" },
+    { kind: "text", text: " loops" },
+  ]);
+  assert.deepEqual(tokenizeInline("passes for $N = 10$"), [
+    { kind: "text", text: "passes for " },
+    { kind: "math", text: "N = 10" },
+  ]);
+});
+
+// A lone dollar is a currency sign far more often than an unclosed formula.
+test("a single dollar stays text", () => {
+  assert.deepEqual(tokenizeInline("costs $5 to run"), [
+    { kind: "text", text: "costs $5 to run" },
+  ]);
+  assert.deepEqual(tokenizeInline("$$"), [{ kind: "text", text: "$$" }]);
+});
+
+// Emphasis does not cross a line break; without that an unpaired marker
+// reaches forward and italicises a paragraph.
+test("emphasis does not span a line break", () => {
+  const text = "an *unpaired marker\nand a later * one";
+  assert.deepEqual(tokenizeInline(text), [{ kind: "text", text }]);
+});
