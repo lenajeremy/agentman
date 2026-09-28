@@ -48,3 +48,5 @@ review-screenshots/
 # Not part of the project: a prompt and issue list from another tool.
 ISSUES.md
 .vercel
+/mobile/.asc.env
+/mobile/build/

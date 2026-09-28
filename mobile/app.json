@@ -12,7 +12,9 @@
       "bundleIdentifier": "dev.agentman.mobile",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "buildNumber": "15",
+      "appleTeamId": "N58PT393QS"
     },
     "android": {
       "package": "dev.agentman.mobile",
