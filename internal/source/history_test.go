@@ -55,6 +55,7 @@ func hermeticClaude(t *testing.T, home string) *ClaudeSource {
 	}
 	s.listPanes = func(context.Context) ([]tmux.Session, error) { return nil, nil }
 	s.snapshotProcesses = func(context.Context) (*tmux.ProcessTree, error) { return nil, nil }
+	s.processArgs = func(context.Context, []int) map[int]string { return nil }
 	return s
 }
 

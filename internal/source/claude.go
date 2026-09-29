@@ -46,6 +46,11 @@ type ClaudeSource struct {
 	snapshotProcesses func(context.Context) (*tmux.ProcessTree, error)
 	// capturePane is injectable for the last-moment send safety check.
 	capturePane func(context.Context, string) (string, error)
+	// processArgs reads full command lines, which the process snapshot does
+	// not carry; infra remembers what they said. See withoutInfra.
+	processArgs func(context.Context, []int) map[int]string
+	infraMu     sync.Mutex
+	infra       map[claudeProcessKey]bool
 
 	mu       sync.RWMutex
 	sessions map[string]claudeSession
@@ -98,6 +103,8 @@ func NewClaudeSource(home string) (*ClaudeSource, error) {
 		listPanes:         tmux.List,
 		snapshotProcesses: tmux.SnapshotProcessTree,
 		capturePane:       tmux.Capture,
+		processArgs:       claudeProcessArgs,
+		infra:             map[claudeProcessKey]bool{},
 	}, nil
 }
 
@@ -150,6 +157,10 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 		}
 	}
 
+	// Every live registry entry first, before any becomes a row: dropping
+	// Claude Code's own workers and merging two processes on one conversation
+	// both need all of them in view. See claude_infra.go.
+	candidates := make([]claudeCandidate, 0, len(entries))
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -172,19 +183,30 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 			continue
 		}
 
+		tmuxName := ""
+		for _, pane := range panes {
+			if processes.OwnsPID(pane.PanePID, file.PID) {
+				tmuxName = pane.Name
+				break
+			}
+		}
+		candidates = append(candidates, claudeCandidate{file: file, tmuxName: tmuxName})
+	}
+	candidates = mergeClaudeCandidates(s.withoutInfra(ctx, candidates))
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	for _, candidate := range candidates {
+		file, tmuxName := candidate.file, candidate.tmuxName
 		id := string(protocol.KindClaude) + ":" + file.SessionID
 
 		// A session launched through the wrapper can be typed into at any
 		// time, including mid-turn. Everything else falls back to the hook
 		// queue, which only delivers between turns and can be dropped.
-		tmuxName := ""
 		inject := protocol.InjectHook
-		for _, pane := range panes {
-			if processes.OwnsPID(pane.PanePID, file.PID) {
-				tmuxName = pane.Name
-				inject = protocol.InjectTmux
-				break
-			}
+		if tmuxName != "" {
+			inject = protocol.InjectTmux
 		}
 
 		meta := protocol.Session{
