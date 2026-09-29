@@ -50,3 +50,5 @@ ISSUES.md
 .vercel
 /mobile/.asc.env
 /mobile/build/
+/mobile/credentials.json
+/mobile/credentials/

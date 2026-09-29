@@ -16,15 +16,23 @@
 #     (gitignored). Neither is a secret — the .p8 is — but they are account
 #     identifiers and do not belong in a public repository.
 #
-# Signing goes through the Apple ID already signed into Xcode (Settings →
-# Accounts), which is what holds the distribution certificate and the App
-# Store profile for this bundle. The API key is for the upload only.
+# Signing uses Apple's cloud signing, which needs an identity that is allowed
+# to sign. There are two ways to give it one:
 #
-# Worth knowing, because it cost an hour to find: passing the key to
-# xcodebuild as well does not add a fallback, it *overrides* the working
-# account session — and a key scoped for submission cannot create signing
-# assets, so the export fails with "Cloud signing permission error" on a
-# machine that was able to sign all along.
+#   - ASC_SIGNING_KEY_ID: an App Store Connect key with Admin access. This is
+#     the one to use. It is a file, so nothing about it expires between runs,
+#     and the script needs no one signed into anything.
+#   - Without it, whatever Apple ID is signed into Xcode (Settings →
+#     Accounts). That works while the session lasts. It lapsed overnight
+#     once already and the export failed with "No Accounts" — which is why
+#     the key exists.
+#
+# The two do not combine. Passing a key to xcodebuild replaces the Xcode
+# session rather than adding a fallback, and a key without Admin cannot sign
+# at all: the export fails with "Cloud signing permission error". So only a
+# key named as the signing key is ever given to xcodebuild. The upload key
+# needs much less and is kept separate so a submission-only key keeps
+# working for that.
 #
 # Usage:
 #   mobile/scripts/release-ios.sh            # bump build, build, upload
@@ -65,6 +73,25 @@ if [ ! -f "$key" ]; then
   echo "no API key at $key" >&2
   echo "download it from App Store Connect and put it there; it is shown once." >&2
   exit 1
+fi
+
+# The signing identity, passed to both xcodebuild calls. Empty means "use the
+# Apple ID signed into Xcode".
+signing=()
+if [ -n "${ASC_SIGNING_KEY_ID:-}" ]; then
+  signing_key="$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_SIGNING_KEY_ID}.p8"
+  if [ ! -f "$signing_key" ]; then
+    echo "no signing key at $signing_key" >&2
+    exit 1
+  fi
+  signing=(
+    -authenticationKeyPath "$signing_key"
+    -authenticationKeyID "$ASC_SIGNING_KEY_ID"
+    -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+  )
+  echo "==> signing with API key ${ASC_SIGNING_KEY_ID}"
+else
+  echo "==> signing with the Apple ID in Xcode (set ASC_SIGNING_KEY_ID to stop depending on it)"
 fi
 
 scheme="agentman"
@@ -110,6 +137,7 @@ xcodebuild archive \
   DEVELOPMENT_TEAM="$team" \
   CODE_SIGN_STYLE=Automatic \
   -allowProvisioningUpdates \
+  ${signing[@]+"${signing[@]}"} \
   | { command -v xcbeautify >/dev/null && xcbeautify || cat; }
 
 # Written per run rather than committed: one less file to drift.
@@ -132,7 +160,8 @@ xcodebuild -exportArchive \
   -archivePath "$archive" \
   -exportOptionsPlist "$options" \
   -exportPath "$export_dir" \
-  -allowProvisioningUpdates
+  -allowProvisioningUpdates \
+  ${signing[@]+"${signing[@]}"}
 
 ipa=$(find "$export_dir" -name "*.ipa" -maxdepth 1 | head -1)
 [ -n "$ipa" ] || { echo "no .ipa produced" >&2; exit 1; }
