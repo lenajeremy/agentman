@@ -25,7 +25,6 @@ const (
 	maxWorkspacePath    = 4096
 	maxDirectoryEntries = 500
 	maxTextFile         = 256 << 10
-	maxImageFile        = 2 << 20
 	maxGitOutput        = 256 << 10
 )
 
@@ -246,17 +245,14 @@ func readWorkspace(root *os.Root, rel string) (text, image, mime string, truncat
 	mime = http.DetectContentType(head[:n])
 	_, _ = f.Seek(0, io.SeekStart)
 	if _, previewable := readableImages[mime]; previewable {
-		if info.Size() > maxImageFile {
-			return "", "", "", false, errors.New("image is too large to preview (2 MiB limit)")
+		if info.Size() > maxImageInput {
+			return "", "", "", false, errPreviewTooLarge
 		}
-		data, readErr := io.ReadAll(io.LimitReader(f, maxImageFile+1))
-		if readErr != nil {
-			return "", "", "", false, readErr
+		data, previewMime, err := previewImage(f, mime)
+		if err != nil {
+			return "", "", "", false, err
 		}
-		if len(data) > maxImageFile {
-			return "", "", "", false, errors.New("image is too large to preview (2 MiB limit)")
-		}
-		return "", base64.StdEncoding.EncodeToString(data), mime, false, nil
+		return "", base64.StdEncoding.EncodeToString(data), previewMime, false, nil
 	}
 	if bytes.IndexByte(head[:n], 0) >= 0 {
 		return "", "", "", false, errors.New("binary file preview is unavailable")
