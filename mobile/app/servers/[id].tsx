@@ -38,7 +38,7 @@ export default function Servers() {
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
-  const session = store.sessions.find((candidate) => candidate.id === sessionId);
+  const session = store.findSession(sessionId);
   const servers = session?.servers ?? [];
 
   return (

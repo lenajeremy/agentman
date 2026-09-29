@@ -154,6 +154,16 @@ interface Store {
   setFolderFilter(path: string | null): void;
   /** True while a newly chosen folder is being read. */
   folderLoading: boolean;
+  /**
+   * A session by id, whether it is running or was found in a folder.
+   *
+   * Screens used to look only in `sessions`, which is discovery's list of
+   * what is running. A session opened from a folder's history is by
+   * definition not in it — so the screen found nothing, the resume never
+   * fired, and the composer stayed locked on a session it had been built to
+   * reopen. The live reading still wins when both exist.
+   */
+  findSession(id: string): Session | undefined;
   /** The one state the list is narrowed to, or null for all of them. */
   stateFilter: Session["state"] | null;
   setStateFilter(state: Session["state"] | null): void;
@@ -1242,6 +1252,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       folderFilter,
       folderLoading,
       setFolderFilter,
+      findSession(id) {
+        return (
+          sessions.find((session) => session.id === id) ??
+          folderSessions.find((session) => session.id === id)
+        );
+      },
       stateFilter,
       setStateFilter,
 
@@ -1292,7 +1308,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         });
       },
     }),
-    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, folderFilter, folderLoading, setFolderFilter, stateFilter, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest],
+    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, folderFilter, folderLoading, setFolderFilter, folderSessions, stateFilter, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest],
   );
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;

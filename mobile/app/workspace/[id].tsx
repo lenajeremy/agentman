@@ -40,7 +40,7 @@ export default function WorkspaceScreen() {
     typeof pathParam === "string" ? pathParam : "",
   );
   const store = useStore();
-  const session = store.sessions.find((item) => item.id === sessionId);
+  const session = store.findSession(sessionId);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);

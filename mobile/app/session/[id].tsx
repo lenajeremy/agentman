@@ -91,7 +91,7 @@ export default function SessionScreen() {
   // otherwise opening a session is a cascade of fades.
   const settled = useRef<Set<string> | null>(null);
 
-  const session = store.sessions.find((s) => s.id === sessionId);
+  const session = store.findSession(sessionId);
   const messages = store.messages[sessionId] ?? [];
   const paging = store.pageState[sessionId];
   const answerAction = store.actions.find(
@@ -357,12 +357,39 @@ export default function SessionScreen() {
           router.replace(`/session/${encodeURIComponent(id)}`);
         }
       })
-      .catch((err: Error) => setResumeError(err.message))
-      .finally(() => setResuming(false));
+      // Only a failure ends "reopening" here. Success does not: the request
+      // returns when the pane exists, but the agent inside it takes a few
+      // seconds more to start and register, and until discovery sees it the
+      // session still reads as unreachable. Clearing the note on success
+      // flashed the old "start this with am claude" advice at exactly the
+      // moment the session was coming up.
+      .catch((err: Error) => {
+        setResumeError(err.message);
+        setResuming(false);
+      });
     // store methods change identity as sessions update; this must run once
     // per session, not once per update.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.id, session?.inject, store.daemonOnline]);
+
+  // Reopening is over when the session can actually be reached.
+  useEffect(() => {
+    if (resuming && session && session.inject !== "none") setResuming(false);
+  }, [resuming, session]);
+
+  // An agent that never comes up should not leave the note spinning forever.
+  // Long enough for a cold start with a trust prompt; short enough that a
+  // missing login is reported while the person is still looking.
+  useEffect(() => {
+    if (!resuming) return;
+    const timer = setTimeout(() => {
+      setResuming(false);
+      setResumeError(
+        "The session did not come back up. Check the agent's login on your Mac, then open it again.",
+      );
+    }, 30_000);
+    return () => clearTimeout(timer);
+  }, [resuming]);
   // null until asked, so the bar is absent rather than flickering in and out
   // while the answer is in flight.
   const [changedFiles, setChangedFiles] = useState<number | null>(null);
