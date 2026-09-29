@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/tmux"
 )
 
 // writeClaudeTranscript lays out one Claude transcript the way Claude does:
@@ -40,6 +41,23 @@ func claudeUserLine(cwd, text string) string {
 		`"message":{"role":"user","content":[{"type":"text","text":%q}]}}`, cwd, text)
 }
 
+// hermeticClaude is a Claude source that sees no tmux panes and no processes.
+//
+// Without this, Discover reads the host's real tmux server, and a test that
+// expects nothing to be live fails whenever the person running it has a
+// Claude pane open — which on a machine used to build this is most of the
+// time. It passed for a day only because none happened to be open then.
+func hermeticClaude(t *testing.T, home string) *ClaudeSource {
+	t.Helper()
+	s, err := NewClaudeSource(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.listPanes = func(context.Context) ([]tmux.Session, error) { return nil, nil }
+	s.snapshotProcesses = func(context.Context) (*tmux.ProcessTree, error) { return nil, nil }
+	return s
+}
+
 // A session whose process is gone is invisible to Discover by design. It is
 // still the thing the folder filter exists to show.
 func TestClaudePastFindsSessionsThatHaveExited(t *testing.T) {
@@ -48,10 +66,7 @@ func TestClaudePastFindsSessionsThatHaveExited(t *testing.T) {
 	writeClaudeTranscript(t, home, "11111111-1111-4111-8111-111111111111", work,
 		claudeUserLine(work, "fix the retry backoff"))
 
-	s, err := NewClaudeSource(home)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := hermeticClaude(t, home)
 	live, err := s.Discover(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -198,10 +213,7 @@ func TestClaudePastSurvivesADiscoverySweep(t *testing.T) {
 	id := "11111111-1111-4111-8111-111111111111"
 	writeClaudeTranscript(t, home, id, work, claudeUserLine(work, "still here?"))
 
-	s, err := NewClaudeSource(home)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := hermeticClaude(t, home)
 	if _, err := s.Past(context.Background(), work, 0); err != nil {
 		t.Fatal(err)
 	}
