@@ -12,6 +12,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -21,6 +22,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Appear } from "../../components/Appear";
+import { MessageMenu, type MessageMenuItem } from "../../components/MessageMenu";
+import { Toast } from "../../components/Toast";
 import { ContentColumn } from "../../components/ContentColumn";
 import { Markdown } from "../../components/Markdown";
 import { MotionPressable } from "../../components/MotionPressable";
@@ -30,6 +33,7 @@ import { Thinking } from "../../components/Thinking";
 import { ToolRow } from "../../components/ToolRow";
 import { AttachmentStrip } from "../../components/AttachmentStrip";
 import { Popover, type PopoverItem } from "../../components/Popover";
+import { type Frame } from "../../lib/message-menu";
 import { canEnd, shouldResume } from "../../lib/resume";
 import { chooseImageSource } from "../../lib/image-source-sheet";
 import { draftNamespace } from "../../lib/draft-policy";
@@ -74,6 +78,12 @@ export default function SessionScreen() {
   const listRef = useRef<FlatList<Row>>(null);
   const [draft, setDraft] = useState("");
   const images = useAttachments(store.credentials);
+  // The confirmation for a copy made from a message's menu. Held here rather
+  // than in the row so it survives the row re-rendering, and so there is only
+  // ever one on screen.
+  const [toast, setToast] = useState<string | null>(null);
+  const showCopied = useCallback(() => setToast("Copied"), []);
+  const hideToast = useCallback(() => setToast(null), []);
   const [sendingImages, setSendingImages] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const [submittedClientId, setSubmittedClientId] = useState<string | null>(
@@ -634,11 +644,13 @@ export default function SessionScreen() {
                   settled.current !== null &&
                   !settled.current.has(item.message.id)
                 }
+                onCopied={showCopied}
               />
             ) : (
               <PendingRow
                 pending={item.pending}
                 onDismiss={store.dismissPending}
+                onCopied={showCopied}
               />
             )
           }
@@ -849,6 +861,8 @@ export default function SessionScreen() {
           </View>
         )}
       </KeyboardAvoidingView>
+
+      <Toast message={toast} onHidden={hideToast} top={insets.top + HEADER_HEIGHT + space.sm} />
     </View>
   );
 }
@@ -976,10 +990,12 @@ function MessageRow({
   message,
   cwd,
   fresh,
+  onCopied,
 }: {
   message: Message;
   cwd: string;
   fresh: boolean;
+  onCopied(): void;
 }) {
   const styles = useStyles(makeStyles);
   if (message.role === "tool" && message.tool) {
@@ -991,7 +1007,7 @@ function MessageRow({
   }
 
   if (message.role === "user") {
-    return <SentMessage text={message.text ?? ""} fresh={fresh} />;
+    return <SentMessage text={message.text ?? ""} fresh={fresh} onCopied={onCopied} />;
   }
 
   if (message.role === "system") {
@@ -1016,70 +1032,113 @@ function MessageRow({
 }
 
 /**
- * How long a press has to be held to copy. Long enough that a scroll which
- * starts on a bubble never copies it; short enough not to feel like waiting.
+ * How long a message has to be held before its menu opens. Long enough that a
+ * scroll which starts on a bubble never opens it; short enough not to feel
+ * like waiting.
  */
-const COPY_HOLD_MS = 350;
+const HOLD_MS = 350;
 
 /**
- * Copy a message on long-press, and say that it worked.
+ * A message that can be held to lift it out of the conversation.
  *
- * Your own messages were the one thing in a conversation you could not copy:
- * the agent's replies are selectable, but a sent message was plain text in a
- * bubble. Holding a bubble to copy it is the gesture chat apps teach, and the
- * haptic plus a word under it are what make it visible — a clipboard write
- * otherwise happens without a trace.
+ * Measures the message where it sits, so the menu can lift it from exactly
+ * there. A keyboard that is up is put away first and the message measured
+ * once it has gone: measured mid-slide, the lifted copy would land where the
+ * message was a moment earlier rather than where it ends up.
  */
-function useCopyOnHold() {
-  // A counter rather than a flag, so copying twice in a row restarts the
-  // confirmation instead of it vanishing early on the first one's timer.
-  const [copiedAt, setCopiedAt] = useState(0);
-  useEffect(() => {
-    if (!copiedAt) return;
-    const timer = setTimeout(() => setCopiedAt(0), 1400);
-    return () => clearTimeout(timer);
-  }, [copiedAt]);
-  const copy = useCallback((text: string) => {
-    if (!text) return;
-    void Clipboard.setStringAsync(text)
-      .then(() => {
-        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-        setCopiedAt(Date.now());
-      })
-      .catch(() => {});
+function useHeldMessage() {
+  const ref = useRef<View>(null);
+  const [anchor, setAnchor] = useState<Frame | null>(null);
+
+  const open = useCallback(() => {
+    const measure = () =>
+      ref.current?.measureInWindow((x, y, width, height) => {
+        if (!width || !height) return;
+        // A firmer tap than a button press: something came up out of the
+        // page, which is what this weight of haptic means elsewhere on iOS.
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        setAnchor({ x, y, width, height });
+      });
+    if (Keyboard.isVisible()) {
+      const hidden = Keyboard.addListener("keyboardDidHide", () => {
+        hidden.remove();
+        measure();
+      });
+      Keyboard.dismiss();
+    } else {
+      measure();
+    }
   }, []);
-  return { copied: copiedAt > 0, copy };
+  const close = useCallback(() => setAnchor(null), []);
+  return { ref, anchor, open, close };
 }
 
-function SentMessage({ text, fresh }: { text: string; fresh: boolean }) {
+/** Copy a message, and let the screen say so — a clipboard write is silent. */
+function copyMessage(text: string, onCopied: () => void) {
+  if (!text) return;
+  void Clipboard.setStringAsync(text)
+    .then(() => {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      onCopied();
+    })
+    .catch(() => {});
+}
+
+/** What can be done with a message you sent. */
+function sentMessageActions(text: string, onCopied: () => void): MessageMenuItem[] {
+  return [
+    { key: "copy", label: "Copy", icon: "copy", onPress: () => copyMessage(text, onCopied) },
+    {
+      // For when the prompt is wanted somewhere other than the clipboard:
+      // a note, a different agent, a message to someone.
+      key: "share",
+      label: "Share…",
+      icon: "share",
+      onPress: () => void Share.share({ message: text }).catch(() => {}),
+    },
+  ];
+}
+
+function SentMessage({
+  text,
+  fresh,
+  onCopied,
+}: {
+  text: string;
+  fresh: boolean;
+  onCopied(): void;
+}) {
   const styles = useStyles(makeStyles);
-  const { copied, copy } = useCopyOnHold();
+  const held = useHeldMessage();
   return (
     <Appear enabled={fresh}>
-      <View style={styles.sentColumn}>
-        {/* The bubble itself is the target, so holding the empty space beside
-            it copies nothing. A plain Pressable rather than MotionPressable:
-            a tap does nothing here, and shrinking on one would promise an
-            action that is not there. */}
-        <Pressable
-          onLongPress={() => copy(text)}
-          delayLongPress={COPY_HOLD_MS}
-          style={styles.userRow}
-          accessibilityRole="text"
-          accessibilityHint="Touch and hold to copy."
-          accessibilityActions={[{ name: "copy", label: "Copy" }]}
-          onAccessibilityAction={(event) =>
-            event.nativeEvent.actionName === "copy" && copy(text)
-          }
-        >
-          <Text style={styles.userText}>{text}</Text>
-        </Pressable>
-        {copied ? (
-          <Appear offset={2}>
-            <Text style={styles.copied}>Copied</Text>
-          </Appear>
-        ) : null}
-      </View>
+      {/* The bubble itself is the target, so holding the space beside it does
+          nothing. A plain Pressable rather than MotionPressable: a tap does
+          nothing here, and shrinking on one would promise an action that is
+          not there. */}
+      <Pressable
+        ref={held.ref}
+        onLongPress={held.open}
+        delayLongPress={HOLD_MS}
+        // Hidden while its lifted copy is up, or the blur shows a ghost of it.
+        style={[styles.userRow, held.anchor && styles.heldSource]}
+        accessibilityRole="text"
+        accessibilityHint="Touch and hold for options."
+        accessibilityActions={[{ name: "copy", label: "Copy" }]}
+        onAccessibilityAction={(event) =>
+          event.nativeEvent.actionName === "copy" && copyMessage(text, onCopied)
+        }
+      >
+        <Text style={styles.userText}>{text}</Text>
+      </Pressable>
+      <MessageMenu
+        anchor={held.anchor}
+        items={sentMessageActions(text, onCopied)}
+        onClose={held.close}
+        bubbleStyle={styles.userRow}
+      >
+        <Text style={styles.userText}>{text}</Text>
+      </MessageMenu>
     </Appear>
   );
 }
@@ -1087,54 +1146,78 @@ function SentMessage({ text, fresh }: { text: string; fresh: boolean }) {
 function PendingRow({
   pending,
   onDismiss,
+  onCopied,
 }: {
   pending: PendingSend;
   onDismiss: (clientId: string) => void;
+  onCopied(): void;
 }) {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
+  const held = useHeldMessage();
   const failed = pending.status === "failed";
   const queued = pending.status === "queued";
   const delivered = pending.status === "delivered";
-
   const dismissable = failed || delivered;
-  const { copied, copy } = useCopyOnHold();
+
+  const actions = sentMessageActions(pending.text, onCopied);
+  if (dismissable) {
+    actions.push({
+      key: "dismiss",
+      label: "Dismiss",
+      icon: "x",
+      onPress: () => onDismiss(pending.clientId),
+    });
+  }
+
+  const status =
+    pending.status === "sending"
+      ? "Sending…"
+      : queued
+        ? "Queued — arrives when this turn ends"
+        : failed
+          ? `Didn't send${pending.error ? `: ${pending.error}` : ""} · tap to dismiss`
+          : delivered
+            ? "Sent · syncing…"
+            : "";
+  const body = (
+    <>
+      <Text style={styles.userText}>{pending.text}</Text>
+      <Text style={[styles.pendingStatus, failed && { color: color.errorText }]}>{status}</Text>
+    </>
+  );
+  const bubble = [styles.userRow, styles.pendingRow, failed && styles.pendingFailed];
 
   return (
-    <MotionPressable
-      // Not disabled while it sends, even though a tap does nothing yet:
-      // disabling it would take long-press with it, and a message that failed
-      // or is stuck sending is the one you most want to copy and send again.
-      onPress={() => dismissable && onDismiss(pending.clientId)}
-      onLongPress={() => copy(pending.text)}
-      delayLongPress={COPY_HOLD_MS}
-      style={[
-        styles.userRow,
-        styles.pendingRow,
-        failed && styles.pendingFailed,
-      ]}
-      pressedScale={dismissable ? 0.98 : 1}
-      accessibilityHint={dismissable ? "Double tap to dismiss. Touch and hold to copy." : "Touch and hold to copy."}
-      accessibilityActions={[{ name: "copy", label: "Copy" }]}
-      onAccessibilityAction={(event) => event.nativeEvent.actionName === "copy" && copy(pending.text)}
-    >
-      <Text style={styles.userText}>{pending.text}</Text>
-      <Text
-        style={[styles.pendingStatus, failed && !copied && { color: color.errorText }]}
+    <>
+      <Pressable
+        ref={held.ref}
+        // Held works in every state, tap only once it can dismiss: a message
+        // that failed or is stuck sending is the one you most want to copy
+        // and try again.
+        onPress={() => dismissable && onDismiss(pending.clientId)}
+        onLongPress={held.open}
+        delayLongPress={HOLD_MS}
+        style={({ pressed }) => [
+          ...bubble,
+          pressed && dismissable && styles.pendingPressed,
+          held.anchor && styles.heldSource,
+        ]}
+        accessibilityRole={dismissable ? "button" : "text"}
+        accessibilityHint={
+          dismissable ? "Double tap to dismiss. Touch and hold for options." : "Touch and hold for options."
+        }
+        accessibilityActions={[{ name: "copy", label: "Copy" }]}
+        onAccessibilityAction={(event) =>
+          event.nativeEvent.actionName === "copy" && copyMessage(pending.text, onCopied)
+        }
       >
-        {copied
-          ? "Copied"
-          : pending.status === "sending"
-          ? "Sending…"
-          : queued
-            ? "Queued — arrives when this turn ends"
-            : failed
-              ? `Didn't send${pending.error ? `: ${pending.error}` : ""} · tap to dismiss`
-              : delivered
-                ? "Sent · syncing…"
-              : ""}
-      </Text>
-    </MotionPressable>
+        {body}
+      </Pressable>
+      <MessageMenu anchor={held.anchor} items={actions} onClose={held.close} bubbleStyle={bubble}>
+        {body}
+      </MessageMenu>
+    </>
   );
 }
 
@@ -1309,17 +1392,9 @@ const makeStyles = (c: Palette) =>
       color: c.text,
       lineHeight: 21,
     },
-    // Full width, so the bubble's own 84% cap is measured against the screen
-    // exactly as before; this column only gives the confirmation somewhere to
-    // sit under it.
-    sentColumn: { alignSelf: "stretch", alignItems: "flex-end" },
-    copied: {
-      marginTop: space.xs,
-      marginRight: space.xs,
-      fontFamily: font.sansMedium,
-      fontSize: size.label,
-      color: c.muted,
-    },
+    // The message in the list while its lifted copy is showing.
+    heldSource: { opacity: 0 },
+    pendingPressed: { opacity: 0.85 },
 
     assistantRow: { gap: space.xs },
     sidechain: {
