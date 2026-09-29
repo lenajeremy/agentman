@@ -85,6 +85,9 @@ export default function Settings() {
               {/* Push either works or it does not, and when it does not the
                   app has the reason. Withholding it turns a one-line fix into
                   a round of guessing against a ten-minute build. */}
+              {/* Untinted on purpose: `ok` is for dots, icons and counts
+                  beside a label, never for two lines of prose. The dot on
+                  "Your Mac" above is what green is for on this screen. */}
               <Row
                 label="Background alerts"
                 value={
@@ -92,7 +95,6 @@ export default function Settings() {
                     ? "On — your Mac can reach you when the app is closed"
                     : pushFailureReason() || "Unavailable in this build"
                 }
-                tint={isPushActive() ? color.ok : undefined}
               />
             </View>
           </Appear>
@@ -124,7 +126,7 @@ export default function Settings() {
             <Text style={styles.sectionLabel}>Privacy</Text>
             <View style={[styles.card, styles.privacyCard]}>
               <View style={styles.privacyIcon}>
-                <Feather name="lock" size={16} color={color.ok} />
+                <Feather name="lock" size={16} color={color.muted} />
               </View>
               <View style={styles.privacyCopy}>
                 <Text style={styles.privacyTitle}>Your Mac keeps your history</Text>
@@ -313,12 +315,16 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.md,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: c.okWash,
+      // Neutral: `ok` means connected, delivered, added. A lock is none of
+      // those, and the system keeps that colour small and literal.
+      backgroundColor: c.fill,
     },
     privacyCopy: { flex: 1, gap: space.xs },
     privacyTitle: { fontFamily: font.sansBold, fontSize: size.body, color: c.text },
     privacyLink: { alignSelf: "flex-start", justifyContent: "center", minHeight: 24, marginTop: space.xs },
-    privacyLinkText: { fontFamily: font.sansMedium, fontSize: size.label, color: c.ok },
+    // Cobalt, the brand and the colour of anything tappable. Green said
+    // "connected", which is not what a policy link means.
+    privacyLinkText: { fontFamily: font.sansMedium, fontSize: size.label, color: c.workingText },
 
     unpair: {
       minHeight: 52,

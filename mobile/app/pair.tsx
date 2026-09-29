@@ -404,5 +404,7 @@ const makeStyles = (c: Palette) =>
       marginTop: space.xs,
       paddingHorizontal: space.md,
     },
-    policyLinkText: { fontFamily: font.sansMedium, fontSize: size.label, color: c.ok },
+    // Cobalt, like every other tappable thing. Green reads as a status, and
+    // a policy link is not one.
+    policyLinkText: { fontFamily: font.sansMedium, fontSize: size.label, color: c.workingText },
   });
