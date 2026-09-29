@@ -34,20 +34,35 @@
 # needs much less and is kept separate so a submission-only key keeps
 # working for that.
 #
+# Every build ships with "What to Test" notes, which is what the TestFlight
+# app shows under it. They are the app changes since the previous build,
+# worked out from git: each commit contributes its `Changelog:` trailer if it
+# has one, otherwise its subject. Commit subjects are written for the history
+# and some read well out of context — "Keep green for the one thing it means"
+# does not — so the trailer is how to say it for a tester instead.
+#
+# That only works if the build and the history agree, so the script refuses
+# to run with uncommitted app code, and after a successful upload it commits
+# the build number and tags that commit ios-build-<n>. The tag is where the
+# next build's notes start from.
+#
 # Usage:
-#   mobile/scripts/release-ios.sh            # bump build, build, upload
+#   mobile/scripts/release-ios.sh              # bump, build, upload, notes, tag
 #   mobile/scripts/release-ios.sh --no-upload  # stop after the .ipa
-#   mobile/scripts/release-ios.sh --keep     # skip prebuild --clean
+#   mobile/scripts/release-ios.sh --keep       # skip prebuild --clean
+#   mobile/scripts/release-ios.sh --allow-dirty  # build uncommitted app code
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 upload=1
 clean="--clean"
+allow_dirty=0
 for arg in "$@"; do
   case "$arg" in
     --no-upload) upload=0 ;;
     --keep) clean="" ;;
+    --allow-dirty) allow_dirty=1 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -99,6 +114,34 @@ workspace="ios/${scheme}.xcworkspace"
 archive="build/${scheme}.xcarchive"
 export_dir="build/ipa"
 
+# The app code that goes into the build. Paths are relative to mobile/.
+app_paths=(app components lib assets)
+
+if [ "$allow_dirty" -eq 0 ] && [ -n "$(git status --porcelain -- "${app_paths[@]}")" ]; then
+  echo "app code has uncommitted changes — commit them first, so this build" >&2
+  echo "matches its notes and its tag. (--allow-dirty to build anyway.)" >&2
+  exit 1
+fi
+
+# What changed since the last build that shipped. The first build after this
+# script learned to tag has nothing to count from, so it takes the last ten.
+last_build=$(git describe --tags --match 'ios-build-*' --abbrev=0 2>/dev/null || true)
+if [ -n "$last_build" ]; then range=("$last_build..HEAD"); else range=(-n 10 HEAD); fi
+mkdir -p build
+notes_file="build/whats-new.txt"
+git log --no-merges "${range[@]}" \
+    --format='%(trailers:key=Changelog,valueonly,separator= )%x1f%s' -- "${app_paths[@]}" \
+  | node -e '
+      const lines = require("fs").readFileSync(0, "utf8").split("\n").filter(Boolean);
+      const notes = lines.map((line) => {
+        const [trailer, subject] = line.split("\x1f");
+        return "• " + ((trailer || "").trim() || subject.trim());
+      });
+      process.stdout.write(
+        notes.join("\n") || "• No app changes since the last build — same app, new build.",
+      );
+    ' > "$notes_file"
+
 # The build number is ours to manage now. EAS incremented it server-side,
 # which is why app.json never carried one; keeping it here instead puts every
 # submitted build in the git history, where a duplicate is obvious before
@@ -113,7 +156,8 @@ fs.writeFileSync(path, JSON.stringify(config, null, 2) + "\n");
 process.stdout.write(ios.buildNumber);
 ')
 version=$(node -p 'require("./app.json").expo.version')
-echo "==> agentman ${version} (${build_number})"
+echo "==> agentman ${version} (${build_number}), changes since ${last_build:-the last ten commits}:"
+sed 's/^/    /' "$notes_file"
 
 # Regenerated rather than reused: ios/ is gitignored build output, and a
 # stale one silently ships whatever app.json said last time.
@@ -182,7 +226,25 @@ echo "==> upload"
 xcrun altool --upload-app -f "$ipa" -t ios \
   --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
 
+# Record what shipped. Only app.json is committed, even if other files are
+# dirty, and the tag marks this commit as where the next build's notes start.
+echo "==> tag ios-build-${build_number}"
+git commit -q -m "Ship iOS build ${build_number}" -- app.json
+git tag "ios-build-${build_number}"
+if ! git push -q origin HEAD "ios-build-${build_number}"; then
+  # The build is already with Apple; a failed push must not look like a
+  # failed release. It needs pushing before the next run, though, or that
+  # run's notes will start from the wrong place on another machine.
+  echo "    push failed — run: git push origin HEAD ios-build-${build_number}" >&2
+fi
+
+# Last, because it waits for Apple to register the upload. A failure here is
+# reported, not fatal: the build shipped either way.
+echo "==> what to test"
+if ! node scripts/testflight-notes.mjs "$build_number" "$notes_file"; then
+  echo "    notes not set — retry: node scripts/testflight-notes.mjs $build_number $notes_file" >&2
+fi
+
 echo
 echo "==> ${version} (${build_number}) uploaded — Apple processes it before it"
 echo "    appears in TestFlight, usually within fifteen minutes."
-echo "    Commit the app.json build number so the next run does not reuse it."
