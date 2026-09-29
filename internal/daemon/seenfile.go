@@ -55,17 +55,20 @@ func (d *Daemon) readSeenFile(req protocol.Request) protocol.Event {
 	if _, ok := readableImages[mime]; !ok {
 		return workspaceError(req, "only images can be opened this way")
 	}
-	if info.Size() > maxImageFile {
-		return workspaceError(req, "that image is too large to preview (2 MiB limit)")
+	if info.Size() > maxImageInput {
+		return workspaceError(req, "that "+errPreviewTooLarge.Error())
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return workspaceError(req, "that file could not be read")
 	}
-	data, err := io.ReadAll(io.LimitReader(file, maxImageFile+1))
-	if err != nil || len(data) > maxImageFile {
-		return workspaceError(req, "that image is too large to preview (2 MiB limit)")
+	// Resized to fit a phone rather than refused. The screenshots agents take
+	// are exactly the images that land here, and at full Retina resolution
+	// they were over the limit more often than not.
+	data, previewMime, err := previewImage(file, mime)
+	if err != nil {
+		return workspaceError(req, "that "+err.Error())
 	}
 	result.Image = base64.StdEncoding.EncodeToString(data)
-	result.MIME = mime
+	result.MIME = previewMime
 	return protocol.Event{Type: protocol.EvtWorkspace, Workspace: result}
 }
