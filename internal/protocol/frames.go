@@ -72,6 +72,16 @@ const (
 	// agent already opened. It is what lets a screenshot written to a temp
 	// directory be looked at, without the daemon serving the whole disk.
 	ReqReadSeenFile RequestType = "read_seen_file"
+	// ReqReadFileChunk and ReqReadSeenFileChunk read one piece of an image the
+	// matching request above can preview, from Offset.
+	//
+	// A preview is resized to fit a phone and the relay. The file itself is
+	// fetched a piece at a time, each piece asked for after the last arrived,
+	// so the whole of it never has to fit in one frame and a slow phone is
+	// never sent more than it has asked for. Additive: an older daemon rejects
+	// the type and the app keeps the preview it has.
+	ReqReadFileChunk     RequestType = "read_file_chunk"
+	ReqReadSeenFileChunk RequestType = "read_seen_file_chunk"
 	// A paired phone can browse launchable folders beneath the Mac user's home
 	// and start a new local agent process in one of them.
 	ReqListDirectories RequestType = "list_directories"
@@ -132,6 +142,8 @@ type Request struct {
 	// or relative to the Mac user's home for launch directory requests. It is
 	// never an absolute path supplied by the phone.
 	Path string `json:"path,omitempty"`
+	// Offset is where a chunk request starts reading, in bytes.
+	Offset int64 `json:"offset,omitempty"`
 	// UploadIDs names images the phone left with the relay, to be collected by
 	// the daemon and handed to the agent as file paths. They are tickets, not
 	// filenames: nothing in them reaches the filesystem.
@@ -239,6 +251,35 @@ type WorkspaceResult struct {
 	// while twenty files were waiting, and nothing on screen could have told
 	// you otherwise.
 	Hidden int `json:"hidden,omitempty"`
+	// Source describes the file Image was made from.
+	Source *ImageSource `json:"source,omitempty"`
+	// Data is one piece of a file, base64, on kind "chunk". Offset is where it
+	// starts and Size is the length of the whole file, so the app knows both
+	// what to ask for next and when it has everything.
+	Data   string `json:"data,omitempty"`
+	Offset int64  `json:"offset,omitempty"`
+	Size   int64  `json:"size,omitempty"`
+	// Version changes when the file does. Pieces are read in separate
+	// requests, and an agent can rewrite a screenshot between two of them; a
+	// download stitched from both would be neither image.
+	Version string `json:"version,omitempty"`
+}
+
+// ImageSource describes the file an image preview was made from.
+//
+// A preview is not always the file. One too large for a phone, or for the
+// relay to carry in a frame, is resized first, and nothing in the bytes the
+// app receives says so. This does, along with what fetching the file itself
+// would bring, so the app can offer that and say how large it is.
+type ImageSource struct {
+	Size int64  `json:"size"`
+	MIME string `json:"mime"`
+	// Width and Height are zero for a format the daemon cannot decode.
+	Width  int `json:"width,omitempty"`
+	Height int `json:"height,omitempty"`
+	// Reduced is true when the preview is a smaller copy rather than the file
+	// itself, byte for byte.
+	Reduced bool `json:"reduced,omitempty"`
 }
 
 type WorkspaceEntry struct {

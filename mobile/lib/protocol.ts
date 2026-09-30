@@ -152,6 +152,8 @@ export type RequestType =
   | "list_changes"
   | "file_diff"
   | "read_seen_file"
+  | "read_file_chunk"
+  | "read_seen_file_chunk"
   | "list_directories"
   | "start_session"
   | "list_folders"
@@ -179,6 +181,8 @@ export interface Request {
   port?: number;
   /** Relative to session cwd for workspace reads, or Mac home for launches. */
   path?: string;
+  /** Where a chunk request starts reading, in bytes. */
+  offset?: number;
   /** Tickets for images already left with the relay, on send_message. */
   uploadIds?: string[];
   /** Agent to launch; path is relative to the Mac user's home directory. */
@@ -211,8 +215,23 @@ export interface WorkspaceChange {
   added?: number;
   removed?: number;
 }
+/**
+ * The file an image preview was made from. A preview too large for a phone or
+ * the relay is resized on the Mac first, and nothing in its bytes says so;
+ * this does, along with what fetching the file itself would bring.
+ */
+export interface ImageSource {
+  size: number;
+  mime: string;
+  /** Absent for a format the Mac cannot decode. */
+  width?: number;
+  height?: number;
+  /** True when the preview is a smaller copy rather than the file itself. */
+  reduced?: boolean;
+}
+
 export interface WorkspaceResult {
-  kind: "directory" | "file" | "changes" | "diff";
+  kind: "directory" | "file" | "changes" | "diff" | "chunk";
   sessionId: string;
   path?: string;
   entries?: WorkspaceEntry[];
@@ -224,6 +243,14 @@ export interface WorkspaceResult {
   truncated?: boolean;
   /** How many entries the daemon withheld as private. */
   hidden?: number;
+  /** Set alongside `image`. Absent from a Mac too old to describe it. */
+  source?: ImageSource;
+  /** One piece of a file, base64, on kind "chunk": where it starts, how long
+   *  the whole file is, and a stamp that changes when the file does. */
+  data?: string;
+  offset?: number;
+  size?: number;
+  version?: string;
 }
 
 export type SendStatus = "delivered" | "queued" | "failed";
@@ -417,8 +444,27 @@ function isFolder(value: unknown): value is Folder {
     optionalFiniteNumber(value.lastActivityAt);
 }
 
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+/** One megabyte of file is 1.4 MB of base64; this leaves room and no more. */
+const MAX_CHUNK_BASE64 = 2 * 1024 * 1024;
+/** Nothing over 32 MiB is previewed, so nothing over it can be downloaded. */
+const MAX_ORIGINAL_BYTES = 32 * 1024 * 1024;
+
+function isByteCount(value: unknown, max: number): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= max;
+}
+
+function isImageSource(value: unknown): value is ImageSource {
+  return isRecord(value) &&
+    isByteCount(value.size, MAX_ORIGINAL_BYTES) &&
+    isOneOf(value.mime, IMAGE_TYPES) &&
+    (value.width === undefined || isByteCount(value.width, 1_000_000)) &&
+    (value.height === undefined || isByteCount(value.height, 1_000_000)) &&
+    (value.reduced === undefined || typeof value.reduced === "boolean");
+}
+
 function isWorkspaceResult(value: unknown): value is WorkspaceResult {
-  if (!isRecord(value) || !isOneOf(value.kind, ["directory", "file", "changes", "diff"] as const) ||
+  if (!isRecord(value) || !isOneOf(value.kind, ["directory", "file", "changes", "diff", "chunk"] as const) ||
       !boundedString(value.sessionId, 512, true) || !optionalBoundedString(value.path, 4096) ||
       !optionalBoundedString(value.text, 256 * 1024) ||
       !optionalBoundedString(value.image, 3 * 1024 * 1024) ||
@@ -434,10 +480,21 @@ function isWorkspaceResult(value: unknown): value is WorkspaceResult {
       optionalFiniteNumber(change.added) && optionalFiniteNumber(change.removed))) return false;
   if (value.image !== undefined && (
       typeof value.image !== "string" ||
-      !isOneOf(value.mime, ["image/png", "image/jpeg", "image/gif", "image/webp"] as const) ||
+      !isOneOf(value.mime, IMAGE_TYPES) ||
       !/^[A-Za-z0-9+/]*={0,2}$/.test(value.image)
   )) return false;
-  return true;
+  if (value.source !== undefined && !isImageSource(value.source)) return false;
+  // A piece is written straight to a file, so everything about it is checked
+  // here: nothing empty, nothing oversized, and nothing that is not base64.
+  if (value.kind === "chunk") {
+    return boundedString(value.data, MAX_CHUNK_BASE64, true) &&
+      /^[A-Za-z0-9+/]*={0,2}$/.test(value.data) &&
+      isOneOf(value.mime, IMAGE_TYPES) &&
+      isByteCount(value.offset ?? 0, MAX_ORIGINAL_BYTES) &&
+      isByteCount(value.size, MAX_ORIGINAL_BYTES) && value.size > 0 &&
+      boundedString(value.version, 64, true);
+  }
+  return value.data === undefined;
 }
 
 function isSession(value: unknown): value is Session {

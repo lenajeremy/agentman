@@ -1,11 +1,12 @@
 import Feather from "@expo/vector-icons/Feather";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
@@ -18,7 +19,9 @@ import { MotionPressable } from "../../components/MotionPressable";
 import { SyntaxCode } from "../../components/SyntaxCode";
 import { useStyles, useTheme } from "../../lib/appearance";
 import { diffStat, parseDiff, type DiffRow } from "../../lib/diff";
+import { describeSource, fetchOriginal, saveName } from "../../lib/original";
 import { WorkspaceResult } from "../../lib/protocol";
+import { appendPiece, discard, offerFile, scratchFile } from "../../lib/save-image";
 import { useStore } from "../../lib/store";
 import { font, Palette, radius, size, space } from "../../lib/theme";
 
@@ -43,6 +46,7 @@ export default function FileScreen() {
   const store = useStore();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const window = useWindowDimensions();
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
   const [tab, setTab] = useState<"code" | "diff">(() =>
@@ -58,6 +62,18 @@ export default function FileScreen() {
   // Wrapped by default: panning a long line on a phone loses your place, and
   // the line you were reading is rarely the one you end up looking at.
   const [wrap, setWrap] = useState(true);
+  // How far a download has got, from 0 to 1; null when none is running.
+  const [saving, setSaving] = useState<number | null>(null);
+  const [saveError, setSaveError] = useState("");
+  // A download outlives a render but must not outlive the screen: leaving
+  // stops it between pieces rather than fetching megabytes for nobody.
+  const onScreen = useRef(true);
+  useEffect(
+    () => () => {
+      onScreen.current = false;
+    },
+    [],
+  );
 
   useEffect(() => {
     let current = true;
@@ -103,7 +119,72 @@ export default function FileScreen() {
     result?.image && result.mime
       ? `data:${result.mime};base64,${result.image}`
       : "";
+  // What is on screen is often a smaller copy the Mac made to fit. When it
+  // is, saving fetches the file itself; when it is not, the bytes already
+  // here are the file and there is nothing better to ask for.
+  const source = result?.source;
+  const reduced = source?.reduced === true;
+
+  const save = async () => {
+    if (saving !== null || !result?.image || !result.mime) return;
+    setSaveError("");
+    setSaving(0);
+    const mime = reduced && source ? source.mime : result.mime;
+    let file: ReturnType<typeof scratchFile> | null = null;
+    try {
+      const target = (file = scratchFile(saveName(filePath, mime)));
+      if (reduced) {
+        const done = await fetchOriginal({
+          read: (offset) =>
+            store.workspace(
+              sessionId,
+              seenOnly ? "read_seen_file_chunk" : "read_file_chunk",
+              filePath,
+              offset,
+            ),
+          write: (data, first) => appendPiece(target, data, first),
+          onProgress: (received, total) => {
+            if (onScreen.current) setSaving(received / total);
+          },
+          cancelled: () => !onScreen.current,
+        });
+        if (!done) {
+          discard(target);
+          return;
+        }
+      } else {
+        appendPiece(target, result.image, true);
+      }
+      if (onScreen.current) setSaving(1);
+      // The middle of the save button, give or take: it is centred at the foot.
+      await offerFile(target, mime, {
+        x: window.width / 2 - 1,
+        y: window.height - insets.bottom - space.lg - 24,
+        width: 2,
+        height: 2,
+      });
+    } catch (reason) {
+      discard(file);
+      if (onScreen.current) {
+        setSaveError(
+          reason instanceof Error ? reason.message : "That image could not be saved.",
+        );
+      }
+    } finally {
+      if (onScreen.current) setSaving(null);
+    }
+  };
+
   if (imageUri) {
+    const detail = describeSource(source);
+    const saveTitle =
+      saving !== null
+        ? reduced && saving < 1
+          ? `Downloading ${Math.round(saving * 100)}%`
+          : "Preparing"
+        : reduced
+          ? "Save original"
+          : "Save image";
     return (
       <View style={styles.photoPage}>
         <StatusBar style="light" hidden={!chrome} animated />
@@ -147,6 +228,50 @@ export default function FileScreen() {
               accessibilityLabel="Reload image"
             >
               <Feather name="refresh-cw" size={17} color="#FFFFFF" />
+            </MotionPressable>
+          </View>
+        ) : null}
+        {chrome ? (
+          <View
+            style={[styles.photoFoot, { paddingBottom: insets.bottom + space.lg }]}
+            pointerEvents="box-none"
+          >
+            <PhotoScrim edge="bottom" />
+            {saveError ? (
+              <Text style={styles.saveError} accessibilityRole="alert">
+                {saveError}
+              </Text>
+            ) : null}
+            {/* A label, not just an arrow. "Save original" beside a size is
+                the only thing on this screen that says the picture above is a
+                smaller copy, and what the real one would be. */}
+            <MotionPressable
+              onPress={() => void save()}
+              disabled={saving !== null}
+              style={styles.saveButton}
+              pressedScale={0.97}
+              accessibilityRole="button"
+              accessibilityState={{ busy: saving !== null, disabled: saving !== null }}
+              accessibilityLabel={
+                reduced
+                  ? `Save the original image${detail ? `, ${detail}` : ""}. This is a smaller preview.`
+                  : "Save image"
+              }
+            >
+              {saving !== null ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Feather name="download" size={17} color="#FFFFFF" />
+              )}
+              <View>
+                <Text style={styles.saveTitle}>{saveTitle}</Text>
+                {detail ? <Text style={styles.saveDetail}>{detail}</Text> : null}
+              </View>
+              {saving !== null && reduced ? (
+                <View style={styles.saveTrack}>
+                  <View style={[styles.saveFill, { width: `${Math.round(saving * 100)}%` }]} />
+                </View>
+              ) : null}
             </MotionPressable>
           </View>
         ) : null}
@@ -293,18 +418,21 @@ const scrimFill = {
   right: 0,
   bottom: -56,
 } as const;
+/** The same fade for the bar at the foot, reaching up instead. */
+const scrimFillBottom = { ...scrimFill, top: -56, bottom: 0 } as const;
+const scrimBands = [0.92, 0.92, 0.92, 0.9, 0.84, 0.66, 0.4, 0.18, 0.05];
 
-function PhotoScrim() {
+function PhotoScrim({ edge = "top" }: { edge?: "top" | "bottom" }) {
+  // Darkest against the screen edge either way, fading toward the picture.
+  const bands = edge === "top" ? scrimBands : [...scrimBands].reverse();
   return (
-    <View style={scrimFill} pointerEvents="none">
-      {[0.92, 0.92, 0.92, 0.9, 0.84, 0.66, 0.4, 0.18, 0.05].map(
-        (opacity, index) => (
-          <View
-            key={index}
-            style={{ flex: 1, backgroundColor: `rgba(0, 0, 0, ${opacity})` }}
-          />
-        ),
-      )}
+    <View style={edge === "top" ? scrimFill : scrimFillBottom} pointerEvents="none">
+      {bands.map((opacity, index) => (
+        <View
+          key={index}
+          style={{ flex: 1, backgroundColor: `rgba(0, 0, 0, ${opacity})` }}
+        />
+      ))}
     </View>
   );
 }
@@ -415,6 +543,55 @@ const makeStyles = (c: Palette) =>
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: "rgba(255, 255, 255, 0.14)",
+    },
+    photoFoot: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      alignItems: "center",
+      gap: space.sm,
+      paddingHorizontal: space.lg,
+      paddingTop: space.md,
+    },
+    // The same translucent white as the round buttons above, so the chrome
+    // over a photo is one family of controls rather than two.
+    saveButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      minHeight: 48,
+      paddingVertical: space.sm,
+      paddingHorizontal: space.lg,
+      borderRadius: radius.pill,
+      backgroundColor: "rgba(255, 255, 255, 0.16)",
+      overflow: "hidden",
+    },
+    saveTitle: {
+      fontFamily: font.sansMedium,
+      fontSize: size.caption,
+      color: "#FFFFFF",
+    },
+    saveDetail: {
+      fontFamily: font.mono,
+      fontSize: 11,
+      color: "rgba(255, 255, 255, 0.62)",
+      marginTop: 1,
+    },
+    saveTrack: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: 3,
+      backgroundColor: "rgba(255, 255, 255, 0.12)",
+    },
+    saveFill: { height: 3, backgroundColor: "#FFFFFF" },
+    saveError: {
+      fontFamily: font.sans,
+      fontSize: size.caption,
+      color: "#FFFFFF",
+      textAlign: "center",
     },
     photoHeading: { flex: 1 },
     photoTitle: {

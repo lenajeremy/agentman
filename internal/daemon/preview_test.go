@@ -51,7 +51,7 @@ func TestPreviewShrinksARetinaScreenshotInsteadOfRefusingIt(t *testing.T) {
 	}
 
 	start := time.Now()
-	out, mime, err := previewImage(bytes.NewReader(source), "image/png")
+	out, mime, _, err := previewImage(bytes.NewReader(source), "image/png")
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("refused a %.1f MB screenshot: %v", float64(len(source))/(1<<20), err)
@@ -87,7 +87,7 @@ func TestPreviewPassesASmallImageThroughUntouched(t *testing.T) {
 	if err := png.Encode(&source, img); err != nil {
 		t.Fatal(err)
 	}
-	out, mime, err := previewImage(bytes.NewReader(source.Bytes()), "image/png")
+	out, mime, _, err := previewImage(bytes.NewReader(source.Bytes()), "image/png")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestPreviewRefusesADecompressionBomb(t *testing.T) {
 	if len(bomb) > 100 {
 		t.Fatalf("fixture is %d bytes; it should be tiny", len(bomb))
 	}
-	_, _, err := previewImage(bytes.NewReader(bomb), "image/png")
+	_, _, _, err := previewImage(bytes.NewReader(bomb), "image/png")
 	if err != errPreviewTooManyPx {
 		t.Fatalf("err = %v, want %v", err, errPreviewTooManyPx)
 	}
@@ -177,7 +177,7 @@ func TestPreviewLeavesAnAnimatedGIFAlone(t *testing.T) {
 	if err := gif.EncodeAll(&source, frames); err != nil {
 		t.Fatal(err)
 	}
-	out, mime, err := previewImage(bytes.NewReader(source.Bytes()), "image/gif")
+	out, mime, _, err := previewImage(bytes.NewReader(source.Bytes()), "image/gif")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestPreviewKeepsTransparency(t *testing.T) {
 	if err := png.Encode(&source, img); err != nil {
 		t.Fatal(err)
 	}
-	out, mime, err := previewImage(bytes.NewReader(source.Bytes()), "image/png")
+	out, mime, _, err := previewImage(bytes.NewReader(source.Bytes()), "image/png")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestPreviewStepsDownForAnImageThatStaysHeavy(t *testing.T) {
 	if err := png.Encode(&source, img); err != nil {
 		t.Fatal(err)
 	}
-	out, _, err := previewImage(bytes.NewReader(source.Bytes()), "image/png")
+	out, _, _, err := previewImage(bytes.NewReader(source.Bytes()), "image/png")
 	if err != nil {
 		t.Fatalf("gave up on a noisy image: %v", err)
 	}
@@ -242,11 +242,11 @@ func TestPreviewStepsDownForAnImageThatStaysHeavy(t *testing.T) {
 // something the relay would drop.
 func TestPreviewRefusesAWebPItCannotResize(t *testing.T) {
 	large := append([]byte("RIFF\x00\x00\x00\x00WEBPVP8 "), make([]byte, maxImageFile)...)
-	if _, _, err := previewImage(bytes.NewReader(large), "image/webp"); err != errPreviewUnresizable {
+	if _, _, _, err := previewImage(bytes.NewReader(large), "image/webp"); err != errPreviewUnresizable {
 		t.Fatalf("err = %v, want %v", err, errPreviewUnresizable)
 	}
 	small := append([]byte("RIFF\x00\x00\x00\x00WEBPVP8 "), make([]byte, 1024)...)
-	out, mime, err := previewImage(bytes.NewReader(small), "image/webp")
+	out, mime, _, err := previewImage(bytes.NewReader(small), "image/webp")
 	if err != nil || mime != "image/webp" || !bytes.Equal(out, small) {
 		t.Errorf("a WebP that fits should pass through untouched: err=%v mime=%q", err, mime)
 	}
@@ -254,7 +254,7 @@ func TestPreviewRefusesAWebPItCannotResize(t *testing.T) {
 
 func TestPreviewRefusesAnEnormousFileWithoutReadingItAll(t *testing.T) {
 	huge := bytes.NewReader(make([]byte, maxImageInput+1))
-	if _, _, err := previewImage(huge, "image/png"); err != errPreviewTooLarge {
+	if _, _, _, err := previewImage(huge, "image/png"); err != errPreviewTooLarge {
 		t.Fatalf("err = %v, want %v", err, errPreviewTooLarge)
 	}
 }
