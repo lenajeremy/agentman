@@ -1070,11 +1070,15 @@ func (d *Daemon) HandleFrom(
 	case protocol.ReqStopServer:
 		return d.stopServer(ctx, req.SessionID, req.Port)
 
-	case protocol.ReqListFiles, protocol.ReqReadFile, protocol.ReqListChanges, protocol.ReqFileDiff:
+	case protocol.ReqListFiles, protocol.ReqReadFile, protocol.ReqListChanges, protocol.ReqFileDiff,
+		protocol.ReqReadFileChunk:
 		return d.workspace(ctx, req)
 
 	case protocol.ReqReadSeenFile:
 		return d.readSeenFile(req)
+
+	case protocol.ReqReadSeenFileChunk:
+		return d.readSeenFileChunk(req)
 
 	default:
 		return protocol.Event{Type: protocol.EvtError, Error: "unsupported request: " + string(req.Type)}
@@ -1142,7 +1146,8 @@ func validateRequest(req protocol.Request) error {
 		req.Type == protocol.ReqStopServer ||
 		req.Type == protocol.ReqListFiles || req.Type == protocol.ReqReadFile ||
 		req.Type == protocol.ReqListChanges || req.Type == protocol.ReqFileDiff ||
-		req.Type == protocol.ReqReadSeenFile
+		req.Type == protocol.ReqReadSeenFile ||
+		req.Type == protocol.ReqReadFileChunk || req.Type == protocol.ReqReadSeenFileChunk
 	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
 		return fmt.Errorf("daemon: invalid session id")
 	}
@@ -1187,10 +1192,17 @@ func validateRequest(req protocol.Request) error {
 			return fmt.Errorf("daemon: invalid server port")
 		}
 		return nil
-	case protocol.ReqListFiles, protocol.ReqReadFile, protocol.ReqListChanges, protocol.ReqFileDiff:
+	case protocol.ReqListFiles, protocol.ReqReadFile, protocol.ReqListChanges, protocol.ReqFileDiff,
+		protocol.ReqReadFileChunk:
+		if req.Offset < 0 || req.Offset > maxImageInput {
+			return fmt.Errorf("daemon: invalid file offset")
+		}
 		_, err := workspacePath(req.Path, req.Type == protocol.ReqListFiles || req.Type == protocol.ReqListChanges)
 		return err
-	case protocol.ReqReadSeenFile:
+	case protocol.ReqReadSeenFile, protocol.ReqReadSeenFileChunk:
+		if req.Offset < 0 || req.Offset > maxImageInput {
+			return fmt.Errorf("daemon: invalid file offset")
+		}
 		if !strings.HasPrefix(req.Path, "/") || len(req.Path) > maxWirePathBytes {
 			return fmt.Errorf("daemon: that is not an absolute path")
 		}

@@ -10,6 +10,8 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+
+	"github.com/lenajeremy/agentman/internal/protocol"
 )
 
 // Images an agent wrote are shown on the phone by sending them inline, base64
@@ -55,7 +57,8 @@ var (
 	errPreviewUnresizable = errors.New("image is too large to preview, and this format cannot be resized here")
 )
 
-// previewImage returns the bytes to show for an image, and their type.
+// previewImage returns the bytes to show for an image, their type, and a
+// description of the file they were made from.
 //
 // An image that already fits on a screen and under the limit is returned
 // untouched, byte for byte, so nothing that previewed before looks any
@@ -63,19 +66,27 @@ var (
 // re-encoded: as JPEG when it has no transparency, since that is several
 // times smaller for a screenshot, and as PNG when it does, so a transparent
 // icon keeps its edges.
-func previewImage(r io.Reader, mime string) ([]byte, string, error) {
+//
+// The description is what lets the app offer the file itself: it says whether
+// the preview is a smaller copy, and how large the original is.
+func previewImage(r io.Reader, mime string) ([]byte, string, protocol.ImageSource, error) {
+	var source protocol.ImageSource
 	data, err := io.ReadAll(io.LimitReader(r, maxImageInput+1))
 	if err != nil {
-		return nil, "", err
+		return nil, "", source, err
 	}
 	if len(data) > maxImageInput {
-		return nil, "", errPreviewTooLarge
+		return nil, "", source, errPreviewTooLarge
 	}
+	source.Size, source.MIME = int64(len(data)), mime
 
 	config, format, err := image.DecodeConfig(bytes.NewReader(data))
 	decodable := err == nil
 	if decodable && int64(config.Width)*int64(config.Height) > maxImagePixels {
-		return nil, "", errPreviewTooManyPx
+		return nil, "", source, errPreviewTooManyPx
+	}
+	if decodable {
+		source.Width, source.Height = config.Width, config.Height
 	}
 
 	fits := len(data) <= maxImageFile
@@ -85,26 +96,27 @@ func previewImage(r io.Reader, mime string) ([]byte, string, error) {
 	// preview. WebP is passed through when it fits because the standard
 	// library cannot decode it to resize it.
 	if fits && (onScreen || !decodable || format == "gif") {
-		return data, mime, nil
+		return data, mime, source, nil
 	}
 	if !decodable {
-		return nil, "", errPreviewUnresizable
+		return nil, "", source, errPreviewUnresizable
 	}
 
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return nil, "", err
+		return nil, "", source, err
 	}
+	source.Reduced = true
 	// Almost always the first size is enough. The smaller ones are for the
 	// image that stays heavy even at phone size — dense noise, or a
 	// transparent PNG — rather than failing it outright.
 	for _, dimension := range []int{previewMaxDimension, 1536, 1024} {
 		out, outMime, err := encodePreview(fitImage(img, dimension))
 		if err == nil && len(out) <= maxImageFile {
-			return out, outMime, nil
+			return out, outMime, source, nil
 		}
 	}
-	return nil, "", errors.New("image is too large to preview even after resizing")
+	return nil, "", source, errors.New("image is too large to preview even after resizing")
 }
 
 // fitImage scales an image so its longest edge is at most dimension.

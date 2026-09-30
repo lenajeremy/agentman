@@ -125,7 +125,9 @@ func (d *Daemon) workspace(ctx context.Context, req protocol.Request) protocol.E
 		result.Entries, result.Truncated, result.Hidden, err = listWorkspace(root, rel)
 	case protocol.ReqReadFile:
 		result.Kind = "file"
-		result.Text, result.Image, result.MIME, result.Truncated, err = readWorkspace(root, rel)
+		result.Text, result.Image, result.MIME, result.Source, result.Truncated, err = readWorkspace(root, rel)
+	case protocol.ReqReadFileChunk:
+		err = readWorkspaceChunk(root, rel, req.Offset, result)
 	case protocol.ReqListChanges:
 		result.Kind = "changes"
 		result.Changes, result.Truncated, result.Hidden, err = listChanges(ctx, session.Cwd, root, rel)
@@ -227,18 +229,20 @@ var readableImages = map[string]struct{}{
 	"image/webp": {},
 }
 
-func readWorkspace(root *os.Root, rel string) (text, image, mime string, truncated bool, err error) {
+// readWorkspace reads one file for display: text, or an image preview with a
+// description of the file it was made from.
+func readWorkspace(root *os.Root, rel string) (text, image, mime string, source *protocol.ImageSource, truncated bool, err error) {
 	f, err := root.Open(rel)
 	if err != nil {
-		return "", "", "", false, err
+		return "", "", "", nil, false, err
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return "", "", "", false, err
+		return "", "", "", nil, false, err
 	}
 	if !info.Mode().IsRegular() {
-		return "", "", "", false, errors.New("only regular files can be read")
+		return "", "", "", nil, false, errors.New("only regular files can be read")
 	}
 	var head [512]byte
 	n, _ := f.Read(head[:])
@@ -246,20 +250,20 @@ func readWorkspace(root *os.Root, rel string) (text, image, mime string, truncat
 	_, _ = f.Seek(0, io.SeekStart)
 	if _, previewable := readableImages[mime]; previewable {
 		if info.Size() > maxImageInput {
-			return "", "", "", false, errPreviewTooLarge
+			return "", "", "", nil, false, errPreviewTooLarge
 		}
-		data, previewMime, err := previewImage(f, mime)
+		data, previewMime, made, err := previewImage(f, mime)
 		if err != nil {
-			return "", "", "", false, err
+			return "", "", "", nil, false, err
 		}
-		return "", base64.StdEncoding.EncodeToString(data), previewMime, false, nil
+		return "", base64.StdEncoding.EncodeToString(data), previewMime, &made, false, nil
 	}
 	if bytes.IndexByte(head[:n], 0) >= 0 {
-		return "", "", "", false, errors.New("binary file preview is unavailable")
+		return "", "", "", nil, false, errors.New("binary file preview is unavailable")
 	}
 	data, readErr := io.ReadAll(io.LimitReader(f, maxTextFile+1))
 	if readErr != nil {
-		return "", "", "", false, readErr
+		return "", "", "", nil, false, readErr
 	}
 	truncated = len(data) > maxTextFile
 	if truncated {
@@ -269,9 +273,9 @@ func readWorkspace(root *os.Root, rel string) (text, image, mime string, truncat
 		}
 	}
 	if !utf8.Valid(data) {
-		return "", "", "", false, errors.New("this file is not UTF-8 text")
+		return "", "", "", nil, false, errors.New("this file is not UTF-8 text")
 	}
-	return string(data), "", "text/plain", truncated, nil
+	return string(data), "", "text/plain", nil, truncated, nil
 }
 
 type boundedOutput struct {
@@ -432,7 +436,7 @@ func fileDiff(ctx context.Context, cwd string, root *os.Root, rel string) (strin
 		return "", false, err
 	}
 	if strings.HasPrefix(status, "?? ") {
-		text, image, _, truncated, err := readWorkspace(root, rel)
+		text, image, _, _, truncated, err := readWorkspace(root, rel)
 		if err != nil {
 			return "", false, err
 		}
