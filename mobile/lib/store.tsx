@@ -135,7 +135,14 @@ interface Store {
   closeServer(sessionId: string, port: number): void;
   /** End the process listening on a port. Nothing here can start it again. */
   stopServer(sessionId: string, port: number): Promise<void>;
-  workspace(sessionId: string, type: "list_files" | "read_file" | "list_changes" | "file_diff" | "read_seen_file", path?: string): Promise<WorkspaceResult>;
+  workspace(
+    sessionId: string,
+    type: "list_files" | "read_file" | "list_changes" | "file_diff" | "read_seen_file" |
+      "read_file_chunk" | "read_seen_file_chunk",
+    path?: string,
+    /** Where a chunk request starts reading. */
+    offset?: number,
+  ): Promise<WorkspaceResult>;
   /** Browse one directory: its child folders, and how many agents each has
    *  under it. Counts are absent from a Mac too old to send them. */
   listDirectories(path: string): Promise<{ names: string[]; folders: Folder[] }>;
@@ -1181,9 +1188,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         });
       },
 
-      workspace(sessionId, type, path = "") {
+      workspace(sessionId, type, path = "", offset) {
         return new Promise<WorkspaceResult>((resolve, reject) => {
-          const id = clientRef.current?.send({ type, sessionId, path });
+          const id = clientRef.current?.send(
+            offset ? { type, sessionId, path, offset } : { type, sessionId, path },
+          );
           if (!id) {
             reject(new Error("Not connected to your Mac right now."));
             return;

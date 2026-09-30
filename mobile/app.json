@@ -11,7 +11,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "dev.agentman.mobile",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryAddUsageDescription": "Allow Agentman to save an image from your Mac to your photo library."
       },
       "buildNumber": "20",
       "appleTeamId": "N58PT393QS"
@@ -47,7 +48,8 @@
       ],
       "expo-notifications",
       "./plugins/withIosBuildFixes",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true
