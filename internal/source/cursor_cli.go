@@ -418,21 +418,7 @@ type cursorCLIRow struct {
 	Data  string `json:"data"`
 }
 
-type cursorCLIPart struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text"`
-	ToolName string          `json:"toolName"`
-	Args     json.RawMessage `json:"args"`
-	Result   json.RawMessage `json:"result"`
-}
-
 func queryCursorCLIRows(ctx context.Context, store string, before int64, limit int) ([]cursorCLIRow, error) {
-	bin, err := exec.LookPath("sqlite3")
-	if err != nil {
-		return nil, fmt.Errorf("source: sqlite3 is required to read Cursor CLI chats: %w", err)
-	}
-	ctx, cancel := context.WithTimeout(ctx, cursorCLIDBTimeout)
-	defer cancel()
 	where := ""
 	if before > 0 {
 		where = " AND rowid < " + strconv.FormatInt(before, 10)
@@ -440,6 +426,16 @@ func queryCursorCLIRows(ctx context.Context, store string, before int64, limit i
 	query := "SELECT rowid,id,CAST(data AS TEXT) AS data FROM blobs WHERE json_valid(data)=1" +
 		" AND json_extract(data,'$.role') IN ('user','assistant','tool')" + where +
 		" ORDER BY rowid DESC LIMIT " + strconv.Itoa(limit)
+	return runCursorCLIQuery(ctx, store, query)
+}
+
+func runCursorCLIQuery(ctx context.Context, store, query string) ([]cursorCLIRow, error) {
+	bin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		return nil, fmt.Errorf("source: sqlite3 is required to read Cursor CLI chats: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, cursorCLIDBTimeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "-json", "-readonly",
 		"-cmd", cursorCLITimeoutCommand, "file:"+store+"?mode=ro", query)
 	var stdout, stderr bytes.Buffer
@@ -450,102 +446,15 @@ func queryCursorCLIRows(ctx context.Context, store string, before int64, limit i
 	if stdout.Len() > cursorCLIMaxDBOutput {
 		return nil, fmt.Errorf("source: cursor CLI message page exceeds %d bytes", cursorCLIMaxDBOutput)
 	}
+	if stdout.Len() == 0 {
+		// sqlite3 -json prints nothing at all for an empty result.
+		return nil, nil
+	}
 	var rows []cursorCLIRow
 	if err := json.Unmarshal(stdout.Bytes(), &rows); err != nil {
 		return nil, fmt.Errorf("source: cursor CLI message page: %w", err)
 	}
 	return rows, nil
-}
-
-func cursorCLIMessages(sessionID string, row cursorCLIRow, started int64) []protocol.Message {
-	var item struct {
-		Role    string          `json:"role"`
-		Content json.RawMessage `json:"content"`
-	}
-	if json.Unmarshal([]byte(row.Data), &item) != nil {
-		return nil
-	}
-	role := protocol.Role(item.Role)
-	if role != protocol.RoleUser && role != protocol.RoleAssistant && role != protocol.RoleTool {
-		return nil
-	}
-	base := protocol.Message{
-		ID: "cursor-cli:" + row.ID, SessionID: sessionID,
-		Ts: started + row.RowID,
-	}
-	var parts []cursorCLIPart
-	if len(item.Content) > 0 && item.Content[0] == '"' {
-		var body string
-		_ = json.Unmarshal(item.Content, &body)
-		parts = append(parts, cursorCLIPart{Type: "text", Text: body})
-	} else if json.Unmarshal(item.Content, &parts) != nil {
-		return nil
-	}
-	var out []protocol.Message
-	var texts []string
-	for i, part := range parts {
-		switch part.Type {
-		case "text":
-			if part.Text != "" && role != protocol.RoleTool {
-				texts = append(texts, part.Text)
-			}
-		case "tool-call", "tool-result":
-			name := part.ToolName
-			if name == "" {
-				name = "tool"
-			}
-			msg := base
-			msg.ID = fmt.Sprintf("%s:%d", base.ID, i)
-			msg.Role = protocol.RoleTool
-			msg.Tool = &protocol.Tool{Name: name}
-			if part.Type == "tool-call" {
-				msg.Tool.Summary = cursorCLIToolSummary(part.Args)
-			} else {
-				var result string
-				if json.Unmarshal(part.Result, &result) == nil {
-					msg.Text = clipRunes(result, parser.PreviewChars)
-				}
-			}
-			out = append(out, msg)
-		}
-	}
-	body := strings.Join(texts, "\n")
-	if strings.TrimSpace(body) == "" {
-		return out
-	}
-	if role == protocol.RoleUser {
-		// Cursor stores its generated workspace/rules preamble as a user-role
-		// blob. Real prompts are wrapped in <user_query>; keep only that text
-		// instead of leaking the internal context into the phone transcript.
-		if start := strings.Index(body, "<user_query>"); start >= 0 {
-			body = body[start+len("<user_query>"):]
-			if end := strings.Index(body, "</user_query>"); end >= 0 {
-				body = body[:end]
-			}
-			body = strings.TrimSpace(body)
-		} else if strings.HasPrefix(strings.TrimSpace(body), "<user_info>") {
-			return out
-		}
-	}
-	if body == "" {
-		return out
-	}
-	base.Role = role
-	base.Text = clipRunes(body, parser.PreviewChars)
-	return append([]protocol.Message{base}, out...)
-}
-
-func cursorCLIToolSummary(raw json.RawMessage) string {
-	var args map[string]any
-	if json.Unmarshal(raw, &args) != nil {
-		return ""
-	}
-	for _, key := range []string{"description", "command", "path", "pattern", "glob_pattern"} {
-		if value, ok := args[key].(string); ok && strings.TrimSpace(value) != "" {
-			return clipRunes(strings.TrimSpace(value), parser.SummaryChars)
-		}
-	}
-	return ""
 }
 
 func (s *CursorCLISource) Page(ctx context.Context, sessionID, before string, limit int) (protocol.Page, error) {
@@ -578,15 +487,52 @@ func (s *CursorCLISource) Page(ctx context.Context, sessionID, before string, li
 	if hasMore {
 		rows = rows[:limit]
 	}
-	messages := make([]protocol.Message, 0, len(rows))
+	ordered := make([]parser.CursorCLIRow, 0, len(rows))
 	for i := len(rows) - 1; i >= 0; i-- {
-		messages = append(messages, cursorCLIMessages(sessionID, rows[i], session.meta.StartedAt)...)
+		ordered = append(ordered, parser.CursorCLIRow{RowID: rows[i].RowID, ID: rows[i].ID, Data: rows[i].Data})
 	}
+	// A result is always written after its call. On the newest page it is
+	// therefore on the page already, or does not exist yet; an older page
+	// can end between the two, and the call would arrive running forever.
+	if before != "" && len(ordered) > 0 {
+		if pending := parser.CursorCLIPendingCalls(ordered); len(pending) > 0 {
+			results, err := queryCursorCLIResults(ctx, session.store, ordered[len(ordered)-1].RowID, pending)
+			if err != nil {
+				return protocol.Page{}, err
+			}
+			for _, row := range results {
+				ordered = append(ordered, parser.CursorCLIRow{RowID: row.RowID, ID: row.ID, Data: row.Data})
+			}
+		}
+	}
+	messages := parser.CursorCLIMessages(sessionID, session.meta.StartedAt, ordered)
 	position := ""
 	if hasMore && len(rows) > 0 {
 		position = strconv.FormatInt(rows[len(rows)-1].RowID, 10)
 	}
 	return protocol.NewPage(sessionID, messages, position, hasMore), nil
+}
+
+// cursorCLIMaxLookups bounds one page's result lookup. A page holds at most
+// MaxPageMessages rows, so this is a backstop, not a limit anyone meets.
+const cursorCLIMaxLookups = 100
+
+// queryCursorCLIResults reads the results of the given tool calls written
+// after rowid after.
+func queryCursorCLIResults(ctx context.Context, store string, after int64, callIDs []string) ([]cursorCLIRow, error) {
+	if len(callIDs) > cursorCLIMaxLookups {
+		callIDs = callIDs[:cursorCLIMaxLookups]
+	}
+	quoted := make([]string, 0, len(callIDs))
+	for _, id := range callIDs {
+		quoted = append(quoted, "'"+strings.ReplaceAll(id, "'", "''")+"'")
+	}
+	query := "SELECT rowid,id,CAST(data AS TEXT) AS data FROM blobs WHERE rowid > " + strconv.FormatInt(after, 10) +
+		" AND json_valid(CAST(data AS TEXT))=1 AND json_extract(CAST(data AS TEXT),'$.role')='tool'" +
+		" AND EXISTS (SELECT 1 FROM json_each(CAST(data AS TEXT),'$.content')" +
+		" WHERE json_extract(value,'$.toolCallId') IN (" + strings.Join(quoted, ",") + "))" +
+		" ORDER BY rowid LIMIT " + strconv.Itoa(2*cursorCLIMaxLookups)
+	return runCursorCLIQuery(ctx, store, query)
 }
 
 func (s *CursorCLISource) Follow(ctx context.Context, sessionID string, out chan<- []protocol.Message) error {
@@ -600,11 +546,27 @@ func (s *CursorCLISource) Follow(ctx context.Context, sessionID string, out chan
 	failures := 0
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
+	// Each poll is a sqlite3 process reading up to a hundred blobs, some of
+	// them tens of kilobytes. Cursor writes through the WAL, so an unchanged
+	// store and WAL mean there is nothing new to read.
+	s.mu.RLock()
+	store := s.sessions[sessionID].store
+	s.mu.RUnlock()
+	if store == "" {
+		if past, ok := s.pastCursorCLISession(sessionID); ok {
+			store = past.store
+		}
+	}
+	last := cursorCLIStoreVersion(store)
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			version := cursorCLIStoreVersion(store)
+			if store != "" && version == last && failures == 0 {
+				continue
+			}
 			page, err := s.Page(ctx, sessionID, "", 100)
 			if err != nil {
 				// Reading Cursor's store can fail for reasons that pass: it
@@ -620,6 +582,7 @@ func (s *CursorCLISource) Follow(ctx context.Context, sessionID string, out chan
 				continue
 			}
 			failures = 0
+			last = version
 			generation++
 			fresh := updateOpenCodeSeen(seen, page.Messages, generation)
 			if len(fresh) > 0 {
@@ -674,4 +637,21 @@ func (s *CursorCLISource) Interrupt(ctx context.Context, sessionID string) error
 		return errors.New("source: Cursor is not running a turn")
 	}
 	return tmux.Interrupt(ctx, session.pane)
+}
+
+// cursorCLIStoreVersion identifies the state of a chat store by the size and
+// modification time of the database and its write-ahead log.
+func cursorCLIStoreVersion(store string) string {
+	if store == "" {
+		return ""
+	}
+	var version strings.Builder
+	for _, path := range []string{store, store + "-wal"} {
+		if info, err := os.Stat(path); err == nil {
+			fmt.Fprintf(&version, "%d:%d;", info.Size(), info.ModTime().UnixNano())
+		} else {
+			version.WriteString("-;")
+		}
+	}
+	return version.String()
 }
