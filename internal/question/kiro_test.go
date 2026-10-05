@@ -153,3 +153,121 @@ func TestDetectKiroTrustOptions(t *testing.T) {
 		t.Error("the two levels read as the same question")
 	}
 }
+
+// Real screens from Kiro CLI 2.27.1 in an 80x24 pane, the size a phone launch
+// gets. Only the scratch directory's path was replaced with /work.
+
+// The call under review was read from the single line above the menu, and
+// that line is often something else: a write's diff, a sibling call's "esc
+// to cancel", a parameter row, a task-list status. Each time the phone asked
+// "Shell requires approval" without saying what.
+func TestDetectKiroFindsTheCallUnderReview(t *testing.T) {
+	cases := []struct {
+		fixture, title, prompt, detail string
+	}{
+		{"kiro_write_approval_real_pane.txt", "Write", "write requires approval",
+			"Write /work/hello.txt\nadded 1 line in hello.txt\n1+  hi there"},
+		{"kiro_edit_approval_real_pane.txt", "Write", "write requires approval",
+			"Write /work/greeting.txt\nadded 1 line, removed 1 line in greeting.txt\n1-  hi there\n1+  hello there"},
+		{"kiro_parallel_approval_real_pane.txt", "Shell", "shell requires approval", "Shell ls -la"},
+		{"kiro_task_list_approval_real_pane.txt", "Write", "write requires approval",
+			"Write /work/haiku.txt\nadded 3 lines in haiku.txt\n1+  Screen lights up at night\n" +
+				"2+  Fingers scroll through endless feeds\n3+  Silence goes unheard"},
+		{"kiro_web_fetch_approval_real_pane.txt", "Web fetch", "web_fetch requires approval", "WebFetch example.com"},
+		{"kiro_write_trust_options_real_pane.txt", "Write", "write requires approval · trust options",
+			"Write /work/greeting.txt\nadded 1 line in greeting.txt\n1+  hi there"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.fixture, func(t *testing.T) {
+			q := DetectKiro(readFixture(t, "testdata/"+tc.fixture))
+			if q == nil {
+				t.Fatal("no question")
+			}
+			if q.Title != tc.title || q.Prompt != tc.prompt || q.Detail != tc.detail {
+				t.Errorf("title %q prompt %q detail %q,\nwant %q %q %q", q.Title, q.Prompt, q.Detail, tc.title, tc.prompt, tc.detail)
+			}
+		})
+	}
+}
+
+func TestDetectKiroWriteTrustOptions(t *testing.T) {
+	q := DetectKiro(readFixture(t, "testdata/kiro_write_trust_options_real_pane.txt"))
+	want := []Option{
+		{Key: "1", Label: "Specific paths", Description: "greeting.txt", Selected: true},
+		{Key: "2", Label: "Complete directory", Description: "/work"},
+		{Key: "3", Label: "Entire tool"},
+	}
+	if q == nil || len(q.Options) != len(want) {
+		t.Fatalf("got %+v", q)
+	}
+	for i := range want {
+		if q.Options[i] != want[i] {
+			t.Errorf("option %d = %+v, want %+v", i, q.Options[i], want[i])
+		}
+	}
+}
+
+// Tab on "No" opens an editor for the reason. The call still waits on the
+// user, so it is a question: the text box takes the reason, and its one
+// choice goes back to the menu. What has been typed is not part of it, so the
+// question does not change while someone types at the Mac.
+func TestDetectKiroDenialReasonEditor(t *testing.T) {
+	empty := DetectKiro(readFixture(t, "testdata/kiro_feedback_editor_real_pane.txt"))
+	if empty == nil {
+		t.Fatal("the reason editor was not recognised")
+	}
+	if empty.Prompt != "write requires approval · Modify request" || !empty.Custom ||
+		len(empty.Options) != 1 || empty.Options[0].Key != "1" || empty.Detail != "Write /work/hello.txt\nadded 1 line in hello.txt\n1+  hi there" {
+		t.Errorf("got %+v", empty)
+	}
+	typed := DetectKiro(readFixture(t, "testdata/kiro_feedback_typed_real_pane.txt"))
+	if typed == nil || typed.Prompt != empty.Prompt || typed.Detail != empty.Detail ||
+		len(typed.Options) != 1 || typed.Options[0] != empty.Options[0] {
+		t.Errorf("typing changed the question: %+v", typed)
+	}
+	// A bare "esc to close" is also the /tools panel's footer.
+	if q := DetectKiro(readFixture(t, "testdata/kiro_tools_panel_real_pane.txt")); q != nil {
+		t.Errorf("the tools panel read as a question: %+v", q)
+	}
+}
+
+// Pickers and panels take the keyboard from the prompt. Typed into the /model
+// picker, a message becomes its search and Enter switches the model; into
+// /rewind, Enter forks the session. None of them is a question, but each
+// must stop a send.
+func TestKiroOverlayOpen(t *testing.T) {
+	open := []string{
+		"kiro_slash_palette_real_pane.txt", "kiro_model_picker_real_pane.txt", "kiro_agent_picker_real_pane.txt",
+		"kiro_context_panel_real_pane.txt", "kiro_tools_panel_real_pane.txt", "kiro_rewind_picker_real_pane.txt",
+		"kiro_write_approval_real_pane.txt", "kiro_feedback_editor_real_pane.txt",
+	}
+	for _, fixture := range open {
+		if !KiroOverlayOpen(readFixture(t, "testdata/"+fixture)) {
+			t.Errorf("%s: overlay not seen", fixture)
+		}
+	}
+	for _, fixture := range []string{"kiro_slash_palette_real_pane.txt", "kiro_model_picker_real_pane.txt",
+		"kiro_agent_picker_real_pane.txt", "kiro_context_panel_real_pane.txt", "kiro_rewind_picker_real_pane.txt"} {
+		if q := DetectKiro(readFixture(t, "testdata/"+fixture)); q != nil {
+			t.Errorf("%s read as a question: %+v", fixture, q)
+		}
+	}
+	for _, fixture := range []string{"kiro_idle_real_pane.txt", "kiro_busy_queue_mode_real_pane.txt",
+		"kiro_busy_steer_queued_real_pane.txt"} {
+		pane := readFixture(t, "testdata/"+fixture)
+		if KiroOverlayOpen(pane) || DetectKiro(pane) != nil {
+			t.Errorf("%s: the prompt has the keyboard, but an overlay or question was seen", fixture)
+		}
+	}
+}
+
+func TestKiroTitles(t *testing.T) {
+	for tool, want := range map[string]string{
+		"shell": "Shell", "web_fetch": "Web fetch", "use_aws": "AWS", "todo_list": "Todo list",
+		"read_notes > shell": "Shell", "subagent": "Subagent",
+	} {
+		if got := kiroTitle(tool); got != want {
+			t.Errorf("kiroTitle(%q) = %q, want %q", tool, got, want)
+		}
+	}
+}

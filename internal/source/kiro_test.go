@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -308,5 +309,104 @@ func TestKiroFollowStreamsAppendedEventsInOrder(t *testing.T) {
 	}
 	if got[1].Text != "There is 1 file." || got[1].Ts <= shownTs {
 		t.Errorf("reply = %+v, want it after ts %d", got[1], shownTs)
+	}
+}
+
+// The Kiro /model picker, open over the prompt (Kiro CLI 2.27.1, 80 columns,
+// rules shortened).
+const kiroModelPickerPane = `› /model
+Select model:   type to search
+
+❯ auto                 1.00x credits    Models chosen by task for optimal u...
+  claude-sonnet-4.5    1.30x credits    Claude Sonnet 4.5 model
+  claude-haiku-4.5     0.40x credits    The latest Claude Haiku model
+────────────────────────────────────────
+ Settings for selected model: auto                         tab to switch panels
+
+  thinking  n/a   Not available for this model.
+────────────────────────────────────────
+ esc to close · ↑↓ to navigate · ↵ to select · tab to switch panels
+`
+
+// A message typed into an open picker becomes its search, and the Enter
+// meant to submit it picks a model, an agent, or a point to fork from. The
+// send is refused instead, with the reason.
+func TestKiroRefusesToTypeIntoAPicker(t *testing.T) {
+	home := t.TempDir()
+	pid := os.Getpid()
+	writeKiroSession(t, home, "s", "/work", pid, kiroLinePrompt, kiroLineReply)
+	pane := tmux.Session{Name: "agentman-kiro-1-a", PanePID: pid, Cwd: "/work"}
+	s := newTestKiro(t, home, fmt.Sprintf("%d 1 kiro-cli-chat\n", pid), pane)
+	s.capturePane = func(context.Context, string) (string, error) { return kiroModelPickerPane, nil }
+
+	session := discoverKiro(t, s)["kiro:tmux-agentman-kiro-1-a"]
+	if session.Question != nil {
+		t.Fatalf("the picker read as a question: %+v", session.Question)
+	}
+	if _, err := s.Inject(context.Background(), session.ID, "run the tests"); !errors.Is(err, errKiroOverlay) {
+		t.Fatalf("send into an open picker: err = %v", err)
+	}
+}
+
+// A long diff or a tall task list can push the "↓" row that names the call
+// off the screen. The call is already on disk, so the question names it from
+// there — and an answer checks against the same name.
+func TestKiroQuestionNamesTheCallFromTheTranscriptWhenTheScreenCannot(t *testing.T) {
+	home := t.TempDir()
+	pid := os.Getpid()
+	writeKiroSession(t, home, "s", "/work", pid, kiroLinePrompt, kiroLineCall)
+	pane := tmux.Session{Name: "agentman-kiro-1-a", PanePID: pid, Cwd: "/work"}
+	s := newTestKiro(t, home, fmt.Sprintf("%d 1 kiro-cli-chat\n", pid), pane)
+	menu := "     40+  the last line of a long diff\n──────\n shell requires approval\n ❯ Yes, single permission\n" +
+		"   Trust, always allow in this session\n   No (Tab to edit)\n──────\n esc to close · ↑↓ to navigate · ↵ to select · Tab to edit\n"
+	s.capturePane = func(context.Context, string) (string, error) { return menu, nil }
+
+	session := discoverKiro(t, s)["kiro:tmux-agentman-kiro-1-a"]
+	if session.Question == nil || session.Question.Detail != "Shell ls -la" {
+		t.Fatalf("question = %+v", session.Question)
+	}
+	current, err := s.CurrentQuestion(context.Background(), session.ID)
+	if err != nil || current == nil || current.ID != session.Question.ID {
+		t.Errorf("read back as %+v (%v), shown as %+v", current, err, session.Question)
+	}
+}
+
+// Kiro's editor for the reason a call is refused is answered with text, or
+// with its one choice, back to the menu. Anything else, or an answer to a
+// question no longer on screen, is refused before a key is pressed.
+func TestKiroDenialReasonAnswersAreChecked(t *testing.T) {
+	home := t.TempDir()
+	pid := os.Getpid()
+	writeKiroSession(t, home, "s", "/work", pid, kiroLinePrompt, kiroLineCall)
+	pane := tmux.Session{Name: "agentman-kiro-1-a", PanePID: pid, Cwd: "/work"}
+	s := newTestKiro(t, home, fmt.Sprintf("%d 1 kiro-cli-chat\n", pid), pane)
+	editor := "↓ Shell ls -la\n──────\n shell requires approval · Modify request\n ›  add your feedback...\n──────\n esc to close\n"
+	s.capturePane = func(context.Context, string) (string, error) { return editor, nil }
+
+	session := discoverKiro(t, s)["kiro:tmux-agentman-kiro-1-a"]
+	shown := session.Question
+	if shown == nil || !shown.Custom || session.State != protocol.StateWaitingInput {
+		t.Fatalf("session = %+v", session)
+	}
+	ctx := context.Background()
+	for name, tc := range map[string]struct {
+		answer protocol.QuestionAnswer
+		want   string
+	}{
+		"stale":          {protocol.QuestionAnswer{QuestionID: "old", Text: "use ls -l"}, "no longer current"},
+		"no reason":      {protocol.QuestionAnswer{QuestionID: shown.ID}, "write the reason"},
+		"unknown choice": {protocol.QuestionAnswer{QuestionID: shown.ID, OptionKey: "2"}, "write the reason"},
+	} {
+		if err := s.Answer(ctx, session.ID, tc.answer); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
+		}
+	}
+	// The editor closed between the phone reading it and answering.
+	s.capturePane = func(context.Context, string) (string, error) {
+		return "›  ask a question or describe a task ↵\n", nil
+	}
+	if err := s.Answer(ctx, session.ID, protocol.QuestionAnswer{QuestionID: shown.ID, Text: "use ls -l"}); err == nil ||
+		!strings.Contains(err.Error(), "no longer on screen") {
+		t.Errorf("answer to a closed editor: %v", err)
 	}
 }

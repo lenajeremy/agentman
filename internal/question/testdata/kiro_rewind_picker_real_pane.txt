@@ -1,0 +1,24 @@
+
+  ID if loaded: none
+
+────────────────────────────────────────────────────────────────────────────────
+ /rewind
+────────────────────────────────────────────────────────────────────────────────
+
+ Fork from a previous prompt in this session
+
+ search:   type to filter
+
+ User Prompt    Context used
+ ❯ Use your introspect tool to read the Kiro CLI hooks docum…              5%
+   Reply with one short sentence: what is the secret word, i…              1%
+ ──────────────────────────────────────────────────────────────────────────────
+ Response Snippet
+   ↳ introspect: reading the hooks documentation as requested
+   Here is everything the documentation states, quoted verbatim where possible:
+   ## OBJECTIVE
+────────────────────────────────────────────────────────────────────────────────
+ esc to close · ↑↓ navigate · Enter to fork
+
+
+

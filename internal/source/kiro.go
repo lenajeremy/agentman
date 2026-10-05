@@ -234,7 +234,7 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 		session.LastActivityAt = fileMillis(transcript, session.StartedAt)
 		if tmuxName != "" {
 			session.Inject = protocol.InjectTmux
-			s.applyPane(ctx, &session, tmuxName)
+			s.applyPane(ctx, &session, tmuxName, transcript)
 		}
 		found = append(found, session)
 		next[id] = kiroSession{meta: session, transcript: transcript, tmuxName: tmuxName}
@@ -256,7 +256,7 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 			State: protocol.StateIdle, Inject: protocol.InjectTmux,
 			StartedAt: started, LastActivityAt: started, AgentPID: pane.PanePID,
 		}
-		s.applyPane(ctx, &session, pane.Name)
+		s.applyPane(ctx, &session, pane.Name, "")
 		found = append(found, session)
 		next[id] = kiroSession{meta: session, tmuxName: pane.Name}
 	}
@@ -272,7 +272,7 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 // the transcript: Kiro writes an event only once it is complete, so a reply
 // being streamed, or a tool waiting on approval, looks the same on disk as a
 // turn that has not started.
-func (s *KiroSource) applyPane(ctx context.Context, session *protocol.Session, tmuxName string) {
+func (s *KiroSource) applyPane(ctx context.Context, session *protocol.Session, tmuxName, transcript string) {
 	capture := s.capturePane
 	if capture == nil {
 		capture = tmux.Capture
@@ -281,7 +281,7 @@ func (s *KiroSource) applyPane(ctx context.Context, session *protocol.Session, t
 	if err != nil {
 		return
 	}
-	if found := question.DetectKiro(pane); found != nil {
+	if found := s.detector(ctx, transcript, session.ID)(pane); found != nil {
 		session.Question = protocolQuestion(found)
 		session.State = protocol.StateWaitingInput
 		return
@@ -663,7 +663,7 @@ func (s *KiroSource) Inject(ctx context.Context, sessionID, text string) (protoc
 		return protocol.InjectNone, errors.New(
 			"source: this session cannot receive messages — start it with `am kiro` to enable sending")
 	}
-	if err := refuseSendIntoMenu(ctx, s.capturePane, session.tmuxName, question.DetectKiro); err != nil {
+	if err := s.refuseSendIntoOverlay(ctx, session.tmuxName); err != nil {
 		return protocol.InjectNone, err
 	}
 	// Mid-turn, Kiro reads typed text as steering for the running turn rather
@@ -693,7 +693,11 @@ func (s *KiroSource) Answer(ctx context.Context, sessionID string, answer protoc
 	if err != nil {
 		return err
 	}
-	return answerMenu(ctx, s.capturePane, session.tmuxName, session.meta.Question, answer, question.DetectKiro)
+	detect := s.detector(ctx, session.transcript, sessionID)
+	if shown := session.meta.Question; shown != nil && strings.HasSuffix(shown.Prompt, question.KiroFeedbackLevel) {
+		return s.answerFeedback(ctx, session.tmuxName, shown, answer, detect)
+	}
+	return answerMenu(ctx, s.capturePane, session.tmuxName, session.meta.Question, answer, detect)
 }
 
 // CurrentQuestion implements QuestionInspector.
@@ -702,7 +706,7 @@ func (s *KiroSource) CurrentQuestion(ctx context.Context, sessionID string) (*pr
 	if err != nil || session.tmuxName == "" {
 		return nil, err
 	}
-	found, err := paneMenu(ctx, s.capturePane, session.tmuxName, question.DetectKiro)
+	found, err := paneMenu(ctx, s.capturePane, session.tmuxName, s.detector(ctx, session.transcript, sessionID))
 	if err != nil || found == nil {
 		return nil, err
 	}
