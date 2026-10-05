@@ -364,3 +364,40 @@ test("an option may say it takes a note, and nothing else in that field", () => 
     }), null, JSON.stringify(withText));
   }
 });
+
+test("a session says what it may switch to", () => {
+  const offers = {
+    ...baseSession, mode: "default", modes: ["default", "accept-edits", "plan"],
+    model: "opus", models: ["opus", "sonnet"], modelScope: "default",
+  };
+  const update = decodeDaemonEvent({ type: "session_update", session: offers });
+  assert.ok(update);
+  assert.deepEqual(update.session?.modes, ["default", "accept-edits", "plan"]);
+  assert.equal(update.session?.modelScope, "default");
+  assert.ok(decodeDaemonEvent({ type: "session_update", session: { ...offers, modelScope: "session" } }));
+});
+
+test("switch lists are bounded and every name in them could be sent back", () => {
+  for (const bad of [
+    { modes: "plan" },
+    { modes: [""] },
+    { modes: [" plan"] },
+    { modes: ["plan\n"] },
+    { modes: ["a\u001b[2J"] },
+    { modes: ["m".repeat(65)] },
+    { modes: Array.from({ length: 17 }, (_, index) => `mode-${index}`) },
+    { models: [7] },
+    { models: ["m".repeat(129)] },
+    { models: Array.from({ length: 65 }, (_, index) => `model-${index}`) },
+    { modelScope: "global" },
+    { modelScope: "" },
+  ]) {
+    assert.equal(decodeDaemonEvent({ type: "session_update", session: { ...baseSession, ...bad } }), null,
+      JSON.stringify(bad));
+  }
+  assert.ok(decodeDaemonEvent({
+    type: "session_update",
+    session: { ...baseSession, modes: Array.from({ length: 16 }, (_, index) => `mode-${index}`),
+      models: Array.from({ length: 64 }, (_, index) => "m".repeat(120) + index) },
+  }));
+});

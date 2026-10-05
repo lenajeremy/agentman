@@ -126,6 +126,13 @@ const (
 	ReqListArtifacts  RequestType = "list_artifacts"
 	ReqReadArtifact   RequestType = "read_artifact"
 	ReqReviewArtifact RequestType = "review_artifact"
+	// ReqSetMode and ReqSetModel switch a session's mode or model to Text,
+	// which must be one of the session's Modes or Models. Each is a terminal
+	// action like a send — under the session's lock, in order, refused while
+	// a question is pending — and is answered with EvtSendResult for
+	// ClientID once the adapter has seen the switch take.
+	ReqSetMode  RequestType = "set_mode"
+	ReqSetModel RequestType = "set_model"
 )
 
 // Request is anything the app asks of the daemon.

@@ -29,6 +29,7 @@ type fullSource struct {
 	comment     string
 	injected    []string
 	declineInto bool
+	mode, model string
 }
 
 func (s *fullSource) Artifacts(_ context.Context, sessionID string) ([]protocol.Artifact, error) {
@@ -61,6 +62,16 @@ func (s *fullSource) InjectWithAttachments(
 	}
 	s.injected = append([]string{text}, paths...)
 	return protocol.InjectAPI, nil
+}
+
+func (s *fullSource) SetMode(_ context.Context, _, mode string) error {
+	s.mode = mode
+	return nil
+}
+
+func (s *fullSource) SetModel(_ context.Context, _, model string) error {
+	s.model = model
+	return nil
 }
 
 func (s *fullSource) ResumedSession(native, defaultPane string) (string, string) {
@@ -172,5 +183,25 @@ func TestRegistryAsksTheOwningAdapterToNameAResume(t *testing.T) {
 	}
 	if pane, id := registry.ResumedSession("malformed", "x", "p"); pane != "" || id != "" {
 		t.Errorf("a malformed id named the resume %q / %q", pane, id)
+	}
+}
+
+func TestRegistryRoutesModeAndModelSwitches(t *testing.T) {
+	registry, full := optionalRegistry(t)
+	ctx := context.Background()
+	if err := registry.SetMode(ctx, "antigravity:c1", "plan"); err != nil || full.mode != "plan" {
+		t.Fatalf("mode switch = %v, adapter saw %q", err, full.mode)
+	}
+	if err := registry.SetModel(ctx, "antigravity:c1", "gemini-3-pro"); err != nil || full.model != "gemini-3-pro" {
+		t.Fatalf("model switch = %v, adapter saw %q", err, full.model)
+	}
+	if err := registry.SetMode(ctx, "codex:x", "plan"); err == nil {
+		t.Error("an adapter without modes switched one")
+	}
+	if err := registry.SetModel(ctx, "codex:x", "o3"); err == nil {
+		t.Error("an adapter without models switched one")
+	}
+	if err := registry.SetMode(ctx, "gemini:x", "plan"); err == nil {
+		t.Error("a kind with no adapter switched a mode")
 	}
 }
