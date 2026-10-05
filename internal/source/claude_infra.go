@@ -66,6 +66,16 @@ func (s *ClaudeSource) withoutInfra(ctx context.Context, candidates []claudeCand
 	var unknown []int
 	asked := map[int]bool{}
 	for _, c := range candidates {
+		// Claude Code's registry names the kind of process it describes, and
+		// its daemons are infrastructure whatever their command line says, so
+		// they need no ps. Every other kind still goes by the command line:
+		// "interactive" is not proof, because the workers this filter exists
+		// for were found writing files indistinguishable from a conversation's.
+		switch c.file.Kind {
+		case "daemon", "daemon-worker":
+			s.infra[c.key()] = true
+			continue
+		}
 		if _, judged := s.infra[c.key()]; !judged && !asked[c.file.PID] {
 			asked[c.file.PID] = true
 			unknown = append(unknown, c.file.PID)

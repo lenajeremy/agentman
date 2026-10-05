@@ -272,3 +272,41 @@ func TestClaudeDiscoverShowsEachConversationOnceAndNoWorkers(t *testing.T) {
 			got.State, got.AgentPID, second)
 	}
 }
+
+// Claude Code's registry says what kind of process each entry is. Its daemon
+// processes are infrastructure whatever their command line says, and are
+// dropped without asking ps. Every other entry still goes by the command line.
+func TestClaudeRegistryKindDropsDaemonsWithoutAskingPs(t *testing.T) {
+	source, err := NewClaudeSource(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var asked []int
+	source.processArgs = func(_ context.Context, pids []int) map[int]string {
+		asked = append(asked, pids...)
+		out := map[int]string{}
+		for _, pid := range pids {
+			out[pid] = "/Users/me/.local/bin/claude"
+		}
+		return out
+	}
+	candidates := []claudeCandidate{
+		claudeCandidateFor("daemon", 1, 1, "idle", ""),
+		claudeCandidateFor("worker", 2, 1, "idle", ""),
+		claudeCandidateFor("chat", 3, 1, "idle", ""),
+		claudeCandidateFor("old", 4, 1, "idle", ""),
+	}
+	candidates[0].file.Kind = "daemon"
+	candidates[1].file.Kind = "daemon-worker"
+	candidates[2].file.Kind = "interactive"
+
+	kept := source.withoutInfra(context.Background(), candidates)
+	if len(kept) != 2 || kept[0].file.SessionID != "chat" || kept[1].file.SessionID != "old" {
+		t.Fatalf("kept %+v, want the conversation and the kindless entry", kept)
+	}
+	for _, pid := range asked {
+		if pid == 1 || pid == 2 {
+			t.Errorf("asked ps about pid %d, which the registry already called a daemon", pid)
+		}
+	}
+}
