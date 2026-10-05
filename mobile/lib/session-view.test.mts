@@ -14,6 +14,11 @@ test("the chip shows the agent's mode and how full its context is", () => {
   });
 });
 
+test("a session whose mode can be switched always has the chip that switches it", () => {
+  assert.deepEqual(statusChip(undefined, undefined, true), { mode: "mode", context: undefined, label: "mode" });
+  assert.equal(statusChip("plan", 0, true)?.mode, "plan");
+});
+
 test("an agent that reported neither gets no chip", () => {
   assert.equal(statusChip(undefined, undefined), null);
   assert.equal(statusChip("  ", 0), null);

@@ -133,6 +133,28 @@ func TestSameAsWithoutQuestions(t *testing.T) {
 	}
 }
 
+// Discovery builds the lists afresh on every sweep, like the question. The
+// same modes in a new slice are no change, or a session that offers modes
+// would push an update every second.
+func TestSameAsComparesSwitchListsByContent(t *testing.T) {
+	base, same := waiting(), waiting()
+	base.Modes, same.Modes = []string{"default", "plan"}, []string{"default", "plan"}
+	base.Models, same.Models = []string{"opus"}, []string{"opus"}
+	if !base.SameAs(same) {
+		t.Fatal("identical mode and model lists compared different")
+	}
+	reordered := waiting()
+	reordered.Modes, reordered.Models = []string{"plan", "default"}, []string{"opus"}
+	if base.SameAs(reordered) {
+		t.Error("a reordered mode list was no change")
+	}
+	scoped := same
+	scoped.ModelScope = ModelScopeDefault
+	if base.SameAs(scoped) {
+		t.Error("a change of model scope was no change")
+	}
+}
+
 func TestSameAsSeesServerChanges(t *testing.T) {
 	base := waiting()
 	base.Servers = []Server{{Port: 5173, Command: "node", Title: "Vite App"}}

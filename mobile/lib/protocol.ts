@@ -73,6 +73,8 @@ export interface QuestionOption {
   withText?: boolean;
 }
 
+export type ModelScope = "session" | "default";
+
 export interface Session {
   id: string;
   kind: AgentKind;
@@ -87,13 +89,20 @@ export interface Session {
    *  Absent until it has replied once — none of the CLIs record it before. */
   model?: string;
   /** The agent's own name for its mode ("plan", "accept-edits"). Absent
-   *  means its default. Read-only: switching would change the Mac's default. */
+   *  means its default. Switchable to one of `modes` when the agent offers any. */
   mode?: string;
   /** How full the model's context window is, in whole percent. */
   contextPercent?: number;
   /** Documents the agent wrote for the user, and how many await review. */
   artifacts?: number;
   artifactsToReview?: number;
+  /** Modes the phone may switch to with set_mode, in the CLI's own names. */
+  modes?: string[];
+  /** Model ids the phone may switch to with set_model. */
+  models?: string[];
+  /** What a model switch touches: this session only, or also the CLI's
+   *  default for new sessions. Absent means models are not switched here. */
+  modelScope?: ModelScope;
   /** Present only while the agent is waiting on a decision. */
   question?: Question;
   /** Web servers the agent has started. Absent from daemons that predate it. */
@@ -193,7 +202,9 @@ export type RequestType =
   | "create_directory"
   | "list_artifacts"
   | "read_artifact"
-  | "review_artifact";
+  | "review_artifact"
+  | "set_mode"
+  | "set_model";
 
 export interface Request {
   type: RequestType;
@@ -589,6 +600,9 @@ function isSession(value: unknown): value is Session {
     (value.contextPercent === undefined || isPercent(value.contextPercent)) &&
     (value.artifacts === undefined || isCount(value.artifacts)) &&
     (value.artifactsToReview === undefined || isCount(value.artifactsToReview)) &&
+    (value.modes === undefined || boundedArray(value.modes, MAX_MODES, isModeName)) &&
+    (value.models === undefined || boundedArray(value.models, MAX_MODELS, isModelName)) &&
+    (value.modelScope === undefined || isOneOf(value.modelScope, ["session", "default"] as const)) &&
     (value.question === undefined || isQuestion(value.question)) &&
     (value.servers === undefined || boundedArray(value.servers, 64, isServer));
 }
@@ -598,6 +612,24 @@ function isServer(value: unknown): value is Server {
     optionalBoundedString(value.command, 256) &&
     optionalBoundedString(value.title, 1024) &&
     (value.link === undefined || isLink(value.link));
+}
+
+/** As many as the daemon sends; it drops any entry these would refuse. */
+const MAX_MODES = 16;
+const MAX_MODELS = 64;
+
+function isModeName(value: unknown): value is string {
+  return boundedString(value, 64, true) && isSwitchValue(value);
+}
+
+function isModelName(value: unknown): value is string {
+  return boundedString(value, 128, true) && isSwitchValue(value);
+}
+
+/** A name that goes back to the Mac exactly as it came: one line, no ends of
+ *  whitespace, nothing a terminal would read. */
+function isSwitchValue(value: string): boolean {
+  return value.trim() === value && !/[\u0000-\u001f\u007f-\u009f]/.test(value);
 }
 
 function isPercent(value: unknown): value is number {

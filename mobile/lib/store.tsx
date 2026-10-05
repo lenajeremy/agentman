@@ -207,6 +207,10 @@ interface Store {
   /** Approve an artifact the agent asked you to review, or ask for changes.
    *  Resolves once the Mac has handed the answer to the agent. */
   reviewArtifact(sessionId: string, name: string, approve: boolean, comment?: string): Promise<void>;
+  /** Switch a session's mode or model to one it offers. Resolves once the
+   *  Mac has seen the agent take the switch; rejects with the reason it did
+   *  not. */
+  switchSession(sessionId: string, kind: "mode" | "model", value: string): Promise<void>;
 }
 
 /** How long a tap on a server waits for the Mac to open its link. The daemon
@@ -1482,6 +1486,35 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             resolve: (event) => {
               if (event.type === "send_result" && event.status === "failed") {
                 reject(new Error(event.error || "The Mac could not deliver your review."));
+              } else {
+                resolve();
+              }
+            },
+            reject,
+            timer,
+          });
+        });
+      },
+
+      switchSession(sessionId, kind, value) {
+        return new Promise<void>((resolve, reject) => {
+          const id = clientRef.current?.send({
+            type: kind === "mode" ? "set_mode" : "set_model",
+            sessionId,
+            text: value,
+            clientId: `switch-${newFrameId()}`,
+          });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          // Answered like a send, so it settles on its own reply frame; see
+          // the send_result case above.
+          const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
+          launchRequests.current.set(id, {
+            resolve: (event) => {
+              if (event.type === "send_result" && event.status === "failed") {
+                reject(new Error(event.error || `The Mac could not switch the ${kind}.`));
               } else {
                 resolve();
               }
