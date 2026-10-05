@@ -378,3 +378,34 @@ func TestKiroSubagentCallsShowTheirTask(t *testing.T) {
 		t.Errorf("report = %q %q", report.Tool.Name, report.Text)
 	}
 }
+
+// The model owes the turn a message after a prompt and after the results of
+// every call it made — exactly when Kiro's screen shows a reply its
+// transcript does not have yet.
+func TestKiroAwaitingReply(t *testing.T) {
+	p := NewKiroParser("kiro:s")
+	steps := []struct {
+		line string
+		want bool
+	}{
+		{fixtureKiroPrompt, true},
+		{fixtureKiroToolCall, false},
+		{fixtureKiroToolResult, true},
+		{fixtureKiroReply, false},
+	}
+	for i, step := range steps {
+		p.Parse(step.line, int64(i))
+		if got := p.AwaitingReply(); got != step.want {
+			t.Errorf("after line %d: awaiting = %v, want %v", i, got, step.want)
+		}
+	}
+	// Two calls, one result: the other call is still running.
+	p = NewKiroParser("kiro:s")
+	p.Parse(fixtureKiroPrompt, 0)
+	p.Parse(kiroCallLine("a", "shell", `{"command":"ls"}`), 1)
+	p.Parse(strings.Replace(kiroCallLine("b", "shell", `{"command":"pwd"}`), `"message_id":"a-b"`, `"message_id":"a-b2"`, 1), 2)
+	p.Parse(kiroResultLine("a", `[{"kind":"text","data":"x"}]`, "success"), 3)
+	if p.AwaitingReply() {
+		t.Error("awaiting a reply while a call is still running")
+	}
+}

@@ -1,0 +1,24 @@
+────────────────────────────────────────────────────────────────────────────────
+  Use your subagent tool to delegate this to exactly one subagent: read
+  notes.txt in this directory and report its first line. Then tell me what it
+  said.
+
+↓ Orchestrating (1 agent)
+
+────────────────────────────────────────────────────────────────────────────────
+ subagent requires approval
+ ❯ Yes, single permission
+   Trust, always allow in this session
+   No (Tab to edit)
+────────────────────────────────────────────────────────────────────────────────
+ esc to close · ↑↓ to navigate · ↵ to select · Tab to edit
+
+
+
+
+
+
+
+
+
+

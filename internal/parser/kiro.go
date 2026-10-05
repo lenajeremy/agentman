@@ -52,6 +52,9 @@ type KiroParser struct {
 	// todos is the latest task list, so a call that ticks off task "2" can
 	// say which task that was.
 	todos map[string]string
+	// awaiting is true while the model owes the turn its next message: after
+	// a prompt, or once every call it made has its result.
+	awaiting bool
 }
 
 // kiroCall is a tool call remembered until its result arrives. The settled row
@@ -158,6 +161,7 @@ func (p *KiroParser) Parse(line string, offset int64) []protocol.Message {
 		}
 		p.turnTs, p.step = ts, 0
 		p.turnID, p.turnTexts = event.Data.MessageID, 0
+		p.awaiting = true
 		text := kiroPromptText(event.Data.Content)
 		if text == "" {
 			return out
@@ -167,6 +171,9 @@ func (p *KiroParser) Parse(line string, offset int64) []protocol.Message {
 		})
 
 	case "AssistantMessage":
+		// A message is written whole; whatever comes next is a call's result
+		// or, with no calls, the end of the turn.
+		p.awaiting = false
 		var out []protocol.Message
 		for i, block := range event.Data.Content {
 			switch block.Kind {
@@ -215,6 +222,7 @@ func (p *KiroParser) Parse(line string, offset int64) []protocol.Message {
 		return out
 
 	case "ToolResults":
+		defer func() { p.awaiting = len(p.pending) == 0 }()
 		var out []protocol.Message
 		for i, block := range event.Data.Content {
 			switch block.Kind {
@@ -247,6 +255,7 @@ func (p *KiroParser) Parse(line string, offset int64) []protocol.Message {
 		return out
 
 	case "Compaction", "Clear", "ResetTo", "CancelledPrompt":
+		p.awaiting = false
 		return []protocol.Message{{
 			ID: fmt.Sprintf("o%d", offset), SessionID: p.sessionID, Role: protocol.RoleSystem,
 			Ts: p.next(), Text: kiroEventNotices[event.Kind],
@@ -300,6 +309,13 @@ func KiroTextID(promptID string, n int) string {
 // place it below what is already shown.
 func (p *KiroParser) TurnState() (promptID string, texts int, nextTs int64) {
 	return p.turnID, p.turnTexts, p.turnTs + p.step + 1
+}
+
+// AwaitingReply reports whether the model is writing the turn's next message:
+// the newest record is a prompt, or results for every call it made. That is
+// exactly when Kiro's screen shows text its transcript does not have yet.
+func (p *KiroParser) AwaitingReply() bool {
+	return p.awaiting
 }
 
 // abandonPending settles every call still waiting for a result as failed.

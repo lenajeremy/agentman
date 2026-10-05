@@ -90,6 +90,7 @@ func newTestKiro(t *testing.T, home string, table string, panes ...tmux.Session)
 		return tmux.ProcessTreeFromTable(table), nil
 	}
 	s.capturePane = func(context.Context, string) (string, error) { return "", nil }
+	s.captureScrollback = func(context.Context, string, int) (string, error) { return "", nil }
 	return s
 }
 

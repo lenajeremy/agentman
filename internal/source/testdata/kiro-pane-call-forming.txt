@@ -1,0 +1,24 @@
+   An early release of Kiro CLI V3 is now available! Try it out: kiro-cli --v3
+                          https://kiro.dev/docs/cli/v3/
+
+    Tip: Type /agent to list available agents or switch to a specialized one.
+
+
+────────────────────────────────────────────────────────────────────────────────
+
+ ✨ What's new: Cloud sessions, specs, expanded hooks, and an improved trust
+ model.
+────────────────────────────────────────────────────────────────────────────────
+  Create a file named hello.txt in the current directory containing the single
+  line: hi there. Use your file write tool, not the shell.
+
+• Write
+  esc to cancel
+
+────────────────────────────────────────────────────────────────────────────────
+kiro_default · auto · ◔ 4%             /work
+
+›  Kiro is working · 1s · Type to steer · Ctrl+S to queue
+
+
+

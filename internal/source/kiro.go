@@ -57,6 +57,7 @@ type KiroSource struct {
 	listPanes         func(context.Context) ([]tmux.Session, error)
 	snapshotProcesses func(context.Context) (*tmux.ProcessTree, error)
 	capturePane       func(context.Context, string) (string, error)
+	captureScrollback func(context.Context, string, int) (string, error)
 
 	mu       sync.RWMutex
 	sessions map[string]kiroSession
@@ -140,6 +141,7 @@ func NewKiroSource(home string) (*KiroSource, error) {
 		listPanes:         tmux.List,
 		snapshotProcesses: tmux.SnapshotProcessTree,
 		capturePane:       tmux.Capture,
+		captureScrollback: tmux.CaptureScrollback,
 		sessions:          map[string]kiroSession{},
 		metas:             map[string]kiroMetaEntry{},
 		states:            map[string]kiroStateEntry{},
@@ -647,6 +649,9 @@ func (s *KiroSource) Follow(ctx context.Context, sessionID string, out chan<- []
 		return err
 	}
 
+	// The reply being written, as last read off the pane; see kiro_stream.go.
+	var stream kiroStreamPreview
+
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
 	for {
@@ -680,6 +685,9 @@ func (s *KiroSource) Follow(ctx context.Context, sessionID string, out chan<- []
 		for _, line := range lines {
 			batch = append(batch, p.Parse(line.Text, line.Offset)...)
 		}
+		batch = stream.update(batch, sessionID, func() (string, string, int64, bool) {
+			return s.streamingReply(ctx, current, p)
+		})
 		if len(batch) == 0 {
 			continue
 		}
@@ -689,6 +697,46 @@ func (s *KiroSource) Follow(ctx context.Context, sessionID string, out chan<- []
 			return ctx.Err()
 		}
 	}
+}
+
+// kiroStreamPreview is the reply a follow last read off the pane.
+type kiroStreamPreview struct {
+	id   string
+	text string
+	ts   int64
+}
+
+// update adds to a batch read from the transcript what the pane shows of the
+// reply being written.
+//
+// A record that lands ends the preview. Usually it is the finished reply,
+// under the preview's own id, and replaces it in place; if it is not — the
+// message was a tool call after all — the preview is withdrawn with an empty
+// text under its id. Otherwise the pane is read, and the preview sent again
+// only when it has grown.
+func (preview *kiroStreamPreview) update(
+	batch []protocol.Message, sessionID string, read func() (string, string, int64, bool),
+) []protocol.Message {
+	if len(batch) > 0 && preview.id != "" {
+		claimed := false
+		for _, message := range batch {
+			claimed = claimed || message.ID == preview.id
+		}
+		if !claimed {
+			batch = append(batch, protocol.Message{
+				ID: preview.id, SessionID: sessionID, Role: protocol.RoleAssistant, Ts: preview.ts,
+			})
+		}
+		*preview = kiroStreamPreview{}
+	}
+	text, id, ts, ok := read()
+	if !ok || (id == preview.id && text == preview.text) {
+		return batch
+	}
+	*preview = kiroStreamPreview{id: id, text: text, ts: ts}
+	return append(batch, protocol.Message{
+		ID: id, SessionID: sessionID, Role: protocol.RoleAssistant, Ts: ts, Text: text,
+	})
 }
 
 // Inject implements Injector.
