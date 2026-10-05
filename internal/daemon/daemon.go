@@ -937,6 +937,21 @@ func (d *Daemon) HandleFrom(
 		}
 		return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
 	}
+	// A message's images are collected from the relay before the session is
+	// locked: that can take up to 30 seconds each, and Stop must not wait for
+	// it.
+	var attachmentPaths []string
+	if req.Type == protocol.ReqSendMessage && len(req.UploadIDs) > 0 {
+		saved, saveErr := d.saveAttachments(ctx, req.SessionID, req.UploadIDs)
+		if saveErr != nil {
+			return protocol.Event{
+				Type: protocol.EvtSendResult, SessionID: req.SessionID,
+				ClientID: req.ClientID, Status: protocol.StatusFailed,
+				Error: saveErr.Error(),
+			}
+		}
+		attachmentPaths = saved
+	}
 	if requestMutatesSession(req.Type) {
 		lock := d.actionLock(req.SessionID)
 		lock.Lock()
@@ -1067,19 +1082,7 @@ func (d *Daemon) HandleFrom(
 				Error: "daemon: answer the pending question before sending a message",
 			}
 		}
-		var paths []string
-		if len(req.UploadIDs) > 0 {
-			saved, saveErr := d.saveAttachments(ctx, req.SessionID, req.UploadIDs)
-			if saveErr != nil {
-				return protocol.Event{
-					Type: protocol.EvtSendResult, SessionID: req.SessionID,
-					ClientID: req.ClientID, Status: protocol.StatusFailed,
-					Error: saveErr.Error(),
-				}
-			}
-			paths = saved
-		}
-		mode, err := d.deliver(ctx, req.SessionID, req.Text, paths)
+		mode, err := d.deliver(ctx, req.SessionID, req.Text, attachmentPaths)
 		result := protocol.Event{
 			Type:      protocol.EvtSendResult,
 			SessionID: req.SessionID,
