@@ -52,8 +52,12 @@ const (
 	cursorCLIMaxDBOutput = 16 * 1024 * 1024
 	cursorCLIMaxChats    = 200
 	cursorCLIPanePrefix  = tmux.Prefix + "cursor-"
-	cursorCLIPaneMargin  = 2 * time.Second
-	cursorCLILsofTimeout = 3 * time.Second
+	// cursorCLIChatPrefix names a chat no managed pane holds; a pane-bound
+	// chat is published under cursorCLIPaneIDPrefix and the pane's name.
+	cursorCLIChatPrefix   = "cursor-cli:chat:"
+	cursorCLIPaneIDPrefix = "cursor-cli:pane:"
+	cursorCLIPaneMargin   = 2 * time.Second
+	cursorCLILsofTimeout  = 3 * time.Second
 )
 
 type cursorCLIChat struct {
@@ -344,13 +348,13 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 	next := make(map[string]cursorCLISession, len(chats)+len(managed))
 	for _, chat := range chats {
 		pane, wrapped := chatPane[chat.id]
-		id := "cursor-cli:chat:" + chat.id
+		id := cursorCLIChatPrefix + chat.id
 		mode := protocol.InjectNone
 		state := protocol.StateIdle
 		var currentQuestion *protocol.Question
 		var running bool
 		if wrapped {
-			id = "cursor-cli:pane:" + pane.Name
+			id = cursorCLIPaneIDPrefix + pane.Name
 			mode = protocol.InjectTmux
 			currentQuestion, running = s.cursorCLIPaneStatus(ctx, pane.Name)
 			if currentQuestion != nil {
@@ -383,7 +387,7 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 		if claimedPane[pane.Name] {
 			continue
 		}
-		id := "cursor-cli:pane:" + pane.Name
+		id := cursorCLIPaneIDPrefix + pane.Name
 		entry := protocol.Session{
 			ID: id, Kind: protocol.KindCursorCLI, NativeID: pane.Name,
 			Name: "Cursor CLI", Cwd: pane.Cwd, State: protocol.StateIdle,

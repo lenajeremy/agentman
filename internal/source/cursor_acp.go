@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -924,4 +925,86 @@ func (s *CursorACPSource) Answer(_ context.Context, id string, answer protocol.Q
 	}
 	st.mu.Unlock()
 	return err
+}
+
+// states returns every record the source knows, without holding its lock
+// while callers read them.
+func (s *CursorACPSource) states() []*cursorACPState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	states := make([]*cursorACPState, 0, len(s.sessions))
+	for _, st := range s.sessions {
+		states = append(states, st)
+	}
+	return states
+}
+
+// Past implements History for chats Agentman started over ACP.
+//
+// Discovery stops listing an idle ACP chat after cursorCLIWindow, and before
+// this nothing else listed it either: a chat launched from the phone simply
+// vanished a day later although its record, and Cursor's own store, were
+// still on disk. A past chat is still reachable — each turn loads the session
+// into a fresh ACP process anyway — so it is reported with InjectAPI and the
+// phone sends to it directly instead of trying to reopen it in a pane, which
+// the terminal CLI cannot do (it does not know ACP sessions, and resuming one
+// by id silently starts an empty chat).
+func (s *CursorACPSource) Past(ctx context.Context, dir string, limit int) ([]protocol.Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	dir = filepath.Clean(dir)
+	if dir == "" || dir == "." {
+		return nil, nil
+	}
+	limit = limitOrDefault(limit)
+	_ = s.refreshRecords()
+	found := make([]protocol.Session, 0, limit)
+	for _, st := range s.states() {
+		st.mu.Lock()
+		record, busy := st.record, st.busy
+		st.mu.Unlock()
+		// A running turn is a live session, and Discover reports it.
+		if busy || !underDirectory(record.Cwd, dir) {
+			continue
+		}
+		found = append(found, protocol.Session{
+			ID: cursorACPPrefix + record.NativeID, Kind: protocol.KindCursorCLI,
+			NativeID: record.NativeID, Name: cursorACPName(record), Cwd: record.Cwd,
+			State: protocol.StateEnded, Inject: protocol.InjectAPI,
+			StartedAt: record.StartedAt, LastActivityAt: record.LastActivityAt,
+		})
+	}
+	sort.Slice(found, func(i, j int) bool { return found[i].LastActivityAt > found[j].LastActivityAt })
+	if len(found) > limit {
+		found = found[:limit]
+	}
+	return found, nil
+}
+
+// Directories implements History for ACP chats.
+func (s *CursorACPSource) Directories(ctx context.Context) ([]protocol.Folder, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	_ = s.refreshRecords()
+	counts := map[string]*protocol.Folder{}
+	for _, st := range s.states() {
+		st.mu.Lock()
+		record := st.record
+		st.mu.Unlock()
+		path := filepath.Clean(record.Cwd)
+		folder := counts[path]
+		if folder == nil {
+			folder = &protocol.Folder{Path: path}
+			counts[path] = folder
+		}
+		folder.Agents++
+		folder.LastActivityAt = max(folder.LastActivityAt, record.LastActivityAt)
+	}
+	folders := make([]protocol.Folder, 0, len(counts))
+	for _, folder := range counts {
+		folders = append(folders, *folder)
+	}
+	return folders, nil
 }

@@ -2,6 +2,8 @@ package source
 
 import (
 	"context"
+	"errors"
+	"sort"
 	"strings"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
@@ -9,10 +11,28 @@ import (
 
 // CursorCLIGroup keeps interactive terminal chats and Agentman-owned ACP chats
 // under the same public agent kind. Their identifiers never overlap.
+//
+// The registry holds this group, not the two sources, so every optional
+// interface the daemon looks for has to be forwarded here explicitly. History
+// and Closer were once implemented only on CursorCLISource, which the registry
+// never sees: Cursor chats were missing from every folder and ending a pane
+// from the phone always failed.
 type CursorCLIGroup struct {
 	terminal *CursorCLISource
 	acp      *CursorACPSource
 }
+
+// The interfaces the daemon discovers by type assertion. Keeping the proof
+// beside the group is what stops a forwarded method from quietly going
+// missing again.
+var (
+	_ Closer            = (*CursorCLIGroup)(nil)
+	_ History           = (*CursorCLIGroup)(nil)
+	_ Injector          = (*CursorCLIGroup)(nil)
+	_ Answerer          = (*CursorCLIGroup)(nil)
+	_ QuestionInspector = (*CursorCLIGroup)(nil)
+	_ Interrupter       = (*CursorCLIGroup)(nil)
+)
 
 func NewCursorCLIGroup(terminal *CursorCLISource, acp *CursorACPSource) *CursorCLIGroup {
 	return &CursorCLIGroup{terminal: terminal, acp: acp}
@@ -72,6 +92,50 @@ func (s *CursorCLIGroup) CurrentQuestion(ctx context.Context, id string) (*proto
 		return s.acp.CurrentQuestion(ctx, id)
 	}
 	return s.terminal.CurrentQuestion(ctx, id)
+}
+
+// TmuxName implements Closer. ACP chats run in a child process the source
+// owns, never in a pane, so there is nothing for "end" to close.
+func (s *CursorCLIGroup) TmuxName(id string) (string, bool) {
+	if s.owned(id) {
+		return "", false
+	}
+	return s.terminal.TmuxName(id)
+}
+
+// Past implements History over both stores. Terminal chats and ACP chats are
+// separate conversations with separate ids, so the merge is a plain union,
+// ordered the way every other adapter orders its history.
+func (s *CursorCLIGroup) Past(ctx context.Context, dir string, limit int) ([]protocol.Session, error) {
+	terminal, terminalErr := s.terminal.Past(ctx, dir, limit)
+	managed, managedErr := s.acp.Past(ctx, dir, limit)
+	all := append(terminal, managed...)
+	sort.SliceStable(all, func(i, j int) bool { return all[i].LastActivityAt > all[j].LastActivityAt })
+	if limit = limitOrDefault(limit); len(all) > limit {
+		all = all[:limit]
+	}
+	return all, errors.Join(terminalErr, managedErr)
+}
+
+// Directories implements History, summing both stores per directory.
+func (s *CursorCLIGroup) Directories(ctx context.Context) ([]protocol.Folder, error) {
+	terminal, terminalErr := s.terminal.Directories(ctx)
+	managed, managedErr := s.acp.Directories(ctx)
+	merged := map[string]*protocol.Folder{}
+	for _, folder := range append(terminal, managed...) {
+		into := merged[folder.Path]
+		if into == nil {
+			into = &protocol.Folder{Path: folder.Path}
+			merged[folder.Path] = into
+		}
+		into.Agents += folder.Agents
+		into.LastActivityAt = max(into.LastActivityAt, folder.LastActivityAt)
+	}
+	folders := make([]protocol.Folder, 0, len(merged))
+	for _, folder := range merged {
+		folders = append(folders, *folder)
+	}
+	return folders, errors.Join(terminalErr, managedErr)
 }
 
 func (s *CursorCLIGroup) Launch(ctx context.Context, cwd, prompt string) (string, error) {
