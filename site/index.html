@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Agentman — remote control for your coding agents</title>
-  <meta name="description" content="Follow Claude Code, Codex, Cursor, Kiro, Antigravity and OpenCode from your phone. Browse files, review working-tree diffs, view and send images, and open live previews. Open source, no account.">
+  <meta name="description" content="Follow Claude Code, Codex, Cursor, Kiro, Antigravity and OpenCode from your phone. Answer prompts, review plans, switch mode and model, browse files and diffs, and open live previews. Open source, no account.">
   <meta name="theme-color" content="#F5F5F2">
   <meta property="og:type" content="website">
   <meta property="og:title" content="Agentman — remote control for your coding agents">
@@ -134,7 +134,7 @@
 
     <section class="why" aria-labelledby="why-title">
       <h2 class="h2" id="why-title">Why Agentman?</h2>
-      <p>Agentman is an <em>open-source</em>, <em>account-free</em> remote control for coding agents, with <em>live status</em>, <em>one-tap answers</em>, <em>file and diff views</em> and a <em>relay that stores nothing</em>.</p>
+      <p>Agentman is an <em>open-source</em>, <em>account-free</em> remote control for coding agents, with <em>live status</em>, <em>one-tap answers</em>, <em>plan reviews</em>, <em>file and diff views</em> and a <em>relay that stores nothing</em>.</p>
       <div class="fleet" aria-hidden="true">
         <div class="dotrow" data-dots></div>
         <span class="finger" data-finger></span>
@@ -152,7 +152,7 @@
         <div class="card">
           <svg class="art-tap" viewBox="0 0 84 84" aria-hidden="true"><g class="key"><rect x="6" y="18" width="52" height="52" rx="12" fill="#0F1012"/><path class="chev" d="M22 36 L32 44 L22 52" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></g><path class="flag" d="M78 6 V46 A40 40 0 0 1 38 6 Z" fill="#FF6A2B"/></svg>
           <h3>Answer in one tap</h3>
-          <p>Permission prompts and questions arrive as a notification and a card. Your answer goes straight back to the agent.</p>
+          <p>Permission prompts and questions arrive as a notification and a card. Tap an answer, or say no and tell the agent what to do instead.</p>
         </div>
         <div class="card">
           <svg class="art-send" viewBox="0 0 84 84" aria-hidden="true"><path class="a1" d="M6 18 L32 42 L6 66 Z" fill="#2E4BFF"/><path class="a2" d="M30 18 L56 42 L30 66 Z" fill="#8E9DFF"/><path class="a3" d="M54 18 L80 42 L54 66 Z" fill="#D9DFFF"/></svg>
@@ -234,6 +234,36 @@
       </div>
     </section>
 
+    <section class="workspace control" id="control" aria-labelledby="control-title">
+      <div class="caps">From anywhere</div>
+      <h2 class="h2" id="control-title">Stay in charge of the work.</h2>
+      <p class="workspace-intro">Every agent, not just one: the same controls for Claude Code, Codex, Cursor, Kiro and Antigravity.</p>
+
+      <div class="workspace-more">
+        <article class="workspace-card">
+          <div class="mini-art plan-art" role="img" aria-label="Illustration of an agent's plan with Approve and Request changes buttons">
+            <div class="mini-code" aria-hidden="true"><span>implementation_plan.md <b>Plan</b></span><code><i>1.</i> Add the /export route</code><code><i>2.</i> Stream rows as CSV</code><code><i>3.</i> Test with 10k rows</code></div>
+            <div class="review-actions" aria-hidden="true"><span>Request changes</span><strong>Approve</strong></div>
+          </div>
+          <h3>Review the plan first</h3><p>Plans and walkthroughs an agent writes open on your phone. Approve them, or send them back with a note.</p>
+        </article>
+        <article class="workspace-card">
+          <div class="mini-art switch-art" role="img" aria-label="Illustration of switching an agent's mode from a menu">
+            <div class="server-row" aria-hidden="true"><span>◐</span><div><b>Opus 5.5 · Plan</b><small>this session only</small></div><strong>Switch</strong></div>
+            <div class="switch-menu" aria-hidden="true"><span>Default</span><span>Accept edits</span><span class="on">Plan <b>✓</b></span></div>
+          </div>
+          <h3>Switch mode and model</h3><p>Move an agent into plan mode or onto another model mid-session. If a switch would change your Mac's defaults, it asks first.</p>
+        </article>
+        <article class="workspace-card">
+          <div class="mini-art message-art" role="img" aria-label="Illustration of refusing a command and telling the agent what to do instead">
+            <div class="message-bubble" aria-hidden="true">Run <code>rm -rf build</code>?</div>
+            <div class="message-composer" aria-hidden="true"><div class="refuse-choice">No, and tell the agent why</div><div class="message-field"><span>Use make clean instead</span><strong>↑</strong></div></div>
+          </div>
+          <h3>Say no, and say why</h3><p>Refuse an action and the agent hears what to do instead, without leaving the question it asked.</p>
+        </article>
+      </div>
+    </section>
+
     <section class="moment" aria-labelledby="moment-title">
       <div>
         <div class="caps">The moment it's built for</div>
@@ -242,7 +272,7 @@
         <ol>
           <li><span><b>The agent blocks.</b> Claude Code, Codex, Cursor, Kiro or Antigravity shows a prompt in its terminal, or OpenCode raises one through its API.</span></li>
           <li><span><b>Your phone buzzes.</b> The question appears as a card, with the full command in view.</span></li>
-          <li><span><b>You tap once.</b> Your choice goes back to the agent and it carries on.</span></li>
+          <li><span><b>You tap once.</b> Your choice goes back to the agent and it carries on — with your note, if you said no.</span></li>
         </ol>
       </div>
       <div class="phones" aria-hidden="true">
