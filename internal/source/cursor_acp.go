@@ -35,6 +35,10 @@ type cursorACPRecord struct {
 	// Mode is Cursor's mode for the chat (agent, plan, ask), from
 	// session/new and current_mode_update.
 	Mode string `json:"mode,omitempty"`
+	// Modes are the modes Cursor offers the chat, and Models the models
+	// it can switch to, as session/new and session/load last reported them.
+	Modes  []string         `json:"modes,omitempty"`
+	Models []cursorACPModel `json:"models,omitempty"`
 }
 
 type cursorACPPending struct {
@@ -88,6 +92,8 @@ type cursorACPState struct {
 // Cursor terminal chats remain in CursorCLISource, with their own store and IDs.
 type CursorACPSource struct {
 	dir string
+	// dial starts an ACP child; a field so tests can stand in for Cursor.
+	dial func(cwd string, handle func(cursorACPEnvelope)) (*cursorACPClient, error)
 	// stores is where Cursor keeps each ACP session's own store
 	// (~/.cursor/acp-sessions); the model a turn ran on is read from it.
 	stores   string
@@ -409,15 +415,6 @@ func (t *cursorACPTurn) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, (*plain)(t))
 }
 
-// cursorACPModes is the modes block of session/new and session/load.
-type cursorACPModes struct {
-	CurrentModeID string `json:"currentModeId"`
-}
-
-func (m cursorACPModes) current() string {
-	return clipRunes(strings.TrimSpace(m.CurrentModeID), 40)
-}
-
 func cursorACPName(record cursorACPRecord) string {
 	if record.Name != "" {
 		return record.Name
@@ -508,13 +505,13 @@ func (st *cursorACPState) signalLocked() {
 
 func (s *CursorACPSource) Launch(ctx context.Context, cwd, prompt string) (string, error) {
 	st := &cursorACPState{record: cursorACPRecord{Cwd: cwd, StartedAt: time.Now().UnixMilli(), LastActivityAt: time.Now().UnixMilli()}}
-	client, err := newCursorACPClient(cwd, func(event cursorACPEnvelope) { s.handle(st, event) })
+	client, err := s.connect(cwd, func(event cursorACPEnvelope) { s.handle(st, event) })
 	if err != nil {
 		return "", err
 	}
 	var created struct {
-		SessionID string         `json:"sessionId"`
-		Modes     cursorACPModes `json:"modes"`
+		SessionID string `json:"sessionId"`
+		cursorACPSessionState
 	}
 	if err := client.call(ctx, "session/new", map[string]any{"cwd": cwd, "mcpServers": []any{}}, &created); err != nil {
 		client.close()
@@ -526,8 +523,8 @@ func (s *CursorACPSource) Launch(ctx context.Context, cwd, prompt string) (strin
 	}
 	st.mu.Lock()
 	st.record.NativeID = created.SessionID
-	st.record.Mode = created.Modes.current()
 	st.mu.Unlock()
+	s.noteSessionState(st, created.cursorACPSessionState)
 	id := cursorACPPrefix + created.SessionID
 	s.mu.Lock()
 	s.sessions[id] = st
@@ -597,7 +594,7 @@ func (s *CursorACPSource) injectLocked(ctx context.Context, st *cursorACPState, 
 		st.mu.Unlock()
 		return protocol.InjectNone, err
 	}
-	client, err := newCursorACPClient(cwd, func(event cursorACPEnvelope) { s.handle(st, event) })
+	client, err := s.connect(cwd, func(event cursorACPEnvelope) { s.handle(st, event) })
 	if err != nil {
 		releaseCursorACPLock(lock)
 		st.mu.Lock()
@@ -605,9 +602,7 @@ func (s *CursorACPSource) injectLocked(ctx context.Context, st *cursorACPState, 
 		st.mu.Unlock()
 		return protocol.InjectNone, err
 	}
-	var loaded struct {
-		Modes cursorACPModes `json:"modes"`
-	}
+	var loaded cursorACPSessionState
 	if err := client.call(ctx, "session/load", map[string]any{"sessionId": nativeID, "cwd": cwd, "mcpServers": []any{}}, &loaded); err != nil {
 		client.close()
 		releaseCursorACPLock(lock)
@@ -618,10 +613,8 @@ func (s *CursorACPSource) injectLocked(ctx context.Context, st *cursorACPState, 
 	}
 	st.mu.Lock()
 	st.replaying = false
-	if mode := loaded.Modes.current(); mode != "" {
-		st.record.Mode = mode
-	}
 	st.mu.Unlock()
+	s.noteSessionState(st, loaded)
 	done, err := s.begin(st, client, lock, turn)
 	if err != nil {
 		return protocol.InjectNone, err

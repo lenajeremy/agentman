@@ -67,9 +67,16 @@ func newCursorACPClient(cwd string, handle func(cursorACPEnvelope)) (*cursorACPC
 		} `json:"agentCapabilities"`
 	}
 	if err := c.call(ctx, "initialize", map[string]any{
-		"protocolVersion":    1,
-		"clientCapabilities": map[string]any{"fs": map[string]bool{"readTextFile": false, "writeTextFile": false}, "terminal": false},
-		"clientInfo":         map[string]string{"name": "agentman", "version": "0.1.0"},
+		"protocolVersion": 1,
+		// parameterizedModelPicker makes Cursor list models by name
+		// ("claude-opus-5-5") rather than as variant strings, and take a
+		// name back from set_config_option: the shape the phone's model list
+		// and switch use.
+		"clientCapabilities": map[string]any{
+			"fs": map[string]bool{"readTextFile": false, "writeTextFile": false}, "terminal": false,
+			"_meta": map[string]bool{"parameterizedModelPicker": true},
+		},
+		"clientInfo": map[string]string{"name": "agentman", "version": "0.1.0"},
 	}, &init); err != nil {
 		c.close()
 		return nil, fmt.Errorf("initialize Cursor ACP: %w", err)
@@ -87,7 +94,11 @@ func newCursorACPClient(cwd string, handle func(cursorACPEnvelope)) (*cursorACPC
 
 func (c *cursorACPClient) read(stdout io.Reader) {
 	defer close(c.closed)
-	defer func() { _ = c.cmd.Wait() }()
+	defer func() {
+		if c.cmd != nil {
+			_ = c.cmd.Wait()
+		}
+	}()
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
