@@ -149,6 +149,9 @@ func ParsePayload(raw []byte) (Payload, error) {
 	if p.SessionID != "" {
 		return p, nil
 	}
+	if agy, ok := parseAntigravityPayload([]byte(trimmed)); ok {
+		return agy, nil
+	}
 
 	// Codex's supported `notify` command appends a legacy JSON object as its
 	// final argv entry rather than writing Claude's hook shape on stdin.

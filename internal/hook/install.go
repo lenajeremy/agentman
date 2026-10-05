@@ -59,10 +59,14 @@ func (in Installer) Plans(token string, remove bool) ([]Plan, error) {
 		}
 	}
 
-	return []Plan{
+	plans := []Plan{
 		in.planClaude(home, token, remove),
 		in.planCodex(home, token, remove),
-	}, nil
+	}
+	if antigravityInstalled(home) {
+		plans = append(plans, in.planAntigravity(home, remove))
+	}
+	return plans, nil
 }
 
 // Apply writes a plan to disk, keeping a backup of the previous contents.

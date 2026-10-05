@@ -283,6 +283,10 @@ func validDelivery(kind protocol.Kind, name Name) bool {
 		}
 	case protocol.KindCodex:
 		return name == NameStop
+	case protocol.KindAntigravity:
+		// agy's Stop, and its PreInvocation installed as UserPromptSubmit:
+		// see install_antigravity.go.
+		return name == NameStop || name == NameUserPromptSubmit
 	}
 	return false
 }

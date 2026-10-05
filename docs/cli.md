@@ -149,6 +149,12 @@ Agentman preserves unrelated Claude hooks. If Codex already has a top-level
 `notify` command, installation refuses to replace it; Codex completion
 integration remains uninstalled until that conflict is resolved.
 
+When the Antigravity CLI is installed, installation also adds an `agentman`
+entry to `~/.gemini/config/hooks.json`: agy's `Stop` hook for turn completion
+and its `PreInvocation` hook for turn start, never `PreToolUse`. Other
+entries in that file are left as they are, and events from Antigravity's IDE,
+which reads the same file, are ignored.
+
 ## Diagnostics
 
 Run `am doctor` after installing hooks or when sessions do not appear. It checks
