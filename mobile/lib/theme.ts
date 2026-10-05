@@ -60,6 +60,9 @@ const light = {
   errorText: "#C4343A",
   errorWash: "#FDEDEE",
   errorEdge: "#F6C9CB",
+  /** A count on a solid state colour — the review badge. White in both
+   *  themes, because the state colours are saturated in both. */
+  onAccent: "#FFFFFF",
 
   /** Dims the page behind a sheet. */
   scrim: "rgba(15, 16, 18, 0.32)",
@@ -100,6 +103,7 @@ const dark: Palette = {
   errorText: "#FF8A8E",
   errorWash: "#2C1517",
   errorEdge: "#4D2226",
+  onAccent: "#FFFFFF",
 
   scrim: "rgba(0, 0, 0, 0.5)",
   cameraScrim: "rgba(10, 11, 13, 0.62)",
