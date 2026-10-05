@@ -125,6 +125,7 @@ type kiroPageEntry struct {
 	size     int64
 	mtime    time.Time
 	messages []protocol.Message
+	calls    []parser.KiroSubagentCall
 }
 
 // NewKiroSource creates an adapter rooted at the given home directory. An
@@ -508,13 +509,16 @@ func (s *KiroSource) Page(ctx context.Context, sessionID, before string, limit i
 	if session.transcript == "" {
 		return protocol.NewPage(sessionID, nil, "", false), nil
 	}
-	messages, err := s.readTranscript(ctx, session.transcript, sessionID)
+	messages, calls, err := s.readTranscriptCalls(ctx, session.transcript, sessionID)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return protocol.NewPage(sessionID, nil, "", false), nil
 		}
 		return protocol.Page{}, err
 	}
+	// Subagents keep their own transcripts, so their rows are placed fresh on
+	// every page rather than cached with the parent's.
+	messages = s.withSubagents(ctx, sessionID, session.transcript, messages, calls)
 	end := len(messages)
 	if before != "" {
 		index, err := strconv.Atoi(before)
@@ -538,15 +542,24 @@ func (s *KiroSource) Page(ctx context.Context, sessionID, before string, limit i
 // readTranscript parses a whole transcript into its feed, reusing the last
 // parse while the file is unchanged.
 func (s *KiroSource) readTranscript(ctx context.Context, path, sessionID string) ([]protocol.Message, error) {
+	messages, _, err := s.readTranscriptCalls(ctx, path, sessionID)
+	return messages, err
+}
+
+// readTranscriptCalls is readTranscript, with the subagent calls the
+// transcript records.
+func (s *KiroSource) readTranscriptCalls(
+	ctx context.Context, path, sessionID string,
+) ([]protocol.Message, []parser.KiroSubagentCall, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	s.cacheMu.Lock()
 	cached, ok := s.pages[path]
 	s.cacheMu.Unlock()
 	if ok && cached.size == info.Size() && cached.mtime.Equal(info.ModTime()) {
-		return cached.messages, nil
+		return cached.messages, cached.calls, nil
 	}
 
 	p := parser.NewKiroParser(sessionID)
@@ -565,12 +578,13 @@ func (s *KiroSource) readTranscript(ctx context.Context, path, sessionID string)
 		}
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	calls := p.SubagentCalls()
 	s.cacheMu.Lock()
-	s.pages[path] = kiroPageEntry{size: info.Size(), mtime: info.ModTime(), messages: messages}
+	s.pages[path] = kiroPageEntry{size: info.Size(), mtime: info.ModTime(), messages: messages, calls: calls}
 	s.cacheMu.Unlock()
-	return messages, nil
+	return messages, calls, nil
 }
 
 // kiroReadForward feeds a transcript to p from its start — or from the start of
@@ -648,6 +662,8 @@ func (s *KiroSource) Follow(ctx context.Context, sessionID string, out chan<- []
 	if err := attach(session.transcript); err != nil {
 		return err
 	}
+	// Subagents running under this session; see kiro_subagents.go.
+	children := newKiroChildFollow(sessionID, path, p.SubagentCalls())
 
 	// The reply being written, as last read off the pane; see kiro_stream.go.
 	var stream kiroStreamPreview
@@ -670,6 +686,7 @@ func (s *KiroSource) Follow(ctx context.Context, sessionID string, out chan<- []
 		}
 		if current.transcript != path {
 			path, tail, p = current.transcript, jsonl.NewTail(current.transcript), parser.NewKiroParser(sessionID)
+			children = newKiroChildFollow(sessionID, path, nil)
 		}
 		if tail == nil {
 			continue
@@ -688,6 +705,9 @@ func (s *KiroSource) Follow(ctx context.Context, sessionID string, out chan<- []
 		batch = stream.update(batch, sessionID, func() (string, string, int64, bool) {
 			return s.streamingReply(ctx, current, p)
 		})
+		if path != "" {
+			batch = append(batch, children.read(ctx, s, p.SubagentCalls(), time.Now())...)
+		}
 		if len(batch) == 0 {
 			continue
 		}

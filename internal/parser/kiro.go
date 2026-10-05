@@ -55,7 +55,34 @@ type KiroParser struct {
 	// awaiting is true while the model owes the turn its next message: after
 	// a prompt, or once every call it made has its result.
 	awaiting bool
+	// turnStart is the latest prompt's time as Kiro stamped it, before any
+	// adjustment for ordering — the only real clock time a turn has.
+	turnStart int64
+	// subagents are the most recent subagent calls, oldest first.
+	subagents []KiroSubagentCall
 }
+
+// KiroSubagentCall is a call that handed work to subagents. Each subagent
+// writes a session of its own, and nothing in either session names the
+// other; what the call records — the prompt each stage was given and the turn
+// it was made in — is what the source binds a child session by.
+type KiroSubagentCall struct {
+	CallID string
+	// Ts is the call row's timestamp in the feed.
+	Ts int64
+	// Prompts holds what each stage was given, in stage order.
+	Prompts []string
+	// TurnStart is the turn's prompt time and TurnEnd the next prompt's, in
+	// milliseconds; TurnEnd is zero while the turn is the latest.
+	TurnStart int64
+	TurnEnd   int64
+	// Done is set once the call has its result.
+	Done bool
+}
+
+// maxKiroSubagentCalls bounds the subagent calls a parser remembers. Only the
+// recent ones can still be gaining output.
+const maxKiroSubagentCalls = 64
 
 // kiroCall is a tool call remembered until its result arrives. The settled row
 // replaces the running one by id, so it keeps the call's timestamp: taking a
@@ -153,12 +180,19 @@ func (p *KiroParser) Parse(line string, offset int64) []protocol.Message {
 		if event.Data.Meta != nil {
 			ts = event.Data.Meta.Timestamp * 1000
 		}
+		raw := ts
 		// Prompts are stamped to the second, so a quick follow-up can share its
 		// predecessor's second — or, if the clock stepped, precede it. Never let
 		// a new turn sort above the replies to the last one.
 		if floor := p.turnTs + p.step + 1; ts < floor {
 			ts = floor
 		}
+		for i := range p.subagents {
+			if p.subagents[i].TurnEnd == 0 {
+				p.subagents[i].TurnEnd = raw
+			}
+		}
+		p.turnStart = raw
 		p.turnTs, p.step = ts, 0
 		p.turnID, p.turnTexts = event.Data.MessageID, 0
 		p.awaiting = true
@@ -204,6 +238,9 @@ func (p *KiroParser) Parse(line string, offset int64) []protocol.Message {
 				call := p.describeCall(callID, use.Name, use.Input)
 				call.ts = p.next()
 				p.calls.set(callID, call)
+				if kiroToolName(use.Name) == "Subagent" {
+					p.rememberSubagentCall(callID, call.ts, use.Input)
+				}
 				p.pending = append(p.pending, callID)
 				if len(p.pending) > maxKiroPending {
 					p.pending = p.pending[1:]
@@ -322,6 +359,11 @@ func (p *KiroParser) AwaitingReply() bool {
 func (p *KiroParser) abandonPending() []protocol.Message {
 	var out []protocol.Message
 	for _, callID := range p.pending {
+		for i := range p.subagents {
+			if p.subagents[i].CallID == callID {
+				p.subagents[i].Done = true
+			}
+		}
 		call, ok := p.calls.get(callID)
 		if !ok {
 			continue
@@ -341,8 +383,40 @@ func (p *KiroParser) abandonPending() []protocol.Message {
 	return out
 }
 
+// SubagentCalls returns the recent subagent calls, oldest first.
+func (p *KiroParser) SubagentCalls() []KiroSubagentCall {
+	return append([]KiroSubagentCall(nil), p.subagents...)
+}
+
+func (p *KiroParser) rememberSubagentCall(callID string, ts int64, raw json.RawMessage) {
+	var input map[string]any
+	if json.Unmarshal(raw, &input) != nil {
+		return
+	}
+	var prompts []string
+	stages, _ := input["stages"].([]any)
+	for _, rawStage := range stages {
+		stage, _ := rawStage.(map[string]any)
+		prompts = append(prompts, strings.TrimSpace(kiroString(stage, "prompt_template")))
+	}
+	if len(prompts) == 0 {
+		prompts = []string{strings.TrimSpace(kiroString(input, "task"))}
+	}
+	p.subagents = append(p.subagents, KiroSubagentCall{
+		CallID: callID, Ts: ts, Prompts: prompts, TurnStart: p.turnStart,
+	})
+	if len(p.subagents) > maxKiroSubagentCalls {
+		p.subagents = p.subagents[1:]
+	}
+}
+
 // settle re-emits a call's rows with its result.
 func (p *KiroParser) settle(result kiroToolResult) []protocol.Message {
+	for i := range p.subagents {
+		if p.subagents[i].CallID == result.ToolUseID {
+			p.subagents[i].Done = true
+		}
+	}
 	for i, callID := range p.pending {
 		if callID == result.ToolUseID {
 			p.pending = append(p.pending[:i:i], p.pending[i+1:]...)

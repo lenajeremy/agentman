@@ -126,12 +126,7 @@ func kiroHistoryKeeps(base string, meta kiroMeta) bool {
 	if strings.TrimSpace(meta.Title) == "" && empty {
 		return false
 	}
-	if meta.SessionState.AgentName == "" && !empty {
-		if _, err := os.Stat(base + ".history"); os.IsNotExist(err) {
-			return false
-		}
-	}
-	return true
+	return empty || !kiroIsSubagentSession(base, meta)
 }
 
 // kiroRunning returns a test for whether a session's lock is held by a Kiro

@@ -409,3 +409,38 @@ func TestKiroAwaitingReply(t *testing.T) {
 		t.Error("awaiting a reply while a call is still running")
 	}
 }
+
+// A subagent call is remembered with what binds its subagents' sessions to
+// it: each stage's prompt and the turn it was made in.
+func TestKiroRemembersSubagentCalls(t *testing.T) {
+	p := NewKiroParser("kiro:s")
+	lines := []string{
+		fixtureKiroPrompt,
+		kiroCallLine("s1", "subagent", `{"task":"Review the code","stages":[{"name":"read","role":"kiro_default","prompt_template":" Read main.go "},{"name":"judge","role":"kiro_default","prompt_template":"Judge it","depends_on":["read"]}]}`),
+		kiroResultLine("s1", `[{"kind":"text","data":"Pipeline completed: 2 stages finished."}]`, "success"),
+		strings.Replace(fixtureKiroPrompt, `"timestamp":1790528359`, `"timestamp":1790528400`, 1),
+		kiroCallLine("s2", "subagent", `{"task":"Count the files"}`),
+	}
+	for i, line := range lines {
+		p.Parse(line, int64(i))
+	}
+	calls := p.SubagentCalls()
+	if len(calls) != 2 {
+		t.Fatalf("calls = %+v", calls)
+	}
+	first, second := calls[0], calls[1]
+	if first.CallID != "s1" || len(first.Prompts) != 2 || first.Prompts[0] != "Read main.go" || first.Prompts[1] != "Judge it" ||
+		first.TurnStart != 1790528359000 || first.TurnEnd != 1790528400000 || !first.Done {
+		t.Errorf("first = %+v", first)
+	}
+	if second.CallID != "s2" || len(second.Prompts) != 1 || second.Prompts[0] != "Count the files" ||
+		second.TurnStart != 1790528400000 || second.TurnEnd != 0 || second.Done {
+		t.Errorf("second = %+v", second)
+	}
+	// The call row and the remembered call agree on the time, which is what
+	// the subagents' rows are stamped with.
+	rows := parseKiro(lines...)
+	if rows[1].ID != "s1" || rows[1].Ts != first.Ts {
+		t.Errorf("row %+v, call ts %d", rows[1], first.Ts)
+	}
+}
