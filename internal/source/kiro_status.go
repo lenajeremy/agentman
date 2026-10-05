@@ -1,6 +1,7 @@
 package source
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,6 +31,16 @@ type kiroStatus struct {
 // The glyph before the percentage fills as the context does, so any single
 // character is accepted there.
 var kiroStatusLine = regexp.MustCompile(`^\s*(\S[^·]*?)\s+·\s+(\S+)\s+·\s+\S\s*(\d{1,3})%`)
+
+// apply shows the status on a session: its model, the agent it runs as —
+// the session's mode, as the phone calls it — and how full its context is.
+func (status kiroStatus) apply(session *protocol.Session) {
+	session.Model = status.model
+	session.Mode = kiroMode(status.agent)
+	if status.hasContext {
+		session.ContextPercent = int(math.Round(status.context))
+	}
+}
 
 // kiroPaneStatus reads the status line from the bottom of a pane. It is the
 // live truth — a /model switch shows there at once, while the metadata file

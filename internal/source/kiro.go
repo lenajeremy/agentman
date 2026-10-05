@@ -266,7 +266,7 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 			session.Inject = protocol.InjectTmux
 			status = s.applyPane(ctx, &session, tmuxName, transcript, status)
 		}
-		session.Model = status.model
+		status.apply(&session)
 		found = append(found, session)
 		next[id] = kiroSession{meta: session, transcript: transcript, tmuxName: tmuxName, status: status}
 	}
@@ -288,7 +288,7 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 			StartedAt: started, LastActivityAt: started, AgentPID: pane.PanePID,
 		}
 		status := s.applyPane(ctx, &session, pane.Name, "", kiroStatus{})
-		session.Model = status.model
+		status.apply(&session)
 		found = append(found, session)
 		next[id] = kiroSession{meta: session, tmuxName: pane.Name, status: status}
 	}

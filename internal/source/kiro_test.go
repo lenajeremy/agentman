@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -613,6 +614,72 @@ func TestKiroMarkedStateWaitsForTheReply(t *testing.T) {
 	} {
 		if got := kiroMarkedState(tc.transcript, tc.busy, now.Add(-tc.age), now); got != tc.want {
 			t.Errorf("%+v: got %s", tc, got)
+		}
+	}
+}
+
+// A reopened session must come back under the id discovery gives it, or the
+// phone waits on the ended session's entry while the live one appears as a
+// second session. Pane-backed Kiro sessions are keyed on their pane.
+func TestKiroResumeIsNamedAsDiscoveryWillListIt(t *testing.T) {
+	home := t.TempDir()
+	pid := os.Getpid()
+	paneName := tmux.NewName("kiro")
+	s := newTestKiro(t, home, fmt.Sprintf("%d 1 kiro-cli-chat\n", pid))
+	gotPane, gotID := s.ResumedSession("9afec73d-0bce-4d68-91ff-95cfe36d542f", paneName)
+	if gotPane != paneName || !regexp.MustCompile(`^agentman-[A-Za-z0-9_-]+$`).MatchString(gotPane) {
+		t.Fatalf("pane = %q, want the daemon's own %q", gotPane, paneName)
+	}
+
+	// The reopened Kiro writes its lock, under the pane the resume opened.
+	writeKiroSession(t, home, "9afec73d-0bce-4d68-91ff-95cfe36d542f", "/work", pid, kiroLinePrompt, kiroLineReply)
+	s.listPanes = func(context.Context) ([]tmux.Session, error) {
+		return []tmux.Session{{Name: paneName, PanePID: pid, Cwd: "/work"}}, nil
+	}
+	sessions := discoverKiro(t, s)
+	if _, ok := sessions[gotID]; !ok || len(sessions) != 1 {
+		t.Errorf("resume named %q, discovery listed %v", gotID, sessions)
+	}
+	// Before Kiro has written anything, the bare pane goes by the same id.
+	s.snapshotProcesses = func(context.Context) (*tmux.ProcessTree, error) { return tmux.ProcessTreeFromTable(""), nil }
+	os.Remove(filepath.Join(home, ".kiro", "sessions", "cli", "9afec73d-0bce-4d68-91ff-95cfe36d542f.lock"))
+	if _, ok := discoverKiro(t, s)[gotID]; !ok {
+		t.Errorf("the pane before Kiro's lock is not %q", gotID)
+	}
+}
+
+// The phone shows the agent a session runs as — its mode — and how full its
+// context is, beside the model. Kiro's default agent is nothing worth a label.
+func TestKiroModeAndContextReachTheSession(t *testing.T) {
+	home := t.TempDir()
+	pid := os.Getpid()
+	writeKiroSessionFiles(t, home, "planner", "/work", pid,
+		`{"agent_name":"kiro_planner","rts_model_state":{"model_info":{"model_id":"auto"},"context_usage_percentage":1.9882}}`,
+		`"plan the release"`, kiroLinePrompt, kiroLineReply)
+	writeKiroSessionFiles(t, home, "plain", "/other", pid,
+		`{"agent_name":"kiro_default","rts_model_state":{"model_info":{"model_id":"auto"},"context_usage_percentage":7.4}}`,
+		`"hello"`, kiroLinePrompt, kiroLineReply)
+	s := newTestKiro(t, home, fmt.Sprintf("%d 1 kiro-cli-chat\n", pid))
+	sessions := discoverKiro(t, s)
+	if got := sessions["kiro:planner"]; got.Mode != "Plan" || got.ContextPercent != 2 || got.Model != "auto" {
+		t.Errorf("planner from metadata = mode %q context %d model %q", got.Mode, got.ContextPercent, got.Model)
+	}
+	if got := sessions["kiro:plain"]; got.Mode != "" || got.ContextPercent != 7 {
+		t.Errorf("default agent = mode %q context %d", got.Mode, got.ContextPercent)
+	}
+
+	// In a pane, the status line is the live word.
+	pane := tmux.Session{Name: "agentman-kiro-1-a", PanePID: pid, Cwd: "/work"}
+	s = newTestKiro(t, home, fmt.Sprintf("%d 1 kiro-cli-chat\n", pid), pane)
+	s.capturePane = func(context.Context, string) (string, error) {
+		return "Plan · claude-haiku-4.5 · ◔ 12%         /work\n\n›  ask a question or describe a task ↵  ·  exit plan mode: shift+tab\n", nil
+	}
+	for id, got := range discoverKiro(t, s) {
+		if got.Inject != protocol.InjectTmux {
+			continue
+		}
+		if got.Mode != "Plan" || got.ContextPercent != 12 || got.Model != "claude-haiku-4.5" {
+			t.Errorf("%s from its status line = mode %q context %d model %q", id, got.Mode, got.ContextPercent, got.Model)
 		}
 	}
 }
