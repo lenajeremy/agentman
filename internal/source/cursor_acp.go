@@ -94,6 +94,8 @@ type CursorACPSource struct {
 	dir string
 	// dial starts an ACP child; a field so tests can stand in for Cursor.
 	dial func(cwd string, handle func(cursorACPEnvelope)) (*cursorACPClient, error)
+	// listing is Cursor's model list, fetched now and then; see catalogue.
+	listing cursorACPListing
 	// stores is where Cursor keeps each ACP session's own store
 	// (~/.cursor/acp-sessions); the model a turn ran on is read from it.
 	stores   string

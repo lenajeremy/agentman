@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -101,12 +103,16 @@ func (s *CursorACPSource) noteSessionState(st *cursorACPState, state cursorACPSe
 	}
 }
 
+// cursorACPDial starts a real `agent acp`. The package's tests replace it, so
+// no test can start Cursor by accident.
+var cursorACPDial = newCursorACPClient
+
 // connect starts an ACP child for a chat.
 func (s *CursorACPSource) connect(cwd string, handle func(cursorACPEnvelope)) (*cursorACPClient, error) {
 	if s.dial != nil {
 		return s.dial(cwd, handle)
 	}
-	return newCursorACPClient(cwd, handle)
+	return cursorACPDial(cwd, handle)
 }
 
 // withSession runs fn with an ACP client that has the chat's session loaded:
@@ -251,17 +257,93 @@ func (s *CursorACPSource) modes(st *cursorACPState) []string {
 	return slices.Clone(cursorACPDefaultModes)
 }
 
-// Catalogue is the newest model list any ACP chat was offered. Models are
-// the account's, not a chat's, so a terminal chat can use it too.
-func (s *CursorACPSource) catalogue() []cursorACPModel {
-	var newest []cursorACPModel
+// cursorACPListingAge is how long a fetched model list is used before it is
+// fetched again, and how long a failed fetch waits to be retried.
+const cursorACPListingAge = 10 * time.Minute
+
+// cursorACPListing is Cursor's model list, as cursor/list_available_models
+// gives it.
+//
+// That extension method answers without a session: Cursor's ACP server
+// returns the models its model service already holds, by name and display
+// name — the GetUsableModels call `agent --list-models` makes, which sends no
+// prompt and spends no request. `--list-models` itself is not used: it prints
+// variant strings ("claude-opus-5-5-high"), which neither the terminal's model
+// commands nor set_config_option take.
+type cursorACPListing struct {
+	mu       sync.Mutex
+	models   []cursorACPModel
+	at       time.Time
+	fetching bool
+}
+
+// catalogue is the model list for chats that have none of their own: the
+// fetched list, or failing that the newest one an ACP chat was offered.
+// Models are the account's, not a chat's, so a terminal chat uses it too.
+// A stale list is refreshed in the background when refresh is set; the
+// caller never waits on Cursor.
+func (s *CursorACPSource) catalogue(refresh bool) []cursorACPModel {
+	s.listing.mu.Lock()
+	models := slices.Clone(s.listing.models)
+	stale := !s.listing.fetching && time.Since(s.listing.at) > cursorACPListingAge
+	if refresh && stale && !s.closing.Load() {
+		s.listing.fetching = true
+		go s.fetchCatalogue()
+	}
+	s.listing.mu.Unlock()
+	if len(models) > 0 {
+		return models
+	}
 	var at int64
 	for _, st := range s.states() {
 		st.mu.Lock()
 		if len(st.record.Models) > 0 && st.record.LastActivityAt >= at {
-			newest, at = slices.Clone(st.record.Models), st.record.LastActivityAt
+			models, at = slices.Clone(st.record.Models), st.record.LastActivityAt
 		}
 		st.mu.Unlock()
 	}
-	return newest
+	return models
+}
+
+func (s *CursorACPSource) fetchCatalogue() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	models, _ := s.listModels(ctx)
+	s.listing.mu.Lock()
+	defer s.listing.mu.Unlock()
+	s.listing.fetching, s.listing.at = false, time.Now()
+	if len(models) > 0 {
+		s.listing.models = models
+	}
+}
+
+// listModels asks Cursor for its models through a short-lived ACP process.
+func (s *CursorACPSource) listModels(ctx context.Context) ([]cursorACPModel, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.connect(home, func(cursorACPEnvelope) {})
+	if err != nil {
+		return nil, err
+	}
+	defer client.close()
+	var reply struct {
+		Models []struct {
+			Value string `json:"value"`
+			Name  string `json:"name"`
+		} `json:"models"`
+	}
+	if err := client.call(ctx, "cursor/list_available_models", map[string]any{}, &reply); err != nil {
+		return nil, fmt.Errorf("list Cursor's models: %w", err)
+	}
+	var models []cursorACPModel
+	for _, model := range reply.Models {
+		id := strings.TrimSpace(model.Value)
+		if id == "" || len(id) > 128 || strings.ContainsAny(id, "[]") || len(models) == 64 {
+			continue
+		}
+		models = append(models, cursorACPModel{ID: id, Name: clipRunes(strings.TrimSpace(model.Name), 128)})
+	}
+	return models, nil
 }

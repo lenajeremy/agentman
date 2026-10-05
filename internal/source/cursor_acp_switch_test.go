@@ -4,12 +4,21 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+// No test in this package starts the real Cursor: the Mac running them has
+// it installed and signed in, and every chat spends the user's requests.
+func init() {
+	cursorACPDial = func(string, func(cursorACPEnvelope)) (*cursorACPClient, error) {
+		return nil, errors.New("tests never start Cursor")
+	}
+}
 
 // fakeACPAgent stands in for `agent acp`: it answers each request with what
 // reply returns for its method, and records the methods it was asked.
