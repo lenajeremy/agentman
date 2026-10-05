@@ -351,3 +351,53 @@ func TestAntigravityPanelOpen(t *testing.T) {
 		}
 	}
 }
+
+// Captured on agy 1.2.17 answering a three-question form the way the phone
+// does: the first question is a single choice that is not the last, the
+// second a multi-select, the third the last.
+func TestDetectAntigravityQuestionsOfAThreeQuestionForm(t *testing.T) {
+	for _, tc := range []struct {
+		pane, title, prompt string
+		index, count        int
+		multiple            bool
+		focus               int
+	}{
+		{"question_first_of_three", "Question 1/3", "Which size?", 1, 3, false, 0},
+		{"question_first_of_three_focused", "Question 1/3", "Which size?", 1, 3, false, 1},
+		{"question_second_of_three", "Question 2/3", "Which fruits?", 2, 3, true, 0},
+		{"question_second_of_three_checked", "Question 2/3", "Which fruits?", 2, 3, true, 2},
+		{"question_third_of_three", "Question 3/3", "Which colour?", 3, 3, false, 0},
+	} {
+		q, form := DetectAntigravityForm(agyPane(t, tc.pane))
+		if q == nil {
+			t.Errorf("%s: not recognised", tc.pane)
+			continue
+		}
+		if q.Title != tc.title || q.Prompt != tc.prompt || form.Index != tc.index || form.Count != tc.count ||
+			q.Multiple != tc.multiple || q.FocusIndex != tc.focus || !q.Custom || form.Typing {
+			t.Errorf("%s: %+v %+v", tc.pane, q, form)
+		}
+	}
+}
+
+// The amend box open under the approval, empty and then with a note typed.
+func TestDetectAntigravityAmendBoxWithANote(t *testing.T) {
+	for _, pane := range []string{"command_amend_open", "command_amend_typed"} {
+		q, form := DetectAntigravityForm(agyPane(t, pane))
+		if q == nil || !form.Typing || form.Kind != "approval" || q.FocusIndex != 0 ||
+			q.Options[0].Label != "Yes, and tell Antigravity CLI what to do next" || q.Detail != "echo amend-check" {
+			t.Errorf("%s: %+v %+v", pane, q, form)
+		}
+	}
+	if q, form := DetectAntigravityForm(agyPane(t, "command_amend_before")); q == nil || form.Typing || !form.Amend {
+		t.Errorf("before Tab: %+v %+v", q, form)
+	}
+}
+
+// agy signed out shows a login menu. Signing in is not something to do from
+// a phone, and nothing here offers it.
+func TestDetectAntigravityLeavesTheLoginMenuAlone(t *testing.T) {
+	if q, form := DetectAntigravityForm(agyPane(t, "signed_out")); q != nil {
+		t.Errorf("the login menu was offered: %+v %+v", q, form)
+	}
+}

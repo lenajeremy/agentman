@@ -36,6 +36,15 @@ const antigravityHookName = "agentman"
 //
 // Agy's hooks answer on stdout, and an empty answer from Stop and
 // PreInvocation is accepted, which is what `am hook` gives.
+//
+// Checked on agy 1.2.17 with exactly this file's output, placed as a
+// workspace's .agents/hooks.json and the binary path holding a space: both
+// handlers ran, with "hook antigravity UserPromptSubmit" and "hook antigravity
+// Stop" as their arguments and agy's payload on stdin. The global copy could
+// not be run the same way — agy under a temporary HOME is signed out, and
+// signing in or copying its credentials is not done for a test — but
+// ~/.gemini/config/hooks.json is where agy's own /hooks command writes ("the
+// shared ~/.gemini/config/hooks.json", in its release notes).
 func (in Installer) planAntigravity(home string, remove bool) Plan {
 	path := filepath.Join(home, ".gemini", "config", "hooks.json")
 	plan := Plan{

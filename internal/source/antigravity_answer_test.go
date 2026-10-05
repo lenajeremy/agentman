@@ -30,6 +30,8 @@ type agyKeys struct {
 	// escapes are what Escape shows, one per press: in agy's subagent panel
 	// the first leaves the choice and the second closes the panel.
 	escapes []string
+	// after is what other keys and typed text show, one pane per press.
+	after map[string][]string
 }
 
 // capture returns the next pane in line, staying on the last one.
@@ -41,10 +43,18 @@ func (k *agyKeys) capture(context.Context, string) (string, error) {
 	return pane, nil
 }
 
+// show moves the screen on to what a key or text was set to show.
+func (k *agyKeys) show(input string) {
+	if next := k.after[input]; len(next) > 0 {
+		k.panes, k.after[input] = []string{next[0]}, next[1:]
+	}
+}
+
 func (k *agyKeys) keys(withSend bool) antigravityKeys {
 	keys := antigravityKeys{
 		typeText: func(_ context.Context, _, text string) error {
 			k.events = append(k.events, "type "+text)
+			k.show(text)
 			return nil
 		},
 		press: func(_ context.Context, _, key string) error {
@@ -71,6 +81,7 @@ func (k *agyKeys) keys(withSend bool) antigravityKeys {
 			if len(names) == 1 && names[0] == "Escape" && len(k.escapes) > 0 {
 				k.panes, k.escapes = []string{k.escapes[0]}, k.escapes[1:]
 			}
+			k.show(strings.Join(names, " "))
 			return nil
 		}
 	}
@@ -371,24 +382,25 @@ func TestAntigravitySubagentAnswerStopsWhenItsKeyIsRefused(t *testing.T) {
 // with a note; with no note it is the plain approval, and nothing else takes
 // one.
 func TestAntigravityApprovesWithANote(t *testing.T) {
-	pane := agyFixture(t, "command")
+	// Captured on agy 1.2.17: the prompt, then the box Tab opened. Submitted,
+	// the note reached the agent as its next message after the approved
+	// command ran.
+	pane := agyFixture(t, "command-amend-before")
 	s, keys, id := agyAsking(t, pane, true)
 	offered := s.sessions[id].meta.Question
 	if !offered.Options[0].WithText || offered.Options[1].WithText || offered.Options[3].WithText {
 		t.Fatalf("options = %+v", offered.Options)
 	}
-	amending := strings.Replace(strings.Replace(pane,
-		"> 1. Yes, run command\n", "> 1. Yes, and tell Antigravity CLI what to do next\n    > █\n", 1),
-		"  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command", "  enter Submit", 1)
-	keys.panes = []string{pane, amending}
-	if err := agyAnswer(t, s, id, protocol.QuestionAnswer{OptionKey: "1", Text: " then show me the output "}); err != nil {
+	keys.panes = []string{pane, agyFixture(t, "command-amend-open")}
+	if err := agyAnswer(t, s, id, protocol.QuestionAnswer{OptionKey: "1", Text: " then also say the word banana "}); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(keys.events, ";"); got != "send Tab;press then show me the output;send Enter" {
+	if got := strings.Join(keys.events, ";"); got != "send Tab;press then also say the word banana;send Enter" {
 		t.Errorf("keys = %q", got)
 	}
 
 	// Tab did not open the box: nothing is typed into whatever is there.
+	pane = agyFixture(t, "command")
 	s, keys, id = agyAsking(t, pane, true)
 	keys.panes = []string{pane, pane}
 	if err := agyAnswer(t, s, id, protocol.QuestionAnswer{OptionKey: "1", Text: "note"}); err == nil ||
@@ -405,5 +417,42 @@ func TestAntigravityApprovesWithANote(t *testing.T) {
 	s, _, id = agyAsking(t, agyFixture(t, "file-access"), true)
 	if s.sessions[id].meta.Question.Options[0].WithText {
 		t.Error("a note was offered where agy takes none")
+	}
+}
+
+// A three-question form answered the way agy 1.2.17 took it, captured live:
+// a single choice that is not the last is focused and selected with Enter,
+// which moves on; a multi-select moves on with →; the last is submitted with
+// Enter.
+func TestAntigravityAnswersAThreeQuestionForm(t *testing.T) {
+	first := agyFixture(t, "question-first-of-three")
+	s, keys, id := agyAsking(t, first, true)
+	keys.panes = []string{first, agyFixture(t, "question-first-of-three-focused")}
+	if err := agyAnswer(t, s, id, protocol.QuestionAnswer{OptionKey: "2"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(keys.events, ";"); got != "move ↓ enter" {
+		t.Errorf("first: %q", got)
+	}
+
+	second := agyFixture(t, "question-second-of-three")
+	s, keys, id = agyAsking(t, second, true)
+	keys.panes = []string{second, agyFixture(t, "question-second-of-three-checked")}
+	if err := agyAnswer(t, s, id, protocol.QuestionAnswer{Options: []string{"1", "3"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(keys.events, ";"); got != "press 1;press 3;send Right" {
+		t.Errorf("second: %q", got)
+	}
+
+	third := agyFixture(t, "question-third-of-three")
+	s, keys, id = agyAsking(t, third, true)
+	focused := strings.Replace(strings.Replace(third, "> 1. red", "  1. red", 1), "  2. blue", "> 2. blue", 1)
+	keys.panes = []string{third, focused}
+	if err := agyAnswer(t, s, id, protocol.QuestionAnswer{OptionKey: "2"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(keys.events, ";"); got != "move ↓ enter" {
+		t.Errorf("third: %q", got)
 	}
 }
