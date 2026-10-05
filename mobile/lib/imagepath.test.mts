@@ -130,3 +130,13 @@ test("shell characters still keep a row from looking like a file", () => {
     assert.equal(workspaceImage("Read", summary, CWD), null, summary);
   }
 });
+
+test("Codex's View image row opens the picture it looked at", () => {
+  // The daemon now turns Codex's file:// URL into this plain path.
+  assert.deepEqual(workspaceImage("View image", "/private/tmp/remediation-landing.png", CWD), {
+    request: "read_seen_file",
+    path: "/private/tmp/remediation-landing.png",
+  });
+  // The raw URL Codex records is not a path, so it must never become a link.
+  assert.equal(workspaceImage("View image", "file:///private/tmp/remediation-landing.png", CWD), null);
+});

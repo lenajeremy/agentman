@@ -3,6 +3,7 @@ package parser
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -252,8 +253,14 @@ func (p *CodexParser) Parse(line string, offset int64) []protocol.Message {
 		return []protocol.Message{base}
 
 	case "ImageView":
+		// "[image]" is what every parser leaves where a picture was read, and
+		// the path as a plain absolute path is what lets the app offer it:
+		// Codex records a file:// URL, which neither the daemon nor the app
+		// treats as a file the agent opened. Not clipped either — half a path
+		// opens nothing.
 		base.Role = protocol.RoleTool
-		base.Tool = &protocol.Tool{Name: "View image", Summary: clip(item.Path, SummaryChars), Status: protocol.ToolOK}
+		base.Text = "[image]"
+		base.Tool = &protocol.Tool{Name: "View image", Summary: codexFilePath(item.Path), Status: protocol.ToolOK}
 		return []protocol.Message{base}
 
 	case "CollabAgentToolCall":
@@ -382,4 +389,18 @@ func baseName(path string) string {
 		return path[i+1:]
 	}
 	return path
+}
+
+// codexFilePath turns the file:// URL Codex records for an image it viewed
+// into the absolute path it names, decoding escapes such as the %20 in a
+// macOS screenshot's name. Anything else is returned as it came.
+func codexFilePath(raw string) string {
+	if !strings.HasPrefix(raw, "file://") {
+		return raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Path == "" || (parsed.Host != "" && parsed.Host != "localhost") {
+		return raw
+	}
+	return parsed.Path
 }
