@@ -208,3 +208,23 @@ func TestCodexSetModelChoosesTheModelForThisSessionOnly(t *testing.T) {
 		t.Errorf("chose the reasoning level with %v, want only s", terminal.literals)
 	}
 }
+
+// Captured live after switching to GPT-6-Luna for the session: the model in
+// config.toml is then marked "(default)" rather than "(current)", and
+// switching back to it was not found until both marks were read off.
+func TestCodexPickerRowsAreReadWithoutTheirMarks(t *testing.T) {
+	rows, ok := codexModelRows(permissionPane(t, "codex_model_picker_other_current_real_pane.txt"))
+	if !ok {
+		t.Fatal("the picker was not recognised")
+	}
+	var labels []string
+	for _, row := range rows {
+		labels = append(labels, row.label)
+		if row.focused && row.label != "GPT-6-Luna" {
+			t.Errorf("focus on %q", row.label)
+		}
+	}
+	if !slices.Contains(labels, "GPT-6.1-Sol") || !slices.Contains(labels, "GPT-6-Luna") {
+		t.Errorf("rows read as %q", labels)
+	}
+}

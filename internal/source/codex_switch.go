@@ -233,8 +233,12 @@ func codexPickerOpen(pane string) bool {
 	return codexModelPickerOpen(pane) || strings.Contains(pane, "Select Reasoning Level for ")
 }
 
+// codexRowMark is what Codex adds after a model's name: "(current)" for the
+// one in use, "(default)" for the one config.toml names when that differs.
+var codexRowMark = regexp.MustCompile(`\s*\((?:current|default)\)$`)
+
 // codexModelRows reads the model picker's rows; a row's label is the model's
-// display name, with "(current)" after the one in use.
+// display name, without its marks.
 func codexModelRows(pane string) ([]paneRow, bool) {
 	if !codexModelPickerOpen(pane) {
 		return nil, false
@@ -248,7 +252,11 @@ func codexModelRows(pane string) ([]paneRow, bool) {
 	}
 	rows := pickerRows(lines, "›")
 	for index := range rows {
-		rows[index].label = strings.TrimSpace(strings.TrimSuffix(rows[index].label, "(current)"))
+		label := rows[index].label
+		for codexRowMark.MatchString(label) {
+			label = codexRowMark.ReplaceAllString(label, "")
+		}
+		rows[index].label = strings.TrimSpace(label)
 	}
 	return rows, true
 }
