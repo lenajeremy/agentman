@@ -51,6 +51,10 @@ const (
 	previewJPEGQuality = 85
 )
 
+// previewSlots lets one image at a time be decoded and resized. See
+// previewImage.
+var previewSlots = make(chan struct{}, 1)
+
 var (
 	errPreviewTooLarge    = errors.New("image is too large to preview (32 MiB limit)")
 	errPreviewTooManyPx   = errors.New("image is too large to preview (over 40 megapixels)")
@@ -102,6 +106,11 @@ func previewImage(r io.Reader, mime string) ([]byte, string, protocol.ImageSourc
 		return nil, "", source, errPreviewUnresizable
 	}
 
+	// One at a time: a decoded image is four bytes a pixel, and on macOS the
+	// memory a preview touches stays charged to the daemon after it is freed,
+	// so two large previews at once would set that weight for good.
+	previewSlots <- struct{}{}
+	defer func() { <-previewSlots }()
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, "", source, err
@@ -120,23 +129,23 @@ func previewImage(r io.Reader, mime string) ([]byte, string, protocol.ImageSourc
 }
 
 // fitImage scales an image so its longest edge is at most dimension.
+//
+// The result is a plain RGBA whatever the source was: paletted, CMYK, 16-bit.
+// That is also premultiplied alpha, which is what averaging needs — mixing a
+// transparent pixel into an opaque one otherwise darkens the edge.
 func fitImage(img image.Image, dimension int) *image.RGBA {
 	bounds := img.Bounds()
 	width, height := bounds.Dx(), bounds.Dy()
 
-	// Drawn into a plain RGBA first, whatever it was: paletted, CMYK, 16-bit.
-	// That is also premultiplied alpha, which is what averaging needs — mixing
-	// a transparent pixel into an opaque one otherwise darkens the edge.
-	source := image.NewRGBA(image.Rect(0, 0, width, height))
-	draw.Draw(source, source.Bounds(), img, bounds.Min, draw.Src)
-
 	longest := max(width, height)
 	if longest <= dimension {
-		return source
+		fitted := image.NewRGBA(image.Rect(0, 0, width, height))
+		draw.Draw(fitted, fitted.Bounds(), img, bounds.Min, draw.Src)
+		return fitted
 	}
 	scaledWidth := max(1, width*dimension/longest)
 	scaledHeight := max(1, height*dimension/longest)
-	return resizeArea(source, scaledWidth, scaledHeight)
+	return resizeArea(img, scaledWidth, scaledHeight)
 }
 
 // resizeArea shrinks an image by area averaging: each output pixel is the
@@ -147,17 +156,23 @@ func fitImage(img image.Image, dimension int) *image.RGBA {
 // rest, which drops the thin strokes text is made of; averaging keeps every
 // source pixel's contribution. Done as two one-dimensional passes, which is
 // the same result as the two-dimensional average and far less work.
-func resizeArea(source *image.RGBA, width, height int) *image.RGBA {
-	sourceWidth, sourceHeight := source.Bounds().Dx(), source.Bounds().Dy()
+//
+// The source is read in place, one row at a time converted to premultiplied
+// RGBA. It used to be copied whole into an RGBA first, which for a large photo
+// doubled the memory a preview needed.
+func resizeArea(source image.Image, width, height int) *image.RGBA {
+	bounds := source.Bounds()
+	sourceWidth, sourceHeight := bounds.Dx(), bounds.Dy()
 
 	// Across each row first, into an image as tall as the source.
+	row := image.NewRGBA(image.Rect(0, 0, sourceWidth, 1))
 	across := image.NewRGBA(image.Rect(0, 0, width, sourceHeight))
 	columns := areaWeights(sourceWidth, width)
 	for y := 0; y < sourceHeight; y++ {
-		in := source.Pix[y*source.Stride:]
+		draw.Draw(row, row.Bounds(), source, image.Point{X: bounds.Min.X, Y: bounds.Min.Y + y}, draw.Src)
 		out := across.Pix[y*across.Stride:]
 		for x, taps := range columns {
-			blend(out[x*4:x*4+4], in, taps, 4)
+			blend(out[x*4:x*4+4], row.Pix, taps, 4)
 		}
 	}
 
