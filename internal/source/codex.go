@@ -899,10 +899,15 @@ func (s *CodexSource) Page(ctx context.Context, sessionID, before string, limit 
 		return protocol.NewPage(sessionID, nil, "", false), nil
 	}
 
+	// A fresh parser per page: reading backwards, a question's answer is met
+	// before the question, and Unsettled keeps the page from stopping between
+	// the two.
+	p := parser.NewCodexParser(sessionID)
 	opts := jsonl.BackwardOptions{
 		Want:         limit,
-		Map:          parser.NewCodexParser(sessionID).Parse,
+		Map:          p.Parse,
 		MaxScanBytes: jsonl.DefaultScanBytes,
+		Unsettled:    p.AwaitingCalls,
 	}
 	if before != "" {
 		offset, err := strconv.ParseInt(before, 10, 64)
