@@ -1,6 +1,7 @@
 package source
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -210,4 +211,30 @@ func limitOrDefault(limit int) int {
 		return DefaultPastLimit
 	}
 	return limit
+}
+
+// scanTail applies visit to the lines in the last limit bytes of a file,
+// newest first, until it returns true. A first line cut by the window simply
+// fails to parse.
+func scanTail(path string, limit int64, visit func([]byte) bool) {
+	file, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return
+	}
+	offset := max(info.Size()-limit, 0)
+	buffer := make([]byte, info.Size()-offset)
+	n, _ := file.ReadAt(buffer, offset)
+	buffer = buffer[:n]
+	for end := len(buffer); end > 0; {
+		start := bytes.LastIndexByte(buffer[:end], '\n') + 1
+		if line := buffer[start:end]; len(line) > 0 && visit(line) {
+			return
+		}
+		end = start - 1
+	}
 }

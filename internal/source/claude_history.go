@@ -1,6 +1,7 @@
 package source
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -95,7 +96,7 @@ func (s *ClaudeSource) Past(ctx context.Context, dir string, limit int) ([]proto
 			ID:             id,
 			Kind:           protocol.KindClaude,
 			NativeID:       sessionID,
-			Name:           historyName(head.prompt, cwd),
+			Name:           historyName(claudeTranscriptTitle(candidate.path, head.titles), cwd),
 			Cwd:            cwd,
 			State:          protocol.StateEnded,
 			Inject:         protocol.InjectNone,
@@ -209,6 +210,92 @@ type claudeHead struct {
 	cwd       string
 	prompt    string
 	startedAt int64
+	// titles are the names the head gave the session, with the opening
+	// prompt as the last resort. See claudeTranscriptTitle.
+	titles claudeTitles
+}
+
+// claudeTitles are the names a transcript records for its session. Claude
+// writes each as a record of its own, and again when a session is resumed.
+type claudeTitles struct {
+	custom string // set by the person with /rename
+	agent  string // the name the live session is listed under
+	ai     string // a title Claude made up from the conversation
+	prompt string // the opening prompt, when nothing named the session
+}
+
+// best is the name a person would recognise: their own first, then the one the
+// live row showed, then Claude's, then what they first asked.
+func (t claudeTitles) best() string {
+	for _, name := range []string{t.custom, t.agent, t.ai, t.prompt} {
+		if strings.TrimSpace(name) != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+// claudeTitleRecord reads a title record, reporting which kind it is.
+func claudeTitleRecord(line []byte) (kind, title string) {
+	if !bytes.Contains(line, []byte(`-title"`)) && !bytes.Contains(line, []byte(`"agent-name"`)) {
+		return "", "" // most lines: skip the decode
+	}
+	var record struct {
+		Type        string `json:"type"`
+		CustomTitle string `json:"customTitle"`
+		AgentName   string `json:"agentName"`
+		AITitle     string `json:"aiTitle"`
+	}
+	if json.Unmarshal(line, &record) != nil {
+		return "", ""
+	}
+	switch record.Type {
+	case "custom-title":
+		return record.Type, record.CustomTitle
+	case "agent-name":
+		return record.Type, record.AgentName
+	case "ai-title":
+		return record.Type, record.AITitle
+	}
+	return "", ""
+}
+
+// claudeTitleScanBytes is how much of a transcript's end is searched for the
+// newest title, the same window the model is read from.
+const claudeTitleScanBytes = modelScanBytes
+
+// claudeTranscriptTitle names a past session. The newest title of each kind
+// is taken from the end of the transcript, where a rename or a resume writes
+// it, and the head's are used for any kind the end does not have.
+func claudeTranscriptTitle(path string, head claudeTitles) string {
+	titles := claudeTitles{prompt: head.prompt}
+	found := map[string]bool{}
+	scanTail(path, claudeTitleScanBytes, func(line []byte) bool {
+		kind, title := claudeTitleRecord(line)
+		if kind == "" || title == "" || found[kind] {
+			return false
+		}
+		found[kind] = true
+		switch kind {
+		case "custom-title":
+			titles.custom = title
+		case "agent-name":
+			titles.agent = title
+		case "ai-title":
+			titles.ai = title
+		}
+		return found["custom-title"] // nothing outranks the person's own
+	})
+	if titles.custom == "" {
+		titles.custom = head.custom
+	}
+	if titles.agent == "" {
+		titles.agent = head.agent
+	}
+	if titles.ai == "" {
+		titles.ai = head.ai
+	}
+	return titles.best()
 }
 
 // claudeTranscriptHead reads a session's working directory, opening prompt and
@@ -229,6 +316,14 @@ func claudeTranscriptHead(path string) claudeHead {
 		if json.Unmarshal(line, &record) != nil {
 			return false
 		}
+		switch kind, title := claudeTitleRecord(line); kind {
+		case "custom-title":
+			head.titles.custom = title
+		case "agent-name":
+			head.titles.agent = title
+		case "ai-title":
+			head.titles.ai = title
+		}
 		if head.cwd == "" && record.Cwd != "" {
 			head.cwd = record.Cwd
 		}
@@ -245,7 +340,31 @@ func claudeTranscriptHead(path string) claudeHead {
 		}
 		return head.cwd != "" && head.prompt != ""
 	})
+	head.titles.prompt = head.prompt
 	return head
+}
+
+// scheduledTaskName reads the task a scheduled run was started for. Its whole
+// prompt is the task's block, which usablePrompt rightly strips as machinery,
+// leaving the session named after its folder; the task's name says what it is.
+func scheduledTaskName(text string) string {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "<scheduled-task ") {
+		return ""
+	}
+	opening, _, ok := strings.Cut(text, ">")
+	if !ok {
+		return ""
+	}
+	_, rest, ok := strings.Cut(opening, ` name="`)
+	if !ok {
+		return ""
+	}
+	name, _, ok := strings.Cut(rest, `"`)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(name)
 }
 
 // claudePromptText pulls the person-written text out of one user message.
@@ -256,6 +375,9 @@ func claudeTranscriptHead(path string) claudeHead {
 func claudePromptText(raw json.RawMessage) string {
 	var text string
 	if json.Unmarshal(raw, &text) == nil {
+		if name := scheduledTaskName(text); name != "" {
+			return name
+		}
 		return usablePrompt(text)
 	}
 	var blocks []struct {
