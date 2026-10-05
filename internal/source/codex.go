@@ -164,6 +164,11 @@ type CodexSource struct {
 	listPanes func(context.Context) ([]tmux.Session, error)
 	// capturePane is injectable for the last-moment send safety check.
 	capturePane func(context.Context, string) (string, error)
+	// revealQuestion reads a pane for a pending question, opening Codex's
+	// collapsed question tray first if that is what is showing. Injectable so
+	// discovery can be tested without touching a real tmux server: unlike a
+	// capture, this can press a key.
+	revealQuestion func(context.Context, string) (string, error)
 	// models remembers each session's model; see modelCache.
 	models *modelCache
 	// readMeta and readActivity are injectable for cache instrumentation tests.
@@ -267,15 +272,16 @@ func NewCodexSource(home string) (*CodexSource, error) {
 		}
 	}
 	return &CodexSource{
-		home:         home,
-		processCheck: codexRunning,
-		listPanes:    tmux.List,
-		capturePane:  tmux.Capture,
-		models:       newModelCache(),
-		readMeta:     readCodexMeta,
-		readActivity: codexActivity,
-		rolloutCache: map[string]codexRolloutCacheEntry{},
-		sessions:     map[string]codexSession{},
+		home:           home,
+		processCheck:   codexRunning,
+		listPanes:      tmux.List,
+		capturePane:    tmux.Capture,
+		revealQuestion: tmux.RevealCodexQuestion,
+		models:         newModelCache(),
+		readMeta:       readCodexMeta,
+		readActivity:   codexActivity,
+		rolloutCache:   map[string]codexRolloutCacheEntry{},
+		sessions:       map[string]codexSession{},
 	}, nil
 }
 
@@ -294,7 +300,7 @@ func (s *CodexSource) CurrentQuestion(ctx context.Context, sessionID string) (*p
 	if session.tmuxName == "" {
 		return session.meta.Question, nil
 	}
-	pane, err := tmux.RevealCodexQuestion(ctx, session.tmuxName)
+	pane, err := s.revealQuestion(ctx, session.tmuxName)
 	if err != nil {
 		return nil, err
 	}
@@ -352,23 +358,16 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	}
 	s.mu.RUnlock()
 
-	paneByCwd := map[string]tmux.Session{}
-	ambiguous := map[string]bool{}
+	// Codex panes by directory. A directory with one pane can be matched to
+	// its newest rollout; one with several cannot, because nothing on disk
+	// says which pane wrote which rollout, and showing a pane the wrong
+	// conversation invites typing into the wrong agent.
+	var codexPanes []tmux.Session
+	panesByCwd := map[string][]tmux.Session{}
 	for _, pane := range panes {
-		if !isCodexPane(pane) {
-			continue
-		}
-		if _, seen := paneByCwd[pane.Cwd]; seen {
-			ambiguous[pane.Cwd] = true
-			continue
-		}
-		paneByCwd[pane.Cwd] = pane
-	}
-	// Panes still waiting for their first rollout, filled in below.
-	unmatched := map[string]tmux.Session{}
-	for cwd, pane := range paneByCwd {
-		if !ambiguous[cwd] {
-			unmatched[cwd] = pane
+		if isCodexPane(pane) {
+			codexPanes = append(codexPanes, pane)
+			panesByCwd[pane.Cwd] = append(panesByCwd[pane.Cwd], pane)
 		}
 	}
 
@@ -447,13 +446,26 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 
 			tmuxName := ""
 			inject := protocol.InjectNone
-			pane, hasPane := paneByCwd[meta.Payload.Cwd]
-			if hasPane && !ambiguous[meta.Payload.Cwd] && !claimed[pane.Name] &&
-				codexRolloutCanClaimPane(meta, pane) {
+			var pane tmux.Session
+			hasPane := false
+			switch candidates := panesByCwd[meta.Payload.Cwd]; {
+			case len(candidates) == 1:
+				pane = candidates[0]
+				hasPane = codexRolloutCanClaimPane(meta, pane)
+			case len(candidates) > 1:
+				// Shared directory: a pane keeps only the rollout it already
+				// held while it was alone there. A second Codex opening beside
+				// it does not make that match any less certain.
+				for _, candidate := range candidates {
+					if boundToPane[path] == candidate.Name {
+						pane, hasPane = candidate, true
+					}
+				}
+			}
+			if hasPane && !claimed[pane.Name] {
 				claimed[pane.Name] = true
 				tmuxName = pane.Name
 				inject = protocol.InjectTmux
-				delete(unmatched, meta.Payload.Cwd)
 				// Key a tmux-backed session on the pane rather than the
 				// rollout. The pane exists from launch and the rollout does
 				// not, so this keeps one stable id across the moment the
@@ -482,7 +494,7 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				// The pane's process is the root of everything codex runs, so
 				// servers it starts can be traced back to this session.
 				session.AgentPID = pane.PanePID
-				if q := detectCodexQuestion(ctx, tmuxName); q != nil {
+				if q := s.detectQuestion(ctx, tmuxName); q != nil {
 					session.Question = q
 					session.State = protocol.StateWaitingInput
 				}
@@ -500,11 +512,17 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 		}
 	}
 
-	// A pane running codex that has written no rollout yet is still a real
-	// session the user may need to reach — Codex writes nothing to disk until
-	// its first turn, so without this a session sitting on its trust dialog,
-	// or simply idle before the first prompt, is invisible to the phone.
-	for cwd, pane := range unmatched {
+	// A pane with no rollout of its own is still a real session the user may
+	// need to reach: Codex writes nothing to disk until its first turn, so one
+	// sitting on its trust dialog, or idle before the first prompt, has none
+	// yet; and a pane sharing its directory with another cannot be matched to
+	// one. Without this such panes were invisible: 14 Codex panes in one
+	// directory showed on the phone as nothing.
+	for _, pane := range codexPanes {
+		if claimed[pane.Name] {
+			continue
+		}
+		cwd := pane.Cwd
 		id := string(protocol.KindCodex) + ":" + tmuxID(pane.Name)
 		// Timestamps come from tmux, not the clock. Using the current time
 		// made every sweep look like a change, so an idle session emitted a
@@ -526,7 +544,7 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			LastActivityAt: started.UnixMilli(),
 			AgentPID:       pane.PanePID,
 		}
-		if q := detectCodexQuestion(ctx, pane.Name); q != nil {
+		if q := s.detectQuestion(ctx, pane.Name); q != nil {
 			session.Question = q
 			session.State = protocol.StateWaitingInput
 		}

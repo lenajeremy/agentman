@@ -160,8 +160,8 @@ func rejectSendIntoLiveQuestion(
 	return nil
 }
 
-func detectCodexQuestion(ctx context.Context, tmuxName string) *protocol.Question {
-	pane, err := tmux.RevealCodexQuestion(ctx, tmuxName)
+func (s *CodexSource) detectQuestion(ctx context.Context, tmuxName string) *protocol.Question {
+	pane, err := s.revealQuestion(ctx, tmuxName)
 	if err != nil {
 		return nil
 	}
