@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/source"
 	"github.com/lenajeremy/agentman/internal/tmux"
@@ -65,6 +66,11 @@ func runWrap(ctx context.Context, agent string, args []string) error {
 	if err != nil {
 		return err
 	}
+	if agent == "kiro" && !kiroResumes(args) {
+		if home, err := os.UserHomeDir(); err == nil {
+			prefix = append(prefix, hook.KiroAgentArgs(home, args)...)
+		}
+	}
 
 	name := tmux.NewName(agent)
 	command := append(append([]string{binary}, prefix...), args...)
@@ -81,6 +87,20 @@ func runWrap(ctx context.Context, agent string, args []string) error {
 	// Replace this process with the tmux client so the user gets tmux's own
 	// terminal handling — signals, resizes, and scrollback all behave normally.
 	return tmux.Attach(name)
+}
+
+// kiroResumes reports whether arguments to `kiro-cli chat` reopen a session.
+// A reopened session keeps the agent it ran as; starting it as Agentman's
+// agent would switch it.
+func kiroResumes(args []string) bool {
+	for _, arg := range args {
+		switch {
+		case arg == "-r", arg == "--resume", arg == "--resume-id", arg == "--resume-picker",
+			arg == "--list", strings.HasPrefix(arg, "--resume-id="):
+			return true
+		}
+	}
+	return false
 }
 
 // resolveResumeFlag rewrites `am <agent> --resume <id>` into whatever that

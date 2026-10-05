@@ -92,6 +92,8 @@ func newTestKiro(t *testing.T, home string, table string, panes ...tmux.Session)
 	}
 	s.capturePane = func(context.Context, string) (string, error) { return "", nil }
 	s.captureScrollback = func(context.Context, string, int) (string, error) { return "", nil }
+	// No model list from the real Kiro: a test that wants one sets it.
+	s.models = &kiroModelCatalog{}
 	// No test reaches a real pane: a test that answers replaces these.
 	s.sendKeys = func(context.Context, string, ...string) error { return errors.New("test: no tmux") }
 	s.sendText = func(context.Context, string, string) error { return errors.New("test: no tmux") }
@@ -515,7 +517,8 @@ func TestKiroStatusLine(t *testing.T) {
 			t.Errorf("kiroPaneStatus(%.40q) = %+v %v, want %+v %v", tc.pane, got, ok, tc.want, tc.visible)
 		}
 	}
-	for agent, want := range map[string]string{"kiro_default": "", "": "", "kiro_planner": "Plan", "Plan": "Plan", "amhook": "amhook"} {
+	for agent, want := range map[string]string{"kiro_default": "kiro_default", "": "", "kiro_planner": "kiro_planner",
+		"Plan": "kiro_planner", "kiro_guide": "kiro_guide", "amhook": "amhook"} {
 		if got := kiroMode(agent); got != want {
 			t.Errorf("kiroMode(%q) = %q, want %q", agent, got, want)
 		}
@@ -651,8 +654,8 @@ func TestKiroResumeIsNamedAsDiscoveryWillListIt(t *testing.T) {
 	}
 }
 
-// The phone shows the agent a session runs as — its mode — and how full its
-// context is, beside the model. Kiro's default agent is nothing worth a label.
+// The phone shows the agent a session runs as — its mode, in the name the
+// phone switches it by — and how full its context is, beside the model.
 func TestKiroModeAndContextReachTheSession(t *testing.T) {
 	home := t.TempDir()
 	pid := os.Getpid()
@@ -664,10 +667,10 @@ func TestKiroModeAndContextReachTheSession(t *testing.T) {
 		`"hello"`, kiroLinePrompt, kiroLineReply)
 	s := newTestKiro(t, home, fmt.Sprintf("%d 1 kiro-cli-chat\n", pid))
 	sessions := discoverKiro(t, s)
-	if got := sessions["kiro:planner"]; got.Mode != "Plan" || got.ContextPercent != 2 || got.Model != "auto" {
+	if got := sessions["kiro:planner"]; got.Mode != "kiro_planner" || got.ContextPercent != 2 || got.Model != "auto" {
 		t.Errorf("planner from metadata = mode %q context %d model %q", got.Mode, got.ContextPercent, got.Model)
 	}
-	if got := sessions["kiro:plain"]; got.Mode != "" || got.ContextPercent != 7 {
+	if got := sessions["kiro:plain"]; got.Mode != "kiro_default" || got.ContextPercent != 7 {
 		t.Errorf("default agent = mode %q context %d", got.Mode, got.ContextPercent)
 	}
 
@@ -681,7 +684,7 @@ func TestKiroModeAndContextReachTheSession(t *testing.T) {
 		if got.Inject != protocol.InjectTmux {
 			continue
 		}
-		if got.Mode != "Plan" || got.ContextPercent != 12 || got.Model != "claude-haiku-4.5" {
+		if got.Mode != "kiro_planner" || got.ContextPercent != 12 || got.Model != "claude-haiku-4.5" {
 			t.Errorf("%s from its status line = mode %q context %d model %q", id, got.Mode, got.ContextPercent, got.Model)
 		}
 	}

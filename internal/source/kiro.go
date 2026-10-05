@@ -63,6 +63,8 @@ type KiroSource struct {
 	// is only a description.
 	sendKeys func(context.Context, string, ...string) error
 	sendText func(context.Context, string, string) error
+	// models is Kiro's model list, fetched in the background; see kiro_switch.go.
+	models *kiroModelCatalog
 
 	mu       sync.RWMutex
 	sessions map[string]kiroSession
@@ -150,6 +152,7 @@ func NewKiroSource(home string) (*KiroSource, error) {
 		captureScrollback: tmux.CaptureScrollback,
 		sendKeys:          tmux.SendKeys,
 		sendText:          tmux.Send,
+		models:            &kiroModelCatalog{fetch: kiroListModels},
 		sessions:          map[string]kiroSession{},
 		metas:             map[string]kiroMetaEntry{},
 		states:            map[string]kiroStateEntry{},
@@ -274,6 +277,7 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 			status = s.applyPane(ctx, &session, tmuxName, transcript, status)
 		}
 		status.apply(&session)
+		s.offerSwitches(&session)
 		found = append(found, session)
 		next[id] = kiroSession{meta: session, transcript: transcript, tmuxName: tmuxName, status: status}
 	}
@@ -296,6 +300,7 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 		}
 		status := s.applyPane(ctx, &session, pane.Name, "", kiroStatus{})
 		status.apply(&session)
+		s.offerSwitches(&session)
 		found = append(found, session)
 		next[id] = kiroSession{meta: session, tmuxName: pane.Name, status: status}
 	}

@@ -72,16 +72,13 @@ func kiroMetaStatus(meta kiroMeta) kiroStatus {
 	return status
 }
 
-// kiroMode names the agent a session runs as, for the phone to show beside its
-// model — or "" for Kiro's default agent, which is nothing worth a label.
-// The status line already says "Plan" for kiro_planner; the metadata says
-// kiro_planner, and reads the same way here.
+// kiroMode names the agent a session runs as, in the name `/agent swap`
+// takes, which is also what the phone switches it to. The status line says
+// "Plan" for kiro_planner and the agent's own name for every other; the
+// metadata always says the name.
 func kiroMode(agent string) string {
-	switch agent {
-	case "", "kiro_default":
-		return ""
-	case "kiro_planner":
-		return "Plan"
+	if agent == "Plan" {
+		return "kiro_planner"
 	}
 	return agent
 }

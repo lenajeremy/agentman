@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/source"
 	"github.com/lenajeremy/agentman/internal/tmux"
@@ -332,6 +333,11 @@ func startTerminalSession(ctx context.Context, kind protocol.Kind, dir, prompt s
 		// Kiro picks its own session id once it starts, so the pane is the
 		// only name that exists yet; the adapter keys the session on it.
 		argv = append(argv, "chat")
+		// Agentman's own agent, when the user opted in to Kiro's hooks
+		// (`am install-hooks --kiro`); kiro_default otherwise.
+		if home, err := os.UserHomeDir(); err == nil {
+			argv = append(argv, hook.KiroAgentArgs(home, nil)...)
+		}
 		id = "kiro:tmux-" + name
 	case protocol.KindAntigravity:
 		id = "antigravity:tmux-" + name
