@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -93,6 +94,15 @@ var (
 	}
 )
 
+// Option keys that are not a letter Cursor reads: named keys, and a decline
+// made through the answer box.
+const (
+	cursorCLITabKey     = "tab"
+	cursorCLIBackTabKey = "shift+tab"
+	cursorCLISkipKey    = "skip"
+	cursorCLICancelKey  = "esc"
+)
+
 // cursorCLIQuestionFromPane reports the decision a pane is waiting on.
 func cursorCLIQuestionFromPane(pane string) *protocol.Question {
 	return parseCursorCLIScreen(pane).question
@@ -115,6 +125,12 @@ func parseCursorCLIScreen(pane string) cursorCLIScreen {
 		if strings.HasPrefix(prompt, marker) {
 			q := &protocol.Question{Title: title, Prompt: title + ".", Custom: true,
 				Detail: cursorCLITextBoxDetail(lines)}
+			// "empty to skip" and "Esc to cancel", as each box says.
+			if strings.Contains(prompt, "empty to skip") {
+				q.Options = append(q.Options, protocol.QuestionOption{Key: cursorCLISkipKey, Label: "Skip"})
+			} else if strings.Contains(prompt, "Esc to cancel") {
+				q.Options = append(q.Options, protocol.QuestionOption{Key: cursorCLICancelKey, Label: "Cancel"})
+			}
 			q.ID = terminalQuestionID(q)
 			screen.question, screen.textBox = q, true
 			return screen
@@ -394,24 +410,40 @@ func cursorCLIMenuQuestion(lines []string) (*protocol.Question, string) {
 	}
 	q := &protocol.Question{Title: title, Prompt: cursorCLIBoxText(lines[promptAt]), Detail: detail}
 	custom := ""
+	declines := false
+	for _, option := range options {
+		declines = declines || (!option.proposes() && option.letter() == "n")
+	}
 	for _, option := range options {
 		key := option.letter()
-		if option.proposes() {
-			// Chosen with text from the phone: the key opens Cursor's box and
-			// the text goes in it. A bare choice would leave Cursor waiting
-			// in that box for an Enter only a named-key send can give.
-			if key != "" && custom == "" {
-				custom = key
-				q.Custom = true
+		switch {
+		case option.proposes():
+			// With text from the phone the key opens Cursor's box and the text
+			// goes in it. Without text it is still a plain decline — the box
+			// takes an empty Enter as "skip" — unless the menu already has
+			// one of its own, or it is the plan's, which has nothing to say
+			// without text.
+			if key == "" || custom != "" {
+				continue
 			}
-			continue
+			custom = key
+			q.Custom = true
+			if !declines && title != "Cursor plan" {
+				label := "Reject"
+				if strings.HasPrefix(option.label, "Skip") {
+					label = "Skip"
+				}
+				q.Options = append(q.Options, protocol.QuestionOption{Key: cursorCLISkipKey, Label: label})
+			}
+		case key != "":
+			q.Options = append(q.Options, protocol.QuestionOption{Key: key, Label: option.label})
+		case slices.Contains(option.keys, "tab"):
+			// "Add Shell(echo) to allowlist?", "Allowlist MCP Tool", "Always
+			// allow example.com": shown as Cursor offers them, pressed by name.
+			q.Options = append(q.Options, protocol.QuestionOption{Key: cursorCLITabKey, Label: option.label})
+		case slices.Contains(option.keys, "shift+tab"):
+			q.Options = append(q.Options, protocol.QuestionOption{Key: cursorCLIBackTabKey, Label: option.label})
 		}
-		if key == "" {
-			// Tab and shift+Tab options (allowlist, Run Everything) need a
-			// named-key send; they are left on the Mac until there is one.
-			continue
-		}
-		q.Options = append(q.Options, protocol.QuestionOption{Key: key, Label: option.label})
 	}
 	if len(q.Options) == 0 && !q.Custom {
 		return nil, ""
@@ -619,6 +651,20 @@ func (s *CursorCLISource) Answer(ctx context.Context, sessionID string, answer p
 		if !questionHasOption(screen.question, key) {
 			return errors.New("source: that option is no longer current; refresh the session")
 		}
+		switch key {
+		case cursorCLITabKey:
+			return s.pressKeys(ctx, session.pane, "Tab")
+		case cursorCLIBackTabKey:
+			return s.pressKeys(ctx, session.pane, "BTab")
+		case cursorCLICancelKey:
+			return s.pressKeys(ctx, session.pane, "Escape")
+		case cursorCLISkipKey:
+			// An empty answer in Cursor's box is its plain skip.
+			if err := s.openTextBox(ctx, session.pane, screen); err != nil {
+				return err
+			}
+			return s.pressKeys(ctx, session.pane, "Enter")
+		}
 		return s.typeKey(ctx, session.pane, key)
 	}
 	if !screen.question.Custom {
@@ -627,30 +673,41 @@ func (s *CursorCLISource) Answer(ctx context.Context, sessionID string, answer p
 	if containsControl(text) {
 		return errors.New("source: an answer cannot contain control characters")
 	}
-	if !screen.textBox {
-		if err := s.typeKey(ctx, session.pane, screen.customKey); err != nil {
-			return err
-		}
-		// Cursor swaps the menu for its box on the next frame. Typing before
-		// it has would put the text into the menu, where each letter is a
-		// shortcut.
-		deadline := time.Now().Add(cursorCLITextBoxWait)
-		for {
-			next, err := s.paneScreen(ctx, session.pane)
-			if err == nil && next.textBox {
-				break
-			}
-			if time.Now().After(deadline) {
-				return errors.New("source: Cursor did not open its answer box; check the session on the Mac")
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(80 * time.Millisecond):
-			}
-		}
+	if err := s.openTextBox(ctx, session.pane, screen); err != nil {
+		return err
 	}
 	return s.typeText(ctx, session.pane, text)
+}
+
+// openTextBox makes sure Cursor's answer box is open, pressing the key that
+// opens it when the screen is still the menu.
+func (s *CursorCLISource) openTextBox(ctx context.Context, pane string, screen cursorCLIScreen) error {
+	if screen.textBox {
+		return nil
+	}
+	if screen.customKey == "" {
+		return errors.New("source: this Cursor question has no answer box")
+	}
+	if err := s.typeKey(ctx, pane, screen.customKey); err != nil {
+		return err
+	}
+	// Cursor swaps the menu for its box on the next frame. Typing before it
+	// has would put the text into the menu, where each letter is a shortcut.
+	deadline := time.Now().Add(cursorCLITextBoxWait)
+	for {
+		next, err := s.paneScreen(ctx, pane)
+		if err == nil && next.textBox {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return errors.New("source: Cursor did not open its answer box; check the session on the Mac")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(80 * time.Millisecond):
+		}
+	}
 }
 
 // containsControl rejects terminal control characters other than newlines,
@@ -672,6 +729,13 @@ func (s *CursorCLISource) typeKey(ctx context.Context, pane, key string) error {
 		return s.sendKey(ctx, pane, key)
 	}
 	return tmux.Answer(ctx, pane, key)
+}
+
+func (s *CursorCLISource) pressKeys(ctx context.Context, pane string, keys ...string) error {
+	if s.sendKeys != nil {
+		return s.sendKeys(ctx, pane, keys...)
+	}
+	return tmux.SendKeys(ctx, pane, keys...)
 }
 
 func (s *CursorCLISource) typeText(ctx context.Context, pane, text string) error {

@@ -400,8 +400,8 @@ func TestCursorCLIShellApprovalIsAnswerableAndBlocksNormalSend(t *testing.T) {
 	q := cursorCLIQuestionFromPane(pane)
 	// "Skip & tell the agent…" is the custom answer: n opens Cursor's box and
 	// the phone's text goes in it.
-	if q == nil || q.Detail != "sleep 20 in .\n\nNot in allowlist: sleep" || len(q.Options) != 1 ||
-		q.Options[0].Key != "y" || !q.Custom {
+	if q == nil || q.Detail != "sleep 20 in .\n\nNot in allowlist: sleep" || len(q.Options) != 4 ||
+		q.Options[0].Key != "y" || q.Options[3].Key != "skip" || !q.Custom {
 		t.Fatalf("approval menu not parsed: %+v", q)
 	}
 	s, err := NewCursorCLISource(t.TempDir())

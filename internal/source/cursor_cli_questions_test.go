@@ -55,14 +55,14 @@ func TestCursorCLIScreensFromRealPanes(t *testing.T) {
 		"hints":                      {},
 		"slash-menu":                 {},
 		"text-question":              {busy: true},
-		"shell-approval":             {title: "Shell command", keys: "y", custom: true, customKey: "n", detail: "echo agentman-research in ."},
-		"skip-box":                   {title: "Tell the agent what to do instead", custom: true, textBox: true, detail: "echo agentman-research in .", busy: true},
+		"shell-approval":             {title: "Shell command", keys: "y,tab,shift+tab,skip", custom: true, customKey: "n", detail: "echo agentman-research in ."},
+		"skip-box":                   {title: "Tell the agent what to do instead", keys: "skip", custom: true, textBox: true, detail: "echo agentman-research in .", busy: true},
 		"delete-approval":            {title: "Delete file", keys: "y,n", detail: "Delete file: hello.txt"},
 		"plan-approval-reconnecting": {title: "Cursor plan", keys: "b", custom: true, customKey: "p", detail: "Create goodbye.txt", busy: true},
 		"plan-approval-usage-limit":  {title: "Cursor plan", keys: "b", custom: true, customKey: "p", detail: "Create goodbye.txt"},
 		"plan-approval-focus-2":      {title: "Cursor plan", keys: "b", custom: true, customKey: "p", detail: "Create goodbye.txt"},
-		"plan-revise-box":            {title: "Describe how to revise the plan", custom: true, textBox: true},
-		"plan-rejected-revise-box":   {title: "Describe how to revise the plan", custom: true, textBox: true},
+		"plan-revise-box":            {title: "Describe how to revise the plan", keys: "esc", custom: true, textBox: true},
+		"plan-rejected-revise-box":   {title: "Describe how to revise the plan", keys: "esc", custom: true, textBox: true},
 		"resume-picker":              {blocked: true},
 	}
 	for name, want := range cases {
@@ -184,6 +184,16 @@ func (f *fakeCursorPane) key(_ context.Context, _ string, key string) error {
 	return nil
 }
 
+func (f *fakeCursorPane) keys(_ context.Context, _ string, keys ...string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.typed = append(f.typed, "keys:"+strings.Join(keys, "+"))
+	if len(f.screens) > 1 {
+		f.screens = f.screens[1:]
+	}
+	return nil
+}
+
 func (f *fakeCursorPane) text(_ context.Context, _ string, text string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -198,7 +208,7 @@ func cursorCLIAnswerFixture(t *testing.T, screens ...string) (*CursorCLISource, 
 		t.Fatal(err)
 	}
 	pane := &fakeCursorPane{screens: screens}
-	s.capturePane, s.sendKey, s.sendText = pane.capture, pane.key, pane.text
+	s.capturePane, s.sendKey, s.sendText, s.sendKeys = pane.capture, pane.key, pane.text, pane.keys
 	id := cursorCLIPaneIDPrefix + "agentman-cursor-test"
 	s.sessions[id] = cursorCLISession{
 		pane: "agentman-cursor-test",
@@ -318,5 +328,71 @@ func TestCursorCLIPaneStateReportsUnreadableDecisionsAsWaiting(t *testing.T) {
 	s, _, _ = cursorCLIAnswerFixture(t, cursorCLIPaneFixture(t, "reconnecting"))
 	if state, _ := s.cursorCLIPaneState(context.Background(), "agentman-cursor-test"); state != protocol.StateBusy {
 		t.Fatalf("reconnecting turn reads %s, want busy", state)
+	}
+}
+
+// The approval's own labels, pressed by name: Tab adds the command to
+// Cursor's allowlist, shift+Tab turns on Run Everything.
+func TestCursorCLIAnswersNamedKeyOptions(t *testing.T) {
+	approval := cursorCLIPaneFixture(t, "shell-approval")
+	q := cursorCLIQuestionFromPane(approval)
+	labels := map[string]string{}
+	for _, option := range q.Options {
+		labels[option.Key] = option.Label
+	}
+	if labels["tab"] != "Add Shell(echo) to allowlist?" || labels["shift+tab"] != "Run Everything" || labels["skip"] != "Skip" {
+		t.Fatalf("options = %+v", q.Options)
+	}
+	for key, want := range map[string]string{"tab": "keys:Tab", "shift+tab": "keys:BTab"} {
+		s, pane, id := cursorCLIAnswerFixture(t, approval)
+		if err := s.Answer(context.Background(), id, protocol.QuestionAnswer{QuestionID: q.ID, OptionKey: key}); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(pane.typed, "|"); got != want {
+			t.Errorf("%s typed %q, want %q", key, got, want)
+		}
+	}
+}
+
+// A bare Skip is "n" and then an empty Enter in the box it opens.
+func TestCursorCLISkipsWithoutAnInstruction(t *testing.T) {
+	s, pane, id := cursorCLIAnswerFixture(t,
+		cursorCLIPaneFixture(t, "shell-approval"), cursorCLIPaneFixture(t, "skip-box"))
+	q := s.sessions[id].meta.Question
+	if err := s.Answer(context.Background(), id, protocol.QuestionAnswer{QuestionID: q.ID, OptionKey: "skip"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(pane.typed, "|"); got != "key:n|keys:Enter" {
+		t.Fatalf("typed %q", got)
+	}
+
+	s, pane, id = cursorCLIAnswerFixture(t, cursorCLIPaneFixture(t, "plan-revise-box"))
+	q = s.sessions[id].meta.Question
+	if err := s.Answer(context.Background(), id, protocol.QuestionAnswer{QuestionID: q.ID, OptionKey: "esc"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(pane.typed, "|"); got != "keys:Escape" {
+		t.Fatalf("cancel typed %q", got)
+	}
+}
+
+// A menu that has its own "n" decline keeps it; the propose-changes row is
+// then only the custom answer.
+func TestCursorCLIMCPApprovalKeepsItsOwnSkip(t *testing.T) {
+	pane := ` $  github: search_issues
+ ────────────────────────────────────────
+ {"query": "is:open"}
+ Run this MCP tool?
+  → Run (once) (y)
+    Allowlist MCP Tool (tab)
+    Reject & propose changes (p)
+    Skip (esc or n)
+`
+	q := cursorCLIQuestionFromPane(pane)
+	if q == nil || strings.Join(optionKeys(q), ",") != "y,tab,n" || !q.Custom {
+		t.Fatalf("MCP approval = %+v", q)
+	}
+	if screen := parseCursorCLIScreen(pane); screen.customKey != "p" {
+		t.Fatalf("custom key = %q, want p", screen.customKey)
 	}
 }

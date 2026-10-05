@@ -94,6 +94,7 @@ type CursorCLISource struct {
 	// what would have been typed instead.
 	sendKey  func(ctx context.Context, pane, key string) error
 	sendText func(ctx context.Context, pane, text string) error
+	sendKeys func(ctx context.Context, pane string, keys ...string) error
 	modelMu  sync.Mutex
 	models   map[string]cursorCLIModelEntry
 	mu       sync.RWMutex
