@@ -71,7 +71,7 @@ func (s *CodexSource) Past(ctx context.Context, dir string, limit int) ([]protoc
 		id := string(protocol.KindCodex) + ":" + threadID
 		model, cached := s.models.get(id)
 		if !cached {
-			model = modelFromTranscript(rollout.path, codexModelOf)
+			model = codexModel(rollout.path)
 			s.models.put(id, model)
 		}
 

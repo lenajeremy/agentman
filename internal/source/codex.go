@@ -529,7 +529,7 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 
 			model, cached := s.models.get(id)
 			if !cached {
-				model = modelFromTranscript(path, codexModelOf)
+				model = codexModel(path)
 				s.models.put(id, model)
 			}
 			session.Model = model
