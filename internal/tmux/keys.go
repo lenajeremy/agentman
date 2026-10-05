@@ -13,9 +13,14 @@ import (
 // Everything" on shift+Tab; Kiro and Antigravity move through lists with the
 // arrows. Nothing here types text, stops a process — Ctrl-C is Interrupt's,
 // deliberately — or reaches tmux's own prefix bindings.
+//
+// M-j is the one modified key. Antigravity opens its subagent panel on
+// alt+j, and that panel is the only place a subagent's permission request
+// can be answered. It is listed by name: no other alt key is allowed.
 var namedKeys = map[string]bool{
 	"Tab": true, "BTab": true, "Enter": true, "Escape": true, "Space": true,
 	"Up": true, "Down": true, "Left": true, "Right": true,
+	"M-j": true,
 }
 
 // maxNamedKeys bounds one call. A menu is a handful of rows; a long burst is

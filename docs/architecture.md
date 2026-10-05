@@ -122,8 +122,9 @@ An adapter can also set three groups of read-only fields on `Session`:
 `mode`, `contextPercent` (whole percent), and `artifacts` with
 `artifactsToReview`. The daemon clamps these values to the ranges that the app
 accepts. To drive a menu or picker with keys, use `tmux.SendKeys`. It accepts
-only `Tab`, `BTab`, `Enter`, `Escape`, `Space` and the four arrow keys, and
-only in an Agentman pane.
+only `Tab`, `BTab`, `Enter`, `Escape`, `Space`, the four arrow keys and `M-j`
+(alt+j, which opens Antigravity's subagent panel), and only in an Agentman
+pane.
 
 Some CLIs let the user refuse an action and say what to do instead, for
 example Claude's "No, and tell Claude what to do differently". To offer this,
