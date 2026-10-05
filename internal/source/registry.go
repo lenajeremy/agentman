@@ -466,6 +466,59 @@ func (r *Registry) ResumedSession(sessionID, native, defaultPane string) (pane, 
 	return namer.ResumedSession(native, defaultPane)
 }
 
+// ModeSetter is implemented by adapters that can switch a live session's
+// mode: Claude's and Antigravity's shift+tab cycle, Kiro's agent swap, an ACP
+// session/set_mode.
+//
+// Advertise what can be switched to in Session.Modes, and switch only to the
+// mode asked for: press the key, read the mode back from the pane, and
+// repeat a bounded number of times until it matches. Return an error when it
+// never does, or when a picker that is not the expected one is open; never
+// type into one unverified. The daemon calls this only with a mode the
+// session advertised, never while a question is pending, and under the
+// session's action lock.
+type ModeSetter interface {
+	SetMode(ctx context.Context, sessionID, mode string) error
+}
+
+// ModelSetter is implemented by adapters that can switch a live session's
+// model.
+//
+// Advertise the models in Session.Models and what a switch touches in
+// Session.ModelScope: protocol.ModelScopeSession when it changes this
+// session alone, protocol.ModelScopeDefault when the CLI also saves it as
+// the default for new sessions, which the phone confirms with the user
+// first. The daemon's guarantees are the same as for SetMode.
+type ModelSetter interface {
+	SetModel(ctx context.Context, sessionID, model string) error
+}
+
+// SetMode routes a mode switch to the adapter owning the session.
+func (r *Registry) SetMode(ctx context.Context, sessionID, mode string) error {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return err
+	}
+	setter, ok := s.(ModeSetter)
+	if !ok {
+		return fmt.Errorf("source: %s sessions cannot switch modes from the phone", s.Kind())
+	}
+	return setter.SetMode(ctx, sessionID, mode)
+}
+
+// SetModel routes a model switch to the adapter owning the session.
+func (r *Registry) SetModel(ctx context.Context, sessionID, model string) error {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return err
+	}
+	setter, ok := s.(ModelSetter)
+	if !ok {
+		return fmt.Errorf("source: %s sessions cannot switch models from the phone", s.Kind())
+	}
+	return setter.SetModel(ctx, sessionID, model)
+}
+
 func (r *Registry) forSession(sessionID string) (Source, error) {
 	kind, _, ok := strings.Cut(sessionID, ":")
 	if !ok {

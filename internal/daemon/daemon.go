@@ -929,7 +929,8 @@ func (d *Daemon) HandleFrom(
 ) protocol.Event {
 	if err := validateRequest(req); err != nil {
 		if req.Type == protocol.ReqSendMessage || req.Type == protocol.ReqAnswer ||
-			req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqReviewArtifact {
+			req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqReviewArtifact ||
+			req.Type == protocol.ReqSetMode || req.Type == protocol.ReqSetModel {
 			return protocol.Event{
 				Type: protocol.EvtSendResult, SessionID: req.SessionID,
 				ClientID: req.ClientID, Status: protocol.StatusFailed, Error: err.Error(),
@@ -1161,6 +1162,9 @@ func (d *Daemon) HandleFrom(
 	case protocol.ReqReviewArtifact:
 		return d.reviewArtifact(ctx, req)
 
+	case protocol.ReqSetMode, protocol.ReqSetModel:
+		return d.switchSession(ctx, req)
+
 	default:
 		return protocol.Event{Type: protocol.EvtError, Error: "unsupported request: " + string(req.Type)}
 	}
@@ -1172,7 +1176,7 @@ func requestMutatesSession(kind protocol.RequestType) bool {
 		// Resume and end start or stop a process. Run concurrently, two resumes
 		// of one session each launched their own.
 		kind == protocol.ReqResumeSession || kind == protocol.ReqEndSession ||
-		kind == protocol.ReqReviewArtifact
+		kind == protocol.ReqReviewArtifact || kind == protocol.ReqSetMode || kind == protocol.ReqSetModel
 }
 
 func (d *Daemon) actionLock(sessionID string) *sync.Mutex {
@@ -1239,7 +1243,8 @@ func validateRequest(req protocol.Request) error {
 		req.Type == protocol.ReqReadSeenFile ||
 		req.Type == protocol.ReqReadFileChunk || req.Type == protocol.ReqReadSeenFileChunk ||
 		req.Type == protocol.ReqListArtifacts || req.Type == protocol.ReqReadArtifact ||
-		req.Type == protocol.ReqReviewArtifact
+		req.Type == protocol.ReqReviewArtifact ||
+		req.Type == protocol.ReqSetMode || req.Type == protocol.ReqSetModel
 	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
 		return fmt.Errorf("daemon: invalid session id")
 	}
@@ -1344,6 +1349,16 @@ func validateRequest(req protocol.Request) error {
 		}
 		if len(req.Text) > maxMessageBytes || containsTerminalControl(req.Text) {
 			return fmt.Errorf("daemon: invalid review comment")
+		}
+		return nil
+	case protocol.ReqSetMode:
+		if !switchValue(req.Text, maxWireModeBytes) {
+			return fmt.Errorf("daemon: invalid mode")
+		}
+		return nil
+	case protocol.ReqSetModel:
+		if !switchValue(req.Text, maxWireModelBytes) {
+			return fmt.Errorf("daemon: invalid model")
 		}
 		return nil
 	default:
@@ -1477,6 +1492,11 @@ func normalizeSessionStatus(session *protocol.Session) {
 	session.ContextPercent = min(max(session.ContextPercent, 0), 100)
 	session.Artifacts = min(max(session.Artifacts, 0), maxWireArtifactCount)
 	session.ArtifactsToReview = min(max(session.ArtifactsToReview, 0), session.Artifacts)
+	session.Modes = switchList(session.Modes, maxWireModes, maxWireModeBytes)
+	session.Models = switchList(session.Models, maxWireModels, maxWireModelBytes)
+	if session.ModelScope != protocol.ModelScopeSession && session.ModelScope != protocol.ModelScopeDefault {
+		session.ModelScope = ""
+	}
 }
 
 func fitSessionList(sessions []protocol.Session) []protocol.Session {

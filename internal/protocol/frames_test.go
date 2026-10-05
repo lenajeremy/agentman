@@ -104,3 +104,30 @@ func TestAnOptionWithTextRoundTrips(t *testing.T) {
 		t.Fatalf("answer decoded as %+v", req)
 	}
 }
+
+func TestSwitchingWireNames(t *testing.T) {
+	encoded, err := json.Marshal(Session{
+		ID: "kiro:k1", Kind: KindKiro, Modes: []string{"kiro_default", "kiro_planner"},
+		Models: []string{"claude-sonnet-4.5"}, ModelScope: ModelScopeSession,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{
+		`"modes":["kiro_default","kiro_planner"]`, `"models":["claude-sonnet-4.5"]`, `"modelScope":"session"`,
+	} {
+		if !strings.Contains(string(encoded), field) {
+			t.Errorf("%s missing from %s", field, encoded)
+		}
+	}
+	plain, _ := json.Marshal(Session{ID: "kiro:k1"})
+	for _, name := range []string{"modes", "models", "modelScope"} {
+		if strings.Contains(string(plain), `"`+name+`"`) {
+			t.Errorf("a session that offers no switching still sent %s: %s", name, plain)
+		}
+	}
+	if ReqSetMode != "set_mode" || ReqSetModel != "set_model" ||
+		ModelScopeSession != "session" || ModelScopeDefault != "default" {
+		t.Fatal("a wire name changed")
+	}
+}
