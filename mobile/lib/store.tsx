@@ -57,6 +57,7 @@ import {
 } from "./push-registration";
 import { clearDraft } from "./drafts";
 import { newFrameId } from "./id";
+import { failPending } from "./pending-requests";
 import {
   Artifact,
   DaemonEvent,
@@ -819,6 +820,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         onConnectionChange: (state, online) => {
           setConnection(state);
           setDaemonOnline(online);
+          // Nothing waiting on the Mac can be answered while it is away, so
+          // it is told now rather than when its timer runs out.
+          if (!online) {
+            const message = "Your Mac went offline. Try again when it is back.";
+            const cancel = (id: string) => clientRef.current?.cancelRead(id);
+            failPending(launchRequests.current, message, cancel);
+            failPending(workspaceRequests.current, message, cancel);
+            failPending(serverRequests.current, message, cancel);
+          }
           // A Mac that was offline never saw the token, and one that restarted
           // may have lost it, so it is offered again each time the Mac is back.
           if (online && clientRef.current) registerPushToken(clientRef.current);
