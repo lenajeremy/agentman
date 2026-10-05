@@ -95,7 +95,10 @@ func (d *Daemon) resumeSession(ctx context.Context, sessionID string) (string, e
 	if session.Cwd == "" {
 		return "", errors.New("daemon: this session did not record a working directory")
 	}
-	return startResumedSession(ctx, session.Kind, session.Cwd, resume)
+	naming := func(native, pane string) (string, string) {
+		return d.registry.ResumedSession(session.ID, native, pane)
+	}
+	return startResumedSession(ctx, session.Kind, session.Cwd, resume, naming)
 }
 
 // resumable finds a session to reopen, live or remembered from a folder.
