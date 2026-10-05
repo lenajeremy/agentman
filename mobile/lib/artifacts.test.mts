@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   artifactKind,
+  artifactRowName,
   artifactTitle,
   artifactsButtonLabel,
   isMarkdown,
@@ -58,4 +59,16 @@ test("markdown is recognised by type or by name", () => {
 test("the artifacts button says what its badge counts", () => {
   assert.equal(artifactsButtonLabel(1, 0), "1 artifact");
   assert.equal(artifactsButtonLabel(3, 1), "3 artifacts, 1 waiting for your review");
+});
+
+test("an Artifact row opens the artifact it wrote, by name only", () => {
+  assert.equal(
+    artifactRowName("Artifact", "/Users/me/.gemini/antigravity-cli/brain/ef11/implementation_plan.md"),
+    "implementation_plan.md",
+  );
+  // Any other row, even one naming a markdown file, is not an artifact.
+  assert.equal(artifactRowName("Write", "/Users/me/work/README.md"), null);
+  assert.equal(artifactRowName("Artifact", "implementation_plan.md"), null);
+  assert.equal(artifactRowName("Artifact", "/Users/me/brain/ef11/"), null);
+  assert.equal(artifactRowName("Artifact", "/Users/me/brain/ef11/.hidden"), null);
 });
