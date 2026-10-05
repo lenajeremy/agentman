@@ -87,6 +87,44 @@ Terminal parsing is intentionally conservative. Agentman re-reads a prompt
 immediately before applying an answer and rejects stale or ambiguous forms
 instead of risking input into the wrong terminal state.
 
+## Optional adapter interfaces
+
+An adapter implements `Source`, and `Injector` when it can deliver messages.
+Everything else is optional. The registry finds the adapter from the kind
+prefix of a session id, so an adapter adds a capability by implementing one
+of these interfaces in its own files. These four are in
+[`internal/source/registry.go`](../internal/source/registry.go):
+
+| Interface | Used for | When it is not implemented |
+|---|---|---|
+| `ArtifactSource` | `list_artifacts`, `read_artifact` and `review_artifact` | The session has no artifacts, and reading or reviewing one fails. |
+| `AttachmentPlacer` | Gives the agent a different path for each image the phone sent, such as a copy where the agent reads images. | The agent gets the saved path. A placement error, or a result that is not one absolute path on one line, also falls back to the saved path. |
+| `AttachmentInjector` | Delivers the text and images as one structured message, for example ACP image blocks. The daemon prefers it to `AttachmentPlacer`. | The image paths are typed before the text. A session with no structured channel returns `source.ErrAttachmentsAsPaths` and gets the same treatment. |
+| `ResumeNamer` | Names the tmux pane that a resume opens, and the session id that discovery will give it. | The daemon names the resume itself. The daemon also ignores an answer whose pane does not start with `agentman-`, contains characters other than letters, digits, `-` and `_`, or whose id belongs to another agent. |
+
+Artifacts are documents that an agent writes for the user outside the
+conversation: plans, task lists, walkthroughs and screenshots.
+
+- **Names:** an artifact name is a plain file name. The daemon refuses a name
+  that contains `/`, `\`, `..` or a control character before any adapter sees
+  it. `OpenArtifact` must still confine the name to the adapter's own store.
+  Use `Lstat`, open only regular files, and do not follow subdirectories.
+- **Reading:** `read_artifact` uses the same reader as a workspace file. It
+  returns a `workspace` event of kind `artifact`. Text has the same size limit
+  as a workspace file, and an image becomes a downscaled preview. Binary files
+  are refused.
+- **Reviewing:** `review_artifact` delivers a message, so the daemon handles it
+  like a send. It takes the session's action lock, waits its turn in the
+  mutation queue, and is refused while a question is pending. The reply is a
+  `send_result` event.
+
+An adapter can also set three groups of read-only fields on `Session`:
+`mode`, `contextPercent` (whole percent), and `artifacts` with
+`artifactsToReview`. The daemon clamps these values to the ranges that the app
+accepts. To drive a menu or picker with keys, use `tmux.SendKeys`. It accepts
+only `Tab`, `BTab`, `Enter`, `Escape`, `Space` and the four arrow keys, and
+only in an Agentman pane.
+
 ## Notifications
 
 Local notifications are scheduled by the app while it is running and connected.
