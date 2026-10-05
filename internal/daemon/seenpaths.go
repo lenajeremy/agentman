@@ -31,11 +31,18 @@ const (
 	// Per session. A long session names far fewer distinct files than this,
 	// and the cap is what stops a runaway agent from growing the set forever.
 	maxSeenPaths = 512
+	// Sessions whose files are remembered. The set is filled whenever a page
+	// of a session is read, past sessions included, and the daemon runs for
+	// weeks; the least recently read are forgotten first, and reading one
+	// again fills it again.
+	maxSeenSessions = 64
 )
 
 type seenPaths struct {
 	mu       sync.Mutex
 	sessions map[string]*pathSet
+	// recent orders sessions from least to most recently recorded.
+	recent []string
 }
 
 // pathSet is a bounded set with first-in-first-out eviction. Recency is not
@@ -79,6 +86,7 @@ func (s *seenPaths) record(sessionID string, messages []protocol.Message) {
 		set = &pathSet{members: map[string]struct{}{}}
 		s.sessions[sessionID] = set
 	}
+	s.touchLocked(sessionID)
 	for _, path := range found {
 		if _, known := set.members[path]; known {
 			continue
@@ -107,14 +115,20 @@ func (s *seenPaths) allows(sessionID, path string) bool {
 	return member
 }
 
-// forget drops a session's set when the session goes away.
-func (s *seenPaths) forget(sessionID string) {
-	if s == nil {
-		return
+// touchLocked marks a session most recently recorded and forgets the least
+// recent beyond maxSeenSessions. s.mu must be held.
+func (s *seenPaths) touchLocked(sessionID string) {
+	for i, id := range s.recent {
+		if id == sessionID {
+			s.recent = append(s.recent[:i], s.recent[i+1:]...)
+			break
+		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.sessions, sessionID)
+	s.recent = append(s.recent, sessionID)
+	for len(s.recent) > maxSeenSessions {
+		delete(s.sessions, s.recent[0])
+		s.recent = s.recent[1:]
+	}
 }
 
 // toolPath extracts the absolute path a tool call names, or "" when it names

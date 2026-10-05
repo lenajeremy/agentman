@@ -266,6 +266,13 @@ func (r *Registry) pastIn(ctx context.Context, dir string, limit int) ([]protoco
 		if r.pastByDir == nil {
 			r.pastByDir = map[string]pastListing{}
 		}
+		// Expired listings are dropped here, or every folder ever opened
+		// would keep one.
+		for other, listing := range r.pastByDir {
+			if time.Since(listing.builtAt) >= pastListingTTL {
+				delete(r.pastByDir, other)
+			}
+		}
 		r.pastByDir[key] = pastListing{sessions: past, builtAt: time.Now()}
 		r.folderMu.Unlock()
 	}

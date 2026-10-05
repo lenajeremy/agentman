@@ -53,7 +53,14 @@ type History interface {
 type pastSessions struct {
 	mu    sync.RWMutex
 	paths map[string]string
+	// order runs from the least to the most recently listed.
+	order []string
 }
+
+// maxPastSessions bounds the past sessions remembered so their transcripts can
+// be opened. A folder lists at most DefaultPastLimit, and the daemon runs for
+// weeks while folder after folder is opened; the least recently listed go.
+const maxPastSessions = 2000
 
 func (p *pastSessions) remember(id, path string) {
 	p.mu.Lock()
@@ -61,7 +68,20 @@ func (p *pastSessions) remember(id, path string) {
 	if p.paths == nil {
 		p.paths = map[string]string{}
 	}
+	if _, known := p.paths[id]; known {
+		for i, existing := range p.order {
+			if existing == id {
+				p.order = append(p.order[:i], p.order[i+1:]...)
+				break
+			}
+		}
+	}
 	p.paths[id] = path
+	p.order = append(p.order, id)
+	for len(p.order) > maxPastSessions {
+		delete(p.paths, p.order[0])
+		p.order = p.order[1:]
+	}
 }
 
 func (p *pastSessions) path(id string) (string, bool) {

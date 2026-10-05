@@ -65,6 +65,9 @@ const hookWaitingGrace = 10 * time.Minute
 
 const maxHookQuestionInspectionRetries = 3
 
+// maxRememberedLaunches bounds the launches kept to answer a retried request.
+const maxRememberedLaunches = 128
+
 // A discovery sweep can change hundreds of sessions at once (daemon restart,
 // agent upgrade, large workspace). One full snapshot is both smaller and less
 // bursty than enough individual updates to overflow an otherwise healthy
@@ -508,6 +511,14 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 		delete(d.turns, id)
 		delete(d.hookStates, id)
 		delete(d.pushedQuestions, id)
+		delete(d.lastAlert, id)
+		// A launch is remembered so a retried request returns the session it
+		// started; once that session has ended, the retry window has too.
+		for clientID, launched := range d.launches {
+			if launched == id {
+				delete(d.launches, clientID)
+			}
+		}
 		if pending, ok := d.pendingTurns[id]; ok {
 			pending.timer.Stop()
 			delete(d.pendingTurns, id)
@@ -518,6 +529,17 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 			_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessionGone, SessionID: id})
 		}
 	}
+	// A launch whose session never showed up is never "gone" either. Past a
+	// bound, only launches of sessions still running are worth remembering.
+	d.mu.Lock()
+	if len(d.launches) > maxRememberedLaunches {
+		for clientID, launched := range d.launches {
+			if _, live := current[launched]; !live {
+				delete(d.launches, clientID)
+			}
+		}
+	}
+	d.mu.Unlock()
 }
 
 func cloneSessionMap(sessions map[string]protocol.Session) map[string]protocol.Session {
