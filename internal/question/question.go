@@ -246,10 +246,23 @@ func Detect(pane string) *Question {
 
 	first := last
 	var rawOptions []paneOption
+	blanks := 0
 	for i := last; i >= 0; i-- {
 		menuLine := menuColumn(lines[i], previewColumn)
 		match := optionLine.FindStringSubmatch(menuLine)
 		if match == nil {
+			// Claude 2.1.289 leaves a blank line after a choice that wraps,
+			// such as "Yes, and always allow access to <folder>". One blank
+			// line inside the run is layout, while an earlier key is still
+			// due; two in a row end the menu.
+			if strings.TrimSpace(menuLine) == "" {
+				blanks++
+				if blanks == 1 && expected > 0 && len(rawOptions) > 0 {
+					continue
+				}
+				break
+			}
+			blanks = 0
 			// Codex renders descriptions in a second column and wraps them
 			// onto indented lines in narrow panes. Claude can likewise wrap
 			// long labels/descriptions. They belong to the option immediately
@@ -271,6 +284,7 @@ func Detect(pane string) *Question {
 			}
 			break
 		}
+		blanks = 0
 		keyNumber, err := strconv.Atoi(match[2])
 		if err != nil || keyNumber != expected {
 			break
@@ -445,10 +459,18 @@ func Detect(pane string) *Question {
 		if inputLine.MatchString(lines[i]) {
 			break
 		}
-		if trimmed == "" {
-			if len(context) > 0 {
+		// Claude 2.1.289 sets the command apart inside its box with dashed
+		// rules (╌) and no blank lines. They separate the question from the
+		// detail exactly as a blank line does, and are not text.
+		if trimmed == "" || isInnerRule(trimmed) {
+			if len(context) > 0 && context[len(context)-1] != "" {
 				context = append(context, "")
 			}
+			continue
+		}
+		// Claude's advice about its own settings ("Tip: auto mode handles
+		// these prompts for you") is not part of what is being decided.
+		if strings.HasPrefix(trimmed, "Tip: ") {
 			continue
 		}
 		context = append(context, trimmed)
@@ -755,6 +777,16 @@ func previewPanelText(lines []string, previewColumn int) string {
 }
 
 // isRule reports whether a line is a box-drawing separator.
+// isInnerRule reports a dashed rule drawn inside a question's box.
+func isInnerRule(trimmed string) bool {
+	for _, r := range trimmed {
+		if r != '╌' && r != '┄' && r != ' ' {
+			return false
+		}
+	}
+	return trimmed != ""
+}
+
 func isRule(trimmed string) bool {
 	if trimmed == "" {
 		return false
