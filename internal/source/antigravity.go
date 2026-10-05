@@ -98,6 +98,8 @@ type AntigravitySource struct {
 
 	// index is agy's conversation index, read for history.
 	index antigravityIndex
+	// logs caches the tails of running processes' CLI logs.
+	logs antigravityLogCache
 }
 
 // antigravityStateEntry caches the state a transcript's last line implies,
@@ -106,6 +108,8 @@ type antigravityStateEntry struct {
 	size  int64
 	mtime time.Time
 	state protocol.State
+	// step is the last record's step_index, -1 when there is none.
+	step int
 }
 
 // antigravityTitle is a conversation's title as agy's annotations file held it
@@ -135,6 +139,9 @@ type antigravitySession struct {
 type antigravityProcess struct {
 	cwd           string
 	conversations []string
+	// log is the process's own CLI log, log/cli-<started>.log, which it
+	// holds open for as long as it runs. See antigravity_log.go.
+	log string
 }
 
 // NewAntigravitySource creates an adapter rooted at the given home directory.
@@ -249,6 +256,14 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 		if tmuxName != "" {
 			session.Inject = protocol.InjectTmux
 			footer = s.applyPane(ctx, &session, tmuxName)
+		} else if process.log != "" {
+			// No pane to read: the process's own log says what the
+			// transcript cannot — a prompt waiting on the user, or a turn
+			// cancelled with Esc, which writes nothing to the transcript.
+			_, step := s.transcriptEnd(transcript)
+			if state, ok := s.logState(process.log, conversation, step); ok {
+				session.State = state
+			}
 		}
 		found = append(found, session)
 		next[id] = antigravitySession{meta: session, transcript: transcript, tmuxName: tmuxName, footer: footer}
@@ -279,6 +294,13 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 	s.sessions = next
 	s.mu.Unlock()
 	s.forgetCaches(next)
+	liveLogs := map[string]bool{}
+	for _, process := range open {
+		if process.log != "" {
+			liveLogs[process.log] = true
+		}
+	}
+	s.forgetLogs(liveLogs)
 	return found, nil
 }
 
@@ -629,24 +651,36 @@ func firstAntigravityRequest(transcript string) string {
 // with a response that calls no tool; a prompt, a tool call, or a tool's
 // result last means the turn is still going.
 func (s *AntigravitySource) transcriptState(path string) protocol.State {
+	state, _ := s.transcriptEnd(path)
+	return state
+}
+
+// transcriptEnd is transcriptState and the index of the last step on disk.
+func (s *AntigravitySource) transcriptEnd(path string) (protocol.State, int) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return protocol.StateIdle
+		return protocol.StateIdle, -1
 	}
 	s.cacheMu.Lock()
 	cached, ok := s.states[path]
 	s.cacheMu.Unlock()
 	if ok && cached.size == info.Size() && cached.mtime.Equal(info.ModTime()) {
-		return cached.state
+		return cached.state, cached.step
 	}
-	state := protocol.StateIdle
+	state, step := protocol.StateIdle, -1
 	if line, err := lastLine(path, 32<<20); err == nil && line != "" {
 		state = antigravityLineState(line)
+		var last struct {
+			StepIndex *int `json:"step_index"`
+		}
+		if json.Unmarshal([]byte(line), &last) == nil && last.StepIndex != nil {
+			step = *last.StepIndex
+		}
 	}
 	s.cacheMu.Lock()
-	s.states[path] = antigravityStateEntry{size: info.Size(), mtime: info.ModTime(), state: state}
+	s.states[path] = antigravityStateEntry{size: info.Size(), mtime: info.ModTime(), state: state, step: step}
 	s.cacheMu.Unlock()
-	return state
+	return state, step
 }
 
 func antigravityLineState(line string) protocol.State {
@@ -1061,6 +1095,11 @@ func parseAntigravityOpenFiles(home string, output []byte) map[int]antigravityPr
 				continue
 			}
 			parts := strings.Split(rel, string(filepath.Separator))
+			if parts[0] == "log" && len(parts) == 2 && strings.HasSuffix(parts[1], ".log") {
+				process.log = path
+				result[pid] = process
+				continue
+			}
 			conversation := ""
 			switch {
 			case parts[0] == "brain" && len(parts) >= 2:
