@@ -15,6 +15,7 @@ import { useRouter } from "expo-router";
 
 import { useStyles, useTheme } from "../lib/appearance";
 import { parseDiff } from "../lib/diff";
+import { artifactRowName } from "../lib/artifacts";
 import { workspaceImage, type ImageTarget } from "../lib/imagepath";
 import { Message } from "../lib/protocol";
 import { font, Palette, radius, size, space } from "../lib/theme";
@@ -317,6 +318,34 @@ function ImageLink({ sessionId, target }: { sessionId: string; target: ImageTarg
 }
 
 /**
+ * A way into the plan or walkthrough an agent wrote, on the Artifacts screen
+ * where it can be read whole and approved.
+ */
+function ArtifactLink({ sessionId, name }: { sessionId: string; name: string }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const router = useRouter();
+  return (
+    <MotionPressable
+      onPress={() =>
+        router.push(
+          `/artifacts/view?session=${encodeURIComponent(sessionId)}&name=${encodeURIComponent(name)}`,
+        )
+      }
+      style={styles.imageLink}
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${name}`}
+    >
+      <Feather name="file-text" size={14} color={color.working} />
+      <Text style={styles.imageLinkText} numberOfLines={1}>
+        Open {name}
+      </Text>
+      <Feather name="chevron-right" size={14} color={color.faint} />
+    </MotionPressable>
+  );
+}
+
+/**
  * One tool call: what ran, and how it ended.
  *
  * The header is exactly one line, open or closed. It used to grow with the
@@ -352,7 +381,8 @@ export function ToolRow({
   // "[image]" — so without this the row is the one place in the app that names
   // a picture and then refuses to show it.
   const image = workspaceImage(tool.name, summary, cwd);
-  const canOpen = Boolean(output) || showCommand || Boolean(image);
+  const artifact = artifactRowName(tool.name, summary);
+  const canOpen = Boolean(output) || showCommand || Boolean(image) || Boolean(artifact);
 
   return (
     <View style={styles.row}>
@@ -385,6 +415,9 @@ export function ToolRow({
           {showCommand ? <CommandBlock text={summary} /> : null}
           {image ? (
             <ImageLink sessionId={message.sessionId} target={image} />
+          ) : null}
+          {artifact ? (
+            <ArtifactLink sessionId={message.sessionId} name={artifact} />
           ) : null}
           {/* "[image]" is the placeholder a parser leaves where it could not
               carry the picture. Once the link above can actually show it, the

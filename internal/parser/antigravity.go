@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
@@ -40,9 +39,14 @@ type AntigravityParser struct {
 }
 
 type antigravityCall struct {
+	// tool is agy's own name for it; name is what the phone is shown.
+	tool    string
 	name    string
 	summary string
 	ts      int64
+	// written replaces a successful result's text: the new file as a diff,
+	// or an artifact's one-line summary.
+	written string
 }
 
 // NewAntigravityParser creates a parser bound to one session. It reads a
@@ -61,18 +65,21 @@ type antigravityStep struct {
 	Status    string `json:"status"`
 	CreatedAt string `json:"created_at"`
 	Content   string `json:"content"`
+	// Error is set on a failed step, with the reason on its own.
+	Error string `json:"error"`
+	// Media is set on a result the model saw as a picture: an image
+	// view_file read, copied into the conversation's .tempmediaStorage.
+	Media []struct {
+		MimeType string `json:"mime_type"`
+		URI      string `json:"uri"`
+	} `json:"media"`
 	ToolCalls []struct {
 		Name string          `json:"name"`
 		Args json.RawMessage `json:"args"`
 	} `json:"tool_calls"`
 }
 
-var (
-	antigravityRequest = regexp.MustCompile(`(?s)<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>`)
-	antigravityExit    = regexp.MustCompile(`The command exited with code (-?\d+)`)
-	// antigravityStamps are the bookkeeping lines a tool result opens with.
-	antigravityStamps = regexp.MustCompile(`^(?:Created At|Completed At): `)
-)
+var antigravityRequest = regexp.MustCompile(`(?s)<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>`)
 
 func antigravityID(step int) string { return fmt.Sprintf("s%06d", step) }
 
@@ -84,8 +91,8 @@ func antigravityID(step int) string { return fmt.Sprintf("s%06d", step) }
 // place instead of appearing twice.
 func (p *AntigravityParser) NextStepIndex() int { return p.lastStep + 1 }
 
-// AwaitingResponse reports whether the newest record is a prompt with no
-// reply yet — the only moment a reply is actually being written.
+// AwaitingResponse reports whether the model is writing its next response:
+// whether the newest record is one the model answers rather than one it wrote.
 //
 // The transcript answers this; the session's state does not. State comes from
 // discovery, which sweeps on its own timer, so for up to a sweep after a
@@ -93,6 +100,25 @@ func (p *AntigravityParser) NextStepIndex() int { return p.lastStep + 1 }
 // finished reply a second time, scraped off the pane and wrapped to the
 // terminal's width — which is how a table came out as a column of rules.
 func (p *AntigravityParser) AwaitingResponse() bool { return p.awaiting }
+
+// antigravityAwaits reports whether a record is answered by a model response.
+//
+// A prompt is, and so is a system message: agy hands one to the model with the
+// next prompt — a subagent's or a background task's news — or on its own when
+// a task finishes, and either way a response follows. Only waiting on prompts
+// stopped streaming for every turn that began with one, which after a subagent
+// or a resume was most of them. A tool's result is answered too, which is the
+// reply after a command or an edit. A declined call is not: agy ends the turn
+// there.
+func antigravityAwaits(step antigravityStep) bool {
+	switch step.Type {
+	case "USER_INPUT", "SYSTEM_MESSAGE":
+		return true
+	case "GENERIC":
+		return !strings.Contains(step.Error, "user denied permission for ")
+	}
+	return false
+}
 
 // Parse implements Parser.
 func (p *AntigravityParser) Parse(line string, offset int64) []protocol.Message {
@@ -103,7 +129,7 @@ func (p *AntigravityParser) Parse(line string, offset int64) []protocol.Message 
 	ts := parseTime(step.CreatedAt)
 	if step.StepIndex >= p.lastStep {
 		p.lastStep = step.StepIndex
-		p.awaiting = step.Type == "USER_INPUT"
+		p.awaiting = antigravityAwaits(step)
 	}
 
 	switch step.Type {
@@ -127,10 +153,18 @@ func (p *AntigravityParser) Parse(line string, offset int64) []protocol.Message 
 		}
 		for j, call := range step.ToolCalls {
 			id := antigravityID(step.StepIndex + 1 + j)
+			args := decodeAntigravityArgs(call.Args)
 			remembered := antigravityCall{
-				name:    antigravityToolName(call.Name),
-				summary: summarizeAntigravityArgs(call.Name, call.Args),
+				tool:    call.Name,
+				name:    antigravityToolName(call.Name, args),
+				summary: summarizeAntigravityArgs(call.Name, args),
 				ts:      ts,
+			}
+			switch {
+			case remembered.name == "Artifact":
+				remembered.written = antigravityArtifactSummary(args)
+			case call.Name == "write_to_file":
+				remembered.written = antigravityWritten(args)
 			}
 			p.calls.set(id, remembered)
 			message := protocol.Message{
@@ -139,6 +173,7 @@ func (p *AntigravityParser) Parse(line string, offset int64) []protocol.Message 
 			}
 			// Paging backwards meets the result first.
 			if outcome, ok := p.outcomes.get(id); ok {
+				outcome = remembered.settle(outcome)
 				message.Tool.Status = outcome.status
 				message.Text = outcome.preview
 			}
@@ -148,7 +183,7 @@ func (p *AntigravityParser) Parse(line string, offset int64) []protocol.Message 
 
 	case "GENERIC":
 		id := antigravityID(step.StepIndex)
-		outcome := antigravityOutcome(step.Content, step.Status)
+		outcome := antigravityOutcome(step)
 		p.outcomes.set(id, outcome)
 		call, known := p.calls.get(id)
 		if !known {
@@ -156,6 +191,7 @@ func (p *AntigravityParser) Parse(line string, offset int64) []protocol.Message 
 			// generic step that answers no call is not something to show.
 			return nil
 		}
+		outcome = call.settle(outcome)
 		return []protocol.Message{{
 			ID: id, SessionID: p.sessionID, Role: protocol.RoleTool, Ts: call.ts,
 			Text: outcome.preview,
@@ -176,78 +212,4 @@ func AntigravityRequest(content string) string {
 		return "" // entirely machine context, no request in it
 	}
 	return strings.TrimSpace(content)
-}
-
-func antigravityOutcome(content, status string) toolOutcome {
-	outcome := toolOutcome{status: protocol.ToolOK}
-	if match := antigravityExit.FindStringSubmatch(content); match != nil {
-		if code, err := strconv.Atoi(match[1]); err == nil && code != 0 {
-			outcome.status = protocol.ToolError
-		}
-	}
-	switch strings.ToUpper(status) {
-	case "ERROR", "FAILED", "CANCELED", "CANCELLED":
-		outcome.status = protocol.ToolError
-	}
-	var kept []string
-	for _, line := range strings.Split(content, "\n") {
-		if !antigravityStamps.MatchString(line) {
-			kept = append(kept, line)
-		}
-	}
-	outcome.preview = ClipBlock(strings.TrimSpace(strings.Join(kept, "\n")), PreviewLines, PreviewChars)
-	return outcome
-}
-
-// antigravityToolName gives Antigravity's tools the names the app knows how
-// to render: a "Shell" row shows its command, a "Read" row can open an image.
-func antigravityToolName(name string) string {
-	switch name {
-	case "run_command":
-		return "Shell"
-	case "view_file", "view_file_outline", "view_code_item":
-		return "Read"
-	case "write_to_file":
-		return "Write"
-	case "replace_file_content", "multi_replace_file_content":
-		return "Edit"
-	case "list_dir":
-		return "List"
-	case "grep_search":
-		return "Grep"
-	case "find_by_name":
-		return "Find"
-	case "search_web":
-		return "Web search"
-	case "read_url_content":
-		return "Web fetch"
-	case "":
-		return "Tool"
-	}
-	return name
-}
-
-// summarizeAntigravityArgs picks the part of a call worth a glance. Argument
-// names are Antigravity's own — CommandLine, AbsolutePath, TargetFile.
-func summarizeAntigravityArgs(name string, raw json.RawMessage) string {
-	var args map[string]any
-	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil {
-		return ""
-	}
-	pick := func(keys ...string) string {
-		for _, key := range keys {
-			if value, ok := args[key].(string); ok && strings.TrimSpace(value) != "" {
-				return value
-			}
-		}
-		return ""
-	}
-	if name == "run_command" {
-		return ClipBlock(pick("CommandLine"), CommandLines, CommandChars)
-	}
-	if value := pick("AbsolutePath", "TargetFile", "File", "DirectoryPath", "SearchPath",
-		"Query", "Url", "SearchDirectory"); value != "" {
-		return clip(value, SummaryChars)
-	}
-	return clip(pick("toolSummary", "toolAction"), SummaryChars)
 }

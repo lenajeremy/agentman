@@ -55,3 +55,21 @@ export function artifactsButtonLabel(total: number, toReview: number): string {
   const count = `${total} artifact${total === 1 ? "" : "s"}`;
   return toReview > 0 ? `${count}, ${toReview} waiting for your review` : count;
 }
+
+/**
+ * The artifact a tool row wrote, by the name the Artifacts screen opens it
+ * with, or null for any other row.
+ *
+ * Antigravity writes its plans and walkthroughs with the same tool as any
+ * file, and its rows say "Artifact" with the file's absolute path. The path
+ * is never sent back: the name alone is what the daemon resolves, inside that
+ * session's own artifacts, so a row cannot point the viewer anywhere else.
+ */
+export function artifactRowName(toolName: string, summary: string): string | null {
+  if (toolName !== "Artifact") return null;
+  const path = summary.split("\n", 1)[0]?.trim() ?? "";
+  if (!path.startsWith("/")) return null;
+  const name = path.split("/").at(-1) ?? "";
+  if (!name || name.startsWith(".") || name === "..") return null;
+  return name;
+}

@@ -1,0 +1,40 @@
+
+  Fruits: apple, cherry; Size: large.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+────────────────────────────────────────────────────────────────────────────────────────────────────
+Antigravity CLI   general    commands    shortcuts   (←/→ or tab to cycle)
+Available Commands
+
+> /add-dir                                         Add a directory to the workspace
+  /agents                                          List available custom agents
+  /artifact                                        View and review artifacts
+  /btw                                             Ask a side question without interrupting the ...
+  /changelog                                       Show release notes and changes
+  /clear (new)                                     Clear conversation and start a new one
+  /codesearch (cs, search)                         Search code in the workspace (usage: /codesea...
+  /config (settings)                               Open settings panel
+  /context                                         Visualize current context usage
+  /copy                                            Copy the last planner response to the clipboa...
+  /credits                                         Show remaining G1 credits and purchase link
+  /diff                                            View uncommitted changes and per-turn diffs
+  /effort                                          Set the reasoning effort
+  /exit (quit)                                     Exit the CLI
+  /feedback                                        Submit qualitative feedback to improve the agent
+  /fork (branch)                                   Create a branch of the current conversation a...
+  /help                                            Show available commands and keybindings
+  /hooks                                           Manage hook configurations for tool events
+  /keybindings                                     Set custom keybindings
+  /logout                                          Log out
+  /mcp                                             Manage MCP servers
+  /model                                           Set a model, or run a single prompt on anothe...
+  /open                                            Open a file or view opened/edited files
+  /permissions                                     Manage tool permissions
+  /remote-control                                  Turn on remote control for this session (off ...
+  /rename                                          Rename the current conversation
+  [1-26 of 78 items]
+
+Keyboard: ↑/↓ Navigate  ←/→ Switch View  esc Close
+
+                                                                             Gemini 3.8 Flash · high

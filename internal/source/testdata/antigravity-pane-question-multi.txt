@@ -1,0 +1,40 @@
+  Blue
+
+────────────────────────────────────────────────────────────
+> /Users/me/.gemini/antigravity-cli/brain/ef116096-84c3-4723-bbc3-aed0f3cca68b/.user_uploaded/att3
+  .png
+  what colour is this? One word.
+
+● Read(~/.gemini/antigravity-cli/brain/ef...d0f3cca68b/.user_uploaded/att3.png) (ctrl+o to expand)
+
+  Blue
+
+────────────────────────────────────────────────────────────
+> Use your ask_question tool to ask me which colour I prefer, with the options red, green and blue.
+  Then reply with just my answer.
+
+? Which colour do you prefer?
+> purple
+
+  purple
+
+────────────────────────────────────────────────────────────
+> Use your ask_question tool once, with two questions: first 'Which fruits do you like?' as a
+  multi-select with options apple, banana and cherry; second 'Which size?' single-select with
+  options small and large. Then reply with my answers in one line.
+
+? Which fruits do you like?
+? Which size?
+
+Question
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Question 1/2: Which fruits do you like?
+
+> 1. [ ] apple
+  2. [ ] banana
+  3. [ ] cherry
+  4. Write-in...
+
+  ↑/↓ Navigate · → Next · space Toggle · enter Submit · esc Skip · ctrl+r Review
+esc to cancel                                                                Gemini 3.8 Flash · high

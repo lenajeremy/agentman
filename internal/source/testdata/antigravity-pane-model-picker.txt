@@ -1,0 +1,40 @@
+  credibility of their research.
+
+────────────────────────────────────────────────────────────
+> Write the numbers from 1 to 300 as English words, one per line, with no other text.
+
+────────────────────────────────────────────────────────────
+> - reply with the single word ok
+
+  ok
+
+────────────────────────────────────────────────────────────
+> First line: reply with the word alpha.
+  Second line: then also the word beta.
+
+  alpha
+  beta
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+────────────────────────────────────────────────────────────────────────────────────────────────────
+Switch Model
+
+  Search:
+          ────────────────────
+
+> Gemini 3.8 Flash             (current)
+  Gemini 3.7 Flash
+  Gemini 3.6 Flash
+  Gemini 3.1 Pro
+  Claude Sonnet 4.6 (Thinking)
+  Claude Opus 4.6 (Thinking)
+  GPT-OSS 120B (Medium)
+
+  Effort  ◂        ●━━━━━━━━━━━━━━●━━━━━━━━━━━━━━◉        ▸
+                  low          medium          high
+            Deepest reasoning for complex problems — slower but strongest
+
+Keyboard: ↑/↓ Navigate  ←/→ Effort  enter Select  esc Go Back
+
+                                                                             Gemini 3.8 Flash · high

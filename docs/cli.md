@@ -157,6 +157,12 @@ in an ordinary terminal, and let the phone send to such a chat: the message
 is handed over by the `stop` hook when the current turn ends. Cursor reads the
 file when a chat starts, so chats already open keep their old hooks.
 
+When the Antigravity CLI is installed, installation also adds an `agentman`
+entry to `~/.gemini/config/hooks.json`: agy's `Stop` hook for turn completion
+and its `PreInvocation` hook for turn start, never `PreToolUse`. Other
+entries in that file are left as they are, and events from Antigravity's IDE,
+which reads the same file, are ignored.
+
 ## Diagnostics
 
 Run `am doctor` after installing hooks or when sessions do not appear. It checks

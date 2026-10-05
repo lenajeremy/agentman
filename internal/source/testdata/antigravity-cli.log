@@ -1,0 +1,79 @@
+I1005 10:29:43.200934     245 quota_manager.go:36] doRefreshQuota: skipped (not logged in)
+I1005 10:29:45.488562     245 quota_manager.go:45] doRefreshQuota: starting reload (force=true)
+I1005 10:29:47.005995     245 quota_manager.go:45] doRefreshQuota: starting reload (force=true)
+I1005 10:30:04.300936     657 conversation_manager.go:779] Forwarding user message to conversation ef116096-84c3-4723-bbc3-aed0f3cca68b (items=1, media=0)
+W1005 10:30:04.335700      62 declarative_config_loader.go:278] skipping component during resolution: empty component: prompt section "mcp_servers"
+I1005 10:30:24.822145    1950 conversation_manager.go:1520] Cancelling in-progress response for conversation ef116096-84c3-4723-bbc3-aed0f3cca68b
+I1005 10:30:24.822213     312 server.go:1325] Stream goroutine exited for ef116096-84c3-4723-bbc3-aed0f3cca68b, sending completion signal
+I1005 10:30:42.861050     732 conversation_manager.go:779] Forwarding user message to conversation ef116096-84c3-4723-bbc3-aed0f3cca68b (items=1, media=0)
+W1005 10:30:42.875277     733 declarative_config_loader.go:278] skipping component during resolution: empty component: prompt section "mcp_servers"
+I1005 10:30:45.517362    1952 tool_confirmation_manager.go:226] Surfacing tool confirmation: "WriteToFile" at step 9
+I1005 10:30:56.277470     243 input_loop.go:706] Responding to tool confirmation: convID=ef116096-84c3-4723-bbc3-aed0f3cca68b, stepIdx=9, approved=true, sandboxOverride=false, persistGrants=[]
+I1005 10:30:56.277554    2414 server.go:2521] Tool confirmation for conversation ef116096-84c3-4723-bbc3-aed0f3cca68b step 9 (type=*gemini_coder_go_proto.Step_Generic approved=true)
+I1005 10:31:06.905834    1952 tool_confirmation_manager.go:226] Surfacing tool confirmation: "ReplaceFileContent" at step 13
+I1005 10:31:15.821378     243 input_loop.go:706] Responding to tool confirmation: convID=ef116096-84c3-4723-bbc3-aed0f3cca68b, stepIdx=13, approved=false, sandboxOverride=false, persistGrants=[]
+I1005 10:31:15.821442    2736 server.go:2521] Tool confirmation for conversation ef116096-84c3-4723-bbc3-aed0f3cca68b step 13 (type=*gemini_coder_go_proto.Step_Generic approved=false)
+I1005 10:31:15.821901     245 quota_manager.go:45] doRefreshQuota: starting reload (force=false)
+I1005 10:32:00.002284    2835 conversation_manager.go:779] Forwarding user message to conversation ef116096-84c3-4723-bbc3-aed0f3cca68b (items=1, media=0)
+W1005 10:32:00.017123    2836 declarative_config_loader.go:278] skipping component during resolution: empty component: prompt section "mcp_servers"
+I1005 10:32:03.540051    1952 tool_confirmation_manager.go:226] Surfacing tool confirmation: "RunCommand" at step 16
+I1005 10:32:14.609064     243 input_loop.go:706] Responding to tool confirmation: convID=ef116096-84c3-4723-bbc3-aed0f3cca68b, stepIdx=16, approved=true, sandboxOverride=false, persistGrants=[]
+I1005 10:32:14.609142    3258 server.go:2521] Tool confirmation for conversation ef116096-84c3-4723-bbc3-aed0f3cca68b step 16 (type=*gemini_coder_go_proto.Step_Generic approved=true)
+I1005 10:32:22.392400     245 quota_manager.go:45] doRefreshQuota: starting reload (force=false)
+I1005 10:32:55.578867    3512 conversation_manager.go:779] Forwarding user message to conversation ef116096-84c3-4723-bbc3-aed0f3cca68b (items=1, media=0)
+W1005 10:32:55.593433    3513 declarative_config_loader.go:278] skipping component during resolution: empty component: prompt section "mcp_servers"
+I1005 10:33:01.681896     245 quota_manager.go:41] doRefreshQuota: skipped (throttled)
+I1005 10:33:41.562727    4001 conversation_manager.go:779] Forwarding user message to conversation ef116096-84c3-4723-bbc3-aed0f3cca68b (items=1, media=0)
+W1005 10:33:41.575647    4098 declarative_config_loader.go:278] skipping component during resolution: empty component: prompt section "mcp_servers"
+I1005 10:33:43.800432    1952 tool_confirmation_manager.go:226] Surfacing tool confirmation: "ViewFile" at step 24
+I1005 10:33:57.906606     243 input_loop.go:706] Responding to tool confirmation: convID=ef116096-84c3-4723-bbc3-aed0f3cca68b, stepIdx=24, approved=true, sandboxOverride=false, persistGrants=[]
+I1005 10:33:57.906676    4431 server.go:2521] Tool confirmation for conversation ef116096-84c3-4723-bbc3-aed0f3cca68b step 24 (type=*gemini_coder_go_proto.Step_Generic approved=true)
+I1005 10:34:06.453868     245 quota_manager.go:45] doRefreshQuota: starting reload (force=false)
+I1005 10:34:06.699649    4977 conversation_manager.go:779] Forwarding user message to conversation ef116096-84c3-4723-bbc3-aed0f3cca68b (items=1, media=0)
+W1005 10:34:06.712036    5026 declarative_config_loader.go:278] skipping component during resolution: empty component: prompt section "mcp_servers"
+I1005 10:34:09.842237    1952 tool_confirmation_manager.go:226] Surfacing tool confirmation: "ViewFile" at step 28
+I1005 10:34:26.351550     243 input_loop.go:706] Responding to tool confirmation: convID=ef116096-84c3-4723-bbc3-aed0f3cca68b, stepIdx=28, approved=true, sandboxOverride=false, persistGrants=[]
+I1005 10:34:26.351604    5446 server.go:2521] Tool confirmation for conversation ef116096-84c3-4723-bbc3-aed0f3cca68b step 28 (type=*gemini_coder_go_proto.Step_Generic approved=true)
+I1005 10:34:31.214969     245 quota_manager.go:41] doRefreshQuota: skipped (throttled)
+I1005 10:34:34.587938    5583 conversation_manager.go:779] Forwarding user message to conversation ef116096-84c3-4723-bbc3-aed0f3cca68b (items=1, media=0)
+W1005 10:34:34.601510    5584 declarative_config_loader.go:278] skipping component during resolution: empty component: prompt section "mcp_servers"
+I1005 10:34:44.108739     245 quota_manager.go:41] doRefreshQuota: skipped (throttled)
+I1005 10:34:50.517727    6228 conversation_manager.go:779] Forwarding user message to conversation ef116096-84c3-4723-bbc3-aed0f3cca68b (items=1, media=0)
+W1005 10:34:50.529849    6234 declarative_config_loader.go:278] skipping component during resolution: empty component: prompt section "mcp_servers"
+I1005 10:34:55.149585    1952 conversation_manager.go:1164] Surfacing ask_question at step 36
+I1005 10:35:14.208351     245 quota_manager.go:45] doRefreshQuota: starting reload (force=false)
+I1005 10:35:25.912003    4699 conversation_manager.go:779] Forwarding user message to conversation ef116096-84c3-4723-bbc3-aed0f3cca68b (items=1, media=0)
+W1005 10:35:25.924807    6892 declarative_config_loader.go:278] skipping component during resolution: empty component: prompt section "mcp_servers"
+I1005 10:35:30.295591    1952 conversation_manager.go:1164] Surfacing ask_question at step 40
+I1005 10:35:50.626996     245 quota_manager.go:41] doRefreshQuota: skipped (throttled)
+I1005 10:36:42.783997    7635 conversation_manager.go:779] Forwarding user message to conversation ef116096-84c3-4723-bbc3-aed0f3cca68b (items=2, media=0)
+W1005 10:36:42.802688    7636 declarative_config_loader.go:278] skipping component during resolution: empty component: prompt section "mcp_servers"
+I1005 10:37:00.651130     245 quota_manager.go:45] doRefreshQuota: starting reload (force=false)
+I1005 10:37:24.596742    8469 conversation_manager.go:779] Forwarding user message to conversation ef116096-84c3-4723-bbc3-aed0f3cca68b (items=1, media=0)
+W1005 10:37:24.612772    8470 declarative_config_loader.go:278] skipping component during resolution: empty component: prompt section "mcp_servers"
+I1005 10:37:27.494720    1952 tool_confirmation_manager.go:226] Surfacing tool confirmation: "WriteToFile" at step 50
+I1005 10:37:34.401674     243 input_loop.go:706] Responding to tool confirmation: convID=ef116096-84c3-4723-bbc3-aed0f3cca68b, stepIdx=50, approved=true, sandboxOverride=false, persistGrants=[]
+I1005 10:37:34.401750    8705 server.go:2521] Tool confirmation for conversation ef116096-84c3-4723-bbc3-aed0f3cca68b step 50 (type=*gemini_coder_go_proto.Step_Generic approved=true)
+I1005 10:37:52.473014     245 quota_manager.go:41] doRefreshQuota: skipped (throttled)
+I1005 10:38:38.252962    9451 conversation_manager.go:779] Forwarding user message to conversation ef116096-84c3-4723-bbc3-aed0f3cca68b (items=1, media=0)
+W1005 10:38:38.279355    9452 declarative_config_loader.go:278] skipping component during resolution: empty component: prompt section "mcp_servers"
+I1005 10:38:42.412244     245 quota_manager.go:45] doRefreshQuota: starting reload (force=false)
+I1005 10:39:06.341905    9361 conversation_manager.go:779] Forwarding user message to conversation ef116096-84c3-4723-bbc3-aed0f3cca68b (items=1, media=0)
+W1005 10:39:06.356640    9986 declarative_config_loader.go:278] skipping component during resolution: empty component: prompt section "mcp_servers"
+I1005 10:39:10.561137    1952 tool_confirmation_manager.go:226] Surfacing tool confirmation: "ReadUrlContent" at step 62
+I1005 10:39:28.613698     243 input_loop.go:706] Responding to tool confirmation: convID=ef116096-84c3-4723-bbc3-aed0f3cca68b, stepIdx=62, approved=false, sandboxOverride=false, persistGrants=[]
+I1005 10:39:28.613775   10319 server.go:2521] Tool confirmation for conversation ef116096-84c3-4723-bbc3-aed0f3cca68b step 62 (type=*gemini_coder_go_proto.Step_Generic approved=false)
+I1005 10:39:28.615466     245 quota_manager.go:41] doRefreshQuota: skipped (throttled)
+I1005 10:39:40.271067   10486 conversation_manager.go:779] Forwarding user message to conversation ef116096-84c3-4723-bbc3-aed0f3cca68b (items=1, media=0)
+W1005 10:39:40.305740   10487 declarative_config_loader.go:278] skipping component during resolution: empty component: prompt section "mcp_servers"
+W1005 10:39:44.585990   10905 declarative_config_loader.go:278] skipping component during resolution: empty component: prompt section "mcp_servers"
+I1005 10:39:47.154758     245 quota_manager.go:45] doRefreshQuota: starting reload (force=false)
+I1005 10:40:16.121698   11875 server.go:2521] Tool confirmation for conversation 659d2256-2d1f-4ecf-9f18-e0452e64434e step 10 (type=*gemini_coder_go_proto.Step_Generic approved=false)
+I1005 10:42:24.544580   11996 conversation_manager.go:779] Forwarding user message to conversation ef116096-84c3-4723-bbc3-aed0f3cca68b (items=1, media=0)
+W1005 10:42:24.577121   11422 declarative_config_loader.go:278] skipping component during resolution: empty component: prompt section "mcp_servers"
+I1005 10:42:30.244562    1952 tool_confirmation_manager.go:226] Surfacing tool confirmation: "RunCommand" at step 70
+I1005 10:42:35.746096     243 input_loop.go:706] Responding to tool confirmation: convID=ef116096-84c3-4723-bbc3-aed0f3cca68b, stepIdx=70, approved=true, sandboxOverride=false, persistGrants=[]
+I1005 10:42:35.746175   12513 server.go:2521] Tool confirmation for conversation ef116096-84c3-4723-bbc3-aed0f3cca68b step 70 (type=*gemini_coder_go_proto.Step_Generic approved=true)
+I1005 10:42:43.285705     245 quota_manager.go:45] doRefreshQuota: starting reload (force=false)
+I1005 10:43:14.481587    1953 server.go:1325] Stream goroutine exited for ef116096-84c3-4723-bbc3-aed0f3cca68b, sending completion signal
+I1005 10:43:14.481595   11770 server.go:1325] Stream goroutine exited for 659d2256-2d1f-4ecf-9f18-e0452e64434e, sending completion signal
