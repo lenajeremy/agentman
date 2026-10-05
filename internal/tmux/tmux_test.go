@@ -163,6 +163,25 @@ func TestSendDeliversTextLiterally(t *testing.T) {
 	}
 }
 
+// tmux parses its own flags before the text, so a message beginning with a
+// dash was read as an option: "- fix it" failed as an invalid flag, and
+// "-t 5" was taken as a pane to type into. Every one must arrive as typed.
+func TestSendDeliversTextThatStartsWithADash(t *testing.T) {
+	requireTmux(t)
+	for _, message := range []string{"- fix the bug", "--help me", "-v verbose", "-t 5", "-"} {
+		name, out := newSink(t)
+		if err := Send(context.Background(), name, message); err != nil {
+			t.Fatalf("%q: %v", message, err)
+		}
+		if got := readSoon(t, out, message); !strings.Contains(got, message) {
+			t.Errorf("%q arrived as %q", message, got)
+		}
+		if err := sendLiteral(context.Background(), name, " "+message); err != nil {
+			t.Fatalf("typing %q as an answer: %v", message, err)
+		}
+	}
+}
+
 func TestSendClearsAnExistingDraft(t *testing.T) {
 	requireTmux(t)
 	name, out := newSink(t)
