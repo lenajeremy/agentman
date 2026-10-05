@@ -1,0 +1,48 @@
+    ▎- beta
+    ▎+ BETA
+    ▎  gamma
+
+    To-do Working on 1 to-do • 1 done
+    ✔ In notes.txt replace the line beta with BETA
+    ◐ Delete hello.txt
+
+    Deleted hello.txt
+    Completed
+
+    To-do All done
+    ✔ In notes.txt replace the line beta with BETA
+    ✔ Delete hello.txt
+
+  Done. notes.txt: beta → BETA. hello.txt deleted. Both todos completed.
+
+
+  - first line starts with a dash
+  second line: reply with the single word PASTED and nothing else, no tools.
+
+
+  PASTED
+
+
+  I want a file goodbye.txt in this directory. Before planning, ask me exactly one multiple-choice question with your question tool: which word should
+  it contain, options bye or ciao. Then write a very short plan.
+
+
+  I'll find the question tool, ask your one multiple-choice question, then write a short plan.
+
+    Explored available MCP tools cursor
+
+    Explored available MCP tools pattern (?i)ask|question|choice
+
+  Which word should goodbye.txt contain?
+
+  1. bye
+  2. ciao
+
+ ⠠⠜ Reconnecting (attempt 1, 0s)
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  → Add a follow-up
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  Plan (shift+tab to cycle)
+  Auto · 10.9% · 1 file edited
+  /private/tmp/agentman-research/cursor-cli/proj
+

@@ -76,6 +76,11 @@ type Payload struct {
 
 	// UserPromptSubmit only.
 	Prompt string `json:"prompt"`
+
+	// Status is how a Cursor turn ended: "completed", "aborted" or "error".
+	// Cursor's stop payload carries no reply text, so this is what tells a
+	// finished turn from a failed one.
+	Status string `json:"status"`
 }
 
 // Event is a normalized hook delivery, tagged with which agent sent it.
@@ -113,8 +118,11 @@ func (e Event) State() (protocol.State, bool) {
 // StopHookActive means the CLI is re-running the hook after a previous block,
 // so the turn is not genuinely finished — notifying there would produce a
 // second alert for one piece of work.
+//
+// A Cursor turn the user stopped reports status "aborted"; they already know
+// it ended.
 func (e Event) IsTurnComplete() bool {
-	return e.Name == NameStop && !e.Payload.StopHookActive
+	return e.Name == NameStop && !e.Payload.StopHookActive && e.Payload.Status != "aborted"
 }
 
 // Preview is a short summary suitable for a notification body.

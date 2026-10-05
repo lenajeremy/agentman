@@ -283,6 +283,8 @@ func validDelivery(kind protocol.Kind, name Name) bool {
 		}
 	case protocol.KindCodex:
 		return name == NameStop
+	case protocol.KindCursorCLI:
+		return cursorHookName(name)
 	}
 	return false
 }

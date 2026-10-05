@@ -62,6 +62,7 @@ func (in Installer) Plans(token string, remove bool) ([]Plan, error) {
 	return []Plan{
 		in.planClaude(home, token, remove),
 		in.planCodex(home, token, remove),
+		in.planCursor(home, remove),
 	}, nil
 }
 
