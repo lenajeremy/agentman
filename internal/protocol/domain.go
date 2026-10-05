@@ -248,6 +248,13 @@ type QuestionOption struct {
 	Preview     string `json:"preview,omitempty"`
 	Selected    bool   `json:"selected,omitempty"`
 	Checked     bool   `json:"checked,omitempty"`
+	// WithText means choosing this option may carry a short note, which the
+	// adapter delivers with it the way the CLI takes one: Claude's "No, and
+	// tell Claude what to do differently", Kiro's reason editor behind Tab on
+	// "No", Cursor's free-text box after "n". The answer is OptionKey plus
+	// Text; an empty Text is the plain choice. Every other option stays one
+	// tap, which marking the whole question Custom would lose.
+	WithText bool `json:"withText,omitempty"`
 }
 
 // QuestionAnswer is the complete user response to one displayed question.
