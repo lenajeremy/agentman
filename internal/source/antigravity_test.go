@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -65,6 +66,8 @@ func newTestAntigravity(t *testing.T, home string, pid int, held map[int]antigra
 	}
 	s.openConversations = func(context.Context, string, []int) map[int]antigravityProcess { return held }
 	s.capturePane = func(context.Context, string) (string, error) { return "", nil }
+	// Never the real `agy models`: it would start agy and ask its service.
+	s.models.list = func(context.Context) ([]byte, error) { return nil, errors.New("no agy in tests") }
 	return s
 }
 

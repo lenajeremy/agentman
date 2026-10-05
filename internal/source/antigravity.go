@@ -104,6 +104,8 @@ type AntigravitySource struct {
 	// records; usage caches each transcript's last token count.
 	artifacts antigravityArtifactCache
 	usage     antigravityUsageCache
+	// models is agy's listing of the models it offers, for switching.
+	models antigravityModelCatalog
 }
 
 // antigravityStateEntry caches the state a transcript's last line implies,
@@ -271,7 +273,7 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 				session.State = state
 			}
 		}
-		session.Mode = footer.mode
+		s.offerSwitches(&session, footer)
 		if percent, ok := s.contextPercent(transcript, session.Model); ok {
 			session.ContextPercent = percent
 		}
@@ -305,6 +307,7 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 			StartedAt: started, LastActivityAt: started, AgentPID: pane.PanePID,
 		}
 		footer := s.applyPane(ctx, &session, pane.Name)
+		s.offerSwitches(&session, footer)
 		found = append(found, session)
 		next[id] = antigravitySession{meta: session, tmuxName: pane.Name, footer: footer}
 	}

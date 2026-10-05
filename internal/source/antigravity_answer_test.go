@@ -30,6 +30,8 @@ type agyKeys struct {
 	// escapes are what Escape shows, one per press: in agy's subagent panel
 	// the first leaves the choice and the second closes the panel.
 	escapes []string
+	// after is what other keys and typed text show, one pane per press.
+	after map[string][]string
 }
 
 // capture returns the next pane in line, staying on the last one.
@@ -41,10 +43,18 @@ func (k *agyKeys) capture(context.Context, string) (string, error) {
 	return pane, nil
 }
 
+// show moves the screen on to what a key or text was set to show.
+func (k *agyKeys) show(input string) {
+	if next := k.after[input]; len(next) > 0 {
+		k.panes, k.after[input] = []string{next[0]}, next[1:]
+	}
+}
+
 func (k *agyKeys) keys(withSend bool) antigravityKeys {
 	keys := antigravityKeys{
 		typeText: func(_ context.Context, _, text string) error {
 			k.events = append(k.events, "type "+text)
+			k.show(text)
 			return nil
 		},
 		press: func(_ context.Context, _, key string) error {
@@ -71,6 +81,7 @@ func (k *agyKeys) keys(withSend bool) antigravityKeys {
 			if len(names) == 1 && names[0] == "Escape" && len(k.escapes) > 0 {
 				k.panes, k.escapes = []string{k.escapes[0]}, k.escapes[1:]
 			}
+			k.show(strings.Join(names, " "))
 			return nil
 		}
 	}
