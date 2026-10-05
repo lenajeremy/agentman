@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -61,6 +62,11 @@ func cursorCLIFixture(t *testing.T) (string, *CursorCLISource, string) {
 		t.Fatal(err)
 	}
 	s.listPanes = func(context.Context) ([]tmux.Session, error) { return nil, nil }
+	// No process table: these tests describe chats by recency alone, and the
+	// machine running them may have real Cursor processes of its own.
+	s.processes = func(context.Context) (*tmux.ProcessTree, error) {
+		return nil, errors.New("no process table in tests")
+	}
 	return cwd, s, store
 }
 
@@ -278,7 +284,7 @@ func TestCursorCLIExactOpenStoreMatchesPanesSharingDirectory(t *testing.T) {
 	}
 	source.listPanes = func(context.Context) ([]tmux.Session, error) { return panes, nil }
 	bindings := map[int]string{123: firstStore, 456: secondStore}
-	source.openStores = func(context.Context, []int) map[int]string { return bindings }
+	source.openStores = func(context.Context, []int) (map[int]string, bool) { return bindings, true }
 	source.capturePane = func(context.Context, string) (string, error) { return "", nil }
 	sessions, err := source.Discover(context.Background())
 	if err != nil {

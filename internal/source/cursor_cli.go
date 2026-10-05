@@ -85,7 +85,11 @@ type CursorCLISource struct {
 	home        string
 	listPanes   func(context.Context) ([]tmux.Session, error)
 	capturePane func(context.Context, string) (string, error)
-	openStores  func(context.Context, []int) map[int]string
+	// openStores maps processes to the chat store each has open, and
+	// reports whether the answer can be trusted; processes lists every
+	// process so the Cursor agents among them can be found.
+	openStores func(context.Context, []int) (map[int]string, bool)
+	processes  func(context.Context) (*tmux.ProcessTree, error)
 	// sendKey and sendText type into a pane; nil means tmux. Tests record
 	// what would have been typed instead.
 	sendKey  func(ctx context.Context, pane, key string) error
@@ -98,6 +102,14 @@ type CursorCLISource struct {
 	// past holds the stores of chats that have already ended, found by Past
 	// rather than by a sweep. See pastSessions.
 	past pastSessions
+
+	// live is the last trustworthy answer to which stores are open; see
+	// cursor_cli_liveness.go.
+	live cursorCLILiveness
+	// turnMu guards the transcript locations and turn states read from them.
+	turnMu      sync.Mutex
+	transcripts map[string]string
+	turns       map[string]cursorCLITurnEntry
 }
 
 func NewCursorCLISource(home string) (*CursorCLISource, error) {
@@ -110,11 +122,12 @@ func NewCursorCLISource(home string) (*CursorCLISource, error) {
 	}
 	return &CursorCLISource{
 		home: home, listPanes: tmux.List, capturePane: tmux.Capture,
-		openStores: func(ctx context.Context, pids []int) map[int]string {
+		openStores: func(ctx context.Context, pids []int) (map[int]string, bool) {
 			return cursorCLIOpenStores(ctx, home, pids)
 		},
-		models:   make(map[string]cursorCLIModelEntry),
-		sessions: make(map[string]cursorCLISession),
+		processes: tmux.SnapshotProcessTree,
+		models:    make(map[string]cursorCLIModelEntry),
+		sessions:  make(map[string]cursorCLISession),
 	}, nil
 }
 
@@ -135,31 +148,33 @@ func cursorCLIChatIDs(home string) map[string]bool {
 // process actually has open. This remains exact when two panes share a cwd,
 // when an old chat is resumed, and when the user switches chats in one pane.
 // lsof is optional: environments without it retain the conservative fallback.
-func cursorCLIOpenStores(ctx context.Context, home string, pids []int) map[int]string {
+func cursorCLIOpenStores(ctx context.Context, home string, pids []int) (map[int]string, bool) {
 	result := make(map[int]string)
-	if len(pids) == 0 {
-		return result
-	}
-	bin, err := exec.LookPath("lsof")
-	if err != nil {
-		return result
-	}
 	ids := make([]string, 0, len(pids))
+	seen := make(map[int]bool, len(pids))
 	for _, pid := range pids {
-		if pid > 1 {
+		if pid > 1 && !seen[pid] {
+			seen[pid] = true
 			ids = append(ids, strconv.Itoa(pid))
 		}
 	}
 	if len(ids) == 0 {
-		return result
+		return result, true
+	}
+	bin, err := exec.LookPath("lsof")
+	if err != nil {
+		return result, false
 	}
 	ctx, cancel := context.WithTimeout(ctx, cursorCLILsofTimeout)
 	defer cancel()
 	output, err := exec.CommandContext(ctx, bin, "-w", "-a", "-p", strings.Join(ids, ","), "-Fpn").Output()
-	if err != nil {
-		return result
+	if err != nil && (len(output) == 0 || ctx.Err() != nil) {
+		// lsof also exits non-zero when one of the processes ended between
+		// the process scan and this call; what it printed for the others is
+		// still a true answer. No output at all is not.
+		return result, false
 	}
-	return parseCursorCLIOpenStores(home, output)
+	return parseCursorCLIOpenStores(home, output), true
 }
 
 func parseCursorCLIOpenStores(home string, output []byte) map[int]string {
@@ -246,10 +261,7 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 			panePIDs = append(panePIDs, pane.PanePID)
 		}
 	}
-	openStores := map[int]string{}
-	if s.openStores != nil {
-		openStores = s.openStores(ctx, panePIDs)
-	}
+	openStores, live, liveKnown := s.observeStores(ctx, panePIDs)
 
 	// CLI stores are grouped by a workspace hash. Read metadata only; the
 	// potentially large message blobs are opened on history/follow requests.
@@ -276,14 +288,10 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 		if _, err := os.Stat(store); err != nil {
 			continue
 		}
-		active := false
-		for _, opened := range openStores {
-			if opened == store {
-				active = true
-				break
-			}
-		}
-		if meta.UpdatedAtMs < cutoff && !active {
+		// Live means a Cursor process has the store open. Only when that
+		// cannot be read does recency stand in for it.
+		_, active := live[store]
+		if !active && (liveKnown || meta.UpdatedAtMs < cutoff) {
 			continue
 		}
 		chats = append(chats, foundChat{
@@ -359,6 +367,11 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 			id = cursorCLIPaneIDPrefix + pane.Name
 			mode = protocol.InjectTmux
 			state, currentQuestion = s.cursorCLIPaneState(ctx, pane.Name)
+		} else if turn, ok := s.cursorCLITurnState(ctx, chat.id); ok && liveKnown {
+			// No pane to read: the transcript says whether a turn is open.
+			// Only for a chat a process holds; a crashed one would read busy
+			// forever.
+			state = turn.state
 		}
 		name := strings.TrimSpace(chat.meta.Title)
 		if name == "" {
@@ -376,6 +389,8 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 		if wrapped {
 			entry.AgentPID = pane.PanePID
 			entry.Question = currentQuestion
+		} else if pid, ok := live[chat.store]; ok {
+			entry.AgentPID = pid
 		}
 		result = append(result, entry)
 		next[id] = cursorCLISession{meta: entry, store: chat.store, pane: pane.Name}
@@ -506,6 +521,12 @@ func (s *CursorCLISource) Page(ctx context.Context, sessionID, before string, li
 		}
 	}
 	messages := parser.CursorCLIMessages(sessionID, session.meta.StartedAt, ordered)
+	if before == "" && len(ordered) > 0 {
+		chatID := filepath.Base(filepath.Dir(session.store))
+		if turn, ok := s.cursorCLITurnState(ctx, chatID); ok && turn.failure != "" {
+			messages = append(messages, cursorCLIFailureNotice(sessionID, turn, session.meta.StartedAt+ordered[len(ordered)-1].RowID))
+		}
+	}
 	position := ""
 	if hasMore && len(rows) > 0 {
 		position = strconv.FormatInt(rows[len(rows)-1].RowID, 10)
@@ -557,13 +578,14 @@ func (s *CursorCLISource) Follow(ctx context.Context, sessionID string, out chan
 			store = past.store
 		}
 	}
-	last := cursorCLIStoreVersion(store)
+	chatID := filepath.Base(filepath.Dir(store))
+	last := cursorCLIStoreVersion(store) + s.cursorCLITranscriptVersion(chatID)
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			version := cursorCLIStoreVersion(store)
+			version := cursorCLIStoreVersion(store) + s.cursorCLITranscriptVersion(chatID)
 			if store != "" && version == last && failures == 0 {
 				continue
 			}
