@@ -67,6 +67,15 @@ type ClaudeSource struct {
 
 	questionMu    sync.Mutex
 	questionSpecs map[string]claudeQuestionSpecCache
+
+	// switcher drives a pane to switch its mode or model; see claude_switch.go.
+	switcher paneDriver
+	// switchMu guards pickerLabels, the rows the model picker last showed,
+	// and modelSwitches, the models sessions were switched to from the phone
+	// that their transcripts do not show yet.
+	switchMu      sync.Mutex
+	pickerLabels  []string
+	modelSwitches map[string]claudeModelSwitch
 }
 
 type claudeSession struct {
@@ -110,6 +119,7 @@ func NewClaudeSource(home string) (*ClaudeSource, error) {
 		snapshotProcesses: tmux.SnapshotProcessTree,
 		capturePane:       tmux.Capture,
 		answerWithNote:    tmux.AnswerWithNote,
+		switcher:          newPaneDriver(),
 		processArgs:       claudeProcessArgs,
 		infra:             map[claudeProcessKey]bool{},
 	}, nil
@@ -239,10 +249,8 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 		// the terminal. Finding one overrides the state, because "waiting on
 		// you" is the truth and "idle" is not.
 		if tmuxName != "" {
-			if detected, err := s.captureQuestion(ctx, tmuxName); err == nil {
-				s.enrichClaudeQuestion(id, transcript, detected)
-				meta.Question = protocolQuestion(detected)
-				meta.State = protocol.StateWaitingInput
+			if pane, err := s.capture(ctx, tmuxName); err == nil {
+				s.applyPane(&meta, transcript, pane)
 			}
 		}
 		if meta.LastActivityAt == 0 {
@@ -255,6 +263,9 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 			s.models.put(id, model)
 		}
 		meta.Model = model
+		if switched, ok := s.switched(id, transcript); ok {
+			meta.Model = switched
+		}
 
 		found = append(found, meta)
 		next[id] = claudeSession{
@@ -287,10 +298,8 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 			StartedAt: started, LastActivityAt: started, AgentPID: pane.PanePID,
 		}
 		transcript := s.transcriptPath(pane.Cwd, uuid)
-		if q, err := s.captureQuestion(ctx, pane.Name); err == nil {
-			s.enrichClaudeQuestion(id, transcript, q)
-			meta.Question = protocolQuestion(q)
-			meta.State = protocol.StateWaitingInput
+		if screen, err := s.capture(ctx, pane.Name); err == nil {
+			s.applyPane(&meta, transcript, screen)
 		}
 		found = append(found, meta)
 		next[id] = claudeSession{meta: meta, transcript: transcript,

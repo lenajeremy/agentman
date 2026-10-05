@@ -169,6 +169,18 @@ type CodexSource struct {
 	// discovery can be tested without touching a real tmux server: unlike a
 	// capture, this can press a key.
 	revealQuestion func(context.Context, string) (string, error)
+	// refuseWithNote chooses "No, and tell Codex what to do differently" and
+	// sends the note once the composer is back; see tmux.RefuseThenSend.
+	refuseWithNote func(ctx context.Context, name, key, note string, composerBack func(string) bool) error
+	// switcher drives a pane to switch its mode or model; see
+	// codex_switch.go. switchMu guards the model list read from Codex's
+	// own cache of it.
+	switcher      paneDriver
+	switchMu      sync.Mutex
+	modelList     []codexModelEntry
+	modelsReadAt  time.Time
+	modelsModTime time.Time
+	modelsSize    int64
 	// models remembers each session's model; see modelCache.
 	models *modelCache
 	// readMeta and readActivity are injectable for cache instrumentation tests.
@@ -279,6 +291,8 @@ func NewCodexSource(home string) (*CodexSource, error) {
 		listPanes:      tmux.List,
 		capturePane:    tmux.Capture,
 		revealQuestion: tmux.RevealCodexQuestion,
+		refuseWithNote: tmux.RefuseThenSend,
+		switcher:       newPaneDriver(),
 		models:         newModelCache(),
 		readMeta:       readCodexMeta,
 		readActivity:   codexActivity,
@@ -519,11 +533,14 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				StartedAt:      parseCodexTime(meta.Payload.Timestamp),
 				LastActivityAt: lastActivity,
 			}
+			var screen string
+			var read bool
 			if tmuxName != "" {
 				// The pane's process is the root of everything codex runs, so
 				// servers it starts can be traced back to this session.
 				session.AgentPID = pane.PanePID
-				if q := s.detectQuestion(ctx, tmuxName); q != nil {
+				screen, read = s.readPane(ctx, tmuxName)
+				if q := codexQuestionIn(screen); read && q != nil {
 					session.Question = q
 					session.State = protocol.StateWaitingInput
 				}
@@ -535,6 +552,9 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				s.models.put(id, model)
 			}
 			session.Model = model
+			if read {
+				s.applyFooter(&session, screen)
+			}
 
 			found = append(found, session)
 			next[id] = codexSession{meta: session, transcript: path, tmuxName: tmuxName}
@@ -573,9 +593,12 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			LastActivityAt: started.UnixMilli(),
 			AgentPID:       pane.PanePID,
 		}
-		if q := s.detectQuestion(ctx, pane.Name); q != nil {
-			session.Question = q
-			session.State = protocol.StateWaitingInput
+		if screen, read := s.readPane(ctx, pane.Name); read {
+			if q := codexQuestionIn(screen); q != nil {
+				session.Question = q
+				session.State = protocol.StateWaitingInput
+			}
+			s.applyFooter(&session, screen)
 		}
 		found = append(found, session)
 		// No transcript yet: Page returns an empty feed rather than failing.

@@ -85,6 +85,12 @@ type OpenCodeSource struct {
 	knownPorts   map[int]bool
 	listPanes    func(context.Context) ([]tmux.Session, error)
 	now          func() time.Time
+	// snapshotProcesses reads the process table, shared with the rest of the
+	// sweep. openCodePIDs are the opencode processes it showed last time, and
+	// fullScanUntil keeps scanning in full while a new one comes up.
+	snapshotProcesses func(context.Context) (*tmux.ProcessTree, error)
+	openCodePIDs      map[int]bool
+	fullScanUntil     time.Time
 
 	// models remembers each session's model; see modelCache. It matters more
 	// here than for the file-backed agents, because finding it costs an HTTP
@@ -164,6 +170,7 @@ func NewOpenCodeSource(baseURL string) *OpenCodeSource {
 		questionAnswers:    map[string][][]string{},
 		store:              &openCodeStore{path: openCodeDatabase},
 		listPanes:          tmux.List,
+		snapshotProcesses:  tmux.SnapshotProcessTree,
 		now:                time.Now,
 	}
 	source.findServers = source.scanServers
@@ -385,6 +392,11 @@ const OpenCodePortSpan = 16
 // nothing there, was a steady cost of the idle daemon.
 const openCodeFullScanEvery = 10 * time.Second
 
+// openCodeNewProcessWindow is how long every port is probed after a new
+// opencode process appears, so a server started outside agentman shows up
+// within a sweep or two of listening rather than at the next full scan.
+const openCodeNewProcessWindow = 5 * time.Second
+
 // Available reports whether at least one local OpenCode server is reachable.
 func (s *OpenCodeSource) Available(ctx context.Context) bool {
 	if s.configurationError != nil {
@@ -464,9 +476,14 @@ func (s *OpenCodeSource) portsToProbe(ctx context.Context) ([]int, bool) {
 	if clock == nil {
 		clock = time.Now
 	}
+	started := s.newOpenCodeProcess(ctx)
 	s.scanMu.Lock()
 	now := clock()
-	full := s.lastFullScan.IsZero() || now.Sub(s.lastFullScan) >= openCodeFullScanEvery
+	if started {
+		s.fullScanUntil = now.Add(openCodeNewProcessWindow)
+	}
+	full := s.lastFullScan.IsZero() || now.Sub(s.lastFullScan) >= openCodeFullScanEvery ||
+		now.Before(s.fullScanUntil)
 	probe := map[int]bool{}
 	if full {
 		s.lastFullScan = now
@@ -497,6 +514,38 @@ func (s *OpenCodeSource) portsToProbe(ctx context.Context) ([]int, bool) {
 	}
 	slices.Sort(ports)
 	return ports, full
+}
+
+// newOpenCodeProcess reports whether an opencode process is running that was
+// not running at the last look. It reads the process table only within a
+// discovery sweep, where the table is read once for every adapter anyway.
+func (s *OpenCodeSource) newOpenCodeProcess(ctx context.Context) bool {
+	if s.snapshotProcesses == nil || !tmux.InSweep(ctx) {
+		return false
+	}
+	tree, err := s.snapshotProcesses(ctx)
+	if err != nil || tree == nil {
+		return false
+	}
+	running := map[int]bool{}
+	for _, pid := range tree.PIDs() {
+		if filepath.Base(tree.Command(pid)) == "opencode" {
+			running[pid] = true
+		}
+	}
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
+	seen := s.openCodePIDs
+	s.openCodePIDs = running
+	if seen == nil {
+		return false // the first look: the first scan is a full one anyway
+	}
+	for pid := range running {
+		if !seen[pid] {
+			return true
+		}
+	}
+	return false
 }
 
 // openCodeServerPort reads the port from the name of a tmux session agentman

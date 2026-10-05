@@ -84,3 +84,68 @@ func TestOpenCodeScansEveryPortOnlyEveryFewSeconds(t *testing.T) {
 		t.Errorf("the full scan probed %v, want every port", ports)
 	}
 }
+
+// A server started outside agentman, such as `opencode` in a terminal, used
+// to wait for the next full scan: up to ten seconds. The sweep already reads
+// the process table, so a new opencode process now brings the full scan
+// forward, and it repeats for a few seconds while the server comes up.
+func TestANewOpenCodeProcessBringsTheFullScanForward(t *testing.T) {
+	src := NewOpenCodeSource("")
+	var mu sync.Mutex
+	probes := 0
+	src.client.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		probes++
+		return nil, errors.New("connection refused")
+	})
+	clock := time.Unix(1_000_000, 0)
+	src.now = func() time.Time { return clock }
+	src.listPanes = func(context.Context) ([]tmux.Session, error) { return nil, nil }
+	table := "1 0 /sbin/launchd\n500 1 /bin/zsh\n"
+	snapshots := 0
+	src.snapshotProcesses = func(context.Context) (*tmux.ProcessTree, error) {
+		snapshots++
+		return tmux.ProcessTreeFromTable(table), nil
+	}
+	scan := func() int {
+		t.Helper()
+		mu.Lock()
+		probes = 0
+		mu.Unlock()
+		sweep, done := tmux.WithSweep(context.Background())
+		defer done()
+		src.scanServers(sweep)
+		mu.Lock()
+		defer mu.Unlock()
+		return probes
+	}
+
+	scan()
+	clock = clock.Add(time.Second)
+	if got := scan(); got != 0 {
+		t.Fatalf("a sweep between full scans probed %d ports", got)
+	}
+
+	table += "4242 500 /opt/homebrew/Cellar/opencode/1.18.30_2/bin/opencode\n"
+	clock = clock.Add(time.Second)
+	if got := scan(); got != OpenCodePortSpan {
+		t.Errorf("a new opencode process probed %d ports, want all %d", got, OpenCodePortSpan)
+	}
+	clock = clock.Add(time.Second)
+	if got := scan(); got != OpenCodePortSpan {
+		t.Errorf("a second after it started, %d ports were probed; the server may not be listening yet", got)
+	}
+	clock = clock.Add(openCodeNewProcessWindow)
+	if got := scan(); got != 0 {
+		t.Errorf("long after it started, a sweep still probed %d ports", got)
+	}
+
+	// Outside a sweep, such as listing a folder's history, the process table
+	// is not read just for this.
+	before := snapshots
+	src.scanServers(context.Background())
+	if snapshots != before {
+		t.Error("a scan outside a sweep ran ps")
+	}
+}

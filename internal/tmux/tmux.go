@@ -186,7 +186,11 @@ func Send(ctx context.Context, name, text string) error {
 	lock := actionLock(name)
 	lock.Lock()
 	defer lock.Unlock()
+	return sendLocked(ctx, name, text)
+}
 
+// sendLocked is Send for a caller that already holds the pane's action lock.
+func sendLocked(ctx context.Context, name, text string) error {
 	// Clear whatever is already in the prompt box first.
 	//
 	// Typing into a box that holds a half-written draft fuses the two into one
@@ -789,11 +793,49 @@ func AnswerWithNote(
 	return nil
 }
 
+// RefuseThenSend answers a menu with a choice that ends the agent's turn and
+// gives focus back to its composer, then sends text there as the next
+// message. That is Codex's "No, and tell Codex what to do differently": it
+// interrupts the turn, and what to do instead is simply the next prompt.
+//
+// The text is typed only once composerBack sees the composer return, which
+// takes Codex a moment while it winds the turn down. If it never does, the
+// note is not typed anywhere.
+func RefuseThenSend(ctx context.Context, name, key, text string, composerBack func(pane string) bool) error {
+	if !Available() {
+		return ErrNotInstalled
+	}
+	if key == "" {
+		return errors.New("tmux: no option given")
+	}
+	if strings.TrimSpace(text) == "" {
+		return errors.New("tmux: the note is empty")
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	if _, err := run(ctx, "send-keys", "-t", name, "-l", "--", key); err != nil {
+		return fmt.Errorf("tmux: could not answer: %w", err)
+	}
+	if err := awaitPaneFor(ctx, name, composerBack, 40, 75*time.Millisecond); err != nil {
+		return errors.New("tmux: the choice was made, but the prompt did not come back for the note; " +
+			"send it as a message")
+	}
+	return sendLocked(ctx, name, text)
+}
+
 // awaitPane captures the pane until check accepts it, for a few render ticks:
 // an Ink TUI redraws a moment after the key that changed it.
 func awaitPane(ctx context.Context, name string, check func(pane string) bool) error {
-	for attempt := 0; attempt < 5; attempt++ {
-		time.Sleep(45 * time.Millisecond)
+	return awaitPaneFor(ctx, name, check, 5, 45*time.Millisecond)
+}
+
+// awaitPaneFor checks the pane up to attempts times, interval apart.
+func awaitPaneFor(
+	ctx context.Context, name string, check func(pane string) bool, attempts int, interval time.Duration,
+) error {
+	for attempt := 0; attempt < attempts; attempt++ {
+		time.Sleep(interval)
 		pane, err := Capture(ctx, name)
 		if err != nil {
 			return err
