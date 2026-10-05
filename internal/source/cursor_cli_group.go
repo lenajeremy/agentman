@@ -3,8 +3,11 @@ package source
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
@@ -20,6 +23,17 @@ import (
 type CursorCLIGroup struct {
 	terminal *CursorCLISource
 	acp      *CursorACPSource
+
+	// switched is the model each session was last switched to, shown as its
+	// model until the next reply names the one actually used.
+	switchMu sync.Mutex
+	switched map[string]cursorModelSwitch
+}
+
+type cursorModelSwitch struct {
+	model string
+	// activity is the session's LastActivityAt when it was switched.
+	activity int64
 }
 
 // The interfaces the daemon discovers by type assertion. Keeping the proof
@@ -34,6 +48,8 @@ var (
 	_ Interrupter        = (*CursorCLIGroup)(nil)
 	_ ResumeNamer        = (*CursorCLIGroup)(nil)
 	_ AttachmentInjector = (*CursorCLIGroup)(nil)
+	_ ModeSetter         = (*CursorCLIGroup)(nil)
+	_ ModelSetter        = (*CursorCLIGroup)(nil)
 	_ ArtifactSource     = (*CursorCLIGroup)(nil)
 )
 
@@ -50,6 +66,7 @@ func (s *CursorCLIGroup) Discover(ctx context.Context) ([]protocol.Session, erro
 	managed, managedErr := s.acp.Discover(ctx)
 	all := append(legacy, managed...)
 	s.countPlans(all)
+	s.offerSwitches(all)
 	if legacyErr != nil {
 		return all, legacyErr
 	}
@@ -105,6 +122,139 @@ func (s *CursorCLIGroup) TmuxName(id string) (string, bool) {
 		return "", false
 	}
 	return s.terminal.TmuxName(id)
+}
+
+// SetMode implements ModeSetter.
+func (s *CursorCLIGroup) SetMode(ctx context.Context, id, mode string) error {
+	if s.owned(id) {
+		return s.acp.SetMode(ctx, id, mode)
+	}
+	return s.terminal.SetMode(ctx, id, mode)
+}
+
+// SetModel implements ModelSetter. A terminal chat switches through its
+// pane, with the model's display name from the list ACP last gave.
+func (s *CursorCLIGroup) SetModel(ctx context.Context, id, model string) error {
+	var err error
+	if s.owned(id) {
+		err = s.acp.SetModel(ctx, id, model)
+	} else {
+		err = fmt.Errorf("source: Cursor does not offer %q", model)
+		catalogue := s.acp.catalogue(false)
+		if slices.Contains(cursorCLICommandModels(catalogue), model) {
+			for _, offered := range catalogue {
+				if offered.ID == model {
+					err = s.terminal.SetModelTo(ctx, id, offered)
+					break
+				}
+			}
+		}
+	}
+	if err != nil {
+		return err
+	}
+	activity := int64(0)
+	for _, session := range s.lastSessions() {
+		if session.ID == id {
+			activity = session.LastActivityAt
+		}
+	}
+	s.switchMu.Lock()
+	if s.switched == nil {
+		s.switched = map[string]cursorModelSwitch{}
+	}
+	s.switched[id] = cursorModelSwitch{model: model, activity: activity}
+	s.switchMu.Unlock()
+	return nil
+}
+
+// lastSessions is what the last sweep of both sources found.
+func (s *CursorCLIGroup) lastSessions() []protocol.Session {
+	var sessions []protocol.Session
+	s.terminal.mu.RLock()
+	for _, session := range s.terminal.sessions {
+		sessions = append(sessions, session.meta)
+	}
+	s.terminal.mu.RUnlock()
+	for _, st := range s.acp.states() {
+		st.mu.Lock()
+		sessions = append(sessions, protocol.Session{ID: cursorACPPrefix + st.record.NativeID, LastActivityAt: st.record.LastActivityAt})
+		st.mu.Unlock()
+	}
+	return sessions
+}
+
+// offerSwitches fills in what each session can be switched to. Models are
+// Cursor's default for every chat once chosen, by whichever path, so the
+// scope is always "default".
+func (s *CursorCLIGroup) offerSwitches(sessions []protocol.Session) {
+	// Only fetch Cursor's list when some session could use it.
+	switchable := slices.ContainsFunc(sessions, func(session protocol.Session) bool {
+		return s.owned(session.ID) || cursorCLISwitchable(session)
+	})
+	catalogue := s.acp.catalogue(switchable)
+	ids := make([]string, 0, len(catalogue))
+	for _, model := range catalogue {
+		ids = append(ids, model.ID)
+	}
+	for i := range sessions {
+		session := &sessions[i]
+		switch {
+		case s.owned(session.ID):
+			if st, err := s.acp.get(session.ID); err == nil {
+				session.Modes = s.acp.modes(st)
+				st.mu.Lock()
+				for _, model := range st.record.Models {
+					session.Models = append(session.Models, model.ID)
+				}
+				st.mu.Unlock()
+				if len(session.Models) == 0 {
+					session.Models = slices.Clone(ids)
+				}
+			}
+		case cursorCLISwitchable(*session):
+			session.Modes = slices.Clone(cursorCLIPaneModes)
+			session.Models = cursorCLICommandModels(catalogue)
+		}
+		if len(session.Models) > 0 {
+			session.ModelScope = protocol.ModelScopeDefault
+		}
+		// The model a reply last used stays the store's answer until the
+		// next reply; the switch is newer than that.
+		s.switchMu.Lock()
+		if switched, ok := s.switched[session.ID]; ok {
+			if session.LastActivityAt > switched.activity {
+				delete(s.switched, session.ID)
+			} else {
+				session.Model = switched.model
+			}
+		}
+		s.switchMu.Unlock()
+	}
+}
+
+// cursorCLISwitchable is a pane whose prompt row was read; a chat with no
+// pane has no keys to press.
+func cursorCLISwitchable(session protocol.Session) bool {
+	return session.Inject == protocol.InjectTmux && session.Mode != ""
+}
+
+// cursorCLICommandModels are the models a terminal chat can be switched to by
+// command: each whose display name no other model shares, since the command
+// list shows only that name and two rows saying the same thing cannot be
+// told apart.
+func cursorCLICommandModels(catalogue []cursorACPModel) []string {
+	seen := map[string]int{}
+	for _, model := range catalogue {
+		seen[cursorCLIModelDisplay(model)]++
+	}
+	var ids []string
+	for _, model := range catalogue {
+		if seen[cursorCLIModelDisplay(model)] == 1 {
+			ids = append(ids, model.ID)
+		}
+	}
+	return ids
 }
 
 // ResumedSession implements ResumeNamer. A resumed chat opens in a managed
