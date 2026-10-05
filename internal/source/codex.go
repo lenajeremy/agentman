@@ -184,6 +184,8 @@ type CodexSource struct {
 	// past holds rollouts of sessions that have already exited, found by
 	// Past rather than by a sweep. See pastSessions.
 	past pastSessions
+	// pastRead is what history listings read from rollouts.
+	pastRead pastFacts[codexPastFacts]
 }
 
 type codexSession struct {

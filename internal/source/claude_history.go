@@ -70,25 +70,26 @@ func (s *ClaudeSource) Past(ctx context.Context, dir string, limit int) ([]proto
 		if !validClaudeSessionID(sessionID) {
 			continue
 		}
-		head := claudeTranscriptHead(candidate.path)
-		// A transcript with no cwd of its own is judged by the slug that led
-		// here, which is the best available and was already a prefix match.
-		if head.cwd != "" && !underDirectory(head.cwd, dir) {
+		facts, ok := s.pastFactsOf(candidate.path)
+		if !ok {
 			continue
 		}
-		cwd := head.cwd
+		// A transcript with no cwd of its own is judged by the slug that led
+		// here, which is the best available and was already a prefix match.
+		if facts.cwd != "" && !underDirectory(facts.cwd, dir) {
+			continue
+		}
+		cwd := facts.cwd
 		if cwd == "" {
 			cwd = dir
 		}
-
-		id := string(protocol.KindClaude) + ":" + sessionID
-		model, cached := s.models.get(id)
-		if !cached {
-			model = modelFromTranscript(candidate.path, claudeModelOf)
-			s.models.put(id, model)
+		name := facts.name
+		if name == "" {
+			name = historyName("", cwd)
 		}
 
-		started := head.startedAt
+		id := string(protocol.KindClaude) + ":" + sessionID
+		started := facts.startedAt
 		if started == 0 {
 			started = candidate.modTime
 		}
@@ -96,18 +97,49 @@ func (s *ClaudeSource) Past(ctx context.Context, dir string, limit int) ([]proto
 			ID:             id,
 			Kind:           protocol.KindClaude,
 			NativeID:       sessionID,
-			Name:           historyName(claudeTranscriptTitle(candidate.path, head.titles), cwd),
+			Name:           name,
 			Cwd:            cwd,
 			State:          protocol.StateEnded,
 			Inject:         protocol.InjectNone,
 			StartedAt:      started,
 			LastActivityAt: candidate.modTime,
-			Model:          model,
+			Model:          facts.model,
 		})
 
 		s.past.remember(id, candidate.path)
 	}
 	return found, nil
+}
+
+// claudePastFacts is what a history listing reads from one transcript.
+type claudePastFacts struct {
+	cwd       string
+	startedAt int64
+	// name is empty when nothing named the session, and the listing falls
+	// back to the folder.
+	name  string
+	model string
+}
+
+// pastFactsOf reads a transcript's directory, name and model, or recalls them
+// if the file has not changed since.
+func (s *ClaudeSource) pastFactsOf(path string) (claudePastFacts, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return claudePastFacts{}, false
+	}
+	if facts, ok := s.pastRead.get(path, info); ok {
+		return facts, true
+	}
+	head := claudeTranscriptHead(path)
+	facts := claudePastFacts{
+		cwd:       head.cwd,
+		startedAt: head.startedAt,
+		name:      historyName(claudeTranscriptTitle(path, head.titles), ""),
+		model:     modelFromTranscript(path, claudeModelOf),
+	}
+	s.pastRead.put(path, info, facts)
+	return facts, true
 }
 
 // Directories implements History.

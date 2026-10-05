@@ -62,6 +62,8 @@ type ClaudeSource struct {
 	// past holds transcripts of sessions that have already exited, found by
 	// Past rather than by a sweep. See pastSessions.
 	past pastSessions
+	// pastRead is what history listings read from those transcripts.
+	pastRead pastFacts[claudePastFacts]
 
 	questionMu    sync.Mutex
 	questionSpecs map[string]claudeQuestionSpecCache

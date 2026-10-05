@@ -50,10 +50,11 @@ func (s *CodexSource) Past(ctx context.Context, dir string, limit int) ([]protoc
 		if err != nil {
 			continue
 		}
-		meta, err := s.cachedCodexMeta(rollout.path, info)
+		facts, err := s.pastFactsOf(rollout.path, info)
 		if err != nil {
 			continue
 		}
+		meta := facts.meta
 		if !underDirectory(meta.Payload.Cwd, dir) {
 			continue
 		}
@@ -69,10 +70,11 @@ func (s *CodexSource) Past(ctx context.Context, dir string, limit int) ([]protoc
 		seen[threadID] = true
 
 		id := string(protocol.KindCodex) + ":" + threadID
-		model, cached := s.models.get(id)
-		if !cached {
-			model = codexModel(rollout.path)
-			s.models.put(id, model)
+		if !facts.named {
+			facts.name = historyName(codexRolloutPrompt(rollout.path), meta.Payload.Cwd)
+			facts.model = codexModel(rollout.path)
+			facts.named = true
+			s.pastRead.put(rollout.path, info, facts)
 		}
 
 		started := parseCodexTime(meta.Payload.Timestamp)
@@ -83,18 +85,47 @@ func (s *CodexSource) Past(ctx context.Context, dir string, limit int) ([]protoc
 			ID:             id,
 			Kind:           protocol.KindCodex,
 			NativeID:       threadID,
-			Name:           historyName(codexRolloutPrompt(rollout.path), meta.Payload.Cwd),
+			Name:           facts.name,
 			Cwd:            meta.Payload.Cwd,
 			State:          protocol.StateEnded,
 			Inject:         protocol.InjectNone,
 			StartedAt:      started,
 			LastActivityAt: rollout.modTime,
-			Model:          model,
+			Model:          facts.model,
 		})
 
 		s.past.remember(id, rollout.path)
 	}
 	return found, nil
+}
+
+// codexPastFacts is what history reads from one rollout. Folder counts need
+// only the header; a listing of the folder goes on to read the name and the
+// model, for the rollouts that fall in it.
+type codexPastFacts struct {
+	meta  codexMeta
+	named bool
+	name  string
+	model string
+}
+
+// pastFactsOf reads a rollout's header, or recalls what was read from it if
+// the file has not changed since.
+func (s *CodexSource) pastFactsOf(path string, info os.FileInfo) (codexPastFacts, error) {
+	if facts, ok := s.pastRead.get(path, info); ok {
+		return facts, nil
+	}
+	read := s.readMeta
+	if read == nil {
+		read = readCodexMeta
+	}
+	meta, err := read(path)
+	if err != nil {
+		return codexPastFacts{}, err
+	}
+	facts := codexPastFacts{meta: meta}
+	s.pastRead.put(path, info, facts)
+	return facts, nil
 }
 
 // Directories implements History.
@@ -113,7 +144,8 @@ func (s *CodexSource) Directories(ctx context.Context) ([]protocol.Folder, error
 		if err != nil {
 			continue
 		}
-		meta, err := s.cachedCodexMeta(rollout.path, info)
+		facts, err := s.pastFactsOf(rollout.path, info)
+		meta := facts.meta
 		if err != nil || meta.Payload.Cwd == "" || meta.isSubagent() {
 			continue
 		}
