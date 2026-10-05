@@ -348,7 +348,7 @@ func queryCursorCLIStoreMode(ctx context.Context, store string) string {
 	ctx, cancel := context.WithTimeout(ctx, cursorCLIDBTimeout)
 	defer cancel()
 	output, err := exec.CommandContext(ctx, bin, "-readonly", "-cmd", cursorCLITimeoutCommand,
-		"file:"+store+"?mode=ro", "SELECT value FROM meta WHERE key='0'").Output()
+		cursorSQLiteURI(store), "SELECT value FROM meta WHERE key='0'").Output()
 	if err != nil || len(output) > 64*1024 {
 		return ""
 	}

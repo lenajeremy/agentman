@@ -42,6 +42,26 @@ const (
 	cursorCLIFollowFailures = 20
 )
 
+// cursorSQLiteURI opens one of Cursor's databases read-only.
+//
+// They run in WAL mode, and a read-only connection to a WAL database cannot
+// start when the -wal file is missing: sqlite3 fails with "unable to open
+// database file" rather than reading the main file. Cursor's own SQLite
+// leaves the -wal file behind when it closes, but a store whose -wal is gone
+// — closed by another SQLite build, or copied without it — would then be
+// unreadable while nothing at all is writing it. With no -wal (and no
+// rollback journal, the other sign of a writer) the file is opened as
+// immutable, which reads it as it is without the shared-memory index; with
+// one, as an ordinary read-only reader that sees the writer's latest commits.
+func cursorSQLiteURI(path string) string {
+	if _, err := os.Stat(path + "-wal"); os.IsNotExist(err) {
+		if _, err := os.Stat(path + "-journal"); os.IsNotExist(err) {
+			return "file:" + path + "?mode=ro&immutable=1"
+		}
+	}
+	return "file:" + path + "?mode=ro"
+}
+
 // cursorCLITimeoutCommand sets the busy timeout through sqlite3's dot-command
 // form, which prints nothing. A `PRAGMA busy_timeout` would return its value as
 // a row and, under -json, land in the output the caller is about to parse.
@@ -231,7 +251,7 @@ func queryCursorCLIModel(ctx context.Context, store string) string {
 		"FROM blobs WHERE json_valid(data)=1 AND json_extract(data,'$.role')='assistant' " +
 		"AND model IS NOT NULL ORDER BY rowid DESC LIMIT 1"
 	output, err := exec.CommandContext(ctx, bin, "-json", "-readonly",
-		"-cmd", cursorCLITimeoutCommand, "file:"+store+"?mode=ro", query).Output()
+		"-cmd", cursorCLITimeoutCommand, cursorSQLiteURI(store), query).Output()
 	if err != nil || len(output) > 4096 {
 		return ""
 	}
@@ -484,7 +504,7 @@ func runCursorCLIQuery(ctx context.Context, store, query string) ([]cursorCLIRow
 	ctx, cancel := context.WithTimeout(ctx, cursorCLIDBTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "-json", "-readonly",
-		"-cmd", cursorCLITimeoutCommand, "file:"+store+"?mode=ro", query)
+		"-cmd", cursorCLITimeoutCommand, cursorSQLiteURI(store), query)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
