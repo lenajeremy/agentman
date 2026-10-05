@@ -96,6 +96,11 @@ type Server struct {
 	// uploads holds images in flight from a phone to a daemon. See uploads.go
 	// for why they travel beside the websocket rather than through it.
 	uploads *uploadStore
+	// beforeDaemonRegistered runs between a daemon's websocket handshake and
+	// its registration. Nil in production; tests use it to widen that window,
+	// which is where a client can already think it is connected while apps
+	// are still told the daemon is offline.
+	beforeDaemonRegistered func()
 }
 
 // NewServer builds a relay.
@@ -552,6 +557,9 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	conn := newWSConn(ws)
 	defer conn.Close()
 
+	if s.beforeDaemonRegistered != nil {
+		s.beforeDaemonRegistered()
+	}
 	// A reconnecting daemon replaces its previous socket, so a half-dead
 	// connection from a suspended laptop cannot keep owning the account.
 	if replaced := s.hub.AddDaemon(account, conn); replaced != nil {

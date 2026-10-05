@@ -17,9 +17,9 @@ import (
 // state the reason, in the version the peer can still decode, before hanging
 // up — the frame has to be flushed, because closing discards the send queue.
 func TestOldClientLearnsWhyItWasDisconnected(t *testing.T) {
-	_, ts := newTestServer(t)
+	server, ts := newTestServer(t)
 	const daemonToken = "version-mismatch-token"
-	dialDaemon(t, ts.URL, daemonToken)
+	dialDaemon(t, server, ts.URL, daemonToken)
 	app := dialPairedApp(t, ts.URL, daemonToken)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

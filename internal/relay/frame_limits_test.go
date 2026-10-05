@@ -51,9 +51,9 @@ func dialPairedApp(t *testing.T, base, daemonToken string) *websocket.Conn {
 // (256 KiB), so one long tool result routinely exceeds an app-sized ceiling.
 // Holding the daemon to maxAppFrame silently killed its socket mid-page.
 func TestDaemonMayPublishLargeEvent(t *testing.T) {
-	_, ts := newTestServer(t)
+	server, ts := newTestServer(t)
 	const daemonToken = "large-event-token"
-	daemon := dialDaemon(t, ts.URL, daemonToken)
+	daemon := dialDaemon(t, server, ts.URL, daemonToken)
 	app := dialPairedApp(t, ts.URL, daemonToken)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
