@@ -77,6 +77,27 @@ type Session struct {
 	// "Codex" says which CLI is open, not which model is doing the work, and
 	// those diverge constantly.
 	Model string `json:"model,omitempty"`
+	// Mode is the agent's own name for the mode it is in — "plan",
+	// "accept-edits", "ask" — as its footer or transcript spells it. Empty
+	// means the agent's default, or an adapter that cannot tell.
+	//
+	// Read-only on the phone. Every CLI that has modes keeps the choice as a
+	// global default, so switching one from here would change the laptop's
+	// next session too.
+	Mode string `json:"mode,omitempty"`
+	// ContextPercent is how full the model's context window is, in whole
+	// percent from 0 to 100. Zero is also "unknown": no adapter can tell
+	// before the first reply.
+	//
+	// Whole percent rather than a fraction, so a long reply does not produce
+	// a session update for every few tokens the window gains.
+	ContextPercent int `json:"contextPercent,omitempty"`
+	// Artifacts counts the documents this session's agent has written for
+	// the user apart from the conversation — a plan, a task list, a
+	// screenshot — which list_artifacts returns. ArtifactsToReview is how
+	// many of them the agent is waiting on the user to approve.
+	Artifacts         int `json:"artifacts,omitempty"`
+	ArtifactsToReview int `json:"artifactsToReview,omitempty"`
 	// Question is set when the agent is blocked on a decision. Its presence
 	// is what makes StateWaitingInput actionable rather than merely visible:
 	// the app renders the choices and the user taps one.
@@ -102,6 +123,32 @@ type Server struct {
 	Title string `json:"title,omitempty"`
 	// Link is the public preview link while the server is being shared.
 	Link string `json:"link,omitempty"`
+}
+
+// Artifact is a document an agent wrote for the user to read apart from the
+// conversation: Antigravity's implementation plan, task list and walkthrough,
+// a screenshot it took, a spec. Plans in particular are what people approve
+// away from the desk, so the phone lists them, opens them, and answers a
+// request for review.
+type Artifact struct {
+	// Name identifies the artifact within its session and is what
+	// read_artifact and review_artifact take as Path. A plain file name,
+	// never a path: no "/" and no "..".
+	Name string `json:"name"`
+	// Kind is what the artifact is for: "plan", "task", "walkthrough",
+	// "spec", "image", "video" or "file". Open-ended, so the app shows a
+	// kind it does not know with a generic icon rather than refusing the list.
+	Kind string `json:"kind"`
+	// Title is the agent's own heading for it, when it gave one.
+	Title string `json:"title,omitempty"`
+	// Summary is the agent's short description of what it holds.
+	Summary   string `json:"summary,omitempty"`
+	UpdatedAt int64  `json:"updatedAt"`
+	Size      int64  `json:"size"`
+	MIME      string `json:"mime,omitempty"`
+	// Review means the agent asked the user to approve this artifact and has
+	// had no answer since it last changed.
+	Review bool `json:"review,omitempty"`
 }
 
 // Folder is one directory agents have run in.
@@ -139,6 +186,8 @@ func (s Session) SameAs(other Session) bool {
 		s.Name == other.Name && s.Cwd == other.Cwd && s.State == other.State &&
 		s.Inject == other.Inject && s.StartedAt == other.StartedAt &&
 		s.LastActivityAt == other.LastActivityAt && s.Model == other.Model &&
+		s.Mode == other.Mode && s.ContextPercent == other.ContextPercent &&
+		s.Artifacts == other.Artifacts && s.ArtifactsToReview == other.ArtifactsToReview &&
 		s.AgentPID == other.AgentPID &&
 		s.Question.sameAs(other.Question) && SameServers(s.Servers, other.Servers)
 }

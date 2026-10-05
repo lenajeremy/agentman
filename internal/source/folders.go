@@ -187,17 +187,27 @@ func (r *Registry) InDirectory(ctx context.Context, dir string, limit int) ([]pr
 	past, failures := r.pastIn(ctx, dir, limit)
 
 	live := map[string]bool{}
+	// A live session is not always published under the id its transcript
+	// has: Kiro, Codex and Antigravity key a session running in an Agentman
+	// pane on the pane, because the pane exists before the agent has chosen
+	// an id. The agent's own id is what the two readings share.
+	liveNative := map[nativeSession]bool{}
 	all := make([]protocol.Session, 0, len(past))
 	for _, session := range r.lastKnown() {
 		if underDirectory(session.Cwd, dir) {
 			live[session.ID] = true
+			if session.NativeID != "" {
+				liveNative[nativeSession{session.Kind, session.NativeID}] = true
+			}
 			all = append(all, session)
 		}
 	}
 	for _, session := range past {
-		if !live[session.ID] {
-			all = append(all, session)
+		if live[session.ID] ||
+			(session.NativeID != "" && liveNative[nativeSession{session.Kind, session.NativeID}]) {
+			continue
 		}
+		all = append(all, session)
 	}
 
 	SortSessions(all)
@@ -209,6 +219,12 @@ func (r *Registry) InDirectory(ctx context.Context, dir string, limit int) ([]pr
 		return all, fmt.Errorf("source: %s", strings.Join(failures, "; "))
 	}
 	return all, nil
+}
+
+// nativeSession is one conversation as its agent names it.
+type nativeSession struct {
+	kind     protocol.Kind
+	nativeID string
 }
 
 // pastIn reads one directory's finished sessions, reusing a recent read.
