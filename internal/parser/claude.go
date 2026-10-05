@@ -10,36 +10,6 @@ import (
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
 
-// Claude Code writes ~/.claude/projects/<cwd-slug>/<sessionId>.jsonl.
-//
-// Only "user" and "assistant" records carry conversation. The rest of the file
-// is bookkeeping the UI has no use for — mode changes, generated titles,
-// file-history snapshots — and dropping it early is most of what makes the
-// mobile feed readable.
-var claudeIgnoredTypes = map[string]bool{
-	"mode":                  true,
-	"permission-mode":       true,
-	"ai-title":              true,
-	"attachment":            true,
-	"file-history-snapshot": true,
-	"file-history-delta":    true,
-	"last-prompt":           true,
-	"queue-operation":       true,
-	"system":                true,
-	"summary":               true,
-}
-
-// IsKnownClaudeRecordType reports whether a transcript record type is one this
-// parser recognizes — either conversation or known bookkeeping.
-//
-// Claude Code's transcript format is not a published API. `am doctor` scans a
-// recent transcript through this so an unrecognized record type after a CLI
-// upgrade surfaces as an explicit warning, rather than as messages silently
-// vanishing from the feed.
-func IsKnownClaudeRecordType(recordType string) bool {
-	return recordType == "user" || recordType == "assistant" || claudeIgnoredTypes[recordType]
-}
-
 // Slash-command scaffolding the CLI injects as though the user had typed it.
 var claudeCommandWrapper = regexp.MustCompile(
 	`^\s*<(command-name|command-message|command-args|local-command-stdout|user-prompt-submit-hook)`)

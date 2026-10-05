@@ -876,19 +876,12 @@ func cleanTitle(title string) string {
 	return strings.TrimSpace(strings.TrimLeft(title, "←☐☑☒ "))
 }
 
-// cleanLabel tidies a choice for display on a phone.
-//
-// Codex pads a trailing description onto the same line ("Keep current model
-// (never show again)   Hide future rate limit reminders"). Collapsing all the
-// whitespace would fuse the choice and its explanation into one run-on, so the
-// run of spaces that separates them is treated as the boundary and only the
-// choice itself is kept — the label has to be readable as a button. Two spaces
-// is enough of a signal, since a real label never contains a double space.
-func cleanLabel(label string) string {
-	label, _ = splitOptionText(label)
-	return label
-}
-
+// splitOptionText separates a choice from a description padded onto the same
+// line. Codex draws "Keep current model (never show again)   Hide future rate
+// limit reminders". Collapsing all the whitespace would fuse the two into one
+// run-on, so the run of spaces between them is the boundary, and the label
+// stays readable as a button. Two spaces are enough of a signal, since a real
+// label never contains a double space.
 func splitOptionText(text string) (label, description string) {
 	text = strings.TrimSpace(text)
 	if idx := strings.Index(text, "  "); idx > 0 {

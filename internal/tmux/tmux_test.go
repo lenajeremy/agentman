@@ -434,13 +434,17 @@ func TestOwnsPIDMatchesDescendants(t *testing.T) {
 
 	// Ancestry is how a discovered agent is matched to the tmux session that
 	// can type into it, so a pane must claim itself and nothing unrelated.
-	if !OwnsPID(pane, pane) {
+	processes, err := SnapshotProcessTree(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !processes.OwnsPID(pane, pane) {
 		t.Error("a pane should own its own process")
 	}
-	if OwnsPID(pane, os.Getpid()) {
+	if processes.OwnsPID(pane, os.Getpid()) {
 		t.Error("the test process is not inside the pane but was claimed by it")
 	}
-	if OwnsPID(pane, 1) {
+	if processes.OwnsPID(pane, 1) {
 		t.Error("init must never be claimed")
 	}
 }

@@ -290,23 +290,6 @@ func Kill(ctx context.Context, name string) error {
 	return err
 }
 
-// OwnsPID reports whether pid is the pane process or one of its descendants.
-//
-// Walking up from the agent's pid is how a session discovered on disk is
-// matched to the tmux session that can type into it. Ancestry is used rather
-// than the working directory because two agents can easily run in the same
-// directory, and typing into the wrong one would be worse than not delivering.
-func OwnsPID(panePID, pid int) bool {
-	if pid > 1 && pid == panePID {
-		return true
-	}
-	processes, err := SnapshotProcessTree(context.Background())
-	if err != nil {
-		return false
-	}
-	return processes.OwnsPID(panePID, pid)
-}
-
 // ProcessTree is one immutable snapshot of the operating system's PID → parent
 // relationships. A discovery sweep can perform any number of ancestry checks
 // against it without spawning another process or observing an inconsistent

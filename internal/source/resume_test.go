@@ -37,9 +37,6 @@ func TestResumeArgsRefusesWhatCannotBeReopened(t *testing.T) {
 		if _, ok := ResumeArgs(kind, "abc"); ok {
 			t.Errorf("%s reported resumable", kind)
 		}
-		if CanResume(kind) {
-			t.Errorf("CanResume(%s) = true", kind)
-		}
 	}
 }
 
