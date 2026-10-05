@@ -161,10 +161,22 @@ func rejectSendIntoLiveQuestion(
 }
 
 func (s *CodexSource) detectQuestion(ctx context.Context, tmuxName string) *protocol.Question {
-	pane, err := s.revealQuestion(ctx, tmuxName)
-	if err != nil {
+	pane, read := s.readPane(ctx, tmuxName)
+	if !read {
 		return nil
 	}
+	return codexQuestionIn(pane)
+}
+
+// readPane reads a Codex pane, opening its collapsed question tray first if
+// that is what is showing.
+func (s *CodexSource) readPane(ctx context.Context, tmuxName string) (string, bool) {
+	pane, err := s.revealQuestion(ctx, tmuxName)
+	return pane, err == nil
+}
+
+// codexQuestionIn is the question a Codex pane shows, if any.
+func codexQuestionIn(pane string) *protocol.Question {
 	shown := protocolQuestionOrNil(question.Detect(pane))
 	if shown != nil {
 		for i := range shown.Options {
@@ -244,14 +256,18 @@ func (s *ClaudeSource) CurrentQuestion(
 	return protocolQuestion(current), nil
 }
 
-func (s *ClaudeSource) captureQuestion(ctx context.Context, tmuxName string) (*question.Question, error) {
-	// Through the injected capture, so discovery and answers can be tested
-	// against real pane captures without a tmux server.
+// capture reads a pane through the injected capture, so discovery and
+// answers can be tested against real pane captures without a tmux server.
+func (s *ClaudeSource) capture(ctx context.Context, tmuxName string) (string, error) {
 	capture := s.capturePane
 	if capture == nil {
 		capture = tmux.Capture
 	}
-	pane, err := capture(ctx, tmuxName)
+	return capture(ctx, tmuxName)
+}
+
+func (s *ClaudeSource) captureQuestion(ctx context.Context, tmuxName string) (*question.Question, error) {
+	pane, err := s.capture(ctx, tmuxName)
 	if err != nil {
 		return nil, err
 	}
