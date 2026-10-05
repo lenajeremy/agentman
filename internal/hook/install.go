@@ -37,6 +37,9 @@ type Plan struct {
 	Changed bool
 	// Note carries a caveat worth showing the user.
 	Note string
+	// Delete removes the file instead of writing After, for a config that is
+	// Agentman's entirely (Kiro's agent) rather than a key inside the user's.
+	Delete bool
 	// Err is set when this agent cannot be configured, without preventing
 	// other agents from being configured.
 	Err error
@@ -96,6 +99,9 @@ func (p Plan) Apply() error {
 	// that interval is caught as well.
 	if err := p.verifySourceUnchanged(); err != nil {
 		return err
+	}
+	if p.Delete {
+		return os.Remove(p.Path)
 	}
 	return writeFileAtomic(p.Path, []byte(p.After), 0o600)
 }
