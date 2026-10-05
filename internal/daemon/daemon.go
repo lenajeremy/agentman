@@ -521,36 +521,42 @@ func (d *Daemon) announceTurnComplete(ctx context.Context, session protocol.Sess
 		return
 	}
 
-	// A notification saying only "it finished" makes you open the app to learn
-	// anything, which is the thing this is meant to save you.
-	//
-	// System messages count, not just the agent's own words: a turn that died
-	// on a provider error produces no assistant text at all, and reporting that
-	// as a bare "done" is actively misleading — it reads as success. Taking the
-	// last of either kind gets this right without a special case, since the
-	// failure is recorded after whatever content preceded it.
-	preview := ""
-	if page, err := d.registry.Page(ctx, session.ID, "", 6); err == nil {
-		for i := len(page.Messages) - 1; i >= 0; i-- {
-			m := page.Messages[i]
-			if m.Text == "" {
-				continue
-			}
-			if m.Role == protocol.RoleAssistant || m.Role == protocol.RoleSystem {
-				preview = clipPreview(m.Text)
-				break
-			}
-		}
-	}
-
 	event := protocol.Event{
 		Type:        protocol.EvtTurnComplete,
 		SessionID:   session.ID,
 		SessionName: session.Name,
-		Preview:     preview,
+		Preview:     d.latestPreview(ctx, session.ID),
 	}
 	_ = d.sink.Send(event)
 	d.alertTurnComplete(event)
+}
+
+// latestPreview is the closing words of a session's last turn, read from its
+// transcript.
+//
+// A notification saying only "it finished" makes you open the app to learn
+// anything, which is the thing this is meant to save you.
+//
+// System messages count, not just the agent's own words: a turn that died on
+// a provider error produces no assistant text at all, and reporting that as a
+// bare "done" is actively misleading — it reads as success. Taking the last of
+// either kind gets this right without a special case, since the failure is
+// recorded after whatever content preceded it.
+func (d *Daemon) latestPreview(ctx context.Context, sessionID string) string {
+	page, err := d.registry.Page(ctx, sessionID, "", 6)
+	if err != nil {
+		return ""
+	}
+	for i := len(page.Messages) - 1; i >= 0; i-- {
+		m := page.Messages[i]
+		if strings.TrimSpace(m.Text) == "" {
+			continue
+		}
+		if m.Role == protocol.RoleAssistant || m.Role == protocol.RoleSystem {
+			return clipPreview(m.Text)
+		}
+	}
+	return ""
 }
 
 func clipPreview(text string) string {
@@ -778,9 +784,22 @@ func (d *Daemon) finishHookTurn(
 	if !claimed {
 		return
 	}
+	// Claude's Stop hook carries the closing words and Codex's notify does
+	// too, but not every agent's does. Without them the notification says
+	// only that something finished, so read them from the transcript the
+	// way a completion found by polling does.
+	if event.Preview == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), hookPreviewTimeout)
+		event.Preview = d.latestPreview(ctx, event.SessionID)
+		cancel()
+	}
 	_ = d.sink.Send(event)
 	d.alertTurnComplete(event)
 }
+
+// hookPreviewTimeout bounds the transcript read that fills a hook's missing
+// preview. A late notification is worse than one without the agent's words.
+const hookPreviewTimeout = 2 * time.Second
 
 func (d *Daemon) retryHookQuestionInspection(
 	event protocol.Event,
@@ -861,7 +880,7 @@ func (d *Daemon) HandleFrom(
 ) protocol.Event {
 	if err := validateRequest(req); err != nil {
 		if req.Type == protocol.ReqSendMessage || req.Type == protocol.ReqAnswer ||
-			req.Type == protocol.ReqInterrupt {
+			req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqReviewArtifact {
 			return protocol.Event{
 				Type: protocol.EvtSendResult, SessionID: req.SessionID,
 				ClientID: req.ClientID, Status: protocol.StatusFailed, Error: err.Error(),
@@ -996,9 +1015,9 @@ func (d *Daemon) HandleFrom(
 				Error: "daemon: answer the pending question before sending a message",
 			}
 		}
-		text := req.Text
+		var paths []string
 		if len(req.UploadIDs) > 0 {
-			paths, saveErr := d.saveAttachments(ctx, req.SessionID, req.UploadIDs)
+			saved, saveErr := d.saveAttachments(ctx, req.SessionID, req.UploadIDs)
 			if saveErr != nil {
 				return protocol.Event{
 					Type: protocol.EvtSendResult, SessionID: req.SessionID,
@@ -1006,11 +1025,9 @@ func (d *Daemon) HandleFrom(
 					Error: saveErr.Error(),
 				}
 			}
-			// The paths lead, the way a person types them before saying what to
-			// look for. One line, so nothing submits early.
-			text = strings.TrimSpace(strings.Join(paths, " ") + " " + text)
+			paths = saved
 		}
-		mode, err := d.registry.Inject(ctx, req.SessionID, text)
+		mode, err := d.deliver(ctx, req.SessionID, req.Text, paths)
 		result := protocol.Event{
 			Type:      protocol.EvtSendResult,
 			SessionID: req.SessionID,
@@ -1080,6 +1097,15 @@ func (d *Daemon) HandleFrom(
 	case protocol.ReqReadSeenFileChunk:
 		return d.readSeenFileChunk(req)
 
+	case protocol.ReqListArtifacts:
+		return d.listArtifacts(ctx, req)
+
+	case protocol.ReqReadArtifact:
+		return d.readArtifact(ctx, req)
+
+	case protocol.ReqReviewArtifact:
+		return d.reviewArtifact(ctx, req)
+
 	default:
 		return protocol.Event{Type: protocol.EvtError, Error: "unsupported request: " + string(req.Type)}
 	}
@@ -1087,7 +1113,8 @@ func (d *Daemon) HandleFrom(
 
 func requestMutatesSession(kind protocol.RequestType) bool {
 	return kind == protocol.ReqSendMessage || kind == protocol.ReqAnswer ||
-		kind == protocol.ReqInterrupt || kind == protocol.ReqStartSession
+		kind == protocol.ReqInterrupt || kind == protocol.ReqStartSession ||
+		kind == protocol.ReqReviewArtifact
 }
 
 func (d *Daemon) actionLock(sessionID string) *sync.Mutex {
@@ -1134,6 +1161,11 @@ const (
 	maxWireDetailBytes  = 16 << 10
 	maxWireOptionBytes  = 1 << 10
 	maxWirePreviewBytes = 2 << 10
+	// A mode is a word or two from a footer. The app accepts 256 characters,
+	// so this is well inside it in any script.
+	maxWireModeBytes = 64
+	// The app accepts counts up to 100,000; nobody reviews more than this.
+	maxWireArtifactCount = 10_000
 )
 
 const wireTruncation = "\n\n[output truncated by agentman]"
@@ -1147,7 +1179,9 @@ func validateRequest(req protocol.Request) error {
 		req.Type == protocol.ReqListFiles || req.Type == protocol.ReqReadFile ||
 		req.Type == protocol.ReqListChanges || req.Type == protocol.ReqFileDiff ||
 		req.Type == protocol.ReqReadSeenFile ||
-		req.Type == protocol.ReqReadFileChunk || req.Type == protocol.ReqReadSeenFileChunk
+		req.Type == protocol.ReqReadFileChunk || req.Type == protocol.ReqReadSeenFileChunk ||
+		req.Type == protocol.ReqListArtifacts || req.Type == protocol.ReqReadArtifact ||
+		req.Type == protocol.ReqReviewArtifact
 	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
 		return fmt.Errorf("daemon: invalid session id")
 	}
@@ -1244,6 +1278,16 @@ func validateRequest(req protocol.Request) error {
 			return fmt.Errorf("daemon: invalid question answer")
 		}
 		return nil
+	case protocol.ReqListArtifacts:
+		return nil
+	case protocol.ReqReadArtifact, protocol.ReqReviewArtifact:
+		if !validArtifactName(req.Path) {
+			return fmt.Errorf("daemon: that is not an artifact name")
+		}
+		if len(req.Text) > maxMessageBytes || containsTerminalControl(req.Text) {
+			return fmt.Errorf("daemon: invalid review comment")
+		}
+		return nil
 	default:
 		return fmt.Errorf("unsupported request: %s", req.Type)
 	}
@@ -1287,6 +1331,7 @@ func normalizeDiscoveredSessions(found []protocol.Session) []protocol.Session {
 		session.Name = truncateWireText(session.Name, maxWireNameBytes)
 		session.Cwd = truncateWireText(session.Cwd, maxWirePathBytes)
 		session.Model = truncateWireText(session.Model, maxWireNameBytes)
+		normalizeSessionStatus(&session)
 		if question := session.Question; question != nil {
 			copyQuestion := *question
 			unsupportedReason := ""
@@ -1346,6 +1391,20 @@ func normalizeDiscoveredSessions(found []protocol.Session) []protocol.Session {
 		normalized = append(normalized, session)
 	}
 	return normalized
+}
+
+// normalizeSessionStatus holds an adapter's mode, context and artifact
+// counts to what the app accepts. The app checks every session in a list and
+// refuses the whole list over one bad field, so a parser reading 104% off a
+// footer must not be able to blank the board.
+func normalizeSessionStatus(session *protocol.Session) {
+	session.Mode = truncateUTF8(strings.TrimSpace(session.Mode), maxWireModeBytes, "")
+	if containsTerminalControl(session.Mode) {
+		session.Mode = ""
+	}
+	session.ContextPercent = min(max(session.ContextPercent, 0), 100)
+	session.Artifacts = min(max(session.Artifacts, 0), maxWireArtifactCount)
+	session.ArtifactsToReview = min(max(session.ArtifactsToReview, 0), session.Artifacts)
 }
 
 func fitSessionList(sessions []protocol.Session) []protocol.Session {

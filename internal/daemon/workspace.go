@@ -241,6 +241,13 @@ func readWorkspace(root *os.Root, rel string) (text, image, mime string, source 
 	if err != nil {
 		return "", "", "", nil, false, err
 	}
+	return readDisplayable(f, info)
+}
+
+// readDisplayable reads one open file for display. Workspace files and agent
+// artifacts both come through here, so they share one set of limits: the
+// image preview, and the ceiling on text.
+func readDisplayable(f *os.File, info os.FileInfo) (text, image, mime string, source *protocol.ImageSource, truncated bool, err error) {
 	if !info.Mode().IsRegular() {
 		return "", "", "", nil, false, errors.New("only regular files can be read")
 	}
