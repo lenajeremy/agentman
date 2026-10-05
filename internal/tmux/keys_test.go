@@ -11,7 +11,7 @@ import (
 // started, and the arguments are checked as built.
 
 func TestEveryNamedKeyIsAccepted(t *testing.T) {
-	for _, key := range []string{"Tab", "BTab", "Enter", "Escape", "Up", "Down", "Left", "Right", "Space"} {
+	for _, key := range []string{"Tab", "BTab", "Enter", "Escape", "Up", "Down", "Left", "Right", "Space", "M-j"} {
 		if err := checkKeys("agentman-cursor-1-a", []string{key}); err != nil {
 			t.Errorf("%s was refused: %v", key, err)
 		}
@@ -24,6 +24,8 @@ func TestKeysOutsideTheAllowlistAreRefused(t *testing.T) {
 	for _, key := range []string{
 		"C-c", "C-u", "C-b", "M-x", "S-Left", "F1", "q", "y", "1", "", "tab", "ENTER",
 		"Enter Enter", "-l", "--", "Escape\n", "Tab;", "BSpace", "DC", "PageUp",
+		// alt+j is allowed by name, not as the first of a family.
+		"M-J", "M-k", "M-Enter", "M-C-j", "C-M-j", "M-j ", " M-j", "m-j", "Escape M-j", "j",
 	} {
 		if err := checkKeys("agentman-cursor-1-a", []string{key}); err == nil {
 			t.Errorf("%q was accepted", key)
@@ -44,12 +46,31 @@ func TestOneRefusedKeyRefusesTheCall(t *testing.T) {
 
 func TestKeysAreOnlyPressedInAgentmanPanes(t *testing.T) {
 	for _, name := range []string{"", "work", "agentman-", "my-agentman-pane", "%3", "agentman"} {
-		if err := checkKeys(name, []string{"Enter"}); err == nil {
-			t.Errorf("pane %q was accepted", name)
+		for _, key := range []string{"Enter", "M-j"} {
+			if err := checkKeys(name, []string{key}); err == nil {
+				t.Errorf("%s in pane %q was accepted", key, name)
+			}
+			if err := SendKeys(context.Background(), name, key); err == nil {
+				t.Errorf("SendKeys pressed %s in %q", key, name)
+			}
 		}
-		if err := SendKeys(context.Background(), name, "Enter"); err == nil {
-			t.Errorf("SendKeys pressed a key in %q", name)
-		}
+	}
+}
+
+// Antigravity's subagent panel, then a move and a confirmation: the whole
+// sequence is checked before alt+j is pressed, so a bad key after it leaves
+// the panel closed.
+func TestAltJIsCheckedWithTheRestOfTheCall(t *testing.T) {
+	if err := checkKeys("agentman-antigravity-1-a", []string{"M-j", "Down", "Enter"}); err != nil {
+		t.Fatalf("opening the subagent panel and choosing was refused: %v", err)
+	}
+	err := SendKeys(context.Background(), "agentman-antigravity-1-a", "M-j", "Down", "M-x")
+	if err == nil || !strings.Contains(err.Error(), "M-x") {
+		t.Fatalf("SendKeys = %v, want the refusal naming M-x", err)
+	}
+	if got := keyArgs("agentman-antigravity-1-a", "M-j"); !slices.Equal(got,
+		[]string{"send-keys", "-t", "agentman-antigravity-1-a", "M-j"}) {
+		t.Fatalf("args = %q", got)
 	}
 }
 
