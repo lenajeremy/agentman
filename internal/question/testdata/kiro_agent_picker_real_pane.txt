@@ -1,0 +1,24 @@
+
+────────────────────────────────────────────────────────────────────────────────
+kiro_default · auto · ◔ 2%             /work
+
+› /agent
+Select agent:   type to search
+
+❯ kiro_default    Built-in    The default agent for Kiro CLI
+  kiro_guide      Built-in    Guide agent that answers questions about Kiro...
+  kiro_planner    Built-in    Specialized planning agent that helps break d...
+────────────────────────────────────────────────────────────────────────────────
+ esc to close · ↑↓ to navigate · ↵ to select
+
+
+
+
+
+
+
+
+
+
+
+

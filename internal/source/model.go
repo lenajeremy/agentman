@@ -182,3 +182,19 @@ func cleanModel(model string) string {
 	}
 	return model
 }
+
+// codexModel names the model a Codex rollout ran on: the newest one in its
+// tail, or, when a turn that printed a lot has pushed every turn_context out
+// of that window, the first one in its head. A third of the sessions on one
+// Mac showed no model before the head was read too.
+func codexModel(path string) string {
+	if model := modelFromTranscript(path, codexModelOf); model != "" {
+		return model
+	}
+	var model string
+	scanHead(path, func(line []byte) bool {
+		model = codexModelOf(line)
+		return model != ""
+	})
+	return model
+}

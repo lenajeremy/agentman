@@ -266,6 +266,22 @@ section { scroll-margin-top: 24px; }
 .message-field b { font-size: 17px; font-weight: 400; }
 .message-field strong { margin-left: auto; width: 23px; height: 23px; display: grid; place-items: center; border-radius: 50%; background: var(--ink); color: var(--white); font-size: 15px; }
 
+/* Controls: reuse the workspace cards, with three small pieces of their own. */
+.control { padding-top: 110px; }
+.plan-art { background: #F1EEFF; }
+.review-actions { position: absolute; left: 18px; right: 46px; bottom: 22px; display: flex; gap: 8px; font-size: 10px; }
+.review-actions span, .review-actions strong { padding: 9px 12px; border-radius: 8px; box-shadow: 0 10px 25px -16px rgba(15,16,18,.3); }
+.review-actions span { background: var(--white); color: var(--ink-2); }
+.review-actions strong { margin-left: auto; background: var(--ink); color: var(--white); font-weight: 600; }
+.switch-art { background: #E7EBFF; }
+.switch-menu { position: absolute; top: 88px; left: 40px; right: 40px; padding: 6px; display: grid; gap: 2px; border-radius: 12px; background: var(--white); box-shadow: 0 16px 30px -15px rgba(15,16,18,.3); font-size: 11px; }
+.switch-menu span { display: flex; justify-content: space-between; padding: 9px 10px; border-radius: 8px; color: var(--ink-2); }
+.switch-menu span.on { background: var(--fill); color: var(--ink); font-weight: 600; }
+.switch-menu b { color: var(--cobalt-700); }
+.message-bubble code { font: 11px var(--mono); }
+.refuse-choice { padding: 9px 10px; border-radius: 9px; background: #FFE9DE; color: #9A3B10; font-size: 11px; font-weight: 600; }
+.message-composer .message-field span { color: var(--ink-2); }
+
 /* How it works */
 .how { padding: 130px 0 0; }
 .how .h2 { max-width: 760px; margin-top: 14px; }

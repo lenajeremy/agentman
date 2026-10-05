@@ -40,9 +40,3 @@ func ResumeArgs(kind protocol.Kind, nativeID string) ([]string, bool) {
 		return nil, false
 	}
 }
-
-// CanResume reports whether a session of this kind can be reopened by id.
-func CanResume(kind protocol.Kind) bool {
-	_, ok := ResumeArgs(kind, "x")
-	return ok
-}

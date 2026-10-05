@@ -90,6 +90,14 @@ func TestSameAsDetectsRealChanges(t *testing.T) {
 		}
 	})
 
+	t.Run("an option starting to take a note", func(t *testing.T) {
+		changed := waiting()
+		changed.Question.Options[1].WithText = true
+		if base.SameAs(changed) {
+			t.Error("the phone was never told it could say why")
+		}
+	})
+
 	t.Run("the question clearing", func(t *testing.T) {
 		answered := waiting()
 		answered.Question = nil
@@ -122,6 +130,28 @@ func TestSameAsWithoutQuestions(t *testing.T) {
 	moved.LastActivityAt = 2000
 	if idle.SameAs(moved) {
 		t.Error("a genuine activity bump was ignored")
+	}
+}
+
+// Discovery builds the lists afresh on every sweep, like the question. The
+// same modes in a new slice are no change, or a session that offers modes
+// would push an update every second.
+func TestSameAsComparesSwitchListsByContent(t *testing.T) {
+	base, same := waiting(), waiting()
+	base.Modes, same.Modes = []string{"default", "plan"}, []string{"default", "plan"}
+	base.Models, same.Models = []string{"opus"}, []string{"opus"}
+	if !base.SameAs(same) {
+		t.Fatal("identical mode and model lists compared different")
+	}
+	reordered := waiting()
+	reordered.Modes, reordered.Models = []string{"plan", "default"}, []string{"opus"}
+	if base.SameAs(reordered) {
+		t.Error("a reordered mode list was no change")
+	}
+	scoped := same
+	scoped.ModelScope = ModelScopeDefault
+	if base.SameAs(scoped) {
+		t.Error("a change of model scope was no change")
 	}
 }
 

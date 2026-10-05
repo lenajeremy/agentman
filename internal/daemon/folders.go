@@ -100,15 +100,23 @@ func (d *Daemon) annotateDirectories(ctx context.Context, parent string, names [
 	return folders
 }
 
-// directorySessions answers ReqDirectorySessions.
-func (d *Daemon) directorySessions(ctx context.Context, raw string) ([]protocol.Session, error) {
+// directorySessions answers ReqDirectorySessions, with the absolute directory
+// it read. A folder chosen by browsing is named relative to home, which the
+// phone does not know, and it needs the absolute path to match sessions that
+// start there later.
+func (d *Daemon) directorySessions(ctx context.Context, raw string) ([]protocol.Session, string, error) {
 	dir, err := folderDirectory(raw)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	sessions, err := d.registry.InDirectory(ctx, dir, source.DefaultPastLimit)
 	if sessions == nil && err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return sessions, nil
+	// Held to the same bounds as the board: the app refuses a whole list
+	// over one session's out-of-range field.
+	for i := range sessions {
+		normalizeSessionStatus(&sessions[i])
+	}
+	return sessions, dir, nil
 }

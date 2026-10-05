@@ -1,0 +1,22 @@
+• Orchestrated (1 agent)
+
+• The subagent read notes.txt and reported that its first line is: alpha
+
+▸ Credits: turn 0.08 • session 0.91 | Time: 17s
+────────────────────────────────────────────────────────────────────────────────
+  Use your web_fetch tool to fetch https://example.com and tell me the page
+  title. Do not use any other tool.
+
+↓ WebFetch example.com
+    ╰ search_terms=title
+
+────────────────────────────────────────────────────────────────────────────────
+ web_fetch requires approval
+ ❯ Yes, single permission
+   Trust, always allow in this session
+   No (Tab to edit)
+────────────────────────────────────────────────────────────────────────────────
+ esc to close · ↑↓ to navigate · ↵ to select · Tab to edit
+
+
+

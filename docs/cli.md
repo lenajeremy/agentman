@@ -18,7 +18,7 @@ daemon used by the mobile app.
 | `am opencode [args...]` | Start OpenCode with a discoverable local HTTP API. |
 | `am kiro [args...]` | Start Kiro CLI in managed tmux. Arguments go to `kiro-cli chat`. |
 | `am antigravity [args...]` | Start Antigravity CLI (`agy`) in managed tmux. `am agy` is the same command. |
-| `am install-hooks` | Install Agentman's Claude Code and Codex completion hooks. |
+| `am install-hooks` | Install Agentman's Claude Code, Codex and Cursor Agent CLI hooks. With `-kiro`, only Kiro's opt-in agent (see Hooks). |
 | `am uninstall-hooks` | Remove only Agentman's hook entries. |
 | `am doctor` | Check hooks, daemon health, agent discovery, and transcript parsing. |
 | `am version` | Print the installed version. |
@@ -141,13 +141,50 @@ am uninstall-hooks -dry-run
 am uninstall-hooks
 ```
 
-Hook installation updates `~/.claude/settings.json` and
-`~/.codex/config.toml`. Existing files are backed up as `.agentman.bak` before
-they are changed. Writes are private and atomic.
+Hook installation updates `~/.claude/settings.json`,
+`~/.codex/config.toml` and `~/.cursor/hooks.json`. Existing files are backed
+up as `.agentman.bak` before they are changed. Writes are private and atomic.
 
-Agentman preserves unrelated Claude hooks. If Codex already has a top-level
-`notify` command, installation refuses to replace it; Codex completion
-integration remains uninstalled until that conflict is resolved.
+Agentman preserves unrelated Claude and Cursor hooks. If Codex already has a
+top-level `notify` command, installation refuses to replace it; Codex
+completion integration remains uninstalled until that conflict is resolved.
+Cursor accepts comments in `hooks.json`; a file with comments is refused
+rather than rewritten without them.
+
+Cursor's hooks (`sessionStart`, `beforeSubmitPrompt`, `stop`, `sessionEnd`)
+report busy and idle for every Cursor Agent CLI chat, including ones started
+in an ordinary terminal, and let the phone send to such a chat: the message
+is handed over by the `stop` hook when the current turn ends. Cursor reads the
+file when a chat starts, so chats already open keep their old hooks.
+
+When the Antigravity CLI is installed, installation also adds an `agentman`
+entry to `~/.gemini/config/hooks.json`: agy's `Stop` hook for turn completion
+and its `PreInvocation` hook for turn start, never `PreToolUse`. Other
+entries in that file are left as they are, and events from Antigravity's IDE,
+which reads the same file, are ignored.
+
+### Kiro (opt-in)
+
+```bash
+am install-hooks -kiro
+am uninstall-hooks -kiro
+```
+
+Kiro CLI runs hooks only from an agent's own configuration, and its default
+agent, `kiro_default`, is built in. So Kiro's hooks are never part of the
+default install. `am install-hooks -kiro` asks the installed Kiro for a copy of
+`kiro_default` and writes it, with three hooks added (`agentSpawn`,
+`userPromptSubmit`, `stop`), as `~/.kiro/agents/agentman.json`. It needs Kiro
+to be logged in, since `kiro-cli agent create` does. `kiro_default` and every
+other agent are left as they are.
+
+Once that agent is installed, `am kiro` and Kiro sessions started from the
+phone run as it (`--agent agentman`), unless you choose an agent yourself or
+reopen a session, which keeps the agent it ran as. Its `stop` hook rings the
+phone the moment a turn ends, with the reply as the preview. A file at that
+path that Agentman did not write is never replaced or removed.
+`am uninstall-hooks` removes the agent along with the other hooks;
+`am uninstall-hooks -kiro` removes only it.
 
 ## Diagnostics
 

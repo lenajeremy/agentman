@@ -119,12 +119,32 @@ func (h *Hub) RemoveDaemon(account AccountID, conn Conn) bool {
 
 // AddApp registers a device connection under a caller-supplied id.
 func (h *Hub) AddApp(account AccountID, deviceID string, conn Conn) {
+	h.AddAppGreeting(account, deviceID, conn, func(bool, time.Time) {})
+}
+
+// AddAppGreeting registers a device connection and, under the same lock, hands
+// greet the daemon's current state for the hello it sends.
+//
+// Taking the state and queueing the hello as one step is what keeps them in
+// order with daemon_online and daemon_offline. Registering, then reading the
+// state, then sending, let a daemon connect in between: the new app was told
+// "online" and then, by its own stale hello, "offline", which it believed.
+// Here a status change either happens first, and the hello already says so,
+// or after, and its notification is queued behind the hello. greet must only
+// queue: it runs while the hub is locked.
+func (h *Hub) AddAppGreeting(account AccountID, deviceID string, conn Conn, greet func(online bool, lastSeen time.Time)) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.apps[account] == nil {
 		h.apps[account] = map[string]Conn{}
 	}
 	h.apps[account][deviceID] = conn
+	_, online := h.daemons[account]
+	lastSeen := time.Time{}
+	if !online {
+		lastSeen = h.lastSeen[account]
+	}
+	greet(online, lastSeen)
 }
 
 // RemoveApp deregisters a device.

@@ -198,3 +198,24 @@ test("retry replaces the prior action instead of creating duplicate state", () =
   const retry = { ...first, clientId: "answer-2", status: "sending" as const };
   assert.deepEqual(upsertAgentAction([first], retry), [retry]);
 });
+
+// An image-only send has no text to match its transcript row by, and Cursor
+// records the row with the image paths taken out — empty, or "[image]". The
+// echo used to stay on screen forever. Once the Mac has delivered it, the
+// next new row from the user is that message.
+test("an image-only Cursor send settles when its row arrives", () => {
+  const sessionId = "cursor-cli:pane:x";
+  const old = { id: "old", sessionId, role: "user" as const, text: "earlier", ts: 1 };
+  const pending = [{
+    clientId: "send-1", sessionId, text: "", status: "sending" as const,
+    retainUntilTranscript: true, knownUserMessageIds: ["old"],
+  }];
+  // Not yet delivered: a new row could be something typed at the terminal.
+  const fresh = { id: "new", sessionId, role: "user" as const, text: "[image]", ts: 2 };
+  assert.equal(reconcileCursorSendEchoes(pending, sessionId, [old, fresh]).length, 1);
+
+  const delivered = applyPendingSendResult(pending, { clientId: "send-1", status: "delivered" });
+  assert.equal(reconcileCursorSendEchoes(delivered, sessionId, [old]).length, 1);
+  assert.equal(reconcileCursorSendEchoes(delivered, sessionId, [old, fresh]).length, 0);
+  assert.equal(reconcileCursorSendEchoes(delivered, sessionId, [old, { ...fresh, text: "" }]).length, 0);
+});

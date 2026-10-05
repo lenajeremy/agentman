@@ -1,0 +1,40 @@
+
+────────────────────────────────────────────────────────────
+> @/work/upload/att2.png what colour is this one? One word.
+
+● Read(/work/upload/att2.png) (ctrl+o to expand)
+
+  Blue
+
+────────────────────────────────────────────────────────────
+> /Users/me/.gemini/antigravity-cli/brain/ef116096-84c3-4723-bbc3-aed0f3cca68b/.user_uploaded/att3
+  .png
+  what colour is this? One word.
+
+● Read(~/.gemini/antigravity-cli/brain/ef...d0f3cca68b/.user_uploaded/att3.png) (ctrl+o to expand)
+
+  Blue
+
+────────────────────────────────────────────────────────────
+> Use your ask_question tool to ask me which colour I prefer, with the options red, green and blue.
+  Then reply with just my answer.
+
+? Which colour do you prefer?
+
+Question
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Question 1/1: Which colour do you prefer?
+
+  1. Red
+  2. Green
+  3. Blue
+> 4. Write-in...
+
+  Your answer:
+
+
+
+
+  enter Submit · esc Back
+esc to cancel                                                                Gemini 3.8 Flash · high

@@ -55,6 +55,11 @@ type Question struct {
 	PreviewLayout bool `json:"-"`
 	// WorkspaceTrust is Claude's unnumbered first-run folder confirmation.
 	WorkspaceTrust bool `json:"-"`
+	// AmendWithTab means Claude's footer offers "Tab to amend": Tab on the
+	// focused choice opens a line for a note to send with it, which is how a
+	// permission prompt's "No" becomes "No, and tell Claude what to do
+	// differently".
+	AmendWithTab bool `json:"-"`
 }
 
 // Option is one selectable answer.
@@ -202,7 +207,11 @@ func Detect(pane string) *Question {
 	// the end of an assistant response would let the phone type a digit into the
 	// normal prompt.
 	footerSeen := false
+	amendWithTab := false
 	for _, line := range lines[last+1:] {
+		if strings.Contains(strings.ToLower(line), "tab to amend") {
+			amendWithTab = true
+		}
 		menuLine := menuColumn(line, previewColumn)
 		trimmed := strings.TrimSpace(menuLine)
 		if trimmed == "" || isRule(trimmed) {
@@ -246,10 +255,23 @@ func Detect(pane string) *Question {
 
 	first := last
 	var rawOptions []paneOption
+	blanks := 0
 	for i := last; i >= 0; i-- {
 		menuLine := menuColumn(lines[i], previewColumn)
 		match := optionLine.FindStringSubmatch(menuLine)
 		if match == nil {
+			// Claude 2.1.289 leaves a blank line after a choice that wraps,
+			// such as "Yes, and always allow access to <folder>". One blank
+			// line inside the run is layout, while an earlier key is still
+			// due; two in a row end the menu.
+			if strings.TrimSpace(menuLine) == "" {
+				blanks++
+				if blanks == 1 && expected > 0 && len(rawOptions) > 0 {
+					continue
+				}
+				break
+			}
+			blanks = 0
 			// Codex renders descriptions in a second column and wraps them
 			// onto indented lines in narrow panes. Claude can likewise wrap
 			// long labels/descriptions. They belong to the option immediately
@@ -271,6 +293,7 @@ func Detect(pane string) *Question {
 			}
 			break
 		}
+		blanks = 0
 		keyNumber, err := strconv.Atoi(match[2])
 		if err != nil || keyNumber != expected {
 			break
@@ -364,6 +387,7 @@ func Detect(pane string) *Question {
 		SubmitFocused:  submitFocused,
 		AdvanceWithTab: advanceWithTab,
 		PreviewLayout:  previewColumn >= 0,
+		AmendWithTab:   amendWithTab,
 	}
 	visiblePreview := previewPanelText(lines, previewColumn)
 	focusedOptions := 0
@@ -445,10 +469,18 @@ func Detect(pane string) *Question {
 		if inputLine.MatchString(lines[i]) {
 			break
 		}
-		if trimmed == "" {
-			if len(context) > 0 {
+		// Claude 2.1.289 sets the command apart inside its box with dashed
+		// rules (╌) and no blank lines. They separate the question from the
+		// detail exactly as a blank line does, and are not text.
+		if trimmed == "" || isInnerRule(trimmed) {
+			if len(context) > 0 && context[len(context)-1] != "" {
 				context = append(context, "")
 			}
+			continue
+		}
+		// Claude's advice about its own settings ("Tip: auto mode handles
+		// these prompts for you") is not part of what is being decided.
+		if strings.HasPrefix(trimmed, "Tip: ") {
 			continue
 		}
 		context = append(context, trimmed)
@@ -755,6 +787,16 @@ func previewPanelText(lines []string, previewColumn int) string {
 }
 
 // isRule reports whether a line is a box-drawing separator.
+// isInnerRule reports a dashed rule drawn inside a question's box.
+func isInnerRule(trimmed string) bool {
+	for _, r := range trimmed {
+		if r != '╌' && r != '┄' && r != ' ' {
+			return false
+		}
+	}
+	return trimmed != ""
+}
+
 func isRule(trimmed string) bool {
 	if trimmed == "" {
 		return false
@@ -834,19 +876,12 @@ func cleanTitle(title string) string {
 	return strings.TrimSpace(strings.TrimLeft(title, "←☐☑☒ "))
 }
 
-// cleanLabel tidies a choice for display on a phone.
-//
-// Codex pads a trailing description onto the same line ("Keep current model
-// (never show again)   Hide future rate limit reminders"). Collapsing all the
-// whitespace would fuse the choice and its explanation into one run-on, so the
-// run of spaces that separates them is treated as the boundary and only the
-// choice itself is kept — the label has to be readable as a button. Two spaces
-// is enough of a signal, since a real label never contains a double space.
-func cleanLabel(label string) string {
-	label, _ = splitOptionText(label)
-	return label
-}
-
+// splitOptionText separates a choice from a description padded onto the same
+// line. Codex draws "Keep current model (never show again)   Hide future rate
+// limit reminders". Collapsing all the whitespace would fuse the two into one
+// run-on, so the run of spaces between them is the boundary, and the label
+// stays readable as a button. Two spaces are enough of a signal, since a real
+// label never contains a double space.
 func splitOptionText(text string) (label, description string) {
 	text = strings.TrimSpace(text)
 	if idx := strings.Index(text, "  "); idx > 0 {

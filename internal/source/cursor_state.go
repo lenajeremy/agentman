@@ -87,7 +87,7 @@ func queryCursorHeaders(ctx context.Context, dbPath string) (map[string]cursorHe
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, bin,
-		"-json", "-readonly", "file:"+dbPath+"?mode=ro",
+		"-json", "-readonly", cursorSQLiteURI(dbPath),
 		"SELECT composerId, createdAt, lastUpdatedAt, isArchived, value FROM composerHeaders")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

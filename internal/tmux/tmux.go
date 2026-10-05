@@ -84,8 +84,16 @@ type Session struct {
 	Created time.Time
 }
 
-// List returns the agentman-owned tmux sessions currently running.
+// List returns the agentman-owned tmux sessions currently running. Within a
+// discovery sweep it is asked once; see WithSweep.
 func List(ctx context.Context) ([]Session, error) {
+	if s := sweepOf(ctx); s != nil {
+		return s.list()
+	}
+	return listSessions(ctx)
+}
+
+func listSessions(ctx context.Context) ([]Session, error) {
 	if !Available() {
 		return nil, ErrNotInstalled
 	}
@@ -157,7 +165,8 @@ func Attach(name string) error {
 	if err != nil {
 		return ErrNotInstalled
 	}
-	args := []string{"tmux", "attach-session", "-t", name}
+	args := append([]string{"tmux"}, socketArgs()...)
+	args = append(args, "attach-session", "-t", name)
 	return syscallExec(binary, args, os.Environ())
 }
 
@@ -177,7 +186,11 @@ func Send(ctx context.Context, name, text string) error {
 	lock := actionLock(name)
 	lock.Lock()
 	defer lock.Unlock()
+	return sendLocked(ctx, name, text)
+}
 
+// sendLocked is Send for a caller that already holds the pane's action lock.
+func sendLocked(ctx context.Context, name, text string) error {
 	// Clear whatever is already in the prompt box first.
 	//
 	// Typing into a box that holds a half-written draft fuses the two into one
@@ -289,23 +302,6 @@ func Kill(ctx context.Context, name string) error {
 	return err
 }
 
-// OwnsPID reports whether pid is the pane process or one of its descendants.
-//
-// Walking up from the agent's pid is how a session discovered on disk is
-// matched to the tmux session that can type into it. Ancestry is used rather
-// than the working directory because two agents can easily run in the same
-// directory, and typing into the wrong one would be worse than not delivering.
-func OwnsPID(panePID, pid int) bool {
-	if pid > 1 && pid == panePID {
-		return true
-	}
-	processes, err := SnapshotProcessTree(context.Background())
-	if err != nil {
-		return false
-	}
-	return processes.OwnsPID(panePID, pid)
-}
-
 // ProcessTree is one immutable snapshot of the operating system's PID → parent
 // relationships. A discovery sweep can perform any number of ancestry checks
 // against it without spawning another process or observing an inconsistent
@@ -321,8 +317,17 @@ type ProcessTree struct {
 
 // SnapshotProcessTree reads the process table with one cancellable ps command.
 // The caller's context is authoritative; commandTimeout is only a second line
-// of defence for callers that supplied no deadline of their own.
+// of defence for callers that supplied no deadline of their own. Within a
+// discovery sweep the table is read once, on the sweep's context; see
+// WithSweep.
 func SnapshotProcessTree(ctx context.Context) (*ProcessTree, error) {
+	if s := sweepOf(ctx); s != nil {
+		return s.processTree()
+	}
+	return snapshotProcessTree(ctx)
+}
+
+func snapshotProcessTree(ctx context.Context) (*ProcessTree, error) {
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 
@@ -422,10 +427,36 @@ func (p *ProcessTree) OwnsPID(panePID, pid int) bool {
 	return false
 }
 
+// SocketEnv names a private tmux server for this process to use instead of
+// the default one.
+//
+// It exists for tests. An agent working on this repository runs inside a
+// tmux pane, so $TMUX is set, and a bare tmux command — from a test, a probe,
+// anything — goes to the server that pane belongs to, whatever TMUX_TMPDIR
+// says. That is the user's own server, with their shells and every agent
+// session on it. A test helper that ran kill-server there once took all of it
+// down. With this set, every command this package runs carries -S and so can
+// only ever reach the named socket. See tmuxtest.Isolate.
+const SocketEnv = "AGENTMAN_TMUX_SOCKET"
+
+// socketArgs are the global flags that pin a command to SocketEnv's server,
+// or nothing when it is unset.
+func socketArgs() []string {
+	if socket := os.Getenv(SocketEnv); socket != "" {
+		return []string{"-S", socket}
+	}
+	return nil
+}
+
 func run(ctx context.Context, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "tmux", args...).Output()
+	// Whatever a sweep captured of a pane is out of date once something is
+	// sent to it.
+	if s := sweepOf(ctx); s != nil {
+		if target, ok := sendsTo(args); ok {
+			s.forget(target)
+		}
+	}
+	out, err := runOutput(ctx, args...)
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
@@ -433,7 +464,16 @@ func run(ctx context.Context, args ...string) (string, error) {
 		}
 		return "", err
 	}
-	return string(out), nil
+	return out, nil
+}
+
+// runOutput runs one tmux command and returns what it printed, including
+// when it failed partway through a sequence of commands.
+func runOutput(ctx context.Context, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "tmux", append(socketArgs(), args...)...).Output()
+	return string(out), err
 }
 
 // NewName mints a session name for an agent launch.
@@ -461,6 +501,15 @@ func Capture(ctx context.Context, name string) (string, error) {
 	if !Available() {
 		return "", ErrNotInstalled
 	}
+	if s := sweepOf(ctx); s != nil {
+		if pane, ok := s.capture(name); ok {
+			return pane, nil
+		}
+	}
+	return captureFresh(ctx, name)
+}
+
+func captureFresh(ctx context.Context, name string) (string, error) {
 	// -p prints to stdout; without -S the capture is the visible pane only,
 	// which is exactly the region a prompt occupies.
 	out, err := run(ctx, "capture-pane", "-t", name, "-p")
@@ -498,15 +547,25 @@ func RevealCodexQuestion(ctx context.Context, name string) (string, error) {
 	lock := actionLock(name)
 	lock.Lock()
 	defer lock.Unlock()
+	trayShown := func(pane string) bool {
+		return question.Detect(pane) == nil && question.CodexQueued(pane)
+	}
 	pane, err := Capture(ctx, name)
-	if err != nil || question.Detect(pane) != nil || !question.CodexQueued(pane) {
+	if err != nil || !trayShown(pane) {
+		return pane, err
+	}
+	// A key is about to be pressed, so it goes on the pane as it is now.
+	// Within a discovery sweep the capture above is from the start of the
+	// sweep, and the phone may have answered the question since.
+	pane, err = captureFresh(ctx, name)
+	if err != nil || !trayShown(pane) {
 		return pane, err
 	}
 	if _, err := run(ctx, "send-keys", "-t", name, "S-Left"); err != nil {
 		return "", fmt.Errorf("tmux: could not reveal Codex question: %w", err)
 	}
 	time.Sleep(80 * time.Millisecond)
-	return Capture(ctx, name)
+	return captureFresh(ctx, name)
 }
 
 // Answer chooses an option in a menu the agent is showing.
@@ -683,6 +742,109 @@ func AnswerArrowMenu(ctx context.Context, name string, distance int, focused fun
 		return fmt.Errorf("tmux: could not answer: %w", err)
 	}
 	return nil
+}
+
+// AnswerWithNote chooses a menu option and sends a note with it, the way
+// Claude Code takes one: focus the option, press Tab to open a line for the
+// note ("No, and tell Claude what to do differently"), type the note, press
+// Enter.
+//
+// Each step is checked against a fresh capture before the next, under the
+// pane's lock: focused before Tab, amending before typing, typed before
+// Enter. Pressing Enter on the wrong row, or typing into whatever else the
+// screen became, would send something the user did not choose.
+func AnswerWithNote(
+	ctx context.Context, name string, distance int, note string,
+	focused, amending, typed func(pane string) bool,
+) error {
+	if !Available() {
+		return ErrNotInstalled
+	}
+	// One line: the note is typed into a single-line field, where a newline
+	// would submit it early. The app sends one line already.
+	note = strings.Join(strings.Fields(note), " ")
+	if note == "" {
+		return errors.New("tmux: the note is empty")
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	if err := moveFocus(ctx, name, distance); err != nil {
+		return err
+	}
+	if err := awaitPane(ctx, name, focused); err != nil {
+		return errors.New("tmux: that choice is no longer on screen; refresh the session")
+	}
+	if _, err := run(ctx, "send-keys", "-t", name, "Tab"); err != nil {
+		return fmt.Errorf("tmux: could not open the note: %w", err)
+	}
+	if err := awaitPane(ctx, name, amending); err != nil {
+		return errors.New("tmux: the note could not be opened; answer it in the terminal")
+	}
+	if err := sendLiteral(ctx, name, note); err != nil {
+		return fmt.Errorf("tmux: could not type the note: %w", err)
+	}
+	if err := awaitPane(ctx, name, typed); err != nil {
+		return errors.New("tmux: the note did not appear; answer it in the terminal")
+	}
+	if _, err := run(ctx, "send-keys", "-t", name, "Enter"); err != nil {
+		return fmt.Errorf("tmux: could not answer: %w", err)
+	}
+	return nil
+}
+
+// RefuseThenSend answers a menu with a choice that ends the agent's turn and
+// gives focus back to its composer, then sends text there as the next
+// message. That is Codex's "No, and tell Codex what to do differently": it
+// interrupts the turn, and what to do instead is simply the next prompt.
+//
+// The text is typed only once composerBack sees the composer return, which
+// takes Codex a moment while it winds the turn down. If it never does, the
+// note is not typed anywhere.
+func RefuseThenSend(ctx context.Context, name, key, text string, composerBack func(pane string) bool) error {
+	if !Available() {
+		return ErrNotInstalled
+	}
+	if key == "" {
+		return errors.New("tmux: no option given")
+	}
+	if strings.TrimSpace(text) == "" {
+		return errors.New("tmux: the note is empty")
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	if _, err := run(ctx, "send-keys", "-t", name, "-l", "--", key); err != nil {
+		return fmt.Errorf("tmux: could not answer: %w", err)
+	}
+	if err := awaitPaneFor(ctx, name, composerBack, 40, 75*time.Millisecond); err != nil {
+		return errors.New("tmux: the choice was made, but the prompt did not come back for the note; " +
+			"send it as a message")
+	}
+	return sendLocked(ctx, name, text)
+}
+
+// awaitPane captures the pane until check accepts it, for a few render ticks:
+// an Ink TUI redraws a moment after the key that changed it.
+func awaitPane(ctx context.Context, name string, check func(pane string) bool) error {
+	return awaitPaneFor(ctx, name, check, 5, 45*time.Millisecond)
+}
+
+// awaitPaneFor checks the pane up to attempts times, interval apart.
+func awaitPaneFor(
+	ctx context.Context, name string, check func(pane string) bool, attempts int, interval time.Duration,
+) error {
+	for attempt := 0; attempt < attempts; attempt++ {
+		time.Sleep(interval)
+		pane, err := Capture(ctx, name)
+		if err != nil {
+			return err
+		}
+		if check(pane) {
+			return nil
+		}
+	}
+	return errors.New("tmux: the pane did not show what was expected")
 }
 
 // AnswerSingleForm records a single choice in Claude's tabbed or preview

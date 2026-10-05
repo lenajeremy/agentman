@@ -11,12 +11,18 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
-    groups:
-      expo-sdk-54:
-        patterns:
-          - "expo*"
-          - "@expo/*"
-          - "react-native*"
+    # Expo pins these to exact versions per SDK, and CI's `expo install --check`
+    # rejects anything else, so a bump proposed here can only ever fail. They
+    # move together, with `npx expo install --fix`, when the app changes SDK.
+    ignore:
+      - dependency-name: "expo"
+      - dependency-name: "expo-*"
+      - dependency-name: "@expo/*"
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      - dependency-name: "react-native"
+      - dependency-name: "react-native-*"
+      - dependency-name: "@react-native-async-storage/*"
 
   - package-ecosystem: github-actions
     directory: /

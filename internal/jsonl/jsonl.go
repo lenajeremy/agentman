@@ -99,7 +99,17 @@ type BackwardOptions struct {
 	MaxScanBytes int64
 	// ChunkSize overrides DefaultChunk. Mainly useful for tests.
 	ChunkSize int
+	// Unsettled, when set, reports whether the lines mapped so far have left
+	// something only an earlier line can finish — a tool result whose call is
+	// further back. A page that has reached Want keeps reading while it does,
+	// up to UnsettledScanBytes more and half as many messages again, so the
+	// call settles on this page instead of opening the next one as still
+	// running. The bound keeps a page inside what the app accepts (100).
+	Unsettled func() bool
 }
+
+// UnsettledScanBytes bounds how far past a full page Unsettled may extend it.
+const UnsettledScanBytes = 256 << 10
 
 // BackwardResult is one page of scrollback.
 type BackwardResult struct {
@@ -182,6 +192,19 @@ func CollectBackwardContext(ctx context.Context, path string, opts BackwardOptio
 	found := make([]protocol.Message, 0, opts.Want)
 	cursor := NoCursor
 	var scanned int64
+	// full reports whether the page may stop: it has Want messages and nothing
+	// unsettled, or it has run out of room to keep looking.
+	fullAt := int64(-1)
+	full := func() bool {
+		if len(found) < opts.Want {
+			return false
+		}
+		if fullAt < 0 {
+			fullAt = scanned
+		}
+		return opts.Unsettled == nil || !opts.Unsettled() ||
+			len(found) >= opts.Want+max(opts.Want/2, 1) || scanned-fullAt >= UnsettledScanBytes
+	}
 
 	// Fragments hold one line that crosses chunk boundaries. They are retained
 	// as slices in right-to-left discovery order and copied only once, when the
@@ -192,7 +215,10 @@ func CollectBackwardContext(ctx context.Context, path string, opts BackwardOptio
 	haveRightBoundary := false
 	trailingBytes := 0
 
-	for pos > 0 && len(found) < opts.Want {
+	// The page is judged full only after a line is mapped, below. Judging it
+	// here as well would let the byte bound on an unsettled page end the walk
+	// between chunks, with no cursor, and lose the rest of the file.
+	for pos > 0 {
 		if err := ctx.Err(); err != nil {
 			return BackwardResult{NextCursor: NoCursor}, err
 		}
@@ -259,7 +285,7 @@ func CollectBackwardContext(ctx context.Context, path string, opts BackwardOptio
 			fragmentBytes = 0
 			end = newline
 
-			if len(found) >= opts.Want || scanned >= maxScan {
+			if full() || scanned >= maxScan {
 				return finishBackward(found, cursor, scanned, cursor > 0), nil
 			}
 		}

@@ -1,0 +1,40 @@
+  .png
+  what colour is this? One word.
+
+● Read(~/.gemini/antigravity-cli/brain/ef...d0f3cca68b/.user_uploaded/att3.png) (ctrl+o to expand)
+
+  Blue
+
+────────────────────────────────────────────────────────────
+> Use your ask_question tool to ask me which colour I prefer, with the options red, green and blue.
+  Then reply with just my answer.
+
+? Which colour do you prefer?
+> purple
+
+  purple
+
+────────────────────────────────────────────────────────────
+> Use your ask_question tool once, with two questions: first 'Which fruits do you like?' as a
+  multi-select with options apple, banana and cherry; second 'Which size?' single-select with
+  options small and large. Then reply with my answers in one line.
+
+? Which fruits do you like?
+> apple, cherry
+? Which size?
+> large
+
+  Fruits: apple, cherry; Size: large.
+
+> /help
+  ⎿  Exited /help command
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+> Plan mode: research & plan only (shift+tab to cycle)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts                                                       plan · Gemini 3.8 Flash · high
+
+
+
+
+

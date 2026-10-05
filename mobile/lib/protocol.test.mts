@@ -221,3 +221,183 @@ test("an agent this app does not know yet still loads", () => {
     type: "sessions", sessions: [baseSession, { ...baseSession, id: "gemini:g", kind: "gemini" }],
   }));
 });
+
+test("an older Mac's empty session lists are read as empty, not dropped", () => {
+  // Daemons before the fix left an empty list out entirely. Dropping that
+  // frame kept every ended session on the board.
+  const board = decodeDaemonEvent({ type: "sessions" });
+  assert.ok(board);
+  assert.equal(board.type, "sessions");
+  assert.deepEqual(board.sessions, []);
+
+  const folder = decodeDaemonEvent({ type: "directory_sessions", path: "/work/empty" });
+  assert.ok(folder);
+  assert.equal(folder.type, "directory_sessions");
+  assert.deepEqual(folder.sessions, []);
+});
+
+test("a question whose options were withdrawn keeps the rest of the board", () => {
+  // An older Mac sends options:null for a question it can only show, not let
+  // the phone answer. Rejecting it took the whole session list with it.
+  const sessions = [
+    {
+      id: "opencode:ses_1", kind: "opencode", nativeId: "ses_1", name: "n", cwd: "/tmp",
+      state: "waiting_input", inject: "api", startedAt: 1, lastActivityAt: 2,
+      question: {
+        id: "question-q1-0", prompt: "Pick one",
+        detail: "Answer it in the terminal.", options: null,
+      },
+    },
+    {
+      id: "claude:abc", kind: "claude", nativeId: "abc", name: "other", cwd: "/tmp",
+      state: "idle", inject: "tmux", startedAt: 1, lastActivityAt: 2,
+    },
+  ];
+  const board = decodeDaemonEvent({ type: "sessions", sessions });
+  assert.ok(board);
+  assert.equal(board.type, "sessions");
+  assert.equal(board.sessions.length, 2);
+  assert.deepEqual(board.sessions[0].question?.options, []);
+});
+
+test("accepts a session's mode, context and artifact counts, and bounds them", () => {
+  const status = { ...baseSession, mode: "plan", contextPercent: 42, artifacts: 3, artifactsToReview: 1 };
+  const update = decodeDaemonEvent({ type: "session_update", session: status });
+  assert.ok(update);
+  assert.equal(update.session?.mode, "plan");
+  assert.equal(update.session?.contextPercent, 42);
+
+  for (const bad of [
+    { mode: 7 },
+    { mode: "x".repeat(257) },
+    { contextPercent: 101 },
+    { contextPercent: -1 },
+    { contextPercent: 4.5 },
+    { contextPercent: "42" },
+    { artifacts: -1 },
+    { artifacts: 1.5 },
+    { artifactsToReview: "1" },
+  ]) {
+    assert.equal(decodeDaemonEvent({ type: "session_update", session: { ...baseSession, ...bad } }), null,
+      JSON.stringify(bad));
+  }
+});
+
+const plan = {
+  name: "implementation_plan.md", kind: "plan", title: "Implementation plan",
+  summary: "Three steps", updatedAt: 1_790_000_000_000, size: 2048, mime: "text/markdown", review: true,
+};
+
+test("decodes an artifact list, including an empty or missing one", () => {
+  const listed = decodeDaemonEvent({ type: "artifacts", sessionId: "antigravity:c1", artifacts: [plan] });
+  assert.ok(listed);
+  assert.equal(listed.artifacts?.[0].name, "implementation_plan.md");
+  assert.ok(decodeDaemonEvent({ type: "artifacts", sessionId: "antigravity:c1", artifacts: [] }));
+  assert.ok(decodeDaemonEvent({ type: "artifacts", sessionId: "antigravity:c1" }));
+  // An agent this app has never heard of may invent a kind; it still lists.
+  assert.ok(decodeDaemonEvent({
+    type: "artifacts", sessionId: "antigravity:c1", artifacts: [{ ...plan, kind: "recording" }],
+  }));
+  assert.equal(decodeDaemonEvent({ type: "artifacts", artifacts: [plan] }), null);
+  assert.equal(decodeDaemonEvent({ type: "artifacts", sessionId: "antigravity:c1", artifacts: plan }), null);
+});
+
+test("refuses an artifact whose name could leave its folder", () => {
+  for (const name of [
+    "../secrets.md", "plans/implementation_plan.md", "/etc/passwd", "..", "a..b.md",
+    "plan\\..\\x.md", "", "x".repeat(256), "plan\u0000.md", "plan\n.md",
+  ]) {
+    assert.equal(decodeDaemonEvent({
+      type: "artifacts", sessionId: "antigravity:c1", artifacts: [{ ...plan, name }],
+    }), null, JSON.stringify(name));
+  }
+});
+
+test("refuses malformed artifact fields and oversized lists", () => {
+  for (const bad of [
+    { kind: "" }, { kind: 3 }, { kind: "k".repeat(65) },
+    { title: "t".repeat(2049) }, { summary: { text: "x" } },
+    { updatedAt: "yesterday" }, { updatedAt: -1 }, { size: -1 }, { size: Infinity },
+    { mime: "m".repeat(129) }, { review: "yes" },
+  ]) {
+    assert.equal(decodeDaemonEvent({
+      type: "artifacts", sessionId: "antigravity:c1", artifacts: [{ ...plan, ...bad }],
+    }), null, JSON.stringify(bad));
+  }
+  assert.equal(decodeDaemonEvent({
+    type: "artifacts", sessionId: "antigravity:c1",
+    artifacts: Array.from({ length: 501 }, (_, index) => ({ ...plan, name: `plan-${index}.md` })),
+  }), null);
+});
+
+test("accepts an artifact read answered as a workspace view", () => {
+  assert.ok(decodeDaemonEvent({ type: "workspace", workspace: {
+    kind: "artifact", sessionId: "antigravity:c1", path: "implementation_plan.md",
+    mime: "text/markdown", text: "# Plan",
+  } }));
+  assert.ok(decodeDaemonEvent({ type: "workspace", workspace: {
+    kind: "artifact", sessionId: "antigravity:c1", path: "screenshot.png", mime: "image/png", image: "aGVsbG8=",
+  } }));
+  assert.equal(decodeDaemonEvent({ type: "workspace", workspace: {
+    kind: "artifact", sessionId: "antigravity:c1", mime: "text/html", image: "PHNjcmlwdD4=",
+  } }), null);
+});
+
+test("an option may say it takes a note, and nothing else in that field", () => {
+  const ask = {
+    ...baseSession,
+    state: "waiting_input",
+    question: {
+      id: "q", prompt: "Run rm -rf build?",
+      options: [{ key: "y", label: "Yes" }, { key: "n", label: "No", withText: true }],
+    },
+  };
+  const update = decodeDaemonEvent({ type: "session_update", session: ask });
+  assert.ok(update);
+  assert.equal(update.session?.question?.options[1].withText, true);
+  assert.equal(update.session?.question?.options[0].withText, undefined);
+
+  for (const withText of ["yes", 1, null, {}]) {
+    assert.equal(decodeDaemonEvent({
+      type: "session_update",
+      session: { ...ask, question: { ...ask.question, options: [{ key: "n", label: "No", withText }] } },
+    }), null, JSON.stringify(withText));
+  }
+});
+
+test("a session says what it may switch to", () => {
+  const offers = {
+    ...baseSession, mode: "default", modes: ["default", "accept-edits", "plan"],
+    model: "opus", models: ["opus", "sonnet"], modelScope: "default",
+  };
+  const update = decodeDaemonEvent({ type: "session_update", session: offers });
+  assert.ok(update);
+  assert.deepEqual(update.session?.modes, ["default", "accept-edits", "plan"]);
+  assert.equal(update.session?.modelScope, "default");
+  assert.ok(decodeDaemonEvent({ type: "session_update", session: { ...offers, modelScope: "session" } }));
+});
+
+test("switch lists are bounded and every name in them could be sent back", () => {
+  for (const bad of [
+    { modes: "plan" },
+    { modes: [""] },
+    { modes: [" plan"] },
+    { modes: ["plan\n"] },
+    { modes: ["a\u001b[2J"] },
+    { modes: ["m".repeat(65)] },
+    { modes: Array.from({ length: 17 }, (_, index) => `mode-${index}`) },
+    { models: [7] },
+    { models: ["m".repeat(129)] },
+    { models: Array.from({ length: 65 }, (_, index) => `model-${index}`) },
+    { modelScope: "global" },
+    { modelScope: "" },
+  ]) {
+    assert.equal(decodeDaemonEvent({ type: "session_update", session: { ...baseSession, ...bad } }), null,
+      JSON.stringify(bad));
+  }
+  assert.ok(decodeDaemonEvent({
+    type: "session_update",
+    session: { ...baseSession, modes: Array.from({ length: 16 }, (_, index) => `mode-${index}`),
+      models: Array.from({ length: 64 }, (_, index) => "m".repeat(120) + index) },
+  }));
+});

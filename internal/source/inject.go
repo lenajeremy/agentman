@@ -160,30 +160,69 @@ func rejectSendIntoLiveQuestion(
 	return nil
 }
 
-func detectCodexQuestion(ctx context.Context, tmuxName string) *protocol.Question {
-	pane, err := tmux.RevealCodexQuestion(ctx, tmuxName)
-	if err != nil {
+func (s *CodexSource) detectQuestion(ctx context.Context, tmuxName string) *protocol.Question {
+	pane, read := s.readPane(ctx, tmuxName)
+	if !read {
 		return nil
 	}
-	return protocolQuestionOrNil(question.Detect(pane))
+	return codexQuestionIn(pane)
+}
+
+// readPane reads a Codex pane, opening its collapsed question tray first if
+// that is what is showing.
+func (s *CodexSource) readPane(ctx context.Context, tmuxName string) (string, bool) {
+	pane, err := s.revealQuestion(ctx, tmuxName)
+	return pane, err == nil
+}
+
+// codexQuestionIn is the question a Codex pane shows, if any.
+func codexQuestionIn(pane string) *protocol.Question {
+	shown := protocolQuestionOrNil(question.Detect(pane))
+	if shown != nil {
+		for i := range shown.Options {
+			shown.Options[i].WithText = codexRefusal(shown.Options[i].Label)
+		}
+	}
+	return shown
+}
+
+// codexRefusalLabel is the choice on Codex's approval prompts that refuses
+// and asks for something else instead. Codex ends the turn on it and gives
+// the composer back, so the "something else" is simply the next message.
+const codexRefusalLabel = "No, and tell Codex what to do differently"
+
+// codexRefusal reports whether an option is that choice. Codex draws its
+// shortcut after it: "… differently (esc)".
+func codexRefusal(label string) bool {
+	return label == codexRefusalLabel || strings.HasPrefix(label, codexRefusalLabel+" (")
+}
+
+// codexComposerBack reports that Codex has ended the turn a refusal
+// interrupted and is waiting at its composer: no question or queued question
+// on screen, nothing still working, and the composer line drawn.
+func codexComposerBack(pane string) bool {
+	if question.Detect(pane) != nil || question.CodexQueued(pane) {
+		return false
+	}
+	lines := strings.Split(strings.TrimRight(pane, "\n"), "\n")
+	if len(lines) > 12 {
+		lines = lines[len(lines)-12:]
+	}
+	composer := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(trimmed, "esc to interrupt") {
+			return false
+		}
+		if strings.HasPrefix(trimmed, "› ") || trimmed == "›" {
+			composer = true
+		}
+	}
+	return composer
 }
 
 func protocolQuestionOrNil(found *question.Question) *protocol.Question {
 	if found == nil {
-		return nil
-	}
-	return protocolQuestion(found)
-}
-
-// detectQuestion reads a pane and reports any decision the agent is blocked on.
-//
-// Runs on every discovery sweep for every tmux-backed session, so it must stay
-// cheap: one capture-pane per session per second, parsed in memory. Failures
-// are silent — a pane that cannot be read simply means no question, which is
-// the same conclusion as an agent that is working normally.
-func detectQuestion(ctx context.Context, tmuxName string) *protocol.Question {
-	found, err := captureQuestion(ctx, tmuxName)
-	if err != nil {
 		return nil
 	}
 	return protocolQuestion(found)
@@ -206,7 +245,7 @@ func (s *ClaudeSource) CurrentQuestion(
 	if session.tmuxName == "" {
 		return session.meta.Question, nil
 	}
-	current, err := captureQuestion(ctx, session.tmuxName)
+	current, err := s.captureQuestion(ctx, session.tmuxName)
 	if err != nil {
 		if errors.Is(err, errNoAnswerableQuestion) {
 			return nil, nil
@@ -217,8 +256,18 @@ func (s *ClaudeSource) CurrentQuestion(
 	return protocolQuestion(current), nil
 }
 
-func captureQuestion(ctx context.Context, tmuxName string) (*question.Question, error) {
-	pane, err := tmux.Capture(ctx, tmuxName)
+// capture reads a pane through the injected capture, so discovery and
+// answers can be tested against real pane captures without a tmux server.
+func (s *ClaudeSource) capture(ctx context.Context, tmuxName string) (string, error) {
+	capture := s.capturePane
+	if capture == nil {
+		capture = tmux.Capture
+	}
+	return capture(ctx, tmuxName)
+}
+
+func (s *ClaudeSource) captureQuestion(ctx context.Context, tmuxName string) (*question.Question, error) {
+	pane, err := s.capture(ctx, tmuxName)
 	if err != nil {
 		return nil, err
 	}
@@ -239,6 +288,7 @@ func protocolQuestion(found *question.Question) *protocol.Question {
 			Preview:     option.Preview,
 			Selected:    option.Selected,
 			Checked:     option.Checked,
+			WithText:    claudeOptionTakesANote(found, option),
 		})
 	}
 	question := &protocol.Question{
@@ -292,7 +342,7 @@ func (s *ClaudeSource) Answer(ctx context.Context, sessionID string, answer prot
 		answer.QuestionID != session.meta.Question.ID {
 		return fmt.Errorf("source: that question is no longer current; refresh the session")
 	}
-	current, err := captureQuestion(ctx, session.tmuxName)
+	current, err := s.captureQuestion(ctx, session.tmuxName)
 	if err != nil {
 		return fmt.Errorf("source: that question is no longer on screen; refresh the session")
 	}
@@ -318,6 +368,9 @@ func (s *ClaudeSource) Answer(ctx context.Context, sessionID string, answer prot
 	}
 	if len(answer.Options) > 0 {
 		return fmt.Errorf("source: this Claude question accepts only one answer")
+	}
+	if answer.Text != "" && answer.OptionKey != "" {
+		return s.answerClaudeWithNote(ctx, session.tmuxName, current, answer)
 	}
 	if answer.Text != "" {
 		if answer.OptionKey != "" || !current.Custom || current.CustomKey == "" {
@@ -350,6 +403,60 @@ func (s *ClaudeSource) Answer(ctx context.Context, sessionID string, answer prot
 		)
 	}
 	return tmux.Answer(ctx, session.tmuxName, answer.OptionKey)
+}
+
+// claudeOptionTakesANote reports the choice whose "Tab to amend" line is
+// "No, and tell Claude what to do differently". Claude also lets a "Yes" be
+// amended, with a note on what to do next; only the refusal is offered for
+// now, because it is the one a person away from the terminal needs.
+func claudeOptionTakesANote(found *question.Question, option question.Option) bool {
+	return found.AmendWithTab && option.Label == "No"
+}
+
+// claudeNoteLabel is how Claude draws the "No" row once Tab has opened it.
+const claudeNoteLabel = "No, and tell Claude what to do differently"
+
+// answerClaudeWithNote refuses with a note: focus the option, open its note
+// line with Tab, type the note, submit. Each step is checked on screen.
+func (s *ClaudeSource) answerClaudeWithNote(
+	ctx context.Context, tmuxName string, current *question.Question, answer protocol.QuestionAnswer,
+) error {
+	target := -1
+	for index, option := range current.Options {
+		if option.Key == answer.OptionKey && claudeOptionTakesANote(current, option) {
+			target = index
+		}
+	}
+	if target < 0 {
+		return fmt.Errorf("source: that choice does not take a note")
+	}
+	if current.FocusIndex < 0 {
+		return fmt.Errorf("source: Claude's current option focus could not be identified; refresh the session")
+	}
+	note := strings.Join(strings.Fields(answer.Text), " ")
+	focusedOn := func(pane string, want func(label string) bool) bool {
+		found := question.Detect(pane)
+		return found != nil && found.Prompt == current.Prompt && found.FocusIndex == target &&
+			target < len(found.Options) && want(found.Options[target].Label)
+	}
+	focused := func(pane string) bool {
+		return focusedOn(pane, func(label string) bool { return label == "No" })
+	}
+	amending := func(pane string) bool {
+		return focusedOn(pane, func(label string) bool { return label == claudeNoteLabel })
+	}
+	typed := func(pane string) bool {
+		// The row may be cut at the pane's width, so the start of the note is
+		// what can be checked.
+		start := []rune(note)
+		if len(start) > 24 {
+			start = start[:24]
+		}
+		return focusedOn(pane, func(label string) bool {
+			return strings.HasPrefix(label, "No, "+string(start))
+		})
+	}
+	return s.answerWithNote(ctx, tmuxName, target-current.FocusIndex, note, focused, amending, typed)
 }
 
 func answerClaudeMultiple(
@@ -482,10 +589,15 @@ func (s *CodexSource) Answer(ctx context.Context, sessionID string, answer proto
 		answer.QuestionID != session.meta.Question.ID {
 		return fmt.Errorf("source: that question is no longer current; refresh the session")
 	}
-	if len(answer.Options) > 0 || answer.Text != "" && answer.OptionKey != "" {
+	note := answer.Text != "" && answer.OptionKey != ""
+	if len(answer.Options) > 0 || note && !codexOptionTakesANote(session.meta.Question, answer.OptionKey) {
 		return fmt.Errorf("source: choose one listed option or provide one custom answer")
 	}
-	currentPane, err := tmux.RevealCodexQuestion(ctx, session.tmuxName)
+	reveal := s.revealQuestion
+	if reveal == nil {
+		reveal = tmux.RevealCodexQuestion
+	}
+	currentPane, err := reveal(ctx, session.tmuxName)
 	if err != nil {
 		return fmt.Errorf("source: could not inspect the Codex question: %w", err)
 	}
@@ -493,6 +605,16 @@ func (s *CodexSource) Answer(ctx context.Context, sessionID string, answer proto
 	current := protocolQuestionOrNil(found)
 	if !sameQuestion(session.meta.Question, current) {
 		return fmt.Errorf("source: that question or option is no longer current; refresh the session")
+	}
+	if note {
+		if !questionHasOption(current, answer.OptionKey) {
+			return fmt.Errorf("source: that question or option is no longer current; refresh the session")
+		}
+		refuse := s.refuseWithNote
+		if refuse == nil {
+			refuse = tmux.RefuseThenSend
+		}
+		return refuse(ctx, session.tmuxName, answer.OptionKey, answer.Text, codexComposerBack)
 	}
 	if answer.Text != "" {
 		if found == nil || !found.Custom || found.CustomKey == "" {
@@ -506,39 +628,18 @@ func (s *CodexSource) Answer(ctx context.Context, sessionID string, answer proto
 	return tmux.Answer(ctx, session.tmuxName, answer.OptionKey)
 }
 
-// validateCurrentQuestion prevents a delayed phone tap from being typed into
-// an unrelated prompt. The pane is re-read immediately before the keystroke;
-// both the question identity and the selected key must still match what the
-// app was shown during discovery.
-func validateCurrentQuestion(
-	ctx context.Context,
-	tmuxName string,
-	shown *protocol.Question,
-	optionKey string,
-) error {
-	if shown == nil || !questionHasOption(shown, optionKey) {
-		return fmt.Errorf("source: that question or option is no longer current; refresh the session")
-	}
-	current, err := currentQuestion(ctx, tmuxName, shown)
-	if err != nil || !questionHasOption(protocolQuestion(current), optionKey) {
-		return fmt.Errorf("source: that question is no longer on screen; refresh the session")
-	}
-	return nil
-}
-
-func currentQuestion(
-	ctx context.Context,
-	tmuxName string,
-	shown *protocol.Question,
-) (*question.Question, error) {
+// codexOptionTakesANote reports whether key names the refusal that carries a
+// note on the question the phone was shown.
+func codexOptionTakesANote(shown *protocol.Question, key string) bool {
 	if shown == nil {
-		return nil, fmt.Errorf("source: that question is no longer current; refresh the session")
+		return false
 	}
-	current, err := captureQuestion(ctx, tmuxName)
-	if err != nil || !sameQuestion(shown, protocolQuestion(current)) {
-		return nil, fmt.Errorf("source: that question is no longer on screen; refresh the session")
+	for _, option := range shown.Options {
+		if option.Key == key {
+			return option.WithText && codexRefusal(option.Label)
+		}
 	}
-	return current, nil
+	return false
 }
 
 func questionHasOption(question *protocol.Question, key string) bool {

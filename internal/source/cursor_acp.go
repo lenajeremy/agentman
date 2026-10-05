@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,7 +31,14 @@ type cursorACPRecord struct {
 	StartedAt      int64              `json:"startedAt"`
 	LastActivityAt int64              `json:"lastActivityAt"`
 	Messages       []protocol.Message `json:"messages"`
-	Queued         []string           `json:"queued,omitempty"`
+	Queued         []cursorACPTurn    `json:"queued,omitempty"`
+	// Mode is Cursor's mode for the chat (agent, plan, ask), from
+	// session/new and current_mode_update.
+	Mode string `json:"mode,omitempty"`
+	// Modes are the modes Cursor offers the chat, and Models the models
+	// it can switch to, as session/new and session/load last reported them.
+	Modes  []string         `json:"modes,omitempty"`
+	Models []cursorACPModel `json:"models,omitempty"`
 }
 
 type cursorACPPending struct {
@@ -75,12 +83,24 @@ type cursorACPState struct {
 	turnID      string
 	subscribers map[chan struct{}]struct{}
 	diskMod     time.Time
+	// calls accumulates the updates of each tool call in the running turn;
+	// Cursor sends only what changed in each one.
+	calls map[string]*parser.CursorACPToolCall
 }
 
 // CursorACPSource owns only Agentman-created ACP sessions. Existing interactive
 // Cursor terminal chats remain in CursorCLISource, with their own store and IDs.
 type CursorACPSource struct {
-	dir      string
+	dir string
+	// dial starts an ACP child; a field so tests can stand in for Cursor.
+	dial func(cwd string, handle func(cursorACPEnvelope)) (*cursorACPClient, error)
+	// listing is Cursor's model list, fetched now and then; see catalogue.
+	listing cursorACPListing
+	// stores is where Cursor keeps each ACP session's own store
+	// (~/.cursor/acp-sessions); the model a turn ran on is read from it.
+	stores   string
+	modelMu  sync.Mutex
+	models   map[string]cursorCLIModelEntry
 	async    bool
 	closing  atomic.Bool
 	mu       sync.RWMutex
@@ -158,7 +178,10 @@ func NewCursorACPSource(dir string) (*CursorACPSource, error) {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return nil, err
 	}
-	s := &CursorACPSource{dir: dir, sessions: make(map[string]*cursorACPState)}
+	s := &CursorACPSource{dir: dir, sessions: make(map[string]*cursorACPState), models: map[string]cursorCLIModelEntry{}}
+	if home, err := os.UserHomeDir(); err == nil {
+		s.stores = filepath.Join(home, ".cursor", "acp-sessions")
+	}
 	if err := s.refreshRecords(); err != nil {
 		return nil, err
 	}
@@ -302,15 +325,11 @@ func (s *CursorACPSource) save(st *cursorACPState) error {
 	return nil
 }
 
-func (s *CursorACPSource) Discover(context.Context) ([]protocol.Session, error) {
+func (s *CursorACPSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 	_ = s.refreshRecords()
-	s.mu.RLock()
-	states := make([]*cursorACPState, 0, len(s.sessions))
-	for _, st := range s.sessions {
-		states = append(states, st)
-	}
-	s.mu.RUnlock()
+	states := s.states()
 	out := make([]protocol.Session, 0, len(states))
+	live := make(map[string]bool, len(states))
 	for _, st := range states {
 		st.mu.Lock()
 		r := st.record
@@ -322,6 +341,12 @@ func (s *CursorACPSource) Discover(context.Context) ([]protocol.Session, error) 
 			state = protocol.StateWaitingInput
 		}
 		q := st.question
+		// The ACP child runs only for the length of a turn; while it does,
+		// its pid is the one whose listening ports belong to this chat.
+		pid := 0
+		if st.client != nil && st.client.cmd != nil && st.client.cmd.Process != nil {
+			pid = st.client.cmd.Process.Pid
+		}
 		st.mu.Unlock()
 		if state == protocol.StateIdle && s.busyElsewhere(r.NativeID) {
 			state = protocol.StateBusy
@@ -329,14 +354,67 @@ func (s *CursorACPSource) Discover(context.Context) ([]protocol.Session, error) 
 		if r.LastActivityAt < time.Now().Add(-cursorCLIWindow).UnixMilli() && state == protocol.StateIdle {
 			continue
 		}
+		live[r.NativeID] = true
 		out = append(out, protocol.Session{
 			ID: cursorACPPrefix + r.NativeID, Kind: protocol.KindCursorCLI,
 			NativeID: r.NativeID, Name: cursorACPName(r), Cwd: r.Cwd,
 			State: state, Inject: protocol.InjectAPI, Question: q,
 			StartedAt: r.StartedAt, LastActivityAt: r.LastActivityAt,
+			Model: s.model(ctx, r.NativeID, r.LastActivityAt), AgentPID: pid,
+			Mode: r.Mode,
 		})
 	}
+	s.modelMu.Lock()
+	for native := range s.models {
+		if !live[native] {
+			delete(s.models, native)
+		}
+	}
+	s.modelMu.Unlock()
 	return out, nil
+}
+
+// model reads the model a chat's last reply came from out of Cursor's own
+// store for the session, which records it per message. ACP's session/new
+// only names the selection ("Auto"), not what Auto routed to.
+func (s *CursorACPSource) model(ctx context.Context, native string, updatedAt int64) string {
+	if s.stores == "" || !cursorACPValidID(native) {
+		return ""
+	}
+	s.modelMu.Lock()
+	defer s.modelMu.Unlock()
+	if cached, ok := s.models[native]; ok && cached.updatedAt == updatedAt {
+		return cached.model
+	}
+	model := ""
+	store := filepath.Join(s.stores, native, "store.db")
+	if _, err := os.Stat(store); err == nil {
+		model = queryCursorCLIModel(ctx, store)
+	}
+	if s.models == nil {
+		s.models = map[string]cursorCLIModelEntry{}
+	}
+	s.models[native] = cursorCLIModelEntry{updatedAt: updatedAt, model: model}
+	return model
+}
+
+// cursorACPTurn is one message to send: its text and the images the phone
+// attached, by the paths the daemon saved them to.
+type cursorACPTurn struct {
+	Text   string   `json:"text"`
+	Images []string `json:"images,omitempty"`
+}
+
+// UnmarshalJSON also reads the plain strings a record's queue held before
+// messages could carry images.
+func (t *cursorACPTurn) UnmarshalJSON(data []byte) error {
+	var text string
+	if json.Unmarshal(data, &text) == nil {
+		*t = cursorACPTurn{Text: text}
+		return nil
+	}
+	type plain cursorACPTurn
+	return json.Unmarshal(data, (*plain)(t))
 }
 
 func cursorACPName(record cursorACPRecord) string {
@@ -429,12 +507,13 @@ func (st *cursorACPState) signalLocked() {
 
 func (s *CursorACPSource) Launch(ctx context.Context, cwd, prompt string) (string, error) {
 	st := &cursorACPState{record: cursorACPRecord{Cwd: cwd, StartedAt: time.Now().UnixMilli(), LastActivityAt: time.Now().UnixMilli()}}
-	client, err := newCursorACPClient(cwd, func(event cursorACPEnvelope) { s.handle(st, event) })
+	client, err := s.connect(cwd, func(event cursorACPEnvelope) { s.handle(st, event) })
 	if err != nil {
 		return "", err
 	}
 	var created struct {
 		SessionID string `json:"sessionId"`
+		cursorACPSessionState
 	}
 	if err := client.call(ctx, "session/new", map[string]any{"cwd": cwd, "mcpServers": []any{}}, &created); err != nil {
 		client.close()
@@ -447,6 +526,7 @@ func (s *CursorACPSource) Launch(ctx context.Context, cwd, prompt string) (strin
 	st.mu.Lock()
 	st.record.NativeID = created.SessionID
 	st.mu.Unlock()
+	s.noteSessionState(st, created.cursorACPSessionState)
 	id := cursorACPPrefix + created.SessionID
 	s.mu.Lock()
 	s.sessions[id] = st
@@ -467,7 +547,7 @@ func (s *CursorACPSource) Launch(ctx context.Context, cwd, prompt string) (strin
 		_ = os.Remove(filepath.Join(s.dir, created.SessionID+".json"))
 		return "", err
 	}
-	if _, err := s.begin(st, client, lock, prompt); err != nil {
+	if _, err := s.begin(st, client, lock, cursorACPTurn{Text: prompt}); err != nil {
 		s.mu.Lock()
 		delete(s.sessions, id)
 		s.mu.Unlock()
@@ -484,18 +564,18 @@ func (s *CursorACPSource) Inject(ctx context.Context, id, text string) (protocol
 	}
 	st.startMu.Lock()
 	defer st.startMu.Unlock()
-	return s.injectLocked(ctx, st, text)
+	return s.injectLocked(ctx, st, cursorACPTurn{Text: text})
 }
 
 // injectLocked serializes a new turn with queue draining and other sends.
-func (s *CursorACPSource) injectLocked(ctx context.Context, st *cursorACPState, text string) (protocol.InjectMode, error) {
+func (s *CursorACPSource) injectLocked(ctx context.Context, st *cursorACPState, turn cursorACPTurn) (protocol.InjectMode, error) {
 	st.mu.Lock()
 	if st.question != nil {
 		st.mu.Unlock()
 		return protocol.InjectNone, errors.New("answer Cursor's pending question first")
 	}
 	if st.busy {
-		st.record.Queued = append(st.record.Queued, text)
+		st.record.Queued = append(st.record.Queued, turn)
 		st.mu.Unlock()
 		if err := s.save(st); err != nil {
 			st.mu.Lock()
@@ -516,7 +596,7 @@ func (s *CursorACPSource) injectLocked(ctx context.Context, st *cursorACPState, 
 		st.mu.Unlock()
 		return protocol.InjectNone, err
 	}
-	client, err := newCursorACPClient(cwd, func(event cursorACPEnvelope) { s.handle(st, event) })
+	client, err := s.connect(cwd, func(event cursorACPEnvelope) { s.handle(st, event) })
 	if err != nil {
 		releaseCursorACPLock(lock)
 		st.mu.Lock()
@@ -524,7 +604,8 @@ func (s *CursorACPSource) injectLocked(ctx context.Context, st *cursorACPState, 
 		st.mu.Unlock()
 		return protocol.InjectNone, err
 	}
-	if err := client.call(ctx, "session/load", map[string]any{"sessionId": nativeID, "cwd": cwd, "mcpServers": []any{}}, nil); err != nil {
+	var loaded cursorACPSessionState
+	if err := client.call(ctx, "session/load", map[string]any{"sessionId": nativeID, "cwd": cwd, "mcpServers": []any{}}, &loaded); err != nil {
 		client.close()
 		releaseCursorACPLock(lock)
 		st.mu.Lock()
@@ -535,7 +616,8 @@ func (s *CursorACPSource) injectLocked(ctx context.Context, st *cursorACPState, 
 	st.mu.Lock()
 	st.replaying = false
 	st.mu.Unlock()
-	done, err := s.begin(st, client, lock, text)
+	s.noteSessionState(st, loaded)
+	done, err := s.begin(st, client, lock, turn)
 	if err != nil {
 		return protocol.InjectNone, err
 	}
@@ -552,9 +634,11 @@ func (s *CursorACPSource) injectLocked(ctx context.Context, st *cursorACPState, 
 	return protocol.InjectAPI, nil
 }
 
-func (s *CursorACPSource) begin(st *cursorACPState, client *cursorACPClient, lock *os.File, text string) (<-chan struct{}, error) {
+func (s *CursorACPSource) begin(st *cursorACPState, client *cursorACPClient, lock *os.File, turn cursorACPTurn) (<-chan struct{}, error) {
+	prompt, shown := cursorACPPrompt(turn)
 	st.mu.Lock()
 	st.client, st.busy, st.question, st.pending = client, true, nil, nil
+	st.calls = nil
 	st.lockFile = lock
 	st.turnDone = make(chan struct{})
 	done := st.turnDone
@@ -563,14 +647,14 @@ func (s *CursorACPSource) begin(st *cursorACPState, client *cursorACPClient, loc
 	id := cursorACPPrefix + st.record.NativeID
 	st.record.Messages = append(st.record.Messages, protocol.Message{
 		ID: fmt.Sprintf("%s:%d:user", id, st.messageSeq), SessionID: id,
-		Role: protocol.RoleUser, Ts: time.Now().UnixMilli(), Text: text,
+		Role: protocol.RoleUser, Ts: time.Now().UnixMilli(), Text: shown,
 	})
 	st.turnID = st.record.Messages[len(st.record.Messages)-1].ID
 	st.record.LastActivityAt = time.Now().UnixMilli()
 	nativeID := st.record.NativeID
 	st.mu.Unlock()
 	requestID, response, err := client.startCall("session/prompt", map[string]any{
-		"sessionId": nativeID, "prompt": []map[string]string{{"type": "text", "text": text}},
+		"sessionId": nativeID, "prompt": prompt,
 	})
 	if err != nil {
 		st.mu.Lock()
@@ -630,7 +714,7 @@ func (s *CursorACPSource) drainQueued(st *cursorACPState) {
 	st.mu.Unlock()
 	if err := s.save(st); err != nil {
 		st.mu.Lock()
-		st.record.Queued = append([]string{next}, st.record.Queued...)
+		st.record.Queued = append([]cursorACPTurn{next}, st.record.Queued...)
 		st.mu.Unlock()
 		_ = s.save(st)
 		return
@@ -639,7 +723,7 @@ func (s *CursorACPSource) drainQueued(st *cursorACPState) {
 	defer cancel()
 	if _, err := s.injectLocked(ctx, st, next); err != nil {
 		st.mu.Lock()
-		st.record.Queued = append([]string{next}, st.record.Queued...)
+		st.record.Queued = append([]cursorACPTurn{next}, st.record.Queued...)
 		st.mu.Unlock()
 		_ = s.save(st)
 	}
@@ -671,105 +755,7 @@ func (s *CursorACPSource) CurrentQuestion(_ context.Context, id string) (*protoc
 
 func (s *CursorACPSource) handle(st *cursorACPState, event cursorACPEnvelope) {
 	if event.Method == "session/update" {
-		var payload struct {
-			Update json.RawMessage `json:"update"`
-		}
-		if json.Unmarshal(event.Params, &payload) != nil {
-			return
-		}
-		var update struct {
-			SessionUpdate string `json:"sessionUpdate"`
-			Title         string `json:"title"`
-			UpdatedAt     string `json:"updatedAt"`
-			Content       struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-			ToolCallID string `json:"toolCallId"`
-			Status     string `json:"status"`
-		}
-		if json.Unmarshal(payload.Update, &update) != nil {
-			return
-		}
-		st.mu.Lock()
-		if st.replaying {
-			st.mu.Unlock()
-			return
-		}
-		changed := false
-		id := cursorACPPrefix + st.record.NativeID
-		switch update.SessionUpdate {
-		case "session_info_update":
-			if title := strings.TrimSpace(update.Title); title != "" {
-				st.record.Name = clipRunes(title, 120)
-				changed = true
-			}
-			if when, err := time.Parse(time.RFC3339Nano, update.UpdatedAt); err == nil {
-				st.record.LastActivityAt = when.UnixMilli()
-				changed = true
-			}
-		case "agent_message_chunk":
-			if update.Content.Type == "text" && update.Content.Text != "" {
-				if st.assistantID != "" {
-					for i := len(st.record.Messages) - 1; i >= 0; i-- {
-						if st.record.Messages[i].ID == st.assistantID {
-							st.record.Messages[i].Text = clipRunes(st.record.Messages[i].Text+update.Content.Text, parser.PreviewChars)
-							changed = true
-							break
-						}
-					}
-				}
-				if !changed {
-					st.messageSeq++
-					st.assistantID = fmt.Sprintf("%s:%d:assistant", id, st.messageSeq)
-					st.record.Messages = append(st.record.Messages, protocol.Message{
-						ID: st.assistantID, SessionID: id, Role: protocol.RoleAssistant,
-						Ts: time.Now().UnixMilli(), Text: clipRunes(update.Content.Text, parser.PreviewChars),
-					})
-					changed = true
-				}
-			}
-		case "tool_call", "tool_call_update":
-			st.assistantID = ""
-			if update.ToolCallID != "" {
-				toolID := st.turnID + ":tool:" + update.ToolCallID
-				for i := len(st.record.Messages) - 1; i >= 0; i-- {
-					if st.record.Messages[i].ID == toolID {
-						if update.Title != "" {
-							st.record.Messages[i].Tool.Summary = clipRunes(update.Title, parser.SummaryChars)
-						}
-						if update.Status == "completed" {
-							st.record.Messages[i].Tool.Status = protocol.ToolOK
-						}
-						if update.Status == "failed" {
-							st.record.Messages[i].Tool.Status = protocol.ToolError
-						}
-						changed = true
-						break
-					}
-				}
-				if !changed {
-					name := update.Title
-					if name == "" {
-						name = "Cursor tool"
-					}
-					st.record.Messages = append(st.record.Messages, protocol.Message{
-						ID: toolID, SessionID: id, Role: protocol.RoleTool, Ts: time.Now().UnixMilli(),
-						Tool: &protocol.Tool{Name: clipRunes(name, parser.SummaryChars), Status: protocol.ToolRunning},
-					})
-					changed = true
-				}
-			}
-		}
-		if changed && update.SessionUpdate != "session_info_update" {
-			st.record.LastActivityAt = time.Now().UnixMilli()
-			st.signalLocked()
-		}
-		persistable := cursorACPValidID(st.record.NativeID)
-		st.mu.Unlock()
-		if changed && persistable {
-			_ = s.save(st)
-		}
+		s.handleUpdate(st, event)
 		return
 	}
 	if len(event.ID) == 0 {
@@ -783,14 +769,13 @@ func (s *CursorACPSource) handle(st *cursorACPState, event cursorACPEnvelope) {
 	}
 	var pending *cursorACPPending
 	var question *protocol.Question
+	acknowledge := false
+	changed := false
 	switch event.Method {
 	case "session/request_permission":
 		var request struct {
-			ToolCall struct {
-				Title    string          `json:"title"`
-				RawInput json.RawMessage `json:"rawInput"`
-			} `json:"toolCall"`
-			Options []struct {
+			ToolCall json.RawMessage `json:"toolCall"`
+			Options  []struct {
 				OptionID string `json:"optionId"`
 				Name     string `json:"name"`
 			} `json:"options"`
@@ -803,14 +788,11 @@ func (s *CursorACPSource) handle(st *cursorACPState, event cursorACPEnvelope) {
 				}
 			}
 			if len(options) > 0 {
-				detail := string(request.ToolCall.RawInput)
-				if len(detail) > 4096 {
-					detail = detail[:4096] + "…"
+				title, prompt, detail := parser.CursorACPPermission(request.ToolCall)
+				if len(detail) > 16*1024 {
+					detail = detail[:16*1024] + "…"
 				}
-				question = &protocol.Question{Title: "Cursor permission", Prompt: request.ToolCall.Title, Detail: detail, Options: options}
-				if question.Prompt == "" {
-					question.Prompt = "Allow this Cursor action?"
-				}
+				question = &protocol.Question{Title: title, Prompt: prompt, Detail: detail, Options: options}
 				pending = &cursorACPPending{requestID: event.ID, kind: "permission", options: options}
 			}
 		}
@@ -825,11 +807,15 @@ func (s *CursorACPSource) handle(st *cursorACPState, event cursorACPEnvelope) {
 		}
 	case "cursor/create_plan":
 		var request struct {
-			Name string `json:"name"`
-			Plan string `json:"plan"`
+			Name     string `json:"name"`
+			Overview string `json:"overview"`
+			Plan     string `json:"plan"`
 		}
 		if json.Unmarshal(event.Params, &request) == nil {
-			detail := request.Plan
+			detail := strings.TrimSpace(request.Plan)
+			if overview := strings.TrimSpace(request.Overview); overview != "" && !strings.Contains(detail, overview) {
+				detail = strings.TrimSpace(overview + "\n\n" + detail)
+			}
 			if len(detail) > 16*1024 {
 				detail = detail[:16*1024] + "…"
 			}
@@ -840,6 +826,34 @@ func (s *CursorACPSource) handle(st *cursorACPState, event cursorACPEnvelope) {
 			}
 			pending = &cursorACPPending{requestID: event.ID, kind: "plan", options: question.Options}
 		}
+	case "cursor/update_todos":
+		// Sent as requests that expect nothing back; the list is the same
+		// one the TodoWrite row shows.
+		var request struct {
+			ToolCallID string          `json:"toolCallId"`
+			Todos      json.RawMessage `json:"todos"`
+		}
+		if json.Unmarshal(event.Params, &request) == nil && request.ToolCallID != "" {
+			if todos := parser.CursorACPTodos(request.Todos); todos != "" {
+				call := st.callLocked(request.ToolCallID)
+				call.Todos = todos
+				changed = st.upsertCallLocked(request.ToolCallID)
+			}
+		}
+		acknowledge = true
+	case "cursor/generate_image":
+		var request struct {
+			ToolCallID string `json:"toolCallId"`
+			FilePath   string `json:"filePath"`
+		}
+		if json.Unmarshal(event.Params, &request) == nil && request.ToolCallID != "" && filepath.IsAbs(request.FilePath) {
+			call := st.callLocked(request.ToolCallID)
+			call.ImagePath = request.FilePath
+			changed = st.upsertCallLocked(request.ToolCallID)
+		}
+		acknowledge = true
+	case "cursor/task":
+		acknowledge = true
 	}
 	if pending != nil && question != nil {
 		st.questionSeq++
@@ -848,17 +862,183 @@ func (s *CursorACPSource) handle(st *cursorACPState, event cursorACPEnvelope) {
 		st.mu.Unlock()
 		return
 	}
+	if changed {
+		st.record.LastActivityAt = time.Now().UnixMilli()
+		st.signalLocked()
+	}
+	persistable := changed && cursorACPValidID(st.record.NativeID)
 	st.mu.Unlock()
+	if persistable {
+		_ = s.save(st)
+	}
+	if acknowledge {
+		_ = client.respond(event.ID, map[string]any{})
+		return
+	}
 	_ = client.respondError(event.ID, "unsupported Cursor ACP request")
 }
 
+// handleUpdate applies one session/update notification.
+func (s *CursorACPSource) handleUpdate(st *cursorACPState, event cursorACPEnvelope) {
+	var payload struct {
+		Update json.RawMessage `json:"update"`
+	}
+	if json.Unmarshal(event.Params, &payload) != nil {
+		return
+	}
+	var update struct {
+		SessionUpdate string `json:"sessionUpdate"`
+		Title         string `json:"title"`
+		UpdatedAt     string `json:"updatedAt"`
+		// A message chunk's content is one block; a tool update's is a
+		// list. Decoding it as either alone rejected the other update
+		// outright, and every finished tool call with output was dropped.
+		Content       json.RawMessage `json:"content"`
+		ToolCallID    string          `json:"toolCallId"`
+		Entries       json.RawMessage `json:"entries"`
+		CurrentModeID string          `json:"currentModeId"`
+	}
+	if json.Unmarshal(payload.Update, &update) != nil {
+		return
+	}
+	var chunk struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	_ = json.Unmarshal(update.Content, &chunk)
+	st.mu.Lock()
+	if st.replaying {
+		st.mu.Unlock()
+		return
+	}
+	changed := false
+	id := cursorACPPrefix + st.record.NativeID
+	switch update.SessionUpdate {
+	case "session_info_update":
+		if title := strings.TrimSpace(update.Title); title != "" {
+			st.record.Name = clipRunes(title, 120)
+			changed = true
+		}
+		if when, err := time.Parse(time.RFC3339Nano, update.UpdatedAt); err == nil {
+			st.record.LastActivityAt = when.UnixMilli()
+			changed = true
+		}
+	case "current_mode_update":
+		if mode := strings.TrimSpace(update.CurrentModeID); mode != "" && mode != st.record.Mode {
+			st.record.Mode = clipRunes(mode, 40)
+			changed = true
+		}
+	case "agent_message_chunk":
+		if chunk.Type == "text" && chunk.Text != "" {
+			if st.assistantID != "" {
+				for i := len(st.record.Messages) - 1; i >= 0; i-- {
+					if st.record.Messages[i].ID == st.assistantID {
+						st.record.Messages[i].Text = clipRunes(st.record.Messages[i].Text+chunk.Text, parser.PreviewChars)
+						changed = true
+						break
+					}
+				}
+			}
+			if !changed {
+				st.messageSeq++
+				st.assistantID = fmt.Sprintf("%s:%d:assistant", id, st.messageSeq)
+				st.record.Messages = append(st.record.Messages, protocol.Message{
+					ID: st.assistantID, SessionID: id, Role: protocol.RoleAssistant,
+					Ts: time.Now().UnixMilli(), Text: clipRunes(chunk.Text, parser.PreviewChars),
+				})
+				changed = true
+			}
+		}
+	case "tool_call", "tool_call_update":
+		st.assistantID = ""
+		if update.ToolCallID != "" {
+			st.callLocked(update.ToolCallID).Merge(payload.Update)
+			changed = st.upsertCallLocked(update.ToolCallID)
+		}
+	case "plan":
+		// The agent's plan entries, Cursor's equivalent of a todo list,
+		// resent whole each time one changes.
+		if todos := parser.CursorACPTodos(update.Entries); todos != "" {
+			st.assistantID = ""
+			changed = st.upsertLocked(protocol.Message{
+				ID: st.turnID + ":plan", SessionID: id, Role: protocol.RoleTool,
+				Ts:   time.Now().UnixMilli(),
+				Tool: &protocol.Tool{Name: "TodoWrite", Status: protocol.ToolOK}, Text: todos,
+			})
+		}
+	}
+	if changed && update.SessionUpdate != "session_info_update" {
+		st.record.LastActivityAt = time.Now().UnixMilli()
+		st.signalLocked()
+	}
+	persistable := cursorACPValidID(st.record.NativeID)
+	st.mu.Unlock()
+	if changed && persistable {
+		_ = s.save(st)
+	}
+}
+
+// callLocked returns the accumulated updates for a tool call in this turn.
+func (st *cursorACPState) callLocked(toolCallID string) *parser.CursorACPToolCall {
+	if st.calls == nil {
+		st.calls = map[string]*parser.CursorACPToolCall{}
+	}
+	call := st.calls[toolCallID]
+	if call == nil {
+		call = &parser.CursorACPToolCall{}
+		st.calls[toolCallID] = call
+	}
+	return call
+}
+
+// upsertCallLocked rebuilds a tool call's row from everything seen for it.
+func (st *cursorACPState) upsertCallLocked(toolCallID string) bool {
+	tool, text := st.callLocked(toolCallID).Row()
+	id := cursorACPPrefix + st.record.NativeID
+	return st.upsertLocked(protocol.Message{
+		ID: st.turnID + ":tool:" + toolCallID, SessionID: id, Role: protocol.RoleTool,
+		Ts: time.Now().UnixMilli(), Tool: tool, Text: text,
+	})
+}
+
+// upsertLocked replaces the message with the same id, keeping its place and
+// time, or appends it. It reports whether anything changed.
+func (st *cursorACPState) upsertLocked(message protocol.Message) bool {
+	for i := len(st.record.Messages) - 1; i >= 0; i-- {
+		existing := &st.record.Messages[i]
+		if existing.ID != message.ID {
+			continue
+		}
+		message.Ts = existing.Ts
+		if existing.Text == message.Text && sameTool(existing.Tool, message.Tool) {
+			return false
+		}
+		*existing = message
+		return true
+	}
+	st.record.Messages = append(st.record.Messages, message)
+	return true
+}
+
+func sameTool(a, b *protocol.Tool) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// cursorACPSkip is the option that declines Cursor's questions, which it
+// accepts as an outcome of its own ("skipped") and continues without.
+const cursorACPSkip = "__skip__"
+
 func cursorACPQuestion(title string, input cursorACPAskQuestion) *protocol.Question {
-	options := make([]protocol.QuestionOption, 0, len(input.Options))
+	options := make([]protocol.QuestionOption, 0, len(input.Options)+1)
 	for _, option := range input.Options {
-		if option.ID != "" {
+		if option.ID != "" && option.ID != cursorACPSkip {
 			options = append(options, protocol.QuestionOption{Key: option.ID, Label: option.Label})
 		}
 	}
+	options = append(options, protocol.QuestionOption{Key: cursorACPSkip, Label: "Skip"})
 	return &protocol.Question{Title: title, Prompt: input.Prompt, Options: options, Multiple: input.AllowMultiple}
 }
 
@@ -901,6 +1081,14 @@ func (s *CursorACPSource) Answer(_ context.Context, id string, answer protocol.Q
 	case "plan":
 		result = map[string]any{"outcome": map[string]string{"outcome": keys[0]}}
 	case "ask":
+		if slices.Contains(keys, cursorACPSkip) {
+			if len(keys) != 1 {
+				st.mu.Unlock()
+				return errors.New("Skip cannot be combined with an answer")
+			}
+			result = map[string]any{"outcome": map[string]any{"outcome": "skipped", "reason": "Skipped from the phone"}}
+			break
+		}
 		pending.answers = append(pending.answers, cursorACPAskAnswer{
 			QuestionID: pending.questions[pending.index].ID, SelectedOptionIDs: slices.Clone(keys),
 		})
@@ -918,10 +1106,92 @@ func (s *CursorACPSource) Answer(_ context.Context, id string, answer protocol.Q
 	err = client.respond(pending.requestID, result)
 	if err == nil {
 		st.question, st.pending = nil, nil
-	} else if pending.kind == "ask" {
+	} else if pending.kind == "ask" && !slices.Contains(keys, cursorACPSkip) {
 		pending.index--
 		pending.answers = pending.answers[:len(pending.answers)-1]
 	}
 	st.mu.Unlock()
 	return err
+}
+
+// states returns every record the source knows, without holding its lock
+// while callers read them.
+func (s *CursorACPSource) states() []*cursorACPState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	states := make([]*cursorACPState, 0, len(s.sessions))
+	for _, st := range s.sessions {
+		states = append(states, st)
+	}
+	return states
+}
+
+// Past implements History for chats Agentman started over ACP.
+//
+// Discovery stops listing an idle ACP chat after cursorCLIWindow, and before
+// this nothing else listed it either: a chat launched from the phone simply
+// vanished a day later although its record, and Cursor's own store, were
+// still on disk. A past chat is still reachable — each turn loads the session
+// into a fresh ACP process anyway — so it is reported with InjectAPI and the
+// phone sends to it directly instead of trying to reopen it in a pane, which
+// the terminal CLI cannot do (it does not know ACP sessions, and resuming one
+// by id silently starts an empty chat).
+func (s *CursorACPSource) Past(ctx context.Context, dir string, limit int) ([]protocol.Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	dir = filepath.Clean(dir)
+	if dir == "" || dir == "." {
+		return nil, nil
+	}
+	limit = limitOrDefault(limit)
+	_ = s.refreshRecords()
+	found := make([]protocol.Session, 0, limit)
+	for _, st := range s.states() {
+		st.mu.Lock()
+		record, busy := st.record, st.busy
+		st.mu.Unlock()
+		// A running turn is a live session, and Discover reports it.
+		if busy || !underDirectory(record.Cwd, dir) {
+			continue
+		}
+		found = append(found, protocol.Session{
+			ID: cursorACPPrefix + record.NativeID, Kind: protocol.KindCursorCLI,
+			NativeID: record.NativeID, Name: cursorACPName(record), Cwd: record.Cwd,
+			State: protocol.StateEnded, Inject: protocol.InjectAPI,
+			StartedAt: record.StartedAt, LastActivityAt: record.LastActivityAt,
+		})
+	}
+	sort.Slice(found, func(i, j int) bool { return found[i].LastActivityAt > found[j].LastActivityAt })
+	if len(found) > limit {
+		found = found[:limit]
+	}
+	return found, nil
+}
+
+// Directories implements History for ACP chats.
+func (s *CursorACPSource) Directories(ctx context.Context) ([]protocol.Folder, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	_ = s.refreshRecords()
+	counts := map[string]*protocol.Folder{}
+	for _, st := range s.states() {
+		st.mu.Lock()
+		record := st.record
+		st.mu.Unlock()
+		path := filepath.Clean(record.Cwd)
+		folder := counts[path]
+		if folder == nil {
+			folder = &protocol.Folder{Path: path}
+			counts[path] = folder
+		}
+		folder.Agents++
+		folder.LastActivityAt = max(folder.LastActivityAt, record.LastActivityAt)
+	}
+	folders := make([]protocol.Folder, 0, len(counts))
+	for _, folder := range counts {
+		folders = append(folders, *folder)
+	}
+	return folders, nil
 }

@@ -167,7 +167,7 @@ func TestCursorACPDoesNotAcknowledgeFailedPromptWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.begin(st, client, lock, "should not appear"); err == nil {
+	if _, err := s.begin(st, client, lock, cursorACPTurn{Text: "should not appear"}); err == nil {
 		t.Fatal("broken ACP pipe was acknowledged")
 	}
 	page, err := s.Page(context.Background(), cursorACPPrefix+st.record.NativeID, "", 10)

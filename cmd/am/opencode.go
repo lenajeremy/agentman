@@ -3,19 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/lenajeremy/agentman/internal/source"
 )
-
-// openCodeProbeTimeout bounds the "is one already running?" check. It is a
-// loopback request; if it has not answered by now, nothing is listening.
-const openCodeProbeTimeout = 1500 * time.Millisecond
 
 // runOpenCode starts OpenCode with its HTTP API where the daemon can find it.
 //
@@ -151,25 +145,4 @@ func explicitPort(args []string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-// openCodeHealthy reports whether an OpenCode server is answering at url.
-//
-// The health endpoint rather than a bare connect: something else on the port
-// would accept the connection just as readily, and attaching to it would fail
-// in a way that points nowhere near the cause.
-func openCodeHealthy(ctx context.Context, url string) bool {
-	ctx, cancel := context.WithTimeout(ctx, openCodeProbeTimeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/global/health", nil)
-	if err != nil {
-		return false
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
 }

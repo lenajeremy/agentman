@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/lenajeremy/agentman/internal/parser"
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/tmux"
 )
 
 // OpenCode is the one agent that needs no tricks.
@@ -75,6 +77,20 @@ type OpenCodeSource struct {
 	// port range used by `am opencode` and returns every live server, not just
 	// the first one: concurrent OpenCode TUIs each own their own API process.
 	findServers func(context.Context) []string
+	// The port scan is throttled; see scanServers. listPanes finds the
+	// servers agentman launched, and now is the clock. Both are replaceable
+	// in tests.
+	scanMu       sync.Mutex
+	lastFullScan time.Time
+	knownPorts   map[int]bool
+	listPanes    func(context.Context) ([]tmux.Session, error)
+	now          func() time.Time
+	// snapshotProcesses reads the process table, shared with the rest of the
+	// sweep. openCodePIDs are the opencode processes it showed last time, and
+	// fullScanUntil keeps scanning in full while a new one comes up.
+	snapshotProcesses func(context.Context) (*tmux.ProcessTree, error)
+	openCodePIDs      map[int]bool
+	fullScanUntil     time.Time
 
 	// models remembers each session's model; see modelCache. It matters more
 	// here than for the file-backed agents, because finding it costs an HTTP
@@ -95,6 +111,9 @@ type OpenCodeSource struct {
 	// pastSessions.
 	pastMu     sync.RWMutex
 	pastRoutes map[string]openCodeSession
+	// store reads OpenCode's own database when no server is running. See
+	// opencode_store.go.
+	store *openCodeStore
 	// A process can miss one health probe while it is busy or restarting. Misses
 	// are tracked per server: one healthy OpenCode instance must not make a
 	// second, temporarily unresponsive instance's sessions disappear.
@@ -149,6 +168,10 @@ func NewOpenCodeSource(baseURL string) *OpenCodeSource {
 		sessions:           map[string]openCodeSession{},
 		serverMisses:       map[string]int{},
 		questionAnswers:    map[string][][]string{},
+		store:              &openCodeStore{path: openCodeDatabase},
+		listPanes:          tmux.List,
+		snapshotProcesses:  tmux.SnapshotProcessTree,
+		now:                time.Now,
 	}
 	source.findServers = source.scanServers
 	return source
@@ -253,10 +276,11 @@ type ocPart struct {
 	Ignored   bool   `json:"ignored"`
 	Tool      string `json:"tool"`
 	State     struct {
-		Status string `json:"status"`
-		Title  string `json:"title"`
-		Output string `json:"output"`
-		Error  string `json:"error"`
+		Status string          `json:"status"`
+		Title  string          `json:"title"`
+		Output string          `json:"output"`
+		Error  string          `json:"error"`
+		Input  json.RawMessage `json:"input"`
 	} `json:"state"`
 }
 
@@ -362,6 +386,17 @@ func (s *OpenCodeSource) doAtLimit(
 // exited while others are still running.
 const OpenCodePortSpan = 16
 
+// openCodeFullScanEvery is how often every port is probed. In between, a
+// sweep probes only the ports that answered last time and those of servers
+// agentman launched. Probing all sixteen every second, almost always to find
+// nothing there, was a steady cost of the idle daemon.
+const openCodeFullScanEvery = 10 * time.Second
+
+// openCodeNewProcessWindow is how long every port is probed after a new
+// opencode process appears, so a server started outside agentman shows up
+// within a sweep or two of listening rather than at the next full scan.
+const openCodeNewProcessWindow = 5 * time.Second
+
 // Available reports whether at least one local OpenCode server is reachable.
 func (s *OpenCodeSource) Available(ctx context.Context) bool {
 	if s.configurationError != nil {
@@ -391,28 +426,144 @@ func (s *OpenCodeSource) scanServers(ctx context.Context) []string {
 		return nil
 	}
 
+	ports, full := s.portsToProbe(ctx)
+
 	// Probe concurrently. A different process can occupy one candidate port and
 	// accept a connection without answering; doing sixteen five-second probes
 	// serially made every discovery sweep stall for over a minute.
-	healthy := make([]bool, OpenCodePortSpan)
+	healthy := make([]bool, len(ports))
 	var wait sync.WaitGroup
-	for index := range OpenCodePortSpan {
+	for index, port := range ports {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			candidate := fmt.Sprintf("http://127.0.0.1:%d", OpenCodeDefaultPort+index)
-			healthy[index] = s.healthyAt(ctx, candidate)
+			healthy[index] = s.healthyAt(ctx, fmt.Sprintf("http://127.0.0.1:%d", port))
 		}()
 	}
 	wait.Wait()
 
-	servers := make([]string, 0, OpenCodePortSpan)
+	servers := make([]string, 0, len(ports))
+	answered := make(map[int]bool, len(ports))
 	for index, ok := range healthy {
 		if ok {
-			servers = append(servers, fmt.Sprintf("http://127.0.0.1:%d", OpenCodeDefaultPort+index))
+			servers = append(servers, fmt.Sprintf("http://127.0.0.1:%d", ports[index]))
+			answered[ports[index]] = true
+		}
+	}
+
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
+	if full {
+		s.knownPorts = answered
+	} else {
+		// Between full scans the set only grows. A known server that misses a
+		// probe is probed again next sweep, and Discover's grace for missed
+		// probes decides whether its sessions stay.
+		if s.knownPorts == nil {
+			s.knownPorts = map[int]bool{}
+		}
+		for port := range answered {
+			s.knownPorts[port] = true
 		}
 	}
 	return servers
+}
+
+// portsToProbe returns the ports this scan probes, in order, and whether that
+// is all of them. See openCodeFullScanEvery.
+func (s *OpenCodeSource) portsToProbe(ctx context.Context) ([]int, bool) {
+	clock := s.now
+	if clock == nil {
+		clock = time.Now
+	}
+	started := s.newOpenCodeProcess(ctx)
+	s.scanMu.Lock()
+	now := clock()
+	if started {
+		s.fullScanUntil = now.Add(openCodeNewProcessWindow)
+	}
+	full := s.lastFullScan.IsZero() || now.Sub(s.lastFullScan) >= openCodeFullScanEvery ||
+		now.Before(s.fullScanUntil)
+	probe := map[int]bool{}
+	if full {
+		s.lastFullScan = now
+		for index := range OpenCodePortSpan {
+			probe[OpenCodeDefaultPort+index] = true
+		}
+	} else {
+		for port := range s.knownPorts {
+			probe[port] = true
+		}
+	}
+	s.scanMu.Unlock()
+
+	// A server agentman launched is probed from its first sweep: the phone is
+	// waiting to open the session it started. Within a sweep the list of
+	// panes is shared with the other adapters.
+	if !full && s.listPanes != nil {
+		panes, _ := s.listPanes(ctx)
+		for _, pane := range panes {
+			if port := openCodeServerPort(pane.Name); port != 0 {
+				probe[port] = true
+			}
+		}
+	}
+	ports := make([]int, 0, len(probe))
+	for port := range probe {
+		ports = append(ports, port)
+	}
+	slices.Sort(ports)
+	return ports, full
+}
+
+// newOpenCodeProcess reports whether an opencode process is running that was
+// not running at the last look. It reads the process table only within a
+// discovery sweep, where the table is read once for every adapter anyway.
+func (s *OpenCodeSource) newOpenCodeProcess(ctx context.Context) bool {
+	if s.snapshotProcesses == nil || !tmux.InSweep(ctx) {
+		return false
+	}
+	tree, err := s.snapshotProcesses(ctx)
+	if err != nil || tree == nil {
+		return false
+	}
+	running := map[int]bool{}
+	for _, pid := range tree.PIDs() {
+		if filepath.Base(tree.Command(pid)) == "opencode" {
+			running[pid] = true
+		}
+	}
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
+	seen := s.openCodePIDs
+	s.openCodePIDs = running
+	if seen == nil {
+		return false // the first look: the first scan is a full one anyway
+	}
+	for pid := range running {
+		if !seen[pid] {
+			return true
+		}
+	}
+	return false
+}
+
+// openCodeServerPort reads the port from the name of a tmux session agentman
+// started an OpenCode server in: agentman-opencode-server-<port>-<suffix>.
+func openCodeServerPort(name string) int {
+	const prefix = tmux.Prefix + "opencode-server-"
+	if !strings.HasPrefix(name, prefix) {
+		return 0
+	}
+	part, suffix, ok := strings.Cut(strings.TrimPrefix(name, prefix), "-")
+	if !ok || suffix == "" {
+		return 0
+	}
+	port, err := strconv.Atoi(part)
+	if err != nil || port < OpenCodeDefaultPort || port >= OpenCodeDefaultPort+OpenCodePortSpan {
+		return 0
+	}
+	return port
 }
 
 func (s *OpenCodeSource) healthyAt(ctx context.Context, base string) bool {
@@ -972,6 +1123,18 @@ func (s *OpenCodeSource) Page(ctx context.Context, sessionID, before string, lim
 	if !ok {
 		return protocol.Page{}, fmt.Errorf("source: unknown opencode session %q", sessionID)
 	}
+	if session.baseURL == "" {
+		// Found in OpenCode's own store while no server was running.
+		stored, cursor, err := s.store.messages(ctx, session.nativeID, before, limit)
+		if err != nil {
+			return protocol.Page{}, err
+		}
+		messages := make([]protocol.Message, 0, len(stored))
+		for _, message := range stored {
+			messages = append(messages, openCodeMessages(sessionID, message)...)
+		}
+		return protocol.NewPage(sessionID, messages, cursor, cursor != ""), nil
+	}
 
 	query := url.Values{"limit": {strconv.Itoa(limit)}}
 	if before != "" {
@@ -1063,7 +1226,7 @@ func openCodeMessages(sessionID string, message ocMessage) []protocol.Message {
 				Text: clipOutput(text),
 				Tool: &protocol.Tool{
 					Name:    name,
-					Summary: clipTitle(part.State.Title),
+					Summary: openCodeToolSummary(part),
 					Status:  status,
 				},
 			})
@@ -1120,6 +1283,25 @@ func clipOutput(text string) string {
 }
 
 // clipTitle bounds the one line a collapsed row shows.
+// openCodeToolSummary is the one line a tool row shows: OpenCode's own title
+// for the call, or, when it left that empty (as it does for many globs and
+// some reads, edits and fetches), the input that says what the call did.
+func openCodeToolSummary(part ocPart) string {
+	if title := clipTitle(part.State.Title); title != "" {
+		return title
+	}
+	var input map[string]any
+	if json.Unmarshal(part.State.Input, &input) != nil {
+		return ""
+	}
+	for _, key := range []string{"command", "filePath", "pattern", "url", "query", "path", "description"} {
+		if value, ok := input[key].(string); ok && strings.TrimSpace(value) != "" {
+			return clipTitle(value)
+		}
+	}
+	return ""
+}
+
 func clipTitle(text string) string {
 	flat := strings.Join(strings.Fields(text), " ")
 	runes := []rune(flat)

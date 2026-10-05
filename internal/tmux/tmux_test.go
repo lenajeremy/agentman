@@ -121,6 +121,31 @@ func readSoon(t *testing.T, path, want string) string {
 	return got
 }
 
+// Every session a test starts must land on the private server TestMain set up
+// (see tmuxtest), never on the one the developer is working in. Run from
+// inside tmux, a bare tmux command reaches that server through $TMUX.
+func TestTestsRunOnAPrivateServer(t *testing.T) {
+	requireTmux(t)
+	want := os.Getenv(SocketEnv)
+	if want == "" {
+		t.Fatal("tests are not isolated: " + SocketEnv + " is unset")
+	}
+	name, _ := newSink(t)
+	got, err := run(context.Background(), "display-message", "-p", "-t", name, "#{socket_path}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolve := func(path string) string {
+		if real, err := filepath.EvalSymlinks(filepath.Dir(path)); err == nil {
+			return filepath.Join(real, filepath.Base(path))
+		}
+		return path
+	}
+	if resolve(strings.TrimSpace(got)) != resolve(want) {
+		t.Fatalf("test session ran on %q, not the private server %q", strings.TrimSpace(got), want)
+	}
+}
+
 func TestSendDeliversTextLiterally(t *testing.T) {
 	requireTmux(t)
 	name, out := newSink(t)
@@ -135,6 +160,25 @@ func TestSendDeliversTextLiterally(t *testing.T) {
 	got := readSoon(t, out, "run $HOME")
 	if !strings.Contains(got, message) {
 		t.Errorf("delivered text was altered:\n got %q\nwant %q", got, message)
+	}
+}
+
+// tmux parses its own flags before the text, so a message beginning with a
+// dash was read as an option: "- fix it" failed as an invalid flag, and
+// "-t 5" was taken as a pane to type into. Every one must arrive as typed.
+func TestSendDeliversTextThatStartsWithADash(t *testing.T) {
+	requireTmux(t)
+	for _, message := range []string{"- fix the bug", "--help me", "-v verbose", "-t 5", "-"} {
+		name, out := newSink(t)
+		if err := Send(context.Background(), name, message); err != nil {
+			t.Fatalf("%q: %v", message, err)
+		}
+		if got := readSoon(t, out, message); !strings.Contains(got, message) {
+			t.Errorf("%q arrived as %q", message, got)
+		}
+		if err := sendLiteral(context.Background(), name, " "+message); err != nil {
+			t.Fatalf("typing %q as an answer: %v", message, err)
+		}
 	}
 }
 
@@ -204,6 +248,46 @@ func TestSendRejectsEmptyMessages(t *testing.T) {
 	name, _ := newSink(t)
 	if err := Send(context.Background(), name, "   \n  "); err == nil {
 		t.Error("expected an empty message to be refused rather than submitted")
+	}
+}
+
+// A note is opened with Tab, typed as one line, and submitted, in that order,
+// and only once each check has accepted the screen.
+func TestAnswerWithNoteOpensTypesAndSubmits(t *testing.T) {
+	requireTmux(t)
+	name, out := newSink(t)
+	var checks []string
+	check := func(step string) func(string) bool {
+		return func(string) bool { checks = append(checks, step); return true }
+	}
+	err := AnswerWithNote(context.Background(), name, 1, "name it\nprobe-two",
+		check("focused"), check("amending"), check("typed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := readSoon(t, out, "name it probe-two")
+	tab := strings.Index(got, "\t")
+	if tab < 0 || tab > strings.Index(got, "name it probe-two") {
+		t.Errorf("the note was not typed after Tab: %q", got)
+	}
+	if strings.Join(checks, ",") != "focused,amending,typed" {
+		t.Errorf("checks ran as %v", checks)
+	}
+}
+
+// A screen that does not show the note line open stops everything: nothing
+// is typed and Enter is never pressed.
+func TestAnswerWithNoteStopsWhenTheNoteLineDoesNotOpen(t *testing.T) {
+	requireTmux(t)
+	name, out := newSink(t)
+	yes := func(string) bool { return true }
+	no := func(string) bool { return false }
+	if err := AnswerWithNote(context.Background(), name, 0, "do not type me", yes, no, yes); err == nil {
+		t.Fatal("answered although the note line never opened")
+	}
+	time.Sleep(200 * time.Millisecond)
+	if raw, _ := os.ReadFile(out); strings.Contains(string(raw), "do not type me") {
+		t.Errorf("the note was typed: %q", raw)
 	}
 }
 
@@ -350,13 +434,17 @@ func TestOwnsPIDMatchesDescendants(t *testing.T) {
 
 	// Ancestry is how a discovered agent is matched to the tmux session that
 	// can type into it, so a pane must claim itself and nothing unrelated.
-	if !OwnsPID(pane, pane) {
+	processes, err := SnapshotProcessTree(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !processes.OwnsPID(pane, pane) {
 		t.Error("a pane should own its own process")
 	}
-	if OwnsPID(pane, os.Getpid()) {
+	if processes.OwnsPID(pane, os.Getpid()) {
 		t.Error("the test process is not inside the pane but was claimed by it")
 	}
-	if OwnsPID(pane, 1) {
+	if processes.OwnsPID(pane, 1) {
 		t.Error("init must never be claimed")
 	}
 }

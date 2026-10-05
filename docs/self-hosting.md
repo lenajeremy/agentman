@@ -11,8 +11,8 @@ deploy the relay yourself and point both `am serve` and `am pair` at it.
 ## Security model
 
 - Pairing and WebSocket control endpoints require bearer credentials or a
-  single-use pairing secret. `GET /health` is public and reports aggregate
-  connection counts and relay version information.
+  single-use pairing secret. `GET /health` is public and reports only that the
+  relay is up, and its version.
 - Typed pairing codes are ten digits, rate-limited, single-use, and valid for
   60 seconds. QR pairing uses an independent high-entropy token.
 - Device credentials are signed, expire after one year, and are not stored in a
@@ -121,9 +121,13 @@ headers themselves.
 ## Health checks
 
 `GET /health` is intentionally public. It returns JSON containing relay status,
-version, active daemon/app counts, pending pairing count, and storage mode. A
-healthy response confirms that the process is serving HTTP; it does not verify
-that a specific daemon or phone is connected.
+version, and storage mode, and nothing about who is connected: counts of
+daemons, apps and pairings would let anyone watch how many people use a public
+relay. A healthy response confirms that the process is serving HTTP; it does
+not verify that a specific daemon or phone is connected.
+
+The relay logs daemon connects and disconnects under a random id per
+connection, never the account, so its logs hold no per-user history.
 
 ## Operational notes
 

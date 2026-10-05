@@ -56,6 +56,8 @@ Flags:
   -limit <n>                  Messages per history page (default 30)
   -before <cursor>            Page further back, using a cursor from history
   -dry-run                    With install-hooks: show changes without writing
+  -kiro                       With install-hooks or uninstall-hooks: only Kiro's
+                              opt-in agent, ~/.kiro/agents/agentman.json
   -relay <url>                Relay to use. Defaults to the public relay;
                               set AGENTMAN_RELAY to change it, or pass
                               "none" to run without one.

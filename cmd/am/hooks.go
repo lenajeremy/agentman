@@ -28,6 +28,16 @@ func runHook(ctx context.Context, args []string) error {
 		return nil
 	}
 	kind, event := args[0], args[1]
+	answered := false
+	if kind == string(protocol.KindCursorCLI) {
+		// Cursor counts a hook that prints nothing as a failed one. "{}" is
+		// "carry on"; a queued message from the daemon replaces it.
+		defer func() {
+			if !answered {
+				_, _ = os.Stdout.Write([]byte("{}\n"))
+			}
+		}()
+	}
 
 	var payload []byte
 	// Claude writes its hook payload to stdin. Codex's supported `notify`
@@ -72,8 +82,15 @@ func runHook(ctx context.Context, args []string) error {
 	if err != nil || len(bytes.TrimSpace(body)) == 0 {
 		return nil
 	}
+	// Kiro adds what a session-start or prompt hook prints to the model's
+	// context, and a stop hook cannot continue a turn: a Kiro hook prints
+	// nothing, whatever the daemon says.
+	if kind == string(protocol.KindKiro) {
+		return nil
+	}
 	if resp.StatusCode == http.StatusOK {
 		_, _ = os.Stdout.Write(body)
+		answered = true
 	}
 	return nil
 }
@@ -115,6 +132,7 @@ func mustExecutable() string {
 func runInstallHooks(ctx context.Context, args []string, remove bool) error {
 	fs := flag.NewFlagSet("install-hooks", flag.ExitOnError)
 	dryRun := fs.Bool("dry-run", false, "show what would change without writing")
+	kiro := fs.Bool("kiro", false, "only Kiro's opt-in agent, ~/.kiro/agents/agentman.json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -130,9 +148,25 @@ func runInstallHooks(ctx context.Context, args []string, remove bool) error {
 		return err
 	}
 
-	plans, err := hook.Installer{Binary: binary}.Plans(cfg.Token, remove)
-	if err != nil {
-		return err
+	installer := hook.Installer{Binary: binary}
+	var plans []hook.Plan
+	switch {
+	case *kiro:
+		// Opt-in, and never part of the default set: Kiro takes hooks only
+		// from an agent of Agentman's own (see internal/hook/install_kiro.go).
+		plans = []hook.Plan{installer.PlanKiro(remove, func() (map[string]any, error) {
+			return hook.KiroDefaultAgent(ctx)
+		})}
+	default:
+		plans, err = installer.Plans(cfg.Token, remove)
+		if err != nil {
+			return err
+		}
+		// Uninstalling takes out everything Agentman installed, the opt-in
+		// Kiro agent included.
+		if home, err := os.UserHomeDir(); remove && err == nil && hook.KiroAgentInstalled(home) {
+			plans = append(plans, installer.PlanKiro(true, nil))
+		}
 	}
 
 	verb, verbPast := "install", "installed"
@@ -250,6 +284,10 @@ func runDoctor(ctx context.Context, args []string) error {
 			check(true, string(plan.Kind)+" hooks", "registered in "+collapseHome(plan.Path))
 		}
 	}
+	// Kiro's hooks are opt-in, so their absence is not a problem to report.
+	if hook.KiroAgentInstalled(home) {
+		check(true, "kiro hooks", "opt-in agent in "+collapseHome(hook.KiroAgentPath(home)))
+	}
 
 	// Registered is not the same as working. A syntactically valid config can
 	// still point at an old binary or fail at runtime, so report actual recent
@@ -263,11 +301,9 @@ func runDoctor(ctx context.Context, args []string) error {
 		// OpenCode has no hook system and needs none: its HTTP API reports
 		// session state directly. Reporting absent hooks as a warning sent
 		// people looking for a problem that does not exist.
-		if kind == protocol.KindOpenCode || kind == protocol.KindCursorCLI || kind == protocol.KindCursor {
+		if kind == protocol.KindOpenCode || kind == protocol.KindCursor {
 			detail := "via HTTP API — no hooks needed"
-			if kind == protocol.KindCursorCLI {
-				detail = "via local CLI store and tmux — no hooks needed"
-			} else if kind == protocol.KindCursor {
+			if kind == protocol.KindCursor {
 				detail = "via IDE transcript and composer index — no hooks needed"
 			}
 			check(true, string(kind)+" events", detail)

@@ -685,3 +685,56 @@ func appendTo(t *testing.T, path, text string) {
 		t.Fatal(err)
 	}
 }
+
+// A page that ends with something unsettled reads on until it settles, but
+// never past half as many messages again: a result whose call is not in the
+// file at all must not turn one page into the whole history.
+func TestAnUnsettledPageReadsOnButStopsAtHalfAgainItsSize(t *testing.T) {
+	path := writeFixture(t, numbered(100))
+	result, err := CollectBackward(path, BackwardOptions{
+		Want: 10, Map: asMessage, Unsettled: func() bool { return true },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Messages) != 15 || !result.HasMore {
+		t.Fatalf("got %d messages (more: %v), want 15 and more", len(result.Messages), result.HasMore)
+	}
+
+	settled := 0
+	result, err = CollectBackward(path, BackwardOptions{
+		Want: 10, Map: func(line string, offset int64) []protocol.Message {
+			settled++
+			return asMessage(line, offset)
+		},
+		Unsettled: func() bool { return settled < 12 },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Messages) != 12 {
+		t.Fatalf("got %d messages, want the page to stop once settled (12)", len(result.Messages))
+	}
+}
+
+// Reading on for an unsettled page must still hand back a cursor when it
+// stops on the byte bound in the middle of a long line, or the rest of the
+// history is unreachable. A tool result holding a whole file is such a line.
+func TestAnUnsettledPageThatRunsOutOfBytesKeepsItsCursor(t *testing.T) {
+	lines := []string{
+		`{"n":0}`,
+		fmt.Sprintf(`{"n":1,"pad":%q}`, strings.Repeat("x", 2*UnsettledScanBytes)),
+		`{"n":2}`,
+	}
+	path := writeFixture(t, lines)
+	result, err := CollectBackward(path, BackwardOptions{
+		Want: 1, Map: asMessage, Unsettled: func() bool { return true }, ChunkSize: 4096,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.HasMore || result.NextCursor <= 0 {
+		t.Fatalf("an unsettled page ended with more=%v cursor=%d: the rest of the file is unreachable",
+			result.HasMore, result.NextCursor)
+	}
+}

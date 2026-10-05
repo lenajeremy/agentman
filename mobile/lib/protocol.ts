@@ -68,7 +68,12 @@ export interface QuestionOption {
   selected?: boolean;
   /** Whether Claude has this checkbox enabled in a multi-select form. */
   checked?: boolean;
+  /** Choosing this may carry a short note — "No, and do this instead". The
+   *  answer is optionKey plus answerText; no text is the plain choice. */
+  withText?: boolean;
 }
+
+export type ModelScope = "session" | "default";
 
 export interface Session {
   id: string;
@@ -83,6 +88,21 @@ export interface Session {
   /** What the agent is actually running ("claude-opus-5", "gpt-5.6-sol").
    *  Absent until it has replied once — none of the CLIs record it before. */
   model?: string;
+  /** The agent's own name for its mode ("plan", "accept-edits"). Absent
+   *  means its default. Switchable to one of `modes` when the agent offers any. */
+  mode?: string;
+  /** How full the model's context window is, in whole percent. */
+  contextPercent?: number;
+  /** Documents the agent wrote for the user, and how many await review. */
+  artifacts?: number;
+  artifactsToReview?: number;
+  /** Modes the phone may switch to with set_mode, in the CLI's own names. */
+  modes?: string[];
+  /** Model ids the phone may switch to with set_model. */
+  models?: string[];
+  /** What a model switch touches: this session only, or also the CLI's
+   *  default for new sessions. Absent means models are not switched here. */
+  modelScope?: ModelScope;
   /** Present only while the agent is waiting on a decision. */
   question?: Question;
   /** Web servers the agent has started. Absent from daemons that predate it. */
@@ -98,6 +118,25 @@ export interface Server {
   title?: string;
   /** The public preview link while the server is being shared. */
   link?: string;
+}
+
+/**
+ * A document an agent wrote for the user apart from the conversation: a plan,
+ * a task list, a walkthrough, a screenshot.
+ */
+export interface Artifact {
+  /** A plain file name, never a path; what read_artifact takes as `path`. */
+  name: string;
+  /** "plan" | "task" | "walkthrough" | "spec" | "image" | "video" | "file",
+   *  open-ended so a newer agent's kind still lists. */
+  kind: string;
+  title?: string;
+  summary?: string;
+  updatedAt: number;
+  size: number;
+  mime?: string;
+  /** The agent asked for approval and has had no answer since it changed. */
+  review?: boolean;
 }
 
 export interface Tool {
@@ -160,7 +199,12 @@ export type RequestType =
   | "directory_sessions"
   | "resume_session"
   | "end_session"
-  | "create_directory";
+  | "create_directory"
+  | "list_artifacts"
+  | "read_artifact"
+  | "review_artifact"
+  | "set_mode"
+  | "set_model";
 
 export interface Request {
   type: RequestType;
@@ -187,6 +231,8 @@ export interface Request {
   uploadIds?: string[];
   /** Agent to launch; path is relative to the Mac user's home directory. */
   kind?: AgentKind;
+  /** The verdict on review_artifact; `text` carries the comment. */
+  approve?: boolean;
 }
 
 export type EventType =
@@ -205,7 +251,8 @@ export type EventType =
   | "session_started"
   | "folders"
   | "directory_sessions"
-  | "session_ended";
+  | "session_ended"
+  | "artifacts";
 
 export interface WorkspaceEntry { name: string; directory: boolean; size?: number }
 export interface WorkspaceChange {
@@ -231,7 +278,7 @@ export interface ImageSource {
 }
 
 export interface WorkspaceResult {
-  kind: "directory" | "file" | "changes" | "diff" | "chunk";
+  kind: "directory" | "file" | "changes" | "diff" | "chunk" | "artifact";
   sessionId: string;
   path?: string;
   entries?: WorkspaceEntry[];
@@ -276,6 +323,8 @@ export interface DaemonEvent {
   /** Agent counts. The whole answer on "folders"; alongside `directories` on
    *  a browse listing, one entry per child that has agents under it. */
   folders?: Folder[];
+  /** The answer on "artifacts"; [] when the session has none. */
+  artifacts?: Artifact[];
 }
 
 /** One directory agents have run in.
@@ -364,11 +413,14 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     "sessions", "session_update", "session_gone", "messages", "page",
     "turn_complete", "send_result", "server_opened", "server_stopped", "error", "workspace",
     "directories", "session_started", "folders", "directory_sessions",
-    "session_ended",
+    "session_ended", "artifacts",
   ] as const)) return null;
 
   switch (value.type) {
     case "sessions":
+      // An older Mac leaves an empty list out entirely. That is an empty
+      // board, not a malformed frame: dropping it kept ended sessions on screen.
+      value.sessions ??= [];
       if (!boundedArray(value.sessions, 10_000, isSession)) return null;
       break;
     case "session_update":
@@ -421,6 +473,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
       if (!optionalFolders(value.folders)) return null;
       break;
     case "directory_sessions":
+      value.sessions ??= [];
       if (!boundedArray(value.sessions, 10_000, isSession) ||
           !optionalBoundedString(value.path, 4096)) return null;
       break;
@@ -428,8 +481,42 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     case "session_ended":
       if (!boundedString(value.sessionId, 512, true)) return null;
       break;
+    case "artifacts":
+      // A missing list is an empty one: the field is new, and [] and absent
+      // say the same thing to a screen that lists them.
+      if (!boundedString(value.sessionId, 512, true) ||
+          (value.artifacts !== undefined && !boundedArray(value.artifacts, MAX_ARTIFACTS, isArtifact))) {
+        return null;
+      }
+      break;
   }
   return value as unknown as DaemonEvent;
+}
+
+/** More than the daemon ever sends, so a cap there is never a refusal here. */
+const MAX_ARTIFACTS = 500;
+
+/**
+ * An artifact name is echoed back to the Mac as `path`, so it has to be a
+ * plain name: anything with a separator or a parent reference is refused here
+ * rather than trusted to the daemon's own check.
+ */
+export function isArtifactName(value: unknown): value is string {
+  return boundedString(value, 255, true) &&
+    !value.includes("/") && !value.includes("\\") && !value.includes("..") &&
+    !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function isArtifact(value: unknown): value is Artifact {
+  return isRecord(value) &&
+    isArtifactName(value.name) &&
+    boundedString(value.kind, 64, true) &&
+    optionalBoundedString(value.title, 2048) &&
+    optionalBoundedString(value.summary, 16 * 1024) &&
+    finiteNumber(value.updatedAt) && value.updatedAt >= 0 &&
+    finiteNumber(value.size) && value.size >= 0 &&
+    optionalBoundedString(value.mime, 128) &&
+    (value.review === undefined || typeof value.review === "boolean");
 }
 
 function optionalFolders(value: unknown): boolean {
@@ -464,7 +551,8 @@ function isImageSource(value: unknown): value is ImageSource {
 }
 
 function isWorkspaceResult(value: unknown): value is WorkspaceResult {
-  if (!isRecord(value) || !isOneOf(value.kind, ["directory", "file", "changes", "diff", "chunk"] as const) ||
+  if (!isRecord(value) ||
+      !isOneOf(value.kind, ["directory", "file", "changes", "diff", "chunk", "artifact"] as const) ||
       !boundedString(value.sessionId, 512, true) || !optionalBoundedString(value.path, 4096) ||
       !optionalBoundedString(value.text, 256 * 1024) ||
       !optionalBoundedString(value.image, 3 * 1024 * 1024) ||
@@ -508,6 +596,13 @@ function isSession(value: unknown): value is Session {
     isOneOf(value.inject, ["api", "tmux", "hook", "none"] as const) &&
     finiteNumber(value.startedAt) && finiteNumber(value.lastActivityAt) &&
     optionalBoundedString(value.model, 4096) &&
+    optionalBoundedString(value.mode, 256) &&
+    (value.contextPercent === undefined || isPercent(value.contextPercent)) &&
+    (value.artifacts === undefined || isCount(value.artifacts)) &&
+    (value.artifactsToReview === undefined || isCount(value.artifactsToReview)) &&
+    (value.modes === undefined || boundedArray(value.modes, MAX_MODES, isModeName)) &&
+    (value.models === undefined || boundedArray(value.models, MAX_MODELS, isModelName)) &&
+    (value.modelScope === undefined || isOneOf(value.modelScope, ["session", "default"] as const)) &&
     (value.question === undefined || isQuestion(value.question)) &&
     (value.servers === undefined || boundedArray(value.servers, 64, isServer));
 }
@@ -517,6 +612,32 @@ function isServer(value: unknown): value is Server {
     optionalBoundedString(value.command, 256) &&
     optionalBoundedString(value.title, 1024) &&
     (value.link === undefined || isLink(value.link));
+}
+
+/** As many as the daemon sends; it drops any entry these would refuse. */
+const MAX_MODES = 16;
+const MAX_MODELS = 64;
+
+function isModeName(value: unknown): value is string {
+  return boundedString(value, 64, true) && isSwitchValue(value);
+}
+
+function isModelName(value: unknown): value is string {
+  return boundedString(value, 128, true) && isSwitchValue(value);
+}
+
+/** A name that goes back to the Mac exactly as it came: one line, no ends of
+ *  whitespace, nothing a terminal would read. */
+function isSwitchValue(value: string): boolean {
+  return value.trim() === value && !/[\u0000-\u001f\u007f-\u009f]/.test(value);
+}
+
+function isPercent(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100;
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100_000;
 }
 
 function isPort(value: unknown): value is number {
@@ -536,8 +657,13 @@ function isQuestion(value: unknown): value is Question {
       !optionalBoundedString(value.detail, 256 * 1024) ||
       (value.multiple !== undefined && typeof value.multiple !== "boolean") ||
       (value.custom !== undefined && typeof value.custom !== "boolean")) return false;
+  // An older Mac sends null for options it withdrew because they could not be
+  // answered safely from here. The question is still worth showing, and
+  // rejecting it took the whole session list it arrived in.
+  value.options ??= [];
   return boundedArray(value.options, 256, (option): option is QuestionOption =>
     isRecord(option) && boundedString(option.key, 4096, true) &&
+    (option.withText === undefined || typeof option.withText === "boolean") &&
     boundedString(option.label, 64 * 1024) &&
     optionalBoundedString(option.description, 64 * 1024) &&
     optionalBoundedString(option.preview, 256 * 1024) &&

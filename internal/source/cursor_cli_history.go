@@ -27,6 +27,15 @@ func (s *CursorCLISource) Past(ctx context.Context, dir string, limit int) ([]pr
 	limit = limitOrDefault(limit)
 
 	chats := s.everyCursorCLIChat()
+	// A chat a process still has open is reported by Discover, under the pane's
+	// id when a managed pane holds it. Listing it here as well would show one
+	// conversation twice, once of them as ended.
+	live := make(map[string]bool)
+	s.mu.RLock()
+	for _, session := range s.sessions {
+		live[session.meta.NativeID] = true
+	}
+	s.mu.RUnlock()
 	found := make([]protocol.Session, 0, limit)
 	for _, chat := range chats {
 		if err := ctx.Err(); err != nil {
@@ -35,10 +44,12 @@ func (s *CursorCLISource) Past(ctx context.Context, dir string, limit int) ([]pr
 		if len(found) == limit {
 			break
 		}
-		if !underDirectory(chat.meta.Cwd, dir) {
+		if !underDirectory(chat.meta.Cwd, dir) || live[chat.id] {
 			continue
 		}
-		id := string(protocol.KindCursorCLI) + ":" + chat.id
+		// The same id Discover gives a chat with no pane, so a chat that ends
+		// keeps its identity on the phone instead of reappearing as a new row.
+		id := cursorCLIChatPrefix + chat.id
 		s.modelMu.Lock()
 		model := s.models[chat.id].model
 		s.modelMu.Unlock()

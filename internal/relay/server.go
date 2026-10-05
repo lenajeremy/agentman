@@ -51,6 +51,13 @@ const (
 	// cannot pin an arbitrary number of HTTP connections and goroutines.
 	maxConcurrentPairingRequests = 64
 	pairingBodyReadTimeout       = 5 * time.Second
+	// A full-size image on a slow phone connection, with room to spare: 4 MiB
+	// in 60 s is 70 KiB/s. An upload slower than that is better retried.
+	uploadBodyReadTimeout = 60 * time.Second
+	// Uploads being read at once, across every account. Each holds at most
+	// one image (4 MiB), so this bounds them to 256 MiB however many accounts
+	// are sending.
+	maxConcurrentUploads = 64
 )
 
 // Server is the relay's HTTP surface.
@@ -96,6 +103,19 @@ type Server struct {
 	// uploads holds images in flight from a phone to a daemon. See uploads.go
 	// for why they travel beside the websocket rather than through it.
 	uploads *uploadStore
+	// uploadRequests bounds the upload bodies being read at once, and
+	// uploadReadTimeout how long one may take. Fields so tests can shrink them.
+	uploadRequests    chan struct{}
+	uploadReadTimeout time.Duration
+	// beforeDaemonRegistered runs between a daemon's websocket handshake and
+	// its registration. Nil in production; tests use it to widen that window,
+	// which is where a client can already think it is connected while apps
+	// are still told the daemon is offline.
+	beforeDaemonRegistered func()
+	// afterAppHelloDecided runs once a connecting app's hello reflects the
+	// daemon's state. Nil in production; tests use it to connect a daemon at
+	// that moment.
+	afterAppHelloDecided func()
 }
 
 // NewServer builds a relay.
@@ -124,6 +144,8 @@ func NewServer(secret, version string, log *slog.Logger, trustProxy bool) *Serve
 		clientConnections:  map[string]int{},
 		tunnels:            newTunnelRegistry(),
 		uploads:            newUploadStore(),
+		uploadRequests:     make(chan struct{}, maxConcurrentUploads),
+		uploadReadTimeout:  uploadBodyReadTimeout,
 		previewRequests:    newLimiter(previewRequestsPerMinute, time.Minute),
 	}
 }
@@ -220,16 +242,15 @@ func (s *Server) handlePairCode(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleHealth reports liveness and connection counts.
+// handleHealth answers the deployment health check. It is public, so it says
+// only that the relay is up and which build: connection and pairing counts
+// let anyone watch the public relay's user base, and counting pairings walked
+// the whole map under the hub's lock on every request.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	daemons, apps, pending := s.hub.Stats()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":          "ok",
-		"version":         s.version,
-		"daemons":         daemons,
-		"apps":            apps,
-		"pendingPairings": pending,
-		"storage":         "none",
+		"status":  "ok",
+		"version": s.version,
+		"storage": "none",
 	})
 }
 
@@ -552,12 +573,20 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	conn := newWSConn(ws)
 	defer conn.Close()
 
+	if s.beforeDaemonRegistered != nil {
+		s.beforeDaemonRegistered()
+	}
 	// A reconnecting daemon replaces its previous socket, so a half-dead
 	// connection from a suspended laptop cannot keep owning the account.
 	if replaced := s.hub.AddDaemon(account, conn); replaced != nil {
 		_ = replaced.Close()
 	}
-	s.log.Info("daemon connected", "account", account)
+	// Logged by an id of the connection's own. The account is a hash of the
+	// daemon token, stable for as long as the token is, so logging it on every
+	// connect and disconnect kept a per-user presence history in the host's
+	// log retention, from a relay that stores nothing.
+	connection := newFrameID()
+	s.log.Info("daemon connected", "connection", connection)
 
 	s.notifyApps(account, protocol.Control{Type: protocol.CtlDaemonOnline, DaemonOnline: true})
 
@@ -569,7 +598,7 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 				Type:       protocol.CtlDaemonOffline,
 				LastSeenAt: time.Now().UnixMilli(),
 			})
-			s.log.Info("daemon disconnected", "account", account)
+			s.log.Info("daemon disconnected", "connection", connection)
 		}
 	}()
 
@@ -601,20 +630,25 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	deviceID := fmt.Sprintf("%s-%d", account, time.Now().UnixNano())
-	s.hub.AddApp(account, deviceID, conn)
+	// The hello is queued in the same step that registers the app, so a
+	// daemon connecting or leaving at that moment cannot have its status
+	// overtaken by a stale hello. See AddAppGreeting.
+	s.hub.AddAppGreeting(account, deviceID, conn, func(online bool, lastSeen time.Time) {
+		hello := protocol.Control{Type: protocol.CtlHello, DaemonOnline: online}
+		if !online && !lastSeen.IsZero() {
+			hello.LastSeenAt = lastSeen.UnixMilli()
+		}
+		_ = sendControl(conn, hello)
+	})
 	defer func() {
 		s.hub.RemoveApp(account, deviceID)
 		s.notifyDaemon(account, protocol.Control{
 			Type: protocol.CtlAppDisconnected, DeviceID: deviceID,
 		})
 	}()
-
-	online, lastSeen := s.hub.DaemonOnline(account)
-	hello := protocol.Control{Type: protocol.CtlHello, DaemonOnline: online}
-	if !online && !lastSeen.IsZero() {
-		hello.LastSeenAt = lastSeen.UnixMilli()
+	if s.afterAppHelloDecided != nil {
+		s.afterAppHelloDecided()
 	}
-	_ = sendControl(conn, hello)
 
 	s.pump(r.Context(), ws, conn, account, protocol.PeerApp, deviceID)
 }
@@ -922,8 +956,10 @@ func bearer(r *http.Request) string {
 	if token := bearerHeader(r); token != "" {
 		return token
 	}
-	// Native websocket clients can set headers, but browsers and some mobile
-	// stacks cannot, so a query parameter is accepted as a fallback.
+	// Native websocket clients can set headers, but a browser's WebSocket
+	// cannot, so the app's socket accepts a query parameter as a fallback for
+	// the web build. Every native build since b27e208 sends the header; only
+	// /ws/app uses this, and nothing else should.
 	return r.URL.Query().Get("token")
 }
 
@@ -939,20 +975,44 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 // The token is verified before a single byte of the body is read: an
 // unauthenticated caller must never be able to make this process allocate.
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
-	account, err := VerifyDeviceToken(s.secret, bearer(r))
+	// Header only. Both clients of the upload routes set it, and a token in
+	// the URL ends up in proxy and access logs.
+	account, err := VerifyDeviceToken(s.secret, bearerHeader(r))
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid device token"})
 		return
 	}
 
+	// Any caller can pair a throwaway daemon and so hold a device token. An
+	// upload that stops sending used to keep its connection and the whole
+	// declared 4 MiB for as long as it liked, with no limit on how many. Now
+	// there is a slot to wait for, a deadline to finish by, and memory is spent
+	// on bytes that arrived rather than the length the client claimed.
+	select {
+	case s.uploadRequests <- struct{}{}:
+		defer func() { <-s.uploadRequests }()
+	default:
+		w.Header().Set("Retry-After", "2")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "the relay is receiving too many images right now — try again in a moment",
+		})
+		return
+	}
+	// Scoped to this body, as for pairing: a server-wide ReadTimeout would
+	// also end long-lived websockets.
+	if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(s.uploadReadTimeout)); err != nil {
+		w.Header().Set("Connection", "close")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "could not safely read the upload"})
+		return
+	}
+
 	body := http.MaxBytesReader(w, r.Body, maxUploadBytes+1)
 	defer body.Close()
-	// Sized from Content-Length rather than grown by ReadAll, which doubles as
-	// it goes and would transiently hold twice the cap. The length is a hint
-	// from the caller, so it is clamped and the read still bounded above.
+	// Grown as bytes arrive. The declared length is only a hint, so it sets the
+	// first allocation no larger than one read's worth.
 	hint := r.ContentLength
-	if hint < 0 || hint > maxUploadBytes {
-		hint = maxUploadBytes
+	if hint < 0 || hint > 64<<10 {
+		hint = 64 << 10
 	}
 	data := make([]byte, 0, hint)
 	buf := make([]byte, 32<<10)
@@ -1008,7 +1068,8 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 // derives the same account the phone uploaded under, so an upload can only
 // ever reach the Mac it was addressed to.
 func (s *Server) handleUploadFetch(w http.ResponseWriter, r *http.Request) {
-	token := bearer(r)
+	// The daemon's long-lived root token, so header only, as on /ws/daemon.
+	token := bearerHeader(r)
 	if token == "" {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing daemon token"})
 		return

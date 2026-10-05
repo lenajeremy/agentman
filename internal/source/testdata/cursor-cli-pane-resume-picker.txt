@@ -1,0 +1,48 @@
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    All chats • This workspace                                                                                                                     Last updated
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  → File And Echo                                                                                                                                Today 10:40 AM
+    Ready Agent agentman-cursor-probe                                                                                                     Sep 26, 2026 03:02 PM
+    Awaiting Instruction Folio                                                                                                            Sep 26, 2026 05:40 AM
+    Agentman Verify Ready agentman-cursor-verify                                                                                          Sep 24, 2026 07:11 PM
+    Ready Reply agentman-cursor-smoke                                                                                                     Sep 24, 2026 06:31 PM
+    Casual Chat agentman                                                                                                                  Sep 24, 2026 06:29 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+                               1/6 • ↑/↓ to navigate • ←/→ to switch scope • Enter to select • Backspace to delete • Esc to close

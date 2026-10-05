@@ -20,7 +20,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -375,9 +374,4 @@ func clipAtSentence(text string, limit int) string {
 		return strings.TrimSpace(cut[:idx]) + "…"
 	}
 	return strings.TrimSpace(cut) + "…"
-}
-
-// ConfigPath is where the speech settings live.
-func ConfigPath(home string) string {
-	return filepath.Join(home, ".agentman", "config.json")
 }

@@ -1,0 +1,24 @@
+
+› /model
+Select model:   type to search
+
+❯ auto                 1.00x credits    Models chosen by task for optimal u...
+  claude-sonnet-4.5    1.30x credits    Claude Sonnet 4.5 model
+  claude-sonnet-4      1.30x credits    [EOL] Hybrid reasoning and coding f...
+  claude-haiku-4.5     0.40x credits    The latest Claude Haiku model
+  deepseek-3.2         0.25x credits    Experimental preview of DeepSeek V3.2
+  minimax-m2.5         0.25x credits    MiniMax M2.5 model
+  minimax-m2.1         0.15x credits    Experimental preview of MiniMax M2.1
+  glm-5                0.50x credits    GLM-5 model
+(+1 more)
+────────────────────────────────────────────────────────────────────────────────
+ Settings for selected model: auto                         tab to switch panels
+
+  thinking  n/a   Not available for this model.
+  effort    n/a   Not available for this model.
+  fallback  none  Answers for this model when it refuses or is unavailable.
+────────────────────────────────────────────────────────────────────────────────
+ esc to close · ↑↓ to navigate · ↵ to select · tab to switch panels
+
+
+

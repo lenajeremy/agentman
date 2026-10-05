@@ -17,7 +17,6 @@ import (
 
 	"github.com/lenajeremy/agentman/internal/parser"
 	"github.com/lenajeremy/agentman/internal/protocol"
-	"github.com/lenajeremy/agentman/internal/question"
 	"github.com/lenajeremy/agentman/internal/tmux"
 )
 
@@ -43,6 +42,26 @@ const (
 	cursorCLIFollowFailures = 20
 )
 
+// cursorSQLiteURI opens one of Cursor's databases read-only.
+//
+// They run in WAL mode, and a read-only connection to a WAL database cannot
+// start when the -wal file is missing: sqlite3 fails with "unable to open
+// database file" rather than reading the main file. Cursor's own SQLite
+// leaves the -wal file behind when it closes, but a store whose -wal is gone
+// — closed by another SQLite build, or copied without it — would then be
+// unreadable while nothing at all is writing it. With no -wal (and no
+// rollback journal, the other sign of a writer) the file is opened as
+// immutable, which reads it as it is without the shared-memory index; with
+// one, as an ordinary read-only reader that sees the writer's latest commits.
+func cursorSQLiteURI(path string) string {
+	if _, err := os.Stat(path + "-wal"); os.IsNotExist(err) {
+		if _, err := os.Stat(path + "-journal"); os.IsNotExist(err) {
+			return "file:" + path + "?mode=ro&immutable=1"
+		}
+	}
+	return "file:" + path + "?mode=ro"
+}
+
 // cursorCLITimeoutCommand sets the busy timeout through sqlite3's dot-command
 // form, which prints nothing. A `PRAGMA busy_timeout` would return its value as
 // a row and, under -json, land in the output the caller is about to parse.
@@ -52,8 +71,12 @@ const (
 	cursorCLIMaxDBOutput = 16 * 1024 * 1024
 	cursorCLIMaxChats    = 200
 	cursorCLIPanePrefix  = tmux.Prefix + "cursor-"
-	cursorCLIPaneMargin  = 2 * time.Second
-	cursorCLILsofTimeout = 3 * time.Second
+	// cursorCLIChatPrefix names a chat no managed pane holds; a pane-bound
+	// chat is published under cursorCLIPaneIDPrefix and the pane's name.
+	cursorCLIChatPrefix   = "cursor-cli:chat:"
+	cursorCLIPaneIDPrefix = "cursor-cli:pane:"
+	cursorCLIPaneMargin   = 2 * time.Second
+	cursorCLILsofTimeout  = 3 * time.Second
 )
 
 type cursorCLIChat struct {
@@ -82,15 +105,40 @@ type CursorCLISource struct {
 	home        string
 	listPanes   func(context.Context) ([]tmux.Session, error)
 	capturePane func(context.Context, string) (string, error)
-	openStores  func(context.Context, []int) map[int]string
-	modelMu     sync.Mutex
-	models      map[string]cursorCLIModelEntry
-	mu          sync.RWMutex
-	sessions    map[string]cursorCLISession
+	// openStores maps processes to the chat store each has open, and
+	// reports whether the answer can be trusted; processes lists every
+	// process so the Cursor agents among them can be found.
+	openStores func(context.Context, []int) (map[int]string, bool)
+	processes  func(context.Context) (*tmux.ProcessTree, error)
+	// sendKey and sendText type into a pane; nil means tmux. Tests record
+	// what would have been typed instead.
+	sendKey  func(ctx context.Context, pane, key string) error
+	sendText func(ctx context.Context, pane, text string) error
+	sendKeys func(ctx context.Context, pane string, keys ...string) error
+	modelMu  sync.Mutex
+	models   map[string]cursorCLIModelEntry
+	mu       sync.RWMutex
+	sessions map[string]cursorCLISession
 
 	// past holds the stores of chats that have already ended, found by Past
 	// rather than by a sweep. See pastSessions.
 	past pastSessions
+
+	// live is the last trustworthy answer to which stores are open; see
+	// cursor_cli_liveness.go.
+	live cursorCLILiveness
+	// turnMu guards the transcript locations and turn states read from them.
+	turnMu       sync.Mutex
+	transcripts  map[string]string
+	turns        map[string]cursorCLITurnEntry
+	hooksChecked cursorCLIHooksEntry
+	paneStatus   map[string]cursorCLIPaneStatus
+	storeModes   map[string]cursorCLIModeEntry
+	planHeads    map[string]cursorPlanHeadEntry
+
+	// pending holds messages for chats running outside a managed pane,
+	// delivered by Cursor's stop hook; see cursorCLIHooksInstalled.
+	pending *PendingQueue
 }
 
 func NewCursorCLISource(home string) (*CursorCLISource, error) {
@@ -103,11 +151,12 @@ func NewCursorCLISource(home string) (*CursorCLISource, error) {
 	}
 	return &CursorCLISource{
 		home: home, listPanes: tmux.List, capturePane: tmux.Capture,
-		openStores: func(ctx context.Context, pids []int) map[int]string {
+		openStores: func(ctx context.Context, pids []int) (map[int]string, bool) {
 			return cursorCLIOpenStores(ctx, home, pids)
 		},
-		models:   make(map[string]cursorCLIModelEntry),
-		sessions: make(map[string]cursorCLISession),
+		processes: tmux.SnapshotProcessTree,
+		models:    make(map[string]cursorCLIModelEntry),
+		sessions:  make(map[string]cursorCLISession),
 	}, nil
 }
 
@@ -128,31 +177,33 @@ func cursorCLIChatIDs(home string) map[string]bool {
 // process actually has open. This remains exact when two panes share a cwd,
 // when an old chat is resumed, and when the user switches chats in one pane.
 // lsof is optional: environments without it retain the conservative fallback.
-func cursorCLIOpenStores(ctx context.Context, home string, pids []int) map[int]string {
+func cursorCLIOpenStores(ctx context.Context, home string, pids []int) (map[int]string, bool) {
 	result := make(map[int]string)
-	if len(pids) == 0 {
-		return result
-	}
-	bin, err := exec.LookPath("lsof")
-	if err != nil {
-		return result
-	}
 	ids := make([]string, 0, len(pids))
+	seen := make(map[int]bool, len(pids))
 	for _, pid := range pids {
-		if pid > 1 {
+		if pid > 1 && !seen[pid] {
+			seen[pid] = true
 			ids = append(ids, strconv.Itoa(pid))
 		}
 	}
 	if len(ids) == 0 {
-		return result
+		return result, true
+	}
+	bin, err := exec.LookPath("lsof")
+	if err != nil {
+		return result, false
 	}
 	ctx, cancel := context.WithTimeout(ctx, cursorCLILsofTimeout)
 	defer cancel()
 	output, err := exec.CommandContext(ctx, bin, "-w", "-a", "-p", strings.Join(ids, ","), "-Fpn").Output()
-	if err != nil {
-		return result
+	if err != nil && (len(output) == 0 || ctx.Err() != nil) {
+		// lsof also exits non-zero when one of the processes ended between
+		// the process scan and this call; what it printed for the others is
+		// still a true answer. No output at all is not.
+		return result, false
 	}
-	return parseCursorCLIOpenStores(home, output)
+	return parseCursorCLIOpenStores(home, output), true
 }
 
 func parseCursorCLIOpenStores(home string, output []byte) map[int]string {
@@ -200,7 +251,7 @@ func queryCursorCLIModel(ctx context.Context, store string) string {
 		"FROM blobs WHERE json_valid(data)=1 AND json_extract(data,'$.role')='assistant' " +
 		"AND model IS NOT NULL ORDER BY rowid DESC LIMIT 1"
 	output, err := exec.CommandContext(ctx, bin, "-json", "-readonly",
-		"-cmd", cursorCLITimeoutCommand, "file:"+store+"?mode=ro", query).Output()
+		"-cmd", cursorCLITimeoutCommand, cursorSQLiteURI(store), query).Output()
 	if err != nil || len(output) > 4096 {
 		return ""
 	}
@@ -239,10 +290,7 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 			panePIDs = append(panePIDs, pane.PanePID)
 		}
 	}
-	openStores := map[int]string{}
-	if s.openStores != nil {
-		openStores = s.openStores(ctx, panePIDs)
-	}
+	openStores, live, liveKnown := s.observeStores(ctx, panePIDs)
 
 	// CLI stores are grouped by a workspace hash. Read metadata only; the
 	// potentially large message blobs are opened on history/follow requests.
@@ -269,14 +317,10 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 		if _, err := os.Stat(store); err != nil {
 			continue
 		}
-		active := false
-		for _, opened := range openStores {
-			if opened == store {
-				active = true
-				break
-			}
-		}
-		if meta.UpdatedAtMs < cutoff && !active {
+		// Live means a Cursor process has the store open. Only when that
+		// cannot be read does recency stand in for it.
+		_, active := live[store]
+		if !active && (liveKnown || meta.UpdatedAtMs < cutoff) {
 			continue
 		}
 		chats = append(chats, foundChat{
@@ -344,20 +388,20 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 	next := make(map[string]cursorCLISession, len(chats)+len(managed))
 	for _, chat := range chats {
 		pane, wrapped := chatPane[chat.id]
-		id := "cursor-cli:chat:" + chat.id
+		id := cursorCLIChatPrefix + chat.id
 		mode := protocol.InjectNone
 		state := protocol.StateIdle
 		var currentQuestion *protocol.Question
-		var running bool
+		var status cursorCLIPaneStatus
 		if wrapped {
-			id = "cursor-cli:pane:" + pane.Name
+			id = cursorCLIPaneIDPrefix + pane.Name
 			mode = protocol.InjectTmux
-			currentQuestion, running = s.cursorCLIPaneStatus(ctx, pane.Name)
-			if currentQuestion != nil {
-				state = protocol.StateWaitingInput
-			} else if running {
-				state = protocol.StateBusy
-			}
+			state, currentQuestion, status = s.cursorCLIPaneReading(ctx, pane.Name)
+		} else if turn, ok := s.cursorCLITurnState(ctx, chat.id); ok && liveKnown {
+			// No pane to read: the transcript says whether a turn is open.
+			// Only for a chat a process holds; a crashed one would read busy
+			// forever.
+			state = turn.state
 		}
 		name := strings.TrimSpace(chat.meta.Title)
 		if name == "" {
@@ -372,9 +416,19 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 			StartedAt: chat.meta.CreatedAtMs, LastActivityAt: chat.meta.UpdatedAtMs,
 		}
 		entry.Model = s.cursorCLIModel(ctx, chat.id, chat.store, chat.meta.UpdatedAtMs)
+		entry.Mode, entry.ContextPercent = status.mode, status.context
+		if entry.Mode == "" {
+			// No pane to read it from: the chat's store records it.
+			entry.Mode = s.cursorCLIStoreMode(ctx, chat.store)
+		}
 		if wrapped {
 			entry.AgentPID = pane.PanePID
 			entry.Question = currentQuestion
+		} else if pid, ok := live[chat.store]; ok {
+			entry.AgentPID = pid
+			if s.pending != nil && s.cursorCLIHooksInstalled() {
+				entry.Inject = protocol.InjectHook
+			}
 		}
 		result = append(result, entry)
 		next[id] = cursorCLISession{meta: entry, store: chat.store, pane: pane.Name}
@@ -383,19 +437,16 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 		if claimedPane[pane.Name] {
 			continue
 		}
-		id := "cursor-cli:pane:" + pane.Name
+		id := cursorCLIPaneIDPrefix + pane.Name
 		entry := protocol.Session{
 			ID: id, Kind: protocol.KindCursorCLI, NativeID: pane.Name,
 			Name: "Cursor CLI", Cwd: pane.Cwd, State: protocol.StateIdle,
 			Inject: protocol.InjectTmux, StartedAt: pane.Created.UnixMilli(),
 			LastActivityAt: pane.Created.UnixMilli(), AgentPID: pane.PanePID,
 		}
-		q, running := s.cursorCLIPaneStatus(ctx, pane.Name)
-		if q != nil {
-			entry.State, entry.Question = protocol.StateWaitingInput, q
-		} else if running {
-			entry.State = protocol.StateBusy
-		}
+		var status cursorCLIPaneStatus
+		entry.State, entry.Question, status = s.cursorCLIPaneReading(ctx, pane.Name)
+		entry.Mode, entry.ContextPercent = status.mode, status.context
 		result = append(result, entry)
 		next[id] = cursorCLISession{meta: entry, pane: pane.Name}
 	}
@@ -410,6 +461,18 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 		}
 	}
 	s.modelMu.Unlock()
+	s.turnMu.Lock()
+	for name := range s.paneStatus {
+		if !slices.ContainsFunc(managed, func(pane tmux.Session) bool { return pane.Name == name }) {
+			delete(s.paneStatus, name)
+		}
+	}
+	for store := range s.storeModes {
+		if !slices.ContainsFunc(chats, func(chat foundChat) bool { return chat.store == store }) {
+			delete(s.storeModes, store)
+		}
+	}
+	s.turnMu.Unlock()
 	s.mu.Lock()
 	s.sessions = next
 	s.mu.Unlock()
@@ -422,21 +485,7 @@ type cursorCLIRow struct {
 	Data  string `json:"data"`
 }
 
-type cursorCLIPart struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text"`
-	ToolName string          `json:"toolName"`
-	Args     json.RawMessage `json:"args"`
-	Result   json.RawMessage `json:"result"`
-}
-
 func queryCursorCLIRows(ctx context.Context, store string, before int64, limit int) ([]cursorCLIRow, error) {
-	bin, err := exec.LookPath("sqlite3")
-	if err != nil {
-		return nil, fmt.Errorf("source: sqlite3 is required to read Cursor CLI chats: %w", err)
-	}
-	ctx, cancel := context.WithTimeout(ctx, cursorCLIDBTimeout)
-	defer cancel()
 	where := ""
 	if before > 0 {
 		where = " AND rowid < " + strconv.FormatInt(before, 10)
@@ -444,8 +493,18 @@ func queryCursorCLIRows(ctx context.Context, store string, before int64, limit i
 	query := "SELECT rowid,id,CAST(data AS TEXT) AS data FROM blobs WHERE json_valid(data)=1" +
 		" AND json_extract(data,'$.role') IN ('user','assistant','tool')" + where +
 		" ORDER BY rowid DESC LIMIT " + strconv.Itoa(limit)
+	return runCursorCLIQuery(ctx, store, query)
+}
+
+func runCursorCLIQuery(ctx context.Context, store, query string) ([]cursorCLIRow, error) {
+	bin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		return nil, fmt.Errorf("source: sqlite3 is required to read Cursor CLI chats: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, cursorCLIDBTimeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "-json", "-readonly",
-		"-cmd", cursorCLITimeoutCommand, "file:"+store+"?mode=ro", query)
+		"-cmd", cursorCLITimeoutCommand, cursorSQLiteURI(store), query)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
@@ -454,102 +513,15 @@ func queryCursorCLIRows(ctx context.Context, store string, before int64, limit i
 	if stdout.Len() > cursorCLIMaxDBOutput {
 		return nil, fmt.Errorf("source: cursor CLI message page exceeds %d bytes", cursorCLIMaxDBOutput)
 	}
+	if stdout.Len() == 0 {
+		// sqlite3 -json prints nothing at all for an empty result.
+		return nil, nil
+	}
 	var rows []cursorCLIRow
 	if err := json.Unmarshal(stdout.Bytes(), &rows); err != nil {
 		return nil, fmt.Errorf("source: cursor CLI message page: %w", err)
 	}
 	return rows, nil
-}
-
-func cursorCLIMessages(sessionID string, row cursorCLIRow, started int64) []protocol.Message {
-	var item struct {
-		Role    string          `json:"role"`
-		Content json.RawMessage `json:"content"`
-	}
-	if json.Unmarshal([]byte(row.Data), &item) != nil {
-		return nil
-	}
-	role := protocol.Role(item.Role)
-	if role != protocol.RoleUser && role != protocol.RoleAssistant && role != protocol.RoleTool {
-		return nil
-	}
-	base := protocol.Message{
-		ID: "cursor-cli:" + row.ID, SessionID: sessionID,
-		Ts: started + row.RowID,
-	}
-	var parts []cursorCLIPart
-	if len(item.Content) > 0 && item.Content[0] == '"' {
-		var body string
-		_ = json.Unmarshal(item.Content, &body)
-		parts = append(parts, cursorCLIPart{Type: "text", Text: body})
-	} else if json.Unmarshal(item.Content, &parts) != nil {
-		return nil
-	}
-	var out []protocol.Message
-	var texts []string
-	for i, part := range parts {
-		switch part.Type {
-		case "text":
-			if part.Text != "" && role != protocol.RoleTool {
-				texts = append(texts, part.Text)
-			}
-		case "tool-call", "tool-result":
-			name := part.ToolName
-			if name == "" {
-				name = "tool"
-			}
-			msg := base
-			msg.ID = fmt.Sprintf("%s:%d", base.ID, i)
-			msg.Role = protocol.RoleTool
-			msg.Tool = &protocol.Tool{Name: name}
-			if part.Type == "tool-call" {
-				msg.Tool.Summary = cursorCLIToolSummary(part.Args)
-			} else {
-				var result string
-				if json.Unmarshal(part.Result, &result) == nil {
-					msg.Text = clipRunes(result, parser.PreviewChars)
-				}
-			}
-			out = append(out, msg)
-		}
-	}
-	body := strings.Join(texts, "\n")
-	if strings.TrimSpace(body) == "" {
-		return out
-	}
-	if role == protocol.RoleUser {
-		// Cursor stores its generated workspace/rules preamble as a user-role
-		// blob. Real prompts are wrapped in <user_query>; keep only that text
-		// instead of leaking the internal context into the phone transcript.
-		if start := strings.Index(body, "<user_query>"); start >= 0 {
-			body = body[start+len("<user_query>"):]
-			if end := strings.Index(body, "</user_query>"); end >= 0 {
-				body = body[:end]
-			}
-			body = strings.TrimSpace(body)
-		} else if strings.HasPrefix(strings.TrimSpace(body), "<user_info>") {
-			return out
-		}
-	}
-	if body == "" {
-		return out
-	}
-	base.Role = role
-	base.Text = clipRunes(body, parser.PreviewChars)
-	return append([]protocol.Message{base}, out...)
-}
-
-func cursorCLIToolSummary(raw json.RawMessage) string {
-	var args map[string]any
-	if json.Unmarshal(raw, &args) != nil {
-		return ""
-	}
-	for _, key := range []string{"description", "command", "path", "pattern", "glob_pattern"} {
-		if value, ok := args[key].(string); ok && strings.TrimSpace(value) != "" {
-			return clipRunes(strings.TrimSpace(value), parser.SummaryChars)
-		}
-	}
-	return ""
 }
 
 func (s *CursorCLISource) Page(ctx context.Context, sessionID, before string, limit int) (protocol.Page, error) {
@@ -582,15 +554,58 @@ func (s *CursorCLISource) Page(ctx context.Context, sessionID, before string, li
 	if hasMore {
 		rows = rows[:limit]
 	}
-	messages := make([]protocol.Message, 0, len(rows))
+	ordered := make([]parser.CursorCLIRow, 0, len(rows))
 	for i := len(rows) - 1; i >= 0; i-- {
-		messages = append(messages, cursorCLIMessages(sessionID, rows[i], session.meta.StartedAt)...)
+		ordered = append(ordered, parser.CursorCLIRow{RowID: rows[i].RowID, ID: rows[i].ID, Data: rows[i].Data})
+	}
+	// A result is always written after its call. On the newest page it is
+	// therefore on the page already, or does not exist yet; an older page
+	// can end between the two, and the call would arrive running forever.
+	if before != "" && len(ordered) > 0 {
+		if pending := parser.CursorCLIPendingCalls(ordered); len(pending) > 0 {
+			results, err := queryCursorCLIResults(ctx, session.store, ordered[len(ordered)-1].RowID, pending)
+			if err != nil {
+				return protocol.Page{}, err
+			}
+			for _, row := range results {
+				ordered = append(ordered, parser.CursorCLIRow{RowID: row.RowID, ID: row.ID, Data: row.Data})
+			}
+		}
+	}
+	messages := parser.CursorCLIMessages(sessionID, session.meta.StartedAt, ordered)
+	if before == "" && len(ordered) > 0 {
+		chatID := filepath.Base(filepath.Dir(session.store))
+		if turn, ok := s.cursorCLITurnState(ctx, chatID); ok && turn.failure != "" {
+			messages = append(messages, cursorCLIFailureNotice(sessionID, turn, session.meta.StartedAt+ordered[len(ordered)-1].RowID))
+		}
 	}
 	position := ""
 	if hasMore && len(rows) > 0 {
 		position = strconv.FormatInt(rows[len(rows)-1].RowID, 10)
 	}
 	return protocol.NewPage(sessionID, messages, position, hasMore), nil
+}
+
+// cursorCLIMaxLookups bounds one page's result lookup. A page holds at most
+// MaxPageMessages rows, so this is a backstop, not a limit anyone meets.
+const cursorCLIMaxLookups = 100
+
+// queryCursorCLIResults reads the results of the given tool calls written
+// after rowid after.
+func queryCursorCLIResults(ctx context.Context, store string, after int64, callIDs []string) ([]cursorCLIRow, error) {
+	if len(callIDs) > cursorCLIMaxLookups {
+		callIDs = callIDs[:cursorCLIMaxLookups]
+	}
+	quoted := make([]string, 0, len(callIDs))
+	for _, id := range callIDs {
+		quoted = append(quoted, "'"+strings.ReplaceAll(id, "'", "''")+"'")
+	}
+	query := "SELECT rowid,id,CAST(data AS TEXT) AS data FROM blobs WHERE rowid > " + strconv.FormatInt(after, 10) +
+		" AND json_valid(CAST(data AS TEXT))=1 AND json_extract(CAST(data AS TEXT),'$.role')='tool'" +
+		" AND EXISTS (SELECT 1 FROM json_each(CAST(data AS TEXT),'$.content')" +
+		" WHERE json_extract(value,'$.toolCallId') IN (" + strings.Join(quoted, ",") + "))" +
+		" ORDER BY rowid LIMIT " + strconv.Itoa(2*cursorCLIMaxLookups)
+	return runCursorCLIQuery(ctx, store, query)
 }
 
 func (s *CursorCLISource) Follow(ctx context.Context, sessionID string, out chan<- []protocol.Message) error {
@@ -604,11 +619,28 @@ func (s *CursorCLISource) Follow(ctx context.Context, sessionID string, out chan
 	failures := 0
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
+	// Each poll is a sqlite3 process reading up to a hundred blobs, some of
+	// them tens of kilobytes. Cursor writes through the WAL, so an unchanged
+	// store and WAL mean there is nothing new to read.
+	s.mu.RLock()
+	store := s.sessions[sessionID].store
+	s.mu.RUnlock()
+	if store == "" {
+		if past, ok := s.pastCursorCLISession(sessionID); ok {
+			store = past.store
+		}
+	}
+	chatID := filepath.Base(filepath.Dir(store))
+	last := cursorCLIStoreVersion(store) + s.cursorCLITranscriptVersion(chatID)
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			version := cursorCLIStoreVersion(store) + s.cursorCLITranscriptVersion(chatID)
+			if store != "" && version == last && failures == 0 {
+				continue
+			}
 			page, err := s.Page(ctx, sessionID, "", 100)
 			if err != nil {
 				// Reading Cursor's store can fail for reasons that pass: it
@@ -624,6 +656,7 @@ func (s *CursorCLISource) Follow(ctx context.Context, sessionID string, out chan
 				continue
 			}
 			failures = 0
+			last = version
 			generation++
 			fresh := updateOpenCodeSeen(seen, page.Messages, generation)
 			if len(fresh) > 0 {
@@ -645,16 +678,19 @@ func (s *CursorCLISource) Inject(ctx context.Context, sessionID, message string)
 		return protocol.InjectNone, fmt.Errorf("source: unknown Cursor CLI session %q", sessionID)
 	}
 	if session.pane == "" {
+		if session.meta.Inject == protocol.InjectHook && s.pending != nil && session.store != "" {
+			// Handed over by the chat's stop hook when its turn ends.
+			s.pending.Add(cursorCLIHookKey(filepath.Base(filepath.Dir(session.store))), message)
+			return protocol.InjectHook, nil
+		}
 		return protocol.InjectNone, errors.New("source: start Cursor with `am cursor` to send messages remotely")
 	}
-	pane, err := s.capturePane(ctx, session.pane)
-	if err != nil {
-		return protocol.InjectNone, fmt.Errorf("source: could not inspect Cursor CLI before sending: %w", err)
+	// Every Cursor menu answers single letters, so text typed into one is a
+	// string of choices: "yes, but…" approves, "build it" builds the plan.
+	if err := s.refuseCursorCLISend(ctx, session.pane); err != nil {
+		return protocol.InjectNone, err
 	}
-	if cursorCLIQuestionFromPane(pane) != nil {
-		return protocol.InjectNone, errors.New("source: answer the pending Cursor CLI question before sending a message")
-	}
-	if err := tmux.Send(ctx, session.pane, message); err != nil {
+	if err := s.typeText(ctx, session.pane, message); err != nil {
 		return protocol.InjectNone, err
 	}
 	return protocol.InjectTmux, nil
@@ -670,169 +706,31 @@ func (s *CursorCLISource) Interrupt(ctx context.Context, sessionID string) error
 	if session.pane == "" {
 		return errors.New("source: only sessions started with `am cursor` can be interrupted")
 	}
+	// Ctrl-C is only "stop" while a turn runs. At a plan menu it rejects the
+	// plan, and at an idle prompt a second one quits the CLI.
+	screen, err := s.paneScreen(ctx, session.pane)
+	if err != nil {
+		return fmt.Errorf("source: could not inspect Cursor CLI before interrupting: %w", err)
+	}
+	if !screen.busy || screen.question != nil {
+		return errors.New("source: Cursor is not running a turn")
+	}
 	return tmux.Interrupt(ctx, session.pane)
 }
 
-func (s *CursorCLISource) CurrentQuestion(ctx context.Context, sessionID string) (*protocol.Question, error) {
-	s.mu.RLock()
-	session, ok := s.sessions[sessionID]
-	s.mu.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("source: unknown Cursor CLI session %q", sessionID)
+// cursorCLIStoreVersion identifies the state of a chat store by the size and
+// modification time of the database and its write-ahead log.
+func cursorCLIStoreVersion(store string) string {
+	if store == "" {
+		return ""
 	}
-	if session.pane == "" {
-		return nil, nil
-	}
-	pane, err := s.capturePane(ctx, session.pane)
-	if err != nil {
-		return nil, err
-	}
-	return cursorCLIQuestionFromPane(pane), nil
-}
-
-func (s *CursorCLISource) cursorCLIPaneStatus(ctx context.Context, paneName string) (*protocol.Question, bool) {
-	pane, err := s.capturePane(ctx, paneName)
-	if err != nil {
-		return nil, false
-	}
-	question := cursorCLIQuestionFromPane(pane)
-	if question != nil {
-		return question, false
-	}
-	lines := strings.Split(strings.TrimSpace(pane), "\n")
-	if len(lines) > 10 {
-		lines = lines[len(lines)-10:]
-	}
-	for _, line := range lines {
-		if strings.Contains(strings.ToLower(line), "ctrl+c to stop") {
-			return nil, true
+	var version strings.Builder
+	for _, path := range []string{store, store + "-wal"} {
+		if info, err := os.Stat(path); err == nil {
+			fmt.Fprintf(&version, "%d:%d;", info.Size(), info.ModTime().UnixNano())
+		} else {
+			version.WriteString("-;")
 		}
 	}
-	return nil, false
-}
-
-// Cursor's shell approval menu uses letter shortcuts instead of the numbered
-// options shared by Claude and Codex. Recognize only a complete, currently
-// visible menu; a fragment in old scrollback must never become answerable.
-func cursorCLIQuestionFromPane(pane string) *protocol.Question {
-	lines := strings.Split(strings.TrimSpace(pane), "\n")
-	if len(lines) > 30 {
-		lines = lines[len(lines)-30:]
-	}
-	// Cursor pauses before the first chat in an unfamiliar directory. Its
-	// single-key menu can be answered remotely, but only while the footer is
-	// still at the bottom of the live pane (not old scrollback).
-	footer := -1
-	for i := len(lines) - 1; i >= 0 && i >= len(lines)-5; i-- {
-		if strings.Contains(lines[i], "Use arrow keys to navigate") {
-			footer = i
-			break
-		}
-	}
-	if footer >= 0 {
-		current := true
-		for _, raw := range lines[footer+1:] {
-			// Cursor frames a blank row with vertical borders between the
-			// footer and bottom edge. It is not newer terminal content.
-			line := strings.TrimSpace(strings.Trim(raw, " │"))
-			if line != "" && !strings.HasPrefix(line, "╰") {
-				current = false
-				break
-			}
-		}
-		trust, quit := false, false
-		for i := footer - 1; i >= 0 && i >= footer-12; i-- {
-			trust = trust || strings.Contains(lines[i], "[a] Trust this workspace")
-			quit = quit || strings.Contains(lines[i], "[q] Quit")
-		}
-		if current && trust && quit {
-			result := &protocol.Question{
-				Title: "Workspace trust", Prompt: "Trust this workspace?",
-				Options: []protocol.QuestionOption{
-					{Key: "a", Label: "Trust this workspace"},
-					{Key: "q", Label: "Quit"},
-				},
-			}
-			result.ID = terminalQuestionID(result)
-			return result
-		}
-	}
-	promptAt, allowAt, skipAt := -1, -1, -1
-	for i, raw := range lines {
-		line := strings.TrimSpace(raw)
-		switch {
-		case line == "Run this command?":
-			promptAt = i
-		case strings.Contains(line, "Run (once) (y)"):
-			allowAt = i
-		case strings.Contains(line, "Skip & tell the agent") && strings.Contains(line, "n)"):
-			skipAt = i
-		}
-	}
-	if promptAt >= 0 && allowAt > promptAt && skipAt > promptAt &&
-		len(lines)-1-skipAt <= 4 {
-		commandAt := -1
-		for i := promptAt - 1; i >= 0 && i >= promptAt-10; i-- {
-			line := strings.TrimSpace(lines[i])
-			if strings.HasPrefix(line, "$") {
-				commandAt = i
-				break
-			}
-		}
-		// A remote approval must show the command in full. If Cursor's pane
-		// does not expose it, leave the decision on the local terminal.
-		if commandAt < 0 {
-			return nil
-		}
-		parts := []string{strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[commandAt]), "$"))}
-		for i := commandAt + 1; i < promptAt; i++ {
-			if line := strings.TrimSpace(lines[i]); line != "" {
-				parts = append(parts, line)
-			}
-		}
-		detail := strings.Join(parts, "\n")
-		if detail == "" || len(detail) > 16*1024 {
-			return nil
-		}
-		result := &protocol.Question{
-			Title: "Shell command", Prompt: "Run this command?", Detail: detail,
-			Options: []protocol.QuestionOption{
-				{Key: "y", Label: "Run once"},
-				{Key: "n", Label: "Skip"},
-			},
-		}
-		result.ID = terminalQuestionID(result)
-		return result
-	}
-	if found := question.Detect(pane); found != nil {
-		return protocolQuestion(found)
-	}
-	return nil
-}
-
-func (s *CursorCLISource) Answer(ctx context.Context, sessionID string, answer protocol.QuestionAnswer) error {
-	s.mu.RLock()
-	session, ok := s.sessions[sessionID]
-	s.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("source: unknown Cursor CLI session %q", sessionID)
-	}
-	if session.pane == "" {
-		return errors.New("source: this Cursor CLI chat cannot receive answers remotely")
-	}
-	if session.meta.Question == nil || answer.QuestionID == "" ||
-		answer.QuestionID != session.meta.Question.ID {
-		return errors.New("source: that question is no longer current; refresh the session")
-	}
-	if len(answer.Options) > 0 || answer.Text != "" {
-		return errors.New("source: this terminal question only accepts one listed option")
-	}
-	if !questionHasOption(session.meta.Question, answer.OptionKey) {
-		return errors.New("source: that option is no longer current; refresh the session")
-	}
-	current, err := s.CurrentQuestion(ctx, sessionID)
-	if err != nil || !sameQuestion(session.meta.Question, current) {
-		return errors.New("source: that question is no longer on screen; refresh the session")
-	}
-	return tmux.Answer(ctx, session.pane, answer.OptionKey)
+	return version.String()
 }

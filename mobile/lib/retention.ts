@@ -29,3 +29,42 @@ export function mergeRetainedMessages(
     limited,
   };
 }
+
+/**
+ * The cached sessions a full snapshot should drop: those no longer running
+ * that no screen has open.
+ *
+ * A snapshot arrives on every reconnect and every return to the foreground,
+ * and it lists only what is running. A past session opened from a folder is
+ * never in it, so dropping everything absent emptied the transcript someone
+ * was reading, with nothing to load it again.
+ */
+export function sessionsToForget(
+  cached: Iterable<string>,
+  live: ReadonlySet<string>,
+  watched: ReadonlySet<string>,
+): string[] {
+  return Array.from(cached).filter((id) => !live.has(id) && !watched.has(id));
+}
+
+/**
+ * Watched sessions that have just become reachable: newly running, or newly
+ * in a place a message can be typed into.
+ *
+ * A resumed session keeps its id, so the screen showing it has no reason of
+ * its own to subscribe again, and a subscription made while it was ended never
+ * started a live tail on an older Mac.
+ */
+export function newlyReachable(
+  previous: readonly { id: string; inject: string }[],
+  next: readonly { id: string; inject: string }[],
+  watched: ReadonlySet<string>,
+): string[] {
+  const before = new Map(previous.map((session) => [session.id, session.inject]));
+  return next
+    .filter((session) =>
+      watched.has(session.id) &&
+      session.inject !== "none" &&
+      (before.get(session.id) ?? "none") === "none")
+    .map((session) => session.id);
+}

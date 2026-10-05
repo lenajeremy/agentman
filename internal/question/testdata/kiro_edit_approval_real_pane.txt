@@ -1,0 +1,16 @@
+
+↓ Write /work/greeting.txt
+  added 1 line, removed 1 line in greeting.txt
+     1-  hi there
+     1+  hello there
+
+────────────────────────────────────────────────────────────────────────────────
+ write requires approval
+ ❯ Yes, single permission
+   Trust, always allow in this session
+   No (Tab to edit)
+────────────────────────────────────────────────────────────────────────────────
+ esc to close · ↑↓ to navigate · ↵ to select · Tab to edit
+
+
+

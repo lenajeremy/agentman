@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,6 +47,16 @@ const antigravityPanePrefix = tmux.Prefix + "antigravity-"
 
 const antigravityLsofTimeout = 3 * time.Second
 
+// antigravityLsofTTL is how long one lsof answer is reused.
+//
+// Discovery sweeps every second and lsof was the most expensive thing in it:
+// a fork and a walk of every descriptor each agy holds, for an answer that
+// changes only when a conversation starts. An agy that holds no conversation
+// yet is the exception, and is asked about again on the next sweep — that is
+// a phone launch or a fresh pane waiting for its first message, and binding it
+// to its transcript a few seconds late would show the user an empty session.
+const antigravityLsofTTL = 5 * time.Second
+
 // antigravityFollowSeed is how much of a transcript a follow reads silently
 // when it attaches. A tool call made just before the follow started can have
 // its result arrive just after; without the call in the parser's memory that
@@ -75,20 +86,68 @@ type AntigravitySource struct {
 	past pastSessions
 
 	cacheMu sync.Mutex
-	states  map[string]kiroStateEntry
+	states  map[string]antigravityStateEntry
 	names   map[string]string
+	titles  map[string]antigravityTitle
+
+	lsofMu sync.Mutex
+	lsof   antigravityLsofAnswer
+
+	// keys is how text and answers reach a pane. See antigravityKeys.
+	keys antigravityKeys
+
+	// index is agy's conversation index, read for history.
+	index antigravityIndex
+	// logs caches the tails of running processes' CLI logs.
+	logs antigravityLogCache
+	// artifacts caches artifact metadata and the reviews each transcript
+	// records; usage caches each transcript's last token count.
+	artifacts antigravityArtifactCache
+	usage     antigravityUsageCache
+	// models is agy's listing of the models it offers, for switching.
+	models antigravityModelCatalog
+}
+
+// antigravityStateEntry caches the state a transcript's last line implies,
+// keyed by the file's size and mtime so an unchanged file is never re-read.
+type antigravityStateEntry struct {
+	size  int64
+	mtime time.Time
+	state protocol.State
+	// step is the last record's step_index, -1 when there is none.
+	step int
+}
+
+// antigravityTitle is a conversation's title as agy's annotations file held it
+// at one mtime.
+type antigravityTitle struct {
+	mtime time.Time
+	title string
+}
+
+// antigravityLsofAnswer is one lsof run, kept for antigravityLsofTTL.
+type antigravityLsofAnswer struct {
+	at   time.Time
+	pids string
+	held map[int]antigravityProcess
 }
 
 type antigravitySession struct {
 	meta       protocol.Session
 	transcript string
 	tmuxName   string
+	// footer is what the pane's bottom row said on the last sweep: the mode
+	// agy is in, and how many subagents and background tasks it is running.
+	footer antigravityFooter
 }
 
 // antigravityProcess is what lsof shows one agy process holding.
 type antigravityProcess struct {
 	cwd           string
 	conversations []string
+	// log is the process's own CLI log, log/cli-<started>.log, which it
+	// holds open for as long as it runs. See antigravity_log.go.
+	log string
 }
 
 // NewAntigravitySource creates an adapter rooted at the given home directory.
@@ -107,9 +166,11 @@ func NewAntigravitySource(home string) (*AntigravitySource, error) {
 		capturePane:       tmux.Capture,
 		captureScrollback: tmux.CaptureScrollback,
 		openConversations: antigravityOpenConversations,
+		keys:              defaultAntigravityKeys(),
 		sessions:          map[string]antigravitySession{},
-		states:            map[string]kiroStateEntry{},
+		states:            map[string]antigravityStateEntry{},
 		names:             map[string]string{},
+		titles:            map[string]antigravityTitle{},
 	}, nil
 }
 
@@ -147,7 +208,7 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 	}
 	var open map[int]antigravityProcess
 	if len(pids) > 0 && s.openConversations != nil {
-		open = s.openConversations(ctx, s.home, pids)
+		open = s.heldConversations(ctx, pids)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -163,7 +224,7 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 		if !ok || len(process.conversations) == 0 {
 			continue // at its trust prompt, or not a chat at all (mic-serve, remote-control)
 		}
-		conversation := s.latestConversation(process.conversations)
+		conversation := s.latestConversation(s.withoutSubagents(process.conversations))
 		if seen[conversation] {
 			continue
 		}
@@ -176,8 +237,10 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 				tmuxName = pane.Name
 				claimed[pane.Name] = true
 				// As with Kiro, a pane-backed session is keyed on the pane,
-				// which a phone launch knows before agy picks a conversation.
-				id = string(protocol.KindAntigravity) + ":" + tmuxID(pane.Name)
+				// which a phone launch knows before agy picks a conversation
+				// — unless the pane was opened to resume this conversation,
+				// when the phone already knows it by the conversation's id.
+				id = antigravityPaneSessionID(pane.Name, conversation)
 				break
 			}
 		}
@@ -188,7 +251,7 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 			ID:             id,
 			Kind:           protocol.KindAntigravity,
 			NativeID:       conversation,
-			Name:           s.conversationName(transcript, process.cwd),
+			Name:           s.conversationName(conversation, transcript, process.cwd),
 			Cwd:            process.cwd,
 			State:          s.transcriptState(transcript),
 			Inject:         protocol.InjectNone,
@@ -197,12 +260,33 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 			Model:          s.defaultModel(),
 			AgentPID:       pid,
 		}
+		var footer antigravityFooter
 		if tmuxName != "" {
 			session.Inject = protocol.InjectTmux
-			s.applyPane(ctx, &session, tmuxName)
+			footer = s.applyPane(ctx, &session, tmuxName)
+		} else if process.log != "" {
+			// No pane to read: the process's own log says what the
+			// transcript cannot — a prompt waiting on the user, or a turn
+			// cancelled with Esc, which writes nothing to the transcript.
+			_, step := s.transcriptEnd(transcript)
+			if state, ok := s.logState(process.log, conversation, step); ok {
+				session.State = state
+			}
+		}
+		s.offerSwitches(&session, footer)
+		if percent, ok := s.contextPercent(transcript, session.Model); ok {
+			session.ContextPercent = percent
+		}
+		if artifacts, err := s.conversationArtifacts(ctx, conversation, transcript); err == nil {
+			session.Artifacts = len(artifacts)
+			for _, artifact := range artifacts {
+				if artifact.Review {
+					session.ArtifactsToReview++
+				}
+			}
 		}
 		found = append(found, session)
-		next[id] = antigravitySession{meta: session, transcript: transcript, tmuxName: tmuxName}
+		next[id] = antigravitySession{meta: session, transcript: transcript, tmuxName: tmuxName, footer: footer}
 	}
 
 	// A pane with no conversation yet: agy at its folder trust prompt, or
@@ -211,26 +295,86 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 		if claimed[pane.Name] {
 			continue
 		}
-		id := string(protocol.KindAntigravity) + ":" + tmuxID(pane.Name)
+		resumed := antigravityResumedConversation(pane.Name)
+		id := antigravityPaneSessionID(pane.Name, resumed)
 		started := pane.Created.UnixMilli()
 		if pane.Created.IsZero() {
 			started = time.Now().UnixMilli()
 		}
 		session := protocol.Session{
-			ID: id, Kind: protocol.KindAntigravity, Name: filepath.Base(pane.Cwd), Cwd: pane.Cwd,
+			ID: id, Kind: protocol.KindAntigravity, NativeID: resumed, Name: filepath.Base(pane.Cwd), Cwd: pane.Cwd,
 			State: protocol.StateIdle, Inject: protocol.InjectTmux, Model: s.defaultModel(),
 			StartedAt: started, LastActivityAt: started, AgentPID: pane.PanePID,
 		}
-		s.applyPane(ctx, &session, pane.Name)
+		footer := s.applyPane(ctx, &session, pane.Name)
+		s.offerSwitches(&session, footer)
 		found = append(found, session)
-		next[id] = antigravitySession{meta: session, tmuxName: pane.Name}
+		next[id] = antigravitySession{meta: session, tmuxName: pane.Name, footer: footer}
 	}
 
 	s.mu.Lock()
 	s.sessions = next
 	s.mu.Unlock()
 	s.forgetCaches(next)
+	liveLogs := map[string]bool{}
+	for _, process := range open {
+		if process.log != "" {
+			liveLogs[process.log] = true
+		}
+	}
+	s.forgetLogs(liveLogs)
+	liveTranscripts, liveConversations := map[string]bool{}, map[string]bool{}
+	for _, session := range next {
+		liveTranscripts[session.transcript] = true
+		liveConversations[session.meta.NativeID] = true
+	}
+	s.forgetArtifacts(liveTranscripts, liveConversations)
+	s.forgetUsage(liveTranscripts)
 	return found, nil
+}
+
+// antigravityResumePrefix names the pane a resume opens: the conversation's
+// own id follows it. See ResumedSession.
+const antigravityResumePrefix = antigravityPanePrefix + "resume-"
+
+// ResumedSession implements ResumeNamer.
+//
+// Reopening an ended session from the phone used to land on an id that never
+// came back. The phone waits on the id it already knows, "antigravity:<conv>",
+// while discovery keyed every pane-backed session on its pane — so the
+// reopened session appeared under a name the phone was not watching, and the
+// one it was watching timed out as "did not come back up". A resume pane is
+// named after the conversation instead, and discovery keeps that
+// conversation's id for it.
+func (s *AntigravitySource) ResumedSession(native, defaultPane string) (pane, sessionID string) {
+	if !isUUID(native) {
+		return "", ""
+	}
+	return antigravityResumePrefix + native, string(protocol.KindAntigravity) + ":" + native
+}
+
+var _ ResumeNamer = (*AntigravitySource)(nil)
+
+// antigravityResumedConversation is the conversation a resume pane was opened
+// for, or "".
+func antigravityResumedConversation(paneName string) string {
+	native, ok := strings.CutPrefix(paneName, antigravityResumePrefix)
+	if !ok || !isUUID(native) {
+		return ""
+	}
+	return native
+}
+
+// antigravityPaneSessionID keys a pane-backed session: on the conversation, if
+// the pane was opened to resume exactly that one, and on the pane otherwise.
+// A resume pane where the user has since started another conversation is
+// keyed on the pane again, so the id never claims a conversation it no longer
+// shows.
+func antigravityPaneSessionID(paneName, conversation string) string {
+	if resumed := antigravityResumedConversation(paneName); resumed != "" && resumed == conversation {
+		return string(protocol.KindAntigravity) + ":" + resumed
+	}
+	return string(protocol.KindAntigravity) + ":" + tmuxID(paneName)
 }
 
 // latestConversation picks the conversation a process is actually in. agy can
@@ -245,49 +389,196 @@ func (s *AntigravitySource) latestConversation(conversations []string) string {
 	return best
 }
 
-// antigravityModelLabel is the model agy right-aligns on its bottom row:
-// "? for shortcuts            Gemini 3.8 Flash · high". It is matched against
-// the last column only — split on runs of spaces — because a pattern over the
-// whole row happily swallows the footer to its left.
-var antigravityModelLabel = regexp.MustCompile(`^(\S.*?\S)\s+·\s+(low|medium|high|max)$`)
+// withoutSubagents drops the conversations a process holds only because one of
+// its own conversations started them.
+//
+// A subagent is a conversation of its own, with its own brain directory and
+// transcript, and the agy that spawned it holds that directory open beside its
+// parent's. While the subagent works its transcript is the newest, so picking
+// "the one written to last" moved the whole session onto it: the phone showed
+// the subagent's steps under the folder's name, stuck at busy, and the
+// parent's own feed was replaced. The parent records each child it spawns
+// under .system_generated/subagents/<child>.json, which is what tells them
+// apart. If every held conversation turns out to be someone's child, which
+// should not happen, they are all kept rather than none.
+func (s *AntigravitySource) withoutSubagents(conversations []string) []string {
+	if len(conversations) < 2 {
+		return conversations
+	}
+	kept := make([]string, 0, len(conversations))
+	for _, candidate := range conversations {
+		child := false
+		for _, parent := range conversations {
+			if parent == candidate {
+				continue
+			}
+			record := filepath.Join(s.root(), "brain", parent, ".system_generated", "subagents", candidate+".json")
+			if _, err := os.Stat(record); err == nil {
+				child = true
+				break
+			}
+		}
+		if !child {
+			kept = append(kept, candidate)
+		}
+	}
+	if len(kept) == 0 {
+		return conversations
+	}
+	return kept
+}
+
+// heldConversations is antigravityOpenConversations, reused for a few seconds.
+// See antigravityLsofTTL.
+func (s *AntigravitySource) heldConversations(ctx context.Context, pids []int) map[int]antigravityProcess {
+	key := pidKey(pids)
+	s.lsofMu.Lock()
+	cached := s.lsof
+	s.lsofMu.Unlock()
+	if cached.pids == key && time.Since(cached.at) < antigravityLsofTTL && allBound(cached.held, pids) {
+		return cached.held
+	}
+	held := s.openConversations(ctx, s.home, pids)
+	if held == nil {
+		// lsof missing or timed out: do not remember a blank answer as if it
+		// were a real one, or every session would vanish for the whole TTL.
+		return nil
+	}
+	s.lsofMu.Lock()
+	s.lsof = antigravityLsofAnswer{at: time.Now(), pids: key, held: held}
+	s.lsofMu.Unlock()
+	return held
+}
+
+func pidKey(pids []int) string {
+	sorted := append([]int(nil), pids...)
+	slices.Sort(sorted)
+	parts := make([]string, len(sorted))
+	for i, pid := range sorted {
+		parts[i] = strconv.Itoa(pid)
+	}
+	return strings.Join(parts, ",")
+}
+
+// allBound reports whether every agy already holds a conversation, which is
+// when an earlier answer can stand in for a new one.
+func allBound(held map[int]antigravityProcess, pids []int) bool {
+	for _, pid := range pids {
+		if len(held[pid].conversations) == 0 {
+			return false
+		}
+	}
+	return true
+}
 
 var columnGap = regexp.MustCompile(`\s{2,}`)
+
+// antigravityEffort is the reasoning effort agy prints after the model name.
+var antigravityEffort = regexp.MustCompile(`^(?:low|medium|high|max)$`)
+
+// antigravityCount is a running count agy appends to its footer:
+// "1 subagent(s)", "2 task(s)".
+var antigravityCount = regexp.MustCompile(`^(\d+) (subagent|task)\(s\)$`)
+
+// antigravityFooter is agy's bottom row, read apart.
+//
+// The right-hand side is a list joined by " · ": an optional mode, the
+// model, the effort, then optional counts —
+//
+//	? for shortcuts                       accept-edits · Gemini 3.8 Flash · high
+//	? for shortcuts                Gemini 3.8 Flash · high · 1 subagent(s)
+//	esc to cancel           Gemini 3.8 Flash · high · 1 task(s) · /tasks
+//
+// The model used to be matched as "whatever precedes the effort", which made
+// the mode part of the model's name ("accept-edits · Gemini 3.8 Flash") and
+// lost the model altogether once a count followed the effort. Anchoring on the
+// effort word and reading outwards from it handles every shape agy draws.
+type antigravityFooter struct {
+	model     string
+	effort    string
+	mode      string
+	subagents int
+	tasks     int
+}
+
+func parseAntigravityFooter(lines []string) antigravityFooter {
+	var footer antigravityFooter
+	last := strings.TrimSpace(lastNonBlankLine(lines))
+	if last == "" {
+		return footer
+	}
+	columns := columnGap.Split(last, -1)
+	parts := strings.Split(columns[len(columns)-1], " · ")
+	effort := -1
+	for i, part := range parts {
+		if antigravityEffort.MatchString(strings.TrimSpace(part)) {
+			effort = i
+			break
+		}
+	}
+	if effort < 1 {
+		return footer
+	}
+	footer.effort = strings.TrimSpace(parts[effort])
+	footer.model = strings.TrimSpace(parts[effort-1])
+	if effort >= 2 {
+		footer.mode = strings.TrimSpace(parts[effort-2])
+	}
+	for _, part := range parts[effort+1:] {
+		match := antigravityCount.FindStringSubmatch(strings.TrimSpace(part))
+		if match == nil {
+			continue
+		}
+		count, _ := strconv.Atoi(match[1])
+		if match[2] == "subagent" {
+			footer.subagents = count
+		} else {
+			footer.tasks = count
+		}
+	}
+	return footer
+}
 
 // applyPane refines a session from its terminal. agy writes a step only once
 // it completes, so a reply still being generated looks, on disk, exactly like
 // a turn that has not started — and a permission prompt is not on disk at all.
-func (s *AntigravitySource) applyPane(ctx context.Context, session *protocol.Session, tmuxName string) {
+func (s *AntigravitySource) applyPane(
+	ctx context.Context, session *protocol.Session, tmuxName string,
+) antigravityFooter {
 	capture := s.capturePane
 	if capture == nil {
 		capture = tmux.Capture
 	}
 	pane, err := capture(ctx, tmuxName)
 	if err != nil {
-		return
+		return antigravityFooter{}
 	}
 	lines := strings.Split(strings.TrimRight(pane, "\n"), "\n")
-	if last := strings.TrimSpace(lastNonBlankLine(lines)); last != "" {
-		columns := columnGap.Split(last, -1)
-		if match := antigravityModelLabel.FindStringSubmatch(columns[len(columns)-1]); match != nil {
-			session.Model = match[1] + " (" + match[2] + ")"
-		}
+	footer := parseAntigravityFooter(lines)
+	if footer.model != "" {
+		session.Model = footer.model + " (" + footer.effort + ")"
 	}
-	if found := question.DetectAntigravity(pane); found != nil {
-		session.Question = protocolQuestion(found)
+	if found, form := question.DetectAntigravityForm(pane); found != nil {
+		session.Question = antigravityQuestion(found, form)
 		session.State = protocol.StateWaitingInput
-		return
+		return footer
 	}
 	if state, ok := antigravityPaneState(lines); ok {
 		session.State = state
 	}
+	return footer
 }
 
 // antigravityPaneState reads agy's footer, which says what it is doing. Only
 // the bottom rows are read: the same words could appear in the conversation.
+//
+// "Press up to edit queued messages" replaces "esc to cancel" when a message
+// was sent while the agent was working; it only ever appears mid-turn.
 func antigravityPaneState(lines []string) (protocol.State, bool) {
 	for i := len(lines) - 1; i >= 0 && i >= len(lines)-3; i-- {
 		switch {
-		case strings.Contains(lines[i], "esc to cancel"):
+		case strings.Contains(lines[i], "esc to cancel"),
+			strings.Contains(lines[i], "Press up to edit queued messages"):
 			return protocol.StateBusy, true
 		case strings.Contains(lines[i], "? for shortcuts"):
 			return protocol.StateIdle, true
@@ -332,9 +623,15 @@ func (s *AntigravitySource) defaultModel() string {
 	return settings.Model
 }
 
-// conversationName is the first thing the user asked, which reads better in a
-// list than a directory name. The first step never changes, so it is read once.
-func (s *AntigravitySource) conversationName(transcript, cwd string) string {
+// conversationName is the title agy gave the conversation — the one its own
+// /resume picker shows, generated after the first turn or set with /rename —
+// and until there is one, the first thing the user asked, which reads better
+// in a list than a directory name. The first step never changes, so it is read
+// once; the title is re-read only when its file changes.
+func (s *AntigravitySource) conversationName(conversation, transcript, cwd string) string {
+	if title := s.conversationTitle(conversation); title != "" {
+		return title
+	}
 	s.cacheMu.Lock()
 	name, ok := s.names[transcript]
 	s.cacheMu.Unlock()
@@ -353,6 +650,48 @@ func (s *AntigravitySource) conversationName(transcript, cwd string) string {
 		return base
 	}
 	return "antigravity"
+}
+
+// antigravityTitleField is the one field agy writes to a conversation's
+// annotations file: `title:"Create And Edit Notes File"`, protobuf text format.
+var antigravityTitleField = regexp.MustCompile(`title:("(?:[^"\\]|\\.)*")`)
+
+// conversationTitle reads annotations/<conversation>.pbtxt.
+func (s *AntigravitySource) conversationTitle(conversation string) string {
+	if !isUUID(conversation) {
+		return ""
+	}
+	path := filepath.Join(s.root(), "annotations", conversation+".pbtxt")
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	s.cacheMu.Lock()
+	cached, ok := s.titles[conversation]
+	s.cacheMu.Unlock()
+	if ok && cached.mtime.Equal(info.ModTime()) {
+		return cached.title
+	}
+	title := ""
+	if raw, err := readBoundedFile(path, 64<<10); err == nil {
+		title = parseAntigravityTitle(string(raw))
+	}
+	s.cacheMu.Lock()
+	s.titles[conversation] = antigravityTitle{mtime: info.ModTime(), title: title}
+	s.cacheMu.Unlock()
+	return title
+}
+
+func parseAntigravityTitle(text string) string {
+	match := antigravityTitleField.FindStringSubmatch(text)
+	if match == nil {
+		return ""
+	}
+	title, err := strconv.Unquote(match[1])
+	if err != nil {
+		return ""
+	}
+	return strings.Join(strings.Fields(title), " ")
 }
 
 func firstAntigravityRequest(transcript string) string {
@@ -385,30 +724,43 @@ func firstAntigravityRequest(transcript string) string {
 // with a response that calls no tool; a prompt, a tool call, or a tool's
 // result last means the turn is still going.
 func (s *AntigravitySource) transcriptState(path string) protocol.State {
+	state, _ := s.transcriptEnd(path)
+	return state
+}
+
+// transcriptEnd is transcriptState and the index of the last step on disk.
+func (s *AntigravitySource) transcriptEnd(path string) (protocol.State, int) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return protocol.StateIdle
+		return protocol.StateIdle, -1
 	}
 	s.cacheMu.Lock()
 	cached, ok := s.states[path]
 	s.cacheMu.Unlock()
 	if ok && cached.size == info.Size() && cached.mtime.Equal(info.ModTime()) {
-		return cached.state
+		return cached.state, cached.step
 	}
-	state := protocol.StateIdle
+	state, step := protocol.StateIdle, -1
 	if line, err := lastLine(path, 32<<20); err == nil && line != "" {
 		state = antigravityLineState(line)
+		var last struct {
+			StepIndex *int `json:"step_index"`
+		}
+		if json.Unmarshal([]byte(line), &last) == nil && last.StepIndex != nil {
+			step = *last.StepIndex
+		}
 	}
 	s.cacheMu.Lock()
-	s.states[path] = kiroStateEntry{size: info.Size(), mtime: info.ModTime(), state: state}
+	s.states[path] = antigravityStateEntry{size: info.Size(), mtime: info.ModTime(), state: state, step: step}
 	s.cacheMu.Unlock()
-	return state
+	return state, step
 }
 
 func antigravityLineState(line string) protocol.State {
 	var step struct {
 		Type      string            `json:"type"`
 		Status    string            `json:"status"`
+		Error     string            `json:"error"`
 		ToolCalls []json.RawMessage `json:"tool_calls"`
 	}
 	if json.Unmarshal([]byte(line), &step) != nil {
@@ -420,7 +772,19 @@ func antigravityLineState(line string) protocol.State {
 		return protocol.StateBusy // a step still in progress
 	}
 	switch step.Type {
-	case "USER_INPUT", "GENERIC":
+	case "USER_INPUT", "SYSTEM_MESSAGE":
+		// A system message is handed to the model with the next prompt, or on
+		// its own when a background task or subagent reports back; either way
+		// a response is now being written.
+		return protocol.StateBusy
+	case "GENERIC":
+		// Declining a tool ends the turn there and then — agy prints
+		// "Interrupted" and writes nothing after the denial — so a denial last
+		// is a finished turn, not one waiting on its next step. Every other
+		// tool result, failures included, is followed by the model's reply.
+		if antigravityDenied(step.Error) {
+			return protocol.StateIdle
+		}
 		return protocol.StateBusy
 	case "PLANNER_RESPONSE":
 		if len(step.ToolCalls) > 0 {
@@ -428,6 +792,14 @@ func antigravityLineState(line string) protocol.State {
 		}
 	}
 	return protocol.StateIdle
+}
+
+// antigravityDenied reports a tool result that is the user turning the call
+// down: "permission check failed for write_file …: user denied permission for
+// write_file(…)". A hook's refusal reads differently and does not end the
+// turn, so it is not matched.
+func antigravityDenied(errorText string) bool {
+	return strings.Contains(errorText, "user denied permission for")
 }
 
 func (s *AntigravitySource) forgetCaches(live map[string]antigravitySession) {
@@ -445,6 +817,11 @@ func (s *AntigravitySource) forgetCaches(live map[string]antigravitySession) {
 	for path := range s.names {
 		if !keep[path] {
 			delete(s.names, path)
+		}
+	}
+	for conversation := range s.titles {
+		if !keep[s.transcriptPath(conversation)] {
+			delete(s.titles, conversation)
 		}
 	}
 }
@@ -546,10 +923,10 @@ func (s *AntigravitySource) Follow(ctx context.Context, sessionID string, out ch
 	}
 	attach(session.transcript, false)
 
-	// The reply being written, as last read off the pane. Kept so an
-	// unchanged preview is not re-sent every tick, and so the provisional
-	// message can be withdrawn the moment the real record lands.
-	var preview string
+	// The reply being written, as last read off the pane, and the id it went
+	// out under. Kept so an unchanged preview is not re-sent every tick, and so
+	// a preview no record replaces can be taken back.
+	var preview, previewID string
 
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
@@ -583,31 +960,37 @@ func (s *AntigravitySource) Follow(ctx context.Context, sessionID string, out ch
 		for _, line := range lines {
 			batch = append(batch, p.Parse(line.Text, line.Offset)...)
 		}
-		// The record that just landed supersedes anything scraped off the
-		// A record for this step supersedes anything scraped for it, and the
-		// next turn starts from nothing.
-		if len(batch) > 0 {
-			preview = ""
+		// A record that just landed supersedes anything scraped for its step.
+		// When it carries no text of its own — the model called a tool and
+		// said nothing — the preview is taken back, or it would stay in the
+		// feed as a reply nobody wrote.
+		if len(batch) > 0 && previewID != "" {
+			if !hasMessage(batch, previewID) {
+				batch = append(batch, withdrawnPreview(sessionID, previewID))
+			}
+			preview, previewID = "", ""
 		}
 
-		// Only while the transcript's newest record is a prompt. Without that
-		// the finished reply is sent a second time the moment its record
-		// lands: the pane still shows it, and the session state that was
-		// meant to stop this lags a discovery sweep behind.
-		//
 		// Sent under the id the finished step will carry, so the app updates
 		// that row in place. A message whose text grows under a stable id is
 		// already how OpenCode streams, so nothing downstream is new.
-		if partial, step, ok := s.streamingReply(ctx, current, p); ok &&
-			partial != preview {
-			preview = partial
+		partial, step, streaming := s.streamingReply(ctx, current, p)
+		switch {
+		case streaming && partial != preview:
+			preview, previewID = partial, antigravityStreamID(step)
 			batch = append(batch, protocol.Message{
-				ID:        antigravityStreamID(step),
+				ID:        previewID,
 				SessionID: sessionID,
 				Role:      protocol.RoleAssistant,
 				Ts:        time.Now().UnixMilli(),
 				Text:      partial,
 			})
+		case !streaming && previewID != "" && len(batch) == 0:
+			// The turn stopped without writing the step — interrupted, or a
+			// tool call drawn where the text was. Page would not show this
+			// preview, so the live feed should not keep it either.
+			batch = append(batch, withdrawnPreview(sessionID, previewID))
+			preview, previewID = "", ""
 		}
 
 		if len(batch) == 0 {
@@ -621,24 +1004,47 @@ func (s *AntigravitySource) Follow(ctx context.Context, sessionID string, out ch
 	}
 }
 
+func hasMessage(batch []protocol.Message, id string) bool {
+	for _, message := range batch {
+		if message.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// withdrawnPreview takes a streamed preview back: the same id with no text,
+// which the app drops from the feed.
+func withdrawnPreview(sessionID, id string) protocol.Message {
+	return protocol.Message{
+		ID: id, SessionID: sessionID, Role: protocol.RoleAssistant, Ts: time.Now().UnixMilli(),
+	}
+}
+
 // streamingReply reads the reply agy is writing from its pane.
 //
-// Only while a turn is actually running: outside one the pane shows the last
-// finished answer, which the transcript already carries and which must not be
-// re-sent as though it were new.
+// Two things must agree that one is being written. The transcript's newest
+// record must be one the model answers (see AwaitingResponse): outside a turn
+// the pane shows the last finished answer, which the transcript already
+// carries and which must not be re-sent as though it were new. And the very
+// capture the text is read from must show agy busy: a turn that was
+// interrupted, or that ended on a declined call, leaves the transcript waiting
+// for a response that is never coming, while the pane says it is idle.
 func (s *AntigravitySource) streamingReply(
 	ctx context.Context, session antigravitySession, p *parser.AntigravityParser,
 ) (string, int, bool) {
 	if session.tmuxName == "" || s.captureScrollback == nil {
 		return "", 0, false
 	}
-	// The transcript decides, not the session state: a reply is being written
-	// exactly while the newest record is a prompt.
 	if !p.AwaitingResponse() {
 		return "", 0, false
 	}
 	pane, err := s.captureScrollback(ctx, session.tmuxName, antigravityScrollbackLines)
 	if err != nil {
+		return "", 0, false
+	}
+	lines := strings.Split(strings.TrimRight(pane, "\n"), "\n")
+	if state, ok := antigravityPaneState(lines); !ok || state != protocol.StateBusy {
 		return "", 0, false
 	}
 	partial := antigravityPartialReply(pane)
@@ -658,10 +1064,21 @@ func (s *AntigravitySource) Inject(ctx context.Context, sessionID, text string) 
 		return protocol.InjectNone, errors.New(
 			"source: this session cannot receive messages — start it with `am antigravity` to enable sending")
 	}
-	if err := refuseSendIntoMenu(ctx, s.capturePane, session.tmuxName, question.DetectAntigravity); err != nil {
-		return protocol.InjectNone, err
+	pane, err := s.capturePane(ctx, session.tmuxName)
+	if err != nil {
+		// Fail closed: without the pane there is no proof it is at a prompt.
+		return protocol.InjectNone, fmt.Errorf("source: could not safely inspect the terminal before sending: %w", err)
 	}
-	if err := tmux.Send(ctx, session.tmuxName, text); err != nil {
+	if question.DetectAntigravity(pane) != nil {
+		return protocol.InjectNone, fmt.Errorf("source: answer the pending question before sending a message")
+	}
+	// A panel or picker takes keys of its own: a message typed into /model
+	// is a search, into the review panel it is approvals and rejections.
+	if question.AntigravityPanelOpen(pane) {
+		return protocol.InjectNone, fmt.Errorf(
+			"source: a panel is open in Antigravity on the Mac; close it there before sending")
+	}
+	if err := s.keys.typeText(ctx, session.tmuxName, text); err != nil {
 		return protocol.InjectNone, err
 	}
 	return protocol.InjectTmux, nil
@@ -679,26 +1096,21 @@ func (s *AntigravitySource) Interrupt(ctx context.Context, sessionID string) err
 	return tmux.Escape(ctx, session.tmuxName)
 }
 
-// Answer implements Answerer.
-func (s *AntigravitySource) Answer(ctx context.Context, sessionID string, answer protocol.QuestionAnswer) error {
-	session, err := s.session(sessionID)
-	if err != nil {
-		return err
-	}
-	return answerMenu(ctx, s.capturePane, session.tmuxName, session.meta.Question, answer, question.DetectAntigravity)
-}
-
 // CurrentQuestion implements QuestionInspector.
 func (s *AntigravitySource) CurrentQuestion(ctx context.Context, sessionID string) (*protocol.Question, error) {
 	session, err := s.session(sessionID)
 	if err != nil || session.tmuxName == "" {
 		return nil, err
 	}
-	found, err := paneMenu(ctx, s.capturePane, session.tmuxName, question.DetectAntigravity)
-	if err != nil || found == nil {
+	pane, err := s.capturePane(ctx, session.tmuxName)
+	if err != nil {
 		return nil, err
 	}
-	return protocolQuestion(found), nil
+	found, form := question.DetectAntigravityForm(pane)
+	if found == nil {
+		return nil, nil
+	}
+	return antigravityQuestion(found, form), nil
 }
 
 // antigravityOpenConversations asks lsof what each agy process holds open.
@@ -760,6 +1172,11 @@ func parseAntigravityOpenFiles(home string, output []byte) map[int]antigravityPr
 				continue
 			}
 			parts := strings.Split(rel, string(filepath.Separator))
+			if parts[0] == "log" && len(parts) == 2 && strings.HasSuffix(parts[1], ".log") {
+				process.log = path
+				result[pid] = process
+				continue
+			}
 			conversation := ""
 			switch {
 			case parts[0] == "brain" && len(parts) >= 2:

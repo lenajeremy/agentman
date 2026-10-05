@@ -65,6 +65,9 @@ const hookWaitingGrace = 10 * time.Minute
 
 const maxHookQuestionInspectionRetries = 3
 
+// maxRememberedLaunches bounds the launches kept to answer a retried request.
+const maxRememberedLaunches = 128
+
 // A discovery sweep can change hundreds of sessions at once (daemon restart,
 // agent upgrade, large workspace). One full snapshot is both smaller and less
 // bursty than enough individual updates to overflow an otherwise healthy
@@ -111,6 +114,11 @@ type Daemon struct {
 	// sessions the app is actually watching appear here, which is what keeps
 	// idle sessions free.
 	follows map[string]*follow
+	// waiting holds subscriptions to sessions that are not running yet, by
+	// session and then subscriber. Opening an ended session subscribes to it,
+	// and reopening it keeps its id, so the phone never asks again: the tail
+	// starts here, on the sweep that first sees the session live.
+	waiting map[string]map[string]struct{}
 	// actionLocks cover send, answer, and interrupt from validation through the
 	// adapter action. Read-only history requests remain fully concurrent.
 	actionLocks [actionLockStripes]sync.Mutex
@@ -145,6 +153,9 @@ type Daemon struct {
 	// one can be reopened by naming it rather than by the phone describing
 	// it. See resume.go.
 	folders folderMemory
+	// resumes stops one ended session being reopened twice while the first
+	// is still coming up. See resume.go.
+	resumes resumeMemory
 }
 
 // follow is one live tail. It is tracked by pointer identity so that a
@@ -182,6 +193,7 @@ func New(registry *source.Registry, sink Transport) *Daemon {
 		sink:               sink,
 		sessions:           map[string]protocol.Session{},
 		follows:            map[string]*follow{},
+		waiting:            map[string]map[string]struct{}{},
 		turns:              map[string]turnState{},
 		lastAlert:          map[string]time.Time{},
 		hookStates:         map[string]hookState{},
@@ -426,7 +438,20 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 	// lock is released. Sharing the map here creates a real concurrent
 	// iteration/write panic window.
 	d.sessions = cloneSessionMap(current)
+	var arrived []waitingSubscription
+	for sessionID, subscribers := range d.waiting {
+		if _, live := current[sessionID]; !live {
+			continue
+		}
+		for subscriber := range subscribers {
+			arrived = append(arrived, waitingSubscription{session: sessionID, subscriber: subscriber})
+		}
+		delete(d.waiting, sessionID)
+	}
 	d.mu.Unlock()
+	for _, wait := range arrived {
+		_ = d.startFollow(wait.subscriber, wait.session)
+	}
 
 	if initial {
 		_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessions, Sessions: fitSessionList(found)})
@@ -486,16 +511,35 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 		delete(d.turns, id)
 		delete(d.hookStates, id)
 		delete(d.pushedQuestions, id)
+		delete(d.lastAlert, id)
+		// A launch is remembered so a retried request returns the session it
+		// started; once that session has ended, the retry window has too.
+		for clientID, launched := range d.launches {
+			if launched == id {
+				delete(d.launches, clientID)
+			}
+		}
 		if pending, ok := d.pendingTurns[id]; ok {
 			pending.timer.Stop()
 			delete(d.pendingTurns, id)
 		}
 		d.mu.Unlock()
-		d.stopFollowAll(id)
+		d.stopFollowAll(id, true)
 		if !bulk {
 			_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessionGone, SessionID: id})
 		}
 	}
+	// A launch whose session never showed up is never "gone" either. Past a
+	// bound, only launches of sessions still running are worth remembering.
+	d.mu.Lock()
+	if len(d.launches) > maxRememberedLaunches {
+		for clientID, launched := range d.launches {
+			if _, live := current[launched]; !live {
+				delete(d.launches, clientID)
+			}
+		}
+	}
+	d.mu.Unlock()
 }
 
 func cloneSessionMap(sessions map[string]protocol.Session) map[string]protocol.Session {
@@ -521,36 +565,42 @@ func (d *Daemon) announceTurnComplete(ctx context.Context, session protocol.Sess
 		return
 	}
 
-	// A notification saying only "it finished" makes you open the app to learn
-	// anything, which is the thing this is meant to save you.
-	//
-	// System messages count, not just the agent's own words: a turn that died
-	// on a provider error produces no assistant text at all, and reporting that
-	// as a bare "done" is actively misleading — it reads as success. Taking the
-	// last of either kind gets this right without a special case, since the
-	// failure is recorded after whatever content preceded it.
-	preview := ""
-	if page, err := d.registry.Page(ctx, session.ID, "", 6); err == nil {
-		for i := len(page.Messages) - 1; i >= 0; i-- {
-			m := page.Messages[i]
-			if m.Text == "" {
-				continue
-			}
-			if m.Role == protocol.RoleAssistant || m.Role == protocol.RoleSystem {
-				preview = clipPreview(m.Text)
-				break
-			}
-		}
-	}
-
 	event := protocol.Event{
 		Type:        protocol.EvtTurnComplete,
 		SessionID:   session.ID,
 		SessionName: session.Name,
-		Preview:     preview,
+		Preview:     d.latestPreview(ctx, session.ID),
 	}
 	_ = d.sink.Send(event)
 	d.alertTurnComplete(event)
+}
+
+// latestPreview is the closing words of a session's last turn, read from its
+// transcript.
+//
+// A notification saying only "it finished" makes you open the app to learn
+// anything, which is the thing this is meant to save you.
+//
+// System messages count, not just the agent's own words: a turn that died on
+// a provider error produces no assistant text at all, and reporting that as a
+// bare "done" is actively misleading — it reads as success. Taking the last of
+// either kind gets this right without a special case, since the failure is
+// recorded after whatever content preceded it.
+func (d *Daemon) latestPreview(ctx context.Context, sessionID string) string {
+	page, err := d.registry.Page(ctx, sessionID, "", 6)
+	if err != nil {
+		return ""
+	}
+	for i := len(page.Messages) - 1; i >= 0; i-- {
+		m := page.Messages[i]
+		if strings.TrimSpace(m.Text) == "" {
+			continue
+		}
+		if m.Role == protocol.RoleAssistant || m.Role == protocol.RoleSystem {
+			return clipPreview(m.Text)
+		}
+	}
+	return ""
 }
 
 func clipPreview(text string) string {
@@ -753,6 +803,11 @@ func (d *Daemon) finishHookTurn(
 			if stillKnown && stillCurrent {
 				current.Question = question
 				current.State = protocol.StateWaitingInput
+				// Held to the bounds a sweep applies, because this goes to the
+				// phone directly rather than through one.
+				if normalized := normalizeDiscoveredSessions([]protocol.Session{current}); len(normalized) == 1 {
+					current = normalized[0]
+				}
 				d.sessions[event.SessionID] = current
 			}
 			d.mu.Unlock()
@@ -778,9 +833,22 @@ func (d *Daemon) finishHookTurn(
 	if !claimed {
 		return
 	}
+	// Claude's Stop hook carries the closing words and Codex's notify does
+	// too, but not every agent's does. Without them the notification says
+	// only that something finished, so read them from the transcript the
+	// way a completion found by polling does.
+	if event.Preview == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), hookPreviewTimeout)
+		event.Preview = d.latestPreview(ctx, event.SessionID)
+		cancel()
+	}
 	_ = d.sink.Send(event)
 	d.alertTurnComplete(event)
 }
+
+// hookPreviewTimeout bounds the transcript read that fills a hook's missing
+// preview. A late notification is worse than one without the agent's words.
+const hookPreviewTimeout = 2 * time.Second
 
 func (d *Daemon) retryHookQuestionInspection(
 	event protocol.Event,
@@ -861,13 +929,29 @@ func (d *Daemon) HandleFrom(
 ) protocol.Event {
 	if err := validateRequest(req); err != nil {
 		if req.Type == protocol.ReqSendMessage || req.Type == protocol.ReqAnswer ||
-			req.Type == protocol.ReqInterrupt {
+			req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqReviewArtifact ||
+			req.Type == protocol.ReqSetMode || req.Type == protocol.ReqSetModel {
 			return protocol.Event{
 				Type: protocol.EvtSendResult, SessionID: req.SessionID,
 				ClientID: req.ClientID, Status: protocol.StatusFailed, Error: err.Error(),
 			}
 		}
 		return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
+	}
+	// A message's images are collected from the relay before the session is
+	// locked: that can take up to 30 seconds each, and Stop must not wait for
+	// it.
+	var attachmentPaths []string
+	if req.Type == protocol.ReqSendMessage && len(req.UploadIDs) > 0 {
+		saved, saveErr := d.saveAttachments(ctx, req.SessionID, req.UploadIDs)
+		if saveErr != nil {
+			return protocol.Event{
+				Type: protocol.EvtSendResult, SessionID: req.SessionID,
+				ClientID: req.ClientID, Status: protocol.StatusFailed,
+				Error: saveErr.Error(),
+			}
+		}
+		attachmentPaths = saved
 	}
 	if requestMutatesSession(req.Type) {
 		lock := d.actionLock(req.SessionID)
@@ -897,15 +981,18 @@ func (d *Daemon) HandleFrom(
 		return protocol.Event{Type: protocol.EvtFolders, Folders: folders}
 
 	case protocol.ReqDirectorySessions:
-		sessions, err := d.directorySessions(ctx, req.Path)
+		sessions, dir, err := d.directorySessions(ctx, req.Path)
 		if err != nil {
 			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
+		}
+		if sessions == nil {
+			sessions = []protocol.Session{} // an empty folder is [], not absent
 		}
 		// Remembered so resuming one of them names a session the daemon
 		// itself found, rather than trusting a kind and a directory sent up
 		// from the phone.
 		d.folders.remember(sessions)
-		return protocol.Event{Type: protocol.EvtDirectorySessions, Path: req.Path, Sessions: sessions}
+		return protocol.Event{Type: protocol.EvtDirectorySessions, Path: dir, Sessions: sessions}
 
 	case protocol.ReqResumeSession:
 		id, err := d.resumeSession(ctx, req.SessionID)
@@ -996,21 +1083,7 @@ func (d *Daemon) HandleFrom(
 				Error: "daemon: answer the pending question before sending a message",
 			}
 		}
-		text := req.Text
-		if len(req.UploadIDs) > 0 {
-			paths, saveErr := d.saveAttachments(ctx, req.SessionID, req.UploadIDs)
-			if saveErr != nil {
-				return protocol.Event{
-					Type: protocol.EvtSendResult, SessionID: req.SessionID,
-					ClientID: req.ClientID, Status: protocol.StatusFailed,
-					Error: saveErr.Error(),
-				}
-			}
-			// The paths lead, the way a person types them before saying what to
-			// look for. One line, so nothing submits early.
-			text = strings.TrimSpace(strings.Join(paths, " ") + " " + text)
-		}
-		mode, err := d.registry.Inject(ctx, req.SessionID, text)
+		mode, err := d.deliver(ctx, req.SessionID, req.Text, attachmentPaths)
 		result := protocol.Event{
 			Type:      protocol.EvtSendResult,
 			SessionID: req.SessionID,
@@ -1080,6 +1153,18 @@ func (d *Daemon) HandleFrom(
 	case protocol.ReqReadSeenFileChunk:
 		return d.readSeenFileChunk(req)
 
+	case protocol.ReqListArtifacts:
+		return d.listArtifacts(ctx, req)
+
+	case protocol.ReqReadArtifact:
+		return d.readArtifact(ctx, req)
+
+	case protocol.ReqReviewArtifact:
+		return d.reviewArtifact(ctx, req)
+
+	case protocol.ReqSetMode, protocol.ReqSetModel:
+		return d.switchSession(ctx, req)
+
 	default:
 		return protocol.Event{Type: protocol.EvtError, Error: "unsupported request: " + string(req.Type)}
 	}
@@ -1087,7 +1172,11 @@ func (d *Daemon) HandleFrom(
 
 func requestMutatesSession(kind protocol.RequestType) bool {
 	return kind == protocol.ReqSendMessage || kind == protocol.ReqAnswer ||
-		kind == protocol.ReqInterrupt || kind == protocol.ReqStartSession
+		kind == protocol.ReqInterrupt || kind == protocol.ReqStartSession ||
+		// Resume and end start or stop a process. Run concurrently, two resumes
+		// of one session each launched their own.
+		kind == protocol.ReqResumeSession || kind == protocol.ReqEndSession ||
+		kind == protocol.ReqReviewArtifact || kind == protocol.ReqSetMode || kind == protocol.ReqSetModel
 }
 
 func (d *Daemon) actionLock(sessionID string) *sync.Mutex {
@@ -1134,6 +1223,11 @@ const (
 	maxWireDetailBytes  = 16 << 10
 	maxWireOptionBytes  = 1 << 10
 	maxWirePreviewBytes = 2 << 10
+	// A mode is a word or two from a footer. The app accepts 256 characters,
+	// so this is well inside it in any script.
+	maxWireModeBytes = 64
+	// The app accepts counts up to 100,000; nobody reviews more than this.
+	maxWireArtifactCount = 10_000
 )
 
 const wireTruncation = "\n\n[output truncated by agentman]"
@@ -1147,7 +1241,10 @@ func validateRequest(req protocol.Request) error {
 		req.Type == protocol.ReqListFiles || req.Type == protocol.ReqReadFile ||
 		req.Type == protocol.ReqListChanges || req.Type == protocol.ReqFileDiff ||
 		req.Type == protocol.ReqReadSeenFile ||
-		req.Type == protocol.ReqReadFileChunk || req.Type == protocol.ReqReadSeenFileChunk
+		req.Type == protocol.ReqReadFileChunk || req.Type == protocol.ReqReadSeenFileChunk ||
+		req.Type == protocol.ReqListArtifacts || req.Type == protocol.ReqReadArtifact ||
+		req.Type == protocol.ReqReviewArtifact ||
+		req.Type == protocol.ReqSetMode || req.Type == protocol.ReqSetModel
 	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
 		return fmt.Errorf("daemon: invalid session id")
 	}
@@ -1244,6 +1341,26 @@ func validateRequest(req protocol.Request) error {
 			return fmt.Errorf("daemon: invalid question answer")
 		}
 		return nil
+	case protocol.ReqListArtifacts:
+		return nil
+	case protocol.ReqReadArtifact, protocol.ReqReviewArtifact:
+		if !validArtifactName(req.Path) {
+			return fmt.Errorf("daemon: that is not an artifact name")
+		}
+		if len(req.Text) > maxMessageBytes || containsTerminalControl(req.Text) {
+			return fmt.Errorf("daemon: invalid review comment")
+		}
+		return nil
+	case protocol.ReqSetMode:
+		if !switchValue(req.Text, maxWireModeBytes) {
+			return fmt.Errorf("daemon: invalid mode")
+		}
+		return nil
+	case protocol.ReqSetModel:
+		if !switchValue(req.Text, maxWireModelBytes) {
+			return fmt.Errorf("daemon: invalid model")
+		}
+		return nil
 	default:
 		return fmt.Errorf("unsupported request: %s", req.Type)
 	}
@@ -1254,11 +1371,23 @@ func containsTerminalControl(text string) bool {
 		if character == '\n' || character == '\t' {
 			continue
 		}
-		if unicode.IsControl(character) {
+		if unicode.IsControl(character) || isBidiControl(character) {
 			return true
 		}
 	}
 	return false
+}
+
+// isBidiControl reports the bidirectional embeddings, overrides and isolates.
+// They make text display in a different order from the bytes that are typed,
+// so what the phone showed could differ from what the agent received.
+// Unicode files them under Cf (format), which IsControl does not cover. The
+// rest of Cf stays allowed on purpose: the joiners inside emoji sequences,
+// the non-joiner Persian spelling needs, and the tags of subdivision flags
+// are all Cf too.
+func isBidiControl(character rune) bool {
+	return (character >= '\u202A' && character <= '\u202E') ||
+		(character >= '\u2066' && character <= '\u2069')
 }
 
 func (d *Daemon) snapshot() []protocol.Session {
@@ -1287,6 +1416,7 @@ func normalizeDiscoveredSessions(found []protocol.Session) []protocol.Session {
 		session.Name = truncateWireText(session.Name, maxWireNameBytes)
 		session.Cwd = truncateWireText(session.Cwd, maxWirePathBytes)
 		session.Model = truncateWireText(session.Model, maxWireNameBytes)
+		normalizeSessionStatus(&session)
 		if question := session.Question; question != nil {
 			copyQuestion := *question
 			unsupportedReason := ""
@@ -1326,7 +1456,9 @@ func normalizeDiscoveredSessions(found []protocol.Session) []protocol.Session {
 			if unsupportedReason != "" {
 				// A partial decision is worse than no remote decision: hidden checked
 				// options could be silently changed when the visible subset is sent.
-				copyQuestion.Options = nil
+				// Empty, not nil: the app requires the list and dropped the whole
+				// frame a null one arrived in.
+				copyQuestion.Options = []protocol.QuestionOption{}
 				copyQuestion.Custom = false
 				copyQuestion.Multiple = false
 				copyQuestion.Detail = truncateWireText(
@@ -1346,6 +1478,25 @@ func normalizeDiscoveredSessions(found []protocol.Session) []protocol.Session {
 		normalized = append(normalized, session)
 	}
 	return normalized
+}
+
+// normalizeSessionStatus holds an adapter's mode, context and artifact
+// counts to what the app accepts. The app checks every session in a list and
+// refuses the whole list over one bad field, so a parser reading 104% off a
+// footer must not be able to blank the board.
+func normalizeSessionStatus(session *protocol.Session) {
+	session.Mode = truncateUTF8(strings.TrimSpace(session.Mode), maxWireModeBytes, "")
+	if containsTerminalControl(session.Mode) {
+		session.Mode = ""
+	}
+	session.ContextPercent = min(max(session.ContextPercent, 0), 100)
+	session.Artifacts = min(max(session.Artifacts, 0), maxWireArtifactCount)
+	session.ArtifactsToReview = min(max(session.ArtifactsToReview, 0), session.Artifacts)
+	session.Modes = switchList(session.Modes, maxWireModes, maxWireModeBytes)
+	session.Models = switchList(session.Models, maxWireModels, maxWireModelBytes)
+	if session.ModelScope != protocol.ModelScopeSession && session.ModelScope != protocol.ModelScopeDefault {
+		session.ModelScope = ""
+	}
 }
 
 func fitSessionList(sessions []protocol.Session) []protocol.Session {
@@ -1370,8 +1521,14 @@ func (d *Daemon) startFollow(subscriberID, sessionID string) error {
 	}
 	d.mu.Lock()
 	if _, exists := d.sessions[sessionID]; !exists {
+		// Not running (yet): an ended session opened from a folder, which the
+		// phone may be about to reopen. Its tail starts when a sweep sees it.
+		waited := d.waitLocked(subscriberID, sessionID)
 		d.mu.Unlock()
-		return fmt.Errorf("daemon: cannot subscribe to unknown session %q", sessionID)
+		if !waited {
+			return fmt.Errorf("daemon: cannot subscribe to unknown session %q", sessionID)
+		}
+		return nil
 	}
 	if existing, exists := d.follows[sessionID]; exists {
 		existing.subscribers[subscriberID] = struct{}{}
@@ -1429,6 +1586,7 @@ func (d *Daemon) stopFollow(subscriberID, sessionID string) {
 		subscriberID = "local"
 	}
 	d.mu.Lock()
+	d.unwaitLocked(subscriberID, sessionID)
 	handle, exists := d.follows[sessionID]
 	if exists {
 		delete(handle.subscribers, subscriberID)
@@ -1444,10 +1602,18 @@ func (d *Daemon) stopFollow(subscriberID, sessionID string) {
 	}
 }
 
-func (d *Daemon) stopFollowAll(sessionID string) {
+// stopFollowAll ends a session's tail for every subscriber. When the session
+// has only ended, its subscribers keep waiting for it: one reopened from the
+// phone they are still looking at comes back under the same id.
+func (d *Daemon) stopFollowAll(sessionID string, keepWaiting bool) {
 	d.mu.Lock()
 	handle, exists := d.follows[sessionID]
 	delete(d.follows, sessionID)
+	if exists && keepWaiting {
+		for subscriber := range handle.subscribers {
+			d.waitLocked(subscriber, sessionID)
+		}
+	}
 	d.mu.Unlock()
 	if exists {
 		handle.cancel()
@@ -1460,6 +1626,9 @@ func (d *Daemon) DisconnectSubscriber(subscriberID string) {
 		return
 	}
 	d.mu.Lock()
+	for sessionID := range d.waiting {
+		d.unwaitLocked(subscriberID, sessionID)
+	}
 	var cancel []context.CancelFunc
 	for sessionID, handle := range d.follows {
 		delete(handle.subscribers, subscriberID)
@@ -1471,6 +1640,49 @@ func (d *Daemon) DisconnectSubscriber(subscriberID string) {
 	d.mu.Unlock()
 	for _, stop := range cancel {
 		stop()
+	}
+}
+
+// maxWaitingSubscriptions bounds subscriptions held for sessions that are not
+// running. Each is one phone looking at an ended session, so a real count is a
+// handful; the bound only stops a misbehaving client from growing the map.
+const maxWaitingSubscriptions = 256
+
+type waitingSubscription struct {
+	session, subscriber string
+}
+
+// waitLocked records a subscriber waiting for a session to start, reporting
+// false when the bound is reached. d.mu must be held.
+func (d *Daemon) waitLocked(subscriberID, sessionID string) bool {
+	if subscribers, ok := d.waiting[sessionID]; ok {
+		if _, already := subscribers[subscriberID]; already {
+			return true
+		}
+	}
+	total := 0
+	for _, subscribers := range d.waiting {
+		total += len(subscribers)
+	}
+	if total >= maxWaitingSubscriptions {
+		return false
+	}
+	if d.waiting[sessionID] == nil {
+		d.waiting[sessionID] = map[string]struct{}{}
+	}
+	d.waiting[sessionID][subscriberID] = struct{}{}
+	return true
+}
+
+// unwaitLocked forgets one waiting subscription. d.mu must be held.
+func (d *Daemon) unwaitLocked(subscriberID, sessionID string) {
+	subscribers, ok := d.waiting[sessionID]
+	if !ok {
+		return
+	}
+	delete(subscribers, subscriberID)
+	if len(subscribers) == 0 {
+		delete(d.waiting, sessionID)
 	}
 }
 

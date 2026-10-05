@@ -246,9 +246,11 @@ that every screen has an inline submit option.
 - Pending questions suppress completion alerts so one blocked prompt does not
   also appear as a completed turn.
 
-`am install-hooks` updates `~/.claude/settings.json` and
-`~/.codex/config.toml`. Writes are atomic, private, and limited to Agentman's
-entries. Existing user-owned Codex notification commands are preserved.
+`am install-hooks` updates `~/.claude/settings.json`,
+`~/.codex/config.toml` and, when the Antigravity CLI is installed,
+`~/.gemini/config/hooks.json`. Writes are atomic, private, and limited to
+Agentman's entries. Existing user-owned Codex notification commands are
+preserved.
 
 Preview changes before writing configuration:
 

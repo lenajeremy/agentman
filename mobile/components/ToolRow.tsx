@@ -1,5 +1,5 @@
 import Feather from "@expo/vector-icons/Feather";
-import { ComponentProps, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, {
   Easing,
@@ -15,13 +15,13 @@ import { useRouter } from "expo-router";
 
 import { useStyles, useTheme } from "../lib/appearance";
 import { parseDiff } from "../lib/diff";
+import { artifactRowName } from "../lib/artifacts";
 import { workspaceImage, type ImageTarget } from "../lib/imagepath";
 import { Message } from "../lib/protocol";
 import { font, Palette, radius, size, space } from "../lib/theme";
+import { toolIcon } from "../lib/tool-icon";
 import { MotionPressable } from "./MotionPressable";
 import { OutputViewer } from "./OutputViewer";
-
-type FeatherName = ComponentProps<typeof Feather>["name"];
 
 /** Output lines shown before the block asks to be opened fully. */
 const OUTPUT_LINES = 12;
@@ -29,24 +29,6 @@ const OUTPUT_LINES = 12;
 const INLINE_COMMAND = 56;
 /** A fixed-width column for the tile keeps every name on the same left edge. */
 const TILE = 22;
-
-/**
- * A glyph for the kind of work a tool does. Names come straight from each
- * CLI (Claude's "Read", Codex's "shell", OpenCode's "webfetch"), so this
- * matches on meaning rather than exact spelling, and anything unknown gets a
- * neutral mark instead of a wrong one.
- */
-export function toolIcon(name: string): FeatherName {
-  const n = name.toLowerCase();
-  if (/(bash|shell|exec|command|terminal)/.test(n)) return "terminal";
-  if (/(edit|write|patch|notebook)/.test(n)) return "edit-3";
-  if (/(read|view|cat|open)/.test(n)) return "file-text";
-  if (/(grep|glob|search|find|list|ls)/.test(n)) return "search";
-  if (/(web|fetch|http|url|browse)/.test(n)) return "globe";
-  if (/(todo|plan)/.test(n)) return "check-square";
-  if (/(task|agent)/.test(n)) return "git-branch";
-  return "tool";
-}
 
 /**
  * What kind of tool ran and how it ended, in one fixed-size tile.
@@ -336,6 +318,34 @@ function ImageLink({ sessionId, target }: { sessionId: string; target: ImageTarg
 }
 
 /**
+ * A way into the plan or walkthrough an agent wrote, on the Artifacts screen
+ * where it can be read whole and approved.
+ */
+function ArtifactLink({ sessionId, name }: { sessionId: string; name: string }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const router = useRouter();
+  return (
+    <MotionPressable
+      onPress={() =>
+        router.push(
+          `/artifacts/view?session=${encodeURIComponent(sessionId)}&name=${encodeURIComponent(name)}`,
+        )
+      }
+      style={styles.imageLink}
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${name}`}
+    >
+      <Feather name="file-text" size={14} color={color.working} />
+      <Text style={styles.imageLinkText} numberOfLines={1}>
+        Open {name}
+      </Text>
+      <Feather name="chevron-right" size={14} color={color.faint} />
+    </MotionPressable>
+  );
+}
+
+/**
  * One tool call: what ran, and how it ended.
  *
  * The header is exactly one line, open or closed. It used to grow with the
@@ -371,7 +381,8 @@ export function ToolRow({
   // "[image]" — so without this the row is the one place in the app that names
   // a picture and then refuses to show it.
   const image = workspaceImage(tool.name, summary, cwd);
-  const canOpen = Boolean(output) || showCommand || Boolean(image);
+  const artifact = artifactRowName(tool.name, summary);
+  const canOpen = Boolean(output) || showCommand || Boolean(image) || Boolean(artifact);
 
   return (
     <View style={styles.row}>
@@ -404,6 +415,9 @@ export function ToolRow({
           {showCommand ? <CommandBlock text={summary} /> : null}
           {image ? (
             <ImageLink sessionId={message.sessionId} target={image} />
+          ) : null}
+          {artifact ? (
+            <ArtifactLink sessionId={message.sessionId} name={artifact} />
           ) : null}
           {/* "[image]" is the placeholder a parser leaves where it could not
               carry the picture. Once the link above can actually show it, the

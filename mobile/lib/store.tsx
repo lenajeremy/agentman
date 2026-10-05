@@ -45,11 +45,21 @@ import {
   type Dismissals,
 } from "./dismissed";
 import { draftNamespace } from "./draft-policy";
-import { withinFolder } from "./folders";
+import { resumeOnce } from "./resume";
+import { folderContains } from "./folders";
 import { isPushActive, obtainPushToken, setPushActive } from "./push";
+import {
+  PUSH_ACCEPT_MS,
+  initialPushRegistration,
+  pushRegistrationAccepted,
+  pushRegistrationRejected,
+  pushRegistrationSent,
+} from "./push-registration";
 import { clearDraft } from "./drafts";
 import { newFrameId } from "./id";
+import { failPending } from "./pending-requests";
 import {
+  Artifact,
   DaemonEvent,
   Folder,
   Message,
@@ -67,6 +77,8 @@ import {
 import {
   MAX_RETAINED_MESSAGES,
   mergeRetainedMessages,
+  newlyReachable,
+  sessionsToForget,
 } from "./retention";
 
 /** A message the user sent that has not been confirmed yet. */
@@ -186,6 +198,19 @@ interface Store {
     path: string,
     text: string,
   ): Promise<string>;
+  /** The documents a session's agent wrote for you: plans, task lists,
+   *  walkthroughs, screenshots. Empty for an agent that writes none. */
+  listArtifacts(sessionId: string): Promise<Artifact[]>;
+  /** One artifact's contents: text, or an image preview, under the same
+   *  limits as a workspace file. */
+  readArtifact(sessionId: string, name: string): Promise<WorkspaceResult>;
+  /** Approve an artifact the agent asked you to review, or ask for changes.
+   *  Resolves once the Mac has handed the answer to the agent. */
+  reviewArtifact(sessionId: string, name: string, approve: boolean, comment?: string): Promise<void>;
+  /** Switch a session's mode or model to one it offers. Resolves once the
+   *  Mac has seen the agent take the switch; rejects with the reason it did
+   *  not. */
+  switchSession(sessionId: string, kind: "mode" | "model", value: string): Promise<void>;
 }
 
 /** How long a tap on a server waits for the Mac to open its link. The daemon
@@ -295,6 +320,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return true;
   }, []);
 
+  // The Mac is asked once per session while a resume is starting, however
+  // many screens or taps ask: see resumeOnce.
+  const resumeSessionOnce = useMemo(() => resumeOnce((sessionId) =>
+    new Promise<string>((resolve, reject) => {
+      const id = clientRef.current?.send({ type: "resume_session", sessionId });
+      if (!id) {
+        reject(new Error("Not connected to your Mac right now."));
+        return;
+      }
+      const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
+      launchRequests.current.set(id, {
+        resolve: (event) => resolve(event.sessionId ?? sessionId), reject, timer,
+      });
+    })), [settleLaunchRequest]);
+
   const clearLaunchRequests = useCallback(() => {
     for (const [id, request] of launchRequests.current) {
       clearTimeout(request.timer);
@@ -348,13 +388,59 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return retained;
   }, []);
 
+  // Whether the Mac is sending alerts by push decides whether the app
+  // schedules its own. See lib/push-registration.ts.
+  const pushToken = useRef<string | null>(null);
+  const pushRegistration = useRef(initialPushRegistration);
+  const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const registerPushToken = useCallback((client: Client) => {
+    if (!pushToken.current) return;
+    const id = client.registerPush(pushToken.current);
+    pushRegistration.current = pushRegistrationSent(pushRegistration.current, id);
+    setPushActive(pushRegistration.current.active);
+    if (!id) return;
+    if (pushTimer.current) clearTimeout(pushTimer.current);
+    pushTimer.current = setTimeout(() => {
+      pushRegistration.current = pushRegistrationAccepted(pushRegistration.current, id);
+      setPushActive(pushRegistration.current.active);
+    }, PUSH_ACCEPT_MS);
+  }, []);
+
+  const rejectPushRegistration = useCallback((replyTo: string) => {
+    pushRegistration.current = pushRegistrationRejected(pushRegistration.current, replyTo);
+    setPushActive(pushRegistration.current.active);
+  }, []);
+
+  // A session someone has open just became reachable — most often one they
+  // reopened, which keeps its id. Subscribe again, so an older Mac that refused
+  // the first subscription starts its tail, and fetch the newest page, which
+  // covers whatever the agent wrote before the tail began.
+  const followReachable = useCallback((ids: readonly string[]) => {
+    for (const sessionId of ids) {
+      clientRef.current?.subscribe(sessionId);
+      const known = messagesRef.current[sessionId] ?? [];
+      const id = clientRef.current?.send({
+        type: "fetch_messages",
+        sessionId,
+        limit: known.length === 0 ? 40 : CATCH_UP_PAGE,
+      });
+      if (!id) continue;
+      if (known.length === 0) pageRequests.current.set(id, sessionId);
+      else catchUpRequests.current.set(id, { sessionId, sinceTs: newestTimestamp(known), depth: 0 });
+    }
+  }, []);
+
   const handleEvent = useCallback((event: DaemonEvent, replyTo?: string) => {
     switch (event.type) {
       case "sessions": {
         const list = event.sessions ?? [];
         const previous = sessionsRef.current;
         const liveIds = new Set(list.map((session) => session.id));
-        const removedIds = Object.keys(messagesRef.current).filter((id) => !liveIds.has(id));
+        const removedIds = sessionsToForget(
+          Object.keys(messagesRef.current), liveIds, desiredSubscriptions.current,
+        );
+        const keep = (id: string) => liveIds.has(id) || desiredSubscriptions.current.has(id);
         if (removedIds.length > 0) {
           const nextMessages = { ...messagesRef.current };
           for (const id of removedIds) {
@@ -365,10 +451,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             clientRef.current?.forgetSession(id);
           }
           for (const [requestId, sessionId] of pageRequests.current) {
-            if (!liveIds.has(sessionId)) pageRequests.current.delete(requestId);
+            if (!keep(sessionId)) pageRequests.current.delete(requestId);
           }
           for (const [requestId, state] of catchUpRequests.current) {
-            if (!liveIds.has(state.sessionId)) catchUpRequests.current.delete(requestId);
+            if (!keep(state.sessionId)) catchUpRequests.current.delete(requestId);
           }
           messagesRef.current = nextMessages;
           setMessages(nextMessages);
@@ -389,6 +475,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setActions((current) => reconcileAgentActions(current, list));
         sessionsRef.current = list;
         setSessions(list);
+        followReachable(newlyReachable(previous, list, desiredSubscriptions.current));
         // A full list from a connected daemon is the only safe moment to prune:
         // doing it from a session_update would judge every other dismissal
         // against a list of one, and drop them all.
@@ -422,6 +509,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         });
         setActions((current) => reconcileAgentActions(current, next));
         sessionsRef.current = next;
+        followReachable(newlyReachable(previous, [updated], desiredSubscriptions.current));
         setSessions((current) => {
           const index = current.findIndex((s) => s.id === updated.id);
           if (index === -1) return [...current, updated];
@@ -607,12 +695,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       case "folders":
       case "directory_sessions":
       case "session_ended":
-      case "session_started": {
+      case "session_started":
+      case "artifacts": {
         if (replyTo) settleLaunchRequest(replyTo, event);
         break;
       }
 
       case "send_result": {
+        // A review is answered like a send, but it is not a message in the
+        // composer: it settles the request that asked for it, and nothing else.
+        if (replyTo && settleLaunchRequest(replyTo, event)) break;
         if (!event.clientId) break;
         setPending((current) => {
           const sent = current.find((item) => item.clientId === event.clientId);
@@ -633,6 +725,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
 
 	  case "error": {
+		if (replyTo) rejectPushRegistration(replyTo);
 		if (replyTo && settleLaunchRequest(replyTo, event)) break;
 		if (replyTo && settleWorkspaceRequest(replyTo, undefined, event.error)) break;
 		if (replyTo && settleServerRequest(replyTo, undefined, serverErrorMessage(event.error))) break;
@@ -656,7 +749,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 		break;
 	  }
     }
-  }, [mergeSessionMessages, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest]);
+  }, [mergeSessionMessages, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, followReachable, rejectPushRegistration]);
 
   const attach = useCallback(
     (creds: Credentials) => {
@@ -668,6 +761,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         onControl: (control, replyTo) => {
           if (control.type === "daemon_offline" && control.lastSeenAt) {
             setLastSeenAt(control.lastSeenAt);
+          }
+          if (replyTo && (control.type === "daemon_offline" || control.type === "error")) {
+            rejectPushRegistration(replyTo);
           }
           if (replyTo && (control.type === "daemon_offline" || control.type === "error")) {
             settleServerRequest(
@@ -728,18 +824,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         onConnectionChange: (state, online) => {
           setConnection(state);
           setDaemonOnline(online);
+          // Nothing waiting on the Mac can be answered while it is away, so
+          // it is told now rather than when its timer runs out.
+          if (!online) {
+            const message = "Your Mac went offline. Try again when it is back.";
+            const cancel = (id: string) => clientRef.current?.cancelRead(id);
+            failPending(launchRequests.current, message, cancel);
+            failPending(workspaceRequests.current, message, cancel);
+            failPending(serverRequests.current, message, cancel);
+          }
+          // A Mac that was offline never saw the token, and one that restarted
+          // may have lost it, so it is offered again each time the Mac is back.
+          if (online && clientRef.current) registerPushToken(clientRef.current);
         },
       });
       clientRef.current = client;
 
       // Hand the Mac a push token so it can reach this phone once iOS suspends
       // the app. Best-effort: on a simulator, without permission, or in Expo Go
-      // there is no token, and the app falls back to local notifications.
+      // there is no token, and the app falls back to local notifications. It
+      // is sent again whenever the Mac comes online, below.
       void obtainPushToken()
         .then((token) => {
           if (!token || clientRef.current !== client) return;
-          client.registerPush(token);
-          setPushActive(true);
+          pushToken.current = token;
+          registerPushToken(client);
         })
         .catch(() => {});
 
@@ -766,7 +875,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       pendingCatchUps.current.clear();
       client.connect();
     },
-    [handleEvent, clearWorkspaceRequests, clearLaunchRequests, settleLaunchRequest],
+    [handleEvent, clearWorkspaceRequests, clearLaunchRequests, settleLaunchRequest, registerPushToken, rejectPushRegistration],
   );
 
   useEffect(() => {
@@ -812,27 +921,46 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // session stops being discoverable the moment its process exits and no
   // amount of waiting would ever stream it.
   const [folderFilter, setFolderFilterPath] = useState<string | null>(null);
+  // Where the Mac says the chosen folder is. Browsing names a folder relative
+  // to the Mac's home, and live sessions carry absolute paths; see
+  // folderContains.
+  const [folderRoot, setFolderRoot] = useState<string | null>(null);
   const [folderSessions, setFolderSessions] = useState<Session[]>([]);
   const [folderLoading, setFolderLoading] = useState(false);
+  // Only the newest folder request may fill the list: picking folder A then B
+  // used to show A's sessions under B's name when A's reply came last.
+  const folderRequest = useRef<string | null>(null);
+  const folderFilterRef = useRef<string | null>(null);
   const [stateFilter, setStateFilter] = useState<Session["state"] | null>(null);
 
   const loadFolderSessions = useCallback((path: string) => {
     const id = clientRef.current?.send({ type: "directory_sessions", path });
     if (!id) return;
+    folderRequest.current = id;
     setFolderLoading(true);
     const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
     launchRequests.current.set(id, {
       resolve: (event) => {
+        if (folderRequest.current !== id) return;
         setFolderSessions(event.sessions ?? []);
+        // A Mac that predates this echoes the path it was sent.
+        if (event.type === "directory_sessions" && event.path?.startsWith("/")) {
+          setFolderRoot(event.path);
+        }
         setFolderLoading(false);
       },
-      reject: () => setFolderLoading(false),
+      reject: () => {
+        if (folderRequest.current === id) setFolderLoading(false);
+      },
       timer,
     });
   }, [settleLaunchRequest]);
 
   const setFolderFilter = useCallback((path: string | null) => {
+    folderFilterRef.current = path;
+    folderRequest.current = null;
     setFolderFilterPath(path);
+    setFolderRoot(null);
     setFolderSessions([]);
     if (path) loadFolderSessions(path);
     else setFolderLoading(false);
@@ -840,9 +968,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   // A folder's list is a snapshot, so it is re-read when the Mac comes back
   // rather than left showing what was true before the connection dropped.
+  // Only on reconnecting: choosing a folder already asks, and reacting to the
+  // choice here too sent every request twice.
   useEffect(() => {
-    if (daemonOnline && folderFilter) loadFolderSessions(folderFilter);
-  }, [daemonOnline, folderFilter, loadFolderSessions]);
+    if (daemonOnline && folderFilterRef.current) loadFolderSessions(folderFilterRef.current);
+  }, [daemonOnline, loadFolderSessions]);
 
   const visibleSessions = useMemo(() => {
     if (!folderFilter) {
@@ -855,12 +985,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const merged = folderSessions.map((session) => live.get(session.id) ?? session);
     const seen = new Set(merged.map((session) => session.id));
     for (const session of sessions) {
-      if (!seen.has(session.id) && withinFolder(session.cwd, folderFilter)) {
+      if (!seen.has(session.id) && folderContains(folderFilter, folderRoot, session.cwd)) {
         merged.push(session);
       }
     }
     return merged.filter((session) => !isHidden(session, dismissals));
-  }, [sessions, folderSessions, folderFilter, dismissals]);
+  }, [sessions, folderSessions, folderFilter, folderRoot, dismissals]);
 
   const store: Store = useMemo(
     () => ({
@@ -1271,17 +1401,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setStateFilter,
 
       resumeSession(sessionId) {
-        return new Promise<string>((resolve, reject) => {
-          const id = clientRef.current?.send({ type: "resume_session", sessionId });
-          if (!id) {
-            reject(new Error("Not connected to your Mac right now."));
-            return;
-          }
-          const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
-          launchRequests.current.set(id, {
-            resolve: (event) => resolve(event.sessionId ?? sessionId), reject, timer,
-          });
-        });
+        return resumeSessionOnce(sessionId);
       },
 
       endSession(sessionId) {
@@ -1316,8 +1436,96 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           });
         });
       },
+
+      listArtifacts(sessionId) {
+        return new Promise<Artifact[]>((resolve, reject) => {
+          const id = clientRef.current?.send({ type: "list_artifacts", sessionId });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
+          launchRequests.current.set(id, {
+            // A missing list is an empty one; see decodeDaemonEvent.
+            resolve: (event) => resolve(event.artifacts ?? []), reject, timer,
+          });
+        });
+      },
+
+      readArtifact(sessionId, name) {
+        return new Promise<WorkspaceResult>((resolve, reject) => {
+          const id = clientRef.current?.send({ type: "read_artifact", sessionId, path: name });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => {
+            settleWorkspaceRequest(id, undefined, "The Mac took too long to read this artifact.");
+          }, 30_000);
+          workspaceRequests.current.set(id, { resolve, reject, timer });
+        });
+      },
+
+      reviewArtifact(sessionId, name, approve, comment) {
+        return new Promise<void>((resolve, reject) => {
+          const text = comment?.trim();
+          const id = clientRef.current?.send({
+            type: "review_artifact",
+            sessionId,
+            path: name,
+            approve,
+            ...(text ? { text } : {}),
+            clientId: `review-${newFrameId()}`,
+          });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
+          launchRequests.current.set(id, {
+            resolve: (event) => {
+              if (event.type === "send_result" && event.status === "failed") {
+                reject(new Error(event.error || "The Mac could not deliver your review."));
+              } else {
+                resolve();
+              }
+            },
+            reject,
+            timer,
+          });
+        });
+      },
+
+      switchSession(sessionId, kind, value) {
+        return new Promise<void>((resolve, reject) => {
+          const id = clientRef.current?.send({
+            type: kind === "mode" ? "set_mode" : "set_model",
+            sessionId,
+            text: value,
+            clientId: `switch-${newFrameId()}`,
+          });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          // Answered like a send, so it settles on its own reply frame; see
+          // the send_result case above.
+          const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
+          launchRequests.current.set(id, {
+            resolve: (event) => {
+              if (event.type === "send_result" && event.status === "failed") {
+                reject(new Error(event.error || `The Mac could not switch the ${kind}.`));
+              } else {
+                resolve();
+              }
+            },
+            reject,
+            timer,
+          });
+        });
+      },
     }),
-    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, folderFilter, folderLoading, setFolderFilter, folderSessions, stateFilter, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest],
+    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, folderFilter, folderLoading, setFolderFilter, folderSessions, stateFilter, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, resumeSessionOnce],
   );
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;

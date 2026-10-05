@@ -110,6 +110,29 @@ const (
 	// ReqCreateDirectory makes one folder for a new session to start in.
 	// Starting an agent somewhere new should not need a trip to the Mac.
 	ReqCreateDirectory RequestType = "create_directory"
+	// ReqListArtifacts lists the documents a session's agent wrote for the
+	// user (see Artifact), answered with EvtArtifacts. ReqReadArtifact reads
+	// one, named by Path, and is answered with EvtWorkspace of kind
+	// "artifact": text, or an image preview, under the same limits as a
+	// workspace file.
+	//
+	// ReqReviewArtifact answers the agent's request to approve one: Path names
+	// it, Approve says which way, and Text carries the user's comment when
+	// they ask for changes. It delivers a message to the agent, so it is
+	// answered like a send, with EvtSendResult for ClientID.
+	//
+	// Additive: an older daemon rejects the types, and the app only offers
+	// them for a session that reports artifacts at all.
+	ReqListArtifacts  RequestType = "list_artifacts"
+	ReqReadArtifact   RequestType = "read_artifact"
+	ReqReviewArtifact RequestType = "review_artifact"
+	// ReqSetMode and ReqSetModel switch a session's mode or model to Text,
+	// which must be one of the session's Modes or Models. Each is a terminal
+	// action like a send — under the session's lock, in order, refused while
+	// a question is pending — and is answered with EvtSendResult for
+	// ClientID once the adapter has seen the switch take.
+	ReqSetMode  RequestType = "set_mode"
+	ReqSetModel RequestType = "set_model"
 )
 
 // Request is anything the app asks of the daemon.
@@ -150,6 +173,9 @@ type Request struct {
 	UploadIDs []string `json:"uploadIds,omitempty"`
 	// Kind and Path select a local agent and a directory relative to home.
 	Kind Kind `json:"kind,omitempty"`
+	// Approve is the verdict on ReqReviewArtifact: true approves the
+	// artifact, false asks for changes, described by Text.
+	Approve bool `json:"approve,omitempty"`
 }
 
 /* ----------------------------- daemon → app ------------------------------ */
@@ -186,6 +212,8 @@ const (
 	// sending it under that type put a month of finished sessions on the
 	// board and left them there when the filter was cleared.
 	EvtDirectorySessions EventType = "directory_sessions"
+	// EvtArtifacts answers ReqListArtifacts.
+	EvtArtifacts EventType = "artifacts"
 )
 
 // SendStatus is how far a sent message actually got.
@@ -205,7 +233,7 @@ const (
 type Event struct {
 	Type      EventType `json:"type"`
 	SessionID string    `json:"sessionId,omitempty"`
-	Sessions  []Session `json:"sessions,omitempty"`
+	Sessions  []Session `json:"sessions,omitzero"` // empty travels as []; the app requires the array
 	Session   *Session  `json:"session,omitempty"`
 	Messages  []Message `json:"messages,omitempty"`
 	Page      *Page     `json:"page,omitempty"`
@@ -230,6 +258,10 @@ type Event struct {
 	// child that has agents under it, so a phone too old to know the field
 	// simply browses without counts.
 	Folders []Folder `json:"folders,omitempty"`
+	// Artifacts is the answer on EvtArtifacts. omitzero rather than
+	// omitempty, so a session with none says so with [] instead of leaving
+	// the field out.
+	Artifacts []Artifact `json:"artifacts,omitzero"`
 
 	Error string `json:"error,omitempty"`
 }

@@ -37,6 +37,9 @@ type Plan struct {
 	Changed bool
 	// Note carries a caveat worth showing the user.
 	Note string
+	// Delete removes the file instead of writing After, for a config that is
+	// Agentman's entirely (Kiro's agent) rather than a key inside the user's.
+	Delete bool
 	// Err is set when this agent cannot be configured, without preventing
 	// other agents from being configured.
 	Err error
@@ -59,10 +62,15 @@ func (in Installer) Plans(token string, remove bool) ([]Plan, error) {
 		}
 	}
 
-	return []Plan{
+	plans := []Plan{
 		in.planClaude(home, token, remove),
 		in.planCodex(home, token, remove),
-	}, nil
+		in.planCursor(home, remove),
+	}
+	if antigravityInstalled(home) {
+		plans = append(plans, in.planAntigravity(home, remove))
+	}
+	return plans, nil
 }
 
 // Apply writes a plan to disk, keeping a backup of the previous contents.
@@ -91,6 +99,9 @@ func (p Plan) Apply() error {
 	// that interval is caught as well.
 	if err := p.verifySourceUnchanged(); err != nil {
 		return err
+	}
+	if p.Delete {
+		return os.Remove(p.Path)
 	}
 	return writeFileAtomic(p.Path, []byte(p.After), 0o600)
 }

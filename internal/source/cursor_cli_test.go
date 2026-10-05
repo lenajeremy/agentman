@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -61,6 +62,11 @@ func cursorCLIFixture(t *testing.T) (string, *CursorCLISource, string) {
 		t.Fatal(err)
 	}
 	s.listPanes = func(context.Context) ([]tmux.Session, error) { return nil, nil }
+	// No process table: these tests describe chats by recency alone, and the
+	// machine running them may have real Cursor processes of its own.
+	s.processes = func(context.Context) (*tmux.ProcessTree, error) {
+		return nil, errors.New("no process table in tests")
+	}
 	return cwd, s, store
 }
 
@@ -278,7 +284,7 @@ func TestCursorCLIExactOpenStoreMatchesPanesSharingDirectory(t *testing.T) {
 	}
 	source.listPanes = func(context.Context) ([]tmux.Session, error) { return panes, nil }
 	bindings := map[int]string{123: firstStore, 456: secondStore}
-	source.openStores = func(context.Context, []int) map[int]string { return bindings }
+	source.openStores = func(context.Context, []int) (map[int]string, bool) { return bindings, true }
 	source.capturePane = func(context.Context, string) (string, error) { return "", nil }
 	sessions, err := source.Discover(context.Background())
 	if err != nil {
@@ -392,8 +398,10 @@ func TestCursorCLIShellApprovalIsAnswerableAndBlocksNormalSend(t *testing.T) {
     Skip & tell the agent what to do instead (esc or n)
 `
 	q := cursorCLIQuestionFromPane(pane)
-	if q == nil || q.Detail != "sleep 20 in ." || len(q.Options) != 2 ||
-		q.Options[0].Key != "y" || q.Options[1].Key != "n" {
+	// "Skip & tell the agent…" is the custom answer: n opens Cursor's box and
+	// the phone's text goes in it.
+	if q == nil || q.Detail != "sleep 20 in .\n\nNot in allowlist: sleep" || len(q.Options) != 4 ||
+		q.Options[0].Key != "y" || q.Options[3].Key != "n" || !q.Options[3].WithText || q.Custom {
 		t.Fatalf("approval menu not parsed: %+v", q)
 	}
 	s, err := NewCursorCLISource(t.TempDir())

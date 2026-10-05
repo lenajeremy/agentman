@@ -7,6 +7,7 @@
       "cmd/relay/**",
       "internal/relay/**",
       "internal/protocol/**",
+      "internal/tunnel/**",
       "Dockerfile",
       "go.mod",
       "go.sum",

@@ -2,17 +2,19 @@ package source
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
-// Antigravity is the one agent that writes nothing while it thinks.
+// agy writes nothing while it thinks.
 //
-// Claude, Codex and Kiro all append to their transcripts as a reply forms, so
-// following the file streams the answer. agy buffers the whole turn and
-// writes one PLANNER_RESPONSE record, status DONE, when it is finished —
-// measured here at a 1,500-word reply landing as a single 24 KB jump thirty
-// seconds after the prompt. Its chunk shards and its SQLite conversation are
-// written at the same moment, so there is no second file to watch.
+// Claude and Codex append to their transcripts as a reply forms, so following
+// the file streams the answer. agy writes each step only once that step is
+// finished — Kiro, too, writes a reply only once it is complete — so a reply
+// lands as one PLANNER_RESPONSE record, status DONE: measured here at a
+// 1,500-word reply landing as a single 24 KB jump thirty seconds after the
+// prompt. Its chunk shards and its SQLite conversation are written at the same
+// moment, so there is no second file to watch.
 //
 // The reply does exist somewhere while it is being written: the terminal. agy
 // renders to the normal screen rather than the alternate one, so tmux keeps
@@ -43,18 +45,21 @@ const antigravityScrollbackLines = 600
 
 // antigravityPartialReply extracts the reply being written from a pane.
 //
-// Returns "" when the pane shows no turn in progress, which is the common
+// Returns "" when the pane shows no reply in progress, which is the common
 // case and must not produce an empty message.
+//
+// The reply being written is whatever follows the latest thing agy drew at
+// column zero: the echoed prompt ("> …"), or a tool call ("● Bash(ls)"), after
+// which the model writes the reply to that call's result. The reply itself is
+// indented by two spaces, so anything else at column zero below that point —
+// a tool row's wrapped tail, a permission heading, a tip — is interface.
 func antigravityPartialReply(pane string) string {
 	lines := strings.Split(strings.ReplaceAll(pane, "\r\n", "\n"), "\n")
 	lines = dropAntigravityFooter(lines)
 
-	// The turn starts at the last echoed prompt: an unindented "> " at column
-	// zero. The composer at the bottom is a bare ">" with nothing after it,
-	// and has already been dropped with the footer.
 	start := -1
 	for i := len(lines) - 1; i >= 0; i-- {
-		if strings.HasPrefix(lines[i], "> ") {
+		if strings.HasPrefix(lines[i], "> ") || strings.HasPrefix(lines[i], "● ") {
 			start = i
 			break
 		}
@@ -63,23 +68,26 @@ func antigravityPartialReply(pane string) string {
 		return ""
 	}
 
-	// The prompt itself wraps onto indented continuation lines, and ends at
-	// the first blank line or at the reasoning summary, whichever comes
-	// first.
 	body := lines[start+1:]
-	for i, line := range body {
-		if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "▸") {
-			body = body[i:]
-			break
-		}
-		if i == len(body)-1 {
-			body = nil
+	if strings.HasPrefix(lines[start], "> ") {
+		// The prompt itself wraps onto indented continuation lines, and ends
+		// at the first blank line or at the reasoning summary, whichever
+		// comes first.
+		for i, line := range body {
+			if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "▸") {
+				body = body[i:]
+				break
+			}
+			if i == len(body)-1 {
+				body = nil
+			}
 		}
 	}
 
 	kept := make([]string, 0, len(body))
 	skipNext := false
 	for _, line := range body {
+		line = strings.TrimRight(line, " \t")
 		trimmed := strings.TrimSpace(line)
 		if skipNext {
 			// The one-line summary agy prints under "Thought for 8s".
@@ -89,25 +97,58 @@ func antigravityPartialReply(pane string) string {
 			}
 		}
 		switch {
+		case trimmed == "":
+			kept = append(kept, "")
+			continue
 		case strings.HasPrefix(trimmed, "▸"):
 			// "Thought for 8s" and its collapsed summary are chrome, not the
-			// answer; the transcript does not record them either.
+			// answer; the transcript does not record them either. A queued
+			// message is drawn the same way.
 			skipNext = true
 			continue
-		case isAntigravitySpinner(trimmed):
+		case !strings.HasPrefix(line, " "):
+			// Column zero: a tool row's wrapped tail, a heading, a spinner,
+			// "└ Tip:". The reply is always indented.
 			continue
-		case strings.HasPrefix(trimmed, "Tip:"), strings.HasPrefix(trimmed, "└ Tip:"):
+		case isAntigravitySpinner(trimmed),
+			strings.HasPrefix(trimmed, "Tip:"),
+			strings.HasPrefix(trimmed, "⎿"),
+			strings.HasPrefix(trimmed, "┃"),
+			antigravityArtifactNotice.MatchString(trimmed):
 			continue
 		}
 		kept = append(kept, strings.TrimPrefix(line, "  "))
 	}
 
-	return strings.TrimRight(strings.Join(kept, "\n"), " \n")
+	return strings.Trim(strings.Join(kept, "\n"), " \n")
 }
 
-// dropAntigravityFooter removes the composer and status bar pinned below the
-// conversation: a rule, an empty prompt, a rule, and the shortcut line.
+// antigravityArtifactNotice is the line agy right-aligns above the prompt
+// while artifacts wait for review: "1 artifact · /artifact to review".
+var antigravityArtifactNotice = regexp.MustCompile(`^\d+ artifacts? · /artifact to review$`)
+
+// dropAntigravityFooter removes everything from the composer down: its rules,
+// the prompt line, any running-subagent or task rows beneath it, and the
+// status line.
+//
+// The composer is the last line opening with ">" that has a rule directly
+// above it and another rule below it; an echoed prompt has the first but
+// never the second. Without a composer in view — a panel open over it — only
+// the bottom rows are dropped, as before.
 func dropAntigravityFooter(lines []string) []string {
+	for i := len(lines) - 1; i > 0; i-- {
+		if lines[i] != ">" && !strings.HasPrefix(lines[i], "> ") {
+			continue
+		}
+		if !isAntigravityRule(strings.TrimSpace(lines[i-1])) || strings.HasPrefix(lines[i-1], " ") {
+			continue
+		}
+		for _, below := range lines[i+1:] {
+			if isAntigravityRule(strings.TrimSpace(below)) && !strings.HasPrefix(below, " ") {
+				return lines[:i-1]
+			}
+		}
+	}
 	end := len(lines)
 	for end > 0 {
 		trimmed := strings.TrimSpace(lines[end-1])

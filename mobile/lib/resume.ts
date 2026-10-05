@@ -31,8 +31,41 @@ export function canResume(kind: string): boolean {
 export function shouldResume(session: {
   kind: string;
   inject: string;
+  state: string;
 }): boolean {
-  return session.inject === "none" && canResume(session.kind);
+  // Only an ended one. A session can also be unreachable because it is
+  // running in someone's own terminal; reopening that by id started a second
+  // agent beside the first, and the Mac now refuses it anyway.
+  return session.inject === "none" && session.state === "ended" && canResume(session.kind);
+}
+
+/** How long a resume that answered stands in for the session it started. */
+export const RESUME_GRACE_MS = 30_000;
+
+/**
+ * Wrap the request that reopens a session so the Mac is asked once.
+ *
+ * The pane answers within a second, but the agent in it takes a few more to
+ * register, and until then the session still looks ended. Opening the screen
+ * again in that window, or a second tap, asked again and started a second
+ * process. Concurrent calls share one request; one that succeeded stands for
+ * RESUME_GRACE_MS; one that failed may be tried again straight away.
+ */
+export function resumeOnce(
+  start: (sessionId: string) => Promise<string>,
+  now: () => number = Date.now,
+): (sessionId: string) => Promise<string> {
+  const started = new Map<string, { at: number; result: Promise<string> }>();
+  return (sessionId) => {
+    const previous = started.get(sessionId);
+    if (previous && now() - previous.at < RESUME_GRACE_MS) return previous.result;
+    const result = start(sessionId);
+    started.set(sessionId, { at: now(), result });
+    result.catch(() => {
+      if (started.get(sessionId)?.result === result) started.delete(sessionId);
+    });
+    return result;
+  };
 }
 
 /**

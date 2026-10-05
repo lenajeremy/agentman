@@ -1,6 +1,6 @@
 import Feather from "@expo/vector-icons/Feather";
 import * as Haptics from "expo-haptics";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -13,6 +13,7 @@ import {
 import { questionSnapshotIdentity } from "../lib/action-state";
 import { useStyles, useTheme } from "../lib/appearance";
 import { Question, QuestionAnswer, SendStatus } from "../lib/protocol";
+import { MAX_NOTE_CHARS, noteAnswer, submitAnswer, tapAnswer } from "../lib/question-answer";
 import { font, Palette, radius, size, space } from "../lib/theme";
 import { MotionPressable } from "./MotionPressable";
 
@@ -64,6 +65,9 @@ export function QuestionCard({
   const { color } = useTheme();
   const [selected, setSelected] = useState<string[]>(() => terminalOptionKeys(question));
   const [custom, setCustom] = useState("");
+  // The option whose note is open in the one-tap layout, and what is in it.
+  const [noteFor, setNoteFor] = useState<string | null>(null);
+  const [note, setNote] = useState("");
   const identity = useMemo(() => questionSnapshotIdentity(question), [question]);
   const terminalSelection = useMemo(() => terminalOptionKeys(question), [identity]);
   // React state does not update until after an event handler returns. This
@@ -73,6 +77,8 @@ export function QuestionCard({
   useEffect(() => {
     setSelected(terminalSelection);
     setCustom("");
+    setNoteFor(null);
+    setNote("");
     commitLock.current = false;
   }, [identity, terminalSelection]);
   useEffect(() => {
@@ -83,9 +89,8 @@ export function QuestionCard({
 
   const hasPreviews = question.options.some((option) => Boolean(option.preview));
   const advanced = Boolean(question.multiple || question.custom || hasPreviews);
-  const customText = custom.trim();
-  const answerCount = selected.length + (customText ? 1 : 0);
-  const canSubmit = answerCount > 0 && (question.multiple || answerCount === 1);
+  const pendingSubmit = submitAnswer(question, selected, custom, note);
+  const canSubmit = pendingSubmit !== null;
   const submitting = submissionStatus === "sending";
   const submitted = submissionStatus === "delivered";
   const interactionDisabled = disabled || submitting || submitted;
@@ -105,8 +110,17 @@ export function QuestionCard({
   const choose = (key: string) => {
     if (interactionDisabled || commitLock.current) return;
     if (!advanced) {
+      const option = question.options.find((candidate) => candidate.key === key);
+      const answer = option ? tapAnswer(option) : { optionKey: key };
+      if (!answer) {
+        // An option that takes a note opens it rather than answering, and a
+        // second tap puts it away. Every other option is still one tap.
+        setNoteFor((current) => (current === key ? null : key));
+        return;
+      }
+      setNoteFor(null);
       setSelected([key]);
-      commit({ optionKey: key });
+      commit(answer);
       return;
     }
     if (Platform.OS !== "web") {
@@ -122,16 +136,21 @@ export function QuestionCard({
     );
   };
 
+  // A list row has no room for a note, so its buttons stay single taps; the
+  // session, one tap away, is where the note is.
+  const chooseQuick = (key: string) => {
+    if (interactionDisabled || commitLock.current) return;
+    setSelected([key]);
+    commit({ optionKey: key });
+  };
+
+  const sendNote = (key: string) => {
+    setSelected([key]);
+    commit(noteAnswer(key, note));
+  };
+
   const submit = () => {
-    if (!canSubmit) return;
-    if (!question.multiple && selected.length === 1) {
-      commit({ optionKey: selected[0] });
-      return;
-    }
-    commit({
-      optionKeys: selected.length > 0 ? selected : undefined,
-      answerText: customText || undefined,
-    });
+    if (pendingSubmit) commit(pendingSubmit);
   };
 
   // The first affirmative choice is the one most people are reaching for, so
@@ -168,7 +187,7 @@ export function QuestionCard({
                 return (
                   <MotionPressable
                     key={option.key}
-                    onPress={() => choose(option.key)}
+                    onPress={() => chooseQuick(option.key)}
                     disabled={interactionDisabled}
                     style={[
                       styles.quick,
@@ -240,55 +259,87 @@ export function QuestionCard({
           // helps, but nothing is preselected here — a tap is a decision.
           const isSelected = selected.includes(option.key);
           const primary = option.key === primaryKey;
+          // One tap opens the note in the one-tap layout; in the full form it
+          // opens under the chosen option, and Submit sends it.
+          const tapOpensNote = !advanced && option.withText === true;
+          const noteOpen =
+            (tapOpensNote && noteFor === option.key) ||
+            (advanced && !question.multiple && option.withText === true && isSelected);
           return (
-            <MotionPressable
-              key={option.key}
-              onPress={() => choose(option.key)}
-              disabled={interactionDisabled}
-              style={[
-                styles.option,
-                primary && styles.optionPrimary,
-                advanced && isSelected && styles.optionSelected,
-                interactionDisabled && styles.controlDisabled,
-              ]}
-              pressedScale={0.985}
-              accessibilityRole={question.multiple ? "checkbox" : "radio"}
-              accessibilityLabel={
-                option.description ? `${option.label}. ${option.description}` : option.label
-              }
-              accessibilityState={
-                question.multiple
-                  ? { checked: isSelected, disabled: interactionDisabled }
-                  : { selected: isSelected, disabled: interactionDisabled }
-              }
-            >
-              <View style={[styles.optionKeyWrap, primary && styles.optionKeyWrapPrimary]}>
-                <Text style={[styles.optionKey, primary && styles.optionKeyPrimary]}>
-                  {option.key}
-                </Text>
-              </View>
-              <View style={styles.optionCopy}>
-                <Text style={[styles.optionLabel, primary && styles.optionLabelPrimary]}>
-                  {option.label}
-                </Text>
-                {option.description ? (
-                  <Text
-                    style={[styles.optionDescription, primary && styles.optionDescriptionPrimary]}
-                  >
-                    {option.description}
+            <Fragment key={option.key}>
+              <MotionPressable
+                onPress={() => choose(option.key)}
+                disabled={interactionDisabled}
+                style={[
+                  styles.option,
+                  primary && styles.optionPrimary,
+                  advanced && isSelected && styles.optionSelected,
+                  interactionDisabled && styles.controlDisabled,
+                ]}
+                pressedScale={0.985}
+                accessibilityRole={question.multiple ? "checkbox" : "radio"}
+                accessibilityLabel={
+                  option.description ? `${option.label}. ${option.description}` : option.label
+                }
+                accessibilityHint={
+                  tapOpensNote
+                    ? "Opens a note to send with this choice. You can leave it empty."
+                    : undefined
+                }
+                accessibilityState={
+                  question.multiple
+                    ? { checked: isSelected, disabled: interactionDisabled }
+                    : {
+                        selected: isSelected,
+                        disabled: interactionDisabled,
+                        ...(tapOpensNote ? { expanded: noteOpen } : {}),
+                      }
+                }
+              >
+                <View style={[styles.optionKeyWrap, primary && styles.optionKeyWrapPrimary]}>
+                  <Text style={[styles.optionKey, primary && styles.optionKeyPrimary]}>
+                    {option.key}
                   </Text>
-                ) : null}
-              </View>
-              {isSelected ? (
-                <View style={[styles.checkMark, primary && styles.checkMarkPrimary]}>
-                  <Feather
-                    name="check"
-                    size={13}
-                    color={primary ? color.inverse : color.onInverse}
-                  />
                 </View>
+                <View style={styles.optionCopy}>
+                  <Text style={[styles.optionLabel, primary && styles.optionLabelPrimary]}>
+                    {option.label}
+                  </Text>
+                  {option.description ? (
+                    <Text
+                      style={[styles.optionDescription, primary && styles.optionDescriptionPrimary]}
+                    >
+                      {option.description}
+                    </Text>
+                  ) : null}
+                </View>
+                {tapOpensNote ? (
+                  <Feather
+                    name={noteOpen ? "chevron-up" : "message-square"}
+                    size={15}
+                    color={primary ? color.onInverse : color.muted}
+                  />
+                ) : isSelected ? (
+                  <View style={[styles.checkMark, primary && styles.checkMarkPrimary]}>
+                    <Feather
+                      name="check"
+                      size={13}
+                      color={primary ? color.inverse : color.onInverse}
+                    />
+                  </View>
+                ) : null}
+              </MotionPressable>
+              {noteOpen ? (
+                <NoteField
+                  label={option.label}
+                  value={note}
+                  onChange={setNote}
+                  onSend={tapOpensNote ? () => sendNote(option.key) : undefined}
+                  sending={submitting}
+                  disabled={interactionDisabled}
+                />
               ) : null}
-            </MotionPressable>
+            </Fragment>
           );
         })}
         {question.custom ? (
@@ -347,6 +398,78 @@ export function QuestionCard({
           />
         ) : null}
       </View>
+    </View>
+  );
+}
+
+/**
+ * A short note sent with one option: "No — use the staging database instead".
+ *
+ * Under the option it belongs to, in the custom answer's own fill, so it reads
+ * as part of that choice rather than as a second question. Sending it empty
+ * is the plain choice, so opening it never forces anyone to write.
+ */
+function NoteField({
+  label,
+  value,
+  onChange,
+  onSend,
+  sending,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChange(text: string): void;
+  /** Absent in the full form, where Submit sends the note. */
+  onSend?: () => void;
+  sending: boolean;
+  disabled: boolean;
+}) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const hasNote = value.trim().length > 0;
+  return (
+    <View style={styles.note}>
+      <TextInput
+        style={styles.noteInput}
+        value={value}
+        onChangeText={onChange}
+        editable={!disabled}
+        placeholder="Why, or what to do instead (optional)"
+        placeholderTextColor={color.faint}
+        // Wraps as it grows, but Return sends: the agent takes the note on
+        // one line, and a line break would submit half of it.
+        multiline
+        submitBehavior="blurAndSubmit"
+        returnKeyType={onSend ? "send" : "done"}
+        onSubmitEditing={onSend}
+        maxLength={MAX_NOTE_CHARS}
+        autoFocus
+        accessibilityLabel={`Note for ${label}, optional`}
+        accessibilityState={{ disabled }}
+      />
+      {onSend ? (
+        <View style={styles.noteActions}>
+          <Text style={styles.noteHint} numberOfLines={2}>
+            Leave it empty to choose this as it is.
+          </Text>
+          <MotionPressable
+            onPress={onSend}
+            disabled={disabled}
+            style={[styles.noteSend, disabled && styles.submitDisabled]}
+            pressedScale={0.96}
+            accessibilityRole="button"
+            accessibilityLabel={hasNote ? `Send ${label} with your note` : `Send ${label}`}
+            accessibilityState={{ disabled, busy: sending }}
+          >
+            {sending ? (
+              <ActivityIndicator size="small" color={color.onInverse} />
+            ) : (
+              <Text style={styles.noteSendLabel}>Send</Text>
+            )}
+          </MotionPressable>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -544,6 +667,48 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: space.lg,
       paddingVertical: 14,
     },
+    note: {
+      gap: space.sm,
+      padding: space.sm,
+      borderRadius: radius.lg,
+      backgroundColor: c.fill,
+    },
+    noteInput: {
+      minHeight: 44,
+      maxHeight: 120,
+      borderRadius: radius.md,
+      backgroundColor: c.surface,
+      color: c.text,
+      fontFamily: font.sans,
+      fontSize: size.body,
+      paddingHorizontal: space.md,
+      paddingTop: space.sm + 2,
+      paddingBottom: space.sm + 2,
+      textAlignVertical: "top",
+    },
+    noteActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      paddingLeft: space.xs,
+    },
+    noteHint: {
+      flex: 1,
+      fontFamily: font.sans,
+      fontSize: size.label,
+      lineHeight: 16,
+      color: c.muted,
+    },
+    noteSend: {
+      minWidth: 76,
+      minHeight: 40,
+      paddingHorizontal: space.lg,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.inverse,
+    },
+    noteSendLabel: { fontFamily: font.sansBold, fontSize: size.body, color: c.onInverse },
     submit: {
       minHeight: 52,
       alignItems: "center",
