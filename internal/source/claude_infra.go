@@ -187,8 +187,10 @@ func mergeClaudeCandidates(candidates []claudeCandidate) []claudeCandidate {
 			}
 		}
 		for _, c := range group {
-			if c.file.Status == "busy" {
-				winner.file.Status = "busy"
+			// Waiting outranks busy: a process blocked on the user is the
+			// most actionable thing either of them is doing.
+			if c.file.Status == "waiting" || (c.file.Status == "busy" && winner.file.Status != "waiting") {
+				winner.file.Status = c.file.Status
 			}
 			winner.file.UpdatedAt = max(winner.file.UpdatedAt, c.file.UpdatedAt)
 		}

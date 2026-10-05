@@ -226,10 +226,11 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 
 		transcript := s.transcriptPath(file.Cwd, file.SessionID)
 
-		// The registry reports a session blocked on a permission prompt as
-		// "idle", and no hook fires for one — so a pending question is only
-		// visible by reading the terminal. Finding one overrides the state,
-		// because "waiting on you" is the truth and "idle" is not.
+		// Older CLIs report a session blocked on a permission prompt as
+		// "idle" (newer ones say "waiting"), and the registry never carries
+		// the question itself — so its options are only visible by reading
+		// the terminal. Finding one overrides the state, because "waiting on
+		// you" is the truth and "idle" is not.
 		if tmuxName != "" {
 			if detected, err := captureQuestion(ctx, tmuxName); err == nil {
 				s.enrichClaudeQuestion(id, transcript, detected)
@@ -391,6 +392,11 @@ func claudeState(status string) protocol.State {
 		return protocol.StateBusy
 	case "idle":
 		return protocol.StateIdle
+	case "waiting":
+		// Newer CLIs (2.1.289 at least) report a session blocked on a
+		// permission prompt, a question or any other dialog this way, with
+		// what it waits for in waitingFor. Older ones said "idle".
+		return protocol.StateWaitingInput
 	default:
 		// Older CLI versions omit the field; assume idle rather than inventing
 		// activity the user would see as a spinning dot that never settles.
