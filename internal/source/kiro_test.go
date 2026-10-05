@@ -484,3 +484,134 @@ func TestKiroPastListsOnlyEndedConversations(t *testing.T) {
 		t.Error("a session whose lock pid was reused is missing from history")
 	}
 }
+
+// Kiro's status line says the agent, the model and how full the context is,
+// and it is live: a /model switch shows there at once, while the metadata
+// changes only with the next turn. A picker can cover it, and then the
+// metadata is all there is.
+func TestKiroStatusLine(t *testing.T) {
+	cases := []struct {
+		pane    string
+		want    kiroStatus
+		visible bool
+	}{
+		{"kiro_default · auto · ◔ 4%             /work\n\n›  ask a question or describe a task ↵\n" +
+			"                                                             /copy to clipboard\n",
+			kiroStatus{agent: "kiro_default", model: "auto", context: 4, hasContext: true}, true},
+		{"Plan · claude-haiku-4.5 · ◔ 12%         /work\n\n›  ask a question or describe a task ↵  ·  exit plan mode: shift+tab\n",
+			kiroStatus{agent: "Plan", model: "claude-haiku-4.5", context: 12, hasContext: true}, true},
+		{"amhook · auto · ◔ 1%                   /work\n\n›  Kiro is working · 3s · Type to steer · Ctrl+S to queue\n",
+			kiroStatus{agent: "amhook", model: "auto", context: 1, hasContext: true}, true},
+		{kiroModelPickerPane, kiroStatus{}, false},
+	}
+	for _, tc := range cases {
+		got, ok := kiroPaneStatus(tc.pane)
+		if ok != tc.visible || got != tc.want {
+			t.Errorf("kiroPaneStatus(%.40q) = %+v %v, want %+v %v", tc.pane, got, ok, tc.want, tc.visible)
+		}
+	}
+	for agent, want := range map[string]string{"kiro_default": "", "": "", "kiro_planner": "Plan", "Plan": "Plan", "amhook": "amhook"} {
+		if got := kiroMode(agent); got != want {
+			t.Errorf("kiroMode(%q) = %q, want %q", agent, got, want)
+		}
+	}
+}
+
+func TestKiroModelFollowsTheStatusLine(t *testing.T) {
+	home := t.TempDir()
+	pid := os.Getpid()
+	writeKiroSession(t, home, "s", "/work", pid, kiroLinePrompt, kiroLineReply)
+	pane := tmux.Session{Name: "agentman-kiro-1-a", PanePID: pid, Cwd: "/work"}
+	bare := tmux.Session{Name: "agentman-kiro-2-b", PanePID: 71_000, Cwd: "/work"}
+	s := newTestKiro(t, home, fmt.Sprintf("%d 1 kiro-cli-chat\n", pid), pane, bare)
+	s.capturePane = func(context.Context, string) (string, error) {
+		return "kiro_default · claude-haiku-4.5 · ◔ 4%   /work\n\n›  ask a question or describe a task ↵\n", nil
+	}
+	sessions := discoverKiro(t, s)
+	for _, id := range []string{"kiro:tmux-agentman-kiro-1-a", "kiro:tmux-agentman-kiro-2-b"} {
+		if got := sessions[id].Model; got != "claude-haiku-4.5" {
+			t.Errorf("%s model = %q, want the one on its status line", id, got)
+		}
+	}
+	// Covered by a picker: the metadata's model, as of the last turn.
+	s.capturePane = func(context.Context, string) (string, error) { return kiroModelPickerPane, nil }
+	if got := discoverKiro(t, s)["kiro:tmux-agentman-kiro-1-a"].Model; got != "auto" {
+		t.Errorf("model under a picker = %q, want the metadata's", got)
+	}
+}
+
+// writeTurnMarker marks a turn in progress the way Kiro's interface does.
+func writeTurnMarker(t *testing.T, home string, pid int) string {
+	t.Helper()
+	dir := filepath.Join(home, "Library", "Application Support", "kiro-cli", "run", "turn-markers")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, fmt.Sprintf("%d-1791193376270.json", pid))
+	body := fmt.Sprintf(`{"pid":%d,"engine":"v2","session_interface":"interactive_cli","agent_mode":"custom",`+
+		`"turn_started_at_ms":1791193376270,"last_alive_at_ms":1791193376270,"version_full":"2.27.1"}`, pid)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// A session run in a terminal Agentman does not own has only its transcript
+// to go on, and a turn that ends in an error writes nothing more: the
+// transcript said "busy" until the next turn. Kiro's interface marks a turn
+// in progress with a file of its own, removed however the turn ends.
+func TestKiroTurnMarkersSettleTheStateOfASessionWithoutAPane(t *testing.T) {
+	home := t.TempDir()
+	lockPID, interfacePID := os.Getpid(), 60_000
+	path := writeKiroSession(t, home, "s", "/work", lockPID, kiroLinePrompt, kiroLineCall, kiroLineResult)
+	old := time.Now().Add(-time.Minute)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	table := fmt.Sprintf("%d %d /Users/me/.local/bin/kiro-cli-chat\n%d 1 /Users/me/Library/Application Support/kiro-cli/bun\n"+
+		"70000 1 /Users/me/Library/Application Support/kiro-cli/bun\n", lockPID, interfacePID, interfacePID)
+	s := newTestKiro(t, home, table)
+	// No marker has ever been seen for this session: the transcript decides.
+	if err := os.MkdirAll(filepath.Join(home, "Library", "Application Support", "kiro-cli", "run", "turn-markers"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := discoverKiro(t, s)["kiro:s"].State; got != protocol.StateBusy {
+		t.Fatalf("before any marker: state = %s, want the transcript's busy", got)
+	}
+	marker := writeTurnMarker(t, home, interfacePID)
+	if got := discoverKiro(t, s)["kiro:s"].State; got != protocol.StateBusy {
+		t.Fatalf("marked: state = %s, want busy", got)
+	}
+	// The turn ended in an error: no reply, no marker.
+	os.Remove(marker)
+	if got := discoverKiro(t, s)["kiro:s"].State; got != protocol.StateIdle {
+		t.Fatalf("marker gone: state = %s, want idle", got)
+	}
+	// Another session's turn says nothing about this one.
+	writeTurnMarker(t, home, 70_000)
+	if got := discoverKiro(t, s)["kiro:s"].State; got != protocol.StateIdle {
+		t.Fatalf("with another session's marker: state = %s, want idle", got)
+	}
+}
+
+// Kiro removes a turn's marker a moment before it writes the reply that ended
+// it. Calling the turn finished in that moment would announce it before its
+// reply is there to preview.
+func TestKiroMarkedStateWaitsForTheReply(t *testing.T) {
+	now := time.Now()
+	for _, tc := range []struct {
+		transcript protocol.State
+		busy       bool
+		age        time.Duration
+		want       protocol.State
+	}{
+		{protocol.StateIdle, true, time.Minute, protocol.StateBusy},
+		{protocol.StateBusy, false, time.Second, protocol.StateBusy},
+		{protocol.StateBusy, false, time.Minute, protocol.StateIdle},
+		{protocol.StateIdle, false, time.Second, protocol.StateIdle},
+	} {
+		if got := kiroMarkedState(tc.transcript, tc.busy, now.Add(-tc.age), now); got != tc.want {
+			t.Errorf("%+v: got %s", tc, got)
+		}
+	}
+}

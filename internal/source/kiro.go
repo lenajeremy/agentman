@@ -60,6 +60,11 @@ type KiroSource struct {
 
 	mu       sync.RWMutex
 	sessions map[string]kiroSession
+	// markerSeen holds the sessions whose turns have been seen to leave a
+	// turn marker. Only for those does the absence of one mean idle: Kiro's
+	// interface writes them, and a session some other program drives over
+	// ACP may never have one.
+	markerSeen map[string]bool
 
 	// past holds transcripts of sessions that have already exited, found by
 	// Past rather than by a sweep. See pastSessions.
@@ -77,6 +82,7 @@ type kiroSession struct {
 	meta       protocol.Session
 	transcript string
 	tmuxName   string
+	status     kiroStatus
 }
 
 type kiroLock struct {
@@ -97,6 +103,7 @@ type kiroMeta struct {
 			ModelInfo struct {
 				ModelID string `json:"model_id"`
 			} `json:"model_info"`
+			ContextUsagePercentage *float64 `json:"context_usage_percentage"`
 		} `json:"rts_model_state"`
 	} `json:"session_state"`
 }
@@ -170,9 +177,18 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 		}
 	}
 	var processes *tmux.ProcessTree
-	if len(locks) > 0 && s.snapshotProcesses != nil {
-		processes, _ = s.snapshotProcesses(ctx)
+	var markers map[int]bool
+	markersKnown := false
+	if len(locks) > 0 {
+		if s.snapshotProcesses != nil {
+			processes, _ = s.snapshotProcesses(ctx)
+		}
+		markers, markersKnown = s.kiroTurnMarkers()
 	}
+	s.mu.RLock()
+	markerSeen := s.markerSeen
+	s.mu.RUnlock()
+	nextSeen := map[string]bool{}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -220,6 +236,7 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 		}
 
 		transcript := base + ".jsonl"
+		status := kiroMetaStatus(meta)
 		session := protocol.Session{
 			ID:        id,
 			Kind:      protocol.KindKiro,
@@ -229,18 +246,26 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 			State:     s.transcriptState(transcript),
 			Inject:    protocol.InjectNone,
 			StartedAt: parseRFC3339Millis(meta.CreatedAt, lock.StartedAt),
-			Model:     meta.SessionState.RTSModelState.ModelInfo.ModelID,
 			// Kiro's shell tool runs commands under this process, so a dev
 			// server started by the agent descends from it.
 			AgentPID: lock.PID,
 		}
 		session.LastActivityAt = fileMillis(transcript, session.StartedAt)
+		if markersKnown {
+			busy := kiroMarkedBusy(markers, processes, lock.PID)
+			if busy || markerSeen[native] {
+				nextSeen[native] = true
+				session.State = kiroMarkedState(session.State, busy,
+					time.UnixMilli(session.LastActivityAt), time.Now())
+			}
+		}
 		if tmuxName != "" {
 			session.Inject = protocol.InjectTmux
-			s.applyPane(ctx, &session, tmuxName, transcript)
+			status = s.applyPane(ctx, &session, tmuxName, transcript, status)
 		}
+		session.Model = status.model
 		found = append(found, session)
-		next[id] = kiroSession{meta: session, transcript: transcript, tmuxName: tmuxName}
+		next[id] = kiroSession{meta: session, transcript: transcript, tmuxName: tmuxName, status: status}
 	}
 
 	// A pane with no session yet: Kiro is starting, or sitting at its first
@@ -259,39 +284,49 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 			State: protocol.StateIdle, Inject: protocol.InjectTmux,
 			StartedAt: started, LastActivityAt: started, AgentPID: pane.PanePID,
 		}
-		s.applyPane(ctx, &session, pane.Name, "")
+		status := s.applyPane(ctx, &session, pane.Name, "", kiroStatus{})
+		session.Model = status.model
 		found = append(found, session)
-		next[id] = kiroSession{meta: session, tmuxName: pane.Name}
+		next[id] = kiroSession{meta: session, tmuxName: pane.Name, status: status}
 	}
 
 	s.mu.Lock()
 	s.sessions = next
+	s.markerSeen = nextSeen
 	s.mu.Unlock()
 	s.forgetCaches(next)
 	return found, nil
 }
 
-// applyPane refines a session's state from its terminal, which knows more than
-// the transcript: Kiro writes an event only once it is complete, so a reply
-// being streamed, or a tool waiting on approval, looks the same on disk as a
-// turn that has not started.
-func (s *KiroSource) applyPane(ctx context.Context, session *protocol.Session, tmuxName, transcript string) {
+// applyPane refines a session from its terminal, which knows more than the
+// transcript: Kiro writes an event only once it is complete, so a reply being
+// streamed, or a tool waiting on approval, looks the same on disk as a turn
+// that has not started. Its status line also says the model and agent now,
+// where the metadata says them as of the last turn; status is returned with
+// whatever the pane added to it.
+func (s *KiroSource) applyPane(
+	ctx context.Context, session *protocol.Session, tmuxName, transcript string, status kiroStatus,
+) kiroStatus {
 	capture := s.capturePane
 	if capture == nil {
 		capture = tmux.Capture
 	}
 	pane, err := capture(ctx, tmuxName)
 	if err != nil {
-		return
+		return status
+	}
+	if live, ok := kiroPaneStatus(pane); ok {
+		status = live
 	}
 	if found := s.detector(ctx, transcript, session.ID)(pane); found != nil {
 		session.Question = protocolQuestion(found)
 		session.State = protocol.StateWaitingInput
-		return
+		return status
 	}
 	if state, ok := kiroPaneState(pane); ok {
 		session.State = state
 	}
+	return status
 }
 
 // kiroPaneState reads Kiro's input line, which it redraws to say what the
