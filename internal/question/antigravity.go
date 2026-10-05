@@ -351,33 +351,49 @@ func detectAntigravityTrust(lines []string) *Question {
 }
 
 // antigravityPanelHeading opens agy's subagent panel: "  main › research".
-var antigravityPanelHeading = regexp.MustCompile(`^\s*main › \S`)
+var antigravityPanelHeading = regexp.MustCompile(`^\s*main › (\S+)\s*$`)
 
-// AntigravitySubagentPanel reads the subagent panel agy opens on alt+j:
+// AntigravityPanel is agy's subagent panel, as alt+j opens it.
+type AntigravityPanel struct {
+	// Open is whether the panel is on screen at all.
+	Open bool
+	// Agent is the subagent it shows: "research" in "main › research".
+	Agent string
+	// Tool is the request awaiting approval ("Read", "Bash"), "" when none.
+	Tool string
+	// Detail is what the request would do, as the panel words it:
+	// "Read: /Users/me/.zsh_history", "echo subagent-check".
+	Detail string
+	// Options are the choices offered for it. Only while the panel is
+	// choosing: Escape leaves that and shows the request without them, and
+	// a second Escape closes the panel with the request still waiting —
+	// both checked against agy 1.2.17.
+	Options []Option
+}
+
+// ReadAntigravitySubagentPanel reads the subagent panel agy opens on alt+j:
 //
-//	main › research
-//	● running · 28s · 11 steps
+//	main › self
+//	● running · 8s · 3 steps
 //	…
 //	⚠ Approval Required
-//	  > Read
-//	    Read: /Users/me/.zsh_history
+//	  > Bash
+//	    echo subagent-check
 //	    > 1. Yes, approve
 //	      2. No, deny
 //	…
 //	↑/↓ navigate · / select · enter confirm · esc cancel
-//
-// open reports whether the panel is on screen at all, and tool names the
-// request it is asking about ("Read"), empty when none is pending.
-func AntigravitySubagentPanel(pane string) (tool string, open bool) {
+func ReadAntigravitySubagentPanel(pane string) AntigravityPanel {
+	var panel AntigravityPanel
 	lines := strings.Split(strings.TrimRight(pane, "\n"), "\n")
 	for _, line := range lines {
-		if antigravityPanelHeading.MatchString(line) {
-			open = true
+		if match := antigravityPanelHeading.FindStringSubmatch(line); match != nil {
+			panel.Open, panel.Agent = true, match[1]
 			break
 		}
 	}
-	if !open {
-		return "", false
+	if !panel.Open {
+		return panel
 	}
 	for i, line := range lines {
 		if strings.TrimSpace(line) != "⚠ Approval Required" {
@@ -385,16 +401,25 @@ func AntigravitySubagentPanel(pane string) (tool string, open bool) {
 		}
 		for _, next := range lines[i+1:] {
 			trimmed := strings.TrimSpace(next)
-			if trimmed == "" {
-				continue
+			switch {
+			case trimmed == "":
+				if panel.Tool != "" {
+					return panel
+				}
+			case optionLine.MatchString(next):
+				match := optionLine.FindStringSubmatch(next)
+				panel.Options = append(panel.Options, Option{Key: match[2], Label: match[3], Selected: match[1] != ""})
+			case panel.Tool == "":
+				panel.Tool = strings.TrimSpace(strings.TrimPrefix(trimmed, "> "))
+			case panel.Detail == "" && len(panel.Options) == 0:
+				panel.Detail = trimmed
+			default:
+				return panel
 			}
-			if name, ok := strings.CutPrefix(trimmed, "> "); ok && !optionLine.MatchString(next) {
-				return strings.TrimSpace(name), true
-			}
-			break
 		}
+		break
 	}
-	return "", true
+	return panel
 }
 
 // antigravityPanelHint is the key hint at the foot of one of agy's panels or

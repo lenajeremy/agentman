@@ -282,6 +282,15 @@ func TestDetectAntigravitySubagentApproval(t *testing.T) {
 		q.Detail != "Read(~/.zsh_history)" || strings.Join(labels(q.Options), "|") != "Yes, approve|No, deny" {
 		t.Errorf("question %+v", q)
 	}
+	// A command, and the same request again once the panel was closed
+	// without answering it.
+	for _, pane := range []string{"subagent_approval_command", "subagent_approval_after_close"} {
+		q, form := DetectAntigravityForm(agyPane(t, pane))
+		if q == nil || form.Kind != "subagent" || q.Prompt != "self needs approval for Bash" ||
+			q.Detail != "Bash(echo subagent-check)" {
+			t.Errorf("%s: %+v %+v", pane, q, form)
+		}
+	}
 }
 
 // Panels and pickers carry their own key hints but nothing numbered: none of
@@ -298,17 +307,33 @@ func TestDetectAntigravityIgnoresPanelsAndReplies(t *testing.T) {
 	}
 }
 
-// The panel a subagent's request is answered in: open with the request, then
-// still open after it was answered, until it is dismissed.
-func TestAntigravitySubagentPanel(t *testing.T) {
-	if tool, open := AntigravitySubagentPanel(agyPane(t, "subagent_panel")); !open || tool != "Read" {
-		t.Errorf("pending: tool %q open %v", tool, open)
+// The panel a subagent's request is answered in, in each state agy 1.2.17
+// drew it: choosing, viewing after one Escape, and after the answer.
+func TestReadAntigravitySubagentPanel(t *testing.T) {
+	for _, tc := range []struct {
+		pane, agent, tool, detail string
+		options                   string
+	}{
+		{"subagent_panel", "research", "Read", "Read: /Users/me/.zsh_history", "1. Yes, approve|2. No, deny"},
+		{"subagent_panel_command", "self", "Bash", "echo subagent-check", "1. Yes, approve|2. No, deny"},
+		// One Escape: still waiting, no longer offering the choice.
+		{"subagent_panel_viewing", "self", "Bash", "echo subagent-check", ""},
+		{"subagent_panel_answered", "research", "", "", ""},
+	} {
+		panel := ReadAntigravitySubagentPanel(agyPane(t, tc.pane))
+		var options []string
+		for _, option := range panel.Options {
+			options = append(options, option.Key+". "+option.Label)
+		}
+		if !panel.Open || panel.Agent != tc.agent || panel.Tool != tc.tool || panel.Detail != tc.detail ||
+			strings.Join(options, "|") != tc.options {
+			t.Errorf("%s: %+v", tc.pane, panel)
+		}
 	}
-	if tool, open := AntigravitySubagentPanel(agyPane(t, "subagent_panel_answered")); !open || tool != "" {
-		t.Errorf("answered: tool %q open %v", tool, open)
-	}
-	if _, open := AntigravitySubagentPanel(agyPane(t, "subagent_approval")); open {
-		t.Error("the prompt with the request box over it read as the panel")
+	for _, pane := range []string{"subagent_approval", "subagent_approval_after_close", "idle_after_reply"} {
+		if panel := ReadAntigravitySubagentPanel(agyPane(t, pane)); panel.Open {
+			t.Errorf("%s read as the panel: %+v", pane, panel)
+		}
 	}
 }
 

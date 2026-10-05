@@ -296,55 +296,139 @@ func (s *AntigravitySource) answerAntigravityChecks(
 //
 // The request is shown over the parent's prompt but answered in agy's subagent
 // panel: alt+j opens it on the waiting request, a digit answers it, and the
-// panel stays open afterwards until Escape closes it. Escape is pressed only
-// while the panel is visibly open — on the prompt it would cancel the parent's
-// turn.
+// panel stays open afterwards until Escape closes it. Each key is pressed only
+// once the screen shows what the last one should have done:
+//
+//   - the panel open on the same subagent, the same tool and the same
+//     argument the phone was shown, offering exactly "1. Yes, approve" and
+//     "2. No, deny";
+//   - after the digit, no request left waiting.
+//
+// A check that fails stops there and the panel is closed rather than left
+// over the prompt. Escape is safe for that: in the panel it never answers —
+// the first leaves the choice and the second closes the panel with the
+// request still waiting, both checked against agy 1.2.17 — and it is only
+// pressed while the panel is visibly open, because on the prompt it would
+// cancel the parent's turn.
 func (s *AntigravitySource) answerAntigravitySubagent(
 	ctx context.Context, name string, current *question.Question, answer protocol.QuestionAnswer,
 ) error {
 	if answer.OptionKey != "1" && answer.OptionKey != "2" {
 		return errors.New("source: choose one of the listed options")
 	}
+	if strings.TrimSpace(answer.Text) != "" || len(answer.Options) > 0 {
+		return errors.New("source: a subagent's request takes one of its options")
+	}
 	if s.keys.send == nil {
 		return errors.New("source: approve or deny a subagent's request on the Mac for now")
 	}
-	_, tool, _ := strings.Cut(current.Prompt, " needs approval for ")
+	agent, tool, _ := strings.Cut(current.Prompt, " needs approval for ")
+	argument := antigravityRequestArgument(current.Detail, tool)
+
 	if err := s.keys.send(ctx, name, "M-j"); err != nil {
 		// Nothing was pressed: SendKeys checks every key first.
 		return fmt.Errorf("source: approve or deny a subagent's request on the Mac for now (%v)", err)
 	}
-	if err := s.waitForPanel(ctx, name, func(pending string, open bool) bool {
-		return open && pending == tool
+	if err := s.waitForPanel(ctx, name, func(panel question.AntigravityPanel) bool {
+		return antigravityPanelOffers(panel, agent, tool, argument)
 	}); err != nil {
-		return errors.New("source: the subagent's request did not open on the Mac; answer it there")
+		return s.closePanelAfter(ctx, name,
+			"source: the subagent's request on the Mac is not the one shown here; nothing was chosen")
 	}
 	if err := s.keys.press(ctx, name, answer.OptionKey); err != nil {
 		return err
 	}
-	var open bool
-	if err := s.waitForPanel(ctx, name, func(pending string, isOpen bool) bool {
-		open = isOpen
-		return pending == ""
+	answered := question.AntigravityPanel{}
+	if err := s.waitForPanel(ctx, name, func(panel question.AntigravityPanel) bool {
+		answered = panel
+		return !panel.Open || panel.Tool == ""
 	}); err != nil {
-		return errors.New("source: the subagent's request was not answered; check the Mac")
+		return s.closePanelAfter(ctx, name, "source: the subagent's request was not answered; check the Mac")
 	}
-	if !open {
-		return nil
+	if answered.Open {
+		return s.closePanel(ctx, name)
 	}
-	return s.keys.send(ctx, name, "Escape")
+	return nil
 }
 
-// waitForPanel reads the pane until done says the subagent panel is in the
-// state wanted, for about a second.
+// antigravityPanelOffers reports whether the panel shows exactly the request
+// the phone was shown, with exactly agy's two choices for it.
+func antigravityPanelOffers(panel question.AntigravityPanel, agent, tool, argument string) bool {
+	if !panel.Open || panel.Agent != agent || panel.Tool != tool || len(panel.Options) != 2 {
+		return false
+	}
+	if panel.Options[0].Key != "1" || panel.Options[0].Label != "Yes, approve" ||
+		panel.Options[1].Key != "2" || panel.Options[1].Label != "No, deny" {
+		return false
+	}
+	return argument == "" || strings.Contains(panel.Detail, argument)
+}
+
+// antigravityRequestArgument is the part of the request box's call that the
+// panel's wording must also contain. The box draws "Read(~/.zsh_history)" or
+// "Bash(echo subagent-check)", shortening a long one with "…"; the panel says
+// "Read: /Users/me/.zsh_history" or "echo subagent-check". The longest run the
+// box did not shorten, without a leading "~", appears in both.
+func antigravityRequestArgument(detail, tool string) string {
+	inner, ok := strings.CutPrefix(detail, tool+"(")
+	if !ok || !strings.HasSuffix(inner, ")") {
+		return ""
+	}
+	inner = strings.TrimSuffix(inner, ")")
+	longest := ""
+	for _, piece := range strings.FieldsFunc(strings.ReplaceAll(inner, "...", "…"), func(r rune) bool { return r == '…' }) {
+		if piece = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(piece), "~")); len(piece) > len(longest) {
+			longest = piece
+		}
+	}
+	return longest
+}
+
+// closePanelAfter closes the panel, if it is open, and reports failure.
+func (s *AntigravitySource) closePanelAfter(ctx context.Context, name, failure string) error {
+	if err := s.closePanel(ctx, name); err != nil {
+		return fmt.Errorf("%s, and the subagent panel is still open on the Mac (%v)", failure, err)
+	}
+	return errors.New(failure)
+}
+
+// closePanel presses Escape while, and only while, the subagent panel is on
+// screen: twice at most, once to leave a choice and once to close.
+func (s *AntigravitySource) closePanel(ctx context.Context, name string) error {
+	for attempt := 0; attempt < 3; attempt++ {
+		pane, err := s.capturePane(ctx, name)
+		if err != nil {
+			return err
+		}
+		if !question.ReadAntigravitySubagentPanel(pane).Open {
+			return nil
+		}
+		if attempt == 2 {
+			break
+		}
+		if err := s.keys.send(ctx, name, "Escape"); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(antigravityKeyPause):
+		}
+	}
+	return errors.New("source: the subagent panel did not close")
+}
+
+// waitForPanel reads the pane until done accepts the subagent panel on it,
+// for about a second.
 func (s *AntigravitySource) waitForPanel(
-	ctx context.Context, name string, done func(pending string, open bool) bool,
+	ctx context.Context, name string, done func(question.AntigravityPanel) bool,
 ) error {
 	for attempt := 0; attempt < 15; attempt++ {
 		pane, err := s.capturePane(ctx, name)
 		if err != nil {
 			return err
 		}
-		if done(question.AntigravitySubagentPanel(pane)) {
+		if done(question.ReadAntigravitySubagentPanel(pane)) {
 			return nil
 		}
 		select {

@@ -27,6 +27,9 @@ func agyFixture(t *testing.T, name string) string {
 type agyKeys struct {
 	events []string
 	panes  []string
+	// escapes are what Escape shows, one per press: in agy's subagent panel
+	// the first leaves the choice and the second closes the panel.
+	escapes []string
 }
 
 // capture returns the next pane in line, staying on the last one.
@@ -65,6 +68,9 @@ func (k *agyKeys) keys(withSend bool) antigravityKeys {
 	if withSend {
 		keys.send = func(_ context.Context, _ string, names ...string) error {
 			k.events = append(k.events, "send "+strings.Join(names, " "))
+			if len(names) == 1 && names[0] == "Escape" && len(k.escapes) > 0 {
+				k.panes, k.escapes = []string{k.escapes[0]}, k.escapes[1:]
+			}
 			return nil
 		}
 	}
@@ -196,24 +202,30 @@ func TestAntigravitySubmitsTheLastMultiSelectQuestion(t *testing.T) {
 }
 
 // A subagent's request is answered in its panel, which is closed afterwards
-// — with Escape, and only while it is visibly open.
+// — with Escape, and only while it is visibly open. Panes captured from agy
+// 1.2.17: the request box, the panel alt+j opened, and the panel after the
+// answer, which stays open until Escape.
 func TestAntigravityAnswersASubagentInItsPanel(t *testing.T) {
-	s, keys, id := agyAsking(t, agyFixture(t, "subagent-approval"), true)
-	keys.panes = []string{
-		agyFixture(t, "subagent-approval"),
-		agyFixture(t, "subagent-panel"),
-		agyFixture(t, "subagent-panel-answered"),
-	}
-	if err := agyAnswer(t, s, id, protocol.QuestionAnswer{OptionKey: "2"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Join(keys.events, ";"); got != "send M-j;press 2;send Escape" {
-		t.Errorf("keys = %q", got)
+	for _, tc := range []struct {
+		box, panel, key string
+	}{
+		{"subagent-approval", "subagent-panel", "2"},
+		{"subagent-approval-command", "subagent-panel-command", "1"},
+	} {
+		s, keys, id := agyAsking(t, agyFixture(t, tc.box), true)
+		keys.panes = []string{agyFixture(t, tc.box), agyFixture(t, tc.panel), agyFixture(t, "subagent-panel-answered")}
+		keys.escapes = []string{agyFixture(t, "idle-after-reply")}
+		if err := agyAnswer(t, s, id, protocol.QuestionAnswer{OptionKey: tc.key}); err != nil {
+			t.Fatalf("%s: %v", tc.box, err)
+		}
+		if got := strings.Join(keys.events, ";"); got != "send M-j;press "+tc.key+";send Escape" {
+			t.Errorf("%s: keys = %q", tc.box, got)
+		}
 	}
 
 	// The panel closing by itself leaves nothing for Escape to do — and on
 	// the prompt, Escape would cancel the parent's turn.
-	s, keys, id = agyAsking(t, agyFixture(t, "subagent-approval"), true)
+	s, keys, id := agyAsking(t, agyFixture(t, "subagent-approval"), true)
 	keys.panes = []string{
 		agyFixture(t, "subagent-approval"),
 		agyFixture(t, "subagent-panel"),
@@ -224,6 +236,78 @@ func TestAntigravityAnswersASubagentInItsPanel(t *testing.T) {
 	}
 	if got := strings.Join(keys.events, ";"); got != "send M-j;press 1" {
 		t.Errorf("keys = %q", got)
+	}
+}
+
+// Nothing is chosen unless the panel shows the same subagent, tool and
+// argument as the request the phone was shown, offering exactly agy's two
+// choices. On a mismatch the panel is closed — Escape there never answers,
+// the first leaving the choice and the second closing it — and the request is
+// left waiting.
+func TestAntigravityChoosesNothingInAPanelShowingSomethingElse(t *testing.T) {
+	command := agyFixture(t, "subagent-panel-command")
+	for name, panel := range map[string]string{
+		// A different subagent and request altogether.
+		"another request": agyFixture(t, "subagent-panel"),
+		"another argument": strings.Replace(command, "      echo subagent-check\n",
+			"      rm -rf /work/ws1\n", 1),
+		"other choices": strings.Replace(command, "2. No, deny", "2. No, deny and stop the subagent", 1),
+		"another agent": strings.Replace(command, "main › self", "main › research", 1),
+	} {
+		s, keys, id := agyAsking(t, agyFixture(t, "subagent-approval-command"), true)
+		keys.panes = []string{agyFixture(t, "subagent-approval-command"), panel}
+		keys.escapes = []string{agyFixture(t, "subagent-panel-viewing"), agyFixture(t, "subagent-approval-after-close")}
+		err := agyAnswer(t, s, id, protocol.QuestionAnswer{OptionKey: "1"})
+		if err == nil || !strings.Contains(err.Error(), "nothing was chosen") {
+			t.Errorf("%s: err %v", name, err)
+		}
+		if got := strings.Join(keys.events, ";"); got != "send M-j;send Escape;send Escape" {
+			t.Errorf("%s: keys = %q", name, got)
+		}
+	}
+}
+
+// A digit that did not take leaves the request waiting: the panel is closed
+// and the phone told, rather than a second key pressed.
+func TestAntigravityReportsASubagentAnswerThatDidNotTake(t *testing.T) {
+	s, keys, id := agyAsking(t, agyFixture(t, "subagent-approval-command"), true)
+	keys.panes = []string{agyFixture(t, "subagent-approval-command"), agyFixture(t, "subagent-panel-command")}
+	keys.escapes = []string{agyFixture(t, "subagent-panel-viewing"), agyFixture(t, "subagent-approval-after-close")}
+	err := agyAnswer(t, s, id, protocol.QuestionAnswer{OptionKey: "2"})
+	if err == nil || !strings.Contains(err.Error(), "not answered") {
+		t.Errorf("err %v", err)
+	}
+	if got := strings.Join(keys.events, ";"); got != "send M-j;press 2;send Escape;send Escape" {
+		t.Errorf("keys = %q", got)
+	}
+}
+
+// A panel that will not close is said to be open, so the user knows to close
+// it at the Mac — and Escape is never pressed past it.
+func TestAntigravitySaysWhenTheSubagentPanelStaysOpen(t *testing.T) {
+	s, keys, id := agyAsking(t, agyFixture(t, "subagent-approval-command"), true)
+	keys.panes = []string{agyFixture(t, "subagent-approval-command"), agyFixture(t, "subagent-panel")}
+	err := agyAnswer(t, s, id, protocol.QuestionAnswer{OptionKey: "1"})
+	if err == nil || !strings.Contains(err.Error(), "still open on the Mac") {
+		t.Errorf("err %v", err)
+	}
+	if got := strings.Join(keys.events, ";"); got != "send M-j;send Escape;send Escape" {
+		t.Errorf("keys = %q", got)
+	}
+}
+
+func TestAntigravityRequestArgument(t *testing.T) {
+	for detail, want := range map[string]string{
+		"Read(~/.zsh_history)":      "/.zsh_history",
+		"Bash(echo subagent-check)": "echo subagent-check",
+		"Edit(~/.gemini/antigravity-cli/brain/ef...ed0f3cca68b/implementation_plan.md)": "ed0f3cca68b/implementation_plan.md",
+		"Bash":          "",
+		"Read(notes.md": "",
+	} {
+		tool, _, _ := strings.Cut(detail, "(")
+		if got := antigravityRequestArgument(detail, tool); got != want {
+			t.Errorf("%q: %q, want %q", detail, got, want)
+		}
 	}
 }
 
