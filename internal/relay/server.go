@@ -956,8 +956,10 @@ func bearer(r *http.Request) string {
 	if token := bearerHeader(r); token != "" {
 		return token
 	}
-	// Native websocket clients can set headers, but browsers and some mobile
-	// stacks cannot, so a query parameter is accepted as a fallback.
+	// Native websocket clients can set headers, but a browser's WebSocket
+	// cannot, so the app's socket accepts a query parameter as a fallback for
+	// the web build. Every native build since b27e208 sends the header; only
+	// /ws/app uses this, and nothing else should.
 	return r.URL.Query().Get("token")
 }
 
@@ -973,7 +975,9 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 // The token is verified before a single byte of the body is read: an
 // unauthenticated caller must never be able to make this process allocate.
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
-	account, err := VerifyDeviceToken(s.secret, bearer(r))
+	// Header only. Both clients of the upload routes set it, and a token in
+	// the URL ends up in proxy and access logs.
+	account, err := VerifyDeviceToken(s.secret, bearerHeader(r))
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid device token"})
 		return
@@ -1064,7 +1068,8 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 // derives the same account the phone uploaded under, so an upload can only
 // ever reach the Mac it was addressed to.
 func (s *Server) handleUploadFetch(w http.ResponseWriter, r *http.Request) {
-	token := bearer(r)
+	// The daemon's long-lived root token, so header only, as on /ws/daemon.
+	token := bearerHeader(r)
 	if token == "" {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing daemon token"})
 		return

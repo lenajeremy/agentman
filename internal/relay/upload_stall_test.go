@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"net"
 	"net/http"
@@ -95,5 +96,31 @@ func TestAStalledUploadHoldsOnlyWhatItSent(t *testing.T) {
 	if grew := int64(after.HeapInuse) - int64(before.HeapInuse); grew > stalled*maxUploadBytes/4 {
 		t.Errorf("%d one-byte uploads hold %d MiB: the declared length is being allocated up front",
 			stalled, grew>>20)
+	}
+}
+
+// A token in a URL ends up in proxy and access logs. Every client of the
+// upload routes — the app sending an image, the daemon collecting it — sets
+// the Authorization header, so the query-string fallback there was only risk.
+func TestUploadRoutesRefuseATokenInTheURL(t *testing.T) {
+	_, ts := newTestServer(t)
+	device := deviceTokenFor(t, "daemon-token")
+	resp, err := http.Post(ts.URL+"/upload?token="+device, "image/png", bytes.NewReader(pngBytes(t, 4)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("POST /upload?token= answered %s", resp.Status)
+	}
+
+	id := uploadID(t, postUpload(t, ts.URL, device, pngBytes(t, 4)))
+	resp, err = http.Get(ts.URL + "/upload/" + id + "?token=daemon-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("GET /upload/{id}?token= answered %s", resp.Status)
 	}
 }
