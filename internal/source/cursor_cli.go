@@ -114,6 +114,7 @@ type CursorCLISource struct {
 	hooksChecked cursorCLIHooksEntry
 	paneStatus   map[string]cursorCLIPaneStatus
 	storeModes   map[string]cursorCLIModeEntry
+	planHeads    map[string]cursorPlanHeadEntry
 
 	// pending holds messages for chats running outside a managed pane,
 	// delivered by Cursor's stop hook; see cursorCLIHooksInstalled.

@@ -26,13 +26,15 @@ type CursorCLIGroup struct {
 // beside the group is what stops a forwarded method from quietly going
 // missing again.
 var (
-	_ Closer            = (*CursorCLIGroup)(nil)
-	_ History           = (*CursorCLIGroup)(nil)
-	_ Injector          = (*CursorCLIGroup)(nil)
-	_ Answerer          = (*CursorCLIGroup)(nil)
-	_ QuestionInspector = (*CursorCLIGroup)(nil)
-	_ Interrupter       = (*CursorCLIGroup)(nil)
-	_ ResumeNamer       = (*CursorCLIGroup)(nil)
+	_ Closer             = (*CursorCLIGroup)(nil)
+	_ History            = (*CursorCLIGroup)(nil)
+	_ Injector           = (*CursorCLIGroup)(nil)
+	_ Answerer           = (*CursorCLIGroup)(nil)
+	_ QuestionInspector  = (*CursorCLIGroup)(nil)
+	_ Interrupter        = (*CursorCLIGroup)(nil)
+	_ ResumeNamer        = (*CursorCLIGroup)(nil)
+	_ AttachmentInjector = (*CursorCLIGroup)(nil)
+	_ ArtifactSource     = (*CursorCLIGroup)(nil)
 )
 
 func NewCursorCLIGroup(terminal *CursorCLISource, acp *CursorACPSource) *CursorCLIGroup {
@@ -47,6 +49,7 @@ func (s *CursorCLIGroup) Discover(ctx context.Context) ([]protocol.Session, erro
 	legacy, legacyErr := s.terminal.Discover(ctx)
 	managed, managedErr := s.acp.Discover(ctx)
 	all := append(legacy, managed...)
+	s.countPlans(all)
 	if legacyErr != nil {
 		return all, legacyErr
 	}
