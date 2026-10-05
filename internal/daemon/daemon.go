@@ -145,6 +145,9 @@ type Daemon struct {
 	// one can be reopened by naming it rather than by the phone describing
 	// it. See resume.go.
 	folders folderMemory
+	// resumes stops one ended session being reopened twice while the first
+	// is still coming up. See resume.go.
+	resumes resumeMemory
 }
 
 // follow is one live tail. It is tracked by pointer identity so that a
@@ -1095,7 +1098,10 @@ func (d *Daemon) HandleFrom(
 
 func requestMutatesSession(kind protocol.RequestType) bool {
 	return kind == protocol.ReqSendMessage || kind == protocol.ReqAnswer ||
-		kind == protocol.ReqInterrupt || kind == protocol.ReqStartSession
+		kind == protocol.ReqInterrupt || kind == protocol.ReqStartSession ||
+		// Resume and end start or stop a process. Run concurrently, two resumes
+		// of one session each launched their own.
+		kind == protocol.ReqResumeSession || kind == protocol.ReqEndSession
 }
 
 func (d *Daemon) actionLock(sessionID string) *sync.Mutex {

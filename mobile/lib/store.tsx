@@ -45,6 +45,7 @@ import {
   type Dismissals,
 } from "./dismissed";
 import { draftNamespace } from "./draft-policy";
+import { resumeOnce } from "./resume";
 import { withinFolder } from "./folders";
 import { isPushActive, obtainPushToken, setPushActive } from "./push";
 import { clearDraft } from "./drafts";
@@ -294,6 +295,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     else request.reject(new Error("The Mac did not answer. Check Agents before trying again."));
     return true;
   }, []);
+
+  // The Mac is asked once per session while a resume is starting, however
+  // many screens or taps ask: see resumeOnce.
+  const resumeSessionOnce = useMemo(() => resumeOnce((sessionId) =>
+    new Promise<string>((resolve, reject) => {
+      const id = clientRef.current?.send({ type: "resume_session", sessionId });
+      if (!id) {
+        reject(new Error("Not connected to your Mac right now."));
+        return;
+      }
+      const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
+      launchRequests.current.set(id, {
+        resolve: (event) => resolve(event.sessionId ?? sessionId), reject, timer,
+      });
+    })), [settleLaunchRequest]);
 
   const clearLaunchRequests = useCallback(() => {
     for (const [id, request] of launchRequests.current) {
@@ -1271,17 +1287,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setStateFilter,
 
       resumeSession(sessionId) {
-        return new Promise<string>((resolve, reject) => {
-          const id = clientRef.current?.send({ type: "resume_session", sessionId });
-          if (!id) {
-            reject(new Error("Not connected to your Mac right now."));
-            return;
-          }
-          const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
-          launchRequests.current.set(id, {
-            resolve: (event) => resolve(event.sessionId ?? sessionId), reject, timer,
-          });
-        });
+        return resumeSessionOnce(sessionId);
       },
 
       endSession(sessionId) {
@@ -1317,7 +1323,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         });
       },
     }),
-    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, folderFilter, folderLoading, setFolderFilter, folderSessions, stateFilter, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest],
+    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, folderFilter, folderLoading, setFolderFilter, folderSessions, stateFilter, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, resumeSessionOnce],
   );
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;

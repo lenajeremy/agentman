@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/source"
@@ -82,6 +83,21 @@ func (d *Daemon) resumeSession(ctx context.Context, sessionID string) (string, e
 			// OpenCode takes prompts over its API; there is no pane to make.
 			return live.ID, nil
 		}
+		// Running, but somewhere Agentman cannot type: someone's own terminal.
+		// Reopening it by id would start a second agent on the same
+		// conversation beside the first, both writing one transcript.
+		if live.State != protocol.StateEnded {
+			return "", errors.New("daemon: this session is still running in a terminal on your Mac. " +
+				"Reopening it here would start a second copy; reply to it there, or close it there first")
+		}
+	}
+
+	// Reopened a moment ago and still coming up. The pane answers within a
+	// fraction of a second, but the agent in it takes a few more to register,
+	// and until discovery sees it the session still looks ended — so a second
+	// tap, a second phone, or the screen opened again would start it twice.
+	if id, ok := d.resumes.recent(sessionID, time.Now()); ok {
+		return id, nil
 	}
 
 	session, ok := d.resumable(sessionID)
@@ -95,7 +111,55 @@ func (d *Daemon) resumeSession(ctx context.Context, sessionID string) (string, e
 	if session.Cwd == "" {
 		return "", errors.New("daemon: this session did not record a working directory")
 	}
-	return startResumedSession(ctx, session.Kind, session.Cwd, resume)
+	id, err := startResumedSession(ctx, session.Kind, session.Cwd, resume)
+	if err != nil {
+		return "", err
+	}
+	d.resumes.remember(sessionID, id, time.Now())
+	return id, nil
+}
+
+// resumeGrace is how long a resume that has answered stands in for the session
+// it started. Long enough for a cold start to register with discovery, after
+// which the live session answers for itself. A resume whose agent died at
+// once can be tried again when this runs out.
+const resumeGrace = 30 * time.Second
+
+// resumeMemory remembers the resumes that answered within resumeGrace.
+// Requests that change a session are serialized per session (actionLock), so
+// this is consulted and updated by one resume at a time.
+type resumeMemory struct {
+	mu      sync.Mutex
+	started map[string]resumeStart
+}
+
+type resumeStart struct {
+	id string
+	at time.Time
+}
+
+func (m *resumeMemory) recent(sessionID string, now time.Time) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	start, ok := m.started[sessionID]
+	if !ok || now.Sub(start.at) >= resumeGrace {
+		return "", false
+	}
+	return start.id, true
+}
+
+func (m *resumeMemory) remember(sessionID, id string, now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.started == nil {
+		m.started = map[string]resumeStart{}
+	}
+	for key, start := range m.started {
+		if now.Sub(start.at) >= resumeGrace {
+			delete(m.started, key)
+		}
+	}
+	m.started[sessionID] = resumeStart{id: id, at: now}
 }
 
 // resumable finds a session to reopen, live or remembered from a folder.
