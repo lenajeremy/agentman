@@ -936,12 +936,14 @@ func (s *CodexSource) Follow(ctx context.Context, sessionID string, out chan<- [
 	}
 
 	tail := jsonl.NewTail(session.transcript)
+	p := parser.NewCodexParser(sessionID)
 	if !startedWithoutTranscript {
-		if err := tail.SeekToEnd(); err != nil && !os.IsNotExist(err) {
+		// From the end, with the parser primed so a question or call already
+		// open is settled when it finishes. See primeFollow.
+		if err := primeFollow(tail, p.Parse); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
-	p := parser.NewCodexParser(sessionID)
 
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()

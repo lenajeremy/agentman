@@ -465,16 +465,18 @@ func (s *ClaudeSource) Follow(ctx context.Context, sessionID string, out chan<- 
 		return fmt.Errorf("source: unknown claude session %q", sessionID)
 	}
 
-	tail := jsonl.NewTail(session.transcript)
-	// Start at the end: the backlog belongs to Page, which the app calls
-	// separately. Streaming it here would duplicate the whole history.
-	if err := tail.SeekToEnd(); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-
 	// One parser for the lifetime of the follow, so a tool call recorded now
 	// can be settled by a result that arrives seconds later.
 	p := parser.NewClaudeParser(sessionID)
+
+	tail := jsonl.NewTail(session.transcript)
+	// Start at the end: the backlog belongs to Page, which the app calls
+	// separately. Streaming it here would duplicate the whole history. The
+	// parser is primed with the stretch before it first, so a call already
+	// running is settled when its result arrives. See primeFollow.
+	if err := primeFollow(tail, p.Parse); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
