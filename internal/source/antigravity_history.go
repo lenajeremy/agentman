@@ -20,10 +20,16 @@ const maxAntigravityHistoryBytes = 32 << 20
 //
 // Antigravity records no working directory anywhere near its transcripts: a
 // live session's cwd comes from lsof on the running process, which is exactly
-// what an ended session no longer has. What it does keep is history.jsonl, one
-// line per prompt carrying the workspace and the conversation it belonged to,
-// so grouping that log by conversation is what makes a finished session
-// findable at all.
+// what an ended session no longer has. Two records keep one. agy's own index of
+// conversations, conversation_summaries.db, holds every conversation with its
+// workspace and the title its /resume picker shows; history.jsonl, one line
+// per typed prompt, holds the workspace of every conversation a prompt was
+// typed into. The index is preferred and the prompt log fills in what it lacks
+// — conversations from before it, or a database that could not be read.
+//
+// Subagents are conversations too, listed in the index with their parent's id.
+// They are the parent's work, not sessions of their own, and are left out the
+// way Claude's workers are.
 func (s *AntigravitySource) Past(ctx context.Context, dir string, limit int) ([]protocol.Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -34,7 +40,7 @@ func (s *AntigravitySource) Past(ctx context.Context, dir string, limit int) ([]
 	}
 	limit = limitOrDefault(limit)
 
-	conversations := s.antigravityConversations()
+	conversations := s.antigravityConversations(ctx)
 	sort.Slice(conversations, func(i, j int) bool {
 		return conversations[i].lastAt > conversations[j].lastAt
 	})
@@ -53,11 +59,19 @@ func (s *AntigravitySource) Past(ctx context.Context, dir string, limit int) ([]
 		}
 		transcript := s.transcriptPath(conversation.id)
 		id := string(protocol.KindAntigravity) + ":" + conversation.id
-		// The transcript's own first request reads better than the prompt log
-		// when both exist, and matches what a live session is named.
-		name := conversation.firstPrompt
-		if _, err := os.Stat(transcript); err == nil {
-			name = s.conversationName(conversation.id, transcript, conversation.workspace)
+		name := conversation.title
+		if name == "" {
+			// The transcript's own first request reads better than the prompt
+			// log when both exist, and matches what a live session is named.
+			name = conversation.firstPrompt
+			if _, err := os.Stat(transcript); err == nil {
+				name = s.conversationName(conversation.id, transcript, conversation.workspace)
+			}
+		}
+		started := conversation.firstAt
+		if started == 0 {
+			// The presence lock is made when the conversation is.
+			started = fileMillis(filepath.Join(s.root(), "presence", conversation.id+".lock"), conversation.lastAt)
 		}
 		found = append(found, protocol.Session{
 			ID:             id,
@@ -67,7 +81,7 @@ func (s *AntigravitySource) Past(ctx context.Context, dir string, limit int) ([]
 			Cwd:            conversation.workspace,
 			State:          protocol.StateEnded,
 			Inject:         protocol.InjectNone,
-			StartedAt:      conversation.firstAt,
+			StartedAt:      started,
 			LastActivityAt: conversation.lastAt,
 			Model:          model,
 		})
@@ -82,7 +96,7 @@ func (s *AntigravitySource) Directories(ctx context.Context) ([]protocol.Folder,
 		return nil, err
 	}
 	counts := map[string]*protocol.Folder{}
-	for _, conversation := range s.antigravityConversations() {
+	for _, conversation := range s.antigravityConversations(ctx) {
 		if conversation.workspace == "" {
 			continue
 		}
@@ -104,20 +118,52 @@ func (s *AntigravitySource) Directories(ctx context.Context) ([]protocol.Folder,
 	return folders, nil
 }
 
-// antigravityConversation is one conversation as the prompt log describes it.
+// antigravityConversation is one conversation as agy's records describe it.
 type antigravityConversation struct {
 	id          string
 	workspace   string
+	title       string
 	firstPrompt string
 	firstAt     int64
 	lastAt      int64
 }
 
-// antigravityConversations groups history.jsonl by conversation.
+// antigravityConversations merges agy's conversation index with its prompt
+// log. See Past.
+func (s *AntigravitySource) antigravityConversations(ctx context.Context) []antigravityConversation {
+	fromLog := s.loggedConversations()
+	indexed, subagents := s.indexedConversations(ctx)
+	seen := map[string]bool{}
+	found := make([]antigravityConversation, 0, len(indexed)+len(fromLog))
+	logged := map[string]antigravityConversation{}
+	for _, conversation := range fromLog {
+		logged[conversation.id] = conversation
+	}
+	for _, conversation := range indexed {
+		if prompts, ok := logged[conversation.id]; ok {
+			if conversation.workspace == "" {
+				conversation.workspace = prompts.workspace
+			}
+			conversation.firstPrompt = prompts.firstPrompt
+			conversation.firstAt = prompts.firstAt
+			conversation.lastAt = max(conversation.lastAt, prompts.lastAt)
+		}
+		seen[conversation.id] = true
+		found = append(found, conversation)
+	}
+	for _, conversation := range fromLog {
+		if !seen[conversation.id] && !subagents[conversation.id] {
+			found = append(found, conversation)
+		}
+	}
+	return found
+}
+
+// loggedConversations groups history.jsonl by conversation.
 //
 // Lines with no conversation id are slash commands typed outside a
 // conversation — "/model" and the like — and belong to no session.
-func (s *AntigravitySource) antigravityConversations() []antigravityConversation {
+func (s *AntigravitySource) loggedConversations() []antigravityConversation {
 	raw, err := readBoundedFile(filepath.Join(s.root(), "history.jsonl"), maxAntigravityHistoryBytes)
 	if err != nil {
 		return nil

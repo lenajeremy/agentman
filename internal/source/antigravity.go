@@ -95,6 +95,9 @@ type AntigravitySource struct {
 
 	// keys is how text and answers reach a pane. See antigravityKeys.
 	keys antigravityKeys
+
+	// index is agy's conversation index, read for history.
+	index antigravityIndex
 }
 
 // antigravityStateEntry caches the state a transcript's last line implies,
