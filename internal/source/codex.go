@@ -364,10 +364,16 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	// conversation invites typing into the wrong agent.
 	var codexPanes []tmux.Session
 	panesByCwd := map[string][]tmux.Session{}
+	// A pane the daemon opened to resume a thread names it, which settles
+	// its rollout whatever the folder or timing say. See ResumedSession.
+	resumedBy := map[string]tmux.Session{}
 	for _, pane := range panes {
 		if isCodexPane(pane) {
 			codexPanes = append(codexPanes, pane)
 			panesByCwd[pane.Cwd] = append(panesByCwd[pane.Cwd], pane)
+			if thread, ok := codexResumedThread(pane.Name); ok {
+				resumedBy[thread] = pane
+			}
 		}
 	}
 
@@ -415,6 +421,21 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			})
 		}
 	}
+	// A resumed thread whose rollout is older than the live window, because
+	// no new turn has been written yet: folder history already found it.
+	listed := make(map[string]bool, len(rollouts))
+	for _, entry := range rollouts {
+		listed[entry.path] = true
+	}
+	for thread := range resumedBy {
+		path, ok := s.pastRollout(string(protocol.KindCodex) + ":" + thread)
+		if !ok || listed[path] {
+			continue
+		}
+		if info, err := os.Stat(path); err == nil {
+			rollouts = append(rollouts, rollout{path: path, modTime: info.ModTime(), info: info, kept: true})
+		}
+	}
 	sort.Slice(rollouts, func(i, j int) bool {
 		return rollouts[i].modTime.After(rollouts[j].modTime)
 	})
@@ -448,10 +469,16 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			inject := protocol.InjectNone
 			var pane tmux.Session
 			hasPane := false
+			resumer, resumed := resumedBy[meta.threadID()]
 			switch candidates := panesByCwd[meta.Payload.Cwd]; {
+			case resumed:
+				pane, hasPane = resumer, true
 			case len(candidates) == 1:
 				pane = candidates[0]
-				hasPane = codexRolloutCanClaimPane(meta, pane)
+				_, reopening := codexResumedThread(pane.Name)
+				// A pane reopened for a thread is that thread's alone, even
+				// when another conversation in the folder is newer.
+				hasPane = !reopening && codexRolloutCanClaimPane(meta, pane)
 			case len(candidates) > 1:
 				// Shared directory: a pane keeps only the rollout it already
 				// held while it was alone there. A second Codex opening beside
