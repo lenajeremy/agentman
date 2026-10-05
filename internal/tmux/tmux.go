@@ -84,8 +84,16 @@ type Session struct {
 	Created time.Time
 }
 
-// List returns the agentman-owned tmux sessions currently running.
+// List returns the agentman-owned tmux sessions currently running. Within a
+// discovery sweep it is asked once; see WithSweep.
 func List(ctx context.Context) ([]Session, error) {
+	if s := sweepOf(ctx); s != nil {
+		return s.list()
+	}
+	return listSessions(ctx)
+}
+
+func listSessions(ctx context.Context) ([]Session, error) {
 	if !Available() {
 		return nil, ErrNotInstalled
 	}
@@ -305,8 +313,17 @@ type ProcessTree struct {
 
 // SnapshotProcessTree reads the process table with one cancellable ps command.
 // The caller's context is authoritative; commandTimeout is only a second line
-// of defence for callers that supplied no deadline of their own.
+// of defence for callers that supplied no deadline of their own. Within a
+// discovery sweep the table is read once, on the sweep's context; see
+// WithSweep.
 func SnapshotProcessTree(ctx context.Context) (*ProcessTree, error) {
+	if s := sweepOf(ctx); s != nil {
+		return s.processTree()
+	}
+	return snapshotProcessTree(ctx)
+}
+
+func snapshotProcessTree(ctx context.Context) (*ProcessTree, error) {
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/tmux"
 )
 
 // Registry fans discovery out across every adapter and routes per-session
@@ -92,6 +93,12 @@ func (r *Registry) Discover(ctx context.Context) ([]protocol.Session, error) {
 		sources = append(sources, s)
 	}
 	r.mu.RUnlock()
+
+	// The adapters run side by side, and most of them list the tmux panes,
+	// read the process table and capture panes. One sweep asks each of those
+	// once; see tmux.WithSweep. The memory ends with the sweep.
+	ctx, sweepDone := tmux.WithSweep(ctx)
+	defer sweepDone()
 
 	var (
 		mu       sync.Mutex
