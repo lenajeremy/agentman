@@ -111,7 +111,10 @@ func (d *Daemon) resumeSession(ctx context.Context, sessionID string) (string, e
 	if session.Cwd == "" {
 		return "", errors.New("daemon: this session did not record a working directory")
 	}
-	id, err := startResumedSession(ctx, session.Kind, session.Cwd, resume)
+	naming := func(native, pane string) (string, string) {
+		return d.registry.ResumedSession(session.ID, native, pane)
+	}
+	id, err := startResumedSession(ctx, session.Kind, session.Cwd, resume, naming)
 	if err != nil {
 		return "", err
 	}

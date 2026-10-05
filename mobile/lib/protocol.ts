@@ -83,6 +83,14 @@ export interface Session {
   /** What the agent is actually running ("claude-opus-5", "gpt-5.6-sol").
    *  Absent until it has replied once — none of the CLIs record it before. */
   model?: string;
+  /** The agent's own name for its mode ("plan", "accept-edits"). Absent
+   *  means its default. Read-only: switching would change the Mac's default. */
+  mode?: string;
+  /** How full the model's context window is, in whole percent. */
+  contextPercent?: number;
+  /** Documents the agent wrote for the user, and how many await review. */
+  artifacts?: number;
+  artifactsToReview?: number;
   /** Present only while the agent is waiting on a decision. */
   question?: Question;
   /** Web servers the agent has started. Absent from daemons that predate it. */
@@ -98,6 +106,25 @@ export interface Server {
   title?: string;
   /** The public preview link while the server is being shared. */
   link?: string;
+}
+
+/**
+ * A document an agent wrote for the user apart from the conversation: a plan,
+ * a task list, a walkthrough, a screenshot.
+ */
+export interface Artifact {
+  /** A plain file name, never a path; what read_artifact takes as `path`. */
+  name: string;
+  /** "plan" | "task" | "walkthrough" | "spec" | "image" | "video" | "file",
+   *  open-ended so a newer agent's kind still lists. */
+  kind: string;
+  title?: string;
+  summary?: string;
+  updatedAt: number;
+  size: number;
+  mime?: string;
+  /** The agent asked for approval and has had no answer since it changed. */
+  review?: boolean;
 }
 
 export interface Tool {
@@ -160,7 +187,10 @@ export type RequestType =
   | "directory_sessions"
   | "resume_session"
   | "end_session"
-  | "create_directory";
+  | "create_directory"
+  | "list_artifacts"
+  | "read_artifact"
+  | "review_artifact";
 
 export interface Request {
   type: RequestType;
@@ -187,6 +217,8 @@ export interface Request {
   uploadIds?: string[];
   /** Agent to launch; path is relative to the Mac user's home directory. */
   kind?: AgentKind;
+  /** The verdict on review_artifact; `text` carries the comment. */
+  approve?: boolean;
 }
 
 export type EventType =
@@ -205,7 +237,8 @@ export type EventType =
   | "session_started"
   | "folders"
   | "directory_sessions"
-  | "session_ended";
+  | "session_ended"
+  | "artifacts";
 
 export interface WorkspaceEntry { name: string; directory: boolean; size?: number }
 export interface WorkspaceChange {
@@ -231,7 +264,7 @@ export interface ImageSource {
 }
 
 export interface WorkspaceResult {
-  kind: "directory" | "file" | "changes" | "diff" | "chunk";
+  kind: "directory" | "file" | "changes" | "diff" | "chunk" | "artifact";
   sessionId: string;
   path?: string;
   entries?: WorkspaceEntry[];
@@ -276,6 +309,8 @@ export interface DaemonEvent {
   /** Agent counts. The whole answer on "folders"; alongside `directories` on
    *  a browse listing, one entry per child that has agents under it. */
   folders?: Folder[];
+  /** The answer on "artifacts"; [] when the session has none. */
+  artifacts?: Artifact[];
 }
 
 /** One directory agents have run in.
@@ -364,7 +399,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     "sessions", "session_update", "session_gone", "messages", "page",
     "turn_complete", "send_result", "server_opened", "server_stopped", "error", "workspace",
     "directories", "session_started", "folders", "directory_sessions",
-    "session_ended",
+    "session_ended", "artifacts",
   ] as const)) return null;
 
   switch (value.type) {
@@ -432,8 +467,42 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     case "session_ended":
       if (!boundedString(value.sessionId, 512, true)) return null;
       break;
+    case "artifacts":
+      // A missing list is an empty one: the field is new, and [] and absent
+      // say the same thing to a screen that lists them.
+      if (!boundedString(value.sessionId, 512, true) ||
+          (value.artifacts !== undefined && !boundedArray(value.artifacts, MAX_ARTIFACTS, isArtifact))) {
+        return null;
+      }
+      break;
   }
   return value as unknown as DaemonEvent;
+}
+
+/** More than the daemon ever sends, so a cap there is never a refusal here. */
+const MAX_ARTIFACTS = 500;
+
+/**
+ * An artifact name is echoed back to the Mac as `path`, so it has to be a
+ * plain name: anything with a separator or a parent reference is refused here
+ * rather than trusted to the daemon's own check.
+ */
+export function isArtifactName(value: unknown): value is string {
+  return boundedString(value, 255, true) &&
+    !value.includes("/") && !value.includes("\\") && !value.includes("..") &&
+    !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function isArtifact(value: unknown): value is Artifact {
+  return isRecord(value) &&
+    isArtifactName(value.name) &&
+    boundedString(value.kind, 64, true) &&
+    optionalBoundedString(value.title, 2048) &&
+    optionalBoundedString(value.summary, 16 * 1024) &&
+    finiteNumber(value.updatedAt) && value.updatedAt >= 0 &&
+    finiteNumber(value.size) && value.size >= 0 &&
+    optionalBoundedString(value.mime, 128) &&
+    (value.review === undefined || typeof value.review === "boolean");
 }
 
 function optionalFolders(value: unknown): boolean {
@@ -468,7 +537,8 @@ function isImageSource(value: unknown): value is ImageSource {
 }
 
 function isWorkspaceResult(value: unknown): value is WorkspaceResult {
-  if (!isRecord(value) || !isOneOf(value.kind, ["directory", "file", "changes", "diff", "chunk"] as const) ||
+  if (!isRecord(value) ||
+      !isOneOf(value.kind, ["directory", "file", "changes", "diff", "chunk", "artifact"] as const) ||
       !boundedString(value.sessionId, 512, true) || !optionalBoundedString(value.path, 4096) ||
       !optionalBoundedString(value.text, 256 * 1024) ||
       !optionalBoundedString(value.image, 3 * 1024 * 1024) ||
@@ -512,6 +582,10 @@ function isSession(value: unknown): value is Session {
     isOneOf(value.inject, ["api", "tmux", "hook", "none"] as const) &&
     finiteNumber(value.startedAt) && finiteNumber(value.lastActivityAt) &&
     optionalBoundedString(value.model, 4096) &&
+    optionalBoundedString(value.mode, 256) &&
+    (value.contextPercent === undefined || isPercent(value.contextPercent)) &&
+    (value.artifacts === undefined || isCount(value.artifacts)) &&
+    (value.artifactsToReview === undefined || isCount(value.artifactsToReview)) &&
     (value.question === undefined || isQuestion(value.question)) &&
     (value.servers === undefined || boundedArray(value.servers, 64, isServer));
 }
@@ -521,6 +595,14 @@ function isServer(value: unknown): value is Server {
     optionalBoundedString(value.command, 256) &&
     optionalBoundedString(value.title, 1024) &&
     (value.link === undefined || isLink(value.link));
+}
+
+function isPercent(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100;
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100_000;
 }
 
 function isPort(value: unknown): value is number {

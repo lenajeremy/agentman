@@ -171,13 +171,18 @@ func agentCommand(kind protocol.Kind) (command, nameKind string) {
 	return command, nameKind
 }
 
+// resumeNaming lets the adapter that owns a session name its resume: the pane
+// it opens in and the id discovery will publish for it (see
+// source.ResumeNamer). Nil, or an empty id, keeps the daemon's own naming.
+type resumeNaming func(native, defaultPane string) (pane, sessionID string)
+
 // startResumedSession reopens an existing session in a pane of its own.
 //
 // Unlike a launch, nothing is being created: the agent is pointed at a
 // transcript it already wrote, in the directory it wrote it in. The prompt is
 // the user's to type once it is up, which is why none is sent here.
 func startResumedSession(
-	ctx context.Context, kind protocol.Kind, dir string, resume []string,
+	ctx context.Context, kind protocol.Kind, dir string, resume []string, naming resumeNaming,
 ) (string, error) {
 	command, nameKind := agentCommand(kind)
 	binary, err := exec.LookPath(command)
@@ -204,6 +209,13 @@ func startResumedSession(
 	// exists until that rollout appears — the same rule a fresh launch uses.
 	id := ""
 	native := resume[len(resume)-1]
+	// The adapter is asked first, because an adapter that keys live sessions
+	// on their pane is the only place that knows what discovery will call
+	// this one. The switch is what an adapter that does not say gets.
+	namedPane, namedID := "", ""
+	if naming != nil {
+		namedPane, namedID = naming(native, name)
+	}
 	switch kind {
 	case protocol.KindClaude:
 		// The UUID in the pane name lets discovery bind the pane before
@@ -221,14 +233,42 @@ func startResumedSession(
 	default:
 		return "", errors.New("daemon: this agent cannot be reopened by id")
 	}
-
-	if err := tmux.Launch(ctx, name, dir, argv); err != nil {
-		return "", err
+	if validResumeName(kind, namedPane, namedID) {
+		name, id = namedPane, namedID
 	}
-	if err := paneSurvivedLaunch(ctx, name, command); err != nil {
+
+	if err := startResumedPane(ctx, name, dir, argv, command); err != nil {
 		return "", err
 	}
 	return id, nil
+}
+
+// startResumedPane opens the pane a resume runs in and checks the agent stayed
+// in it. A variable so a test can see what a resume would open without
+// starting tmux.
+var startResumedPane = func(ctx context.Context, name, dir string, argv []string, command string) error {
+	if err := tmux.Launch(ctx, name, dir, argv); err != nil {
+		return err
+	}
+	return paneSurvivedLaunch(ctx, name, command)
+}
+
+// validResumeName accepts an adapter's naming of a resume only when the pane
+// is one of ours and plain enough to be a tmux target as written — a "." or
+// ":" would make tmux read part of it as a window or pane — and the id is one
+// of this agent's.
+func validResumeName(kind protocol.Kind, pane, id string) bool {
+	if id == "" || len(id) > maxSessionIDBytes || !strings.HasPrefix(id, string(kind)+":") ||
+		len(pane) <= len(tmux.Prefix) || len(pane) > 256 || !strings.HasPrefix(pane, tmux.Prefix) {
+		return false
+	}
+	for _, character := range pane {
+		if !(character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' ||
+			character >= '0' && character <= '9' || character == '-' || character == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 // paneSurvivedLaunch reports whether the pane is still there a moment later.

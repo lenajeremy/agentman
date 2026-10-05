@@ -1,5 +1,5 @@
 import Feather from "@expo/vector-icons/Feather";
-import { ComponentProps, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, {
   Easing,
@@ -18,10 +18,9 @@ import { parseDiff } from "../lib/diff";
 import { workspaceImage, type ImageTarget } from "../lib/imagepath";
 import { Message } from "../lib/protocol";
 import { font, Palette, radius, size, space } from "../lib/theme";
+import { toolIcon } from "../lib/tool-icon";
 import { MotionPressable } from "./MotionPressable";
 import { OutputViewer } from "./OutputViewer";
-
-type FeatherName = ComponentProps<typeof Feather>["name"];
 
 /** Output lines shown before the block asks to be opened fully. */
 const OUTPUT_LINES = 12;
@@ -29,24 +28,6 @@ const OUTPUT_LINES = 12;
 const INLINE_COMMAND = 56;
 /** A fixed-width column for the tile keeps every name on the same left edge. */
 const TILE = 22;
-
-/**
- * A glyph for the kind of work a tool does. Names come straight from each
- * CLI (Claude's "Read", Codex's "shell", OpenCode's "webfetch"), so this
- * matches on meaning rather than exact spelling, and anything unknown gets a
- * neutral mark instead of a wrong one.
- */
-export function toolIcon(name: string): FeatherName {
-  const n = name.toLowerCase();
-  if (/(bash|shell|exec|command|terminal)/.test(n)) return "terminal";
-  if (/(edit|write|patch|notebook)/.test(n)) return "edit-3";
-  if (/(read|view|cat|open)/.test(n)) return "file-text";
-  if (/(grep|glob|search|find|list|ls)/.test(n)) return "search";
-  if (/(web|fetch|http|url|browse)/.test(n)) return "globe";
-  if (/(todo|plan)/.test(n)) return "check-square";
-  if (/(task|agent)/.test(n)) return "git-branch";
-  return "tool";
-}
 
 /**
  * What kind of tool ran and how it ended, in one fixed-size tile.
