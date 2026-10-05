@@ -2,7 +2,9 @@ package source
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -299,6 +301,162 @@ func (r *Registry) Interrupt(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("source: %s sessions cannot be interrupted remotely", s.Kind())
 	}
 	return interrupter.Interrupt(ctx, sessionID)
+}
+
+// ArtifactSource is implemented by adapters whose agent writes documents for
+// the user apart from the conversation: Antigravity's implementation plan,
+// task list and walkthrough, a screenshot it took, Kiro's specs.
+//
+// Names are the adapter's to mint and to confine. The daemon refuses a name
+// from the phone that holds a separator or "..", but only the adapter knows
+// where its artifacts live, so OpenArtifact must open nothing outside that
+// place: no subdirectory, and no symlink (check with Lstat, not Stat).
+type ArtifactSource interface {
+	// Artifacts lists a session's artifacts, newest first.
+	Artifacts(ctx context.Context, sessionID string) ([]protocol.Artifact, error)
+	// OpenArtifact opens one for reading. The caller closes the file.
+	OpenArtifact(ctx context.Context, sessionID, name string) (*os.File, os.FileInfo, error)
+	// ReviewArtifact answers the agent's request to approve one, in whatever
+	// form the CLI itself takes that answer — usually a message typed into
+	// the session. comment is the user's request for changes, and is empty
+	// when approving.
+	ReviewArtifact(ctx context.Context, sessionID, name string, approve bool, comment string) error
+}
+
+// Artifacts lists a session's artifacts. A session whose adapter keeps none
+// has an empty list rather than an error, because that is the true answer.
+func (r *Registry) Artifacts(ctx context.Context, sessionID string) ([]protocol.Artifact, error) {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	artifacts, ok := s.(ArtifactSource)
+	if !ok {
+		return []protocol.Artifact{}, nil
+	}
+	return artifacts.Artifacts(ctx, sessionID)
+}
+
+// OpenArtifact routes an artifact read to the adapter owning the session.
+func (r *Registry) OpenArtifact(ctx context.Context, sessionID, name string) (*os.File, os.FileInfo, error) {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	artifacts, ok := s.(ArtifactSource)
+	if !ok {
+		return nil, nil, fmt.Errorf("source: %s sessions have no artifacts", s.Kind())
+	}
+	return artifacts.OpenArtifact(ctx, sessionID, name)
+}
+
+// ReviewArtifact routes a review to the adapter owning the session.
+func (r *Registry) ReviewArtifact(
+	ctx context.Context, sessionID, name string, approve bool, comment string,
+) error {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return err
+	}
+	artifacts, ok := s.(ArtifactSource)
+	if !ok {
+		return fmt.Errorf("source: %s sessions have no artifacts to review", s.Kind())
+	}
+	return artifacts.ReviewArtifact(ctx, sessionID, name, approve, comment)
+}
+
+// AttachmentPlacer is implemented by adapters whose agent reads a user's
+// images from a place of its own rather than from wherever they were saved.
+// Antigravity, for one, keeps them in its conversation's .user_uploaded
+// directory.
+type AttachmentPlacer interface {
+	// PlaceAttachment returns the path to give the agent for an image saved
+	// at path: usually a copy made where the agent looks. On an error the
+	// daemon gives the agent the original path instead, so a failure here
+	// costs the agent's preferred form and never the image.
+	PlaceAttachment(ctx context.Context, sessionID, path string) (string, error)
+}
+
+// PlaceAttachment maps one saved image to the path the session's agent should
+// be given. An adapter with no preference gets the path unchanged.
+func (r *Registry) PlaceAttachment(ctx context.Context, sessionID, path string) (string, error) {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return path, err
+	}
+	placer, ok := s.(AttachmentPlacer)
+	if !ok {
+		return path, nil
+	}
+	return placer.PlaceAttachment(ctx, sessionID, path)
+}
+
+// AttachmentInjector is implemented by adapters that can hand images to the
+// agent as parts of one structured message rather than as paths typed into a
+// prompt: Cursor over ACP sends image blocks. The daemon prefers it to typing
+// paths, and does not ask an adapter that delivers this way to place them.
+type AttachmentInjector interface {
+	// InjectWithAttachments delivers text and the images saved at paths
+	// together. A session with no structured channel — a terminal chat of
+	// the same agent — returns ErrAttachmentsAsPaths, and the daemon types
+	// the paths into it instead.
+	InjectWithAttachments(ctx context.Context, sessionID, text string, paths []string) (protocol.InjectMode, error)
+}
+
+// ErrAttachmentsAsPaths is what an AttachmentInjector returns for a session
+// it cannot send structured images to, having delivered nothing.
+var ErrAttachmentsAsPaths = errors.New("source: this session takes images as paths")
+
+// InjectWithAttachments delivers a message with images through the owning
+// adapter's structured channel. handled is false when there is none — the
+// adapter does not implement AttachmentInjector, or declined this session
+// with ErrAttachmentsAsPaths — and the caller types the paths instead.
+func (r *Registry) InjectWithAttachments(
+	ctx context.Context, sessionID, text string, paths []string,
+) (mode protocol.InjectMode, handled bool, err error) {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return protocol.InjectNone, false, err
+	}
+	injector, ok := s.(AttachmentInjector)
+	if !ok {
+		return protocol.InjectNone, false, nil
+	}
+	mode, err = injector.InjectWithAttachments(ctx, sessionID, text, paths)
+	if errors.Is(err, ErrAttachmentsAsPaths) {
+		return protocol.InjectNone, false, nil
+	}
+	return mode, true, err
+}
+
+// ResumeNamer is implemented by adapters that choose what a reopened session
+// is called. Reopening starts the agent in a new tmux pane, and the phone is
+// sent to the id discovery will publish for it; an adapter that keys a live
+// session on its pane, or puts its own id in the pane's name, is the only
+// place that knows what that id will be.
+type ResumeNamer interface {
+	// ResumedSession names the pane a resume of the native session opens,
+	// and the session id discovery will give it. defaultPane is the name the
+	// daemon would otherwise use; return it unchanged to keep it. An empty
+	// sessionID keeps the daemon's own naming for both.
+	//
+	// A pane must start with tmux.Prefix and hold only letters, digits, "-"
+	// and "_", or the daemon ignores the answer.
+	ResumedSession(native, defaultPane string) (pane, sessionID string)
+}
+
+// ResumedSession asks the adapter owning sessionID how to name its resume. Both
+// results are empty when the adapter leaves naming to the daemon.
+func (r *Registry) ResumedSession(sessionID, native, defaultPane string) (pane, id string) {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return "", ""
+	}
+	namer, ok := s.(ResumeNamer)
+	if !ok {
+		return "", ""
+	}
+	return namer.ResumedSession(native, defaultPane)
 }
 
 func (r *Registry) forSession(sessionID string) (Source, error) {
