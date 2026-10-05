@@ -269,3 +269,16 @@ func TestAntigravityRefusesToTypeIntoAPanel(t *testing.T) {
 		t.Errorf("mode %s err %v keys %q", mode, err, keys.events)
 	}
 }
+
+// tmux.SendKeys refuses a key outside its list without pressing anything; the
+// answer then fails before the pane is touched.
+func TestAntigravitySubagentAnswerStopsWhenItsKeyIsRefused(t *testing.T) {
+	s, keys, id := agyAsking(t, agyFixture(t, "subagent-approval"), true)
+	s.keys.send = func(context.Context, string, ...string) error {
+		return errors.New(`tmux: "M-j" is not a key Agentman presses`)
+	}
+	err := agyAnswer(t, s, id, protocol.QuestionAnswer{OptionKey: "1"})
+	if err == nil || !strings.Contains(err.Error(), "on the Mac") || len(keys.events) > 0 {
+		t.Errorf("err %v keys %q", err, keys.events)
+	}
+}

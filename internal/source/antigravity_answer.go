@@ -27,10 +27,10 @@ type antigravityKeys struct {
 	// confirm moves the cursor by distance rows, checks the pane shows what
 	// the caller expects, and only then presses Enter (tmux.AnswerArrowMenu).
 	confirm func(ctx context.Context, name string, distance int, ready func(pane string) bool) error
-	// send presses named keys — Right to move to a form's next question,
-	// alt+j to open the subagent panel, Escape to close it. Nil until the
-	// daemon provides a way to send named keys safely; the answers that need
-	// it are refused until then rather than approximated.
+	// send presses named keys (tmux.SendKeys) — Right to move to a form's
+	// next question, alt+j to open the subagent panel, Escape to close it.
+	// SendKeys presses nothing unless every key is on its allowlist, so an
+	// answer needing a key it does not allow fails before touching the pane.
 	send func(ctx context.Context, name string, keys ...string) error
 }
 
@@ -40,6 +40,7 @@ func defaultAntigravityKeys() antigravityKeys {
 		press:    tmux.Answer,
 		writeIn:  tmux.AnswerCustom,
 		confirm:  tmux.AnswerArrowMenu,
+		send:     tmux.SendKeys,
 	}
 }
 
@@ -227,7 +228,8 @@ func (s *AntigravitySource) answerAntigravitySubagent(
 	}
 	_, tool, _ := strings.Cut(current.Prompt, " needs approval for ")
 	if err := s.keys.send(ctx, name, "M-j"); err != nil {
-		return err
+		// Nothing was pressed: SendKeys checks every key first.
+		return fmt.Errorf("source: approve or deny a subagent's request on the Mac for now (%v)", err)
 	}
 	if err := s.waitForPanel(ctx, name, func(pending string, open bool) bool {
 		return open && pending == tool
