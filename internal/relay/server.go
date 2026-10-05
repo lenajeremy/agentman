@@ -51,6 +51,13 @@ const (
 	// cannot pin an arbitrary number of HTTP connections and goroutines.
 	maxConcurrentPairingRequests = 64
 	pairingBodyReadTimeout       = 5 * time.Second
+	// A full-size image on a slow phone connection, with room to spare: 4 MiB
+	// in 60 s is 70 KiB/s. An upload slower than that is better retried.
+	uploadBodyReadTimeout = 60 * time.Second
+	// Uploads being read at once, across every account. Each holds at most
+	// one image (4 MiB), so this bounds them to 256 MiB however many accounts
+	// are sending.
+	maxConcurrentUploads = 64
 )
 
 // Server is the relay's HTTP surface.
@@ -96,6 +103,10 @@ type Server struct {
 	// uploads holds images in flight from a phone to a daemon. See uploads.go
 	// for why they travel beside the websocket rather than through it.
 	uploads *uploadStore
+	// uploadRequests bounds the upload bodies being read at once, and
+	// uploadReadTimeout how long one may take. Fields so tests can shrink them.
+	uploadRequests    chan struct{}
+	uploadReadTimeout time.Duration
 	// beforeDaemonRegistered runs between a daemon's websocket handshake and
 	// its registration. Nil in production; tests use it to widen that window,
 	// which is where a client can already think it is connected while apps
@@ -129,6 +140,8 @@ func NewServer(secret, version string, log *slog.Logger, trustProxy bool) *Serve
 		clientConnections:  map[string]int{},
 		tunnels:            newTunnelRegistry(),
 		uploads:            newUploadStore(),
+		uploadRequests:     make(chan struct{}, maxConcurrentUploads),
+		uploadReadTimeout:  uploadBodyReadTimeout,
 		previewRequests:    newLimiter(previewRequestsPerMinute, time.Minute),
 	}
 }
@@ -953,14 +966,36 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Any caller can pair a throwaway daemon and so hold a device token. An
+	// upload that stops sending used to keep its connection and the whole
+	// declared 4 MiB for as long as it liked, with no limit on how many. Now
+	// there is a slot to wait for, a deadline to finish by, and memory is spent
+	// on bytes that arrived rather than the length the client claimed.
+	select {
+	case s.uploadRequests <- struct{}{}:
+		defer func() { <-s.uploadRequests }()
+	default:
+		w.Header().Set("Retry-After", "2")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "the relay is receiving too many images right now — try again in a moment",
+		})
+		return
+	}
+	// Scoped to this body, as for pairing: a server-wide ReadTimeout would
+	// also end long-lived websockets.
+	if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(s.uploadReadTimeout)); err != nil {
+		w.Header().Set("Connection", "close")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "could not safely read the upload"})
+		return
+	}
+
 	body := http.MaxBytesReader(w, r.Body, maxUploadBytes+1)
 	defer body.Close()
-	// Sized from Content-Length rather than grown by ReadAll, which doubles as
-	// it goes and would transiently hold twice the cap. The length is a hint
-	// from the caller, so it is clamped and the read still bounded above.
+	// Grown as bytes arrive. The declared length is only a hint, so it sets the
+	// first allocation no larger than one read's worth.
 	hint := r.ContentLength
-	if hint < 0 || hint > maxUploadBytes {
-		hint = maxUploadBytes
+	if hint < 0 || hint > 64<<10 {
+		hint = 64 << 10
 	}
 	data := make([]byte, 0, hint)
 	buf := make([]byte, 32<<10)
