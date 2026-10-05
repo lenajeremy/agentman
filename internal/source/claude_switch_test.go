@@ -302,3 +302,81 @@ func TestClaudeDiscoveryOffersModesAndModels(t *testing.T) {
 		t.Errorf("models %v scoped %q", session.Models, session.ModelScope)
 	}
 }
+
+// Live, a session with history asked first: "Switch model? … the full
+// history gets re-read on your next message", with "Yes, switch to Sonnet
+// 5.5" focused. The phone asked for exactly that switch, so it is confirmed
+// once the dialog is checked to name the model asked for.
+func TestSetModelConfirmsClaudesCacheWarningForTheModelAskedFor(t *testing.T) {
+	terminal := modelPickingClaude(t)
+	terminal.onLiteral = func(key string) string {
+		return permissionPane(t, "claude_model_switch_confirm_real_pane.txt")
+	}
+	pickerKeys := terminal.onKey
+	confirming := false
+	terminal.onKey = func(key string) string {
+		if strings.Contains(terminal.screen, "Switch model?") {
+			confirming = true
+			if key == "Enter" {
+				return permissionPane(t, "claude_model_session_set_real_pane.txt")
+			}
+			return claudePickerFocusedOn(t, 4) // Esc goes back to the picker
+		}
+		return pickerKeys(key)
+	}
+	src := claudeAtPrompt(t, terminal)
+	if err := src.SetModel(context.Background(), "claude:s1", "claude-sonnet-5-5"); err != nil {
+		t.Fatal(err)
+	}
+	if !confirming || terminal.keys[len(terminal.keys)-1] != "Enter" {
+		t.Errorf("the warning was not confirmed: pressed %v", terminal.keys)
+	}
+}
+
+func TestSetModelBacksOutOfAWarningForAnotherModel(t *testing.T) {
+	terminal := modelPickingClaude(t)
+	terminal.onLiteral = func(key string) string {
+		return permissionPane(t, "claude_model_switch_confirm_real_pane.txt") // names Sonnet 5.5
+	}
+	pickerKeys := terminal.onKey
+	terminal.onKey = func(key string) string {
+		if strings.Contains(terminal.screen, "Switch model?") {
+			if key == "Enter" {
+				t.Error("confirmed a switch to a model that was not asked for")
+			}
+			return claudePickerFocusedOn(t, 4)
+		}
+		if key == "Escape" {
+			return permissionPane(t, "claude_mode_manual_real_pane.txt")
+		}
+		return pickerKeys(key)
+	}
+	// The picker's row 4 is Sonnet 5.5; ask for Haiku 4.5 (row 5) but have
+	// the dialog name Sonnet 5.5, as a stale or wrong screen would.
+	src := claudeAtPrompt(t, terminal)
+	if err := src.SetModel(context.Background(), "claude:s1", "claude-haiku-4-5"); err == nil {
+		t.Fatal("a warning naming another model was taken as confirmation")
+	}
+	if _, ok := claudePaneMode(terminal.screen); !ok {
+		t.Error("the dialog and picker were left open")
+	}
+}
+
+// Live, Claude 2.1.289 also offers "Yes, and switch to auto mode" when the
+// session is in manual mode, which moves "No" to the fourth row.
+func TestClaudesNoCarriesANoteWhenAutoModeIsOffered(t *testing.T) {
+	src, err := NewClaudeSource(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := protocol.Session{ID: "claude:s1"}
+	src.applyPane(&session, "", permissionPane(t, "claude_permission_auto_offer_real_pane.txt"))
+	if session.Question == nil || len(session.Question.Options) != 4 {
+		t.Fatalf("question %+v", session.Question)
+	}
+	for _, option := range session.Question.Options {
+		if option.WithText != (option.Label == "No") {
+			t.Errorf("%s %q: WithText = %v", option.Key, option.Label, option.WithText)
+		}
+	}
+}

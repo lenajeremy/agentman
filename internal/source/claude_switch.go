@@ -252,6 +252,30 @@ func (s *ClaudeSource) SetMode(ctx context.Context, sessionID, mode string) erro
 	return fmt.Errorf("source: Claude never showed %s mode", mode)
 }
 
+// claudeSwitchWarning heads the dialog Claude shows before switching the
+// model of a session with history: the switch costs a cache miss.
+const claudeSwitchWarning = "Switch model?"
+
+// claudeSwitchOpen reports the model picker or its warning on screen.
+func claudeSwitchOpen(pane string) bool {
+	return claudeModelPickerOpen(pane) || strings.Contains(pane, claudeSwitchWarning)
+}
+
+// claudeConfirmsSwitchTo reports the warning with "Yes, switch to <label>"
+// focused, so Enter confirms that switch and nothing else.
+func claudeConfirmsSwitchTo(pane, label string) bool {
+	index := strings.Index(pane, claudeSwitchWarning)
+	if index < 0 {
+		return false
+	}
+	for _, row := range pickerRows(strings.Split(pane[index:], "\n"), "❯") {
+		if row.focused {
+			return row.label == "Yes, switch to "+label
+		}
+	}
+	return false
+}
+
 func claudeModelPickerOpen(pane string) bool {
 	return strings.Contains(pane, "Select model") && strings.Contains(pane, "s to use this session only")
 }
@@ -304,20 +328,38 @@ func (s *ClaudeSource) SetModel(ctx context.Context, sessionID, model string) er
 	}
 	picker, err := d.focusRow(ctx, name, func(row string) bool { return row == label }, claudeModelRows, 24)
 	if err != nil {
-		d.closePicker(ctx, name, claudeModelPickerOpen, 2)
+		d.closePicker(ctx, name, claudeSwitchOpen, 3)
 		return fmt.Errorf("source: could not choose %s in Claude's picker: %w", label, err)
 	}
 	s.rememberPicker(picker)
+	fail := func(err error) error {
+		d.closePicker(ctx, name, claudeSwitchOpen, 3)
+		return err
+	}
 	if err := d.literal(ctx, name, "s"); err != nil {
-		d.closePicker(ctx, name, claudeModelPickerOpen, 2)
-		return fmt.Errorf("source: could not choose %s: %w", label, err)
+		return fail(fmt.Errorf("source: could not choose %s: %w", label, err))
 	}
 	done := "Set model to " + label + " for this session only"
-	if _, err := d.await(ctx, name, func(pane string) bool {
-		return !claudeModelPickerOpen(pane) && strings.Contains(strings.Join(bottomLines(pane, 8), "\n"), done)
-	}); err != nil {
-		d.closePicker(ctx, name, claudeModelPickerOpen, 2)
-		return fmt.Errorf("source: Claude did not confirm %s", label)
+	switched := func(pane string) bool {
+		return !claudeSwitchOpen(pane) && strings.Contains(strings.Join(bottomLines(pane, 8), "\n"), done)
+	}
+	pane, err = d.await(ctx, name, func(pane string) bool {
+		return switched(pane) || strings.Contains(pane, claudeSwitchWarning)
+	})
+	if err == nil && !switched(pane) {
+		// A session with history warns that switching re-reads all of it on
+		// the next message. The phone asked for this switch; it is confirmed
+		// only when the warning names that model, on the focused row.
+		if !claudeConfirmsSwitchTo(pane, label) {
+			return fail(fmt.Errorf("source: Claude asked to confirm a switch to another model than %s", label))
+		}
+		if err := d.keys(ctx, name, "Enter"); err != nil {
+			return fail(fmt.Errorf("source: could not confirm %s: %w", label, err))
+		}
+		_, err = d.await(ctx, name, switched)
+	}
+	if err != nil {
+		return fail(fmt.Errorf("source: Claude did not confirm %s", label))
 	}
 	s.switchMu.Lock()
 	if s.modelSwitches == nil {
