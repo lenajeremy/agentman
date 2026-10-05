@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -20,8 +21,9 @@ import (
 // status board pretending to be live. A folder's history wants exactly what
 // that window throws away, so this lists without it.
 //
-// The consequence is honest and worth stating: with no server running there is
-// no OpenCode history, because there is nothing to ask.
+// With no server running there is nothing to ask, so the sessions come from
+// OpenCode's own database instead, read-only (opencode_store.go). Those have
+// no server to route to; Page reads them from the database too.
 func (s *OpenCodeSource) Past(ctx context.Context, dir string, limit int) ([]protocol.Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -111,6 +113,19 @@ type openCodeListedSession struct {
 // otherwise appear twice in one folder.
 func (s *OpenCodeSource) listEverySession(ctx context.Context) (openCodeListing, error) {
 	bases := s.findServers(ctx)
+	if len(bases) == 0 {
+		// No server: OpenCode's own store still has every session, and an
+		// empty base routes Page there.
+		stored, err := s.store.sessions(ctx)
+		if errors.Is(err, errNoOpenCodeStore) {
+			err = nil
+		}
+		listing := openCodeListing{sessions: make([]openCodeListedSession, 0, len(stored))}
+		for _, session := range stored {
+			listing.sessions = append(listing.sessions, openCodeListedSession{session: session})
+		}
+		return listing, err
+	}
 	var (
 		mu       sync.Mutex
 		listing  openCodeListing

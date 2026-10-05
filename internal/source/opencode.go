@@ -95,6 +95,9 @@ type OpenCodeSource struct {
 	// pastSessions.
 	pastMu     sync.RWMutex
 	pastRoutes map[string]openCodeSession
+	// store reads OpenCode's own database when no server is running. See
+	// opencode_store.go.
+	store *openCodeStore
 	// A process can miss one health probe while it is busy or restarting. Misses
 	// are tracked per server: one healthy OpenCode instance must not make a
 	// second, temporarily unresponsive instance's sessions disappear.
@@ -149,6 +152,7 @@ func NewOpenCodeSource(baseURL string) *OpenCodeSource {
 		sessions:           map[string]openCodeSession{},
 		serverMisses:       map[string]int{},
 		questionAnswers:    map[string][][]string{},
+		store:              &openCodeStore{path: openCodeDatabase},
 	}
 	source.findServers = source.scanServers
 	return source
@@ -971,6 +975,18 @@ func (s *OpenCodeSource) Page(ctx context.Context, sessionID, before string, lim
 	session, ok := s.routeFor(sessionID)
 	if !ok {
 		return protocol.Page{}, fmt.Errorf("source: unknown opencode session %q", sessionID)
+	}
+	if session.baseURL == "" {
+		// Found in OpenCode's own store while no server was running.
+		stored, cursor, err := s.store.messages(ctx, session.nativeID, before, limit)
+		if err != nil {
+			return protocol.Page{}, err
+		}
+		messages := make([]protocol.Message, 0, len(stored))
+		for _, message := range stored {
+			messages = append(messages, openCodeMessages(sessionID, message)...)
+		}
+		return protocol.NewPage(sessionID, messages, cursor, cursor != ""), nil
 	}
 
 	query := url.Values{"limit": {strconv.Itoa(limit)}}
