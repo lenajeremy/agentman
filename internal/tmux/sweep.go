@@ -110,9 +110,12 @@ func (s *sweep) forget(name string) {
 // tmux has printed all of it. Tmux stops at the first pane that has closed
 // since the list; the panes before it are kept.
 //
-// A marker cannot be mistaken for pane text: capture-pane prints a screen's
-// cells, and the record separator it starts with is a control character no
-// cell holds.
+// A marker is plain text with a random 64-bit nonce in it, fresh for every
+// run, so no screen can hold one by accident. It used to start with a record
+// separator, on the reasoning that no cell holds a control character — but
+// older tmux (3.4, as Ubuntu ships it) escapes control characters in
+// display-message output, so the marker never matched and every pane fell
+// back to a capture of its own.
 func captureAll(ctx context.Context, sessions []Session) map[string]string {
 	if len(sessions) == 0 {
 		return nil
@@ -120,7 +123,7 @@ func captureAll(ctx context.Context, sessions []Session) map[string]string {
 	var nonce [8]byte
 	_, _ = rand.Read(nonce[:])
 	marker := func(index int) string {
-		return "\x1eagentman-" + hex.EncodeToString(nonce[:]) + "-" + strconv.Itoa(index)
+		return "agentman-sweep-" + hex.EncodeToString(nonce[:]) + "-" + strconv.Itoa(index)
 	}
 	args := make([]string, 0, len(sessions)*8)
 	for index, session := range sessions {
