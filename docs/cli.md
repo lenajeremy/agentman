@@ -18,7 +18,7 @@ daemon used by the mobile app.
 | `am opencode [args...]` | Start OpenCode with a discoverable local HTTP API. |
 | `am kiro [args...]` | Start Kiro CLI in managed tmux. Arguments go to `kiro-cli chat`. |
 | `am antigravity [args...]` | Start Antigravity CLI (`agy`) in managed tmux. `am agy` is the same command. |
-| `am install-hooks` | Install Agentman's Claude Code and Codex completion hooks. |
+| `am install-hooks` | Install Agentman's Claude Code, Codex and Cursor Agent CLI hooks. |
 | `am uninstall-hooks` | Remove only Agentman's hook entries. |
 | `am doctor` | Check hooks, daemon health, agent discovery, and transcript parsing. |
 | `am version` | Print the installed version. |
@@ -141,13 +141,21 @@ am uninstall-hooks -dry-run
 am uninstall-hooks
 ```
 
-Hook installation updates `~/.claude/settings.json` and
-`~/.codex/config.toml`. Existing files are backed up as `.agentman.bak` before
-they are changed. Writes are private and atomic.
+Hook installation updates `~/.claude/settings.json`,
+`~/.codex/config.toml` and `~/.cursor/hooks.json`. Existing files are backed
+up as `.agentman.bak` before they are changed. Writes are private and atomic.
 
-Agentman preserves unrelated Claude hooks. If Codex already has a top-level
-`notify` command, installation refuses to replace it; Codex completion
-integration remains uninstalled until that conflict is resolved.
+Agentman preserves unrelated Claude and Cursor hooks. If Codex already has a
+top-level `notify` command, installation refuses to replace it; Codex
+completion integration remains uninstalled until that conflict is resolved.
+Cursor accepts comments in `hooks.json`; a file with comments is refused
+rather than rewritten without them.
+
+Cursor's hooks (`sessionStart`, `beforeSubmitPrompt`, `stop`, `sessionEnd`)
+report busy and idle for every Cursor Agent CLI chat, including ones started
+in an ordinary terminal, and let the phone send to such a chat: the message
+is handed over by the `stop` hook when the current turn ends. Cursor reads the
+file when a chat starts, so chats already open keep their old hooks.
 
 ## Diagnostics
 
