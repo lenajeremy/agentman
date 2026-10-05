@@ -445,9 +445,14 @@ func socketArgs() []string {
 }
 
 func run(ctx context.Context, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "tmux", append(socketArgs(), args...)...).Output()
+	// Whatever a sweep captured of a pane is out of date once something is
+	// sent to it.
+	if s := sweepOf(ctx); s != nil {
+		if target, ok := sendsTo(args); ok {
+			s.forget(target)
+		}
+	}
+	out, err := runOutput(ctx, args...)
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
@@ -455,7 +460,16 @@ func run(ctx context.Context, args ...string) (string, error) {
 		}
 		return "", err
 	}
-	return string(out), nil
+	return out, nil
+}
+
+// runOutput runs one tmux command and returns what it printed, including
+// when it failed partway through a sequence of commands.
+func runOutput(ctx context.Context, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "tmux", append(socketArgs(), args...)...).Output()
+	return string(out), err
 }
 
 // NewName mints a session name for an agent launch.
@@ -483,6 +497,15 @@ func Capture(ctx context.Context, name string) (string, error) {
 	if !Available() {
 		return "", ErrNotInstalled
 	}
+	if s := sweepOf(ctx); s != nil {
+		if pane, ok := s.capture(name); ok {
+			return pane, nil
+		}
+	}
+	return captureFresh(ctx, name)
+}
+
+func captureFresh(ctx context.Context, name string) (string, error) {
 	// -p prints to stdout; without -S the capture is the visible pane only,
 	// which is exactly the region a prompt occupies.
 	out, err := run(ctx, "capture-pane", "-t", name, "-p")
@@ -520,15 +543,25 @@ func RevealCodexQuestion(ctx context.Context, name string) (string, error) {
 	lock := actionLock(name)
 	lock.Lock()
 	defer lock.Unlock()
+	trayShown := func(pane string) bool {
+		return question.Detect(pane) == nil && question.CodexQueued(pane)
+	}
 	pane, err := Capture(ctx, name)
-	if err != nil || question.Detect(pane) != nil || !question.CodexQueued(pane) {
+	if err != nil || !trayShown(pane) {
+		return pane, err
+	}
+	// A key is about to be pressed, so it goes on the pane as it is now.
+	// Within a discovery sweep the capture above is from the start of the
+	// sweep, and the phone may have answered the question since.
+	pane, err = captureFresh(ctx, name)
+	if err != nil || !trayShown(pane) {
 		return pane, err
 	}
 	if _, err := run(ctx, "send-keys", "-t", name, "S-Left"); err != nil {
 		return "", fmt.Errorf("tmux: could not reveal Codex question: %w", err)
 	}
 	time.Sleep(80 * time.Millisecond)
-	return Capture(ctx, name)
+	return captureFresh(ctx, name)
 }
 
 // Answer chooses an option in a menu the agent is showing.
