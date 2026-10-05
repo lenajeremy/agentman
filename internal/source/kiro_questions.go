@@ -145,24 +145,7 @@ const kiroPaneSettle = 1500 * time.Millisecond
 // waitForPane captures a pane until ready says it shows what was expected,
 // for at most kiroPaneSettle.
 func (s *KiroSource) waitForPane(ctx context.Context, tmuxName string, ready func(pane string) bool) bool {
-	capture := s.capturePane
-	if capture == nil {
-		capture = tmux.Capture
-	}
-	deadline := time.Now().Add(kiroPaneSettle)
-	for {
-		if pane, err := capture(ctx, tmuxName); err == nil && ready(pane) {
-			return true
-		}
-		if ctx.Err() != nil || time.Now().After(deadline) {
-			return false
-		}
-		select {
-		case <-ctx.Done():
-			return false
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
+	return s.waitForPaneFor(ctx, tmuxName, kiroPaneSettle, ready)
 }
 
 // answerWithReason refuses a call and says why: focus moves to "No", Tab
