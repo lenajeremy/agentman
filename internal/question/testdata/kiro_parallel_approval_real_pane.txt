@@ -1,0 +1,24 @@
+  directory for the word beta with your grep tool; 3) find *.png files with your
+  glob tool; 4) look at the image red.png and tell me its color.
+
+• I'll run all four steps in order, starting with the first three in parallel
+  since they're independent, then handle the image after.
+↓ Shell ls -la
+    ╰ working_dir=/work
+• Grep "beta"
+    ╰ path=/work
+  esc to cancel
+• Glob "**/*.png"
+    ╰ path=/work
+  esc to cancel
+
+────────────────────────────────────────────────────────────────────────────────
+ shell requires approval
+ ❯ Yes, single permission
+   Trust, always allow in this session
+   No (Tab to edit)
+────────────────────────────────────────────────────────────────────────────────
+ esc to close · ↑↓ to navigate · ↵ to select · Tab to edit
+
+
+

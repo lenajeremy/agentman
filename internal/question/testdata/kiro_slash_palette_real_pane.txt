@@ -1,0 +1,24 @@
+▸ Credits: turn 0.02 • session 0.75 | Time: 1s
+────────────────────────────────────────────────────────────────────────────────
+  what color is this one? /work/blue.png
+
+• That image is solid blue.
+
+▸ Credits: turn 0.02 • session 0.78 | Time: 1s
+────────────────────────────────────────────────────────────────────────────────
+  Run echo hello-from-kiro with your shell tool.
+
+• Cancelled echo hello-from-kiro
+
+▸ Credits: turn 0.03 • session 0.82 | Time: 6s
+
+────────────────────────────────────────────────────────────────────────────────
+kiro_default · auto · ◔ 2%             /work
+
+› /model
+/model    Select or list available models (tab for sub-commands)
+────────────────────────────────────────────────────────────────────────────────
+ esc to cancel · ↵ to select
+
+
+

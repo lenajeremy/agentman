@@ -1,0 +1,40 @@
+  Create a file named hello.txt in the current directory containing the single
+  line: hi there. Use your file write tool, not the shell.
+
+• Rejected /work/hello.txt
+────────────────────────────────────────────────────────────────────────────────
+  Please name it greeting.txt instead
+
+• Write /work/greeting.txt
+  added 1 line in greeting.txt
+     1+  hi there
+
+• Created greeting.txt with the line hi there.
+
+▸ Credits: turn 0.10 • session 0.10 | Time: 1m 15s
+────────────────────────────────────────────────────────────────────────────────
+  Do these in order: 1) run ls -la with your shell tool; 2) search this
+  directory for the word beta with your grep tool; 3) find *.png files with your
+  glob tool; 4) look at the image red.png and tell me its color.
+
+• I'll run all four steps in order, starting with the first three in parallel
+  since they're independent, then handle the image after.
+↓ Shell ls -la
+    ╰ working_dir=/work
+• Grep "beta"
+    ╰ path=/work
+  esc to cancel
+• Glob "**/*.png"
+    ╰ path=/work
+  esc to cancel
+
+────────────────────────────────────────────────────────────────────────────────
+ shell requires approval
+ ❯ Yes, single permission
+   Trust, always allow in this session
+   No (Tab to edit)
+────────────────────────────────────────────────────────────────────────────────
+ esc to close · ↑↓ to navigate · ↵ to select · Tab to edit
+
+
+

@@ -57,9 +57,20 @@ type KiroSource struct {
 	listPanes         func(context.Context) ([]tmux.Session, error)
 	snapshotProcesses func(context.Context) (*tmux.ProcessTree, error)
 	capturePane       func(context.Context, string) (string, error)
+	captureScrollback func(context.Context, string, int) (string, error)
+	// sendKeys presses named keys in a pane and sendText types a message and
+	// submits it; injectable so answering can be tested against a pane that
+	// is only a description.
+	sendKeys func(context.Context, string, ...string) error
+	sendText func(context.Context, string, string) error
 
 	mu       sync.RWMutex
 	sessions map[string]kiroSession
+	// markerSeen holds the sessions whose turns have been seen to leave a
+	// turn marker. Only for those does the absence of one mean idle: Kiro's
+	// interface writes them, and a session some other program drives over
+	// ACP may never have one.
+	markerSeen map[string]bool
 
 	// past holds transcripts of sessions that have already exited, found by
 	// Past rather than by a sweep. See pastSessions.
@@ -77,6 +88,7 @@ type kiroSession struct {
 	meta       protocol.Session
 	transcript string
 	tmuxName   string
+	status     kiroStatus
 }
 
 type kiroLock struct {
@@ -90,10 +102,14 @@ type kiroMeta struct {
 	CreatedAt    string `json:"created_at"`
 	Title        string `json:"title"`
 	SessionState struct {
+		// AgentName is the agent the session runs as. Kiro leaves it null in
+		// the sessions it creates for subagents.
+		AgentName     string `json:"agent_name"`
 		RTSModelState struct {
 			ModelInfo struct {
 				ModelID string `json:"model_id"`
 			} `json:"model_info"`
+			ContextUsagePercentage *float64 `json:"context_usage_percentage"`
 		} `json:"rts_model_state"`
 	} `json:"session_state"`
 }
@@ -114,6 +130,7 @@ type kiroPageEntry struct {
 	size     int64
 	mtime    time.Time
 	messages []protocol.Message
+	calls    []parser.KiroSubagentCall
 }
 
 // NewKiroSource creates an adapter rooted at the given home directory. An
@@ -130,6 +147,9 @@ func NewKiroSource(home string) (*KiroSource, error) {
 		listPanes:         tmux.List,
 		snapshotProcesses: tmux.SnapshotProcessTree,
 		capturePane:       tmux.Capture,
+		captureScrollback: tmux.CaptureScrollback,
+		sendKeys:          tmux.SendKeys,
+		sendText:          tmux.Send,
 		sessions:          map[string]kiroSession{},
 		metas:             map[string]kiroMetaEntry{},
 		states:            map[string]kiroStateEntry{},
@@ -167,9 +187,18 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 		}
 	}
 	var processes *tmux.ProcessTree
-	if len(locks) > 0 && s.snapshotProcesses != nil {
-		processes, _ = s.snapshotProcesses(ctx)
+	var markers map[int]bool
+	markersKnown := false
+	if len(locks) > 0 {
+		if s.snapshotProcesses != nil {
+			processes, _ = s.snapshotProcesses(ctx)
+		}
+		markers, markersKnown = s.kiroTurnMarkers()
 	}
+	s.mu.RLock()
+	markerSeen := s.markerSeen
+	s.mu.RUnlock()
+	nextSeen := map[string]bool{}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -217,6 +246,7 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 		}
 
 		transcript := base + ".jsonl"
+		status := kiroMetaStatus(meta)
 		session := protocol.Session{
 			ID:        id,
 			Kind:      protocol.KindKiro,
@@ -226,18 +256,26 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 			State:     s.transcriptState(transcript),
 			Inject:    protocol.InjectNone,
 			StartedAt: parseRFC3339Millis(meta.CreatedAt, lock.StartedAt),
-			Model:     meta.SessionState.RTSModelState.ModelInfo.ModelID,
 			// Kiro's shell tool runs commands under this process, so a dev
 			// server started by the agent descends from it.
 			AgentPID: lock.PID,
 		}
 		session.LastActivityAt = fileMillis(transcript, session.StartedAt)
+		if markersKnown {
+			busy := kiroMarkedBusy(markers, processes, lock.PID)
+			if busy || markerSeen[native] {
+				nextSeen[native] = true
+				session.State = kiroMarkedState(session.State, busy,
+					time.UnixMilli(session.LastActivityAt), time.Now())
+			}
+		}
 		if tmuxName != "" {
 			session.Inject = protocol.InjectTmux
-			s.applyPane(ctx, &session, tmuxName)
+			status = s.applyPane(ctx, &session, tmuxName, transcript, status)
 		}
+		status.apply(&session)
 		found = append(found, session)
-		next[id] = kiroSession{meta: session, transcript: transcript, tmuxName: tmuxName}
+		next[id] = kiroSession{meta: session, transcript: transcript, tmuxName: tmuxName, status: status}
 	}
 
 	// A pane with no session yet: Kiro is starting, or sitting at its first
@@ -256,39 +294,49 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 			State: protocol.StateIdle, Inject: protocol.InjectTmux,
 			StartedAt: started, LastActivityAt: started, AgentPID: pane.PanePID,
 		}
-		s.applyPane(ctx, &session, pane.Name)
+		status := s.applyPane(ctx, &session, pane.Name, "", kiroStatus{})
+		status.apply(&session)
 		found = append(found, session)
-		next[id] = kiroSession{meta: session, tmuxName: pane.Name}
+		next[id] = kiroSession{meta: session, tmuxName: pane.Name, status: status}
 	}
 
 	s.mu.Lock()
 	s.sessions = next
+	s.markerSeen = nextSeen
 	s.mu.Unlock()
 	s.forgetCaches(next)
 	return found, nil
 }
 
-// applyPane refines a session's state from its terminal, which knows more than
-// the transcript: Kiro writes an event only once it is complete, so a reply
-// being streamed, or a tool waiting on approval, looks the same on disk as a
-// turn that has not started.
-func (s *KiroSource) applyPane(ctx context.Context, session *protocol.Session, tmuxName string) {
+// applyPane refines a session from its terminal, which knows more than the
+// transcript: Kiro writes an event only once it is complete, so a reply being
+// streamed, or a tool waiting on approval, looks the same on disk as a turn
+// that has not started. Its status line also says the model and agent now,
+// where the metadata says them as of the last turn; status is returned with
+// whatever the pane added to it.
+func (s *KiroSource) applyPane(
+	ctx context.Context, session *protocol.Session, tmuxName, transcript string, status kiroStatus,
+) kiroStatus {
 	capture := s.capturePane
 	if capture == nil {
 		capture = tmux.Capture
 	}
 	pane, err := capture(ctx, tmuxName)
 	if err != nil {
-		return
+		return status
 	}
-	if found := question.DetectKiro(pane); found != nil {
-		session.Question = protocolQuestion(found)
+	if live, ok := kiroPaneStatus(pane); ok {
+		status = live
+	}
+	if found := s.detector(ctx, transcript, session.ID)(pane); found != nil {
+		session.Question = kiroQuestion(found)
 		session.State = protocol.StateWaitingInput
-		return
+		return status
 	}
 	if state, ok := kiroPaneState(pane); ok {
 		session.State = state
 	}
+	return status
 }
 
 // kiroPaneState reads Kiro's input line, which it redraws to say what the
@@ -468,13 +516,16 @@ func (s *KiroSource) Page(ctx context.Context, sessionID, before string, limit i
 	if session.transcript == "" {
 		return protocol.NewPage(sessionID, nil, "", false), nil
 	}
-	messages, err := s.readTranscript(ctx, session.transcript, sessionID)
+	messages, calls, err := s.readTranscriptCalls(ctx, session.transcript, sessionID)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return protocol.NewPage(sessionID, nil, "", false), nil
 		}
 		return protocol.Page{}, err
 	}
+	// Subagents keep their own transcripts, so their rows are placed fresh on
+	// every page rather than cached with the parent's.
+	messages = s.withSubagents(ctx, sessionID, session.transcript, messages, calls)
 	end := len(messages)
 	if before != "" {
 		index, err := strconv.Atoi(before)
@@ -498,15 +549,24 @@ func (s *KiroSource) Page(ctx context.Context, sessionID, before string, limit i
 // readTranscript parses a whole transcript into its feed, reusing the last
 // parse while the file is unchanged.
 func (s *KiroSource) readTranscript(ctx context.Context, path, sessionID string) ([]protocol.Message, error) {
+	messages, _, err := s.readTranscriptCalls(ctx, path, sessionID)
+	return messages, err
+}
+
+// readTranscriptCalls is readTranscript, with the subagent calls the
+// transcript records.
+func (s *KiroSource) readTranscriptCalls(
+	ctx context.Context, path, sessionID string,
+) ([]protocol.Message, []parser.KiroSubagentCall, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	s.cacheMu.Lock()
 	cached, ok := s.pages[path]
 	s.cacheMu.Unlock()
 	if ok && cached.size == info.Size() && cached.mtime.Equal(info.ModTime()) {
-		return cached.messages, nil
+		return cached.messages, cached.calls, nil
 	}
 
 	p := parser.NewKiroParser(sessionID)
@@ -525,12 +585,13 @@ func (s *KiroSource) readTranscript(ctx context.Context, path, sessionID string)
 		}
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	calls := p.SubagentCalls()
 	s.cacheMu.Lock()
-	s.pages[path] = kiroPageEntry{size: info.Size(), mtime: info.ModTime(), messages: messages}
+	s.pages[path] = kiroPageEntry{size: info.Size(), mtime: info.ModTime(), messages: messages, calls: calls}
 	s.cacheMu.Unlock()
-	return messages, nil
+	return messages, calls, nil
 }
 
 // kiroReadForward feeds a transcript to p from its start — or from the start of
@@ -608,6 +669,11 @@ func (s *KiroSource) Follow(ctx context.Context, sessionID string, out chan<- []
 	if err := attach(session.transcript); err != nil {
 		return err
 	}
+	// Subagents running under this session; see kiro_subagents.go.
+	children := newKiroChildFollow(sessionID, path, p.SubagentCalls())
+
+	// The reply being written, as last read off the pane; see kiro_stream.go.
+	var stream kiroStreamPreview
 
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
@@ -627,6 +693,7 @@ func (s *KiroSource) Follow(ctx context.Context, sessionID string, out chan<- []
 		}
 		if current.transcript != path {
 			path, tail, p = current.transcript, jsonl.NewTail(current.transcript), parser.NewKiroParser(sessionID)
+			children = newKiroChildFollow(sessionID, path, nil)
 		}
 		if tail == nil {
 			continue
@@ -642,6 +709,12 @@ func (s *KiroSource) Follow(ctx context.Context, sessionID string, out chan<- []
 		for _, line := range lines {
 			batch = append(batch, p.Parse(line.Text, line.Offset)...)
 		}
+		batch = stream.update(batch, sessionID, func() (string, string, int64, bool) {
+			return s.streamingReply(ctx, current, p)
+		})
+		if path != "" {
+			batch = append(batch, children.read(ctx, s, p.SubagentCalls(), time.Now())...)
+		}
 		if len(batch) == 0 {
 			continue
 		}
@@ -651,6 +724,46 @@ func (s *KiroSource) Follow(ctx context.Context, sessionID string, out chan<- []
 			return ctx.Err()
 		}
 	}
+}
+
+// kiroStreamPreview is the reply a follow last read off the pane.
+type kiroStreamPreview struct {
+	id   string
+	text string
+	ts   int64
+}
+
+// update adds to a batch read from the transcript what the pane shows of the
+// reply being written.
+//
+// A record that lands ends the preview. Usually it is the finished reply,
+// under the preview's own id, and replaces it in place; if it is not — the
+// message was a tool call after all — the preview is withdrawn with an empty
+// text under its id. Otherwise the pane is read, and the preview sent again
+// only when it has grown.
+func (preview *kiroStreamPreview) update(
+	batch []protocol.Message, sessionID string, read func() (string, string, int64, bool),
+) []protocol.Message {
+	if len(batch) > 0 && preview.id != "" {
+		claimed := false
+		for _, message := range batch {
+			claimed = claimed || message.ID == preview.id
+		}
+		if !claimed {
+			batch = append(batch, protocol.Message{
+				ID: preview.id, SessionID: sessionID, Role: protocol.RoleAssistant, Ts: preview.ts,
+			})
+		}
+		*preview = kiroStreamPreview{}
+	}
+	text, id, ts, ok := read()
+	if !ok || (id == preview.id && text == preview.text) {
+		return batch
+	}
+	*preview = kiroStreamPreview{id: id, text: text, ts: ts}
+	return append(batch, protocol.Message{
+		ID: id, SessionID: sessionID, Role: protocol.RoleAssistant, Ts: ts, Text: text,
+	})
 }
 
 // Inject implements Injector.
@@ -663,7 +776,7 @@ func (s *KiroSource) Inject(ctx context.Context, sessionID, text string) (protoc
 		return protocol.InjectNone, errors.New(
 			"source: this session cannot receive messages — start it with `am kiro` to enable sending")
 	}
-	if err := refuseSendIntoMenu(ctx, s.capturePane, session.tmuxName, question.DetectKiro); err != nil {
+	if err := s.refuseSendIntoOverlay(ctx, session.tmuxName); err != nil {
 		return protocol.InjectNone, err
 	}
 	// Mid-turn, Kiro reads typed text as steering for the running turn rather
@@ -693,7 +806,15 @@ func (s *KiroSource) Answer(ctx context.Context, sessionID string, answer protoc
 	if err != nil {
 		return err
 	}
-	return answerMenu(ctx, s.capturePane, session.tmuxName, session.meta.Question, answer, question.DetectKiro)
+	detect := s.detector(ctx, session.transcript, sessionID)
+	shown := session.meta.Question
+	if shown != nil && strings.HasSuffix(shown.Prompt, question.KiroFeedbackLevel) {
+		return s.answerFeedback(ctx, session.tmuxName, shown, answer, detect)
+	}
+	if shown != nil && strings.TrimSpace(answer.Text) != "" && len(answer.Options) == 0 {
+		return s.answerWithReason(ctx, session.tmuxName, shown, answer, detect)
+	}
+	return answerMenu(ctx, s.capturePane, session.tmuxName, session.meta.Question, answer, detect)
 }
 
 // CurrentQuestion implements QuestionInspector.
@@ -702,11 +823,11 @@ func (s *KiroSource) CurrentQuestion(ctx context.Context, sessionID string) (*pr
 	if err != nil || session.tmuxName == "" {
 		return nil, err
 	}
-	found, err := paneMenu(ctx, s.capturePane, session.tmuxName, question.DetectKiro)
+	found, err := paneMenu(ctx, s.capturePane, session.tmuxName, s.detector(ctx, session.transcript, sessionID))
 	if err != nil || found == nil {
 		return nil, err
 	}
-	return protocolQuestion(found), nil
+	return kiroQuestion(found), nil
 }
 
 // parseRFC3339Millis returns the first of values that parses, in milliseconds.
