@@ -342,3 +342,25 @@ test("accepts an artifact read answered as a workspace view", () => {
     kind: "artifact", sessionId: "antigravity:c1", mime: "text/html", image: "PHNjcmlwdD4=",
   } }), null);
 });
+
+test("an option may say it takes a note, and nothing else in that field", () => {
+  const ask = {
+    ...baseSession,
+    state: "waiting_input",
+    question: {
+      id: "q", prompt: "Run rm -rf build?",
+      options: [{ key: "y", label: "Yes" }, { key: "n", label: "No", withText: true }],
+    },
+  };
+  const update = decodeDaemonEvent({ type: "session_update", session: ask });
+  assert.ok(update);
+  assert.equal(update.session?.question?.options[1].withText, true);
+  assert.equal(update.session?.question?.options[0].withText, undefined);
+
+  for (const withText of ["yes", 1, null, {}]) {
+    assert.equal(decodeDaemonEvent({
+      type: "session_update",
+      session: { ...ask, question: { ...ask.question, options: [{ key: "n", label: "No", withText }] } },
+    }), null, JSON.stringify(withText));
+  }
+});
