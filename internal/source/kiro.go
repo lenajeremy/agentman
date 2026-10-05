@@ -90,6 +90,9 @@ type kiroMeta struct {
 	CreatedAt    string `json:"created_at"`
 	Title        string `json:"title"`
 	SessionState struct {
+		// AgentName is the agent the session runs as. Kiro leaves it null in
+		// the sessions it creates for subagents.
+		AgentName     string `json:"agent_name"`
 		RTSModelState struct {
 			ModelInfo struct {
 				ModelID string `json:"model_id"`

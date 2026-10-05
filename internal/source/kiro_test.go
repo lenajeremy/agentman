@@ -23,17 +23,31 @@ const (
 	kiroLineReply  = `{"version":"v1","kind":"AssistantMessage","data":{"message_id":"a2","content":[{"kind":"text","data":"There is 1 file."}]}}`
 )
 
-// writeKiroSession lays out one session the way Kiro does. pid 0 leaves the
-// lock out, as Kiro does once a session is closed.
+// writeKiroSession lays out one session the way Kiro's interface does: its
+// metadata, its transcript, and the input history it keeps for a session
+// someone typed into. pid 0 leaves the lock out, as Kiro does once a session
+// is closed.
 func writeKiroSession(t *testing.T, home, id, cwd string, pid int, lines ...string) string {
+	t.Helper()
+	path := writeKiroSessionFiles(t, home, id, cwd, pid,
+		`{"agent_name":"kiro_default","rts_model_state":{"model_info":{"model_id":"auto"}}}`, `"list the files"`, lines...)
+	if err := os.WriteFile(strings.TrimSuffix(path, ".jsonl")+".history", []byte("list the files\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// writeKiroSessionFiles writes a session's metadata, transcript and lock with
+// the given session_state and title, both raw JSON.
+func writeKiroSessionFiles(t *testing.T, home, id, cwd string, pid int, state, title string, lines ...string) string {
 	t.Helper()
 	dir := filepath.Join(home, ".kiro", "sessions", "cli")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	base := filepath.Join(dir, id)
-	meta := fmt.Sprintf(`{"session_id":%q,"cwd":%q,"created_at":"2026-09-27T16:59:07.644671Z","title":"list the files",`+
-		`"session_state":{"rts_model_state":{"model_info":{"model_id":"auto"}}}}`, id, cwd)
+	meta := fmt.Sprintf(`{"session_id":%q,"cwd":%q,"created_at":"2026-09-27T16:59:07.644671Z","title":%s,`+
+		`"session_created_reason":"subagent","session_state":%s}`, id, cwd, title, state)
 	if err := os.WriteFile(base+".json", []byte(meta), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -408,5 +422,65 @@ func TestKiroDenialReasonAnswersAreChecked(t *testing.T) {
 	if err := s.Answer(ctx, session.ID, protocol.QuestionAnswer{QuestionID: shown.ID, Text: "use ls -l"}); err == nil ||
 		!strings.Contains(err.Error(), "no longer on screen") {
 		t.Errorf("answer to a closed editor: %v", err)
+	}
+}
+
+// Folder history lists the conversations a person had, once each. Kiro's
+// session directory holds more than that: a session for every launch, typed
+// in or not; one for every subagent; and the sessions still running, which
+// Discover already lists live.
+func TestKiroPastListsOnlyEndedConversations(t *testing.T) {
+	home := t.TempDir()
+	work := "/work/api"
+	pid := os.Getpid()
+	writeKiroSession(t, home, "ended", work, 0, kiroLinePrompt, kiroLineReply)
+	// Started and closed without a word: Kiro still wrote its files.
+	writeKiroSessionFiles(t, home, "empty", work, 0, `{"agent_name":null,"rts_model_state":{"model_info":null}}`, "null")
+	// A subagent's session: titled with its task, no agent name, no input
+	// history — exactly the shape Kiro 2.27.1 wrote.
+	writeKiroSessionFiles(t, home, "subagent", work, 0,
+		`{"agent_name":null,"rts_model_state":{"model_info":null}}`, `"Read notes.txt and report its first line."`,
+		kiroLinePrompt, kiroLineReply)
+	// A session another ACP client drove has no input history either, but it
+	// does have its agent.
+	writeKiroSessionFiles(t, home, "acp", work, 0, `{"agent_name":"kiro_default"}`, `"run echo"`, kiroLinePrompt, kiroLineReply)
+	// Still running: listed by Discover, not here.
+	writeKiroSession(t, home, "running", work, pid, kiroLinePrompt, kiroLineReply)
+
+	s := newTestKiro(t, home, fmt.Sprintf("%d 1 /Users/me/.local/bin/kiro-cli-chat\n", pid))
+	past, err := s.Past(context.Background(), work, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, session := range past {
+		got[session.NativeID] = true
+		if session.State != protocol.StateEnded {
+			t.Errorf("%s listed as %s", session.NativeID, session.State)
+		}
+	}
+	for id, want := range map[string]bool{"ended": true, "acp": true, "empty": false, "subagent": false, "running": false} {
+		if got[id] != want {
+			t.Errorf("%s listed = %v, want %v", id, got[id], want)
+		}
+	}
+	folders, err := s.Directories(context.Background())
+	if err != nil || len(folders) != 1 || folders[0].Agents != 3 {
+		t.Errorf("folders = %+v (%v), want one folder counting ended, acp and running", folders, err)
+	}
+
+	// A crash leaves the lock behind, and in time its pid runs something
+	// else. That session has ended, and must be listed as such.
+	s = newTestKiro(t, home, fmt.Sprintf("%d 1 /usr/bin/vim\n", pid))
+	past, err = s.Past(context.Background(), work, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, session := range past {
+		found = found || session.NativeID == "running"
+	}
+	if !found {
+		t.Error("a session whose lock pid was reused is missing from history")
 	}
 }
