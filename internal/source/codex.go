@@ -169,6 +169,9 @@ type CodexSource struct {
 	// discovery can be tested without touching a real tmux server: unlike a
 	// capture, this can press a key.
 	revealQuestion func(context.Context, string) (string, error)
+	// refuseWithNote chooses "No, and tell Codex what to do differently" and
+	// sends the note once the composer is back; see tmux.RefuseThenSend.
+	refuseWithNote func(ctx context.Context, name, key, note string, composerBack func(string) bool) error
 	// models remembers each session's model; see modelCache.
 	models *modelCache
 	// readMeta and readActivity are injectable for cache instrumentation tests.
@@ -279,6 +282,7 @@ func NewCodexSource(home string) (*CodexSource, error) {
 		listPanes:      tmux.List,
 		capturePane:    tmux.Capture,
 		revealQuestion: tmux.RevealCodexQuestion,
+		refuseWithNote: tmux.RefuseThenSend,
 		models:         newModelCache(),
 		readMeta:       readCodexMeta,
 		readActivity:   codexActivity,
