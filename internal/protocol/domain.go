@@ -6,6 +6,8 @@
 // so the app never has to know which CLI it is looking at.
 package protocol
 
+import "slices"
+
 // Kind identifies an agent CLI we know how to observe. Adding one means
 // writing a source adapter — nothing outside the adapter should branch on this
 // beyond presentation (glyph, colour).
@@ -81,9 +83,7 @@ type Session struct {
 	// "accept-edits", "ask" — as its footer or transcript spells it. Empty
 	// means the agent's default, or an adapter that cannot tell.
 	//
-	// Read-only on the phone. Every CLI that has modes keeps the choice as a
-	// global default, so switching one from here would change the laptop's
-	// next session too.
+	// The phone switches it only to one of Modes, below.
 	Mode string `json:"mode,omitempty"`
 	// ContextPercent is how full the model's context window is, in whole
 	// percent from 0 to 100. Zero is also "unknown": no adapter can tell
@@ -98,6 +98,19 @@ type Session struct {
 	// many of them the agent is waiting on the user to approve.
 	Artifacts         int `json:"artifacts,omitempty"`
 	ArtifactsToReview int `json:"artifactsToReview,omitempty"`
+	// Modes are the modes the phone may switch this session to, in the CLI's
+	// own names; set_mode takes one of them. Models are the model ids it may
+	// switch to with set_model, and ModelScope says what that switch touches:
+	// ModelScopeSession for this session alone, ModelScopeDefault when the
+	// CLI also saves it as the default for new sessions, which the phone
+	// confirms first. An empty ModelScope means models are not switched from
+	// the phone at all.
+	//
+	// The daemon accepts a switch only to a value listed here, so an adapter
+	// lists exactly what it can verify it switched to.
+	Modes      []string `json:"modes,omitempty"`
+	Models     []string `json:"models,omitempty"`
+	ModelScope string   `json:"modelScope,omitempty"`
 	// Question is set when the agent is blocked on a decision. Its presence
 	// is what makes StateWaitingInput actionable rather than merely visible:
 	// the app renders the choices and the user taps one.
@@ -112,6 +125,15 @@ type Session struct {
 	// listening ports that agent's commands opened.
 	AgentPID int `json:"-"`
 }
+
+// Model scopes: what switching a session's model touches.
+const (
+	// ModelScopeSession changes this session's model and nothing else.
+	ModelScopeSession = "session"
+	// ModelScopeDefault also makes it the CLI's default for new sessions,
+	// because the CLI saves the choice globally.
+	ModelScopeDefault = "default"
+)
 
 // Server is a local web server an agent started.
 type Server struct {
@@ -188,6 +210,8 @@ func (s Session) SameAs(other Session) bool {
 		s.LastActivityAt == other.LastActivityAt && s.Model == other.Model &&
 		s.Mode == other.Mode && s.ContextPercent == other.ContextPercent &&
 		s.Artifacts == other.Artifacts && s.ArtifactsToReview == other.ArtifactsToReview &&
+		slices.Equal(s.Modes, other.Modes) && slices.Equal(s.Models, other.Models) &&
+		s.ModelScope == other.ModelScope &&
 		s.AgentPID == other.AgentPID &&
 		s.Question.sameAs(other.Question) && SameServers(s.Servers, other.Servers)
 }
