@@ -39,7 +39,12 @@ func TestCursorPlansAreAChatsArtifacts(t *testing.T) {
 		"<!-- chat-1 -->\n# Second pass\n\n## Steps\n\nTidy up.\n", time.Minute)
 	writePlan(t, home, "Other-chat-2.plan.md", "<!-- chat-2 -->\n# Someone else's\n", time.Minute)
 	writePlan(t, home, "Loose.plan.md", "# No owner\n", time.Minute)
-	if err := os.Symlink("/etc/hosts", filepath.Join(home, ".cursor", "plans", "Sneaky-chat-1.plan.md")); err != nil {
+	// A link to a file elsewhere that even looks like one of the chat's plans.
+	outside := filepath.Join(t.TempDir(), "secret.md")
+	if err := os.WriteFile(outside, []byte("<!-- chat-1 -->\n# Not a plan\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(home, ".cursor", "plans", "Sneaky-chat-1.plan.md")); err != nil {
 		t.Fatal(err)
 	}
 
