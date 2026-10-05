@@ -36,7 +36,7 @@ func wsAddr(httpURL string) string {
 }
 
 // dialDaemon connects as a daemon using a raw token.
-func dialDaemon(t *testing.T, base, token string) *websocket.Conn {
+func dialDaemon(t *testing.T, server *Server, base, token string) *websocket.Conn {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -47,7 +47,34 @@ func dialDaemon(t *testing.T, base, token string) *websocket.Conn {
 		t.Fatalf("daemon dial: %v", err)
 	}
 	t.Cleanup(func() { ws.CloseNow() })
-	return ws
+	// The handshake finishes before the relay registers the daemon, and an
+	// app that connects in between is told it is offline. Wait, as
+	// startTunnel waits for its link, so no test depends on that race.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if online, _ := server.hub.DaemonOnline(DeriveAccount(token)); online {
+			return ws
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the relay never registered the daemon")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// A daemon's handshake completes before the relay registers it, so a test
+// that dials a daemon and then connects an app could be told the daemon was
+// offline. That window is what made TestAppSeesDaemonOnlineOnConnect fail a
+// release now and then: dialDaemon must return only once the daemon counts as
+// connected. Widened here so it fails every time rather than once in thousands.
+func TestDialDaemonReturnsOnceTheRelayHasRegisteredIt(t *testing.T) {
+	server, ts := newTestServer(t)
+	server.beforeDaemonRegistered = func() { time.Sleep(100 * time.Millisecond) }
+	const token = "daemon-token-registered"
+	dialDaemon(t, server, ts.URL, token)
+	if online, _ := server.hub.DaemonOnline(DeriveAccount(token)); !online {
+		t.Fatal("dialDaemon returned before the relay registered the daemon")
+	}
 }
 
 // requestPairCode asks the relay for a code over HTTP.
@@ -96,10 +123,10 @@ func TestPairingDoesNotDisconnectTheDaemon(t *testing.T) {
 	// Regression: pairing used to be a websocket control frame, so requesting
 	// a code opened a second daemon socket, which replaced the live one and
 	// knocked the real daemon offline every time the user paired a device.
-	_, ts := newTestServer(t)
+	server, ts := newTestServer(t)
 	const daemonToken = "daemon-token"
 
-	daemon := dialDaemon(t, ts.URL, daemonToken)
+	daemon := dialDaemon(t, server, ts.URL, daemonToken)
 
 	for range 3 {
 		if code := requestPairCode(t, ts.URL, daemonToken); code == "" {
@@ -121,7 +148,7 @@ func TestWebsocketPairRequestsAreRateLimited(t *testing.T) {
 	server, ts := newTestServer(t)
 	server.perClientPairings = newLimiter(1, time.Minute)
 	server.globalPairings = newLimiter(10, time.Minute)
-	daemon := dialDaemon(t, ts.URL, "daemon-token")
+	daemon := dialDaemon(t, server, ts.URL, "daemon-token")
 
 	for index := range 2 {
 		envelope, err := protocol.NewEnvelope(fmt.Sprintf("pair-%d", index), protocol.PeerRelay,
@@ -151,9 +178,9 @@ func TestWebsocketPairRequestsAreRateLimited(t *testing.T) {
 }
 
 func TestAppSeesDaemonOnlineOnConnect(t *testing.T) {
-	_, ts := newTestServer(t)
+	server, ts := newTestServer(t)
 	const daemonToken = "daemon-token"
-	dialDaemon(t, ts.URL, daemonToken)
+	dialDaemon(t, server, ts.URL, daemonToken)
 
 	code := requestPairCode(t, ts.URL, daemonToken)
 	deviceToken, status := redeem(t, ts.URL, code)
@@ -192,9 +219,9 @@ func TestAppSeesDaemonOnlineOnConnect(t *testing.T) {
 }
 
 func TestAppFrameReachesDaemon(t *testing.T) {
-	_, ts := newTestServer(t)
+	server, ts := newTestServer(t)
 	const daemonToken = "daemon-token"
-	daemon := dialDaemon(t, ts.URL, daemonToken)
+	daemon := dialDaemon(t, server, ts.URL, daemonToken)
 
 	code := requestPairCode(t, ts.URL, daemonToken)
 	deviceToken, _ := redeem(t, ts.URL, code)
@@ -419,9 +446,9 @@ func TestPeerDirectionPolicy(t *testing.T) {
 }
 
 func TestBruteForceIsRateLimitedPerCaller(t *testing.T) {
-	_, ts := newTestServer(t)
+	server, ts := newTestServer(t)
 	const daemonToken = "daemon-token"
-	dialDaemon(t, ts.URL, daemonToken)
+	dialDaemon(t, server, ts.URL, daemonToken)
 	code := requestPairCode(t, ts.URL, daemonToken)
 
 	guess := func(from, code string) int {
@@ -646,8 +673,8 @@ func TestConnectionCapacityIsBoundedPerClient(t *testing.T) {
 }
 
 func TestHealthExposesNoUserData(t *testing.T) {
-	_, ts := newTestServer(t)
-	dialDaemon(t, ts.URL, "daemon-token")
+	server, ts := newTestServer(t)
+	dialDaemon(t, server, ts.URL, "daemon-token")
 
 	resp, err := http.Get(ts.URL + "/health")
 	if err != nil {
@@ -660,12 +687,9 @@ func TestHealthExposesNoUserData(t *testing.T) {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatal(err)
 	}
-	// Counts and status only — there must be no endpoint that could leak a
-	// session, a message, or an account identifier.
-	allowed := map[string]bool{
-		"status": true, "version": true, "daemons": true,
-		"apps": true, "pendingPairings": true, "storage": true,
-	}
+	// Status only — there must be no endpoint that could leak a session, a
+	// message, an account identifier, or how many people use the relay.
+	allowed := map[string]bool{"status": true, "version": true, "storage": true}
 	for key := range payload {
 		if !allowed[key] {
 			t.Errorf("/health exposes unexpected field %q", key)

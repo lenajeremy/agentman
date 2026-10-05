@@ -1,6 +1,7 @@
 package source
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -45,7 +46,7 @@ func (s *ClaudeSource) Past(ctx context.Context, dir string, limit int) ([]proto
 			continue
 		}
 		name := entry.Name()
-		if name != slug && !strings.HasPrefix(name, slug+"-") {
+		if !claudeSlugMatches(name, slug) {
 			continue
 		}
 		candidates = append(candidates, newestTranscripts(
@@ -69,25 +70,26 @@ func (s *ClaudeSource) Past(ctx context.Context, dir string, limit int) ([]proto
 		if !validClaudeSessionID(sessionID) {
 			continue
 		}
-		head := claudeTranscriptHead(candidate.path)
-		// A transcript with no cwd of its own is judged by the slug that led
-		// here, which is the best available and was already a prefix match.
-		if head.cwd != "" && !underDirectory(head.cwd, dir) {
+		facts, ok := s.pastFactsOf(candidate.path)
+		if !ok {
 			continue
 		}
-		cwd := head.cwd
+		// A transcript with no cwd of its own is judged by the slug that led
+		// here, which is the best available and was already a prefix match.
+		if facts.cwd != "" && !underDirectory(facts.cwd, dir) {
+			continue
+		}
+		cwd := facts.cwd
 		if cwd == "" {
 			cwd = dir
 		}
-
-		id := string(protocol.KindClaude) + ":" + sessionID
-		model, cached := s.models.get(id)
-		if !cached {
-			model = modelFromTranscript(candidate.path, claudeModelOf)
-			s.models.put(id, model)
+		name := facts.name
+		if name == "" {
+			name = historyName("", cwd)
 		}
 
-		started := head.startedAt
+		id := string(protocol.KindClaude) + ":" + sessionID
+		started := facts.startedAt
 		if started == 0 {
 			started = candidate.modTime
 		}
@@ -95,18 +97,49 @@ func (s *ClaudeSource) Past(ctx context.Context, dir string, limit int) ([]proto
 			ID:             id,
 			Kind:           protocol.KindClaude,
 			NativeID:       sessionID,
-			Name:           historyName(head.prompt, cwd),
+			Name:           name,
 			Cwd:            cwd,
 			State:          protocol.StateEnded,
 			Inject:         protocol.InjectNone,
 			StartedAt:      started,
 			LastActivityAt: candidate.modTime,
-			Model:          model,
+			Model:          facts.model,
 		})
 
 		s.past.remember(id, candidate.path)
 	}
 	return found, nil
+}
+
+// claudePastFacts is what a history listing reads from one transcript.
+type claudePastFacts struct {
+	cwd       string
+	startedAt int64
+	// name is empty when nothing named the session, and the listing falls
+	// back to the folder.
+	name  string
+	model string
+}
+
+// pastFactsOf reads a transcript's directory, name and model, or recalls them
+// if the file has not changed since.
+func (s *ClaudeSource) pastFactsOf(path string) (claudePastFacts, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return claudePastFacts{}, false
+	}
+	if facts, ok := s.pastRead.get(path, info); ok {
+		return facts, true
+	}
+	head := claudeTranscriptHead(path)
+	facts := claudePastFacts{
+		cwd:       head.cwd,
+		startedAt: head.startedAt,
+		name:      historyName(claudeTranscriptTitle(path, head.titles), ""),
+		model:     modelFromTranscript(path, claudeModelOf),
+	}
+	s.pastRead.put(path, info, facts)
+	return facts, true
 }
 
 // Directories implements History.
@@ -148,9 +181,44 @@ func (s *ClaudeSource) Directories(ctx context.Context) ([]protocol.Folder, erro
 	return folders, nil
 }
 
-// claudeProjectSlug is how Claude names a working directory's project folder.
+// claudeProjectSlug is how Claude names a working directory's project folder:
+// every character that is not an ASCII letter or digit becomes "-" (2.1.289:
+// replace(/[^a-zA-Z0-9]/g,"-")). That runs over JavaScript's UTF-16 string,
+// so a character outside the Basic Multilingual Plane, two code units there,
+// becomes two dashes. Only "/" and "." used to be replaced here, so any
+// folder with a space or an underscore in its path listed no sessions.
+//
+// Past claudeSlugLimit characters Claude also cuts the name and appends a
+// hash of the path; see claudeSlugMatches.
 func claudeProjectSlug(cwd string) string {
-	return strings.NewReplacer("/", "-", ".", "-").Replace(cwd)
+	var slug strings.Builder
+	for _, character := range cwd {
+		switch {
+		case (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9'):
+			slug.WriteRune(character)
+		case character > 0xFFFF:
+			slug.WriteString("--")
+		default:
+			slug.WriteByte('-')
+		}
+	}
+	return slug.String()
+}
+
+// claudeSlugLimit is the longest project folder name Claude writes before
+// cutting it and appending "-" and a hash of the path.
+const claudeSlugLimit = 200
+
+// claudeSlugMatches reports whether a project folder can hold sessions run in
+// the directory whose slug is given, or beneath it. A folder named past the
+// limit is matched on its first claudeSlugLimit characters: the hash is not
+// worth reproducing, because each transcript's own cwd decides membership.
+func claudeSlugMatches(folder, slug string) bool {
+	if len(slug) > claudeSlugLimit {
+		return strings.HasPrefix(folder, slug[:claudeSlugLimit])
+	}
+	return folder == slug || strings.HasPrefix(folder, slug+"-")
 }
 
 // transcriptFor resolves a session id to its transcript, live or ended.
@@ -174,6 +242,92 @@ type claudeHead struct {
 	cwd       string
 	prompt    string
 	startedAt int64
+	// titles are the names the head gave the session, with the opening
+	// prompt as the last resort. See claudeTranscriptTitle.
+	titles claudeTitles
+}
+
+// claudeTitles are the names a transcript records for its session. Claude
+// writes each as a record of its own, and again when a session is resumed.
+type claudeTitles struct {
+	custom string // set by the person with /rename
+	agent  string // the name the live session is listed under
+	ai     string // a title Claude made up from the conversation
+	prompt string // the opening prompt, when nothing named the session
+}
+
+// best is the name a person would recognise: their own first, then the one the
+// live row showed, then Claude's, then what they first asked.
+func (t claudeTitles) best() string {
+	for _, name := range []string{t.custom, t.agent, t.ai, t.prompt} {
+		if strings.TrimSpace(name) != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+// claudeTitleRecord reads a title record, reporting which kind it is.
+func claudeTitleRecord(line []byte) (kind, title string) {
+	if !bytes.Contains(line, []byte(`-title"`)) && !bytes.Contains(line, []byte(`"agent-name"`)) {
+		return "", "" // most lines: skip the decode
+	}
+	var record struct {
+		Type        string `json:"type"`
+		CustomTitle string `json:"customTitle"`
+		AgentName   string `json:"agentName"`
+		AITitle     string `json:"aiTitle"`
+	}
+	if json.Unmarshal(line, &record) != nil {
+		return "", ""
+	}
+	switch record.Type {
+	case "custom-title":
+		return record.Type, record.CustomTitle
+	case "agent-name":
+		return record.Type, record.AgentName
+	case "ai-title":
+		return record.Type, record.AITitle
+	}
+	return "", ""
+}
+
+// claudeTitleScanBytes is how much of a transcript's end is searched for the
+// newest title, the same window the model is read from.
+const claudeTitleScanBytes = modelScanBytes
+
+// claudeTranscriptTitle names a past session. The newest title of each kind
+// is taken from the end of the transcript, where a rename or a resume writes
+// it, and the head's are used for any kind the end does not have.
+func claudeTranscriptTitle(path string, head claudeTitles) string {
+	titles := claudeTitles{prompt: head.prompt}
+	found := map[string]bool{}
+	scanTail(path, claudeTitleScanBytes, func(line []byte) bool {
+		kind, title := claudeTitleRecord(line)
+		if kind == "" || title == "" || found[kind] {
+			return false
+		}
+		found[kind] = true
+		switch kind {
+		case "custom-title":
+			titles.custom = title
+		case "agent-name":
+			titles.agent = title
+		case "ai-title":
+			titles.ai = title
+		}
+		return found["custom-title"] // nothing outranks the person's own
+	})
+	if titles.custom == "" {
+		titles.custom = head.custom
+	}
+	if titles.agent == "" {
+		titles.agent = head.agent
+	}
+	if titles.ai == "" {
+		titles.ai = head.ai
+	}
+	return titles.best()
 }
 
 // claudeTranscriptHead reads a session's working directory, opening prompt and
@@ -194,6 +348,14 @@ func claudeTranscriptHead(path string) claudeHead {
 		if json.Unmarshal(line, &record) != nil {
 			return false
 		}
+		switch kind, title := claudeTitleRecord(line); kind {
+		case "custom-title":
+			head.titles.custom = title
+		case "agent-name":
+			head.titles.agent = title
+		case "ai-title":
+			head.titles.ai = title
+		}
 		if head.cwd == "" && record.Cwd != "" {
 			head.cwd = record.Cwd
 		}
@@ -210,7 +372,31 @@ func claudeTranscriptHead(path string) claudeHead {
 		}
 		return head.cwd != "" && head.prompt != ""
 	})
+	head.titles.prompt = head.prompt
 	return head
+}
+
+// scheduledTaskName reads the task a scheduled run was started for. Its whole
+// prompt is the task's block, which usablePrompt rightly strips as machinery,
+// leaving the session named after its folder; the task's name says what it is.
+func scheduledTaskName(text string) string {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "<scheduled-task ") {
+		return ""
+	}
+	opening, _, ok := strings.Cut(text, ">")
+	if !ok {
+		return ""
+	}
+	_, rest, ok := strings.Cut(opening, ` name="`)
+	if !ok {
+		return ""
+	}
+	name, _, ok := strings.Cut(rest, `"`)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(name)
 }
 
 // claudePromptText pulls the person-written text out of one user message.
@@ -221,6 +407,9 @@ func claudeTranscriptHead(path string) claudeHead {
 func claudePromptText(raw json.RawMessage) string {
 	var text string
 	if json.Unmarshal(raw, &text) == nil {
+		if name := scheduledTaskName(text); name != "" {
+			return name
+		}
 		return usablePrompt(text)
 	}
 	var blocks []struct {

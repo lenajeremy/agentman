@@ -46,6 +46,10 @@ type ClaudeSource struct {
 	snapshotProcesses func(context.Context) (*tmux.ProcessTree, error)
 	// capturePane is injectable for the last-moment send safety check.
 	capturePane func(context.Context, string) (string, error)
+	// answerWithNote is injectable so a note on "No" can be tested against
+	// real pane captures without a terminal. See tmux.AnswerWithNote.
+	answerWithNote func(ctx context.Context, name string, distance int, note string,
+		focused, amending, typed func(string) bool) error
 	// processArgs reads full command lines, which the process snapshot does
 	// not carry; infra remembers what they said. See withoutInfra.
 	processArgs func(context.Context, []int) map[int]string
@@ -58,6 +62,8 @@ type ClaudeSource struct {
 	// past holds transcripts of sessions that have already exited, found by
 	// Past rather than by a sweep. See pastSessions.
 	past pastSessions
+	// pastRead is what history listings read from those transcripts.
+	pastRead pastFacts[claudePastFacts]
 
 	questionMu    sync.Mutex
 	questionSpecs map[string]claudeQuestionSpecCache
@@ -103,6 +109,7 @@ func NewClaudeSource(home string) (*ClaudeSource, error) {
 		listPanes:         tmux.List,
 		snapshotProcesses: tmux.SnapshotProcessTree,
 		capturePane:       tmux.Capture,
+		answerWithNote:    tmux.AnswerWithNote,
 		processArgs:       claudeProcessArgs,
 		infra:             map[claudeProcessKey]bool{},
 	}, nil
@@ -226,12 +233,13 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 
 		transcript := s.transcriptPath(file.Cwd, file.SessionID)
 
-		// The registry reports a session blocked on a permission prompt as
-		// "idle", and no hook fires for one — so a pending question is only
-		// visible by reading the terminal. Finding one overrides the state,
-		// because "waiting on you" is the truth and "idle" is not.
+		// Older CLIs report a session blocked on a permission prompt as
+		// "idle" (newer ones say "waiting"), and the registry never carries
+		// the question itself — so its options are only visible by reading
+		// the terminal. Finding one overrides the state, because "waiting on
+		// you" is the truth and "idle" is not.
 		if tmuxName != "" {
-			if detected, err := captureQuestion(ctx, tmuxName); err == nil {
+			if detected, err := s.captureQuestion(ctx, tmuxName); err == nil {
 				s.enrichClaudeQuestion(id, transcript, detected)
 				meta.Question = protocolQuestion(detected)
 				meta.State = protocol.StateWaitingInput
@@ -279,7 +287,7 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 			StartedAt: started, LastActivityAt: started, AgentPID: pane.PanePID,
 		}
 		transcript := s.transcriptPath(pane.Cwd, uuid)
-		if q, err := captureQuestion(ctx, pane.Name); err == nil {
+		if q, err := s.captureQuestion(ctx, pane.Name); err == nil {
 			s.enrichClaudeQuestion(id, transcript, q)
 			meta.Question = protocolQuestion(q)
 			meta.State = protocol.StateWaitingInput
@@ -360,8 +368,7 @@ func validClaudeSessionID(id string) bool {
 // directly, then fall back to scanning for the session id — the rule is
 // undocumented, and a wrong guess would silently show an empty feed.
 func (s *ClaudeSource) transcriptPath(cwd, sessionID string) string {
-	slug := strings.NewReplacer("/", "-", ".", "-").Replace(cwd)
-	direct := filepath.Join(s.projectsDir(), slug, sessionID+".jsonl")
+	direct := filepath.Join(s.projectsDir(), claudeProjectSlug(cwd), sessionID+".jsonl")
 	if _, err := os.Stat(direct); err == nil {
 		return direct
 	}
@@ -391,6 +398,11 @@ func claudeState(status string) protocol.State {
 		return protocol.StateBusy
 	case "idle":
 		return protocol.StateIdle
+	case "waiting":
+		// Newer CLIs (2.1.289 at least) report a session blocked on a
+		// permission prompt, a question or any other dialog this way, with
+		// what it waits for in waitingFor. Older ones said "idle".
+		return protocol.StateWaitingInput
 	default:
 		// Older CLI versions omit the field; assume idle rather than inventing
 		// activity the user would see as a spinning dot that never settles.
@@ -405,12 +417,15 @@ func (s *ClaudeSource) Page(ctx context.Context, sessionID, before string, limit
 		return protocol.Page{}, fmt.Errorf("source: unknown claude session %q", sessionID)
 	}
 
+	// A fresh parser per page is correct: reading backwards, a tool result
+	// is met before its call, so pairing resolves within the page — as long as
+	// the page does not stop between the two, which Unsettled prevents.
+	p := parser.NewClaudeParser(sessionID)
 	opts := jsonl.BackwardOptions{
 		Want:         limit,
 		MaxScanBytes: jsonl.DefaultScanBytes,
-		// A fresh parser per page is correct: reading backwards, a tool result
-		// is met before its call, so pairing resolves within the page.
-		Map: parser.NewClaudeParser(sessionID).Parse,
+		Map:          p.Parse,
+		Unsettled:    p.AwaitingCalls,
 	}
 	if before != "" {
 		offset, err := strconv.ParseInt(before, 10, 64)
@@ -459,16 +474,18 @@ func (s *ClaudeSource) Follow(ctx context.Context, sessionID string, out chan<- 
 		return fmt.Errorf("source: unknown claude session %q", sessionID)
 	}
 
-	tail := jsonl.NewTail(session.transcript)
-	// Start at the end: the backlog belongs to Page, which the app calls
-	// separately. Streaming it here would duplicate the whole history.
-	if err := tail.SeekToEnd(); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-
 	// One parser for the lifetime of the follow, so a tool call recorded now
 	// can be settled by a result that arrives seconds later.
 	p := parser.NewClaudeParser(sessionID)
+
+	tail := jsonl.NewTail(session.transcript)
+	// Start at the end: the backlog belongs to Page, which the app calls
+	// separately. Streaming it here would duplicate the whole history. The
+	// parser is primed with the stretch before it first, so a call already
+	// running is settled when its result arrives. See primeFollow.
+	if err := primeFollow(tail, p.Parse); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()

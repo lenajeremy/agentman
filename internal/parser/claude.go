@@ -10,36 +10,6 @@ import (
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
 
-// Claude Code writes ~/.claude/projects/<cwd-slug>/<sessionId>.jsonl.
-//
-// Only "user" and "assistant" records carry conversation. The rest of the file
-// is bookkeeping the UI has no use for — mode changes, generated titles,
-// file-history snapshots — and dropping it early is most of what makes the
-// mobile feed readable.
-var claudeIgnoredTypes = map[string]bool{
-	"mode":                  true,
-	"permission-mode":       true,
-	"ai-title":              true,
-	"attachment":            true,
-	"file-history-snapshot": true,
-	"file-history-delta":    true,
-	"last-prompt":           true,
-	"queue-operation":       true,
-	"system":                true,
-	"summary":               true,
-}
-
-// IsKnownClaudeRecordType reports whether a transcript record type is one this
-// parser recognizes — either conversation or known bookkeeping.
-//
-// Claude Code's transcript format is not a published API. `am doctor` scans a
-// recent transcript through this so an unrecognized record type after a CLI
-// upgrade surfaces as an explicit warning, rather than as messages silently
-// vanishing from the feed.
-func IsKnownClaudeRecordType(recordType string) bool {
-	return recordType == "user" || recordType == "assistant" || claudeIgnoredTypes[recordType]
-}
-
 // Slash-command scaffolding the CLI injects as though the user had typed it.
 var claudeCommandWrapper = regexp.MustCompile(
 	`^\s*<(command-name|command-message|command-args|local-command-stdout|user-prompt-submit-hook)`)
@@ -52,6 +22,12 @@ type claudeRecord struct {
 	IsMeta      bool           `json:"isMeta"`
 	IsSidechain bool           `json:"isSidechain"`
 	Message     *claudeMessage `json:"message"`
+	// A "system" record's notice. Content is a bare string there; it is kept
+	// raw so a record of another type that uses the key differently still
+	// decodes.
+	Subtype string          `json:"subtype"`
+	Level   string          `json:"level"`
+	Content json.RawMessage `json:"content"`
 }
 
 type claudeMessage struct {
@@ -81,7 +57,20 @@ type ClaudeParser struct {
 	outcomes *boundedMap[toolOutcome]
 	// toolCalls holds calls seen before their result — the live-tail case.
 	toolCalls *boundedMap[toolCall]
+	// awaiting holds results whose call this parser has not met yet. Reading
+	// backwards that call is still ahead, and a page that stops before it
+	// would hand it to a page whose parser never saw the result.
+	awaiting map[string]struct{}
 }
+
+// maxAwaitingCalls bounds awaiting for a parser that only ever meets results:
+// a live tail can see results for calls written before it started.
+const maxAwaitingCalls = 256
+
+// AwaitingCalls reports whether a result has been met whose call has not.
+// Paging uses it to keep reading back until those calls are reached, so they
+// settle on the same page. See jsonl.BackwardOptions.Unsettled.
+func (p *ClaudeParser) AwaitingCalls() bool { return len(p.awaiting) > 0 }
 
 // NewClaudeParser creates a parser bound to one session.
 func NewClaudeParser(sessionID string) *ClaudeParser {
@@ -89,6 +78,7 @@ func NewClaudeParser(sessionID string) *ClaudeParser {
 		sessionID: sessionID,
 		outcomes:  newBoundedMap[toolOutcome](2000),
 		toolCalls: newBoundedMap[toolCall](2000),
+		awaiting:  map[string]struct{}{},
 	}
 }
 
@@ -97,6 +87,9 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 	var rec claudeRecord
 	if !decode(line, &rec) {
 		return nil
+	}
+	if rec.Type == "system" {
+		return p.notice(rec, offset)
 	}
 	if rec.Type != "user" && rec.Type != "assistant" {
 		return nil
@@ -154,6 +147,7 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 			}
 			summary := summarizeToolInput(name, block.Input)
 			p.toolCalls.set(id, toolCall{name: name, summary: summary})
+			delete(p.awaiting, id)
 
 			msg := protocol.Message{
 				ID: id, SessionID: p.sessionID, Role: protocol.RoleTool, Ts: ts,
@@ -182,6 +176,9 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 			}
 			outcome := toolOutcome{status: status, preview: ClipBlock(flattenClaudeResult(block.Content), PreviewLines, PreviewChars)}
 			p.outcomes.set(block.ToolUseID, outcome)
+			if _, known := p.toolCalls.get(block.ToolUseID); !known && len(p.awaiting) < maxAwaitingCalls {
+				p.awaiting[block.ToolUseID] = struct{}{}
+			}
 
 			// Reading forwards the row already exists, so re-emit it under the
 			// same ID to settle it. The app upserts by ID, so this replaces the
@@ -202,6 +199,33 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 		}
 	}
 	return out
+}
+
+// claudeNoticeLevels are the levels at which Claude Code shows a system
+// record to the person: a compacted conversation, a usage limit, a model
+// switched after a refusal. The rest is bookkeeping: turn timings, hook
+// summaries ("suggestion"), retries of a failing request, whose final error
+// arrives as an assistant message anyway.
+var claudeNoticeLevels = map[string]bool{"info": true, "notice": true, "warning": true}
+
+// notice turns a system record the CLI showed into a system row.
+func (p *ClaudeParser) notice(rec claudeRecord, offset int64) []protocol.Message {
+	var text string
+	if !claudeNoticeLevels[rec.Level] || json.Unmarshal(rec.Content, &text) != nil {
+		return nil
+	}
+	text = strings.TrimSpace(text)
+	if text == "" || rec.IsMeta || claudeCommandWrapper.MatchString(text) {
+		return nil
+	}
+	id := rec.UUID
+	if id == "" {
+		id = fmt.Sprintf("o%d", offset)
+	}
+	return []protocol.Message{{
+		ID: id, SessionID: p.sessionID, Role: protocol.RoleSystem, Ts: parseTime(rec.Timestamp),
+		Text: ClipBlock(text, PreviewLines, PreviewChars), IsSidechain: rec.IsSidechain,
+	}}
 }
 
 // flattenClaudeResult handles a tool result arriving as a string or as an
@@ -270,6 +294,11 @@ func summarizeToolInput(name string, raw json.RawMessage) string {
 		return clip(pick("description", "prompt"), SummaryChars)
 	case "TodoWrite":
 		return ""
+	case "ExitPlanMode":
+		// The plan is markdown; its first line, usually a heading, names it.
+		return clip(firstLine(pick("plan")), SummaryChars)
+	case "AskUserQuestion":
+		return clip(claudeQuestionSummary(input), SummaryChars)
 	default:
 		if direct := pick("command", "file_path", "path", "query", "pattern", "url"); direct != "" {
 			return clip(direct, SummaryChars)
@@ -291,4 +320,36 @@ func parseTime(value string) int64 {
 		return 0
 	}
 	return t.UnixMilli()
+}
+
+// firstLine returns the first line with text in it, without a markdown
+// heading's marks.
+func firstLine(text string) string {
+	for line := range strings.SplitSeq(text, "\n") {
+		if line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#")); line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
+// claudeQuestionSummary names what AskUserQuestion asked: the first question,
+// and how many more came with it.
+func claudeQuestionSummary(input map[string]any) string {
+	questions, _ := input["questions"].([]any)
+	if len(questions) == 0 {
+		return ""
+	}
+	first, _ := questions[0].(map[string]any)
+	text, _ := first["question"].(string)
+	if strings.TrimSpace(text) == "" {
+		text, _ = first["header"].(string)
+	}
+	text = strings.Join(strings.Fields(text), " ")
+	if more := len(questions) - 1; more > 0 && text != "" {
+		// The count is kept whole however long the question.
+		suffix := fmt.Sprintf(" (+%d more)", more)
+		return clip(text, SummaryChars-len(suffix)) + suffix
+	}
+	return text
 }

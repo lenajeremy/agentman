@@ -157,7 +157,8 @@ func Attach(name string) error {
 	if err != nil {
 		return ErrNotInstalled
 	}
-	args := []string{"tmux", "attach-session", "-t", name}
+	args := append([]string{"tmux"}, socketArgs()...)
+	args = append(args, "attach-session", "-t", name)
 	return syscallExec(binary, args, os.Environ())
 }
 
@@ -289,23 +290,6 @@ func Kill(ctx context.Context, name string) error {
 	return err
 }
 
-// OwnsPID reports whether pid is the pane process or one of its descendants.
-//
-// Walking up from the agent's pid is how a session discovered on disk is
-// matched to the tmux session that can type into it. Ancestry is used rather
-// than the working directory because two agents can easily run in the same
-// directory, and typing into the wrong one would be worse than not delivering.
-func OwnsPID(panePID, pid int) bool {
-	if pid > 1 && pid == panePID {
-		return true
-	}
-	processes, err := SnapshotProcessTree(context.Background())
-	if err != nil {
-		return false
-	}
-	return processes.OwnsPID(panePID, pid)
-}
-
 // ProcessTree is one immutable snapshot of the operating system's PID → parent
 // relationships. A discovery sweep can perform any number of ancestry checks
 // against it without spawning another process or observing an inconsistent
@@ -422,10 +406,31 @@ func (p *ProcessTree) OwnsPID(panePID, pid int) bool {
 	return false
 }
 
+// SocketEnv names a private tmux server for this process to use instead of
+// the default one.
+//
+// It exists for tests. An agent working on this repository runs inside a
+// tmux pane, so $TMUX is set, and a bare tmux command — from a test, a probe,
+// anything — goes to the server that pane belongs to, whatever TMUX_TMPDIR
+// says. That is the user's own server, with their shells and every agent
+// session on it. A test helper that ran kill-server there once took all of it
+// down. With this set, every command this package runs carries -S and so can
+// only ever reach the named socket. See tmuxtest.Isolate.
+const SocketEnv = "AGENTMAN_TMUX_SOCKET"
+
+// socketArgs are the global flags that pin a command to SocketEnv's server,
+// or nothing when it is unset.
+func socketArgs() []string {
+	if socket := os.Getenv(SocketEnv); socket != "" {
+		return []string{"-S", socket}
+	}
+	return nil
+}
+
 func run(ctx context.Context, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "tmux", args...).Output()
+	out, err := exec.CommandContext(ctx, "tmux", append(socketArgs(), args...)...).Output()
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
@@ -683,6 +688,71 @@ func AnswerArrowMenu(ctx context.Context, name string, distance int, focused fun
 		return fmt.Errorf("tmux: could not answer: %w", err)
 	}
 	return nil
+}
+
+// AnswerWithNote chooses a menu option and sends a note with it, the way
+// Claude Code takes one: focus the option, press Tab to open a line for the
+// note ("No, and tell Claude what to do differently"), type the note, press
+// Enter.
+//
+// Each step is checked against a fresh capture before the next, under the
+// pane's lock: focused before Tab, amending before typing, typed before
+// Enter. Pressing Enter on the wrong row, or typing into whatever else the
+// screen became, would send something the user did not choose.
+func AnswerWithNote(
+	ctx context.Context, name string, distance int, note string,
+	focused, amending, typed func(pane string) bool,
+) error {
+	if !Available() {
+		return ErrNotInstalled
+	}
+	// One line: the note is typed into a single-line field, where a newline
+	// would submit it early. The app sends one line already.
+	note = strings.Join(strings.Fields(note), " ")
+	if note == "" {
+		return errors.New("tmux: the note is empty")
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	if err := moveFocus(ctx, name, distance); err != nil {
+		return err
+	}
+	if err := awaitPane(ctx, name, focused); err != nil {
+		return errors.New("tmux: that choice is no longer on screen; refresh the session")
+	}
+	if _, err := run(ctx, "send-keys", "-t", name, "Tab"); err != nil {
+		return fmt.Errorf("tmux: could not open the note: %w", err)
+	}
+	if err := awaitPane(ctx, name, amending); err != nil {
+		return errors.New("tmux: the note could not be opened; answer it in the terminal")
+	}
+	if err := sendLiteral(ctx, name, note); err != nil {
+		return fmt.Errorf("tmux: could not type the note: %w", err)
+	}
+	if err := awaitPane(ctx, name, typed); err != nil {
+		return errors.New("tmux: the note did not appear; answer it in the terminal")
+	}
+	if _, err := run(ctx, "send-keys", "-t", name, "Enter"); err != nil {
+		return fmt.Errorf("tmux: could not answer: %w", err)
+	}
+	return nil
+}
+
+// awaitPane captures the pane until check accepts it, for a few render ticks:
+// an Ink TUI redraws a moment after the key that changed it.
+func awaitPane(ctx context.Context, name string, check func(pane string) bool) error {
+	for attempt := 0; attempt < 5; attempt++ {
+		time.Sleep(45 * time.Millisecond)
+		pane, err := Capture(ctx, name)
+		if err != nil {
+			return err
+		}
+		if check(pane) {
+			return nil
+		}
+	}
+	return errors.New("tmux: the pane did not show what was expected")
 }
 
 // AnswerSingleForm records a single choice in Claude's tabbed or preview

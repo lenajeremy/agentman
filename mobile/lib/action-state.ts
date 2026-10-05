@@ -97,9 +97,14 @@ export function reconcileCursorSendEchoes<T extends PendingSendLike>(
   const claimed = new Set<string>();
   return pending.filter((item) => {
     if (item.sessionId !== sessionId || !item.retainUntilTranscript ||
-        item.status === "failed" || !item.text) return true;
+        item.status === "failed") return true;
+    // An image-only send has no text to match by: Cursor records its row with
+    // the image paths taken out. Once delivered, the next new row from the
+    // user is that message. Before then a new row could be something typed at
+    // the terminal, so nothing is claimed.
+    if (!item.text && item.status !== "delivered") return true;
     const row = userRows.find((message) =>
-      message.text === item.text &&
+      (!item.text || message.text === item.text) &&
       !item.knownUserMessageIds?.includes(message.id) &&
       !claimed.has(message.id),
     );

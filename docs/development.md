@@ -57,6 +57,14 @@ tests that consume them:
 - `AGENTMAN_CLAUDE_PREVIEW_PANE_CORPUS`
 - `AGENTMAN_LIVE_OPENCODE_QUESTIONS`
 
+Tests never touch the tmux server you are working in. Every package whose
+tests can reach tmux starts a private server for the run (see
+`internal/tmux/tmuxtest`), because from inside tmux a bare `tmux` command goes
+to your own server whatever `TMUX_TMPDIR` says. The live tests above drive a
+pane you created, so they need your server named explicitly:
+`AGENTMAN_TMUX_SOCKET=/private/tmp/tmux-$(id -u)/default` (or wherever
+`tmux display -p '#{socket_path}'` says). Never use `kill-server` in a test.
+
 ## Adding an agent adapter
 
 The primary Go extension point is `source.Source`, but a complete adapter is a

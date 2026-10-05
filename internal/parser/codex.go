@@ -25,15 +25,24 @@ type CodexParser struct {
 	sessionID string
 	// A function-call result can be encountered before its call during backward
 	// pagination, or after it during a live forward tail.
-	questionCalls   map[string]protocol.Message
-	questionResults map[string]bool
+	questionCalls map[string]protocol.Message
+	// awaiting holds results whose call this parser has not met yet. A result
+	// does not name its function, so every one waits, not only a question's.
+	// Reading backwards each call follows its result within a few records,
+	// which is what keeps this small.
+	awaiting map[string]struct{}
 }
 
 // NewCodexParser creates a parser bound to one session.
 func NewCodexParser(sessionID string) *CodexParser {
 	return &CodexParser{sessionID: sessionID,
-		questionCalls: map[string]protocol.Message{}, questionResults: map[string]bool{}}
+		questionCalls: map[string]protocol.Message{}, awaiting: map[string]struct{}{}}
 }
+
+// AwaitingCalls reports whether a result has been met whose call has not.
+// Paging uses it to read on until those calls are reached, so a question and
+// its answer settle on the same page. See jsonl.BackwardOptions.Unsettled.
+func (p *CodexParser) AwaitingCalls() bool { return len(p.awaiting) > 0 }
 
 type codexRecord struct {
 	Timestamp string        `json:"timestamp"`
@@ -285,6 +294,8 @@ func (p *CodexParser) parseQuestionCall(rec codexRecord) []protocol.Message {
 	}
 	switch call.Type {
 	case "function_call":
+		_, answered := p.awaiting[call.CallID]
+		delete(p.awaiting, call.CallID)
 		if call.Name != "request_user_input" && call.Name != "request_user_input_async" {
 			return nil
 		}
@@ -305,9 +316,8 @@ func (p *CodexParser) parseQuestionCall(rec codexRecord) []protocol.Message {
 			summary = fmt.Sprintf("Asked %d questions", len(args.Questions))
 		}
 		status := protocol.ToolRunning
-		if p.questionResults[call.CallID] {
+		if answered {
 			status = protocol.ToolOK
-			delete(p.questionResults, call.CallID)
 		}
 		message := protocol.Message{
 			ID: "codex-question:" + call.CallID, SessionID: p.sessionID,
@@ -326,7 +336,11 @@ func (p *CodexParser) parseQuestionCall(rec codexRecord) []protocol.Message {
 			message.Tool = &settled
 			return []protocol.Message{message}
 		}
-		p.questionResults[call.CallID] = true
+		// A live tail meets results of calls written before it started, and
+		// those never clear, hence the bound.
+		if len(p.awaiting) < maxAwaitingCalls {
+			p.awaiting[call.CallID] = struct{}{}
+		}
 	}
 	return nil
 }

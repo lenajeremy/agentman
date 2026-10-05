@@ -65,6 +65,9 @@ const hookWaitingGrace = 10 * time.Minute
 
 const maxHookQuestionInspectionRetries = 3
 
+// maxRememberedLaunches bounds the launches kept to answer a retried request.
+const maxRememberedLaunches = 128
+
 // A discovery sweep can change hundreds of sessions at once (daemon restart,
 // agent upgrade, large workspace). One full snapshot is both smaller and less
 // bursty than enough individual updates to overflow an otherwise healthy
@@ -111,6 +114,11 @@ type Daemon struct {
 	// sessions the app is actually watching appear here, which is what keeps
 	// idle sessions free.
 	follows map[string]*follow
+	// waiting holds subscriptions to sessions that are not running yet, by
+	// session and then subscriber. Opening an ended session subscribes to it,
+	// and reopening it keeps its id, so the phone never asks again: the tail
+	// starts here, on the sweep that first sees the session live.
+	waiting map[string]map[string]struct{}
 	// actionLocks cover send, answer, and interrupt from validation through the
 	// adapter action. Read-only history requests remain fully concurrent.
 	actionLocks [actionLockStripes]sync.Mutex
@@ -145,6 +153,9 @@ type Daemon struct {
 	// one can be reopened by naming it rather than by the phone describing
 	// it. See resume.go.
 	folders folderMemory
+	// resumes stops one ended session being reopened twice while the first
+	// is still coming up. See resume.go.
+	resumes resumeMemory
 }
 
 // follow is one live tail. It is tracked by pointer identity so that a
@@ -182,6 +193,7 @@ func New(registry *source.Registry, sink Transport) *Daemon {
 		sink:               sink,
 		sessions:           map[string]protocol.Session{},
 		follows:            map[string]*follow{},
+		waiting:            map[string]map[string]struct{}{},
 		turns:              map[string]turnState{},
 		lastAlert:          map[string]time.Time{},
 		hookStates:         map[string]hookState{},
@@ -426,7 +438,20 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 	// lock is released. Sharing the map here creates a real concurrent
 	// iteration/write panic window.
 	d.sessions = cloneSessionMap(current)
+	var arrived []waitingSubscription
+	for sessionID, subscribers := range d.waiting {
+		if _, live := current[sessionID]; !live {
+			continue
+		}
+		for subscriber := range subscribers {
+			arrived = append(arrived, waitingSubscription{session: sessionID, subscriber: subscriber})
+		}
+		delete(d.waiting, sessionID)
+	}
 	d.mu.Unlock()
+	for _, wait := range arrived {
+		_ = d.startFollow(wait.subscriber, wait.session)
+	}
 
 	if initial {
 		_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessions, Sessions: fitSessionList(found)})
@@ -486,16 +511,35 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 		delete(d.turns, id)
 		delete(d.hookStates, id)
 		delete(d.pushedQuestions, id)
+		delete(d.lastAlert, id)
+		// A launch is remembered so a retried request returns the session it
+		// started; once that session has ended, the retry window has too.
+		for clientID, launched := range d.launches {
+			if launched == id {
+				delete(d.launches, clientID)
+			}
+		}
 		if pending, ok := d.pendingTurns[id]; ok {
 			pending.timer.Stop()
 			delete(d.pendingTurns, id)
 		}
 		d.mu.Unlock()
-		d.stopFollowAll(id)
+		d.stopFollowAll(id, true)
 		if !bulk {
 			_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessionGone, SessionID: id})
 		}
 	}
+	// A launch whose session never showed up is never "gone" either. Past a
+	// bound, only launches of sessions still running are worth remembering.
+	d.mu.Lock()
+	if len(d.launches) > maxRememberedLaunches {
+		for clientID, launched := range d.launches {
+			if _, live := current[launched]; !live {
+				delete(d.launches, clientID)
+			}
+		}
+	}
+	d.mu.Unlock()
 }
 
 func cloneSessionMap(sessions map[string]protocol.Session) map[string]protocol.Session {
@@ -759,6 +803,11 @@ func (d *Daemon) finishHookTurn(
 			if stillKnown && stillCurrent {
 				current.Question = question
 				current.State = protocol.StateWaitingInput
+				// Held to the bounds a sweep applies, because this goes to the
+				// phone directly rather than through one.
+				if normalized := normalizeDiscoveredSessions([]protocol.Session{current}); len(normalized) == 1 {
+					current = normalized[0]
+				}
 				d.sessions[event.SessionID] = current
 			}
 			d.mu.Unlock()
@@ -888,6 +937,21 @@ func (d *Daemon) HandleFrom(
 		}
 		return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
 	}
+	// A message's images are collected from the relay before the session is
+	// locked: that can take up to 30 seconds each, and Stop must not wait for
+	// it.
+	var attachmentPaths []string
+	if req.Type == protocol.ReqSendMessage && len(req.UploadIDs) > 0 {
+		saved, saveErr := d.saveAttachments(ctx, req.SessionID, req.UploadIDs)
+		if saveErr != nil {
+			return protocol.Event{
+				Type: protocol.EvtSendResult, SessionID: req.SessionID,
+				ClientID: req.ClientID, Status: protocol.StatusFailed,
+				Error: saveErr.Error(),
+			}
+		}
+		attachmentPaths = saved
+	}
 	if requestMutatesSession(req.Type) {
 		lock := d.actionLock(req.SessionID)
 		lock.Lock()
@@ -916,15 +980,18 @@ func (d *Daemon) HandleFrom(
 		return protocol.Event{Type: protocol.EvtFolders, Folders: folders}
 
 	case protocol.ReqDirectorySessions:
-		sessions, err := d.directorySessions(ctx, req.Path)
+		sessions, dir, err := d.directorySessions(ctx, req.Path)
 		if err != nil {
 			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
+		}
+		if sessions == nil {
+			sessions = []protocol.Session{} // an empty folder is [], not absent
 		}
 		// Remembered so resuming one of them names a session the daemon
 		// itself found, rather than trusting a kind and a directory sent up
 		// from the phone.
 		d.folders.remember(sessions)
-		return protocol.Event{Type: protocol.EvtDirectorySessions, Path: req.Path, Sessions: sessions}
+		return protocol.Event{Type: protocol.EvtDirectorySessions, Path: dir, Sessions: sessions}
 
 	case protocol.ReqResumeSession:
 		id, err := d.resumeSession(ctx, req.SessionID)
@@ -1015,19 +1082,7 @@ func (d *Daemon) HandleFrom(
 				Error: "daemon: answer the pending question before sending a message",
 			}
 		}
-		var paths []string
-		if len(req.UploadIDs) > 0 {
-			saved, saveErr := d.saveAttachments(ctx, req.SessionID, req.UploadIDs)
-			if saveErr != nil {
-				return protocol.Event{
-					Type: protocol.EvtSendResult, SessionID: req.SessionID,
-					ClientID: req.ClientID, Status: protocol.StatusFailed,
-					Error: saveErr.Error(),
-				}
-			}
-			paths = saved
-		}
-		mode, err := d.deliver(ctx, req.SessionID, req.Text, paths)
+		mode, err := d.deliver(ctx, req.SessionID, req.Text, attachmentPaths)
 		result := protocol.Event{
 			Type:      protocol.EvtSendResult,
 			SessionID: req.SessionID,
@@ -1114,6 +1169,9 @@ func (d *Daemon) HandleFrom(
 func requestMutatesSession(kind protocol.RequestType) bool {
 	return kind == protocol.ReqSendMessage || kind == protocol.ReqAnswer ||
 		kind == protocol.ReqInterrupt || kind == protocol.ReqStartSession ||
+		// Resume and end start or stop a process. Run concurrently, two resumes
+		// of one session each launched their own.
+		kind == protocol.ReqResumeSession || kind == protocol.ReqEndSession ||
 		kind == protocol.ReqReviewArtifact
 }
 
@@ -1298,11 +1356,23 @@ func containsTerminalControl(text string) bool {
 		if character == '\n' || character == '\t' {
 			continue
 		}
-		if unicode.IsControl(character) {
+		if unicode.IsControl(character) || isBidiControl(character) {
 			return true
 		}
 	}
 	return false
+}
+
+// isBidiControl reports the bidirectional embeddings, overrides and isolates.
+// They make text display in a different order from the bytes that are typed,
+// so what the phone showed could differ from what the agent received.
+// Unicode files them under Cf (format), which IsControl does not cover. The
+// rest of Cf stays allowed on purpose: the joiners inside emoji sequences,
+// the non-joiner Persian spelling needs, and the tags of subdivision flags
+// are all Cf too.
+func isBidiControl(character rune) bool {
+	return (character >= '\u202A' && character <= '\u202E') ||
+		(character >= '\u2066' && character <= '\u2069')
 }
 
 func (d *Daemon) snapshot() []protocol.Session {
@@ -1371,7 +1441,9 @@ func normalizeDiscoveredSessions(found []protocol.Session) []protocol.Session {
 			if unsupportedReason != "" {
 				// A partial decision is worse than no remote decision: hidden checked
 				// options could be silently changed when the visible subset is sent.
-				copyQuestion.Options = nil
+				// Empty, not nil: the app requires the list and dropped the whole
+				// frame a null one arrived in.
+				copyQuestion.Options = []protocol.QuestionOption{}
 				copyQuestion.Custom = false
 				copyQuestion.Multiple = false
 				copyQuestion.Detail = truncateWireText(
@@ -1429,8 +1501,14 @@ func (d *Daemon) startFollow(subscriberID, sessionID string) error {
 	}
 	d.mu.Lock()
 	if _, exists := d.sessions[sessionID]; !exists {
+		// Not running (yet): an ended session opened from a folder, which the
+		// phone may be about to reopen. Its tail starts when a sweep sees it.
+		waited := d.waitLocked(subscriberID, sessionID)
 		d.mu.Unlock()
-		return fmt.Errorf("daemon: cannot subscribe to unknown session %q", sessionID)
+		if !waited {
+			return fmt.Errorf("daemon: cannot subscribe to unknown session %q", sessionID)
+		}
+		return nil
 	}
 	if existing, exists := d.follows[sessionID]; exists {
 		existing.subscribers[subscriberID] = struct{}{}
@@ -1488,6 +1566,7 @@ func (d *Daemon) stopFollow(subscriberID, sessionID string) {
 		subscriberID = "local"
 	}
 	d.mu.Lock()
+	d.unwaitLocked(subscriberID, sessionID)
 	handle, exists := d.follows[sessionID]
 	if exists {
 		delete(handle.subscribers, subscriberID)
@@ -1503,10 +1582,18 @@ func (d *Daemon) stopFollow(subscriberID, sessionID string) {
 	}
 }
 
-func (d *Daemon) stopFollowAll(sessionID string) {
+// stopFollowAll ends a session's tail for every subscriber. When the session
+// has only ended, its subscribers keep waiting for it: one reopened from the
+// phone they are still looking at comes back under the same id.
+func (d *Daemon) stopFollowAll(sessionID string, keepWaiting bool) {
 	d.mu.Lock()
 	handle, exists := d.follows[sessionID]
 	delete(d.follows, sessionID)
+	if exists && keepWaiting {
+		for subscriber := range handle.subscribers {
+			d.waitLocked(subscriber, sessionID)
+		}
+	}
 	d.mu.Unlock()
 	if exists {
 		handle.cancel()
@@ -1519,6 +1606,9 @@ func (d *Daemon) DisconnectSubscriber(subscriberID string) {
 		return
 	}
 	d.mu.Lock()
+	for sessionID := range d.waiting {
+		d.unwaitLocked(subscriberID, sessionID)
+	}
 	var cancel []context.CancelFunc
 	for sessionID, handle := range d.follows {
 		delete(handle.subscribers, subscriberID)
@@ -1530,6 +1620,49 @@ func (d *Daemon) DisconnectSubscriber(subscriberID string) {
 	d.mu.Unlock()
 	for _, stop := range cancel {
 		stop()
+	}
+}
+
+// maxWaitingSubscriptions bounds subscriptions held for sessions that are not
+// running. Each is one phone looking at an ended session, so a real count is a
+// handful; the bound only stops a misbehaving client from growing the map.
+const maxWaitingSubscriptions = 256
+
+type waitingSubscription struct {
+	session, subscriber string
+}
+
+// waitLocked records a subscriber waiting for a session to start, reporting
+// false when the bound is reached. d.mu must be held.
+func (d *Daemon) waitLocked(subscriberID, sessionID string) bool {
+	if subscribers, ok := d.waiting[sessionID]; ok {
+		if _, already := subscribers[subscriberID]; already {
+			return true
+		}
+	}
+	total := 0
+	for _, subscribers := range d.waiting {
+		total += len(subscribers)
+	}
+	if total >= maxWaitingSubscriptions {
+		return false
+	}
+	if d.waiting[sessionID] == nil {
+		d.waiting[sessionID] = map[string]struct{}{}
+	}
+	d.waiting[sessionID][subscriberID] = struct{}{}
+	return true
+}
+
+// unwaitLocked forgets one waiting subscription. d.mu must be held.
+func (d *Daemon) unwaitLocked(subscriberID, sessionID string) {
+	subscribers, ok := d.waiting[sessionID]
+	if !ok {
+		return
+	}
+	delete(subscribers, subscriberID)
+	if len(subscribers) == 0 {
+		delete(d.waiting, sessionID)
 	}
 }
 

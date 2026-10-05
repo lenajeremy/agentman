@@ -25,12 +25,44 @@ function normalise(path: string): string {
   return trimmed === "" ? "/" : trimmed;
 }
 
-/** The last two segments of a path, the way a folder reads on a phone. */
+/**
+ * The last two segments of a path, the way a folder reads on a phone.
+ *
+ * A path without a leading "/" is one chosen by browsing, relative to the
+ * Mac's home, so it reads from "~" rather than as a folder at the root of
+ * the disk.
+ */
 export function folderLabel(path: string): string {
   const parts = normalise(path).split("/").filter(Boolean);
+  if (!path.startsWith("/")) {
+    return parts.length === 0 ? "~" : "~/" + parts.slice(-2).join("/");
+  }
   if (parts.length === 0) return "/";
   if (parts.length <= 2) return "/" + parts.join("/");
   return "~/" + parts.slice(-2).join("/");
+}
+
+/**
+ * Whether a session belongs under the chosen folder.
+ *
+ * root is where the Mac said the folder is when it answered for it. A folder
+ * chosen by browsing is named relative to the Mac's home, which the phone does
+ * not know, and a live session's cwd is absolute; without root such a folder
+ * can match nothing that arrives while it is open.
+ */
+export function folderContains(folder: string, root: string | null, cwd: string): boolean {
+  const absolute = root ?? (folder.startsWith("/") ? folder : null);
+  return absolute !== null && withinFolder(cwd, absolute);
+}
+
+/**
+ * What an empty board should say. With a folder chosen, the folder has
+ * nothing in it. Sessions elsewhere are not "hidden", and offering to show
+ * them did nothing.
+ */
+export function emptyBoard(folder: string | null, hiddenCount: number): "folder" | "hidden" | "nothing" {
+  if (folder) return "folder";
+  return hiddenCount > 0 ? "hidden" : "nothing";
 }
 
 /** One browsable child of the directory being viewed. */

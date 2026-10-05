@@ -1,6 +1,7 @@
 package source
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -52,7 +53,14 @@ type History interface {
 type pastSessions struct {
 	mu    sync.RWMutex
 	paths map[string]string
+	// order runs from the least to the most recently listed.
+	order []string
 }
+
+// maxPastSessions bounds the past sessions remembered so their transcripts can
+// be opened. A folder lists at most DefaultPastLimit, and the daemon runs for
+// weeks while folder after folder is opened; the least recently listed go.
+const maxPastSessions = 2000
 
 func (p *pastSessions) remember(id, path string) {
 	p.mu.Lock()
@@ -60,7 +68,20 @@ func (p *pastSessions) remember(id, path string) {
 	if p.paths == nil {
 		p.paths = map[string]string{}
 	}
+	if _, known := p.paths[id]; known {
+		for i, existing := range p.order {
+			if existing == id {
+				p.order = append(p.order[:i], p.order[i+1:]...)
+				break
+			}
+		}
+	}
 	p.paths[id] = path
+	p.order = append(p.order, id)
+	for len(p.order) > maxPastSessions {
+		delete(p.paths, p.order[0])
+		p.order = p.order[1:]
+	}
 }
 
 func (p *pastSessions) path(id string) (string, bool) {
@@ -210,4 +231,30 @@ func limitOrDefault(limit int) int {
 		return DefaultPastLimit
 	}
 	return limit
+}
+
+// scanTail applies visit to the lines in the last limit bytes of a file,
+// newest first, until it returns true. A first line cut by the window simply
+// fails to parse.
+func scanTail(path string, limit int64, visit func([]byte) bool) {
+	file, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return
+	}
+	offset := max(info.Size()-limit, 0)
+	buffer := make([]byte, info.Size()-offset)
+	n, _ := file.ReadAt(buffer, offset)
+	buffer = buffer[:n]
+	for end := len(buffer); end > 0; {
+		start := bytes.LastIndexByte(buffer[:end], '\n') + 1
+		if line := buffer[start:end]; len(line) > 0 && visit(line) {
+			return
+		}
+		end = start - 1
+	}
 }

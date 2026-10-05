@@ -165,7 +165,6 @@ export class Client {
    */
   private incompatible = false;
   /** Re-sent after every reconnect, like subscriptions. */
-  private pushToken: string | null = null;
   private attempt = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -242,7 +241,6 @@ export class Client {
       // state, so a reconnect starts from nothing on its side.
 	  this.sendSubscriptions();
 	  this.resendReplayable();
-	  if (this.pushToken) this.registerPush(this.pushToken);
 	  this.write(newFrameId(), { type: "list_sessions" });
     };
 
@@ -396,9 +394,14 @@ export class Client {
    * local file, and re-registering is what refreshes their last-seen stamp so
    * an active phone is never aged out.
    */
-  registerPush(token: string): void {
-    this.pushToken = token;
-    this.write(newFrameId(), { type: "register_push", pushToken: token });
+  /**
+   * Hand the Mac a push token. Returns the request's id, or null when the
+   * socket is not open. The store decides when to send it and whether the Mac
+   * kept it: see lib/push-registration.ts.
+   */
+  registerPush(token: string): string | null {
+    const id = newFrameId();
+    return this.write(id, { type: "register_push", pushToken: token }) ? id : null;
   }
 
   private write(id: string, request: Request): boolean {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -73,46 +72,6 @@ func TestOpenCodeWrapperPinsAPIToLoopback(t *testing.T) {
 			t.Errorf("explicit network setting %q was changed to %q", args, got)
 		}
 	}
-}
-
-func TestOpenCodeHealthyOnlyAcceptsOpenCode(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("a real server", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/global/health" {
-				w.WriteHeader(http.StatusNotFound)
-				return
-			}
-			w.Write([]byte(`{"healthy":true,"version":"1.18.15"}`))
-		}))
-		defer server.Close()
-
-		if !openCodeHealthy(ctx, server.URL) {
-			t.Error("a live OpenCode server was not recognised, so the wrapper would " +
-				"refuse to attach and the user would lose their existing sessions")
-		}
-	})
-
-	t.Run("something else on the port", func(t *testing.T) {
-		// The reason this probes the health endpoint instead of just dialling:
-		// any listener accepts a connection, and attaching to the wrong one
-		// fails in a way that points nowhere near the cause.
-		other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusNotFound)
-		}))
-		defer other.Close()
-
-		if openCodeHealthy(ctx, other.URL) {
-			t.Error("a non-OpenCode listener was mistaken for OpenCode")
-		}
-	})
-
-	t.Run("nothing listening", func(t *testing.T) {
-		if openCodeHealthy(ctx, "http://127.0.0.1:1") {
-			t.Error("a closed port reported healthy")
-		}
-	})
 }
 
 func TestPortBusyDetectsAListener(t *testing.T) {

@@ -238,17 +238,6 @@ func TestClaudeSubagentOutputIsFlagged(t *testing.T) {
 	}
 }
 
-func TestIsKnownClaudeRecordType(t *testing.T) {
-	for _, known := range []string{"user", "assistant", "mode", "ai-title", "file-history-snapshot"} {
-		if !IsKnownClaudeRecordType(known) {
-			t.Errorf("%q should be recognized", known)
-		}
-	}
-	if IsKnownClaudeRecordType("some-future-record") {
-		t.Error("an unrecognized type must be reported so doctor can flag format drift")
-	}
-}
-
 /* --------------------------------- Codex --------------------------------- */
 
 func codexEvent(item any) obj {

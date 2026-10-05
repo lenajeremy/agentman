@@ -276,7 +276,7 @@ func (c *Client) connectOnce(
 			})
 			continue
 		}
-		if requestMutatesSession(req.Type) {
+		if queuedInOrder(req.Type) {
 			mutationJobs <- daemonRequestJob{
 				req: req, replyTo: envelope.ID, deviceID: envelope.From,
 			}
@@ -293,6 +293,15 @@ func (c *Client) connectOnce(
 			c.sendReplyOn(conn, replyTo, event)
 		}(req, envelope.ID, envelope.From)
 	}
+}
+
+// queuedInOrder reports the requests that run one at a time, in the order
+// they arrived. Stop is the exception: it exists to cut short whatever is
+// running, so it must not wait behind a send whose images are still being
+// collected. The session's action lock still keeps it from landing in the
+// middle of another action's keystrokes.
+func queuedInOrder(kind protocol.RequestType) bool {
+	return requestMutatesSession(kind) && kind != protocol.ReqInterrupt
 }
 
 type daemonRequestJob struct {

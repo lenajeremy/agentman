@@ -107,3 +107,26 @@ test("a trailing slash on the session directory is tolerated", () => {
     request: "read_file",
   });
 });
+
+// macOS names a screenshot "Screenshot 2026-10-05 at 10.00.00 AM.png", with
+// spaces and a narrow no-break space before "AM". Those rows offered nothing
+// to tap, inside the session or out of it.
+test("a screenshot named the way macOS names them can be opened", () => {
+  const name = "Screenshot 2026-10-05 at 10.00.00 AM.png";
+  assert.deepEqual(workspaceImage("Read", `${CWD}/shots/${name}`, CWD), {
+    path: `shots/${name}`,
+    request: "read_file",
+  });
+  assert.deepEqual(workspaceImage("Read", `/Users/mac/Desktop/${name}`, CWD), {
+    path: `/Users/mac/Desktop/${name}`,
+    request: "read_seen_file",
+  });
+});
+
+// A space is part of a file's name only in what a file tool named. Shell
+// characters are still never a path.
+test("shell characters still keep a row from looking like a file", () => {
+  for (const summary of ["/tmp/a.png; rm -rf ~", "/tmp/$(id).png", "/tmp/`x`.png", "/tmp/a|b.png"]) {
+    assert.equal(workspaceImage("Read", summary, CWD), null, summary);
+  }
+});

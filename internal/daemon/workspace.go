@@ -451,14 +451,18 @@ func fileDiff(ctx context.Context, cwd string, root *os.Root, rel string) (strin
 			return "Binary image (new file)", false, nil
 		}
 		// Built before the header is written, because the header has to state
-		// how many lines follow and truncation can change that.
+		// how many lines follow and truncation can change that. The header's
+		// room is set aside first: the whole diff, header included, has to fit
+		// the app's limit, or the app drops the reply.
+		preamble := "--- /dev/null\n+++ b/" + rel + "\n"
+		headerRoom := len(preamble) + len("@@ -0,0 +1, @@\n") + 20 + 1 // count digits, final newline
 		var added []string
 		size := 0
 		for _, line := range strings.SplitAfter(text, "\n") {
 			if line == "" {
 				continue
 			}
-			if size+len(line)+1 > maxGitOutput {
+			if headerRoom+size+len(line)+1 > maxGitOutput {
 				truncated = true
 				break
 			}
@@ -467,7 +471,7 @@ func fileDiff(ctx context.Context, cwd string, root *os.Root, rel string) (strin
 		}
 
 		var diff strings.Builder
-		diff.WriteString("--- /dev/null\n+++ b/" + rel + "\n")
+		diff.WriteString(preamble)
 		// A hunk header, which real git emits and the app requires: it drops
 		// everything before the first @@ as preamble, so a new file's diff
 		// arrived complete and was parsed down to nothing, and the screen then

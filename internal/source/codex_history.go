@@ -3,7 +3,6 @@ package source
 import (
 	"context"
 	"encoding/json"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -51,10 +50,11 @@ func (s *CodexSource) Past(ctx context.Context, dir string, limit int) ([]protoc
 		if err != nil {
 			continue
 		}
-		meta, err := s.cachedCodexMeta(rollout.path, info)
+		facts, err := s.pastFactsOf(rollout.path, info)
 		if err != nil {
 			continue
 		}
+		meta := facts.meta
 		if !underDirectory(meta.Payload.Cwd, dir) {
 			continue
 		}
@@ -70,10 +70,11 @@ func (s *CodexSource) Past(ctx context.Context, dir string, limit int) ([]protoc
 		seen[threadID] = true
 
 		id := string(protocol.KindCodex) + ":" + threadID
-		model, cached := s.models.get(id)
-		if !cached {
-			model = modelFromTranscript(rollout.path, codexModelOf)
-			s.models.put(id, model)
+		if !facts.named {
+			facts.name = historyName(codexRolloutPrompt(rollout.path), meta.Payload.Cwd)
+			facts.model = codexModel(rollout.path)
+			facts.named = true
+			s.pastRead.put(rollout.path, info, facts)
 		}
 
 		started := parseCodexTime(meta.Payload.Timestamp)
@@ -84,18 +85,47 @@ func (s *CodexSource) Past(ctx context.Context, dir string, limit int) ([]protoc
 			ID:             id,
 			Kind:           protocol.KindCodex,
 			NativeID:       threadID,
-			Name:           historyName(codexRolloutPrompt(rollout.path), meta.Payload.Cwd),
+			Name:           facts.name,
 			Cwd:            meta.Payload.Cwd,
 			State:          protocol.StateEnded,
 			Inject:         protocol.InjectNone,
 			StartedAt:      started,
 			LastActivityAt: rollout.modTime,
-			Model:          model,
+			Model:          facts.model,
 		})
 
 		s.past.remember(id, rollout.path)
 	}
 	return found, nil
+}
+
+// codexPastFacts is what history reads from one rollout. Folder counts need
+// only the header; a listing of the folder goes on to read the name and the
+// model, for the rollouts that fall in it.
+type codexPastFacts struct {
+	meta  codexMeta
+	named bool
+	name  string
+	model string
+}
+
+// pastFactsOf reads a rollout's header, or recalls what was read from it if
+// the file has not changed since.
+func (s *CodexSource) pastFactsOf(path string, info os.FileInfo) (codexPastFacts, error) {
+	if facts, ok := s.pastRead.get(path, info); ok {
+		return facts, nil
+	}
+	read := s.readMeta
+	if read == nil {
+		read = readCodexMeta
+	}
+	meta, err := read(path)
+	if err != nil {
+		return codexPastFacts{}, err
+	}
+	facts := codexPastFacts{meta: meta}
+	s.pastRead.put(path, info, facts)
+	return facts, nil
 }
 
 // Directories implements History.
@@ -114,7 +144,8 @@ func (s *CodexSource) Directories(ctx context.Context) ([]protocol.Folder, error
 		if err != nil {
 			continue
 		}
-		meta, err := s.cachedCodexMeta(rollout.path, info)
+		facts, err := s.pastFactsOf(rollout.path, info)
+		meta := facts.meta
 		if err != nil || meta.Payload.Cwd == "" || meta.isSubagent() {
 			continue
 		}
@@ -142,33 +173,48 @@ func (s *CodexSource) Directories(ctx context.Context) ([]protocol.Folder, error
 	return folders, nil
 }
 
-// allRollouts lists every rollout file under the sessions root, newest first.
+// allRollouts lists rollout files under the sessions root, newest first, up
+// to codexHistoryScanFiles.
+//
+// Codex files rollouts by day (sessions/YYYY/MM/DD), and the names sort by
+// date, so the tree is walked in reverse name order and the cap keeps the
+// newest. Walking it forwards, as it once did, made the cap drop exactly the
+// sessions a folder most needs to show once there were more than it allows.
 func (s *CodexSource) allRollouts() []historyEntry {
-	root := s.sessionsDir()
 	found := make([]historyEntry, 0, 256)
-	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	var walk func(dir string) bool
+	walk = func(dir string) bool {
+		entries, err := os.ReadDir(dir)
 		if err != nil {
 			// A day directory removed mid-walk is not a reason to abandon the
 			// rest of the history.
-			return nil //nolint:nilerr // skip unreadable entries
+			return true
 		}
-		if entry.IsDir() {
-			return nil
+		for i := len(entries) - 1; i >= 0; i-- {
+			entry := entries[i]
+			path := filepath.Join(dir, entry.Name())
+			if entry.IsDir() {
+				if !walk(path) {
+					return false
+				}
+				continue
+			}
+			name := entry.Name()
+			if !strings.HasPrefix(name, "rollout-") || !strings.HasSuffix(name, ".jsonl") {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			found = append(found, historyEntry{path: path, modTime: info.ModTime().UnixMilli()})
+			if len(found) >= codexHistoryScanFiles {
+				return false
+			}
 		}
-		name := entry.Name()
-		if !strings.HasPrefix(name, "rollout-") || !strings.HasSuffix(name, ".jsonl") {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return nil
-		}
-		found = append(found, historyEntry{path: path, modTime: info.ModTime().UnixMilli()})
-		if len(found) >= codexHistoryScanFiles {
-			return fs.SkipAll
-		}
-		return nil
-	})
+		return true
+	}
+	walk(s.sessionsDir())
 	sort.Slice(found, func(i, j int) bool { return found[i].modTime > found[j].modTime })
 	return found
 }

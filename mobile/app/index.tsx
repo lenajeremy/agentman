@@ -22,7 +22,7 @@ import { QuestionCard } from "../components/QuestionCard";
 import { ROW_GAP, SwipeToDismiss } from "../components/SwipeToDismiss";
 import { useStyles, useTheme } from "../lib/appearance";
 import { canDismiss } from "../lib/dismissed";
-import { folderLabel } from "../lib/folders";
+import { emptyBoard, folderLabel } from "../lib/folders";
 import { Session } from "../lib/protocol";
 import { sessionNeedsAnswer } from "../lib/question-alerts";
 import { useStore } from "../lib/store";
@@ -168,7 +168,7 @@ export default function Agents() {
 
             {store.visibleSessions.length === 0 &&
               store.daemonOnline &&
-              (hiddenCount > 0 ? (
+              (emptyBoard(store.folderFilter, hiddenCount) === "hidden" ? (
                 <AllHiddenState
                   count={hiddenCount}
                   onShow={store.restoreAllSessions}
