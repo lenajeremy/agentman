@@ -92,6 +92,9 @@ type AntigravitySource struct {
 
 	lsofMu sync.Mutex
 	lsof   antigravityLsofAnswer
+
+	// keys is how text and answers reach a pane. See antigravityKeys.
+	keys antigravityKeys
 }
 
 // antigravityStateEntry caches the state a transcript's last line implies,
@@ -147,6 +150,7 @@ func NewAntigravitySource(home string) (*AntigravitySource, error) {
 		capturePane:       tmux.Capture,
 		captureScrollback: tmux.CaptureScrollback,
 		openConversations: antigravityOpenConversations,
+		keys:              defaultAntigravityKeys(),
 		sessions:          map[string]antigravitySession{},
 		states:            map[string]antigravityStateEntry{},
 		names:             map[string]string{},
@@ -921,10 +925,21 @@ func (s *AntigravitySource) Inject(ctx context.Context, sessionID, text string) 
 		return protocol.InjectNone, errors.New(
 			"source: this session cannot receive messages — start it with `am antigravity` to enable sending")
 	}
-	if err := refuseSendIntoMenu(ctx, s.capturePane, session.tmuxName, question.DetectAntigravity); err != nil {
-		return protocol.InjectNone, err
+	pane, err := s.capturePane(ctx, session.tmuxName)
+	if err != nil {
+		// Fail closed: without the pane there is no proof it is at a prompt.
+		return protocol.InjectNone, fmt.Errorf("source: could not safely inspect the terminal before sending: %w", err)
 	}
-	if err := tmux.Send(ctx, session.tmuxName, text); err != nil {
+	if question.DetectAntigravity(pane) != nil {
+		return protocol.InjectNone, fmt.Errorf("source: answer the pending question before sending a message")
+	}
+	// A panel or picker takes keys of its own: a message typed into /model
+	// is a search, into the review panel it is approvals and rejections.
+	if question.AntigravityPanelOpen(pane) {
+		return protocol.InjectNone, fmt.Errorf(
+			"source: a panel is open in Antigravity on the Mac; close it there before sending")
+	}
+	if err := s.keys.typeText(ctx, session.tmuxName, text); err != nil {
 		return protocol.InjectNone, err
 	}
 	return protocol.InjectTmux, nil
@@ -940,15 +955,6 @@ func (s *AntigravitySource) Interrupt(ctx context.Context, sessionID string) err
 		return errors.New("source: only sessions started with `am antigravity` can be stopped from the phone")
 	}
 	return tmux.Escape(ctx, session.tmuxName)
-}
-
-// Answer implements Answerer.
-func (s *AntigravitySource) Answer(ctx context.Context, sessionID string, answer protocol.QuestionAnswer) error {
-	session, err := s.session(sessionID)
-	if err != nil {
-		return err
-	}
-	return answerMenu(ctx, s.capturePane, session.tmuxName, session.meta.Question, answer, question.DetectAntigravity)
 }
 
 // CurrentQuestion implements QuestionInspector.

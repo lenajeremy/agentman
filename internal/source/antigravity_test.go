@@ -117,7 +117,8 @@ func TestAntigravityBindsToItsPaneAndReadsItsState(t *testing.T) {
 		900: {cwd: "/work/api", conversations: []string{agConversation}},
 	}, pane)
 	s.capturePane = func(context.Context, string) (string, error) {
-		return "Requesting permission for:\n   ls -la\nRun this command?\n> 1. Yes, run command\n  2. No, cancel\n" +
+		return "● Bash(ls -la) (ctrl+o to expand)\n\nCommand\n" + strings.Repeat("─", 60) + "\n\n" +
+			"Requesting permission for:\n   ls -la\n\nRun this command?\n> 1. Yes, run command\n  2. No, cancel\n\n" +
 			"  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command\n" +
 			"esc to cancel                                          Gemini 3.8 Flash · high\n", nil
 	}
