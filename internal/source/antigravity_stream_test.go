@@ -164,7 +164,7 @@ func agyFollow(t *testing.T, lines []string, pane func() string) (*AntigravitySo
 	return s, path, id, out, func() { cancel(); <-done }
 }
 
-func nextBatch(t *testing.T, out chan []protocol.Message) []protocol.Message {
+func nextStreamBatch(t *testing.T, out chan []protocol.Message) []protocol.Message {
 	t.Helper()
 	select {
 	case batch := <-out:
@@ -191,7 +191,7 @@ func TestAntigravityTakesBackAPreviewNoRecordReplaces(t *testing.T) {
 	})
 	defer stop()
 
-	preview := nextBatch(t, out)
+	preview := nextStreamBatch(t, out)
 	if len(preview) != 1 || preview[0].ID != "s000001" || preview[0].Text != "There are three files here:" {
 		t.Fatalf("preview = %+v", preview)
 	}
@@ -206,7 +206,7 @@ func TestAntigravityTakesBackAPreviewNoRecordReplaces(t *testing.T) {
 	file.WriteString(agLineCall + "\n")
 	file.Close()
 
-	batch := nextBatch(t, out)
+	batch := nextStreamBatch(t, out)
 	var call, withdrawn bool
 	for _, m := range batch {
 		call = call || (m.ID == "s000002" && m.Tool != nil)
@@ -223,7 +223,7 @@ func TestAntigravityStreamsAfterASystemMessage(t *testing.T) {
 	system := `{"step_index": 1, "source": "SYSTEM", "type": "SYSTEM_MESSAGE", "status": "DONE", "created_at": "2026-09-27T17:02:00Z", "content": "<SYSTEM_MESSAGE>[Notice] All your subagents and background tasks have been stopped</SYSTEM_MESSAGE>"}`
 	_, _, _, out, stop := agyFollow(t, []string{agLinePrompt, system}, func() string { return agStreamingPane })
 	defer stop()
-	if batch := nextBatch(t, out); len(batch) != 1 || batch[0].ID != "s000002" {
+	if batch := nextStreamBatch(t, out); len(batch) != 1 || batch[0].ID != "s000002" {
 		t.Errorf("batch = %+v", batch)
 	}
 }
