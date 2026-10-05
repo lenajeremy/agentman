@@ -252,3 +252,198 @@ func TestAntigravityPagesAndFollows(t *testing.T) {
 		t.Errorf("reply = %+v", got[1])
 	}
 }
+
+// A subagent is a conversation of its own, and the agy that started it holds
+// its brain directory open next to its parent's. While it works, its
+// transcript is the newest of the two — and "the newest" is how a process's
+// conversation used to be chosen, so the session became the subagent: its
+// steps under the folder's name, stuck at busy, the parent's feed gone.
+// Captured on 1.2.17 with lsof while a research subagent was blocked.
+func TestAntigravityStaysOnTheParentWhileASubagentWorks(t *testing.T) {
+	home := t.TempDir()
+	const child = "659d2256-2d1f-4ecf-9f18-e0452e64434e"
+	writeAntigravityConversation(t, home, agConversation, agLinePrompt, agLineCall, agLineResult, agLineReply)
+	childTranscript := writeAntigravityConversation(t, home, child,
+		`{"step_index":0,"source":"SYSTEM","type":"SYSTEM_MESSAGE","status":"DONE","created_at":"2026-10-05T09:39:44Z","content":"<SYSTEM_MESSAGE>…</SYSTEM_MESSAGE>"}`,
+		`{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-10-05T09:39:44Z","tool_calls":[{"name":"view_file","args":{"AbsolutePath":"/work/api/notes.txt"}}]}`)
+	// The child was written last.
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(childTranscript, later, later); err != nil {
+		t.Fatal(err)
+	}
+	record := filepath.Join(home, ".gemini", "antigravity-cli", "brain", agConversation, ".system_generated", "subagents")
+	if err := os.MkdirAll(record, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(record, child+".json"),
+		[]byte(`{"conversationId":"`+child+`","subagentDescriptor":{"typeName":"research","role":"Workspace Inspector"},"state":"SUBAGENT_STATE_ALIVE","spawnStepIndex":65}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := newTestAntigravity(t, home, 900, map[int]antigravityProcess{
+		900: {cwd: "/work/api", conversations: []string{child, agConversation}},
+	})
+	sessions := discoverAntigravity(t, s)
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %v", sessions)
+	}
+	session, ok := sessions["antigravity:"+agConversation]
+	if !ok || session.NativeID != agConversation || session.Name != "list the files" || session.State != protocol.StateIdle {
+		t.Errorf("the subagent was taken for the session: %+v", sessions)
+	}
+}
+
+// agy's bottom row carries the mode, the model, the effort and running counts,
+// joined by " · ". Each line here is copied from a 1.2.17 pane.
+func TestAntigravityFooterReadsModeModelAndCounts(t *testing.T) {
+	for _, tc := range []struct {
+		line string
+		want antigravityFooter
+	}{
+		{"? for shortcuts                                                              Gemini 3.8 Flash · high",
+			antigravityFooter{model: "Gemini 3.8 Flash", effort: "high"}},
+		{"? for shortcuts                                               accept-edits · Gemini 3.8 Flash · high",
+			antigravityFooter{model: "Gemini 3.8 Flash", effort: "high", mode: "accept-edits"}},
+		{"esc to cancel                                                         plan · Gemini 3.8 Flash · high",
+			antigravityFooter{model: "Gemini 3.8 Flash", effort: "high", mode: "plan"}},
+		{"? for shortcuts                                              Gemini 3.8 Flash · high · 1 subagent(s)",
+			antigravityFooter{model: "Gemini 3.8 Flash", effort: "high", subagents: 1}},
+		{"esc to cancel                                           Gemini 3.8 Flash · high · 1 task(s) · /tasks",
+			antigravityFooter{model: "Gemini 3.8 Flash", effort: "high", tasks: 1}},
+		// A panel open over the prompt leaves the left side blank.
+		{"                                                                      plan · Gemini 3.8 Flash · high",
+			antigravityFooter{model: "Gemini 3.8 Flash", effort: "high", mode: "plan"}},
+		{"Keyboard: ↑/↓ Navigate  ←/→ Switch View  esc Close", antigravityFooter{}},
+	} {
+		if got := parseAntigravityFooter([]string{"", tc.line, ""}); got != tc.want {
+			t.Errorf("%q\n got %+v\nwant %+v", tc.line, got, tc.want)
+		}
+	}
+}
+
+// The mode used to be read as part of the model's name.
+func TestAntigravityModelLeavesOutTheMode(t *testing.T) {
+	home := t.TempDir()
+	writeAntigravityConversation(t, home, agConversation, agLinePrompt, agLineReply)
+	pane := tmux.Session{Name: "agentman-antigravity-1-a", PanePID: 900, Cwd: "/work/api"}
+	s := newTestAntigravity(t, home, 900, map[int]antigravityProcess{
+		900: {cwd: "/work/api", conversations: []string{agConversation}},
+	}, pane)
+	s.capturePane = func(context.Context, string) (string, error) {
+		return ">\n" + strings.Repeat("─", 40) + "\n" +
+			"? for shortcuts                                               accept-edits · Gemini 3.8 Flash · high\n", nil
+	}
+	session := discoverAntigravity(t, s)["antigravity:tmux-agentman-antigravity-1-a"]
+	if session.Model != "Gemini 3.8 Flash (high)" || session.State != protocol.StateIdle {
+		t.Errorf("model %q state %s", session.Model, session.State)
+	}
+	if got := s.sessions["antigravity:tmux-agentman-antigravity-1-a"].footer.mode; got != "accept-edits" {
+		t.Errorf("mode = %q", got)
+	}
+}
+
+// A message sent while agy works waits in its queue, and the footer says so
+// instead of "esc to cancel". It is still mid-turn.
+func TestAntigravityQueuedMessageFooterIsBusy(t *testing.T) {
+	lines := strings.Split("  ▸ @/tmp/a.png what colour is this one? One word.\n"+
+		strings.Repeat("─", 40)+"\n>\n"+strings.Repeat("─", 40)+"\n"+
+		"  Press up to edit queued messages                                           Gemini 3.8 Flash · high", "\n")
+	if state, ok := antigravityPaneState(lines); !ok || state != protocol.StateBusy {
+		t.Errorf("state = %q %v", state, ok)
+	}
+}
+
+// What the transcript's last record says when there is no pane to read.
+func TestAntigravityStateFromTheLastRecordOnDisk(t *testing.T) {
+	for name, tc := range map[string]struct {
+		line string
+		want protocol.State
+	}{
+		// Declining a tool ends the turn; nothing is written after it.
+		"a declined tool": {`{"step_index":13,"source":"MODEL","type":"GENERIC","status":"ERROR","error":"permission check failed for write_file \"/w/notes.txt\": user denied permission for write_file(/w/notes.txt)\nDo not attempt to circumvent this denial…","created_at":"2026-10-05T09:31:06Z","content":"Encountered error in step execution: …"}`,
+			protocol.StateIdle},
+		// A failed tool is followed by the model's next step.
+		"a failed tool": {`{"step_index":44,"source":"MODEL","type":"GENERIC","status":"ERROR","error":"declaring permissions: cortex tool view_file: … no such file or directory","created_at":"2026-10-05T09:36:48Z","content":"Encountered error in step execution: …"}`,
+			protocol.StateBusy},
+		// Handed to the model with the prompt before it, or on its own when a
+		// background task finishes.
+		"a system message": {`{"step_index":82,"source":"SYSTEM","type":"SYSTEM_MESSAGE","status":"DONE","created_at":"2026-10-05T09:45:23Z","content":"<SYSTEM_MESSAGE>Task id … finished</SYSTEM_MESSAGE>"}`,
+			protocol.StateBusy},
+		"a background command": {`{"step_index":80,"source":"MODEL","type":"GENERIC","status":"RUNNING","created_at":"2026-10-05T09:45:03Z","content":"Tool is running as a background task with task id: c/task-80"}`,
+			protocol.StateBusy},
+	} {
+		if got := antigravityLineState(tc.line); got != tc.want {
+			t.Errorf("%s: state = %s, want %s", name, got, tc.want)
+		}
+	}
+}
+
+// agy titles a conversation after its first turn; that title, not the first
+// prompt, is what its own picker shows.
+func TestAntigravityNamesAConversationByItsTitle(t *testing.T) {
+	home := t.TempDir()
+	writeAntigravityConversation(t, home, agConversation, agLinePrompt, agLineReply)
+	s := newTestAntigravity(t, home, 900, map[int]antigravityProcess{
+		900: {cwd: "/work/api", conversations: []string{agConversation}},
+	})
+	if got := discoverAntigravity(t, s)["antigravity:"+agConversation].Name; got != "list the files" {
+		t.Fatalf("before a title: %q", got)
+	}
+	annotations := filepath.Join(home, ".gemini", "antigravity-cli", "annotations")
+	if err := os.MkdirAll(annotations, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(annotations, agConversation+".pbtxt"),
+		[]byte(`title:"Count Files With \"ls\""`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := discoverAntigravity(t, s)["antigravity:"+agConversation].Name; got != `Count Files With "ls"` {
+		t.Errorf("after a title: %q", got)
+	}
+}
+
+// lsof ran every second; its answer only changes when a conversation starts.
+func TestAntigravityReusesLsofUntilSomethingCouldHaveChanged(t *testing.T) {
+	home := t.TempDir()
+	writeAntigravityConversation(t, home, agConversation, agLinePrompt, agLineReply)
+	held := map[int]antigravityProcess{900: {cwd: "/work/api", conversations: []string{agConversation}}}
+	s := newTestAntigravity(t, home, 900, held)
+	calls := 0
+	s.openConversations = func(context.Context, string, []int) map[int]antigravityProcess {
+		calls++
+		return held
+	}
+	discoverAntigravity(t, s)
+	discoverAntigravity(t, s)
+	if calls != 1 {
+		t.Errorf("lsof ran %d times for an unchanged process table", calls)
+	}
+
+	// An agy that holds nothing yet is waiting for its first message, and is
+	// asked about on every sweep so it binds to its transcript promptly.
+	held[900] = antigravityProcess{cwd: "/work/api"}
+	s.lsof = antigravityLsofAnswer{}
+	calls = 0
+	discoverAntigravity(t, s)
+	discoverAntigravity(t, s)
+	if calls != 2 {
+		t.Errorf("an unbound agy was asked about %d times in two sweeps", calls)
+	}
+
+	// And a failed lsof is never remembered as an empty machine.
+	held[900] = antigravityProcess{cwd: "/work/api", conversations: []string{agConversation}}
+	s.lsof = antigravityLsofAnswer{}
+	fail := true
+	s.openConversations = func(context.Context, string, []int) map[int]antigravityProcess {
+		calls++
+		if fail {
+			return nil
+		}
+		return held
+	}
+	calls = 0
+	discoverAntigravity(t, s)
+	fail = false
+	if len(discoverAntigravity(t, s)) != 1 || calls != 2 {
+		t.Errorf("after a failed lsof: %d calls", calls)
+	}
+}

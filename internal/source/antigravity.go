@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,6 +47,16 @@ const antigravityPanePrefix = tmux.Prefix + "antigravity-"
 
 const antigravityLsofTimeout = 3 * time.Second
 
+// antigravityLsofTTL is how long one lsof answer is reused.
+//
+// Discovery sweeps every second and lsof was the most expensive thing in it:
+// a fork and a walk of every descriptor each agy holds, for an answer that
+// changes only when a conversation starts. An agy that holds no conversation
+// yet is the exception, and is asked about again on the next sweep — that is
+// a phone launch or a fresh pane waiting for its first message, and binding it
+// to its transcript a few seconds late would show the user an empty session.
+const antigravityLsofTTL = 5 * time.Second
+
 // antigravityFollowSeed is how much of a transcript a follow reads silently
 // when it attaches. A tool call made just before the follow started can have
 // its result arrive just after; without the call in the parser's memory that
@@ -75,14 +86,43 @@ type AntigravitySource struct {
 	past pastSessions
 
 	cacheMu sync.Mutex
-	states  map[string]kiroStateEntry
+	states  map[string]antigravityStateEntry
 	names   map[string]string
+	titles  map[string]antigravityTitle
+
+	lsofMu sync.Mutex
+	lsof   antigravityLsofAnswer
+}
+
+// antigravityStateEntry caches the state a transcript's last line implies,
+// keyed by the file's size and mtime so an unchanged file is never re-read.
+type antigravityStateEntry struct {
+	size  int64
+	mtime time.Time
+	state protocol.State
+}
+
+// antigravityTitle is a conversation's title as agy's annotations file held it
+// at one mtime.
+type antigravityTitle struct {
+	mtime time.Time
+	title string
+}
+
+// antigravityLsofAnswer is one lsof run, kept for antigravityLsofTTL.
+type antigravityLsofAnswer struct {
+	at   time.Time
+	pids string
+	held map[int]antigravityProcess
 }
 
 type antigravitySession struct {
 	meta       protocol.Session
 	transcript string
 	tmuxName   string
+	// footer is what the pane's bottom row said on the last sweep: the mode
+	// agy is in, and how many subagents and background tasks it is running.
+	footer antigravityFooter
 }
 
 // antigravityProcess is what lsof shows one agy process holding.
@@ -108,8 +148,9 @@ func NewAntigravitySource(home string) (*AntigravitySource, error) {
 		captureScrollback: tmux.CaptureScrollback,
 		openConversations: antigravityOpenConversations,
 		sessions:          map[string]antigravitySession{},
-		states:            map[string]kiroStateEntry{},
+		states:            map[string]antigravityStateEntry{},
 		names:             map[string]string{},
+		titles:            map[string]antigravityTitle{},
 	}, nil
 }
 
@@ -147,7 +188,7 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 	}
 	var open map[int]antigravityProcess
 	if len(pids) > 0 && s.openConversations != nil {
-		open = s.openConversations(ctx, s.home, pids)
+		open = s.heldConversations(ctx, pids)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -163,7 +204,7 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 		if !ok || len(process.conversations) == 0 {
 			continue // at its trust prompt, or not a chat at all (mic-serve, remote-control)
 		}
-		conversation := s.latestConversation(process.conversations)
+		conversation := s.latestConversation(s.withoutSubagents(process.conversations))
 		if seen[conversation] {
 			continue
 		}
@@ -188,7 +229,7 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 			ID:             id,
 			Kind:           protocol.KindAntigravity,
 			NativeID:       conversation,
-			Name:           s.conversationName(transcript, process.cwd),
+			Name:           s.conversationName(conversation, transcript, process.cwd),
 			Cwd:            process.cwd,
 			State:          s.transcriptState(transcript),
 			Inject:         protocol.InjectNone,
@@ -197,12 +238,13 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 			Model:          s.defaultModel(),
 			AgentPID:       pid,
 		}
+		var footer antigravityFooter
 		if tmuxName != "" {
 			session.Inject = protocol.InjectTmux
-			s.applyPane(ctx, &session, tmuxName)
+			footer = s.applyPane(ctx, &session, tmuxName)
 		}
 		found = append(found, session)
-		next[id] = antigravitySession{meta: session, transcript: transcript, tmuxName: tmuxName}
+		next[id] = antigravitySession{meta: session, transcript: transcript, tmuxName: tmuxName, footer: footer}
 	}
 
 	// A pane with no conversation yet: agy at its folder trust prompt, or
@@ -221,9 +263,9 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 			State: protocol.StateIdle, Inject: protocol.InjectTmux, Model: s.defaultModel(),
 			StartedAt: started, LastActivityAt: started, AgentPID: pane.PanePID,
 		}
-		s.applyPane(ctx, &session, pane.Name)
+		footer := s.applyPane(ctx, &session, pane.Name)
 		found = append(found, session)
-		next[id] = antigravitySession{meta: session, tmuxName: pane.Name}
+		next[id] = antigravitySession{meta: session, tmuxName: pane.Name, footer: footer}
 	}
 
 	s.mu.Lock()
@@ -245,49 +287,196 @@ func (s *AntigravitySource) latestConversation(conversations []string) string {
 	return best
 }
 
-// antigravityModelLabel is the model agy right-aligns on its bottom row:
-// "? for shortcuts            Gemini 3.8 Flash · high". It is matched against
-// the last column only — split on runs of spaces — because a pattern over the
-// whole row happily swallows the footer to its left.
-var antigravityModelLabel = regexp.MustCompile(`^(\S.*?\S)\s+·\s+(low|medium|high|max)$`)
+// withoutSubagents drops the conversations a process holds only because one of
+// its own conversations started them.
+//
+// A subagent is a conversation of its own, with its own brain directory and
+// transcript, and the agy that spawned it holds that directory open beside its
+// parent's. While the subagent works its transcript is the newest, so picking
+// "the one written to last" moved the whole session onto it: the phone showed
+// the subagent's steps under the folder's name, stuck at busy, and the
+// parent's own feed was replaced. The parent records each child it spawns
+// under .system_generated/subagents/<child>.json, which is what tells them
+// apart. If every held conversation turns out to be someone's child, which
+// should not happen, they are all kept rather than none.
+func (s *AntigravitySource) withoutSubagents(conversations []string) []string {
+	if len(conversations) < 2 {
+		return conversations
+	}
+	kept := make([]string, 0, len(conversations))
+	for _, candidate := range conversations {
+		child := false
+		for _, parent := range conversations {
+			if parent == candidate {
+				continue
+			}
+			record := filepath.Join(s.root(), "brain", parent, ".system_generated", "subagents", candidate+".json")
+			if _, err := os.Stat(record); err == nil {
+				child = true
+				break
+			}
+		}
+		if !child {
+			kept = append(kept, candidate)
+		}
+	}
+	if len(kept) == 0 {
+		return conversations
+	}
+	return kept
+}
+
+// heldConversations is antigravityOpenConversations, reused for a few seconds.
+// See antigravityLsofTTL.
+func (s *AntigravitySource) heldConversations(ctx context.Context, pids []int) map[int]antigravityProcess {
+	key := pidKey(pids)
+	s.lsofMu.Lock()
+	cached := s.lsof
+	s.lsofMu.Unlock()
+	if cached.pids == key && time.Since(cached.at) < antigravityLsofTTL && allBound(cached.held, pids) {
+		return cached.held
+	}
+	held := s.openConversations(ctx, s.home, pids)
+	if held == nil {
+		// lsof missing or timed out: do not remember a blank answer as if it
+		// were a real one, or every session would vanish for the whole TTL.
+		return nil
+	}
+	s.lsofMu.Lock()
+	s.lsof = antigravityLsofAnswer{at: time.Now(), pids: key, held: held}
+	s.lsofMu.Unlock()
+	return held
+}
+
+func pidKey(pids []int) string {
+	sorted := append([]int(nil), pids...)
+	slices.Sort(sorted)
+	parts := make([]string, len(sorted))
+	for i, pid := range sorted {
+		parts[i] = strconv.Itoa(pid)
+	}
+	return strings.Join(parts, ",")
+}
+
+// allBound reports whether every agy already holds a conversation, which is
+// when an earlier answer can stand in for a new one.
+func allBound(held map[int]antigravityProcess, pids []int) bool {
+	for _, pid := range pids {
+		if len(held[pid].conversations) == 0 {
+			return false
+		}
+	}
+	return true
+}
 
 var columnGap = regexp.MustCompile(`\s{2,}`)
+
+// antigravityEffort is the reasoning effort agy prints after the model name.
+var antigravityEffort = regexp.MustCompile(`^(?:low|medium|high|max)$`)
+
+// antigravityCount is a running count agy appends to its footer:
+// "1 subagent(s)", "2 task(s)".
+var antigravityCount = regexp.MustCompile(`^(\d+) (subagent|task)\(s\)$`)
+
+// antigravityFooter is agy's bottom row, read apart.
+//
+// The right-hand side is a list joined by " · ": an optional mode, the
+// model, the effort, then optional counts —
+//
+//	? for shortcuts                       accept-edits · Gemini 3.8 Flash · high
+//	? for shortcuts                Gemini 3.8 Flash · high · 1 subagent(s)
+//	esc to cancel           Gemini 3.8 Flash · high · 1 task(s) · /tasks
+//
+// The model used to be matched as "whatever precedes the effort", which made
+// the mode part of the model's name ("accept-edits · Gemini 3.8 Flash") and
+// lost the model altogether once a count followed the effort. Anchoring on the
+// effort word and reading outwards from it handles every shape agy draws.
+type antigravityFooter struct {
+	model     string
+	effort    string
+	mode      string
+	subagents int
+	tasks     int
+}
+
+func parseAntigravityFooter(lines []string) antigravityFooter {
+	var footer antigravityFooter
+	last := strings.TrimSpace(lastNonBlankLine(lines))
+	if last == "" {
+		return footer
+	}
+	columns := columnGap.Split(last, -1)
+	parts := strings.Split(columns[len(columns)-1], " · ")
+	effort := -1
+	for i, part := range parts {
+		if antigravityEffort.MatchString(strings.TrimSpace(part)) {
+			effort = i
+			break
+		}
+	}
+	if effort < 1 {
+		return footer
+	}
+	footer.effort = strings.TrimSpace(parts[effort])
+	footer.model = strings.TrimSpace(parts[effort-1])
+	if effort >= 2 {
+		footer.mode = strings.TrimSpace(parts[effort-2])
+	}
+	for _, part := range parts[effort+1:] {
+		match := antigravityCount.FindStringSubmatch(strings.TrimSpace(part))
+		if match == nil {
+			continue
+		}
+		count, _ := strconv.Atoi(match[1])
+		if match[2] == "subagent" {
+			footer.subagents = count
+		} else {
+			footer.tasks = count
+		}
+	}
+	return footer
+}
 
 // applyPane refines a session from its terminal. agy writes a step only once
 // it completes, so a reply still being generated looks, on disk, exactly like
 // a turn that has not started — and a permission prompt is not on disk at all.
-func (s *AntigravitySource) applyPane(ctx context.Context, session *protocol.Session, tmuxName string) {
+func (s *AntigravitySource) applyPane(
+	ctx context.Context, session *protocol.Session, tmuxName string,
+) antigravityFooter {
 	capture := s.capturePane
 	if capture == nil {
 		capture = tmux.Capture
 	}
 	pane, err := capture(ctx, tmuxName)
 	if err != nil {
-		return
+		return antigravityFooter{}
 	}
 	lines := strings.Split(strings.TrimRight(pane, "\n"), "\n")
-	if last := strings.TrimSpace(lastNonBlankLine(lines)); last != "" {
-		columns := columnGap.Split(last, -1)
-		if match := antigravityModelLabel.FindStringSubmatch(columns[len(columns)-1]); match != nil {
-			session.Model = match[1] + " (" + match[2] + ")"
-		}
+	footer := parseAntigravityFooter(lines)
+	if footer.model != "" {
+		session.Model = footer.model + " (" + footer.effort + ")"
 	}
 	if found := question.DetectAntigravity(pane); found != nil {
 		session.Question = protocolQuestion(found)
 		session.State = protocol.StateWaitingInput
-		return
+		return footer
 	}
 	if state, ok := antigravityPaneState(lines); ok {
 		session.State = state
 	}
+	return footer
 }
 
 // antigravityPaneState reads agy's footer, which says what it is doing. Only
 // the bottom rows are read: the same words could appear in the conversation.
+//
+// "Press up to edit queued messages" replaces "esc to cancel" when a message
+// was sent while the agent was working; it only ever appears mid-turn.
 func antigravityPaneState(lines []string) (protocol.State, bool) {
 	for i := len(lines) - 1; i >= 0 && i >= len(lines)-3; i-- {
 		switch {
-		case strings.Contains(lines[i], "esc to cancel"):
+		case strings.Contains(lines[i], "esc to cancel"),
+			strings.Contains(lines[i], "Press up to edit queued messages"):
 			return protocol.StateBusy, true
 		case strings.Contains(lines[i], "? for shortcuts"):
 			return protocol.StateIdle, true
@@ -332,9 +521,15 @@ func (s *AntigravitySource) defaultModel() string {
 	return settings.Model
 }
 
-// conversationName is the first thing the user asked, which reads better in a
-// list than a directory name. The first step never changes, so it is read once.
-func (s *AntigravitySource) conversationName(transcript, cwd string) string {
+// conversationName is the title agy gave the conversation — the one its own
+// /resume picker shows, generated after the first turn or set with /rename —
+// and until there is one, the first thing the user asked, which reads better
+// in a list than a directory name. The first step never changes, so it is read
+// once; the title is re-read only when its file changes.
+func (s *AntigravitySource) conversationName(conversation, transcript, cwd string) string {
+	if title := s.conversationTitle(conversation); title != "" {
+		return title
+	}
 	s.cacheMu.Lock()
 	name, ok := s.names[transcript]
 	s.cacheMu.Unlock()
@@ -353,6 +548,48 @@ func (s *AntigravitySource) conversationName(transcript, cwd string) string {
 		return base
 	}
 	return "antigravity"
+}
+
+// antigravityTitleField is the one field agy writes to a conversation's
+// annotations file: `title:"Create And Edit Notes File"`, protobuf text format.
+var antigravityTitleField = regexp.MustCompile(`title:("(?:[^"\\]|\\.)*")`)
+
+// conversationTitle reads annotations/<conversation>.pbtxt.
+func (s *AntigravitySource) conversationTitle(conversation string) string {
+	if !isUUID(conversation) {
+		return ""
+	}
+	path := filepath.Join(s.root(), "annotations", conversation+".pbtxt")
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	s.cacheMu.Lock()
+	cached, ok := s.titles[conversation]
+	s.cacheMu.Unlock()
+	if ok && cached.mtime.Equal(info.ModTime()) {
+		return cached.title
+	}
+	title := ""
+	if raw, err := readBoundedFile(path, 64<<10); err == nil {
+		title = parseAntigravityTitle(string(raw))
+	}
+	s.cacheMu.Lock()
+	s.titles[conversation] = antigravityTitle{mtime: info.ModTime(), title: title}
+	s.cacheMu.Unlock()
+	return title
+}
+
+func parseAntigravityTitle(text string) string {
+	match := antigravityTitleField.FindStringSubmatch(text)
+	if match == nil {
+		return ""
+	}
+	title, err := strconv.Unquote(match[1])
+	if err != nil {
+		return ""
+	}
+	return strings.Join(strings.Fields(title), " ")
 }
 
 func firstAntigravityRequest(transcript string) string {
@@ -400,7 +637,7 @@ func (s *AntigravitySource) transcriptState(path string) protocol.State {
 		state = antigravityLineState(line)
 	}
 	s.cacheMu.Lock()
-	s.states[path] = kiroStateEntry{size: info.Size(), mtime: info.ModTime(), state: state}
+	s.states[path] = antigravityStateEntry{size: info.Size(), mtime: info.ModTime(), state: state}
 	s.cacheMu.Unlock()
 	return state
 }
@@ -409,6 +646,7 @@ func antigravityLineState(line string) protocol.State {
 	var step struct {
 		Type      string            `json:"type"`
 		Status    string            `json:"status"`
+		Error     string            `json:"error"`
 		ToolCalls []json.RawMessage `json:"tool_calls"`
 	}
 	if json.Unmarshal([]byte(line), &step) != nil {
@@ -420,7 +658,19 @@ func antigravityLineState(line string) protocol.State {
 		return protocol.StateBusy // a step still in progress
 	}
 	switch step.Type {
-	case "USER_INPUT", "GENERIC":
+	case "USER_INPUT", "SYSTEM_MESSAGE":
+		// A system message is handed to the model with the next prompt, or on
+		// its own when a background task or subagent reports back; either way
+		// a response is now being written.
+		return protocol.StateBusy
+	case "GENERIC":
+		// Declining a tool ends the turn there and then — agy prints
+		// "Interrupted" and writes nothing after the denial — so a denial last
+		// is a finished turn, not one waiting on its next step. Every other
+		// tool result, failures included, is followed by the model's reply.
+		if antigravityDenied(step.Error) {
+			return protocol.StateIdle
+		}
 		return protocol.StateBusy
 	case "PLANNER_RESPONSE":
 		if len(step.ToolCalls) > 0 {
@@ -428,6 +678,14 @@ func antigravityLineState(line string) protocol.State {
 		}
 	}
 	return protocol.StateIdle
+}
+
+// antigravityDenied reports a tool result that is the user turning the call
+// down: "permission check failed for write_file …: user denied permission for
+// write_file(…)". A hook's refusal reads differently and does not end the
+// turn, so it is not matched.
+func antigravityDenied(errorText string) bool {
+	return strings.Contains(errorText, "user denied permission for")
 }
 
 func (s *AntigravitySource) forgetCaches(live map[string]antigravitySession) {
@@ -445,6 +703,11 @@ func (s *AntigravitySource) forgetCaches(live map[string]antigravitySession) {
 	for path := range s.names {
 		if !keep[path] {
 			delete(s.names, path)
+		}
+	}
+	for conversation := range s.titles {
+		if !keep[s.transcriptPath(conversation)] {
+			delete(s.titles, conversation)
 		}
 	}
 }

@@ -57,7 +57,7 @@ func (s *AntigravitySource) Past(ctx context.Context, dir string, limit int) ([]
 		// when both exist, and matches what a live session is named.
 		name := conversation.firstPrompt
 		if _, err := os.Stat(transcript); err == nil {
-			name = s.conversationName(transcript, conversation.workspace)
+			name = s.conversationName(conversation.id, transcript, conversation.workspace)
 		}
 		found = append(found, protocol.Session{
 			ID:             id,
