@@ -68,6 +68,8 @@ import {
 import {
   MAX_RETAINED_MESSAGES,
   mergeRetainedMessages,
+  newlyReachable,
+  sessionsToForget,
 } from "./retention";
 
 /** A message the user sent that has not been confirmed yet. */
@@ -364,13 +366,35 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return retained;
   }, []);
 
+  // A session someone has open just became reachable — most often one they
+  // reopened, which keeps its id. Subscribe again, so an older Mac that refused
+  // the first subscription starts its tail, and fetch the newest page, which
+  // covers whatever the agent wrote before the tail began.
+  const followReachable = useCallback((ids: readonly string[]) => {
+    for (const sessionId of ids) {
+      clientRef.current?.subscribe(sessionId);
+      const known = messagesRef.current[sessionId] ?? [];
+      const id = clientRef.current?.send({
+        type: "fetch_messages",
+        sessionId,
+        limit: known.length === 0 ? 40 : CATCH_UP_PAGE,
+      });
+      if (!id) continue;
+      if (known.length === 0) pageRequests.current.set(id, sessionId);
+      else catchUpRequests.current.set(id, { sessionId, sinceTs: newestTimestamp(known), depth: 0 });
+    }
+  }, []);
+
   const handleEvent = useCallback((event: DaemonEvent, replyTo?: string) => {
     switch (event.type) {
       case "sessions": {
         const list = event.sessions ?? [];
         const previous = sessionsRef.current;
         const liveIds = new Set(list.map((session) => session.id));
-        const removedIds = Object.keys(messagesRef.current).filter((id) => !liveIds.has(id));
+        const removedIds = sessionsToForget(
+          Object.keys(messagesRef.current), liveIds, desiredSubscriptions.current,
+        );
+        const keep = (id: string) => liveIds.has(id) || desiredSubscriptions.current.has(id);
         if (removedIds.length > 0) {
           const nextMessages = { ...messagesRef.current };
           for (const id of removedIds) {
@@ -381,10 +405,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             clientRef.current?.forgetSession(id);
           }
           for (const [requestId, sessionId] of pageRequests.current) {
-            if (!liveIds.has(sessionId)) pageRequests.current.delete(requestId);
+            if (!keep(sessionId)) pageRequests.current.delete(requestId);
           }
           for (const [requestId, state] of catchUpRequests.current) {
-            if (!liveIds.has(state.sessionId)) catchUpRequests.current.delete(requestId);
+            if (!keep(state.sessionId)) catchUpRequests.current.delete(requestId);
           }
           messagesRef.current = nextMessages;
           setMessages(nextMessages);
@@ -405,6 +429,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setActions((current) => reconcileAgentActions(current, list));
         sessionsRef.current = list;
         setSessions(list);
+        followReachable(newlyReachable(previous, list, desiredSubscriptions.current));
         // A full list from a connected daemon is the only safe moment to prune:
         // doing it from a session_update would judge every other dismissal
         // against a list of one, and drop them all.
@@ -438,6 +463,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         });
         setActions((current) => reconcileAgentActions(current, next));
         sessionsRef.current = next;
+        followReachable(newlyReachable(previous, [updated], desiredSubscriptions.current));
         setSessions((current) => {
           const index = current.findIndex((s) => s.id === updated.id);
           if (index === -1) return [...current, updated];
@@ -672,7 +698,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 		break;
 	  }
     }
-  }, [mergeSessionMessages, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest]);
+  }, [mergeSessionMessages, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, followReachable]);
 
   const attach = useCallback(
     (creds: Credentials) => {

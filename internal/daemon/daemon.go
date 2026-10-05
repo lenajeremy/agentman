@@ -111,6 +111,11 @@ type Daemon struct {
 	// sessions the app is actually watching appear here, which is what keeps
 	// idle sessions free.
 	follows map[string]*follow
+	// waiting holds subscriptions to sessions that are not running yet, by
+	// session and then subscriber. Opening an ended session subscribes to it,
+	// and reopening it keeps its id, so the phone never asks again: the tail
+	// starts here, on the sweep that first sees the session live.
+	waiting map[string]map[string]struct{}
 	// actionLocks cover send, answer, and interrupt from validation through the
 	// adapter action. Read-only history requests remain fully concurrent.
 	actionLocks [actionLockStripes]sync.Mutex
@@ -185,6 +190,7 @@ func New(registry *source.Registry, sink Transport) *Daemon {
 		sink:               sink,
 		sessions:           map[string]protocol.Session{},
 		follows:            map[string]*follow{},
+		waiting:            map[string]map[string]struct{}{},
 		turns:              map[string]turnState{},
 		lastAlert:          map[string]time.Time{},
 		hookStates:         map[string]hookState{},
@@ -429,7 +435,20 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 	// lock is released. Sharing the map here creates a real concurrent
 	// iteration/write panic window.
 	d.sessions = cloneSessionMap(current)
+	var arrived []waitingSubscription
+	for sessionID, subscribers := range d.waiting {
+		if _, live := current[sessionID]; !live {
+			continue
+		}
+		for subscriber := range subscribers {
+			arrived = append(arrived, waitingSubscription{session: sessionID, subscriber: subscriber})
+		}
+		delete(d.waiting, sessionID)
+	}
 	d.mu.Unlock()
+	for _, wait := range arrived {
+		_ = d.startFollow(wait.subscriber, wait.session)
+	}
 
 	if initial {
 		_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessions, Sessions: fitSessionList(found)})
@@ -494,7 +513,7 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 			delete(d.pendingTurns, id)
 		}
 		d.mu.Unlock()
-		d.stopFollowAll(id)
+		d.stopFollowAll(id, true)
 		if !bulk {
 			_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessionGone, SessionID: id})
 		}
@@ -1386,8 +1405,14 @@ func (d *Daemon) startFollow(subscriberID, sessionID string) error {
 	}
 	d.mu.Lock()
 	if _, exists := d.sessions[sessionID]; !exists {
+		// Not running (yet): an ended session opened from a folder, which the
+		// phone may be about to reopen. Its tail starts when a sweep sees it.
+		waited := d.waitLocked(subscriberID, sessionID)
 		d.mu.Unlock()
-		return fmt.Errorf("daemon: cannot subscribe to unknown session %q", sessionID)
+		if !waited {
+			return fmt.Errorf("daemon: cannot subscribe to unknown session %q", sessionID)
+		}
+		return nil
 	}
 	if existing, exists := d.follows[sessionID]; exists {
 		existing.subscribers[subscriberID] = struct{}{}
@@ -1445,6 +1470,7 @@ func (d *Daemon) stopFollow(subscriberID, sessionID string) {
 		subscriberID = "local"
 	}
 	d.mu.Lock()
+	d.unwaitLocked(subscriberID, sessionID)
 	handle, exists := d.follows[sessionID]
 	if exists {
 		delete(handle.subscribers, subscriberID)
@@ -1460,10 +1486,18 @@ func (d *Daemon) stopFollow(subscriberID, sessionID string) {
 	}
 }
 
-func (d *Daemon) stopFollowAll(sessionID string) {
+// stopFollowAll ends a session's tail for every subscriber. When the session
+// has only ended, its subscribers keep waiting for it: one reopened from the
+// phone they are still looking at comes back under the same id.
+func (d *Daemon) stopFollowAll(sessionID string, keepWaiting bool) {
 	d.mu.Lock()
 	handle, exists := d.follows[sessionID]
 	delete(d.follows, sessionID)
+	if exists && keepWaiting {
+		for subscriber := range handle.subscribers {
+			d.waitLocked(subscriber, sessionID)
+		}
+	}
 	d.mu.Unlock()
 	if exists {
 		handle.cancel()
@@ -1476,6 +1510,9 @@ func (d *Daemon) DisconnectSubscriber(subscriberID string) {
 		return
 	}
 	d.mu.Lock()
+	for sessionID := range d.waiting {
+		d.unwaitLocked(subscriberID, sessionID)
+	}
 	var cancel []context.CancelFunc
 	for sessionID, handle := range d.follows {
 		delete(handle.subscribers, subscriberID)
@@ -1487,6 +1524,49 @@ func (d *Daemon) DisconnectSubscriber(subscriberID string) {
 	d.mu.Unlock()
 	for _, stop := range cancel {
 		stop()
+	}
+}
+
+// maxWaitingSubscriptions bounds subscriptions held for sessions that are not
+// running. Each is one phone looking at an ended session, so a real count is a
+// handful; the bound only stops a misbehaving client from growing the map.
+const maxWaitingSubscriptions = 256
+
+type waitingSubscription struct {
+	session, subscriber string
+}
+
+// waitLocked records a subscriber waiting for a session to start, reporting
+// false when the bound is reached. d.mu must be held.
+func (d *Daemon) waitLocked(subscriberID, sessionID string) bool {
+	if subscribers, ok := d.waiting[sessionID]; ok {
+		if _, already := subscribers[subscriberID]; already {
+			return true
+		}
+	}
+	total := 0
+	for _, subscribers := range d.waiting {
+		total += len(subscribers)
+	}
+	if total >= maxWaitingSubscriptions {
+		return false
+	}
+	if d.waiting[sessionID] == nil {
+		d.waiting[sessionID] = map[string]struct{}{}
+	}
+	d.waiting[sessionID][subscriberID] = struct{}{}
+	return true
+}
+
+// unwaitLocked forgets one waiting subscription. d.mu must be held.
+func (d *Daemon) unwaitLocked(subscriberID, sessionID string) {
+	subscribers, ok := d.waiting[sessionID]
+	if !ok {
+		return
+	}
+	delete(subscribers, subscriberID)
+	if len(subscribers) == 0 {
+		delete(d.waiting, sessionID)
 	}
 }
 
