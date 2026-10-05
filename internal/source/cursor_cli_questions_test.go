@@ -33,14 +33,14 @@ func optionKeys(q *protocol.Question) []string {
 
 func TestCursorCLIScreensFromRealPanes(t *testing.T) {
 	type want struct {
-		title     string
-		keys      string
-		custom    bool
-		customKey string
-		textBox   bool
-		detail    string
-		busy      bool
-		blocked   bool
+		title    string
+		keys     string
+		custom   bool
+		withText string // the option keys that carry a note
+		textBox  bool
+		detail   string
+		busy     bool
+		blocked  bool
 	}
 	cases := map[string]want{
 		"trust":                      {title: "Workspace trust", keys: "a,q"},
@@ -55,12 +55,12 @@ func TestCursorCLIScreensFromRealPanes(t *testing.T) {
 		"hints":                      {},
 		"slash-menu":                 {},
 		"text-question":              {busy: true},
-		"shell-approval":             {title: "Shell command", keys: "y,tab,shift+tab,skip", custom: true, customKey: "n", detail: "echo agentman-research in ."},
+		"shell-approval":             {title: "Shell command", keys: "y,tab,shift+tab,n", withText: "n", detail: "echo agentman-research in ."},
 		"skip-box":                   {title: "Tell the agent what to do instead", keys: "skip", custom: true, textBox: true, detail: "echo agentman-research in .", busy: true},
 		"delete-approval":            {title: "Delete file", keys: "y,n", detail: "Delete file: hello.txt"},
-		"plan-approval-reconnecting": {title: "Cursor plan", keys: "b", custom: true, customKey: "p", detail: "Create goodbye.txt", busy: true},
-		"plan-approval-usage-limit":  {title: "Cursor plan", keys: "b", custom: true, customKey: "p", detail: "Create goodbye.txt"},
-		"plan-approval-focus-2":      {title: "Cursor plan", keys: "b", custom: true, customKey: "p", detail: "Create goodbye.txt"},
+		"plan-approval-reconnecting": {title: "Cursor plan", keys: "b,p", withText: "p", detail: "Create goodbye.txt", busy: true},
+		"plan-approval-usage-limit":  {title: "Cursor plan", keys: "b,p", withText: "p", detail: "Create goodbye.txt"},
+		"plan-approval-focus-2":      {title: "Cursor plan", keys: "b,p", withText: "p", detail: "Create goodbye.txt"},
 		"plan-revise-box":            {title: "Describe how to revise the plan", keys: "esc", custom: true, textBox: true},
 		"plan-rejected-revise-box":   {title: "Describe how to revise the plan", keys: "esc", custom: true, textBox: true},
 		"resume-picker":              {blocked: true},
@@ -88,8 +88,14 @@ func TestCursorCLIScreensFromRealPanes(t *testing.T) {
 				t.Errorf("question = %q keys=%v custom=%v, want %q keys=%s custom=%v",
 					q.Title, optionKeys(q), q.Custom, want.title, want.keys, want.custom)
 			}
-			if screen.customKey != want.customKey || screen.textBox != want.textBox {
-				t.Errorf("customKey=%q textBox=%v, want %q %v", screen.customKey, screen.textBox, want.customKey, want.textBox)
+			var withText []string
+			for _, option := range q.Options {
+				if option.WithText {
+					withText = append(withText, option.Key)
+				}
+			}
+			if strings.Join(withText, ",") != want.withText || screen.textBox != want.textBox {
+				t.Errorf("withText=%v textBox=%v, want %q %v", withText, screen.textBox, want.withText, want.textBox)
 			}
 			if !strings.HasPrefix(q.Detail, want.detail) {
 				t.Errorf("detail = %q, want it to start with %q", q.Detail, want.detail)
@@ -232,6 +238,9 @@ func TestCursorCLIAnswersADeleteWithItsKey(t *testing.T) {
 	if err := s.Answer(context.Background(), id, protocol.QuestionAnswer{QuestionID: q.ID, Text: "keep it"}); err == nil {
 		t.Fatal("text was accepted by a menu with no answer box")
 	}
+	if err := s.Answer(context.Background(), id, protocol.QuestionAnswer{QuestionID: q.ID, OptionKey: "n", Text: "keep it"}); err == nil {
+		t.Fatal("a note was accepted on an option that takes none")
+	}
 }
 
 // "Skip & tell the agent what to do instead" with text from the phone: n
@@ -240,7 +249,9 @@ func TestCursorCLISkipsAShellCommandWithAnInstruction(t *testing.T) {
 	s, pane, id := cursorCLIAnswerFixture(t,
 		cursorCLIPaneFixture(t, "shell-approval"), cursorCLIPaneFixture(t, "skip-box"))
 	q := s.sessions[id].meta.Question
-	if err := s.Answer(context.Background(), id, protocol.QuestionAnswer{QuestionID: q.ID, Text: "use printf instead"}); err != nil {
+	// Line breaks from a client that does not flatten them: Cursor's box is
+	// one line, where a newline would submit half the note.
+	if err := s.Answer(context.Background(), id, protocol.QuestionAnswer{QuestionID: q.ID, OptionKey: "n", Text: "use printf\ninstead"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(pane.typed, "|"); got != "key:n|text:use printf instead" {
@@ -256,7 +267,7 @@ func TestCursorCLIDoesNotTypeAnInstructionIntoTheMenu(t *testing.T) {
 	q := s.sessions[id].meta.Question
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := s.Answer(ctx, id, protocol.QuestionAnswer{QuestionID: q.ID, Text: "yes do it"})
+	err := s.Answer(ctx, id, protocol.QuestionAnswer{QuestionID: q.ID, OptionKey: "n", Text: "yes do it"})
 	if err == nil {
 		t.Fatal("answer succeeded although the box never opened")
 	}
@@ -340,7 +351,8 @@ func TestCursorCLIAnswersNamedKeyOptions(t *testing.T) {
 	for _, option := range q.Options {
 		labels[option.Key] = option.Label
 	}
-	if labels["tab"] != "Add Shell(echo) to allowlist?" || labels["shift+tab"] != "Run Everything" || labels["skip"] != "Skip" {
+	if labels["tab"] != "Add Shell(echo) to allowlist?" || labels["shift+tab"] != "Run Everything" ||
+		labels["n"] != "Skip & tell the agent what to do instead" {
 		t.Fatalf("options = %+v", q.Options)
 	}
 	for key, want := range map[string]string{"tab": "keys:Tab", "shift+tab": "keys:BTab"} {
@@ -354,16 +366,27 @@ func TestCursorCLIAnswersNamedKeyOptions(t *testing.T) {
 	}
 }
 
-// A bare Skip is "n" and then an empty Enter in the box it opens.
+// The skip option chosen without a note is a plain skip: "n", then an empty
+// Enter in the box it opens, which Cursor reads as "skip".
 func TestCursorCLISkipsWithoutAnInstruction(t *testing.T) {
 	s, pane, id := cursorCLIAnswerFixture(t,
 		cursorCLIPaneFixture(t, "shell-approval"), cursorCLIPaneFixture(t, "skip-box"))
 	q := s.sessions[id].meta.Question
-	if err := s.Answer(context.Background(), id, protocol.QuestionAnswer{QuestionID: q.ID, OptionKey: "skip"}); err != nil {
+	if err := s.Answer(context.Background(), id, protocol.QuestionAnswer{QuestionID: q.ID, OptionKey: "n"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(pane.typed, "|"); got != "key:n|keys:Enter" {
 		t.Fatalf("typed %q", got)
+	}
+
+	// The instruction box itself keeps its own Skip.
+	s, pane, id = cursorCLIAnswerFixture(t, cursorCLIPaneFixture(t, "skip-box"))
+	q = s.sessions[id].meta.Question
+	if err := s.Answer(context.Background(), id, protocol.QuestionAnswer{QuestionID: q.ID, OptionKey: "skip"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(pane.typed, "|"); got != "keys:Enter" {
+		t.Fatalf("box skip typed %q", got)
 	}
 
 	s, pane, id = cursorCLIAnswerFixture(t, cursorCLIPaneFixture(t, "plan-revise-box"))
@@ -376,8 +399,8 @@ func TestCursorCLISkipsWithoutAnInstruction(t *testing.T) {
 	}
 }
 
-// A menu that has its own "n" decline keeps it; the propose-changes row is
-// then only the custom answer.
+// A menu that has its own "n" decline keeps it, and its propose-changes row
+// is the option that carries a note.
 func TestCursorCLIMCPApprovalKeepsItsOwnSkip(t *testing.T) {
 	pane := ` $  github: search_issues
  ────────────────────────────────────────
@@ -389,11 +412,36 @@ func TestCursorCLIMCPApprovalKeepsItsOwnSkip(t *testing.T) {
     Skip (esc or n)
 `
 	q := cursorCLIQuestionFromPane(pane)
-	if q == nil || strings.Join(optionKeys(q), ",") != "y,tab,n" || !q.Custom {
+	if q == nil || strings.Join(optionKeys(q), ",") != "y,tab,p,n" || q.Custom ||
+		!q.Options[2].WithText || q.Options[3].WithText {
 		t.Fatalf("MCP approval = %+v", q)
 	}
-	if screen := parseCursorCLIScreen(pane); screen.customKey != "p" {
-		t.Fatalf("custom key = %q, want p", screen.customKey)
+}
+
+// The plan's "propose changes" has nothing to send without a note, so an
+// empty one is refused with a reason the phone shows, and nothing is typed.
+func TestCursorCLIPlanChangesNeedANote(t *testing.T) {
+	plan := cursorCLIPaneFixture(t, "plan-approval-focus-2")
+	s, pane, id := cursorCLIAnswerFixture(t, plan)
+	q := s.sessions[id].meta.Question
+	err := s.Answer(context.Background(), id, protocol.QuestionAnswer{QuestionID: q.ID, OptionKey: "p"})
+	if err == nil || err.Error() != "Say what to change in the plan" {
+		t.Fatalf("empty plan change = %v", err)
+	}
+	if len(pane.typed) != 0 {
+		t.Fatalf("typed %v", pane.typed)
+	}
+
+	s, pane, id = cursorCLIAnswerFixture(t, plan, cursorCLIPaneFixture(t, "plan-revise-box"))
+	if err := s.Answer(context.Background(), id, protocol.QuestionAnswer{QuestionID: q.ID, OptionKey: "p", Text: "say ciao"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(pane.typed, "|"); got != "key:p|text:say ciao" {
+		t.Fatalf("typed %q", got)
+	}
+	s, pane, id = cursorCLIAnswerFixture(t, plan)
+	if err := s.Answer(context.Background(), id, protocol.QuestionAnswer{QuestionID: q.ID, OptionKey: "b"}); err != nil || strings.Join(pane.typed, "|") != "key:b" {
+		t.Fatalf("build = %v, typed %v", err, pane.typed)
 	}
 }
 

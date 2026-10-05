@@ -41,10 +41,9 @@ import (
 type cursorCLIScreen struct {
 	// question is the decision on screen, ready for the phone.
 	question *protocol.Question
-	// customKey opens the free-text box a Custom answer is typed into. Empty
-	// when the screen already is that box.
-	customKey string
-	textBox   bool
+	// textBox is one of Cursor's answer boxes: the question is Custom and
+	// its text is typed straight in.
+	textBox bool
 	// needsUser is a decision Cursor is waiting on whose layout is not one
 	// the phone can answer: the session is reported as waiting without
 	// options rather than as idle.
@@ -103,8 +102,8 @@ var (
 	}
 )
 
-// Option keys that are not a letter Cursor reads: named keys, and a decline
-// made through the answer box.
+// Option keys that are not a letter Cursor reads: the named keys an option is
+// pressed with, and the answer boxes' own Skip (an empty Enter) and Cancel.
 const (
 	cursorCLITabKey     = "tab"
 	cursorCLIBackTabKey = "shift+tab"
@@ -126,8 +125,8 @@ func parseCursorCLIScreen(pane string) cursorCLIScreen {
 		screen.question = q
 		return screen
 	}
-	if q, custom := cursorCLIMenuQuestion(lines); q != nil {
-		screen.question, screen.customKey = q, custom
+	if q := cursorCLIMenuQuestion(lines); q != nil {
+		screen.question = q
 		return screen
 	}
 	prompt := cursorCLIPromptLine(lines)
@@ -402,9 +401,8 @@ func parseCursorCLIOption(line string) (cursorCLIMenuOption, bool) {
 	return cursorCLIMenuOption{label: strings.TrimSpace(match[1]), keys: keys}, true
 }
 
-// cursorCLIMenuQuestion reads an approval block or the plan box, returning
-// the question and the key that opens its free-text box.
-func cursorCLIMenuQuestion(lines []string) (*protocol.Question, string) {
+// cursorCLIMenuQuestion reads an approval block or the plan box.
+func cursorCLIMenuQuestion(lines []string) *protocol.Question {
 	promptAt, title := -1, ""
 	for i := len(lines) - 1; i >= 0 && i >= len(lines)-40; i-- {
 		text := cursorCLIBoxText(lines[i])
@@ -418,7 +416,7 @@ func cursorCLIMenuQuestion(lines []string) (*protocol.Question, string) {
 		}
 	}
 	if promptAt < 0 {
-		return nil, ""
+		return nil
 	}
 	var options []cursorCLIMenuOption
 	var reasons []string
@@ -438,46 +436,32 @@ func cursorCLIMenuQuestion(lines []string) (*protocol.Question, string) {
 		}
 	}
 	if len(options) == 0 || !cursorCLIMenuIsCurrent(lines, last) {
-		return nil, ""
+		return nil
 	}
 	detail, ok := cursorCLIMenuDetail(lines, promptAt, title)
 	if !ok {
 		// A remote approval must show what it approves. If Cursor's pane
 		// does not expose it, the decision stays on the Mac.
-		return nil, ""
+		return nil
 	}
 	if len(reasons) > 0 && title != "Cursor plan" {
 		detail = strings.TrimSpace(detail + "\n\n" + strings.Join(reasons, "\n"))
 	}
 	if len(detail) > 16*1024 {
-		return nil, ""
+		return nil
 	}
 	q := &protocol.Question{Title: title, Prompt: cursorCLIBoxText(lines[promptAt]), Detail: detail}
-	custom := ""
-	declines := false
-	for _, option := range options {
-		declines = declines || (!option.proposes() && option.letter() == "n")
-	}
 	for _, option := range options {
 		key := option.letter()
 		switch {
 		case option.proposes():
-			// With text from the phone the key opens Cursor's box and the text
-			// goes in it. Without text it is still a plain decline — the box
-			// takes an empty Enter as "skip" — unless the menu already has
-			// one of its own, or it is the plan's, which has nothing to say
-			// without text.
-			if key == "" || custom != "" {
-				continue
-			}
-			custom = key
-			q.Custom = true
-			if !declines && title != "Cursor plan" {
-				label := "Reject"
-				if strings.HasPrefix(option.label, "Skip") {
-					label = "Skip"
-				}
-				q.Options = append(q.Options, protocol.QuestionOption{Key: cursorCLISkipKey, Label: label})
+			// "Skip & tell the agent what to do instead", "Reject & propose
+			// changes", "No, propose changes": the key opens Cursor's answer
+			// box, so the option carries the phone's note. Left empty it is
+			// the plain choice — the box reads an empty Enter as "skip" —
+			// except on the plan, which has nothing to revise without one.
+			if key != "" {
+				q.Options = append(q.Options, protocol.QuestionOption{Key: key, Label: option.label, WithText: true})
 			}
 		case key != "":
 			q.Options = append(q.Options, protocol.QuestionOption{Key: key, Label: option.label})
@@ -489,11 +473,11 @@ func cursorCLIMenuQuestion(lines []string) (*protocol.Question, string) {
 			q.Options = append(q.Options, protocol.QuestionOption{Key: cursorCLIBackTabKey, Label: option.label})
 		}
 	}
-	if len(q.Options) == 0 && !q.Custom {
-		return nil, ""
+	if len(q.Options) == 0 {
+		return nil
 	}
 	q.ID = terminalQuestionID(q)
-	return q, custom
+	return q
 }
 
 // cursorCLIMenuIsCurrent requires the menu to be the live bottom of the pane.
@@ -720,16 +704,30 @@ func (s *CursorCLISource) Answer(ctx context.Context, sessionID string, answer p
 		key = answer.Options[0]
 	}
 	text := strings.TrimSpace(answer.Text)
-	if (key == "") == (text == "") {
+	if key == "" && text == "" {
 		return errors.New("source: choose one listed option or write an answer")
 	}
+	if containsControl(text) {
+		return errors.New("source: an answer cannot contain control characters")
+	}
+	// Each of Cursor's boxes is one line, where a newline submits; a note
+	// that arrives with line breaks goes in as one line rather than as half
+	// a note followed by a stray Enter.
+	text = strings.Join(strings.Fields(text), " ")
 	screen, err := s.paneScreen(ctx, session.pane)
 	if err != nil || !sameQuestion(session.meta.Question, screen.question) {
 		return errors.New("source: that question is no longer on screen; refresh the session")
 	}
 	if key != "" {
-		if !questionHasOption(screen.question, key) {
+		option, ok := cursorCLIOptionByKey(screen.question, key)
+		if !ok {
 			return errors.New("source: that option is no longer current; refresh the session")
+		}
+		if option.WithText {
+			return s.answerWithNote(ctx, session.pane, screen.question, key, text)
+		}
+		if text != "" {
+			return errors.New("source: that option takes no note")
 		}
 		switch key {
 		case cursorCLITabKey:
@@ -739,36 +737,50 @@ func (s *CursorCLISource) Answer(ctx context.Context, sessionID string, answer p
 		case cursorCLICancelKey:
 			return s.pressKeys(ctx, session.pane, "Escape")
 		case cursorCLISkipKey:
-			// An empty answer in Cursor's box is its plain skip.
-			if err := s.openTextBox(ctx, session.pane, screen); err != nil {
-				return err
-			}
+			// The instruction box's own "empty to skip".
 			return s.pressKeys(ctx, session.pane, "Enter")
 		}
 		return s.typeKey(ctx, session.pane, key)
 	}
-	if !screen.question.Custom {
-		return errors.New("source: this Cursor question only accepts a listed option")
-	}
-	if containsControl(text) {
-		return errors.New("source: an answer cannot contain control characters")
-	}
-	if err := s.openTextBox(ctx, session.pane, screen); err != nil {
-		return err
+	if !screen.question.Custom || !screen.textBox {
+		return errors.New("source: choose one of this Cursor question's options")
 	}
 	return s.typeText(ctx, session.pane, text)
 }
 
-// openTextBox makes sure Cursor's answer box is open, pressing the key that
-// opens it when the screen is still the menu.
-func (s *CursorCLISource) openTextBox(ctx context.Context, pane string, screen cursorCLIScreen) error {
-	if screen.textBox {
-		return nil
+func cursorCLIOptionByKey(q *protocol.Question, key string) (protocol.QuestionOption, bool) {
+	if q == nil {
+		return protocol.QuestionOption{}, false
 	}
-	if screen.customKey == "" {
-		return errors.New("source: this Cursor question has no answer box")
+	for _, option := range q.Options {
+		if option.Key == key {
+			return option, true
+		}
 	}
-	if err := s.typeKey(ctx, pane, screen.customKey); err != nil {
+	return protocol.QuestionOption{}, false
+}
+
+// answerWithNote chooses an option that opens Cursor's answer box and fills
+// it: the note, or an empty Enter, which the box reads as the plain choice.
+// The plan's "propose changes" means nothing without a note, so it is
+// refused rather than sent empty.
+func (s *CursorCLISource) answerWithNote(ctx context.Context, pane string, q *protocol.Question, key, note string) error {
+	if note == "" && q.Title == "Cursor plan" {
+		return errors.New("Say what to change in the plan")
+	}
+	if err := s.openTextBox(ctx, pane, key); err != nil {
+		return err
+	}
+	if note == "" {
+		return s.pressKeys(ctx, pane, "Enter")
+	}
+	return s.typeText(ctx, pane, note)
+}
+
+// openTextBox presses the key that opens Cursor's answer box and waits for
+// the box to be on screen.
+func (s *CursorCLISource) openTextBox(ctx context.Context, pane, key string) error {
+	if err := s.typeKey(ctx, pane, key); err != nil {
 		return err
 	}
 	// Cursor swaps the menu for its box on the next frame. Typing before it
