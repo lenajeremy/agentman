@@ -30,6 +30,10 @@ func TestDetectsClaudesPermissionPromptWithAWrappedChoice(t *testing.T) {
 	if !q.Options[0].Selected || q.FocusIndex != 0 {
 		t.Errorf("focus = %d; Yes is focused on screen", q.FocusIndex)
 	}
+	// "Tab to amend": the focused choice can take a note.
+	if !q.AmendWithTab {
+		t.Error("the prompt offers Tab to amend, and that was not seen")
+	}
 	if !strings.Contains(q.Options[1].Label+" "+q.Options[1].Description, "from this project") {
 		t.Errorf("the wrapped choice lost its second line: %+v", q.Options[1])
 	}
@@ -52,5 +56,23 @@ func TestABlankLineDoesNotJoinTwoLists(t *testing.T) {
  Esc to cancel`
 	if q := Detect(pane); q != nil {
 		t.Errorf("joined a prose list and a menu across blank lines: %+v", q)
+	}
+}
+
+// The same prompt with "No" focused, and then opened for a note with Tab, as
+// Claude draws them.
+func TestReadsTheFocusAndTheNoteRowOfClaudesPermissionPrompt(t *testing.T) {
+	focused := Detect(readFixture(t, "testdata/claude_permission_no_focused_real_pane.txt"))
+	if focused == nil || focused.FocusIndex != 3 || focused.Options[3].Label != "No" || !focused.AmendWithTab {
+		t.Fatalf("with No focused: %+v", focused)
+	}
+	opened := Detect(readFixture(t, "testdata/claude_permission_amend_open_real_pane.txt"))
+	if opened == nil || opened.FocusIndex != 3 ||
+		opened.Options[3].Label != "No, and tell Claude what to do differently" || opened.AmendWithTab {
+		t.Fatalf("with the note open: %+v", opened)
+	}
+	typed := Detect(readFixture(t, "testdata/claude_permission_amend_typed_real_pane.txt"))
+	if typed == nil || typed.Options[3].Label != "No, name it probe-two instead" {
+		t.Fatalf("with a note typed: %+v", typed)
 	}
 }

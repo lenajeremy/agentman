@@ -55,6 +55,11 @@ type Question struct {
 	PreviewLayout bool `json:"-"`
 	// WorkspaceTrust is Claude's unnumbered first-run folder confirmation.
 	WorkspaceTrust bool `json:"-"`
+	// AmendWithTab means Claude's footer offers "Tab to amend": Tab on the
+	// focused choice opens a line for a note to send with it, which is how a
+	// permission prompt's "No" becomes "No, and tell Claude what to do
+	// differently".
+	AmendWithTab bool `json:"-"`
 }
 
 // Option is one selectable answer.
@@ -202,7 +207,11 @@ func Detect(pane string) *Question {
 	// the end of an assistant response would let the phone type a digit into the
 	// normal prompt.
 	footerSeen := false
+	amendWithTab := false
 	for _, line := range lines[last+1:] {
+		if strings.Contains(strings.ToLower(line), "tab to amend") {
+			amendWithTab = true
+		}
 		menuLine := menuColumn(line, previewColumn)
 		trimmed := strings.TrimSpace(menuLine)
 		if trimmed == "" || isRule(trimmed) {
@@ -378,6 +387,7 @@ func Detect(pane string) *Question {
 		SubmitFocused:  submitFocused,
 		AdvanceWithTab: advanceWithTab,
 		PreviewLayout:  previewColumn >= 0,
+		AmendWithTab:   amendWithTab,
 	}
 	visiblePreview := previewPanelText(lines, previewColumn)
 	focusedOptions := 0

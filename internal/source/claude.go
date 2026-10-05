@@ -46,6 +46,10 @@ type ClaudeSource struct {
 	snapshotProcesses func(context.Context) (*tmux.ProcessTree, error)
 	// capturePane is injectable for the last-moment send safety check.
 	capturePane func(context.Context, string) (string, error)
+	// answerWithNote is injectable so a note on "No" can be tested against
+	// real pane captures without a terminal. See tmux.AnswerWithNote.
+	answerWithNote func(ctx context.Context, name string, distance int, note string,
+		focused, amending, typed func(string) bool) error
 	// processArgs reads full command lines, which the process snapshot does
 	// not carry; infra remembers what they said. See withoutInfra.
 	processArgs func(context.Context, []int) map[int]string
@@ -103,6 +107,7 @@ func NewClaudeSource(home string) (*ClaudeSource, error) {
 		listPanes:         tmux.List,
 		snapshotProcesses: tmux.SnapshotProcessTree,
 		capturePane:       tmux.Capture,
+		answerWithNote:    tmux.AnswerWithNote,
 		processArgs:       claudeProcessArgs,
 		infra:             map[claudeProcessKey]bool{},
 	}, nil
@@ -232,7 +237,7 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 		// the terminal. Finding one overrides the state, because "waiting on
 		// you" is the truth and "idle" is not.
 		if tmuxName != "" {
-			if detected, err := captureQuestion(ctx, tmuxName); err == nil {
+			if detected, err := s.captureQuestion(ctx, tmuxName); err == nil {
 				s.enrichClaudeQuestion(id, transcript, detected)
 				meta.Question = protocolQuestion(detected)
 				meta.State = protocol.StateWaitingInput
@@ -280,7 +285,7 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 			StartedAt: started, LastActivityAt: started, AgentPID: pane.PanePID,
 		}
 		transcript := s.transcriptPath(pane.Cwd, uuid)
-		if q, err := captureQuestion(ctx, pane.Name); err == nil {
+		if q, err := s.captureQuestion(ctx, pane.Name); err == nil {
 			s.enrichClaudeQuestion(id, transcript, q)
 			meta.Question = protocolQuestion(q)
 			meta.State = protocol.StateWaitingInput

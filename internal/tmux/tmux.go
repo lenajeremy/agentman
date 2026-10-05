@@ -707,6 +707,71 @@ func AnswerArrowMenu(ctx context.Context, name string, distance int, focused fun
 	return nil
 }
 
+// AnswerWithNote chooses a menu option and sends a note with it, the way
+// Claude Code takes one: focus the option, press Tab to open a line for the
+// note ("No, and tell Claude what to do differently"), type the note, press
+// Enter.
+//
+// Each step is checked against a fresh capture before the next, under the
+// pane's lock: focused before Tab, amending before typing, typed before
+// Enter. Pressing Enter on the wrong row, or typing into whatever else the
+// screen became, would send something the user did not choose.
+func AnswerWithNote(
+	ctx context.Context, name string, distance int, note string,
+	focused, amending, typed func(pane string) bool,
+) error {
+	if !Available() {
+		return ErrNotInstalled
+	}
+	// One line: the note is typed into a single-line field, where a newline
+	// would submit it early. The app sends one line already.
+	note = strings.Join(strings.Fields(note), " ")
+	if note == "" {
+		return errors.New("tmux: the note is empty")
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	if err := moveFocus(ctx, name, distance); err != nil {
+		return err
+	}
+	if err := awaitPane(ctx, name, focused); err != nil {
+		return errors.New("tmux: that choice is no longer on screen; refresh the session")
+	}
+	if _, err := run(ctx, "send-keys", "-t", name, "Tab"); err != nil {
+		return fmt.Errorf("tmux: could not open the note: %w", err)
+	}
+	if err := awaitPane(ctx, name, amending); err != nil {
+		return errors.New("tmux: the note could not be opened; answer it in the terminal")
+	}
+	if err := sendLiteral(ctx, name, note); err != nil {
+		return fmt.Errorf("tmux: could not type the note: %w", err)
+	}
+	if err := awaitPane(ctx, name, typed); err != nil {
+		return errors.New("tmux: the note did not appear; answer it in the terminal")
+	}
+	if _, err := run(ctx, "send-keys", "-t", name, "Enter"); err != nil {
+		return fmt.Errorf("tmux: could not answer: %w", err)
+	}
+	return nil
+}
+
+// awaitPane captures the pane until check accepts it, for a few render ticks:
+// an Ink TUI redraws a moment after the key that changed it.
+func awaitPane(ctx context.Context, name string, check func(pane string) bool) error {
+	for attempt := 0; attempt < 5; attempt++ {
+		time.Sleep(45 * time.Millisecond)
+		pane, err := Capture(ctx, name)
+		if err != nil {
+			return err
+		}
+		if check(pane) {
+			return nil
+		}
+	}
+	return errors.New("tmux: the pane did not show what was expected")
+}
+
 // AnswerSingleForm records a single choice in Claude's tabbed or preview
 // question form. Those layouts do not accept numeric shortcuts: the desired
 // row has to receive focus and Enter before Tab can advance the form.

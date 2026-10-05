@@ -251,6 +251,46 @@ func TestSendRejectsEmptyMessages(t *testing.T) {
 	}
 }
 
+// A note is opened with Tab, typed as one line, and submitted, in that order,
+// and only once each check has accepted the screen.
+func TestAnswerWithNoteOpensTypesAndSubmits(t *testing.T) {
+	requireTmux(t)
+	name, out := newSink(t)
+	var checks []string
+	check := func(step string) func(string) bool {
+		return func(string) bool { checks = append(checks, step); return true }
+	}
+	err := AnswerWithNote(context.Background(), name, 1, "name it\nprobe-two",
+		check("focused"), check("amending"), check("typed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := readSoon(t, out, "name it probe-two")
+	tab := strings.Index(got, "\t")
+	if tab < 0 || tab > strings.Index(got, "name it probe-two") {
+		t.Errorf("the note was not typed after Tab: %q", got)
+	}
+	if strings.Join(checks, ",") != "focused,amending,typed" {
+		t.Errorf("checks ran as %v", checks)
+	}
+}
+
+// A screen that does not show the note line open stops everything: nothing
+// is typed and Enter is never pressed.
+func TestAnswerWithNoteStopsWhenTheNoteLineDoesNotOpen(t *testing.T) {
+	requireTmux(t)
+	name, out := newSink(t)
+	yes := func(string) bool { return true }
+	no := func(string) bool { return false }
+	if err := AnswerWithNote(context.Background(), name, 0, "do not type me", yes, no, yes); err == nil {
+		t.Fatal("answered although the note line never opened")
+	}
+	time.Sleep(200 * time.Millisecond)
+	if raw, _ := os.ReadFile(out); strings.Contains(string(raw), "do not type me") {
+		t.Errorf("the note was typed: %q", raw)
+	}
+}
+
 func TestAnswerCustomSelectsTypesAndSubmits(t *testing.T) {
 	requireTmux(t)
 	name, out := newSink(t)
