@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { agentCount, folderLabel, mergeCounts, withinFolder } from "./folders.ts";
+import { agentCount, emptyBoard, folderContains, folderLabel, mergeCounts, withinFolder } from "./folders.ts";
 import { ago } from "./theme.ts";
 
 // Selecting a folder means the project, so its subtree comes with it. The Mac
@@ -97,4 +97,33 @@ test("ago names the year only when it is not this one", () => {
 
 test("ago says nothing for a session with no recorded time", () => {
   assert.equal(ago(0), "");
+});
+
+// Browsing names a folder relative to the Mac's home ("Desktop/agentman"),
+// while Recent names it absolutely. The label read "/Desktop/agentman", a
+// folder at the root of the disk.
+test("a folder chosen by browsing is labelled from home", () => {
+  assert.equal(folderLabel("Desktop/agentman"), "~/Desktop/agentman");
+  assert.equal(folderLabel("Code"), "~/Code");
+  assert.equal(folderLabel("work/clients/acme/api"), "~/acme/api");
+});
+
+// A live session's cwd is absolute, so a home-relative filter matched none of
+// them and a session started in the folder never appeared under it. The Mac
+// says where the folder really is when it answers, and that is what matches.
+test("live sessions are matched against where the folder really is", () => {
+  const live = "/Users/mac/Desktop/agentman/mobile";
+  assert.equal(folderContains("Desktop/agentman", null, live), false);
+  assert.equal(folderContains("Desktop/agentman", "/Users/mac/Desktop/agentman", live), true);
+  assert.equal(folderContains("/Users/mac/Desktop/agentman", null, live), true);
+  assert.equal(folderContains("Desktop/agentman", "/Users/mac/Desktop/agentman", "/Users/mac/Desktop/agentman-old"), false);
+});
+
+// With a folder chosen, an empty list means the folder has nothing, not that
+// sessions elsewhere are hidden: the old message offered to show "hidden"
+// agents and its button did nothing.
+test("an empty board under a folder says the folder is empty", () => {
+  assert.equal(emptyBoard("Desktop/agentman", 7), "folder");
+  assert.equal(emptyBoard(null, 3), "hidden");
+  assert.equal(emptyBoard(null, 0), "nothing");
 });

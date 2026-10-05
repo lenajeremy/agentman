@@ -46,7 +46,7 @@ import {
 } from "./dismissed";
 import { draftNamespace } from "./draft-policy";
 import { resumeOnce } from "./resume";
-import { withinFolder } from "./folders";
+import { folderContains } from "./folders";
 import { isPushActive, obtainPushToken, setPushActive } from "./push";
 import { clearDraft } from "./drafts";
 import { newFrameId } from "./id";
@@ -868,27 +868,46 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // session stops being discoverable the moment its process exits and no
   // amount of waiting would ever stream it.
   const [folderFilter, setFolderFilterPath] = useState<string | null>(null);
+  // Where the Mac says the chosen folder is. Browsing names a folder relative
+  // to the Mac's home, and live sessions carry absolute paths; see
+  // folderContains.
+  const [folderRoot, setFolderRoot] = useState<string | null>(null);
   const [folderSessions, setFolderSessions] = useState<Session[]>([]);
   const [folderLoading, setFolderLoading] = useState(false);
+  // Only the newest folder request may fill the list: picking folder A then B
+  // used to show A's sessions under B's name when A's reply came last.
+  const folderRequest = useRef<string | null>(null);
+  const folderFilterRef = useRef<string | null>(null);
   const [stateFilter, setStateFilter] = useState<Session["state"] | null>(null);
 
   const loadFolderSessions = useCallback((path: string) => {
     const id = clientRef.current?.send({ type: "directory_sessions", path });
     if (!id) return;
+    folderRequest.current = id;
     setFolderLoading(true);
     const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
     launchRequests.current.set(id, {
       resolve: (event) => {
+        if (folderRequest.current !== id) return;
         setFolderSessions(event.sessions ?? []);
+        // A Mac that predates this echoes the path it was sent.
+        if (event.type === "directory_sessions" && event.path?.startsWith("/")) {
+          setFolderRoot(event.path);
+        }
         setFolderLoading(false);
       },
-      reject: () => setFolderLoading(false),
+      reject: () => {
+        if (folderRequest.current === id) setFolderLoading(false);
+      },
       timer,
     });
   }, [settleLaunchRequest]);
 
   const setFolderFilter = useCallback((path: string | null) => {
+    folderFilterRef.current = path;
+    folderRequest.current = null;
     setFolderFilterPath(path);
+    setFolderRoot(null);
     setFolderSessions([]);
     if (path) loadFolderSessions(path);
     else setFolderLoading(false);
@@ -896,9 +915,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   // A folder's list is a snapshot, so it is re-read when the Mac comes back
   // rather than left showing what was true before the connection dropped.
+  // Only on reconnecting: choosing a folder already asks, and reacting to the
+  // choice here too sent every request twice.
   useEffect(() => {
-    if (daemonOnline && folderFilter) loadFolderSessions(folderFilter);
-  }, [daemonOnline, folderFilter, loadFolderSessions]);
+    if (daemonOnline && folderFilterRef.current) loadFolderSessions(folderFilterRef.current);
+  }, [daemonOnline, loadFolderSessions]);
 
   const visibleSessions = useMemo(() => {
     if (!folderFilter) {
@@ -911,12 +932,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const merged = folderSessions.map((session) => live.get(session.id) ?? session);
     const seen = new Set(merged.map((session) => session.id));
     for (const session of sessions) {
-      if (!seen.has(session.id) && withinFolder(session.cwd, folderFilter)) {
+      if (!seen.has(session.id) && folderContains(folderFilter, folderRoot, session.cwd)) {
         merged.push(session);
       }
     }
     return merged.filter((session) => !isHidden(session, dismissals));
-  }, [sessions, folderSessions, folderFilter, dismissals]);
+  }, [sessions, folderSessions, folderFilter, folderRoot, dismissals]);
 
   const store: Store = useMemo(
     () => ({

@@ -146,3 +146,18 @@ func TestCreatedDirectoryIsPrivate(t *testing.T) {
 		t.Errorf("mode = %o, want 700", perm)
 	}
 }
+
+// Browsing names a folder relative to the Mac's home, and the phone does not
+// know where home is. The reply says where the folder really is, so sessions
+// that start in it later can be matched by their absolute cwd.
+func TestAFolderListSaysWhereTheFolderIs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	d := New(source.NewRegistry(), nil)
+	event := d.HandleFrom(context.Background(), "app-1", protocol.Request{
+		Type: protocol.ReqDirectorySessions, Path: "Projects/app",
+	})
+	if want := filepath.Join(home, "Projects", "app"); event.Path != want {
+		t.Fatalf("path = %q, want %q", event.Path, want)
+	}
+}

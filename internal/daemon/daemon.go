@@ -943,7 +943,7 @@ func (d *Daemon) HandleFrom(
 		return protocol.Event{Type: protocol.EvtFolders, Folders: folders}
 
 	case protocol.ReqDirectorySessions:
-		sessions, err := d.directorySessions(ctx, req.Path)
+		sessions, dir, err := d.directorySessions(ctx, req.Path)
 		if err != nil {
 			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
 		}
@@ -954,7 +954,7 @@ func (d *Daemon) HandleFrom(
 		// itself found, rather than trusting a kind and a directory sent up
 		// from the phone.
 		d.folders.remember(sessions)
-		return protocol.Event{Type: protocol.EvtDirectorySessions, Path: req.Path, Sessions: sessions}
+		return protocol.Event{Type: protocol.EvtDirectorySessions, Path: dir, Sessions: sessions}
 
 	case protocol.ReqResumeSession:
 		id, err := d.resumeSession(ctx, req.SessionID)
