@@ -32,6 +32,7 @@ var (
 	_ Answerer          = (*CursorCLIGroup)(nil)
 	_ QuestionInspector = (*CursorCLIGroup)(nil)
 	_ Interrupter       = (*CursorCLIGroup)(nil)
+	_ ResumeNamer       = (*CursorCLIGroup)(nil)
 )
 
 func NewCursorCLIGroup(terminal *CursorCLISource, acp *CursorACPSource) *CursorCLIGroup {
@@ -101,6 +102,15 @@ func (s *CursorCLIGroup) TmuxName(id string) (string, bool) {
 		return "", false
 	}
 	return s.terminal.TmuxName(id)
+}
+
+// ResumedSession implements ResumeNamer. A resumed chat opens in a managed
+// pane, and discovery publishes a chat a managed pane holds under the pane's
+// id, so that is the id the phone must be sent to. The daemon used to return
+// "cursor-cli:<chat id>", which no sweep ever produces: the phone moved to a
+// session that never appeared and reported that it had not come back up.
+func (s *CursorCLIGroup) ResumedSession(_, defaultPane string) (string, string) {
+	return defaultPane, cursorCLIPaneIDPrefix + defaultPane
 }
 
 // Past implements History over both stores. Terminal chats and ACP chats are

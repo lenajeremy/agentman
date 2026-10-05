@@ -141,3 +141,12 @@ func TestCursorACPPastLeavesOutARunningTurn(t *testing.T) {
 		t.Fatalf("a running ACP turn was reported as ended: %+v", past)
 	}
 }
+
+// A resume must land the phone on the id discovery will publish: the pane's.
+func TestCursorCLIResumeIsNamedForItsPane(t *testing.T) {
+	_, registry, _ := cursorGroupFixture(t)
+	pane, id := registry.ResumedSession(cursorCLIChatPrefix+"chat-1", "chat-1", "agentman-cursor-1791-ab12")
+	if pane != "agentman-cursor-1791-ab12" || id != cursorCLIPaneIDPrefix+"agentman-cursor-1791-ab12" {
+		t.Fatalf("resume named %q / %q", pane, id)
+	}
+}
