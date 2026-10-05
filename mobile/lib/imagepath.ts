@@ -21,8 +21,19 @@ const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
  */
 const PATH_TOOLS = /(read|write|edit|view|notebook)/i;
 
-/** A path, not a command: one or more plain segments and nothing to execute. */
-const PATH_SHAPE = /^\/?[\w.@+-]+(\/[\w.@+-]+)*$/;
+/** A relative path, not a command: plain segments and nothing to execute. */
+const PATH_SHAPE = /^[\w.@+-]+(\/[\w.@+-]+)*$/;
+
+/**
+ * An absolute path a file tool named. A segment may hold spaces and any
+ * letter, because macOS names a screenshot "Screenshot 2026-10-05 at
+ * 10.00.00 AM" (with a narrow no-break space before "AM"), and file tools
+ * name files by absolute path. What a shell would act on — quotes, `$`, `;`,
+ * `|`, `&`, redirections, globs, backslashes — and control characters are
+ * never part of one. The Mac applies the same rule. A relative path keeps the
+ * strict shape: "open shot.png" is a command, not a file called that.
+ */
+const ABSOLUTE_PATH_SHAPE = /^(\/[^/\u0000-\u001f"'`$;|&<>()*?[\]\\]+)+$/;
 
 /** How the app should ask the daemon for a given image. */
 export interface ImageTarget {
@@ -53,7 +64,7 @@ export function workspaceImage(name: string, summary: string, cwd: string): Imag
   if (!first || !IMAGE.test(first)) return null;
 
   if (first.startsWith("/")) {
-    if (!PATH_SHAPE.test(first)) return null;
+    if (!ABSOLUTE_PATH_SHAPE.test(first)) return null;
     if (first.split("/").some((part) => part === "..")) return null;
     // Inside the session, the workspace reader is still the better route: it
     // works on a daemon too old to know read_seen_file.

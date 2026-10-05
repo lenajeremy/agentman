@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
@@ -58,7 +60,11 @@ func (s *seenPaths) record(sessionID string, messages []protocol.Message) {
 		if message.Tool == nil {
 			continue
 		}
-		if path := toolPath(message.Tool.Summary); path != "" {
+		path := toolPath(message.Tool.Summary)
+		if path == "" && fileTool.MatchString(message.Tool.Name) {
+			path = toolFilePath(message.Tool.Summary)
+		}
+		if path != "" {
 			found = append(found, path)
 		}
 	}
@@ -129,6 +135,32 @@ func toolPath(summary string) string {
 	}
 	// A path that needs cleaning is not one an agent reported; treat any
 	// difference as a sign this is not the literal file that was opened.
+	if filepath.Clean(first) != first {
+		return ""
+	}
+	return first
+}
+
+// fileTool matches the tools whose summary is a file they opened rather than
+// a command: Read, Write, Edit, NotebookEdit, view_file, fs_read and the
+// like, across the agents. The app decides which rows offer an image by the
+// same rule.
+var fileTool = regexp.MustCompile(`(?i)(read|write|edit|view|notebook)`)
+
+// toolFilePath is toolPath for a file tool's summary, which names a file and
+// nothing else, so a space in it is part of the name: macOS calls a
+// screenshot "Screenshot 2026-10-05 at 10.00.00 AM.png". Characters that
+// only mean something to a shell are still refused, as are control
+// characters, so nothing in it can be read as more than one path.
+func toolFilePath(summary string) string {
+	first, _, _ := strings.Cut(summary, "\n")
+	first = strings.TrimSpace(first)
+	if !strings.HasPrefix(first, "/") || len(first) > 4096 {
+		return ""
+	}
+	if strings.ContainsAny(first, "\t\"'`$&|;<>()*?[]\\") || strings.ContainsFunc(first, unicode.IsControl) {
+		return ""
+	}
 	if filepath.Clean(first) != first {
 		return ""
 	}

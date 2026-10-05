@@ -170,3 +170,26 @@ func TestSeenPathsAreBounded(t *testing.T) {
 		t.Fatalf("the set grew to %d, past the %d cap", size, maxSeenPaths)
 	}
 }
+
+// macOS names a screenshot "Screenshot 2026-10-05 at 10.00.00 AM.png", with
+// spaces and a narrow no-break space before "AM". A file tool reading one names
+// it whole, and it used to be refused for its spaces like a shell command.
+// Shell commands still are: a space is only allowed in what a file tool named.
+func TestAFileToolsPathMayHaveSpaces(t *testing.T) {
+	agent := New(nil, &recordingSink{})
+	shot := filepath.Join(t.TempDir(), "Screenshot 2026-10-05 at 10.00.00 AM.png")
+	writePNG(t, shot)
+	agent.seen.record("codex:test", []protocol.Message{toolMessage(shot)})
+	if event := readSeen(agent, shot); event.Type != protocol.EvtWorkspace {
+		t.Fatalf("a screenshot the agent read was refused: %+v", event)
+	}
+
+	bash := protocol.Message{
+		ID: "m2", SessionID: "codex:test", Role: protocol.RoleTool,
+		Tool: &protocol.Tool{Name: "Bash", Summary: "/tmp/a b.png", Status: protocol.ToolOK},
+	}
+	agent.seen.record("codex:test", []protocol.Message{bash})
+	if agent.seen.allows("codex:test", "/tmp/a b.png") {
+		t.Error("a shell command with a space was recorded as a file")
+	}
+}
