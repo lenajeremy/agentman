@@ -34,7 +34,9 @@ import { ToolRow } from "../../components/ToolRow";
 import { AttachmentStrip } from "../../components/AttachmentStrip";
 import { Popover, type PopoverItem } from "../../components/Popover";
 import { type Frame } from "../../lib/message-menu";
+import { artifactsButtonLabel } from "../../lib/artifacts";
 import { canEnd, shouldResume } from "../../lib/resume";
+import { showsInFeed, statusChip } from "../../lib/session-view";
 import { chooseImageSource } from "../../lib/image-source-sheet";
 import { draftNamespace } from "../../lib/draft-policy";
 import { clearDraft, loadDraft, saveDraft } from "../../lib/drafts";
@@ -204,7 +206,11 @@ export default function SessionScreen() {
       .filter((p) => p.sessionId === sessionId)
       .map((pending) => ({ kind: "pending" as const, pending }));
     const chronological: Row[] = [
-      ...messages.map((message) => ({ kind: "message" as const, message })),
+      // Filtered here rather than drawn as nothing: an empty cell still takes
+      // the list's gap, and a withdrawn preview would leave a hole.
+      ...messages
+        .filter(showsInFeed)
+        .map((message) => ({ kind: "message" as const, message })),
       ...sent,
     ];
     // Reversed to feed an inverted list — see the FlatList below.
@@ -458,6 +464,9 @@ export default function SessionScreen() {
 
   const displayState = effectiveState ?? session?.state ?? "ended";
   const state = stateStyle(displayState, color);
+  const chip = session ? statusChip(session.mode, session.contextPercent) : null;
+  const artifactCount = session?.artifacts ?? 0;
+  const artifactsToReview = session?.artifactsToReview ?? 0;
 
   return (
     <View style={[styles.page, { paddingTop: insets.top }]}>
@@ -501,8 +510,12 @@ export default function SessionScreen() {
                 numberOfLines={1}
               >
                 {session.model ?? agentLabel(session.kind).name}
-                {" · "}
               </Text>
+              {/* Shown, never set: each of these CLIs keeps its mode as a
+                  global default, so changing it here would change the Mac's
+                  next session too. */}
+              {chip ? <StatusChip chip={chip} /> : null}
+              <Text style={[styles.subtitle, styles.subtitleModel]}>{" · "}</Text>
               {/* Truncated from the front, because a path's last segment is the
                   one that says which project this is. Cut from the end,
                   ~/Desktop/agentman became "~/Desktop/agent…", which identifies
@@ -521,6 +534,28 @@ export default function SessionScreen() {
             </Text>
           )}
         </View>
+        {/* Its own button rather than a row in the menu: an agent waiting on
+            you to approve its plan is going nowhere until you do, and a badge
+            behind "…" is one nobody sees. */}
+        {session && artifactCount > 0 ? (
+          <MotionPressable
+            onPress={() =>
+              router.push(`/artifacts/${encodeURIComponent(session.id)}`)
+            }
+            hitSlop={10}
+            style={styles.iconButton}
+            pressedScale={0.92}
+            accessibilityRole="button"
+            accessibilityLabel={artifactsButtonLabel(artifactCount, artifactsToReview)}
+          >
+            <Feather name="file-text" size={18} color={color.text} />
+            {artifactsToReview > 0 ? (
+              <View style={styles.reviewBadge}>
+                <Text style={styles.reviewBadgeText}>{artifactsToReview}</Text>
+              </View>
+            ) : null}
+          </MotionPressable>
+        ) : null}
         {/* Servers and stop live behind this rather than beside the title. Five
             controls across a phone-width row left the name under half of it and
             cut the working directory to "~/Deskt…", and what a session is gets
@@ -867,6 +902,30 @@ export default function SessionScreen() {
   );
 }
 
+/**
+ * The agent's mode and how full its context is, in one chip beside the model.
+ * Machine words in mono, like the model beside it.
+ */
+function StatusChip({ chip }: { chip: NonNullable<ReturnType<typeof statusChip>> }) {
+  const styles = useStyles(makeStyles);
+  return (
+    <View
+      style={styles.statusChip}
+      accessible
+      accessibilityRole="text"
+      accessibilityLabel={chip.label}
+    >
+      {chip.mode ? (
+        <Text style={[styles.statusChipText, styles.statusChipMode]} numberOfLines={1}>
+          {chip.mode}
+        </Text>
+      ) : null}
+      {chip.mode && chip.context ? <View style={styles.statusChipRule} /> : null}
+      {chip.context ? <Text style={styles.statusChipText}>{chip.context}</Text> : null}
+    </View>
+  );
+}
+
 function ConnectionNote() {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
@@ -998,6 +1057,7 @@ function MessageRow({
   onCopied(): void;
 }) {
   const styles = useStyles(makeStyles);
+  if (!showsInFeed(message)) return null;
   if (message.role === "tool" && message.tool) {
     return (
       <Appear enabled={fresh}>
@@ -1296,6 +1356,26 @@ const makeStyles = (c: Palette) =>
       lineHeight: 12,
       color: "#FFFFFF",
     },
+    // The same badge as the server count, in the colour that asks for a tap:
+    // a review is the agent waiting on you.
+    reviewBadge: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      minWidth: 15,
+      height: 15,
+      borderRadius: 8,
+      paddingHorizontal: 3,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.needsYou,
+    },
+    reviewBadgeText: {
+      fontFamily: font.sansMedium,
+      fontSize: 9.5,
+      lineHeight: 12,
+      color: c.onAccent,
+    },
     title: {
       fontFamily: font.monoMedium,
       fontSize: 15,
@@ -1313,6 +1393,31 @@ const makeStyles = (c: Palette) =>
     // one whole one.
     subtitleModel: { flexShrink: 0 },
     subtitlePath: { flexShrink: 1 },
+    // Gives way with the path when the row runs out, and inside it the mode
+    // name gives way first: the percentage is the part worth keeping whole.
+    statusChip: {
+      flexDirection: "row",
+      flexShrink: 1,
+      alignItems: "center",
+      gap: 5,
+      height: 16,
+      maxWidth: 132,
+      marginLeft: 6,
+      paddingHorizontal: 6,
+      borderRadius: radius.pill,
+      backgroundColor: c.fill,
+    },
+    statusChipText: {
+      fontFamily: font.monoMedium,
+      fontSize: 10.5,
+      color: c.muted,
+    },
+    statusChipMode: { flexShrink: 1 },
+    statusChipRule: {
+      width: StyleSheet.hairlineWidth,
+      height: 9,
+      backgroundColor: c.faint,
+    },
     // No box around it. This was a 28pt touch target from when the dot was a
     // control in the top row; on a line of text it centred a six point dot in
     // twenty-eight, which pushed it clear of the title's left edge. It is a

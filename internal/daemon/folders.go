@@ -110,5 +110,10 @@ func (d *Daemon) directorySessions(ctx context.Context, raw string) ([]protocol.
 	if sessions == nil && err != nil {
 		return nil, err
 	}
+	// Held to the same bounds as the board: the app refuses a whole list
+	// over one session's out-of-range field.
+	for i := range sessions {
+		normalizeSessionStatus(&sessions[i])
+	}
 	return sessions, nil
 }

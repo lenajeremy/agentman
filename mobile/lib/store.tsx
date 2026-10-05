@@ -50,6 +50,7 @@ import { isPushActive, obtainPushToken, setPushActive } from "./push";
 import { clearDraft } from "./drafts";
 import { newFrameId } from "./id";
 import {
+  Artifact,
   DaemonEvent,
   Folder,
   Message,
@@ -186,6 +187,15 @@ interface Store {
     path: string,
     text: string,
   ): Promise<string>;
+  /** The documents a session's agent wrote for you: plans, task lists,
+   *  walkthroughs, screenshots. Empty for an agent that writes none. */
+  listArtifacts(sessionId: string): Promise<Artifact[]>;
+  /** One artifact's contents: text, or an image preview, under the same
+   *  limits as a workspace file. */
+  readArtifact(sessionId: string, name: string): Promise<WorkspaceResult>;
+  /** Approve an artifact the agent asked you to review, or ask for changes.
+   *  Resolves once the Mac has handed the answer to the agent. */
+  reviewArtifact(sessionId: string, name: string, approve: boolean, comment?: string): Promise<void>;
 }
 
 /** How long a tap on a server waits for the Mac to open its link. The daemon
@@ -607,12 +617,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       case "folders":
       case "directory_sessions":
       case "session_ended":
-      case "session_started": {
+      case "session_started":
+      case "artifacts": {
         if (replyTo) settleLaunchRequest(replyTo, event);
         break;
       }
 
       case "send_result": {
+        // A review is answered like a send, but it is not a message in the
+        // composer: it settles the request that asked for it, and nothing else.
+        if (replyTo && settleLaunchRequest(replyTo, event)) break;
         if (!event.clientId) break;
         setPending((current) => {
           const sent = current.find((item) => item.clientId === event.clientId);
@@ -1313,6 +1327,65 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               if (event.sessionId) resolve(event.sessionId);
               else reject(new Error("The Mac started an agent but returned no session ID."));
             }, reject, timer,
+          });
+        });
+      },
+
+      listArtifacts(sessionId) {
+        return new Promise<Artifact[]>((resolve, reject) => {
+          const id = clientRef.current?.send({ type: "list_artifacts", sessionId });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
+          launchRequests.current.set(id, {
+            // A missing list is an empty one; see decodeDaemonEvent.
+            resolve: (event) => resolve(event.artifacts ?? []), reject, timer,
+          });
+        });
+      },
+
+      readArtifact(sessionId, name) {
+        return new Promise<WorkspaceResult>((resolve, reject) => {
+          const id = clientRef.current?.send({ type: "read_artifact", sessionId, path: name });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => {
+            settleWorkspaceRequest(id, undefined, "The Mac took too long to read this artifact.");
+          }, 30_000);
+          workspaceRequests.current.set(id, { resolve, reject, timer });
+        });
+      },
+
+      reviewArtifact(sessionId, name, approve, comment) {
+        return new Promise<void>((resolve, reject) => {
+          const text = comment?.trim();
+          const id = clientRef.current?.send({
+            type: "review_artifact",
+            sessionId,
+            path: name,
+            approve,
+            ...(text ? { text } : {}),
+            clientId: `review-${newFrameId()}`,
+          });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
+          launchRequests.current.set(id, {
+            resolve: (event) => {
+              if (event.type === "send_result" && event.status === "failed") {
+                reject(new Error(event.error || "The Mac could not deliver your review."));
+              } else {
+                resolve();
+              }
+            },
+            reject,
+            timer,
           });
         });
       },
