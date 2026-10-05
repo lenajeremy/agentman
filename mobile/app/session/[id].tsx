@@ -37,6 +37,12 @@ import { type Frame } from "../../lib/message-menu";
 import { artifactsButtonLabel } from "../../lib/artifacts";
 import { canEnd, shouldResume } from "../../lib/resume";
 import { showsInFeed, statusChip } from "../../lib/session-view";
+import {
+  defaultScopeWarning,
+  switchChoices,
+  switchFailure,
+  type SwitchKind,
+} from "../../lib/switching";
 import { chooseImageSource } from "../../lib/image-source-sheet";
 import { draftNamespace } from "../../lib/draft-policy";
 import { clearDraft, loadDraft, saveDraft } from "../../lib/drafts";
@@ -461,9 +467,104 @@ export default function SessionScreen() {
     }
   }
 
+  // Mode and model switching. Only what the agent listed is offered, and a
+  // switch is one request at a time: the Mac presses keys and reads the
+  // result back, and a second tap mid-way would race it.
+  const [switchMenu, setSwitchMenu] = useState<SwitchKind | null>(null);
+  // sent: the Mac has seen the switch take, and the next sweep will say so.
+  const [switching, setSwitching] = useState<{
+    kind: SwitchKind;
+    value: string;
+    sent?: boolean;
+  } | null>(null);
+  const [switchConfirm, setSwitchConfirm] = useState<{
+    kind: SwitchKind;
+    value: string;
+    warning: string;
+  } | null>(null);
+  const [switchError, setSwitchError] = useState("");
+  useEffect(() => {
+    setSwitchMenu(null);
+    setSwitchConfirm(null);
+    setSwitchError("");
+  }, [sessionId]);
+  const modeChoices = session ? switchChoices(session, "mode") : null;
+  const modelChoices = session ? switchChoices(session, "model") : null;
+  // The daemon refuses a switch during a question too; disabling it here
+  // says so before anyone taps.
+  const switchLocked = !store.daemonOnline || Boolean(session?.question) || switching !== null;
+
+  const performSwitch = (kind: SwitchKind, value: string) => {
+    if (!session) return;
+    setSwitchConfirm(null);
+    setSwitchError("");
+    setSwitching({ kind, value });
+    store
+      .switchSession(session.id, kind, value)
+      .then(() => setSwitching((current) => (current?.value === value ? { ...current, sent: true } : current)))
+      .catch((reason: Error) => {
+        setSwitchError(switchFailure(kind, value, reason.message));
+        setSwitching(null);
+      });
+  };
+
+  // The Mac answers once the agent shows the switch, a moment before the next
+  // sweep brings the session's new mode or model. The pending value stays on
+  // screen until then, rather than the old one flashing back in between —
+  // and for no more than a few seconds, in case the agent names it otherwise.
+  useEffect(() => {
+    if (!switching?.sent || !session) return;
+    const current = switching.kind === "mode" ? session.mode : session.model;
+    if (current === switching.value) {
+      setSwitching(null);
+      return;
+    }
+    const timer = setTimeout(() => setSwitching(null), 4000);
+    return () => clearTimeout(timer);
+  }, [switching, session?.mode, session?.model]);
+
+  const requestSwitch = (kind: SwitchKind, value: string) => {
+    if (!session || switchLocked) return;
+    const current = kind === "mode" ? session.mode : session.model;
+    if (value === current) return;
+    // A model the CLI also saves as its default changes the Mac's next
+    // session as well, so that is said, naming the agent, before anything is
+    // sent. Inline rather than an alert: an alert raised as the menu's Modal
+    // closes is dismissed with it on iOS.
+    const warning = defaultScopeWarning(session, kind, agentLabel(session.kind).name, value);
+    if (warning) {
+      setSwitchError("");
+      setSwitchConfirm({ kind, value, warning });
+      return;
+    }
+    performSwitch(kind, value);
+  };
+
+  const switchItems: PopoverItem[] = [];
+  const openChoices = switchMenu === "mode" ? modeChoices : switchMenu === "model" ? modelChoices : null;
+  if (switchMenu && openChoices) {
+    for (const value of openChoices.values) {
+      switchItems.push({
+        key: value,
+        label: value,
+        mono: true,
+        checked: value === openChoices.current,
+        onPress: () => requestSwitch(switchMenu, value),
+      });
+    }
+  }
+  const switchTitle =
+    switchMenu === "mode"
+      ? "Mode"
+      : session?.modelScope === "default"
+        ? "Model · also the default for new sessions"
+        : "Model for this session";
+
   const displayState = effectiveState ?? session?.state ?? "ended";
   const state = stateStyle(displayState, color);
-  const chip = session ? statusChip(session.mode, session.contextPercent) : null;
+  const chip = session
+    ? statusChip(session.mode, session.contextPercent, modeChoices !== null)
+    : null;
   const artifactCount = session?.artifacts ?? 0;
   const artifactsToReview = session?.artifactsToReview ?? 0;
 
@@ -504,16 +605,55 @@ export default function SessionScreen() {
               {/* Which model is answering you is worth knowing before you send
                   it something — "Codex" says which CLI is open, not what is
                   doing the work. */}
-              <Text
-                style={[styles.subtitle, styles.subtitleModel]}
-                numberOfLines={1}
-              >
-                {session.model ?? agentLabel(session.kind).name}
-              </Text>
-              {/* Shown, never set: each of these CLIs keeps its mode as a
-                  global default, so changing it here would change the Mac's
-                  next session too. */}
-              {chip ? <StatusChip chip={chip} /> : null}
+              {modelChoices ? (
+                // Tappable only when the agent listed models and said what a
+                // switch touches. The chevron is the only sign it opens
+                // anything, so it stays even at phone width.
+                <Pressable
+                  onPress={() => setSwitchMenu("model")}
+                  disabled={switchLocked}
+                  hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
+                  style={({ pressed }) => [styles.modelSwitch, pressed && styles.switchPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    switching?.kind === "model"
+                      ? `Switching model to ${switching.value}`
+                      : `Model ${session.model ?? "not reported"}. Switch model`
+                  }
+                  accessibilityState={{ disabled: switchLocked, busy: switching?.kind === "model" }}
+                >
+                  <Text
+                    style={[
+                      styles.subtitle,
+                      styles.subtitleModel,
+                      switching?.kind === "model" && styles.switchPending,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {switching?.kind === "model"
+                      ? `${switching.value}…`
+                      : session.model ?? agentLabel(session.kind).name}
+                  </Text>
+                  <Feather name="chevron-down" size={11} color={color.muted} />
+                </Pressable>
+              ) : (
+                <Text
+                  style={[styles.subtitle, styles.subtitleModel]}
+                  numberOfLines={1}
+                >
+                  {session.model ?? agentLabel(session.kind).name}
+                </Text>
+              )}
+              {/* Tappable when the agent lists modes to switch to; otherwise
+                  a fact about the session, like the model beside it. */}
+              {chip ? (
+                <StatusChip
+                  chip={chip}
+                  onPress={modeChoices ? () => setSwitchMenu("mode") : undefined}
+                  pending={switching?.kind === "mode" ? switching.value : undefined}
+                  disabled={switchLocked}
+                />
+              ) : null}
               <Text style={[styles.subtitle, styles.subtitleModel]}>{" · "}</Text>
               {/* Truncated from the front, because a path's last segment is the
                   one that says which project this is. Cut from the end,
@@ -596,6 +736,16 @@ export default function SessionScreen() {
           items={sessionMenuItems}
         />
       ) : null}
+      {session && switchMenu ? (
+        <Popover
+          visible
+          onDismiss={() => setSwitchMenu(null)}
+          top={HEADER_HEIGHT}
+          align="left"
+          title={switchTitle}
+          items={switchItems}
+        />
+      ) : null}
 
       {/* A shortcut, not a fixture: it appears when the agent has actually
           touched something, and the popover keeps the files reachable the rest
@@ -640,6 +790,22 @@ export default function SessionScreen() {
               status={interruptAction.status}
               error={interruptAction.error}
             />
+          </ContentColumn>
+        ) : null}
+        {switchConfirm ? (
+          <ContentColumn>
+            <SwitchConfirmNote
+              warning={switchConfirm.warning}
+              value={switchConfirm.value}
+              disabled={switchLocked}
+              onCancel={() => setSwitchConfirm(null)}
+              onConfirm={() => performSwitch(switchConfirm.kind, switchConfirm.value)}
+            />
+          </ContentColumn>
+        ) : null}
+        {switchError ? (
+          <ContentColumn>
+            <SwitchErrorNote error={switchError} onDismiss={() => setSwitchError("")} />
           </ContentColumn>
         ) : null}
         {session && !session.question && (
@@ -905,22 +1071,122 @@ export default function SessionScreen() {
  * The agent's mode and how full its context is, in one chip beside the model.
  * Machine words in mono, like the model beside it.
  */
-function StatusChip({ chip }: { chip: NonNullable<ReturnType<typeof statusChip>> }) {
+function StatusChip({
+  chip,
+  onPress,
+  pending,
+  disabled,
+}: {
+  chip: NonNullable<ReturnType<typeof statusChip>>;
+  /** Present when the agent lists modes to switch to. */
+  onPress?: () => void;
+  /** The mode a switch is on its way to. */
+  pending?: string;
+  disabled?: boolean;
+}) {
   const styles = useStyles(makeStyles);
-  return (
-    <View
-      style={styles.statusChip}
-      accessible
-      accessibilityRole="text"
-      accessibilityLabel={chip.label}
-    >
+  const { color } = useTheme();
+  const body = (
+    <>
       {chip.mode ? (
-        <Text style={[styles.statusChipText, styles.statusChipMode]} numberOfLines={1}>
-          {chip.mode}
+        <Text
+          style={[styles.statusChipText, styles.statusChipMode, pending ? styles.switchPending : null]}
+          numberOfLines={1}
+        >
+          {pending ? `${pending}…` : chip.mode}
         </Text>
       ) : null}
+      {onPress ? <Feather name="chevron-down" size={10} color={color.muted} /> : null}
       {chip.mode && chip.context ? <View style={styles.statusChipRule} /> : null}
       {chip.context ? <Text style={styles.statusChipText}>{chip.context}</Text> : null}
+    </>
+  );
+  if (!onPress) {
+    return (
+      <View style={styles.statusChip} accessible accessibilityRole="text" accessibilityLabel={chip.label}>
+        {body}
+      </View>
+    );
+  }
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
+      style={({ pressed }) => [styles.statusChip, pressed && styles.switchPressed]}
+      accessibilityRole="button"
+      accessibilityLabel={pending ? `Switching mode to ${pending}` : `${chip.label}. Switch mode`}
+      accessibilityState={{ disabled, busy: Boolean(pending) }}
+    >
+      {body}
+    </Pressable>
+  );
+}
+
+/**
+ * Confirms a model switch the CLI also saves as its default. The sentence
+ * names the agent, because "the default" means nothing without saying whose.
+ */
+function SwitchConfirmNote({
+  warning,
+  value,
+  disabled,
+  onCancel,
+  onConfirm,
+}: {
+  warning: string;
+  value: string;
+  disabled: boolean;
+  onCancel(): void;
+  onConfirm(): void;
+}) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  return (
+    <View style={[styles.note, styles.switchConfirm]} accessibilityLiveRegion="polite">
+      <View style={styles.switchConfirmTop}>
+        <View style={styles.noteIcon}>
+          <Feather name="alert-circle" size={13} color={color.needsYouText} />
+        </View>
+        <Text style={styles.noteText}>{warning}</Text>
+      </View>
+      <View style={styles.switchConfirmButtons}>
+        <MotionPressable
+          onPress={onCancel}
+          style={[styles.switchButton, styles.switchButtonSecondary]}
+          accessibilityRole="button"
+        >
+          <Text style={styles.switchButtonLabel}>Cancel</Text>
+        </MotionPressable>
+        <MotionPressable
+          onPress={onConfirm}
+          disabled={disabled}
+          style={[styles.switchButton, styles.switchButtonPrimary, disabled && styles.switchButtonDisabled]}
+          accessibilityRole="button"
+          accessibilityLabel={`Switch to ${value}, and make it the default`}
+          accessibilityState={{ disabled }}
+        >
+          <Text style={[styles.switchButtonLabel, styles.switchButtonLabelPrimary]} numberOfLines={1}>
+            Switch
+          </Text>
+        </MotionPressable>
+      </View>
+    </View>
+  );
+}
+
+function SwitchErrorNote({ error, onDismiss }: { error: string; onDismiss(): void }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  return (
+    <View style={[styles.note, styles.interruptFailed]} accessibilityRole="alert" accessibilityLiveRegion="polite">
+      <View style={styles.noteIcon}>
+        <Feather name="alert-circle" size={13} color={color.errorText} />
+      </View>
+      <Text style={[styles.noteText, { color: color.errorText }]}>{error}</Text>
+      <Pressable onPress={onDismiss} hitSlop={10} accessibilityRole="button" accessibilityLabel="Dismiss">
+        <Feather name="x-circle" size={16} color={color.faint} />
+      </Pressable>
     </View>
   );
 }
@@ -1412,6 +1678,27 @@ const makeStyles = (c: Palette) =>
       color: c.muted,
     },
     statusChipMode: { flexShrink: 1 },
+    // A model that can be switched: the same text, with a chevron after it.
+    modelSwitch: { flexDirection: "row", alignItems: "center", gap: 2, flexShrink: 0 },
+    switchPressed: { opacity: 0.6 },
+    // On its way: the value being switched to, in the working colour.
+    switchPending: { color: c.workingText },
+    switchConfirm: { flexDirection: "column", alignItems: "stretch", gap: space.sm },
+    switchConfirmTop: { flexDirection: "row", alignItems: "center", gap: 10 },
+    switchConfirmButtons: { flexDirection: "row", justifyContent: "flex-end", gap: space.sm },
+    switchButton: {
+      minHeight: 36,
+      minWidth: 84,
+      paddingHorizontal: space.lg,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    switchButtonPrimary: { backgroundColor: c.inverse },
+    switchButtonSecondary: { backgroundColor: c.surface, borderWidth: 1, borderColor: c.fillStrong },
+    switchButtonDisabled: { opacity: 0.4 },
+    switchButtonLabel: { fontFamily: font.sansBold, fontSize: size.caption, color: c.text },
+    switchButtonLabelPrimary: { color: c.onInverse },
     statusChipRule: {
       width: StyleSheet.hairlineWidth,
       height: 9,

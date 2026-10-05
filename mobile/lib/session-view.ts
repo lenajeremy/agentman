@@ -4,18 +4,23 @@ import type { Message } from "./protocol";
  * The session's mode and context use as one short chip beside the model, or
  * null when the agent reported neither. The mode is the agent's own word,
  * kept as it spelled it; context is whole percent.
+ *
+ * A session whose modes can be switched always gets the chip, since it is
+ * the control that switches them; with no mode reported it reads "mode".
  */
 export function statusChip(
   mode: string | undefined,
   contextPercent: number | undefined,
+  switchable = false,
 ): { mode?: string; context?: string; label: string } | null {
-  const word = mode?.trim() || undefined;
+  const reported = mode?.trim() || undefined;
+  const word = reported ?? (switchable ? "mode" : undefined);
   const context =
     contextPercent && contextPercent > 0
       ? `${Math.min(100, Math.round(contextPercent))}%`
       : undefined;
   if (!word && !context) return null;
-  const label = [word ? `${word} mode` : "", context ? `context ${context} full` : ""]
+  const label = [reported ? `${reported} mode` : word ?? "", context ? `context ${context} full` : ""]
     .filter(Boolean)
     .join(", ");
   return { mode: word, context, label };
