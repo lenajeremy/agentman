@@ -328,6 +328,46 @@ func TestSessionMutationsAreSerialized(t *testing.T) {
 	}
 }
 
+// Bidirectional overrides and isolates make text display differently from
+// the bytes that are typed: the phone would show one instruction while the
+// agent received another. Unicode puts them in category Cf, which IsControl
+// does not cover, so they used to pass.
+func TestRequestValidationRejectsBidiControls(t *testing.T) {
+	for _, control := range []rune{
+		'\u202A', '\u202B', '\u202C', '\u202D', '\u202E', // embeddings and overrides
+		'\u2066', '\u2067', '\u2068', '\u2069', // isolates
+	} {
+		text := "approve " + string(control) + "txt.exe"
+		for _, request := range []protocol.Request{
+			{Type: protocol.ReqSendMessage, SessionID: "claude:s1", Text: text},
+			{Type: protocol.ReqAnswer, SessionID: "claude:s1", QuestionID: "q", AnswerText: text},
+			{Type: protocol.ReqAnswer, SessionID: "claude:s1", QuestionID: "q", OptionKey: text},
+			{Type: protocol.ReqStartSession, ClientID: "c", Kind: protocol.KindClaude, Path: "work", Text: text},
+		} {
+			if err := validateRequest(request); err == nil {
+				t.Errorf("accepted U+%04X in %s", control, request.Type)
+			}
+		}
+	}
+}
+
+// Format characters that legitimate text needs must still pass: the joiners
+// inside family and skin-tone emoji, the non-joiner Persian spelling uses, and
+// the tag characters of subdivision flags.
+func TestRequestValidationKeepsFormatCharactersTextNeeds(t *testing.T) {
+	for _, text := range []string{
+		"\U0001F469\u200D\U0001F469\u200D\U0001F467 thanks",                      // family: ZWJ
+		"\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645",                       // Persian: ZWNJ
+		"\U0001F3F4\U000E0067\U000E0062\U000E0073\U000E0063\U000E0074\U000E007F", // Scotland
+	} {
+		if err := validateRequest(protocol.Request{
+			Type: protocol.ReqSendMessage, SessionID: "claude:s1", Text: text,
+		}); err != nil {
+			t.Errorf("rejected %q: %v", text, err)
+		}
+	}
+}
+
 func TestRequestValidationRejectsTerminalControlCharacters(t *testing.T) {
 	tests := []protocol.Request{
 		{Type: protocol.ReqSendMessage, SessionID: "claude:s1", Text: "hello\x1b[A"},

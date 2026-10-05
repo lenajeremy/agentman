@@ -1287,11 +1287,23 @@ func containsTerminalControl(text string) bool {
 		if character == '\n' || character == '\t' {
 			continue
 		}
-		if unicode.IsControl(character) {
+		if unicode.IsControl(character) || isBidiControl(character) {
 			return true
 		}
 	}
 	return false
+}
+
+// isBidiControl reports the bidirectional embeddings, overrides and isolates.
+// They make text display in a different order from the bytes that are typed,
+// so what the phone showed could differ from what the agent received.
+// Unicode files them under Cf (format), which IsControl does not cover. The
+// rest of Cf stays allowed on purpose: the joiners inside emoji sequences,
+// the non-joiner Persian spelling needs, and the tags of subdivision flags
+// are all Cf too.
+func isBidiControl(character rune) bool {
+	return (character >= '\u202A' && character <= '\u202E') ||
+		(character >= '\u2066' && character <= '\u2069')
 }
 
 func (d *Daemon) snapshot() []protocol.Session {
