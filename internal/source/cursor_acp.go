@@ -353,6 +353,7 @@ func (s *CursorACPSource) Discover(ctx context.Context) ([]protocol.Session, err
 			State: state, Inject: protocol.InjectAPI, Question: q,
 			StartedAt: r.StartedAt, LastActivityAt: r.LastActivityAt,
 			Model: s.model(ctx, r.NativeID, r.LastActivityAt), AgentPID: pid,
+			Mode: r.Mode,
 		})
 	}
 	s.modelMu.Lock()

@@ -112,6 +112,8 @@ type CursorCLISource struct {
 	transcripts  map[string]string
 	turns        map[string]cursorCLITurnEntry
 	hooksChecked cursorCLIHooksEntry
+	paneStatus   map[string]cursorCLIPaneStatus
+	storeModes   map[string]cursorCLIModeEntry
 
 	// pending holds messages for chats running outside a managed pane,
 	// delivered by Cursor's stop hook; see cursorCLIHooksInstalled.
@@ -369,10 +371,11 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 		mode := protocol.InjectNone
 		state := protocol.StateIdle
 		var currentQuestion *protocol.Question
+		var status cursorCLIPaneStatus
 		if wrapped {
 			id = cursorCLIPaneIDPrefix + pane.Name
 			mode = protocol.InjectTmux
-			state, currentQuestion = s.cursorCLIPaneState(ctx, pane.Name)
+			state, currentQuestion, status = s.cursorCLIPaneReading(ctx, pane.Name)
 		} else if turn, ok := s.cursorCLITurnState(ctx, chat.id); ok && liveKnown {
 			// No pane to read: the transcript says whether a turn is open.
 			// Only for a chat a process holds; a crashed one would read busy
@@ -392,6 +395,11 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 			StartedAt: chat.meta.CreatedAtMs, LastActivityAt: chat.meta.UpdatedAtMs,
 		}
 		entry.Model = s.cursorCLIModel(ctx, chat.id, chat.store, chat.meta.UpdatedAtMs)
+		entry.Mode, entry.ContextPercent = status.mode, status.context
+		if entry.Mode == "" {
+			// No pane to read it from: the chat's store records it.
+			entry.Mode = s.cursorCLIStoreMode(ctx, chat.store)
+		}
 		if wrapped {
 			entry.AgentPID = pane.PanePID
 			entry.Question = currentQuestion
@@ -415,7 +423,9 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 			Inject: protocol.InjectTmux, StartedAt: pane.Created.UnixMilli(),
 			LastActivityAt: pane.Created.UnixMilli(), AgentPID: pane.PanePID,
 		}
-		entry.State, entry.Question = s.cursorCLIPaneState(ctx, pane.Name)
+		var status cursorCLIPaneStatus
+		entry.State, entry.Question, status = s.cursorCLIPaneReading(ctx, pane.Name)
+		entry.Mode, entry.ContextPercent = status.mode, status.context
 		result = append(result, entry)
 		next[id] = cursorCLISession{meta: entry, pane: pane.Name}
 	}
@@ -430,6 +440,18 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 		}
 	}
 	s.modelMu.Unlock()
+	s.turnMu.Lock()
+	for name := range s.paneStatus {
+		if !slices.ContainsFunc(managed, func(pane tmux.Session) bool { return pane.Name == name }) {
+			delete(s.paneStatus, name)
+		}
+	}
+	for store := range s.storeModes {
+		if !slices.ContainsFunc(chats, func(chat foundChat) bool { return chat.store == store }) {
+			delete(s.storeModes, store)
+		}
+	}
+	s.turnMu.Unlock()
 	s.mu.Lock()
 	s.sessions = next
 	s.mu.Unlock()

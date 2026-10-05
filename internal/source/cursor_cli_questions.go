@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -51,6 +53,13 @@ type cursorCLIScreen struct {
 	// a picker, a panel or shell mode holds the keyboard.
 	blocked string
 	busy    bool
+	// mode and context come from the status rows under the prompt: the mode
+	// label ("Plan (shift+tab to cycle)", absent in the default Agent mode)
+	// and the footer ("Auto · 6.3% · 1 file edited"). Both are empty and -1
+	// when the prompt is not on screen, which is not the same as Agent mode
+	// or an empty context.
+	mode    string
+	context float64
 }
 
 var (
@@ -112,6 +121,7 @@ func parseCursorCLIScreen(pane string) cursorCLIScreen {
 	lines := cursorCLILines(pane)
 	var screen cursorCLIScreen
 	screen.busy = cursorCLIBusy(lines)
+	screen.mode, screen.context = cursorCLIStatusRows(lines)
 	if q := cursorCLITrustQuestion(lines); q != nil {
 		screen.question = q
 		return screen
@@ -228,6 +238,40 @@ func cursorCLIPromptText(line string) (string, bool) {
 		text = strings.TrimSpace(text[:gap])
 	}
 	return text, true
+}
+
+var (
+	cursorCLIModeLabel = regexp.MustCompile(`^(\w+) \(shift\+tab to cycle\)$`)
+	cursorCLIContext   = regexp.MustCompile(`(?:^|·)\s*(\d{1,3}(?:\.\d+)?)%\s*(?:·|$)`)
+)
+
+// cursorCLIStatusRows reads the mode label and the context use from the rows
+// under the prompt's lower bar.
+func cursorCLIStatusRows(lines []string) (string, float64) {
+	bottom := -1
+	for i := len(lines) - 1; i >= 0 && i >= len(lines)-30; i-- {
+		if cursorCLIBarLine(lines[i]) && strings.HasPrefix(strings.TrimSpace(lines[i]), "▀") {
+			bottom = i
+			break
+		}
+	}
+	if bottom < 0 {
+		return "", -1
+	}
+	mode, context := "agent", -1.0
+	for _, line := range lines[bottom+1 : min(len(lines), bottom+4)] {
+		text := strings.TrimSpace(line)
+		if match := cursorCLIModeLabel.FindStringSubmatch(text); match != nil {
+			mode = strings.ToLower(match[1])
+			continue
+		}
+		if match := cursorCLIContext.FindStringSubmatch(text); match != nil && context < 0 {
+			if value, err := strconv.ParseFloat(match[1], 64); err == nil && value <= 100 {
+				context = value
+			}
+		}
+	}
+	return mode, context
 }
 
 // cursorCLIBusy reads the running indicator: Cursor's "ctrl+c to stop" hint
@@ -568,18 +612,54 @@ func (s *CursorCLISource) paneScreen(ctx context.Context, pane string) (cursorCL
 // cannot answer still reports waiting_input, with no question, so the user
 // hears that Cursor is blocked rather than seeing it idle.
 func (s *CursorCLISource) cursorCLIPaneState(ctx context.Context, paneName string) (protocol.State, *protocol.Question) {
+	state, question, _ := s.cursorCLIPaneReading(ctx, paneName)
+	return state, question
+}
+
+// cursorCLIPaneStatus is the mode and context use last seen in a pane. A menu
+// covers the rows they are read from, and a menu is no reason for the
+// phone's chip to blink out.
+type cursorCLIPaneStatus struct {
+	mode    string
+	context int
+}
+
+func (s *CursorCLISource) cursorCLIPaneReading(ctx context.Context, paneName string) (protocol.State, *protocol.Question, cursorCLIPaneStatus) {
 	screen, err := s.paneScreen(ctx, paneName)
+	s.turnMu.Lock()
+	if s.paneStatus == nil {
+		s.paneStatus = map[string]cursorCLIPaneStatus{}
+	}
+	status := s.paneStatus[paneName]
+	if err == nil && screen.mode != "" {
+		status.mode = screen.mode
+	}
+	if err == nil && screen.context >= 0 {
+		status.context = cursorCLIPercent(screen.context)
+	}
+	s.paneStatus[paneName] = status
+	s.turnMu.Unlock()
 	switch {
 	case err != nil:
-		return protocol.StateIdle, nil
+		return protocol.StateIdle, nil, status
 	case screen.question != nil:
-		return protocol.StateWaitingInput, screen.question
+		return protocol.StateWaitingInput, screen.question, status
 	case screen.needsUser:
-		return protocol.StateWaitingInput, nil
+		return protocol.StateWaitingInput, nil, status
 	case screen.busy:
-		return protocol.StateBusy, nil
+		return protocol.StateBusy, nil, status
 	}
-	return protocol.StateIdle, nil
+	return protocol.StateIdle, nil, status
+}
+
+// cursorCLIPercent rounds Cursor's one-decimal figure to the wire's whole
+// percent, keeping a used-but-tiny context above zero, which means unknown.
+func cursorCLIPercent(value float64) int {
+	percent := int(math.Round(value))
+	if percent == 0 && value > 0 {
+		return 1
+	}
+	return min(percent, 100)
 }
 
 func (s *CursorCLISource) CurrentQuestion(ctx context.Context, sessionID string) (*protocol.Question, error) {

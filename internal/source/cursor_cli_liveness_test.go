@@ -2,8 +2,11 @@ package source
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -216,5 +219,27 @@ func TestCursorCLITerminalChatTakesMessagesThroughTheStopHook(t *testing.T) {
 	}
 	if got := queue.Take("cursor-cli:chat-123"); len(got) != 1 || got[0] != "run the tests next" {
 		t.Fatalf("queued under the hook's key: %v", got)
+	}
+}
+
+// A chat with no pane reports the mode its store records, mapped to the
+// CLI's names. The same row holds the store's encryption key, which must
+// never travel.
+func TestCursorCLIStoreModeForAChatWithoutAPane(t *testing.T) {
+	source, store, _, _ := livenessFixture(t)
+	meta := hex.EncodeToString([]byte(`{"agentId":"chat-123","mode":"search","blobEncryptionKey":"do-not-leak"}`))
+	sql := "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT); INSERT INTO meta VALUES ('0','" + meta + "');"
+	if output, err := exec.Command("sqlite3", store, sql).CombinedOutput(); err != nil {
+		t.Fatalf("meta: %v: %s", err, output)
+	}
+	sessions, err := source.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].Mode != "ask" {
+		t.Fatalf("sessions = %+v, want ask mode", sessions)
+	}
+	if encoded, _ := json.Marshal(sessions); strings.Contains(string(encoded), "do-not-leak") {
+		t.Fatal("the store's key reached the session")
 	}
 }

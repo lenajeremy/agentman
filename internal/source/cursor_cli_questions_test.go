@@ -396,3 +396,41 @@ func TestCursorCLIMCPApprovalKeepsItsOwnSkip(t *testing.T) {
 		t.Fatalf("custom key = %q, want p", screen.customKey)
 	}
 }
+
+// The rows under the prompt: the mode label (none in Agent mode) and the
+// footer's context use.
+func TestCursorCLIStatusRows(t *testing.T) {
+	for name, want := range map[string]struct {
+		mode    string
+		context float64
+	}{
+		"plan-mode-idle":   {"plan", 7.4},
+		"ask-mode-idle":    {"ask", 7.4},
+		"todos-done":       {"agent", 7.4},
+		"idle-after-trust": {"agent", -1},
+		"delete-approval":  {"", -1},
+	} {
+		screen := parseCursorCLIScreen(cursorCLIPaneFixture(t, name))
+		if screen.mode != want.mode || screen.context != want.context {
+			t.Errorf("%s: mode %q context %v, want %q %v", name, screen.mode, screen.context, want.mode, want.context)
+		}
+	}
+	if cursorCLIPercent(0.3) != 1 || cursorCLIPercent(6.5) != 7 || cursorCLIPercent(0) != 0 {
+		t.Error("percent rounding")
+	}
+}
+
+// A menu hides the status rows; the phone keeps what it last saw rather than
+// losing the chip while the user decides.
+func TestCursorCLIPaneStatusSurvivesAMenu(t *testing.T) {
+	s, pane, _ := cursorCLIAnswerFixture(t, cursorCLIPaneFixture(t, "plan-mode-idle"), cursorCLIPaneFixture(t, "delete-approval"))
+	_, _, status := s.cursorCLIPaneReading(context.Background(), "agentman-cursor-test")
+	if status.mode != "plan" || status.context != 7 {
+		t.Fatalf("status = %+v", status)
+	}
+	_ = pane.key(context.Background(), "", "x") // move the fake pane to its menu
+	state, q, status := s.cursorCLIPaneReading(context.Background(), "agentman-cursor-test")
+	if state != protocol.StateWaitingInput || q == nil || status.mode != "plan" || status.context != 7 {
+		t.Fatalf("under a menu: %s %v %+v", state, q, status)
+	}
+}

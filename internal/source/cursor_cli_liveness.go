@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -307,4 +308,66 @@ type cursorCLIHooksEntry struct {
 	size      int64
 	mod       time.Time
 	installed bool
+}
+
+type cursorCLIModeEntry struct {
+	version string
+	mode    string
+}
+
+// cursorCLIModes maps the mode names a chat store records to the ones the
+// CLI shows. Its ACP server maps "ask" to the same "search".
+var cursorCLIModes = map[string]string{"default": "agent", "search": "ask"}
+
+// cursorCLIStoreMode reads the mode a chat store records, once per change to
+// the store. The meta row also holds the store's encryption key, so only the
+// mode is ever taken from it.
+func (s *CursorCLISource) cursorCLIStoreMode(ctx context.Context, store string) string {
+	version := cursorCLIStoreVersion(store)
+	s.turnMu.Lock()
+	cached, ok := s.storeModes[store]
+	s.turnMu.Unlock()
+	if ok && cached.version == version {
+		return cached.mode
+	}
+	mode := queryCursorCLIStoreMode(ctx, store)
+	s.turnMu.Lock()
+	if s.storeModes == nil {
+		s.storeModes = map[string]cursorCLIModeEntry{}
+	}
+	s.storeModes[store] = cursorCLIModeEntry{version: version, mode: mode}
+	s.turnMu.Unlock()
+	return mode
+}
+
+func queryCursorCLIStoreMode(ctx context.Context, store string) string {
+	bin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, cursorCLIDBTimeout)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, bin, "-readonly", "-cmd", cursorCLITimeoutCommand,
+		"file:"+store+"?mode=ro", "SELECT value FROM meta WHERE key='0'").Output()
+	if err != nil || len(output) > 64*1024 {
+		return ""
+	}
+	raw, err := hex.DecodeString(strings.TrimSpace(string(output)))
+	if err != nil {
+		return ""
+	}
+	var meta struct {
+		Mode string `json:"mode"`
+	}
+	if json.Unmarshal(raw, &meta) != nil {
+		return ""
+	}
+	mode := strings.ToLower(strings.TrimSpace(meta.Mode))
+	if mapped, ok := cursorCLIModes[mode]; ok {
+		mode = mapped
+	}
+	if len(mode) > 40 {
+		return ""
+	}
+	return mode
 }

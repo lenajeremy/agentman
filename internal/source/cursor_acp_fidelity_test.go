@@ -161,6 +161,10 @@ func TestCursorACPRemembersTheMode(t *testing.T) {
 	if mode != "plan" {
 		t.Fatalf("mode = %q", mode)
 	}
+	sessions, err := s.Discover(context.Background())
+	if err != nil || len(sessions) != 1 || sessions[0].Mode != "plan" {
+		t.Fatalf("discovered %+v, %v", sessions, err)
+	}
 }
 
 // Discovery reports the ACP child's pid while a turn runs: its listening
