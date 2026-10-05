@@ -125,6 +125,15 @@ accepts. To drive a menu or picker with keys, use `tmux.SendKeys`. It accepts
 only `Tab`, `BTab`, `Enter`, `Escape`, `Space` and the four arrow keys, and
 only in an Agentman pane.
 
+Some CLIs let the user refuse an action and say what to do instead, for
+example Claude's "No, and tell Claude what to do differently". To offer this,
+set `WithText` on that `QuestionOption`. The app then opens a note under the
+option, and other options remain one tap. In `Answer`, `OptionKey` names the
+option and `Text` holds the note. Deliver the note the way the CLI expects it,
+such as typing it into the box the CLI opens. An empty `Text` means the plain
+choice. The app sends the note on one line, but other clients might not, so
+type the text safely.
+
 ## Notifications
 
 Local notifications are scheduled by the app while it is running and connected.

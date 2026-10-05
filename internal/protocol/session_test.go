@@ -90,6 +90,14 @@ func TestSameAsDetectsRealChanges(t *testing.T) {
 		}
 	})
 
+	t.Run("an option starting to take a note", func(t *testing.T) {
+		changed := waiting()
+		changed.Question.Options[1].WithText = true
+		if base.SameAs(changed) {
+			t.Error("the phone was never told it could say why")
+		}
+	})
+
 	t.Run("the question clearing", func(t *testing.T) {
 		answered := waiting()
 		answered.Question = nil
