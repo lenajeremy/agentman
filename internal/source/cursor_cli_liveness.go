@@ -258,3 +258,53 @@ func (s *CursorCLISource) cursorCLITranscriptVersion(chatID string) string {
 	}
 	return ""
 }
+
+// SetPending gives the source the queue that hook delivery drains.
+func (s *CursorCLISource) SetPending(queue *PendingQueue) { s.pending = queue }
+
+// cursorCLIHookKey is the queue key Cursor's own stop hook is delivered
+// under: the hook names the chat by its id, not by the phone's session id.
+func cursorCLIHookKey(chatID string) string {
+	return string(protocol.KindCursorCLI) + ":" + chatID
+}
+
+// cursorCLIHooksInstalled reports whether `am install-hooks` has put
+// Agentman's stop hook in ~/.cursor/hooks.json. Only then can a chat running
+// in an ordinary terminal be handed a message: its stop hook answers with
+// the queued text and Cursor continues the chat with it. Without the hook a
+// queued message would never arrive, so the session stays read-only.
+func (s *CursorCLISource) cursorCLIHooksInstalled() bool {
+	path := filepath.Join(s.home, ".cursor", "hooks.json")
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	s.turnMu.Lock()
+	defer s.turnMu.Unlock()
+	if s.hooksChecked.size == info.Size() && s.hooksChecked.mod.Equal(info.ModTime()) {
+		return s.hooksChecked.installed
+	}
+	installed := false
+	if data, err := os.ReadFile(path); err == nil && len(data) < 1<<20 {
+		var config struct {
+			Hooks map[string][]struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		}
+		if json.Unmarshal(data, &config) == nil {
+			for _, entry := range config.Hooks["stop"] {
+				if strings.HasSuffix(strings.TrimSpace(entry.Command), " hook cursor-cli Stop") {
+					installed = true
+				}
+			}
+		}
+	}
+	s.hooksChecked = cursorCLIHooksEntry{size: info.Size(), mod: info.ModTime(), installed: installed}
+	return installed
+}
+
+type cursorCLIHooksEntry struct {
+	size      int64
+	mod       time.Time
+	installed bool
+}

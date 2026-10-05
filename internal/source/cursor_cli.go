@@ -107,9 +107,14 @@ type CursorCLISource struct {
 	// cursor_cli_liveness.go.
 	live cursorCLILiveness
 	// turnMu guards the transcript locations and turn states read from them.
-	turnMu      sync.Mutex
-	transcripts map[string]string
-	turns       map[string]cursorCLITurnEntry
+	turnMu       sync.Mutex
+	transcripts  map[string]string
+	turns        map[string]cursorCLITurnEntry
+	hooksChecked cursorCLIHooksEntry
+
+	// pending holds messages for chats running outside a managed pane,
+	// delivered by Cursor's stop hook; see cursorCLIHooksInstalled.
+	pending *PendingQueue
 }
 
 func NewCursorCLISource(home string) (*CursorCLISource, error) {
@@ -391,6 +396,9 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 			entry.Question = currentQuestion
 		} else if pid, ok := live[chat.store]; ok {
 			entry.AgentPID = pid
+			if s.pending != nil && s.cursorCLIHooksInstalled() {
+				entry.Inject = protocol.InjectHook
+			}
 		}
 		result = append(result, entry)
 		next[id] = cursorCLISession{meta: entry, store: chat.store, pane: pane.Name}
@@ -626,6 +634,11 @@ func (s *CursorCLISource) Inject(ctx context.Context, sessionID, message string)
 		return protocol.InjectNone, fmt.Errorf("source: unknown Cursor CLI session %q", sessionID)
 	}
 	if session.pane == "" {
+		if session.meta.Inject == protocol.InjectHook && s.pending != nil && session.store != "" {
+			// Handed over by the chat's stop hook when its turn ends.
+			s.pending.Add(cursorCLIHookKey(filepath.Base(filepath.Dir(session.store))), message)
+			return protocol.InjectHook, nil
+		}
 		return protocol.InjectNone, errors.New("source: start Cursor with `am cursor` to send messages remotely")
 	}
 	// Every Cursor menu answers single letters, so text typed into one is a

@@ -1,9 +1,15 @@
 package main
 
 import (
+	"context"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/lenajeremy/agentman/internal/hook"
 )
 
 // Regression: hooks were recorded at the symlink's target, which under
@@ -51,5 +57,47 @@ func TestStableBinaryPathFallsBackWhenNothingResolves(t *testing.T) {
 	}
 	if got := stableBinaryPath(""); got != "" {
 		t.Errorf("stableBinaryPath(\"\") = %q, want empty", got)
+	}
+}
+
+// Cursor counts a hook that prints nothing as a failed hook, so a Cursor
+// hook answers "{}" when the daemon has nothing to hand back — including when
+// no daemon is running at all.
+func TestCursorHookAlwaysAnswersWithJSON(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// A listener that is closed at once: nothing answers on this port, and
+	// the user's own daemon on the default port is never reached.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	listener.Close()
+	if err := hook.SaveConfig(home, hook.Config{Token: "tok", HookAddr: addr}); err != nil {
+		t.Fatal(err)
+	}
+
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldIn, oldOut := os.Stdin, os.Stdout
+	os.Stdin, os.Stdout = stdinR, stdoutW
+	defer func() { os.Stdin, os.Stdout = oldIn, oldOut }()
+	_, _ = stdinW.WriteString(`{"session_id":"chat-1","hook_event_name":"stop","status":"completed"}`)
+	stdinW.Close()
+
+	if err := runHook(context.Background(), []string{"cursor-cli", "Stop"}); err != nil {
+		t.Fatal(err)
+	}
+	stdoutW.Close()
+	out, _ := io.ReadAll(stdoutR)
+	if strings.TrimSpace(string(out)) != "{}" {
+		t.Fatalf("cursor hook printed %q, want {}", out)
 	}
 }

@@ -176,3 +176,45 @@ func TestCursorCLITranscriptGivesStateAndTheFailure(t *testing.T) {
 		t.Fatal("a successful turn reported a failure")
 	}
 }
+
+// A chat in an ordinary terminal can take a message once Agentman's stop
+// hook is installed: the hook hands it to Cursor when the turn ends, keyed
+// by the chat id the hook reports.
+func TestCursorCLITerminalChatTakesMessagesThroughTheStopHook(t *testing.T) {
+	source, _, _, _ := livenessFixture(t)
+	queue := NewPendingQueue()
+	source.SetPending(queue)
+	sessions, err := source.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessions[0].Inject != protocol.InjectNone {
+		t.Fatalf("without the hook the chat claims %s", sessions[0].Inject)
+	}
+	if _, err := source.Inject(context.Background(), sessions[0].ID, "hello"); err == nil {
+		t.Fatal("a message was queued for a hook that is not installed")
+	}
+
+	hooks := filepath.Join(source.home, ".cursor", "hooks.json")
+	if err := os.MkdirAll(filepath.Dir(hooks), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	config := `{"version":1,"hooks":{"stop":[{"command":"./mine.sh"},{"command":"/usr/local/bin/am hook cursor-cli Stop","timeout":5}]}}`
+	if err := os.WriteFile(hooks, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err = source.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessions[0].Inject != protocol.InjectHook {
+		t.Fatalf("inject = %s, want hook", sessions[0].Inject)
+	}
+	mode, err := source.Inject(context.Background(), sessions[0].ID, "run the tests next")
+	if err != nil || mode != protocol.InjectHook {
+		t.Fatalf("inject = %s, %v", mode, err)
+	}
+	if got := queue.Take("cursor-cli:chat-123"); len(got) != 1 || got[0] != "run the tests next" {
+		t.Fatalf("queued under the hook's key: %v", got)
+	}
+}

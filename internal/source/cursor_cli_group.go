@@ -142,6 +142,10 @@ func (s *CursorCLIGroup) Launch(ctx context.Context, cwd, prompt string) (string
 	return s.acp.Launch(ctx, cwd, prompt)
 }
 
+// SetPending forwards the hook-delivery queue to terminal chats. ACP chats
+// queue their own follow-ups, durably, in their records.
+func (s *CursorCLIGroup) SetPending(queue *PendingQueue) { s.terminal.SetPending(queue) }
+
 func (s *CursorCLIGroup) ResumeQueued() { s.acp.ResumeQueued() }
 func (s *CursorCLIGroup) EnableAsync()  { s.acp.EnableAsync() }
 func (s *CursorCLIGroup) Close()        { s.acp.Close() }

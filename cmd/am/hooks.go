@@ -28,6 +28,16 @@ func runHook(ctx context.Context, args []string) error {
 		return nil
 	}
 	kind, event := args[0], args[1]
+	answered := false
+	if kind == string(protocol.KindCursorCLI) {
+		// Cursor counts a hook that prints nothing as a failed one. "{}" is
+		// "carry on"; a queued message from the daemon replaces it.
+		defer func() {
+			if !answered {
+				_, _ = os.Stdout.Write([]byte("{}\n"))
+			}
+		}()
+	}
 
 	var payload []byte
 	// Claude writes its hook payload to stdin. Codex's supported `notify`
@@ -74,6 +84,7 @@ func runHook(ctx context.Context, args []string) error {
 	}
 	if resp.StatusCode == http.StatusOK {
 		_, _ = os.Stdout.Write(body)
+		answered = true
 	}
 	return nil
 }
@@ -263,11 +274,9 @@ func runDoctor(ctx context.Context, args []string) error {
 		// OpenCode has no hook system and needs none: its HTTP API reports
 		// session state directly. Reporting absent hooks as a warning sent
 		// people looking for a problem that does not exist.
-		if kind == protocol.KindOpenCode || kind == protocol.KindCursorCLI || kind == protocol.KindCursor {
+		if kind == protocol.KindOpenCode || kind == protocol.KindCursor {
 			detail := "via HTTP API — no hooks needed"
-			if kind == protocol.KindCursorCLI {
-				detail = "via local CLI store and tmux — no hooks needed"
-			} else if kind == protocol.KindCursor {
+			if kind == protocol.KindCursor {
 				detail = "via IDE transcript and composer index — no hooks needed"
 			}
 			check(true, string(kind)+" events", detail)
