@@ -3,7 +3,6 @@ package source
 import (
 	"context"
 	"encoding/json"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -142,33 +141,48 @@ func (s *CodexSource) Directories(ctx context.Context) ([]protocol.Folder, error
 	return folders, nil
 }
 
-// allRollouts lists every rollout file under the sessions root, newest first.
+// allRollouts lists rollout files under the sessions root, newest first, up
+// to codexHistoryScanFiles.
+//
+// Codex files rollouts by day (sessions/YYYY/MM/DD), and the names sort by
+// date, so the tree is walked in reverse name order and the cap keeps the
+// newest. Walking it forwards, as it once did, made the cap drop exactly the
+// sessions a folder most needs to show once there were more than it allows.
 func (s *CodexSource) allRollouts() []historyEntry {
-	root := s.sessionsDir()
 	found := make([]historyEntry, 0, 256)
-	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	var walk func(dir string) bool
+	walk = func(dir string) bool {
+		entries, err := os.ReadDir(dir)
 		if err != nil {
 			// A day directory removed mid-walk is not a reason to abandon the
 			// rest of the history.
-			return nil //nolint:nilerr // skip unreadable entries
+			return true
 		}
-		if entry.IsDir() {
-			return nil
+		for i := len(entries) - 1; i >= 0; i-- {
+			entry := entries[i]
+			path := filepath.Join(dir, entry.Name())
+			if entry.IsDir() {
+				if !walk(path) {
+					return false
+				}
+				continue
+			}
+			name := entry.Name()
+			if !strings.HasPrefix(name, "rollout-") || !strings.HasSuffix(name, ".jsonl") {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			found = append(found, historyEntry{path: path, modTime: info.ModTime().UnixMilli()})
+			if len(found) >= codexHistoryScanFiles {
+				return false
+			}
 		}
-		name := entry.Name()
-		if !strings.HasPrefix(name, "rollout-") || !strings.HasSuffix(name, ".jsonl") {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return nil
-		}
-		found = append(found, historyEntry{path: path, modTime: info.ModTime().UnixMilli()})
-		if len(found) >= codexHistoryScanFiles {
-			return fs.SkipAll
-		}
-		return nil
-	})
+		return true
+	}
+	walk(s.sessionsDir())
 	sort.Slice(found, func(i, j int) bool { return found[i].modTime > found[j].modTime })
 	return found
 }
