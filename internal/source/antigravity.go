@@ -555,8 +555,8 @@ func (s *AntigravitySource) applyPane(
 	if footer.model != "" {
 		session.Model = footer.model + " (" + footer.effort + ")"
 	}
-	if found := question.DetectAntigravity(pane); found != nil {
-		session.Question = protocolQuestion(found)
+	if found, form := question.DetectAntigravityForm(pane); found != nil {
+		session.Question = antigravityQuestion(found, form)
 		session.State = protocol.StateWaitingInput
 		return footer
 	}
@@ -1099,11 +1099,15 @@ func (s *AntigravitySource) CurrentQuestion(ctx context.Context, sessionID strin
 	if err != nil || session.tmuxName == "" {
 		return nil, err
 	}
-	found, err := paneMenu(ctx, s.capturePane, session.tmuxName, question.DetectAntigravity)
-	if err != nil || found == nil {
+	pane, err := s.capturePane(ctx, session.tmuxName)
+	if err != nil {
 		return nil, err
 	}
-	return protocolQuestion(found), nil
+	found, form := question.DetectAntigravityForm(pane)
+	if found == nil {
+		return nil, nil
+	}
+	return antigravityQuestion(found, form), nil
 }
 
 // antigravityOpenConversations asks lsof what each agy process holds open.

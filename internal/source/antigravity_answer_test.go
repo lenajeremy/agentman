@@ -282,3 +282,44 @@ func TestAntigravitySubagentAnswerStopsWhenItsKeyIsRefused(t *testing.T) {
 		t.Errorf("err %v keys %q", err, keys.events)
 	}
 }
+
+// "tab Amend" approves with a message for the agent. The approval is offered
+// with a note; with no note it is the plain approval, and nothing else takes
+// one.
+func TestAntigravityApprovesWithANote(t *testing.T) {
+	pane := agyFixture(t, "command")
+	s, keys, id := agyAsking(t, pane, true)
+	offered := s.sessions[id].meta.Question
+	if !offered.Options[0].WithText || offered.Options[1].WithText || offered.Options[3].WithText {
+		t.Fatalf("options = %+v", offered.Options)
+	}
+	amending := strings.Replace(strings.Replace(pane,
+		"> 1. Yes, run command\n", "> 1. Yes, and tell Antigravity CLI what to do next\n    > █\n", 1),
+		"  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command", "  enter Submit", 1)
+	keys.panes = []string{pane, amending}
+	if err := agyAnswer(t, s, id, protocol.QuestionAnswer{OptionKey: "1", Text: " then show me the output "}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(keys.events, ";"); got != "send Tab;press then show me the output;send Enter" {
+		t.Errorf("keys = %q", got)
+	}
+
+	// Tab did not open the box: nothing is typed into whatever is there.
+	s, keys, id = agyAsking(t, pane, true)
+	keys.panes = []string{pane, pane}
+	if err := agyAnswer(t, s, id, protocol.QuestionAnswer{OptionKey: "1", Text: "note"}); err == nil ||
+		strings.Join(keys.events, ";") != "send Tab" {
+		t.Errorf("err %v keys %q", err, keys.events)
+	}
+
+	// A note on a choice that takes none is refused before any key.
+	s, keys, id = agyAsking(t, pane, true)
+	if err := agyAnswer(t, s, id, protocol.QuestionAnswer{OptionKey: "4", Text: "because"}); err == nil || len(keys.events) > 0 {
+		t.Errorf("err %v keys %q", err, keys.events)
+	}
+	// A prompt without "tab Amend" offers no note at all.
+	s, _, id = agyAsking(t, agyFixture(t, "file-access"), true)
+	if s.sessions[id].meta.Question.Options[0].WithText {
+		t.Error("a note was offered where agy takes none")
+	}
+}

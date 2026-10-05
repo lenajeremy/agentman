@@ -81,6 +81,8 @@ func (s *AntigravitySource) Answer(ctx context.Context, sessionID string, answer
 	switch {
 	case form.Kind == "subagent":
 		return s.answerAntigravitySubagent(ctx, name, current, answer)
+	case form.Kind == "approval" && strings.TrimSpace(answer.Text) != "":
+		return s.answerAntigravityAmend(ctx, name, shown, current, form, answer)
 	case strings.TrimSpace(answer.Text) != "":
 		return s.answerAntigravityWriteIn(ctx, name, current, form, answer)
 	case current.Multiple:
@@ -99,6 +101,25 @@ func (s *AntigravitySource) Answer(ctx context.Context, sessionID string, answer
 		return now != nil && now.FocusIndex == target &&
 			target < len(now.Options) && now.Options[target].Label == label
 	})
+}
+
+// antigravityAmendLabel is what agy's first option becomes once Tab opens a
+// message box under it.
+const antigravityAmendLabel = "Yes, and tell Antigravity CLI what to do next"
+
+// antigravityQuestion is the question as the phone is shown it.
+//
+// A permission prompt whose hint offers "tab Amend" approves with a message
+// for the agent: Tab turns the first option, the approval, into "Yes, and tell
+// Antigravity CLI what to do next" with a box beneath it. That option is
+// offered with a note; every other choice stays one tap.
+func antigravityQuestion(found *question.Question, form question.AntigravityForm) *protocol.Question {
+	q := protocolQuestion(found)
+	if form.Kind == "approval" && form.Amend && len(q.Options) > 0 &&
+		strings.HasPrefix(q.Options[0].Label, "Yes") {
+		q.Options[0].WithText = true
+	}
+	return q
 }
 
 // currentForm reads the pane and checks it still shows the question the phone
@@ -146,6 +167,67 @@ func (s *AntigravitySource) answerAntigravityWriteIn(
 		return errors.New("source: keep a written answer to one line")
 	}
 	return s.keys.writeIn(ctx, name, form.WriteInKey, text)
+}
+
+// answerAntigravityAmend approves a permission prompt with a message for the
+// agent, the way agy's "tab Amend" does: with the approval focused, Tab opens a
+// box under it, the message is typed there, and Enter submits both.
+func (s *AntigravitySource) answerAntigravityAmend(
+	ctx context.Context, name string, shown *protocol.Question, current *question.Question,
+	form question.AntigravityForm, answer protocol.QuestionAnswer,
+) error {
+	offered := antigravityQuestion(current, form)
+	if len(offered.Options) == 0 || !offered.Options[0].WithText || answer.OptionKey != offered.Options[0].Key {
+		return errors.New("source: only the approval can carry a note here")
+	}
+	text := strings.TrimSpace(answer.Text)
+	if strings.ContainsAny(text, "\r\n") {
+		return errors.New("source: keep the note to one line")
+	}
+	if current.FocusIndex != 0 {
+		ups := make([]string, current.FocusIndex)
+		for i := range ups {
+			ups[i] = "Up"
+		}
+		if err := s.keys.send(ctx, name, ups...); err != nil {
+			return err
+		}
+	}
+	if err := s.keys.send(ctx, name, "Tab"); err != nil {
+		return err
+	}
+	if err := s.waitForForm(ctx, name, func(now *question.Question, nowForm question.AntigravityForm) bool {
+		return nowForm.Typing && now.FocusIndex == 0 && len(now.Options) > 0 &&
+			now.Options[0].Label == antigravityAmendLabel
+	}); err != nil {
+		return errors.New("source: the approval's message box did not open on the Mac; answer it there")
+	}
+	if err := s.keys.press(ctx, name, text); err != nil {
+		return err
+	}
+	return s.keys.send(ctx, name, "Enter")
+}
+
+// waitForForm reads the pane until done accepts the control on it, for about
+// a second.
+func (s *AntigravitySource) waitForForm(
+	ctx context.Context, name string, done func(*question.Question, question.AntigravityForm) bool,
+) error {
+	for attempt := 0; attempt < 15; attempt++ {
+		pane, err := s.capturePane(ctx, name)
+		if err != nil {
+			return err
+		}
+		if now, form := question.DetectAntigravityForm(pane); now != nil && done(now, form) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(antigravityKeyPause):
+		}
+	}
+	return errors.New("source: the question did not reach the expected state")
 }
 
 // answerAntigravityChecks answers a multi-select question: each digit toggles
