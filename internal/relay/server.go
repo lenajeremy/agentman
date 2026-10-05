@@ -112,6 +112,10 @@ type Server struct {
 	// which is where a client can already think it is connected while apps
 	// are still told the daemon is offline.
 	beforeDaemonRegistered func()
+	// afterAppHelloDecided runs once a connecting app's hello reflects the
+	// daemon's state. Nil in production; tests use it to connect a daemon at
+	// that moment.
+	afterAppHelloDecided func()
 }
 
 // NewServer builds a relay.
@@ -622,20 +626,25 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	deviceID := fmt.Sprintf("%s-%d", account, time.Now().UnixNano())
-	s.hub.AddApp(account, deviceID, conn)
+	// The hello is queued in the same step that registers the app, so a
+	// daemon connecting or leaving at that moment cannot have its status
+	// overtaken by a stale hello. See AddAppGreeting.
+	s.hub.AddAppGreeting(account, deviceID, conn, func(online bool, lastSeen time.Time) {
+		hello := protocol.Control{Type: protocol.CtlHello, DaemonOnline: online}
+		if !online && !lastSeen.IsZero() {
+			hello.LastSeenAt = lastSeen.UnixMilli()
+		}
+		_ = sendControl(conn, hello)
+	})
 	defer func() {
 		s.hub.RemoveApp(account, deviceID)
 		s.notifyDaemon(account, protocol.Control{
 			Type: protocol.CtlAppDisconnected, DeviceID: deviceID,
 		})
 	}()
-
-	online, lastSeen := s.hub.DaemonOnline(account)
-	hello := protocol.Control{Type: protocol.CtlHello, DaemonOnline: online}
-	if !online && !lastSeen.IsZero() {
-		hello.LastSeenAt = lastSeen.UnixMilli()
+	if s.afterAppHelloDecided != nil {
+		s.afterAppHelloDecided()
 	}
-	_ = sendControl(conn, hello)
 
 	s.pump(r.Context(), ws, conn, account, protocol.PeerApp, deviceID)
 }
