@@ -411,7 +411,6 @@ export default function SessionScreen() {
   // while the answer is in flight.
   const [changedFiles, setChangedFiles] = useState<number | null>(null);
   const menuServers = session?.servers?.length ?? 0;
-  const canStopTurn = session?.state === "busy" && !interruptLocked;
 
   // Built here rather than in the header so every entry sits beside the action
   // it performs. An idle session simply has fewer rows — which is a popover
@@ -560,7 +559,7 @@ export default function SessionScreen() {
             controls across a phone-width row left the name under half of it and
             cut the working directory to "~/Deskt…", and what a session is gets
             read far more often than either of them gets pressed. */}
-        {session && (menuServers > 0 || canStopTurn) ? (
+        {session && sessionMenuItems.length > 0 ? (
           <MotionPressable
             onPress={() => setMenuOpen(true)}
             hitSlop={10}
