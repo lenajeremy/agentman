@@ -17,7 +17,6 @@ import (
 
 	"github.com/lenajeremy/agentman/internal/parser"
 	"github.com/lenajeremy/agentman/internal/protocol"
-	"github.com/lenajeremy/agentman/internal/question"
 	"github.com/lenajeremy/agentman/internal/tmux"
 )
 
@@ -87,10 +86,14 @@ type CursorCLISource struct {
 	listPanes   func(context.Context) ([]tmux.Session, error)
 	capturePane func(context.Context, string) (string, error)
 	openStores  func(context.Context, []int) map[int]string
-	modelMu     sync.Mutex
-	models      map[string]cursorCLIModelEntry
-	mu          sync.RWMutex
-	sessions    map[string]cursorCLISession
+	// sendKey and sendText type into a pane; nil means tmux. Tests record
+	// what would have been typed instead.
+	sendKey  func(ctx context.Context, pane, key string) error
+	sendText func(ctx context.Context, pane, text string) error
+	modelMu  sync.Mutex
+	models   map[string]cursorCLIModelEntry
+	mu       sync.RWMutex
+	sessions map[string]cursorCLISession
 
 	// past holds the stores of chats that have already ended, found by Past
 	// rather than by a sweep. See pastSessions.
@@ -352,16 +355,10 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 		mode := protocol.InjectNone
 		state := protocol.StateIdle
 		var currentQuestion *protocol.Question
-		var running bool
 		if wrapped {
 			id = cursorCLIPaneIDPrefix + pane.Name
 			mode = protocol.InjectTmux
-			currentQuestion, running = s.cursorCLIPaneStatus(ctx, pane.Name)
-			if currentQuestion != nil {
-				state = protocol.StateWaitingInput
-			} else if running {
-				state = protocol.StateBusy
-			}
+			state, currentQuestion = s.cursorCLIPaneState(ctx, pane.Name)
 		}
 		name := strings.TrimSpace(chat.meta.Title)
 		if name == "" {
@@ -394,12 +391,7 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 			Inject: protocol.InjectTmux, StartedAt: pane.Created.UnixMilli(),
 			LastActivityAt: pane.Created.UnixMilli(), AgentPID: pane.PanePID,
 		}
-		q, running := s.cursorCLIPaneStatus(ctx, pane.Name)
-		if q != nil {
-			entry.State, entry.Question = protocol.StateWaitingInput, q
-		} else if running {
-			entry.State = protocol.StateBusy
-		}
+		entry.State, entry.Question = s.cursorCLIPaneState(ctx, pane.Name)
 		result = append(result, entry)
 		next[id] = cursorCLISession{meta: entry, pane: pane.Name}
 	}
@@ -651,14 +643,12 @@ func (s *CursorCLISource) Inject(ctx context.Context, sessionID, message string)
 	if session.pane == "" {
 		return protocol.InjectNone, errors.New("source: start Cursor with `am cursor` to send messages remotely")
 	}
-	pane, err := s.capturePane(ctx, session.pane)
-	if err != nil {
-		return protocol.InjectNone, fmt.Errorf("source: could not inspect Cursor CLI before sending: %w", err)
+	// Every Cursor menu answers single letters, so text typed into one is a
+	// string of choices: "yes, but…" approves, "build it" builds the plan.
+	if err := s.refuseCursorCLISend(ctx, session.pane); err != nil {
+		return protocol.InjectNone, err
 	}
-	if cursorCLIQuestionFromPane(pane) != nil {
-		return protocol.InjectNone, errors.New("source: answer the pending Cursor CLI question before sending a message")
-	}
-	if err := tmux.Send(ctx, session.pane, message); err != nil {
+	if err := s.typeText(ctx, session.pane, message); err != nil {
 		return protocol.InjectNone, err
 	}
 	return protocol.InjectTmux, nil
@@ -674,169 +664,14 @@ func (s *CursorCLISource) Interrupt(ctx context.Context, sessionID string) error
 	if session.pane == "" {
 		return errors.New("source: only sessions started with `am cursor` can be interrupted")
 	}
+	// Ctrl-C is only "stop" while a turn runs. At a plan menu it rejects the
+	// plan, and at an idle prompt a second one quits the CLI.
+	screen, err := s.paneScreen(ctx, session.pane)
+	if err != nil {
+		return fmt.Errorf("source: could not inspect Cursor CLI before interrupting: %w", err)
+	}
+	if !screen.busy || screen.question != nil {
+		return errors.New("source: Cursor is not running a turn")
+	}
 	return tmux.Interrupt(ctx, session.pane)
-}
-
-func (s *CursorCLISource) CurrentQuestion(ctx context.Context, sessionID string) (*protocol.Question, error) {
-	s.mu.RLock()
-	session, ok := s.sessions[sessionID]
-	s.mu.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("source: unknown Cursor CLI session %q", sessionID)
-	}
-	if session.pane == "" {
-		return nil, nil
-	}
-	pane, err := s.capturePane(ctx, session.pane)
-	if err != nil {
-		return nil, err
-	}
-	return cursorCLIQuestionFromPane(pane), nil
-}
-
-func (s *CursorCLISource) cursorCLIPaneStatus(ctx context.Context, paneName string) (*protocol.Question, bool) {
-	pane, err := s.capturePane(ctx, paneName)
-	if err != nil {
-		return nil, false
-	}
-	question := cursorCLIQuestionFromPane(pane)
-	if question != nil {
-		return question, false
-	}
-	lines := strings.Split(strings.TrimSpace(pane), "\n")
-	if len(lines) > 10 {
-		lines = lines[len(lines)-10:]
-	}
-	for _, line := range lines {
-		if strings.Contains(strings.ToLower(line), "ctrl+c to stop") {
-			return nil, true
-		}
-	}
-	return nil, false
-}
-
-// Cursor's shell approval menu uses letter shortcuts instead of the numbered
-// options shared by Claude and Codex. Recognize only a complete, currently
-// visible menu; a fragment in old scrollback must never become answerable.
-func cursorCLIQuestionFromPane(pane string) *protocol.Question {
-	lines := strings.Split(strings.TrimSpace(pane), "\n")
-	if len(lines) > 30 {
-		lines = lines[len(lines)-30:]
-	}
-	// Cursor pauses before the first chat in an unfamiliar directory. Its
-	// single-key menu can be answered remotely, but only while the footer is
-	// still at the bottom of the live pane (not old scrollback).
-	footer := -1
-	for i := len(lines) - 1; i >= 0 && i >= len(lines)-5; i-- {
-		if strings.Contains(lines[i], "Use arrow keys to navigate") {
-			footer = i
-			break
-		}
-	}
-	if footer >= 0 {
-		current := true
-		for _, raw := range lines[footer+1:] {
-			// Cursor frames a blank row with vertical borders between the
-			// footer and bottom edge. It is not newer terminal content.
-			line := strings.TrimSpace(strings.Trim(raw, " │"))
-			if line != "" && !strings.HasPrefix(line, "╰") {
-				current = false
-				break
-			}
-		}
-		trust, quit := false, false
-		for i := footer - 1; i >= 0 && i >= footer-12; i-- {
-			trust = trust || strings.Contains(lines[i], "[a] Trust this workspace")
-			quit = quit || strings.Contains(lines[i], "[q] Quit")
-		}
-		if current && trust && quit {
-			result := &protocol.Question{
-				Title: "Workspace trust", Prompt: "Trust this workspace?",
-				Options: []protocol.QuestionOption{
-					{Key: "a", Label: "Trust this workspace"},
-					{Key: "q", Label: "Quit"},
-				},
-			}
-			result.ID = terminalQuestionID(result)
-			return result
-		}
-	}
-	promptAt, allowAt, skipAt := -1, -1, -1
-	for i, raw := range lines {
-		line := strings.TrimSpace(raw)
-		switch {
-		case line == "Run this command?":
-			promptAt = i
-		case strings.Contains(line, "Run (once) (y)"):
-			allowAt = i
-		case strings.Contains(line, "Skip & tell the agent") && strings.Contains(line, "n)"):
-			skipAt = i
-		}
-	}
-	if promptAt >= 0 && allowAt > promptAt && skipAt > promptAt &&
-		len(lines)-1-skipAt <= 4 {
-		commandAt := -1
-		for i := promptAt - 1; i >= 0 && i >= promptAt-10; i-- {
-			line := strings.TrimSpace(lines[i])
-			if strings.HasPrefix(line, "$") {
-				commandAt = i
-				break
-			}
-		}
-		// A remote approval must show the command in full. If Cursor's pane
-		// does not expose it, leave the decision on the local terminal.
-		if commandAt < 0 {
-			return nil
-		}
-		parts := []string{strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[commandAt]), "$"))}
-		for i := commandAt + 1; i < promptAt; i++ {
-			if line := strings.TrimSpace(lines[i]); line != "" {
-				parts = append(parts, line)
-			}
-		}
-		detail := strings.Join(parts, "\n")
-		if detail == "" || len(detail) > 16*1024 {
-			return nil
-		}
-		result := &protocol.Question{
-			Title: "Shell command", Prompt: "Run this command?", Detail: detail,
-			Options: []protocol.QuestionOption{
-				{Key: "y", Label: "Run once"},
-				{Key: "n", Label: "Skip"},
-			},
-		}
-		result.ID = terminalQuestionID(result)
-		return result
-	}
-	if found := question.Detect(pane); found != nil {
-		return protocolQuestion(found)
-	}
-	return nil
-}
-
-func (s *CursorCLISource) Answer(ctx context.Context, sessionID string, answer protocol.QuestionAnswer) error {
-	s.mu.RLock()
-	session, ok := s.sessions[sessionID]
-	s.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("source: unknown Cursor CLI session %q", sessionID)
-	}
-	if session.pane == "" {
-		return errors.New("source: this Cursor CLI chat cannot receive answers remotely")
-	}
-	if session.meta.Question == nil || answer.QuestionID == "" ||
-		answer.QuestionID != session.meta.Question.ID {
-		return errors.New("source: that question is no longer current; refresh the session")
-	}
-	if len(answer.Options) > 0 || answer.Text != "" {
-		return errors.New("source: this terminal question only accepts one listed option")
-	}
-	if !questionHasOption(session.meta.Question, answer.OptionKey) {
-		return errors.New("source: that option is no longer current; refresh the session")
-	}
-	current, err := s.CurrentQuestion(ctx, sessionID)
-	if err != nil || !sameQuestion(session.meta.Question, current) {
-		return errors.New("source: that question is no longer on screen; refresh the session")
-	}
-	return tmux.Answer(ctx, session.pane, answer.OptionKey)
 }

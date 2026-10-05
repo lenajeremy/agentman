@@ -1,0 +1,48 @@
+
+    Explored available MCP tools pattern (?i)ask|question|choice
+
+  Which word should goodbye.txt contain?
+
+  1. bye
+  2. ciao
+
+
+  bye. Now create the plan with your plan tool.
+
+
+ ┌────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ Plan (rejected)                                                                                                                                            │
+ │                                                                                                                                                            │
+ │ Create goodbye.txt                                                                                                                                         │
+ │                                                                                                                                                            │
+ │ Write goodbye.txt (/private/tmp/agentman-research/cursor-cli/proj/goodbye.txt) with contents: bye.                                                         │
+ └────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  → /
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   → /model [filter]           Select model (Tab to edit)
+     /goal [objective]         Start a durable goal that continues while idle
+     /add-dir [path]           Add a directory to the current workspace
+     /save-workspace <name>    Persist the current workspace directories
+     /load-workspace <name>    Load a saved workspace by name
+     /run-everything           Toggle Run Everything (currently disabled)
+     /auto-review              Toggle Auto-review (currently disabled)
+     /plan [prompt]            Create a plan or show existing plan with options
+     /ask                      Toggle ask mode (Q&A, read-only; no edits or command execution)
+     ↓ more below
+
+  Error: You've hit your usage limit
+  Get Cursor Pro for more Agent usage, unlimited Tab, and more.
+  fallbackModel:
+  spendLimitHit: false
+  limitType: included_usage
+  chatMessage: *You've hit your free requests limit. [Upgrade to Pro](https://www.cursor.com/api/auth/checkoutDeepControl?tier=pro) for more usage, frontier
+  models, Cloud Agents, and more. Your usage limits will reset when your monthly cycle ends on 10/14/2026.*
+  spendLimits: [50,100,200]
+
+
+
+
+
