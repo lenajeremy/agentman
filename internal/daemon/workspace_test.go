@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"image"
 	"image/png"
 	"os"
@@ -350,5 +351,35 @@ func TestNewFileDiffHeaderCountsOnlyWhatItSends(t *testing.T) {
 	}
 	if !strings.Contains(event.Workspace.Diff, "@@ -0,0 +1,0 @@") {
 		t.Errorf("empty file header wrong:\n%s", event.Workspace.Diff)
+	}
+}
+
+// The app accepts a diff of at most 256 KiB. A large new file's diff was
+// trimmed to that before its header was added, so it came out 47 bytes over,
+// and the app dropped the reply and waited 30 seconds for one.
+func TestALargeNewFileDiffFitsWhatTheAppAccepts(t *testing.T) {
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "big.txt"), []byte(strings.Repeat("a\n", 150_000)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	diff, truncated, err := fileDiff(context.Background(), dir, root, "big.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diff) > maxGitOutput || !truncated {
+		t.Fatalf("diff is %d bytes (limit %d), truncated %v", len(diff), maxGitOutput, truncated)
+	}
+	header := strings.SplitN(diff, "\n", 4)[2]
+	lines := strings.Count(diff, "\n+") - 1 // every added line, less the +++ header
+	if header != fmt.Sprintf("@@ -0,0 +1,%d @@", lines) {
+		t.Errorf("hunk header %q does not count the %d lines sent", header, lines)
 	}
 }
