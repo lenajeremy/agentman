@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/lenajeremy/agentman/internal/parser"
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/tmux"
 )
 
 // OpenCode is the one agent that needs no tricks.
@@ -75,6 +77,14 @@ type OpenCodeSource struct {
 	// port range used by `am opencode` and returns every live server, not just
 	// the first one: concurrent OpenCode TUIs each own their own API process.
 	findServers func(context.Context) []string
+	// The port scan is throttled; see scanServers. listPanes finds the
+	// servers agentman launched, and now is the clock. Both are replaceable
+	// in tests.
+	scanMu       sync.Mutex
+	lastFullScan time.Time
+	knownPorts   map[int]bool
+	listPanes    func(context.Context) ([]tmux.Session, error)
+	now          func() time.Time
 
 	// models remembers each session's model; see modelCache. It matters more
 	// here than for the file-backed agents, because finding it costs an HTTP
@@ -153,6 +163,8 @@ func NewOpenCodeSource(baseURL string) *OpenCodeSource {
 		serverMisses:       map[string]int{},
 		questionAnswers:    map[string][][]string{},
 		store:              &openCodeStore{path: openCodeDatabase},
+		listPanes:          tmux.List,
+		now:                time.Now,
 	}
 	source.findServers = source.scanServers
 	return source
@@ -367,6 +379,12 @@ func (s *OpenCodeSource) doAtLimit(
 // exited while others are still running.
 const OpenCodePortSpan = 16
 
+// openCodeFullScanEvery is how often every port is probed. In between, a
+// sweep probes only the ports that answered last time and those of servers
+// agentman launched. Probing all sixteen every second, almost always to find
+// nothing there, was a steady cost of the idle daemon.
+const openCodeFullScanEvery = 10 * time.Second
+
 // Available reports whether at least one local OpenCode server is reachable.
 func (s *OpenCodeSource) Available(ctx context.Context) bool {
 	if s.configurationError != nil {
@@ -396,28 +414,107 @@ func (s *OpenCodeSource) scanServers(ctx context.Context) []string {
 		return nil
 	}
 
+	ports, full := s.portsToProbe(ctx)
+
 	// Probe concurrently. A different process can occupy one candidate port and
 	// accept a connection without answering; doing sixteen five-second probes
 	// serially made every discovery sweep stall for over a minute.
-	healthy := make([]bool, OpenCodePortSpan)
+	healthy := make([]bool, len(ports))
 	var wait sync.WaitGroup
-	for index := range OpenCodePortSpan {
+	for index, port := range ports {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			candidate := fmt.Sprintf("http://127.0.0.1:%d", OpenCodeDefaultPort+index)
-			healthy[index] = s.healthyAt(ctx, candidate)
+			healthy[index] = s.healthyAt(ctx, fmt.Sprintf("http://127.0.0.1:%d", port))
 		}()
 	}
 	wait.Wait()
 
-	servers := make([]string, 0, OpenCodePortSpan)
+	servers := make([]string, 0, len(ports))
+	answered := make(map[int]bool, len(ports))
 	for index, ok := range healthy {
 		if ok {
-			servers = append(servers, fmt.Sprintf("http://127.0.0.1:%d", OpenCodeDefaultPort+index))
+			servers = append(servers, fmt.Sprintf("http://127.0.0.1:%d", ports[index]))
+			answered[ports[index]] = true
+		}
+	}
+
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
+	if full {
+		s.knownPorts = answered
+	} else {
+		// Between full scans the set only grows. A known server that misses a
+		// probe is probed again next sweep, and Discover's grace for missed
+		// probes decides whether its sessions stay.
+		if s.knownPorts == nil {
+			s.knownPorts = map[int]bool{}
+		}
+		for port := range answered {
+			s.knownPorts[port] = true
 		}
 	}
 	return servers
+}
+
+// portsToProbe returns the ports this scan probes, in order, and whether that
+// is all of them. See openCodeFullScanEvery.
+func (s *OpenCodeSource) portsToProbe(ctx context.Context) ([]int, bool) {
+	clock := s.now
+	if clock == nil {
+		clock = time.Now
+	}
+	s.scanMu.Lock()
+	now := clock()
+	full := s.lastFullScan.IsZero() || now.Sub(s.lastFullScan) >= openCodeFullScanEvery
+	probe := map[int]bool{}
+	if full {
+		s.lastFullScan = now
+		for index := range OpenCodePortSpan {
+			probe[OpenCodeDefaultPort+index] = true
+		}
+	} else {
+		for port := range s.knownPorts {
+			probe[port] = true
+		}
+	}
+	s.scanMu.Unlock()
+
+	// A server agentman launched is probed from its first sweep: the phone is
+	// waiting to open the session it started. Within a sweep the list of
+	// panes is shared with the other adapters.
+	if !full && s.listPanes != nil {
+		panes, _ := s.listPanes(ctx)
+		for _, pane := range panes {
+			if port := openCodeServerPort(pane.Name); port != 0 {
+				probe[port] = true
+			}
+		}
+	}
+	ports := make([]int, 0, len(probe))
+	for port := range probe {
+		ports = append(ports, port)
+	}
+	slices.Sort(ports)
+	return ports, full
+}
+
+// openCodeServerPort reads the port from the name of a tmux session agentman
+// started an OpenCode server in: agentman-opencode-server-<port>-<suffix>.
+func openCodeServerPort(name string) int {
+	const prefix = tmux.Prefix + "opencode-server-"
+	if !strings.HasPrefix(name, prefix) {
+		return 0
+	}
+	part, suffix, ok := strings.Cut(strings.TrimPrefix(name, prefix), "-")
+	if !ok || suffix == "" {
+		return 0
+	}
+	port, err := strconv.Atoi(part)
+	if err != nil || port < OpenCodeDefaultPort || port >= OpenCodeDefaultPort+OpenCodePortSpan {
+		return 0
+	}
+	return port
 }
 
 func (s *OpenCodeSource) healthyAt(ctx context.Context, base string) bool {
