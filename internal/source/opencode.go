@@ -257,10 +257,11 @@ type ocPart struct {
 	Ignored   bool   `json:"ignored"`
 	Tool      string `json:"tool"`
 	State     struct {
-		Status string `json:"status"`
-		Title  string `json:"title"`
-		Output string `json:"output"`
-		Error  string `json:"error"`
+		Status string          `json:"status"`
+		Title  string          `json:"title"`
+		Output string          `json:"output"`
+		Error  string          `json:"error"`
+		Input  json.RawMessage `json:"input"`
 	} `json:"state"`
 }
 
@@ -1079,7 +1080,7 @@ func openCodeMessages(sessionID string, message ocMessage) []protocol.Message {
 				Text: clipOutput(text),
 				Tool: &protocol.Tool{
 					Name:    name,
-					Summary: clipTitle(part.State.Title),
+					Summary: openCodeToolSummary(part),
 					Status:  status,
 				},
 			})
@@ -1136,6 +1137,25 @@ func clipOutput(text string) string {
 }
 
 // clipTitle bounds the one line a collapsed row shows.
+// openCodeToolSummary is the one line a tool row shows: OpenCode's own title
+// for the call, or, when it left that empty (as it does for many globs and
+// some reads, edits and fetches), the input that says what the call did.
+func openCodeToolSummary(part ocPart) string {
+	if title := clipTitle(part.State.Title); title != "" {
+		return title
+	}
+	var input map[string]any
+	if json.Unmarshal(part.State.Input, &input) != nil {
+		return ""
+	}
+	for _, key := range []string{"command", "filePath", "pattern", "url", "query", "path", "description"} {
+		if value, ok := input[key].(string); ok && strings.TrimSpace(value) != "" {
+			return clipTitle(value)
+		}
+	}
+	return ""
+}
+
 func clipTitle(text string) string {
 	flat := strings.Join(strings.Fields(text), " ")
 	runes := []rune(flat)
