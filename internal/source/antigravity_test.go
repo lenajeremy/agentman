@@ -448,3 +448,46 @@ func TestAntigravityReusesLsofUntilSomethingCouldHaveChanged(t *testing.T) {
 		t.Errorf("after a failed lsof: %d calls", calls)
 	}
 }
+
+// Reopening a session from the phone: the phone waits on the id it knows,
+// so the pane is named after the conversation and discovery keeps that id —
+// before agy has opened the conversation, and after.
+func TestAntigravityResumedPaneKeepsTheConversationsID(t *testing.T) {
+	s, err := NewAntigravitySource(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pane, id := s.ResumedSession(agConversation, "agentman-antigravity-1-a")
+	if pane != "agentman-antigravity-resume-"+agConversation || id != "antigravity:"+agConversation {
+		t.Fatalf("pane %q id %q", pane, id)
+	}
+	if pane, id := s.ResumedSession("../../etc", "agentman-antigravity-1-a"); pane != "" || id != "" {
+		t.Errorf("a non-conversation id was named: %q %q", pane, id)
+	}
+
+	home := t.TempDir()
+	writeAntigravityConversation(t, home, agConversation, agLinePrompt, agLineReply)
+	resume := tmux.Session{Name: pane, PanePID: 900, Cwd: "/work/api"}
+	// Starting up: agy holds nothing yet.
+	starting := newTestAntigravity(t, home, 900, map[int]antigravityProcess{900: {cwd: "/work/api"}}, resume)
+	if session, ok := discoverAntigravity(t, starting)[id]; !ok || session.NativeID != agConversation ||
+		session.Inject != protocol.InjectTmux {
+		t.Errorf("while starting: %+v", discoverAntigravity(t, starting))
+	}
+	// Running the conversation it was opened for.
+	running := newTestAntigravity(t, home, 900, map[int]antigravityProcess{
+		900: {cwd: "/work/api", conversations: []string{agConversation}},
+	}, resume)
+	if session, ok := discoverAntigravity(t, running)[id]; !ok || session.Name != "list the files" {
+		t.Errorf("once running: %+v", discoverAntigravity(t, running))
+	}
+	// The user started another conversation in it: that is not this one.
+	const other = "0cf8ac1d-48f6-4aee-b760-80b7dd1eb885"
+	writeAntigravityConversation(t, home, other, agLinePrompt)
+	moved := newTestAntigravity(t, home, 900, map[int]antigravityProcess{
+		900: {cwd: "/work/api", conversations: []string{other}},
+	}, resume)
+	if _, ok := discoverAntigravity(t, moved)["antigravity:tmux-"+pane]; !ok {
+		t.Errorf("after /clear: %+v", discoverAntigravity(t, moved))
+	}
+}

@@ -231,8 +231,10 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 				tmuxName = pane.Name
 				claimed[pane.Name] = true
 				// As with Kiro, a pane-backed session is keyed on the pane,
-				// which a phone launch knows before agy picks a conversation.
-				id = string(protocol.KindAntigravity) + ":" + tmuxID(pane.Name)
+				// which a phone launch knows before agy picks a conversation
+				// — unless the pane was opened to resume this conversation,
+				// when the phone already knows it by the conversation's id.
+				id = antigravityPaneSessionID(pane.Name, conversation)
 				break
 			}
 		}
@@ -275,13 +277,14 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 		if claimed[pane.Name] {
 			continue
 		}
-		id := string(protocol.KindAntigravity) + ":" + tmuxID(pane.Name)
+		resumed := antigravityResumedConversation(pane.Name)
+		id := antigravityPaneSessionID(pane.Name, resumed)
 		started := pane.Created.UnixMilli()
 		if pane.Created.IsZero() {
 			started = time.Now().UnixMilli()
 		}
 		session := protocol.Session{
-			ID: id, Kind: protocol.KindAntigravity, Name: filepath.Base(pane.Cwd), Cwd: pane.Cwd,
+			ID: id, Kind: protocol.KindAntigravity, NativeID: resumed, Name: filepath.Base(pane.Cwd), Cwd: pane.Cwd,
 			State: protocol.StateIdle, Inject: protocol.InjectTmux, Model: s.defaultModel(),
 			StartedAt: started, LastActivityAt: started, AgentPID: pane.PanePID,
 		}
@@ -302,6 +305,50 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 	}
 	s.forgetLogs(liveLogs)
 	return found, nil
+}
+
+// antigravityResumePrefix names the pane a resume opens: the conversation's
+// own id follows it. See ResumedSession.
+const antigravityResumePrefix = antigravityPanePrefix + "resume-"
+
+// ResumedSession implements ResumeNamer.
+//
+// Reopening an ended session from the phone used to land on an id that never
+// came back. The phone waits on the id it already knows, "antigravity:<conv>",
+// while discovery keyed every pane-backed session on its pane — so the
+// reopened session appeared under a name the phone was not watching, and the
+// one it was watching timed out as "did not come back up". A resume pane is
+// named after the conversation instead, and discovery keeps that
+// conversation's id for it.
+func (s *AntigravitySource) ResumedSession(native, defaultPane string) (pane, sessionID string) {
+	if !isUUID(native) {
+		return "", ""
+	}
+	return antigravityResumePrefix + native, string(protocol.KindAntigravity) + ":" + native
+}
+
+var _ ResumeNamer = (*AntigravitySource)(nil)
+
+// antigravityResumedConversation is the conversation a resume pane was opened
+// for, or "".
+func antigravityResumedConversation(paneName string) string {
+	native, ok := strings.CutPrefix(paneName, antigravityResumePrefix)
+	if !ok || !isUUID(native) {
+		return ""
+	}
+	return native
+}
+
+// antigravityPaneSessionID keys a pane-backed session: on the conversation, if
+// the pane was opened to resume exactly that one, and on the pane otherwise.
+// A resume pane where the user has since started another conversation is
+// keyed on the pane again, so the id never claims a conversation it no longer
+// shows.
+func antigravityPaneSessionID(paneName, conversation string) string {
+	if resumed := antigravityResumedConversation(paneName); resumed != "" && resumed == conversation {
+		return string(protocol.KindAntigravity) + ":" + resumed
+	}
+	return string(protocol.KindAntigravity) + ":" + tmuxID(paneName)
 }
 
 // latestConversation picks the conversation a process is actually in. agy can
