@@ -157,7 +157,8 @@ func Attach(name string) error {
 	if err != nil {
 		return ErrNotInstalled
 	}
-	args := []string{"tmux", "attach-session", "-t", name}
+	args := append([]string{"tmux"}, socketArgs()...)
+	args = append(args, "attach-session", "-t", name)
 	return syscallExec(binary, args, os.Environ())
 }
 
@@ -422,10 +423,31 @@ func (p *ProcessTree) OwnsPID(panePID, pid int) bool {
 	return false
 }
 
+// SocketEnv names a private tmux server for this process to use instead of
+// the default one.
+//
+// It exists for tests. An agent working on this repository runs inside a
+// tmux pane, so $TMUX is set, and a bare tmux command — from a test, a probe,
+// anything — goes to the server that pane belongs to, whatever TMUX_TMPDIR
+// says. That is the user's own server, with their shells and every agent
+// session on it. A test helper that ran kill-server there once took all of it
+// down. With this set, every command this package runs carries -S and so can
+// only ever reach the named socket. See tmuxtest.Isolate.
+const SocketEnv = "AGENTMAN_TMUX_SOCKET"
+
+// socketArgs are the global flags that pin a command to SocketEnv's server,
+// or nothing when it is unset.
+func socketArgs() []string {
+	if socket := os.Getenv(SocketEnv); socket != "" {
+		return []string{"-S", socket}
+	}
+	return nil
+}
+
 func run(ctx context.Context, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "tmux", args...).Output()
+	out, err := exec.CommandContext(ctx, "tmux", append(socketArgs(), args...)...).Output()
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {

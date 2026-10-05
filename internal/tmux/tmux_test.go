@@ -121,6 +121,31 @@ func readSoon(t *testing.T, path, want string) string {
 	return got
 }
 
+// Every session a test starts must land on the private server TestMain set up
+// (see tmuxtest), never on the one the developer is working in. Run from
+// inside tmux, a bare tmux command reaches that server through $TMUX.
+func TestTestsRunOnAPrivateServer(t *testing.T) {
+	requireTmux(t)
+	want := os.Getenv(SocketEnv)
+	if want == "" {
+		t.Fatal("tests are not isolated: " + SocketEnv + " is unset")
+	}
+	name, _ := newSink(t)
+	got, err := run(context.Background(), "display-message", "-p", "-t", name, "#{socket_path}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolve := func(path string) string {
+		if real, err := filepath.EvalSymlinks(filepath.Dir(path)); err == nil {
+			return filepath.Join(real, filepath.Base(path))
+		}
+		return path
+	}
+	if resolve(strings.TrimSpace(got)) != resolve(want) {
+		t.Fatalf("test session ran on %q, not the private server %q", strings.TrimSpace(got), want)
+	}
+}
+
 func TestSendDeliversTextLiterally(t *testing.T) {
 	requireTmux(t)
 	name, out := newSink(t)
