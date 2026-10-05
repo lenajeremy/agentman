@@ -687,12 +687,9 @@ func TestHealthExposesNoUserData(t *testing.T) {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatal(err)
 	}
-	// Counts and status only — there must be no endpoint that could leak a
-	// session, a message, or an account identifier.
-	allowed := map[string]bool{
-		"status": true, "version": true, "daemons": true,
-		"apps": true, "pendingPairings": true, "storage": true,
-	}
+	// Status only — there must be no endpoint that could leak a session, a
+	// message, an account identifier, or how many people use the relay.
+	allowed := map[string]bool{"status": true, "version": true, "storage": true}
 	for key := range payload {
 		if !allowed[key] {
 			t.Errorf("/health exposes unexpected field %q", key)

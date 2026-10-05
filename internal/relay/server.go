@@ -242,16 +242,15 @@ func (s *Server) handlePairCode(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleHealth reports liveness and connection counts.
+// handleHealth answers the deployment health check. It is public, so it says
+// only that the relay is up and which build: connection and pairing counts
+// let anyone watch the public relay's user base, and counting pairings walked
+// the whole map under the hub's lock on every request.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	daemons, apps, pending := s.hub.Stats()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":          "ok",
-		"version":         s.version,
-		"daemons":         daemons,
-		"apps":            apps,
-		"pendingPairings": pending,
-		"storage":         "none",
+		"status":  "ok",
+		"version": s.version,
+		"storage": "none",
 	})
 }
 
@@ -582,7 +581,12 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	if replaced := s.hub.AddDaemon(account, conn); replaced != nil {
 		_ = replaced.Close()
 	}
-	s.log.Info("daemon connected", "account", account)
+	// Logged by an id of the connection's own. The account is a hash of the
+	// daemon token, stable for as long as the token is, so logging it on every
+	// connect and disconnect kept a per-user presence history in the host's
+	// log retention, from a relay that stores nothing.
+	connection := newFrameID()
+	s.log.Info("daemon connected", "connection", connection)
 
 	s.notifyApps(account, protocol.Control{Type: protocol.CtlDaemonOnline, DaemonOnline: true})
 
@@ -594,7 +598,7 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 				Type:       protocol.CtlDaemonOffline,
 				LastSeenAt: time.Now().UnixMilli(),
 			})
-			s.log.Info("daemon disconnected", "account", account)
+			s.log.Info("daemon disconnected", "connection", connection)
 		}
 	}()
 
