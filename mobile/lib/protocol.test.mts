@@ -221,3 +221,41 @@ test("an agent this app does not know yet still loads", () => {
     type: "sessions", sessions: [baseSession, { ...baseSession, id: "gemini:g", kind: "gemini" }],
   }));
 });
+
+test("an older Mac's empty session lists are read as empty, not dropped", () => {
+  // Daemons before the fix left an empty list out entirely. Dropping that
+  // frame kept every ended session on the board.
+  const board = decodeDaemonEvent({ type: "sessions" });
+  assert.ok(board);
+  assert.equal(board.type, "sessions");
+  assert.deepEqual(board.sessions, []);
+
+  const folder = decodeDaemonEvent({ type: "directory_sessions", path: "/work/empty" });
+  assert.ok(folder);
+  assert.equal(folder.type, "directory_sessions");
+  assert.deepEqual(folder.sessions, []);
+});
+
+test("a question whose options were withdrawn keeps the rest of the board", () => {
+  // An older Mac sends options:null for a question it can only show, not let
+  // the phone answer. Rejecting it took the whole session list with it.
+  const sessions = [
+    {
+      id: "opencode:ses_1", kind: "opencode", nativeId: "ses_1", name: "n", cwd: "/tmp",
+      state: "waiting_input", inject: "api", startedAt: 1, lastActivityAt: 2,
+      question: {
+        id: "question-q1-0", prompt: "Pick one",
+        detail: "Answer it in the terminal.", options: null,
+      },
+    },
+    {
+      id: "claude:abc", kind: "claude", nativeId: "abc", name: "other", cwd: "/tmp",
+      state: "idle", inject: "tmux", startedAt: 1, lastActivityAt: 2,
+    },
+  ];
+  const board = decodeDaemonEvent({ type: "sessions", sessions });
+  assert.ok(board);
+  assert.equal(board.type, "sessions");
+  assert.equal(board.sessions.length, 2);
+  assert.deepEqual(board.sessions[0].question?.options, []);
+});

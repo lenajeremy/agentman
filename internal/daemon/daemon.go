@@ -753,6 +753,11 @@ func (d *Daemon) finishHookTurn(
 			if stillKnown && stillCurrent {
 				current.Question = question
 				current.State = protocol.StateWaitingInput
+				// Held to the bounds a sweep applies, because this goes to the
+				// phone directly rather than through one.
+				if normalized := normalizeDiscoveredSessions([]protocol.Session{current}); len(normalized) == 1 {
+					current = normalized[0]
+				}
 				d.sessions[event.SessionID] = current
 			}
 			d.mu.Unlock()
@@ -900,6 +905,9 @@ func (d *Daemon) HandleFrom(
 		sessions, err := d.directorySessions(ctx, req.Path)
 		if err != nil {
 			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
+		}
+		if sessions == nil {
+			sessions = []protocol.Session{} // an empty folder is [], not absent
 		}
 		// Remembered so resuming one of them names a session the daemon
 		// itself found, rather than trusting a kind and a directory sent up
@@ -1326,7 +1334,9 @@ func normalizeDiscoveredSessions(found []protocol.Session) []protocol.Session {
 			if unsupportedReason != "" {
 				// A partial decision is worse than no remote decision: hidden checked
 				// options could be silently changed when the visible subset is sent.
-				copyQuestion.Options = nil
+				// Empty, not nil: the app requires the list and dropped the whole
+				// frame a null one arrived in.
+				copyQuestion.Options = []protocol.QuestionOption{}
 				copyQuestion.Custom = false
 				copyQuestion.Multiple = false
 				copyQuestion.Detail = truncateWireText(

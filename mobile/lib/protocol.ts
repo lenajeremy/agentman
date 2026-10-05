@@ -369,6 +369,9 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
 
   switch (value.type) {
     case "sessions":
+      // An older Mac leaves an empty list out entirely. That is an empty
+      // board, not a malformed frame: dropping it kept ended sessions on screen.
+      value.sessions ??= [];
       if (!boundedArray(value.sessions, 10_000, isSession)) return null;
       break;
     case "session_update":
@@ -421,6 +424,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
       if (!optionalFolders(value.folders)) return null;
       break;
     case "directory_sessions":
+      value.sessions ??= [];
       if (!boundedArray(value.sessions, 10_000, isSession) ||
           !optionalBoundedString(value.path, 4096)) return null;
       break;
@@ -536,6 +540,10 @@ function isQuestion(value: unknown): value is Question {
       !optionalBoundedString(value.detail, 256 * 1024) ||
       (value.multiple !== undefined && typeof value.multiple !== "boolean") ||
       (value.custom !== undefined && typeof value.custom !== "boolean")) return false;
+  // An older Mac sends null for options it withdrew because they could not be
+  // answered safely from here. The question is still worth showing, and
+  // rejecting it took the whole session list it arrived in.
+  value.options ??= [];
   return boundedArray(value.options, 256, (option): option is QuestionOption =>
     isRecord(option) && boundedString(option.key, 4096, true) &&
     boundedString(option.label, 64 * 1024) &&

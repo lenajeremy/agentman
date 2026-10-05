@@ -205,7 +205,7 @@ const (
 type Event struct {
 	Type      EventType `json:"type"`
 	SessionID string    `json:"sessionId,omitempty"`
-	Sessions  []Session `json:"sessions,omitempty"`
+	Sessions  []Session `json:"sessions,omitzero"` // empty travels as []; the app requires the array
 	Session   *Session  `json:"session,omitempty"`
 	Messages  []Message `json:"messages,omitempty"`
 	Page      *Page     `json:"page,omitempty"`
