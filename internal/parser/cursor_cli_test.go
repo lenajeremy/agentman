@@ -146,3 +146,32 @@ func TestCursorCLIModelComesFromTheReply(t *testing.T) {
 		t.Fatalf("a prompt reported model %q", got)
 	}
 }
+
+// The phone's pictures reach a terminal chat as paths typed ahead of the
+// message, which Cursor attaches. The row is the message the user wrote.
+func TestCursorCLIAttachedImagePathsLeaveThePrompt(t *testing.T) {
+	prompt := func(query string, image bool) CursorCLIRow {
+		parts := `{"type":"text","text":"<user_query>\n` + query + `\n</user_query>"}`
+		if image {
+			parts = `{"type":"image","image":{"__type":"Uint8Array","hex":"ff"},"mimeType":"image/jpeg"},` + parts
+		}
+		return CursorCLIRow{RowID: 1, ID: "u", Data: `{"role":"user","content":[` + parts + `]}`}
+	}
+	cases := []struct {
+		query string
+		image bool
+		want  string
+	}{
+		{"/Users/u/.agentman/images/c/q7.png What colour is this?", true, "What colour is this?"},
+		{"/Users/u/.agentman/images/c/a.png /Users/u/.agentman/images/c/b.jpg compare", true, "compare"},
+		{"/Users/u/.agentman/images/c/a.png", true, "[image]"},
+		// Without an attached image the path is something the user wrote.
+		{"/Users/u/shot.png is broken", false, "/Users/u/shot.png is broken"},
+	}
+	for _, c := range cases {
+		got := CursorCLIMessages("s", 0, []CursorCLIRow{prompt(c.query, c.image)})
+		if len(got) != 1 || got[0].Text != c.want {
+			t.Errorf("%q: %+v, want %q", c.query, got, c.want)
+		}
+	}
+}

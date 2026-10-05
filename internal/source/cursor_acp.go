@@ -31,7 +31,7 @@ type cursorACPRecord struct {
 	StartedAt      int64              `json:"startedAt"`
 	LastActivityAt int64              `json:"lastActivityAt"`
 	Messages       []protocol.Message `json:"messages"`
-	Queued         []string           `json:"queued,omitempty"`
+	Queued         []cursorACPTurn    `json:"queued,omitempty"`
 	// Mode is Cursor's mode for the chat (agent, plan, ask), from
 	// session/new and current_mode_update.
 	Mode string `json:"mode,omitempty"`
@@ -390,6 +390,25 @@ func (s *CursorACPSource) model(ctx context.Context, native string, updatedAt in
 	return model
 }
 
+// cursorACPTurn is one message to send: its text and the images the phone
+// attached, by the paths the daemon saved them to.
+type cursorACPTurn struct {
+	Text   string   `json:"text"`
+	Images []string `json:"images,omitempty"`
+}
+
+// UnmarshalJSON also reads the plain strings a record's queue held before
+// messages could carry images.
+func (t *cursorACPTurn) UnmarshalJSON(data []byte) error {
+	var text string
+	if json.Unmarshal(data, &text) == nil {
+		*t = cursorACPTurn{Text: text}
+		return nil
+	}
+	type plain cursorACPTurn
+	return json.Unmarshal(data, (*plain)(t))
+}
+
 // cursorACPModes is the modes block of session/new and session/load.
 type cursorACPModes struct {
 	CurrentModeID string `json:"currentModeId"`
@@ -529,7 +548,7 @@ func (s *CursorACPSource) Launch(ctx context.Context, cwd, prompt string) (strin
 		_ = os.Remove(filepath.Join(s.dir, created.SessionID+".json"))
 		return "", err
 	}
-	if _, err := s.begin(st, client, lock, prompt); err != nil {
+	if _, err := s.begin(st, client, lock, cursorACPTurn{Text: prompt}); err != nil {
 		s.mu.Lock()
 		delete(s.sessions, id)
 		s.mu.Unlock()
@@ -546,18 +565,18 @@ func (s *CursorACPSource) Inject(ctx context.Context, id, text string) (protocol
 	}
 	st.startMu.Lock()
 	defer st.startMu.Unlock()
-	return s.injectLocked(ctx, st, text)
+	return s.injectLocked(ctx, st, cursorACPTurn{Text: text})
 }
 
 // injectLocked serializes a new turn with queue draining and other sends.
-func (s *CursorACPSource) injectLocked(ctx context.Context, st *cursorACPState, text string) (protocol.InjectMode, error) {
+func (s *CursorACPSource) injectLocked(ctx context.Context, st *cursorACPState, turn cursorACPTurn) (protocol.InjectMode, error) {
 	st.mu.Lock()
 	if st.question != nil {
 		st.mu.Unlock()
 		return protocol.InjectNone, errors.New("answer Cursor's pending question first")
 	}
 	if st.busy {
-		st.record.Queued = append(st.record.Queued, text)
+		st.record.Queued = append(st.record.Queued, turn)
 		st.mu.Unlock()
 		if err := s.save(st); err != nil {
 			st.mu.Lock()
@@ -603,7 +622,7 @@ func (s *CursorACPSource) injectLocked(ctx context.Context, st *cursorACPState, 
 		st.record.Mode = mode
 	}
 	st.mu.Unlock()
-	done, err := s.begin(st, client, lock, text)
+	done, err := s.begin(st, client, lock, turn)
 	if err != nil {
 		return protocol.InjectNone, err
 	}
@@ -620,7 +639,8 @@ func (s *CursorACPSource) injectLocked(ctx context.Context, st *cursorACPState, 
 	return protocol.InjectAPI, nil
 }
 
-func (s *CursorACPSource) begin(st *cursorACPState, client *cursorACPClient, lock *os.File, text string) (<-chan struct{}, error) {
+func (s *CursorACPSource) begin(st *cursorACPState, client *cursorACPClient, lock *os.File, turn cursorACPTurn) (<-chan struct{}, error) {
+	prompt, shown := cursorACPPrompt(turn)
 	st.mu.Lock()
 	st.client, st.busy, st.question, st.pending = client, true, nil, nil
 	st.calls = nil
@@ -632,14 +652,14 @@ func (s *CursorACPSource) begin(st *cursorACPState, client *cursorACPClient, loc
 	id := cursorACPPrefix + st.record.NativeID
 	st.record.Messages = append(st.record.Messages, protocol.Message{
 		ID: fmt.Sprintf("%s:%d:user", id, st.messageSeq), SessionID: id,
-		Role: protocol.RoleUser, Ts: time.Now().UnixMilli(), Text: text,
+		Role: protocol.RoleUser, Ts: time.Now().UnixMilli(), Text: shown,
 	})
 	st.turnID = st.record.Messages[len(st.record.Messages)-1].ID
 	st.record.LastActivityAt = time.Now().UnixMilli()
 	nativeID := st.record.NativeID
 	st.mu.Unlock()
 	requestID, response, err := client.startCall("session/prompt", map[string]any{
-		"sessionId": nativeID, "prompt": []map[string]string{{"type": "text", "text": text}},
+		"sessionId": nativeID, "prompt": prompt,
 	})
 	if err != nil {
 		st.mu.Lock()
@@ -699,7 +719,7 @@ func (s *CursorACPSource) drainQueued(st *cursorACPState) {
 	st.mu.Unlock()
 	if err := s.save(st); err != nil {
 		st.mu.Lock()
-		st.record.Queued = append([]string{next}, st.record.Queued...)
+		st.record.Queued = append([]cursorACPTurn{next}, st.record.Queued...)
 		st.mu.Unlock()
 		_ = s.save(st)
 		return
@@ -708,7 +728,7 @@ func (s *CursorACPSource) drainQueued(st *cursorACPState) {
 	defer cancel()
 	if _, err := s.injectLocked(ctx, st, next); err != nil {
 		st.mu.Lock()
-		st.record.Queued = append([]string{next}, st.record.Queued...)
+		st.record.Queued = append([]cursorACPTurn{next}, st.record.Queued...)
 		st.mu.Unlock()
 		_ = s.save(st)
 	}

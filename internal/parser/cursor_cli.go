@@ -111,8 +111,11 @@ func CursorCLIMessages(sessionID string, started int64, rows []CursorCLIRow) []p
 		parts := cursorCLIParts(blob.Content)
 		var texts []string
 		var tools []protocol.Message
+		images := 0
 		for _, part := range parts {
 			switch part.Type {
+			case "image":
+				images++
 			case "text":
 				if part.Text != "" {
 					texts = append(texts, part.Text)
@@ -139,6 +142,9 @@ func CursorCLIMessages(sessionID string, started int64, rows []CursorCLIRow) []p
 				})
 			}
 			body = cursorCLIUserText(body)
+			if images > 0 {
+				body = cursorCLIStripImagePaths(body)
+			}
 		}
 		if body != "" {
 			msg := base
@@ -258,6 +264,32 @@ func cursorCLIUserText(body string) string {
 		}
 	}
 	return trimmed
+}
+
+var cursorCLIImagePath = regexp.MustCompile(`(?i)^/\S+\.(png|jpe?g|gif|webp)$`)
+
+// cursorCLIStripImagePaths drops the image paths a prompt starts with once
+// Cursor has attached those images. That is how the phone's pictures arrive
+// in a terminal chat — the daemon types their paths ahead of the message —
+// and the row then reads as the message the user wrote, which is also what
+// the phone matches its own copy of the send against.
+func cursorCLIStripImagePaths(body string) string {
+	fields := strings.Fields(body)
+	stripped := 0
+	for stripped < len(fields) && cursorCLIImagePath.MatchString(fields[stripped]) {
+		stripped++
+	}
+	if stripped == 0 {
+		return body
+	}
+	rest := body
+	for _, field := range fields[:stripped] {
+		rest = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(rest), field))
+	}
+	if rest == "" {
+		return strings.TrimSpace(strings.Repeat("[image]\n", stripped))
+	}
+	return rest
 }
 
 // cursorCLIDisplayNames renames tools whose Cursor name says less than what
