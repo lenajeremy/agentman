@@ -81,7 +81,20 @@ type ClaudeParser struct {
 	outcomes *boundedMap[toolOutcome]
 	// toolCalls holds calls seen before their result — the live-tail case.
 	toolCalls *boundedMap[toolCall]
+	// awaiting holds results whose call this parser has not met yet. Reading
+	// backwards that call is still ahead, and a page that stops before it
+	// would hand it to a page whose parser never saw the result.
+	awaiting map[string]struct{}
 }
+
+// maxAwaitingCalls bounds awaiting for a parser that only ever meets results:
+// a live tail can see results for calls written before it started.
+const maxAwaitingCalls = 256
+
+// AwaitingCalls reports whether a result has been met whose call has not.
+// Paging uses it to keep reading back until those calls are reached, so they
+// settle on the same page. See jsonl.BackwardOptions.Unsettled.
+func (p *ClaudeParser) AwaitingCalls() bool { return len(p.awaiting) > 0 }
 
 // NewClaudeParser creates a parser bound to one session.
 func NewClaudeParser(sessionID string) *ClaudeParser {
@@ -89,6 +102,7 @@ func NewClaudeParser(sessionID string) *ClaudeParser {
 		sessionID: sessionID,
 		outcomes:  newBoundedMap[toolOutcome](2000),
 		toolCalls: newBoundedMap[toolCall](2000),
+		awaiting:  map[string]struct{}{},
 	}
 }
 
@@ -154,6 +168,7 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 			}
 			summary := summarizeToolInput(name, block.Input)
 			p.toolCalls.set(id, toolCall{name: name, summary: summary})
+			delete(p.awaiting, id)
 
 			msg := protocol.Message{
 				ID: id, SessionID: p.sessionID, Role: protocol.RoleTool, Ts: ts,
@@ -182,6 +197,9 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 			}
 			outcome := toolOutcome{status: status, preview: ClipBlock(flattenClaudeResult(block.Content), PreviewLines, PreviewChars)}
 			p.outcomes.set(block.ToolUseID, outcome)
+			if _, known := p.toolCalls.get(block.ToolUseID); !known && len(p.awaiting) < maxAwaitingCalls {
+				p.awaiting[block.ToolUseID] = struct{}{}
+			}
 
 			// Reading forwards the row already exists, so re-emit it under the
 			// same ID to settle it. The app upserts by ID, so this replaces the

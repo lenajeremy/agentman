@@ -410,12 +410,15 @@ func (s *ClaudeSource) Page(ctx context.Context, sessionID, before string, limit
 		return protocol.Page{}, fmt.Errorf("source: unknown claude session %q", sessionID)
 	}
 
+	// A fresh parser per page is correct: reading backwards, a tool result
+	// is met before its call, so pairing resolves within the page — as long as
+	// the page does not stop between the two, which Unsettled prevents.
+	p := parser.NewClaudeParser(sessionID)
 	opts := jsonl.BackwardOptions{
 		Want:         limit,
 		MaxScanBytes: jsonl.DefaultScanBytes,
-		// A fresh parser per page is correct: reading backwards, a tool result
-		// is met before its call, so pairing resolves within the page.
-		Map: parser.NewClaudeParser(sessionID).Parse,
+		Map:          p.Parse,
+		Unsettled:    p.AwaitingCalls,
 	}
 	if before != "" {
 		offset, err := strconv.ParseInt(before, 10, 64)
