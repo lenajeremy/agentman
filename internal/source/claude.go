@@ -361,8 +361,7 @@ func validClaudeSessionID(id string) bool {
 // directly, then fall back to scanning for the session id — the rule is
 // undocumented, and a wrong guess would silently show an empty feed.
 func (s *ClaudeSource) transcriptPath(cwd, sessionID string) string {
-	slug := strings.NewReplacer("/", "-", ".", "-").Replace(cwd)
-	direct := filepath.Join(s.projectsDir(), slug, sessionID+".jsonl")
+	direct := filepath.Join(s.projectsDir(), claudeProjectSlug(cwd), sessionID+".jsonl")
 	if _, err := os.Stat(direct); err == nil {
 		return direct
 	}

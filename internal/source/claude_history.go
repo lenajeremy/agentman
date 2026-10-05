@@ -45,7 +45,7 @@ func (s *ClaudeSource) Past(ctx context.Context, dir string, limit int) ([]proto
 			continue
 		}
 		name := entry.Name()
-		if name != slug && !strings.HasPrefix(name, slug+"-") {
+		if !claudeSlugMatches(name, slug) {
 			continue
 		}
 		candidates = append(candidates, newestTranscripts(
@@ -148,9 +148,44 @@ func (s *ClaudeSource) Directories(ctx context.Context) ([]protocol.Folder, erro
 	return folders, nil
 }
 
-// claudeProjectSlug is how Claude names a working directory's project folder.
+// claudeProjectSlug is how Claude names a working directory's project folder:
+// every character that is not an ASCII letter or digit becomes "-" (2.1.289:
+// replace(/[^a-zA-Z0-9]/g,"-")). That runs over JavaScript's UTF-16 string,
+// so a character outside the Basic Multilingual Plane, two code units there,
+// becomes two dashes. Only "/" and "." used to be replaced here, so any
+// folder with a space or an underscore in its path listed no sessions.
+//
+// Past claudeSlugLimit characters Claude also cuts the name and appends a
+// hash of the path; see claudeSlugMatches.
 func claudeProjectSlug(cwd string) string {
-	return strings.NewReplacer("/", "-", ".", "-").Replace(cwd)
+	var slug strings.Builder
+	for _, character := range cwd {
+		switch {
+		case (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9'):
+			slug.WriteRune(character)
+		case character > 0xFFFF:
+			slug.WriteString("--")
+		default:
+			slug.WriteByte('-')
+		}
+	}
+	return slug.String()
+}
+
+// claudeSlugLimit is the longest project folder name Claude writes before
+// cutting it and appending "-" and a hash of the path.
+const claudeSlugLimit = 200
+
+// claudeSlugMatches reports whether a project folder can hold sessions run in
+// the directory whose slug is given, or beneath it. A folder named past the
+// limit is matched on its first claudeSlugLimit characters: the hash is not
+// worth reproducing, because each transcript's own cwd decides membership.
+func claudeSlugMatches(folder, slug string) bool {
+	if len(slug) > claudeSlugLimit {
+		return strings.HasPrefix(folder, slug[:claudeSlugLimit])
+	}
+	return folder == slug || strings.HasPrefix(folder, slug+"-")
 }
 
 // transcriptFor resolves a session id to its transcript, live or ended.
