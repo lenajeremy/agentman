@@ -58,6 +58,11 @@ type KiroSource struct {
 	snapshotProcesses func(context.Context) (*tmux.ProcessTree, error)
 	capturePane       func(context.Context, string) (string, error)
 	captureScrollback func(context.Context, string, int) (string, error)
+	// sendKeys presses named keys in a pane and sendText types a message and
+	// submits it; injectable so answering can be tested against a pane that
+	// is only a description.
+	sendKeys func(context.Context, string, ...string) error
+	sendText func(context.Context, string, string) error
 
 	mu       sync.RWMutex
 	sessions map[string]kiroSession
@@ -143,6 +148,8 @@ func NewKiroSource(home string) (*KiroSource, error) {
 		snapshotProcesses: tmux.SnapshotProcessTree,
 		capturePane:       tmux.Capture,
 		captureScrollback: tmux.CaptureScrollback,
+		sendKeys:          tmux.SendKeys,
+		sendText:          tmux.Send,
 		sessions:          map[string]kiroSession{},
 		metas:             map[string]kiroMetaEntry{},
 		states:            map[string]kiroStateEntry{},
@@ -322,7 +329,7 @@ func (s *KiroSource) applyPane(
 		status = live
 	}
 	if found := s.detector(ctx, transcript, session.ID)(pane); found != nil {
-		session.Question = protocolQuestion(found)
+		session.Question = kiroQuestion(found)
 		session.State = protocol.StateWaitingInput
 		return status
 	}
@@ -800,8 +807,12 @@ func (s *KiroSource) Answer(ctx context.Context, sessionID string, answer protoc
 		return err
 	}
 	detect := s.detector(ctx, session.transcript, sessionID)
-	if shown := session.meta.Question; shown != nil && strings.HasSuffix(shown.Prompt, question.KiroFeedbackLevel) {
+	shown := session.meta.Question
+	if shown != nil && strings.HasSuffix(shown.Prompt, question.KiroFeedbackLevel) {
 		return s.answerFeedback(ctx, session.tmuxName, shown, answer, detect)
+	}
+	if shown != nil && strings.TrimSpace(answer.Text) != "" && len(answer.Options) == 0 {
+		return s.answerWithReason(ctx, session.tmuxName, shown, answer, detect)
 	}
 	return answerMenu(ctx, s.capturePane, session.tmuxName, session.meta.Question, answer, detect)
 }
@@ -816,7 +827,7 @@ func (s *KiroSource) CurrentQuestion(ctx context.Context, sessionID string) (*pr
 	if err != nil || found == nil {
 		return nil, err
 	}
-	return protocolQuestion(found), nil
+	return kiroQuestion(found), nil
 }
 
 // parseRFC3339Millis returns the first of values that parses, in milliseconds.

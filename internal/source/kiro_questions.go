@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/question"
@@ -109,13 +110,135 @@ func (s *KiroSource) answerFeedback(
 	if err != nil {
 		return fmt.Errorf("source: could not inspect the question: %w", err)
 	}
-	if current == nil || !sameQuestion(shown, protocolQuestion(current)) {
+	if current == nil || !sameQuestion(shown, kiroQuestion(current)) {
 		return fmt.Errorf("source: that question is no longer on screen; refresh the session")
 	}
 	if back {
-		return tmux.Escape(ctx, tmuxName)
+		return s.sendKeys(ctx, tmuxName, "Escape")
 	}
 	// Send clears whatever was typed at the Mac first, so the reason sent is
 	// exactly the one written on the phone.
-	return tmux.Send(ctx, tmuxName, reason)
+	return s.sendText(ctx, tmuxName, reason)
+}
+
+// kiroQuestion is protocolQuestion for a Kiro menu, offering a reason with the
+// refusal.
+//
+// Tab on "No" opens a box for the reason a call is refused, which Kiro hands
+// the agent with the refusal. On the phone that is a note under "No"; every
+// other choice stays one tap. Only the menu's first level has it: the trust
+// options have no refusal.
+func kiroQuestion(found *question.Question) *protocol.Question {
+	q := protocolQuestion(found)
+	if strings.HasSuffix(q.Prompt, " requires approval") {
+		for i := range q.Options {
+			q.Options[i].WithText = q.Options[i].Label == "No"
+		}
+	}
+	return q
+}
+
+// kiroPaneSettle bounds how long an answer waits for Kiro to redraw after a
+// key: focus moving to a row, or the reason box opening.
+const kiroPaneSettle = 1500 * time.Millisecond
+
+// waitForPane captures a pane until ready says it shows what was expected,
+// for at most kiroPaneSettle.
+func (s *KiroSource) waitForPane(ctx context.Context, tmuxName string, ready func(pane string) bool) bool {
+	capture := s.capturePane
+	if capture == nil {
+		capture = tmux.Capture
+	}
+	deadline := time.Now().Add(kiroPaneSettle)
+	for {
+		if pane, err := capture(ctx, tmuxName); err == nil && ready(pane) {
+			return true
+		}
+		if ctx.Err() != nil || time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+// answerWithReason refuses a call and says why: focus moves to "No", Tab
+// opens Kiro's box for the reason, and the reason is typed into it and sent.
+//
+// Every step is checked on screen before the next key: the menu must be the
+// one the phone was shown, the cursor must rest on "No" before Tab, and the
+// box must be open before anything is typed — typed into the menu instead,
+// the text would be keys that move focus and choose. If any check fails the
+// answer stops there, with nothing chosen.
+func (s *KiroSource) answerWithReason(
+	ctx context.Context,
+	tmuxName string,
+	shown *protocol.Question,
+	answer protocol.QuestionAnswer,
+	detect menuDetector,
+) error {
+	if tmuxName == "" {
+		return fmt.Errorf("source: only sessions started through Agentman can be answered")
+	}
+	if answer.QuestionID == "" || answer.QuestionID != shown.ID {
+		return fmt.Errorf("source: that question is no longer current; refresh the session")
+	}
+	takesReason := false
+	for _, option := range shown.Options {
+		takesReason = takesReason || (option.Key == answer.OptionKey && option.WithText)
+	}
+	if !takesReason {
+		return fmt.Errorf("source: only the refusal can carry a note")
+	}
+	current, err := paneMenu(ctx, s.capturePane, tmuxName, detect)
+	if err != nil {
+		return fmt.Errorf("source: could not inspect the question: %w", err)
+	}
+	if current == nil || !sameQuestion(shown, kiroQuestion(current)) {
+		return fmt.Errorf("source: that question is no longer on screen; refresh the session")
+	}
+	target := -1
+	for i, option := range current.Options {
+		if option.Key == answer.OptionKey {
+			target = i
+		}
+	}
+	if target < 0 {
+		return fmt.Errorf("source: that option is no longer on screen; refresh the session")
+	}
+
+	var moves []string
+	for i := current.FocusIndex; i < target; i++ {
+		moves = append(moves, "Down")
+	}
+	for i := current.FocusIndex; i > target; i-- {
+		moves = append(moves, "Up")
+	}
+	if len(moves) > 0 {
+		if err := s.sendKeys(ctx, tmuxName, moves...); err != nil {
+			return err
+		}
+	}
+	label := current.Options[target].Label
+	if !s.waitForPane(ctx, tmuxName, func(pane string) bool {
+		now := detect(pane)
+		return now != nil && now.Prompt == current.Prompt && now.FocusIndex == target &&
+			target < len(now.Options) && now.Options[target].Label == label
+	}) {
+		return fmt.Errorf("source: that choice is no longer on screen; refresh the session")
+	}
+	if err := s.sendKeys(ctx, tmuxName, "Tab"); err != nil {
+		return err
+	}
+	editor := current.Prompt + " · " + question.KiroFeedbackLevel
+	if !s.waitForPane(ctx, tmuxName, func(pane string) bool {
+		now := question.DetectKiro(pane)
+		return now != nil && now.Prompt == editor
+	}) {
+		return fmt.Errorf("source: Kiro did not open its box for a reason, so nothing was sent; answer on the Mac")
+	}
+	return s.sendText(ctx, tmuxName, strings.TrimSpace(answer.Text))
 }

@@ -92,6 +92,9 @@ func newTestKiro(t *testing.T, home string, table string, panes ...tmux.Session)
 	}
 	s.capturePane = func(context.Context, string) (string, error) { return "", nil }
 	s.captureScrollback = func(context.Context, string, int) (string, error) { return "", nil }
+	// No test reaches a real pane: a test that answers replaces these.
+	s.sendKeys = func(context.Context, string, ...string) error { return errors.New("test: no tmux") }
+	s.sendText = func(context.Context, string, string) error { return errors.New("test: no tmux") }
 	return s
 }
 
