@@ -1,0 +1,45 @@
+      ▄▀▀▄        Antigravity CLI 1.2.17
+     ▀▀▀▀▀▀       user@example.com (Google AI Pro)
+    ▀▀▀▀▀▀▀▀      Gemini 3.8 Flash (High)
+   ▄▀▀    ▀▀▄     /work/ws1
+  ▄▀▀      ▀▀▄
+
+────────────────────────────────────────────────────────────
+> Run the shell command: echo amend-check   in this folder, then tell me what it printed.
+
+● Bash(echo amend-check) (ctrl+o to expand)
+
+  The command printed:
+
+    amend-check
+
+────────────────────────────────────────────────────────────
+> then also say the word banana
+
+  banana
+
+────────────────────────────────────────────────────────────
+> Use your ask_question tool once, with three questions: first 'Which size?' single-select with
+  options small and large; second 'Which fruits?' multi-select with options apple, banana and
+  cherry; third 'Which colour?' single-select with options red and blue. Then reply with my answers
+  in one line.
+
+▸ Thought for 3s, 446 tokens
+  Determining the required tool use based on the user's request. The tool needs to be invoked wi...
+
+? Which size?
+? Which fruits?
+? Which colour?
+
+Question
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Question 2/3: Which fruits?
+
+> 1. [ ] apple
+  2. [ ] banana
+  3. [ ] cherry
+  4. Write-in...
+
+  ↑/↓ Navigate · ← Back · → Next · space Toggle · enter Submit · esc Skip
+esc to cancel                                                                Gemini 3.8 Flash · high
