@@ -75,3 +75,32 @@ func TestSessionStatusFieldsAreOptionalOnTheWire(t *testing.T) {
 		}
 	}
 }
+
+// A refusal with a reason travels as the option chosen plus the note, in the
+// fields a terminal answer and a custom answer already use.
+func TestAnOptionWithTextRoundTrips(t *testing.T) {
+	encoded, err := json.Marshal(QuestionOption{Key: "3", Label: "No, and tell Claude what to do", WithText: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"withText":true`) {
+		t.Fatalf("option encoded as %s", encoded)
+	}
+	var option QuestionOption
+	if err := json.Unmarshal(encoded, &option); err != nil || !option.WithText {
+		t.Fatalf("option decoded as %+v, %v", option, err)
+	}
+	plain, _ := json.Marshal(QuestionOption{Key: "1", Label: "Yes"})
+	if strings.Contains(string(plain), "withText") {
+		t.Fatalf("an ordinary option carried the field: %s", plain)
+	}
+
+	var req Request
+	if err := json.Unmarshal([]byte(`{"type":"answer_question","sessionId":"claude:s1",`+
+		`"questionId":"q","optionKey":"3","answerText":"use the staging database"}`), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.OptionKey != "3" || req.AnswerText != "use the staging database" {
+		t.Fatalf("answer decoded as %+v", req)
+	}
+}

@@ -68,6 +68,9 @@ export interface QuestionOption {
   selected?: boolean;
   /** Whether Claude has this checkbox enabled in a multi-select form. */
   checked?: boolean;
+  /** Choosing this may carry a short note — "No, and do this instead". The
+   *  answer is optionKey plus answerText; no text is the plain choice. */
+  withText?: boolean;
 }
 
 export interface Session {
@@ -620,6 +623,7 @@ function isQuestion(value: unknown): value is Question {
       (value.custom !== undefined && typeof value.custom !== "boolean")) return false;
   return boundedArray(value.options, 256, (option): option is QuestionOption =>
     isRecord(option) && boundedString(option.key, 4096, true) &&
+    (option.withText === undefined || typeof option.withText === "boolean") &&
     boundedString(option.label, 64 * 1024) &&
     optionalBoundedString(option.description, 64 * 1024) &&
     optionalBoundedString(option.preview, 256 * 1024) &&
