@@ -91,8 +91,8 @@ func antigravityID(step int) string { return fmt.Sprintf("s%06d", step) }
 // place instead of appearing twice.
 func (p *AntigravityParser) NextStepIndex() int { return p.lastStep + 1 }
 
-// AwaitingResponse reports whether the newest record is a prompt with no
-// reply yet — the only moment a reply is actually being written.
+// AwaitingResponse reports whether the model is writing its next response:
+// whether the newest record is one the model answers rather than one it wrote.
 //
 // The transcript answers this; the session's state does not. State comes from
 // discovery, which sweeps on its own timer, so for up to a sweep after a
@@ -100,6 +100,25 @@ func (p *AntigravityParser) NextStepIndex() int { return p.lastStep + 1 }
 // finished reply a second time, scraped off the pane and wrapped to the
 // terminal's width — which is how a table came out as a column of rules.
 func (p *AntigravityParser) AwaitingResponse() bool { return p.awaiting }
+
+// antigravityAwaits reports whether a record is answered by a model response.
+//
+// A prompt is, and so is a system message: agy hands one to the model with the
+// next prompt — a subagent's or a background task's news — or on its own when
+// a task finishes, and either way a response follows. Only waiting on prompts
+// stopped streaming for every turn that began with one, which after a subagent
+// or a resume was most of them. A tool's result is answered too, which is the
+// reply after a command or an edit. A declined call is not: agy ends the turn
+// there.
+func antigravityAwaits(step antigravityStep) bool {
+	switch step.Type {
+	case "USER_INPUT", "SYSTEM_MESSAGE":
+		return true
+	case "GENERIC":
+		return !strings.Contains(step.Error, "user denied permission for ")
+	}
+	return false
+}
 
 // Parse implements Parser.
 func (p *AntigravityParser) Parse(line string, offset int64) []protocol.Message {
@@ -110,7 +129,7 @@ func (p *AntigravityParser) Parse(line string, offset int64) []protocol.Message 
 	ts := parseTime(step.CreatedAt)
 	if step.StepIndex >= p.lastStep {
 		p.lastStep = step.StepIndex
-		p.awaiting = step.Type == "USER_INPUT"
+		p.awaiting = antigravityAwaits(step)
 	}
 
 	switch step.Type {

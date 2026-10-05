@@ -813,10 +813,10 @@ func (s *AntigravitySource) Follow(ctx context.Context, sessionID string, out ch
 	}
 	attach(session.transcript, false)
 
-	// The reply being written, as last read off the pane. Kept so an
-	// unchanged preview is not re-sent every tick, and so the provisional
-	// message can be withdrawn the moment the real record lands.
-	var preview string
+	// The reply being written, as last read off the pane, and the id it went
+	// out under. Kept so an unchanged preview is not re-sent every tick, and so
+	// a preview no record replaces can be taken back.
+	var preview, previewID string
 
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
@@ -850,31 +850,37 @@ func (s *AntigravitySource) Follow(ctx context.Context, sessionID string, out ch
 		for _, line := range lines {
 			batch = append(batch, p.Parse(line.Text, line.Offset)...)
 		}
-		// The record that just landed supersedes anything scraped off the
-		// A record for this step supersedes anything scraped for it, and the
-		// next turn starts from nothing.
-		if len(batch) > 0 {
-			preview = ""
+		// A record that just landed supersedes anything scraped for its step.
+		// When it carries no text of its own — the model called a tool and
+		// said nothing — the preview is taken back, or it would stay in the
+		// feed as a reply nobody wrote.
+		if len(batch) > 0 && previewID != "" {
+			if !hasMessage(batch, previewID) {
+				batch = append(batch, withdrawnPreview(sessionID, previewID))
+			}
+			preview, previewID = "", ""
 		}
 
-		// Only while the transcript's newest record is a prompt. Without that
-		// the finished reply is sent a second time the moment its record
-		// lands: the pane still shows it, and the session state that was
-		// meant to stop this lags a discovery sweep behind.
-		//
 		// Sent under the id the finished step will carry, so the app updates
 		// that row in place. A message whose text grows under a stable id is
 		// already how OpenCode streams, so nothing downstream is new.
-		if partial, step, ok := s.streamingReply(ctx, current, p); ok &&
-			partial != preview {
-			preview = partial
+		partial, step, streaming := s.streamingReply(ctx, current, p)
+		switch {
+		case streaming && partial != preview:
+			preview, previewID = partial, antigravityStreamID(step)
 			batch = append(batch, protocol.Message{
-				ID:        antigravityStreamID(step),
+				ID:        previewID,
 				SessionID: sessionID,
 				Role:      protocol.RoleAssistant,
 				Ts:        time.Now().UnixMilli(),
 				Text:      partial,
 			})
+		case !streaming && previewID != "" && len(batch) == 0:
+			// The turn stopped without writing the step — interrupted, or a
+			// tool call drawn where the text was. Page would not show this
+			// preview, so the live feed should not keep it either.
+			batch = append(batch, withdrawnPreview(sessionID, previewID))
+			preview, previewID = "", ""
 		}
 
 		if len(batch) == 0 {
@@ -888,24 +894,47 @@ func (s *AntigravitySource) Follow(ctx context.Context, sessionID string, out ch
 	}
 }
 
+func hasMessage(batch []protocol.Message, id string) bool {
+	for _, message := range batch {
+		if message.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// withdrawnPreview takes a streamed preview back: the same id with no text,
+// which the app drops from the feed.
+func withdrawnPreview(sessionID, id string) protocol.Message {
+	return protocol.Message{
+		ID: id, SessionID: sessionID, Role: protocol.RoleAssistant, Ts: time.Now().UnixMilli(),
+	}
+}
+
 // streamingReply reads the reply agy is writing from its pane.
 //
-// Only while a turn is actually running: outside one the pane shows the last
-// finished answer, which the transcript already carries and which must not be
-// re-sent as though it were new.
+// Two things must agree that one is being written. The transcript's newest
+// record must be one the model answers (see AwaitingResponse): outside a turn
+// the pane shows the last finished answer, which the transcript already
+// carries and which must not be re-sent as though it were new. And the very
+// capture the text is read from must show agy busy: a turn that was
+// interrupted, or that ended on a declined call, leaves the transcript waiting
+// for a response that is never coming, while the pane says it is idle.
 func (s *AntigravitySource) streamingReply(
 	ctx context.Context, session antigravitySession, p *parser.AntigravityParser,
 ) (string, int, bool) {
 	if session.tmuxName == "" || s.captureScrollback == nil {
 		return "", 0, false
 	}
-	// The transcript decides, not the session state: a reply is being written
-	// exactly while the newest record is a prompt.
 	if !p.AwaitingResponse() {
 		return "", 0, false
 	}
 	pane, err := s.captureScrollback(ctx, session.tmuxName, antigravityScrollbackLines)
 	if err != nil {
+		return "", 0, false
+	}
+	lines := strings.Split(strings.TrimRight(pane, "\n"), "\n")
+	if state, ok := antigravityPaneState(lines); !ok || state != protocol.StateBusy {
 		return "", 0, false
 	}
 	partial := antigravityPartialReply(pane)

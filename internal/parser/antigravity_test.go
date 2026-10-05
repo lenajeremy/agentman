@@ -269,3 +269,23 @@ func TestAntigravityEmptyWriteKeepsTheReceiptOnly(t *testing.T) {
 		t.Errorf("got %q", got[len(got)-1].Text)
 	}
 }
+
+// The model writes a reply after a tool's result just as after a prompt — the
+// answer to "run ls, then tell me…" comes after the ls. A declined call is the
+// exception: agy ends the turn there.
+func TestAntigravityAwaitsTheReplyToAToolResult(t *testing.T) {
+	p := NewAntigravityParser("antigravity:c1")
+	p.Parse(agStepPrompt, 0)
+	p.Parse(agStepCall, 1)
+	if p.AwaitingResponse() {
+		t.Error("awaiting a reply while the tool runs")
+	}
+	p.Parse(agStepResult, 2)
+	if !p.AwaitingResponse() || p.NextStepIndex() != 3 {
+		t.Errorf("after the result: awaiting %v next %d", p.AwaitingResponse(), p.NextStepIndex())
+	}
+	p.Parse(`{"step_index":5,"type":"GENERIC","status":"ERROR","error":"permission check failed for read_url \"example.com\": user denied permission for read_url(example.com)"}`, 3)
+	if p.AwaitingResponse() {
+		t.Error("awaiting a reply after the user declined the call")
+	}
+}
