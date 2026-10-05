@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
@@ -235,5 +236,9 @@ func (s *AntigravitySource) pastAntigravitySession(sessionID string) (antigravit
 		// brain directory. It is still a session, with nothing to show yet.
 		return antigravitySession{}, true
 	}
-	return antigravitySession{transcript: transcript}, true
+	// The conversation's id is what its artifacts are found by.
+	native := strings.TrimPrefix(sessionID, string(protocol.KindAntigravity)+":")
+	return antigravitySession{transcript: transcript, meta: protocol.Session{
+		ID: sessionID, Kind: protocol.KindAntigravity, NativeID: native, State: protocol.StateEnded,
+	}}, true
 }

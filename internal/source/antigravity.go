@@ -100,6 +100,10 @@ type AntigravitySource struct {
 	index antigravityIndex
 	// logs caches the tails of running processes' CLI logs.
 	logs antigravityLogCache
+	// artifacts caches artifact metadata and the reviews each transcript
+	// records; usage caches each transcript's last token count.
+	artifacts antigravityArtifactCache
+	usage     antigravityUsageCache
 }
 
 // antigravityStateEntry caches the state a transcript's last line implies,
@@ -267,6 +271,18 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 				session.State = state
 			}
 		}
+		session.Mode = footer.mode
+		if percent, ok := s.contextPercent(transcript, session.Model); ok {
+			session.ContextPercent = percent
+		}
+		if artifacts, err := s.conversationArtifacts(ctx, conversation, transcript); err == nil {
+			session.Artifacts = len(artifacts)
+			for _, artifact := range artifacts {
+				if artifact.Review {
+					session.ArtifactsToReview++
+				}
+			}
+		}
 		found = append(found, session)
 		next[id] = antigravitySession{meta: session, transcript: transcript, tmuxName: tmuxName, footer: footer}
 	}
@@ -304,6 +320,13 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 		}
 	}
 	s.forgetLogs(liveLogs)
+	liveTranscripts, liveConversations := map[string]bool{}, map[string]bool{}
+	for _, session := range next {
+		liveTranscripts[session.transcript] = true
+		liveConversations[session.meta.NativeID] = true
+	}
+	s.forgetArtifacts(liveTranscripts, liveConversations)
+	s.forgetUsage(liveTranscripts)
 	return found, nil
 }
 
