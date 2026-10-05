@@ -48,6 +48,13 @@ import { draftNamespace } from "./draft-policy";
 import { resumeOnce } from "./resume";
 import { folderContains } from "./folders";
 import { isPushActive, obtainPushToken, setPushActive } from "./push";
+import {
+  PUSH_ACCEPT_MS,
+  initialPushRegistration,
+  pushRegistrationAccepted,
+  pushRegistrationRejected,
+  pushRegistrationSent,
+} from "./push-registration";
 import { clearDraft } from "./drafts";
 import { newFrameId } from "./id";
 import {
@@ -376,6 +383,30 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return retained;
   }, []);
 
+  // Whether the Mac is sending alerts by push decides whether the app
+  // schedules its own. See lib/push-registration.ts.
+  const pushToken = useRef<string | null>(null);
+  const pushRegistration = useRef(initialPushRegistration);
+  const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const registerPushToken = useCallback((client: Client) => {
+    if (!pushToken.current) return;
+    const id = client.registerPush(pushToken.current);
+    pushRegistration.current = pushRegistrationSent(pushRegistration.current, id);
+    setPushActive(pushRegistration.current.active);
+    if (!id) return;
+    if (pushTimer.current) clearTimeout(pushTimer.current);
+    pushTimer.current = setTimeout(() => {
+      pushRegistration.current = pushRegistrationAccepted(pushRegistration.current, id);
+      setPushActive(pushRegistration.current.active);
+    }, PUSH_ACCEPT_MS);
+  }, []);
+
+  const rejectPushRegistration = useCallback((replyTo: string) => {
+    pushRegistration.current = pushRegistrationRejected(pushRegistration.current, replyTo);
+    setPushActive(pushRegistration.current.active);
+  }, []);
+
   // A session someone has open just became reachable — most often one they
   // reopened, which keeps its id. Subscribe again, so an older Mac that refused
   // the first subscription starts its tail, and fetch the newest page, which
@@ -689,6 +720,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
 
 	  case "error": {
+		if (replyTo) rejectPushRegistration(replyTo);
 		if (replyTo && settleLaunchRequest(replyTo, event)) break;
 		if (replyTo && settleWorkspaceRequest(replyTo, undefined, event.error)) break;
 		if (replyTo && settleServerRequest(replyTo, undefined, serverErrorMessage(event.error))) break;
@@ -712,7 +744,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 		break;
 	  }
     }
-  }, [mergeSessionMessages, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, followReachable]);
+  }, [mergeSessionMessages, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, followReachable, rejectPushRegistration]);
 
   const attach = useCallback(
     (creds: Credentials) => {
@@ -724,6 +756,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         onControl: (control, replyTo) => {
           if (control.type === "daemon_offline" && control.lastSeenAt) {
             setLastSeenAt(control.lastSeenAt);
+          }
+          if (replyTo && (control.type === "daemon_offline" || control.type === "error")) {
+            rejectPushRegistration(replyTo);
           }
           if (replyTo && (control.type === "daemon_offline" || control.type === "error")) {
             settleServerRequest(
@@ -784,18 +819,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         onConnectionChange: (state, online) => {
           setConnection(state);
           setDaemonOnline(online);
+          // A Mac that was offline never saw the token, and one that restarted
+          // may have lost it, so it is offered again each time the Mac is back.
+          if (online && clientRef.current) registerPushToken(clientRef.current);
         },
       });
       clientRef.current = client;
 
       // Hand the Mac a push token so it can reach this phone once iOS suspends
       // the app. Best-effort: on a simulator, without permission, or in Expo Go
-      // there is no token, and the app falls back to local notifications.
+      // there is no token, and the app falls back to local notifications. It
+      // is sent again whenever the Mac comes online, below.
       void obtainPushToken()
         .then((token) => {
           if (!token || clientRef.current !== client) return;
-          client.registerPush(token);
-          setPushActive(true);
+          pushToken.current = token;
+          registerPushToken(client);
         })
         .catch(() => {});
 
@@ -822,7 +861,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       pendingCatchUps.current.clear();
       client.connect();
     },
-    [handleEvent, clearWorkspaceRequests, clearLaunchRequests, settleLaunchRequest],
+    [handleEvent, clearWorkspaceRequests, clearLaunchRequests, settleLaunchRequest, registerPushToken, rejectPushRegistration],
   );
 
   useEffect(() => {
