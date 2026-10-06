@@ -1567,7 +1567,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         });
       },
     }),
-    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, folderFilter, folderLoading, setFolderFilter, folderSessions, stateFilter, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, resumeSessionOnce],
+    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, folderFilter, folderLoading, setFolderFilter, folderSessions, stateFilter, notifyPrefs, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, resumeSessionOnce, registerPushToken, clearLaunchRequests, clearWorkspaceRequests],
   );
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
