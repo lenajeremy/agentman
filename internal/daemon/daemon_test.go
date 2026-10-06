@@ -646,3 +646,25 @@ func TestRefreshCoalescesLargeSessionBursts(t *testing.T) {
 		t.Fatalf("large refresh emitted %d lists and %d updates, want 2 and 0", lists, updates)
 	}
 }
+
+// An Antigravity pane sitting on agy's first-run trust prompt has no
+// conversation yet, so no native id. The phone requires one and used to reject
+// the whole session list over it, which took every idle agent off the board.
+func TestASessionWithNoNativeIDYetIsStillPublishedWithOne(t *testing.T) {
+	got := normalizeDiscoveredSessions([]protocol.Session{
+		{
+			ID: "antigravity:tmux-agentman-antigravity-1791228982550-2dd1fbd83b76ecf1", Kind: protocol.KindAntigravity,
+			Name: "models", State: protocol.StateWaitingInput, Inject: protocol.InjectTmux,
+		},
+		{ID: "claude:3eed3aaf", Kind: protocol.KindClaude, NativeID: "3eed3aaf", State: protocol.StateIdle},
+	})
+	if len(got) != 2 {
+		t.Fatalf("got %d sessions, want both", len(got))
+	}
+	if got[0].NativeID != "tmux-agentman-antigravity-1791228982550-2dd1fbd83b76ecf1" {
+		t.Errorf("native id = %q, want the part of the id after the kind", got[0].NativeID)
+	}
+	if got[1].NativeID != "3eed3aaf" {
+		t.Errorf("a session's own native id was replaced: %q", got[1].NativeID)
+	}
+}

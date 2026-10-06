@@ -19,11 +19,15 @@ import { palettes } from "../lib/theme";
 
 // Notifications are the product, not a nicety: an alert that arrives silently
 // while the app is open would defeat the point of walking away from the desk.
+// iOS asks this only while the app is open, and the answer is always no.
+// You are already looking: a banner over the screen you are reading, or a
+// chime for a turn you watched finish, is the noise this app is meant to cut.
+// Alerts that arrive while it is closed are untouched by this.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
+    shouldShowBanner: false,
+    shouldShowList: false,
+    shouldPlaySound: false,
     shouldSetBadge: false,
   }),
 });
