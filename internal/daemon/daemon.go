@@ -1417,6 +1417,14 @@ func normalizeDiscoveredSessions(found []protocol.Session) []protocol.Session {
 			len(session.NativeID) > maxSessionIDBytes {
 			continue
 		}
+		// Every app requires a native id, and rejects the whole list over one
+		// session without it: one Antigravity pane sitting on its first-run
+		// trust prompt, before agy has made a conversation, took every idle
+		// agent off the phone's board. A session with no id of its own yet is
+		// still a session; it gets the part of its agentman id after the kind.
+		if session.NativeID == "" {
+			session.NativeID = strings.TrimPrefix(session.ID, string(session.Kind)+":")
+		}
 		session.Name = truncateWireText(session.Name, maxWireNameBytes)
 		session.Cwd = truncateWireText(session.Cwd, maxWirePathBytes)
 		session.Model = truncateWireText(session.Model, maxWireNameBytes)
