@@ -36,7 +36,7 @@ import { Popover, type PopoverItem } from "../../components/Popover";
 import { type Frame } from "../../lib/message-menu";
 import { artifactsButtonLabel } from "../../lib/artifacts";
 import { canEnd, shouldResume } from "../../lib/resume";
-import { showsInFeed, statusChip } from "../../lib/session-view";
+import { modeLabel, modelLabel, showsInFeed, statusChip } from "../../lib/session-view";
 import {
   defaultScopeWarning,
   switchChoices,
@@ -190,6 +190,20 @@ export default function SessionScreen() {
       settled.current = new Set(messages.map((m) => m.id));
     }
   }, [messages]);
+
+  // The question sheet's scroll view. A note opened on a "No, and say why"
+  // option brings the keyboard up, and the sheet moves above it — but its
+  // content stayed where it was, which left the box being typed into below
+  // the visible part of the sheet. Scrolling to the end shows it: the note
+  // sits under the last option.
+  const sheetScroll = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const shown = Keyboard.addListener("keyboardDidShow", () => {
+      sheetScroll.current?.scrollToEnd({ animated: true });
+    });
+    return () => shown.remove();
+  }, []);
 
   useEffect(() => {
     if (Platform.OS === "web") return;
@@ -471,6 +485,7 @@ export default function SessionScreen() {
   // switch is one request at a time: the Mac presses keys and reads the
   // result back, and a second tap mid-way would race it.
   const [switchMenu, setSwitchMenu] = useState<SwitchKind | null>(null);
+  const [headerHeight, setHeaderHeight] = useState(HEADER_HEIGHT);
   // sent: the Mac has seen the switch take, and the next sweep will say so.
   const [switching, setSwitching] = useState<{
     kind: SwitchKind;
@@ -546,8 +561,7 @@ export default function SessionScreen() {
     for (const value of openChoices.values) {
       switchItems.push({
         key: value,
-        label: value,
-        mono: true,
+        label: switchMenu === "mode" ? modeLabel(value) : modelLabel(value),
         checked: value === openChoices.current,
         onPress: () => requestSwitch(switchMenu, value),
       });
@@ -570,169 +584,141 @@ export default function SessionScreen() {
 
   return (
     <View style={[styles.page, { paddingTop: insets.top }]}>
-      <ContentColumn style={styles.header}>
-        <MotionPressable
-          onPress={() => router.back()}
-          hitSlop={12}
-          style={styles.backButton}
-          pressedScale={0.92}
-          accessibilityRole="button"
-          accessibilityLabel="Back to agents"
-        >
-          <Feather name="chevron-left" size={20} color={color.text} />
-        </MotionPressable>
-        <View style={styles.headerBody}>
-          <Text style={styles.title} numberOfLines={1}>
-            {session?.name ?? "Session"}
-          </Text>
-          {session ? (
-            <View style={styles.subtitleRow}>
-              {/* A colour, not a word, and sitting with the other facts about
-                  the session rather than as a control of its own. "Working"
-                  and "Idle" cost roughly eighty points of a phone-width row to
-                  repeat what the dot already said — and the dot says it
-                  faster, because it pulses while the agent runs. The words
-                  survive as a label, which is the one place a colour says
-                  nothing. */}
-              <View
-                style={styles.stateDot}
-                accessible
-                accessibilityRole="text"
-                accessibilityLabel={state.label}
-              >
-                <Pulse state={displayState} size={6} inline />
-              </View>
-              {/* Which model is answering you is worth knowing before you send
-                  it something — "Codex" says which CLI is open, not what is
-                  doing the work. */}
-              {modelChoices ? (
-                // Tappable only when the agent listed models and said what a
-                // switch touches. The chevron is the only sign it opens
-                // anything, so it stays even at phone width.
-                <Pressable
-                  onPress={() => setSwitchMenu("model")}
-                  disabled={switchLocked}
-                  hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
-                  style={({ pressed }) => [styles.modelSwitch, pressed && styles.switchPressed]}
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    switching?.kind === "model"
-                      ? `Switching model to ${switching.value}`
-                      : `Model ${session.model ?? "not reported"}. Switch model`
-                  }
-                  accessibilityState={{ disabled: switchLocked, busy: switching?.kind === "model" }}
-                >
-                  <Text
-                    style={[
-                      styles.subtitle,
-                      styles.subtitleModel,
-                      switching?.kind === "model" && styles.switchPending,
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {switching?.kind === "model"
-                      ? `${switching.value}…`
-                      : session.model ?? agentLabel(session.kind).name}
-                  </Text>
-                  <Feather name="chevron-down" size={11} color={color.muted} />
-                </Pressable>
-              ) : (
-                <Text
-                  style={[styles.subtitle, styles.subtitleModel]}
-                  numberOfLines={1}
-                >
-                  {session.model ?? agentLabel(session.kind).name}
-                </Text>
-              )}
-              {/* Tappable when the agent lists modes to switch to; otherwise
-                  a fact about the session, like the model beside it. */}
-              {chip ? (
-                <StatusChip
-                  chip={chip}
-                  onPress={modeChoices ? () => setSwitchMenu("mode") : undefined}
-                  pending={switching?.kind === "mode" ? switching.value : undefined}
-                  disabled={switchLocked}
-                />
-              ) : null}
-              <Text style={[styles.subtitle, styles.subtitleModel]}>{" · "}</Text>
-              {/* Truncated from the front, because a path's last segment is the
-                  one that says which project this is. Cut from the end,
-                  ~/Desktop/agentman became "~/Desktop/agent…", which identifies
-                  nothing. */}
-              <Text
-                style={[styles.subtitle, styles.subtitlePath]}
-                numberOfLines={1}
-                ellipsizeMode="head"
-              >
-                {shortPath(session.cwd)}
-              </Text>
-            </View>
-          ) : (
-            <Text style={styles.subtitle} numberOfLines={1}>
-              {sessionId}
+      {/* Measured, not assumed: the chip row makes the header taller than
+          the constant it replaced, and menus anchored to the constant opened
+          on top of the very chips that opened them. */}
+      <View onLayout={(event) => setHeaderHeight(event.nativeEvent.layout.height)}>
+        <ContentColumn style={styles.header}>
+          <MotionPressable
+            onPress={() => router.back()}
+            hitSlop={12}
+            style={styles.backButton}
+            pressedScale={0.92}
+            accessibilityRole="button"
+            accessibilityLabel="Back to agents"
+          >
+            <Feather name="chevron-left" size={20} color={color.text} />
+          </MotionPressable>
+          <View style={styles.headerBody}>
+            <Text style={styles.title} numberOfLines={1}>
+              {session?.name ?? "Session"}
             </Text>
-          )}
-        </View>
-        {/* Its own button rather than a row in the menu: an agent waiting on
-            you to approve its plan is going nowhere until you do, and a badge
-            behind "…" is one nobody sees. */}
-        {session && artifactCount > 0 ? (
-          <MotionPressable
-            onPress={() =>
-              router.push(`/artifacts/${encodeURIComponent(session.id)}`)
-            }
-            hitSlop={10}
-            style={styles.iconButton}
-            pressedScale={0.92}
-            accessibilityRole="button"
-            accessibilityLabel={artifactsButtonLabel(artifactCount, artifactsToReview)}
-          >
-            <Feather name="file-text" size={18} color={color.text} />
-            {artifactsToReview > 0 ? (
-              <View style={styles.reviewBadge}>
-                <Text style={styles.reviewBadgeText}>{artifactsToReview}</Text>
-              </View>
-            ) : null}
-          </MotionPressable>
-        ) : null}
-        {/* Servers and stop live behind this rather than beside the title. Five
-            controls across a phone-width row left the name under half of it and
-            cut the working directory to "~/Deskt…", and what a session is gets
-            read far more often than either of them gets pressed. */}
-        {session && sessionMenuItems.length > 0 ? (
-          <MotionPressable
-            onPress={() => setMenuOpen(true)}
-            hitSlop={10}
-            style={styles.iconButton}
-            pressedScale={0.92}
-            accessibilityRole="button"
-            accessibilityLabel={
-              menuServers > 0
-                ? `Session actions. ${menuServers} server${menuServers === 1 ? "" : "s"} running`
-                : "Session actions"
-            }
-          >
-            {interruptAction?.status === "sending" ? (
-              <ActivityIndicator size="small" color={color.text} />
+            {session ? (
+              <>
+                <View style={styles.subtitleRow}>
+                  {/* A colour, not a word: the dot pulses while the agent runs,
+                      which says "working" faster than the word did, and the
+                      word survives as its label. */}
+                  <View
+                    style={styles.stateDot}
+                    accessible
+                    accessibilityRole="text"
+                    accessibilityLabel={state.label}
+                  >
+                    <Pulse state={displayState} size={6} inline />
+                  </View>
+                  {/* Which agent and which project: the two facts this line is
+                      read for. The model and mode used to share it, and at
+                      phone width that left the folder as "…ts/northstar" and
+                      the mode as "kir…" — four facts, none of them whole. */}
+                  <Text style={[styles.subtitle, styles.subtitleModel]} numberOfLines={1}>
+                    {agentLabel(session.kind).name}
+                  </Text>
+                  <Text style={[styles.subtitle, styles.subtitleModel]}>{" · "}</Text>
+                  {/* Truncated from the front: a path's last segment is the one
+                      that says which project this is. */}
+                  <Text
+                    style={[styles.subtitle, styles.subtitlePath]}
+                    numberOfLines={1}
+                    ellipsizeMode="head"
+                  >
+                    {shortPath(session.cwd)}
+                  </Text>
+                </View>
+              </>
             ) : (
-              <Feather name="more-horizontal" size={20} color={color.text} />
+              <Text style={styles.subtitle} numberOfLines={1}>
+                {sessionId}
+              </Text>
             )}
-            {/* The count still has to be visible without opening anything: a
-                running server is a fact about the session, not an action. */}
-            {menuServers > 0 ? (
-              <View style={styles.serverDot}>
-                <Text style={styles.serverDotText}>{menuServers}</Text>
-              </View>
-            ) : null}
-          </MotionPressable>
+          </View>
+          {/* Its own button rather than a row in the menu: an agent waiting on
+              you to approve its plan is going nowhere until you do, and a badge
+              behind "…" is one nobody sees. */}
+          {session && artifactCount > 0 ? (
+            <MotionPressable
+              onPress={() =>
+                router.push(`/artifacts/${encodeURIComponent(session.id)}`)
+              }
+              hitSlop={10}
+              style={styles.iconButton}
+              pressedScale={0.92}
+              accessibilityRole="button"
+              accessibilityLabel={artifactsButtonLabel(artifactCount, artifactsToReview)}
+            >
+              <Feather name="file-text" size={18} color={color.text} />
+              {artifactsToReview > 0 ? (
+                <View style={styles.reviewBadge}>
+                  <Text style={styles.reviewBadgeText}>{artifactsToReview}</Text>
+                </View>
+              ) : null}
+            </MotionPressable>
+          ) : null}
+          {/* Servers and stop live behind this rather than beside the title. Five
+              controls across a phone-width row left the name under half of it and
+              cut the working directory to "~/Deskt…", and what a session is gets
+              read far more often than either of them gets pressed. */}
+          {session && sessionMenuItems.length > 0 ? (
+            <MotionPressable
+              onPress={() => setMenuOpen(true)}
+              hitSlop={10}
+              style={styles.iconButton}
+              pressedScale={0.92}
+              accessibilityRole="button"
+              accessibilityLabel={
+                menuServers > 0
+                  ? `Session actions. ${menuServers} server${menuServers === 1 ? "" : "s"} running`
+                  : "Session actions"
+              }
+            >
+              {interruptAction?.status === "sending" ? (
+                <ActivityIndicator size="small" color={color.text} />
+              ) : (
+                <Feather name="more-horizontal" size={20} color={color.text} />
+              )}
+              {/* The count still has to be visible without opening anything: a
+                  running server is a fact about the session, not an action. */}
+              {menuServers > 0 ? (
+                <View style={styles.serverDot}>
+                  <Text style={styles.serverDotText}>{menuServers}</Text>
+                </View>
+              ) : null}
+            </MotionPressable>
+          ) : null}
+        </ContentColumn>
+        {/* Its own row, the full width of the screen: beside the buttons there
+            was room for two chips, and the third was cut off. */}
+        {session ? (
+          <ContentColumn style={styles.controlsBar}>
+            <HeaderControls
+              model={session.model}
+              modelPending={switching?.kind === "model" ? switching.value : undefined}
+              onModel={modelChoices ? () => setSwitchMenu("model") : undefined}
+              mode={chip?.mode && chip.mode !== "mode" ? chip.mode : undefined}
+              modePending={switching?.kind === "mode" ? switching.value : undefined}
+              onMode={modeChoices ? () => setSwitchMenu("mode") : undefined}
+              contextPercent={session.contextPercent}
+              disabled={switchLocked}
+            />
+          </ContentColumn>
         ) : null}
-      </ContentColumn>
+      </View>
 
       {session ? (
         <Popover
           visible={menuOpen}
           onDismiss={() => setMenuOpen(false)}
-          top={HEADER_HEIGHT}
+          top={headerHeight}
           items={sessionMenuItems}
         />
       ) : null}
@@ -740,7 +726,7 @@ export default function SessionScreen() {
         <Popover
           visible
           onDismiss={() => setSwitchMenu(null)}
-          top={HEADER_HEIGHT}
+          top={headerHeight}
           align="left"
           title={switchTitle}
           items={switchItems}
@@ -905,6 +891,7 @@ export default function SessionScreen() {
           >
             <View style={styles.grabber} />
             <ScrollView
+              ref={sheetScroll}
               contentContainerStyle={styles.sheetContent}
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled
@@ -1062,7 +1049,7 @@ export default function SessionScreen() {
         )}
       </KeyboardAvoidingView>
 
-      <Toast message={toast} onHidden={hideToast} top={insets.top + HEADER_HEIGHT + space.sm} />
+      <Toast message={toast} onHidden={hideToast} top={insets.top + headerHeight + space.sm} />
     </View>
   );
 }
@@ -1071,39 +1058,106 @@ export default function SessionScreen() {
  * The agent's mode and how full its context is, in one chip beside the model.
  * Machine words in mono, like the model beside it.
  */
-function StatusChip({
-  chip,
-  onPress,
-  pending,
+/**
+ * What is answering, in which mode, and how full its context is: one row of
+ * chips under the title, each with room for its whole name.
+ *
+ * They were squeezed onto the line with the folder, where at phone width
+ * every one of them was cut short. A chip with a chevron opens the switcher
+ * for that setting; one without is only a fact.
+ */
+function HeaderControls({
+  model,
+  modelPending,
+  onModel,
+  mode,
+  modePending,
+  onMode,
+  contextPercent,
   disabled,
 }: {
-  chip: NonNullable<ReturnType<typeof statusChip>>;
-  /** Present when the agent lists modes to switch to. */
-  onPress?: () => void;
-  /** The mode a switch is on its way to. */
-  pending?: string;
+  model?: string;
+  modelPending?: string;
+  onModel?: () => void;
+  mode?: string;
+  modePending?: string;
+  onMode?: () => void;
+  contextPercent?: number;
   disabled?: boolean;
+}) {
+  const styles = useStyles(makeStyles);
+  const context =
+    contextPercent && contextPercent > 0 ? `${Math.min(100, Math.round(contextPercent))}% context` : undefined;
+  const shownMode = modePending ?? mode;
+  if (!model && !shownMode && !onMode && !context) return null;
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.controls}
+      contentContainerStyle={styles.controlsContent}
+    >
+      {model || modelPending ? (
+        <ControlChip
+          label={modelLabel(modelPending ?? model ?? "")}
+          pending={Boolean(modelPending)}
+          onPress={onModel}
+          disabled={disabled}
+          accessibilityLabel={
+            modelPending
+              ? `Switching model to ${modelLabel(modelPending)}`
+              : `Model ${modelLabel(model ?? "")}${onModel ? ". Switch model" : ""}`
+          }
+        />
+      ) : null}
+      {shownMode || onMode ? (
+        <ControlChip
+          label={shownMode ? modeLabel(shownMode) : "Mode"}
+          pending={Boolean(modePending)}
+          onPress={onMode}
+          disabled={disabled}
+          accessibilityLabel={
+            modePending
+              ? `Switching mode to ${modeLabel(modePending)}`
+              : `${shownMode ? `${modeLabel(shownMode)} mode` : "Mode"}${onMode ? ". Switch mode" : ""}`
+          }
+        />
+      ) : null}
+      {context ? (
+        <View style={[styles.control, styles.controlQuiet]} accessible accessibilityRole="text" accessibilityLabel={context}>
+          <Text style={[styles.controlText, styles.controlTextQuiet]}>{context}</Text>
+        </View>
+      ) : null}
+    </ScrollView>
+  );
+}
+
+function ControlChip({
+  label,
+  pending,
+  onPress,
+  disabled,
+  accessibilityLabel,
+}: {
+  label: string;
+  pending: boolean;
+  onPress?: () => void;
+  disabled?: boolean;
+  accessibilityLabel: string;
 }) {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
   const body = (
     <>
-      {chip.mode ? (
-        <Text
-          style={[styles.statusChipText, styles.statusChipMode, pending ? styles.switchPending : null]}
-          numberOfLines={1}
-        >
-          {pending ? `${pending}…` : chip.mode}
-        </Text>
-      ) : null}
-      {onPress ? <Feather name="chevron-down" size={10} color={color.muted} /> : null}
-      {chip.mode && chip.context ? <View style={styles.statusChipRule} /> : null}
-      {chip.context ? <Text style={styles.statusChipText}>{chip.context}</Text> : null}
+      <Text style={[styles.controlText, pending && styles.switchPending]} numberOfLines={1}>
+        {pending ? `${label}…` : label}
+      </Text>
+      {onPress ? <Feather name="chevron-down" size={12} color={color.muted} /> : null}
     </>
   );
   if (!onPress) {
     return (
-      <View style={styles.statusChip} accessible accessibilityRole="text" accessibilityLabel={chip.label}>
+      <View style={styles.control} accessible accessibilityRole="text" accessibilityLabel={accessibilityLabel}>
         {body}
       </View>
     );
@@ -1112,11 +1166,11 @@ function StatusChip({
     <Pressable
       onPress={onPress}
       disabled={disabled}
-      hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
-      style={({ pressed }) => [styles.statusChip, pressed && styles.switchPressed]}
+      hitSlop={{ top: 8, bottom: 8 }}
+      style={({ pressed }) => [styles.control, pressed && styles.switchPressed]}
       accessibilityRole="button"
-      accessibilityLabel={pending ? `Switching mode to ${pending}` : `${chip.label}. Switch mode`}
-      accessibilityState={{ disabled, busy: Boolean(pending) }}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ disabled, busy: pending }}
     >
       {body}
     </Pressable>
@@ -1552,9 +1606,11 @@ const makeStyles = (c: Palette) =>
     keyboardAvoider: { flex: 1 },
     feed: { flex: 1 },
 
+    // Top-aligned: the controls row makes the body three lines tall, and
+    // centred buttons ended up beside the folder instead of the title.
     header: {
       flexDirection: "row",
-      alignItems: "center",
+      alignItems: "flex-start",
       gap: space.xs,
       paddingHorizontal: space.md,
       paddingTop: space.xs,
@@ -1566,12 +1622,16 @@ const makeStyles = (c: Palette) =>
     backButton: {
       width: 30,
       height: 34,
+      // Centred on the title's line rather than on the whole header.
+      marginTop: -7,
       alignItems: "center",
       justifyContent: "center",
     },
     iconButton: {
       width: 40,
       height: 40,
+      // Centred on the title's line, like the back button.
+      marginTop: -10,
       borderRadius: radius.pill,
       alignItems: "center",
       justifyContent: "center",
@@ -1660,26 +1720,23 @@ const makeStyles = (c: Palette) =>
     subtitlePath: { flexShrink: 1 },
     // Gives way with the path when the row runs out, and inside it the mode
     // name gives way first: the percentage is the part worth keeping whole.
-    statusChip: {
+    // Starts where the title starts: past the screen edge and the back button.
+    controlsBar: { paddingLeft: space.md + 30 + space.xs, paddingBottom: space.sm, marginTop: -2 },
+    controls: { flexGrow: 0 },
+    controlsContent: { flexDirection: "row", alignItems: "center", gap: 6, paddingRight: space.sm },
+    control: {
       flexDirection: "row",
-      flexShrink: 1,
       alignItems: "center",
-      gap: 5,
-      height: 16,
-      maxWidth: 132,
-      marginLeft: 6,
-      paddingHorizontal: 6,
+      gap: 3,
+      height: 26,
+      paddingHorizontal: 10,
       borderRadius: radius.pill,
       backgroundColor: c.fill,
     },
-    statusChipText: {
-      fontFamily: font.monoMedium,
-      fontSize: 10.5,
-      color: c.muted,
-    },
-    statusChipMode: { flexShrink: 1 },
-    // A model that can be switched: the same text, with a chevron after it.
-    modelSwitch: { flexDirection: "row", alignItems: "center", gap: 2, flexShrink: 0 },
+    controlText: { fontFamily: font.sansMedium, fontSize: 12.5, color: c.text },
+    // A fact, not a control: outlined rather than filled, and quieter.
+    controlQuiet: { backgroundColor: "transparent", borderWidth: 1, borderColor: c.line },
+    controlTextQuiet: { color: c.muted },
     switchPressed: { opacity: 0.6 },
     // On its way: the value being switched to, in the working colour.
     switchPending: { color: c.workingText },
@@ -1699,11 +1756,6 @@ const makeStyles = (c: Palette) =>
     switchButtonDisabled: { opacity: 0.4 },
     switchButtonLabel: { fontFamily: font.sansBold, fontSize: size.caption, color: c.text },
     switchButtonLabelPrimary: { color: c.onInverse },
-    statusChipRule: {
-      width: StyleSheet.hairlineWidth,
-      height: 9,
-      backgroundColor: c.faint,
-    },
     // No box around it. This was a 28pt touch target from when the dot was a
     // control in the top row; on a line of text it centred a six point dot in
     // twenty-eight, which pushed it clear of the title's left edge. It is a

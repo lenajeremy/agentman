@@ -123,6 +123,9 @@ function isPath(summary: string): boolean {
   return /^[~.]?\/?[\w.@+-]+(\/[\w.@+-]+)+\/?$/.test(summary);
 }
 
+/** A UUID, or a long run of hex: an id, not a name. */
+const ID_SEGMENT = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{24,})$/i;
+
 function Target({ summary }: { summary: string }) {
   const styles = useStyles(makeStyles);
   const first = summary.split("\n", 1)[0];
@@ -130,7 +133,11 @@ function Target({ summary }: { summary: string }) {
   if (isPath(first)) {
     const parts = first.replace(/\/$/, "").split("/");
     const base = parts.pop() ?? first;
-    const parent = parts.length > 0 ? `${parts[parts.length - 1]}/` : "";
+    const above = parts.length > 0 ? parts[parts.length - 1] : "";
+    // A folder named by an id says nothing a person can use, and at forty
+    // characters it pushed the file name off the row: Antigravity keeps a
+    // plan in brain/<conversation id>/implementation_plan.md.
+    const parent = above && !ID_SEGMENT.test(above) ? `${above}/` : "";
     return (
       <Text style={styles.target} numberOfLines={1}>
         <Text style={styles.targetDim}>{parent}</Text>
