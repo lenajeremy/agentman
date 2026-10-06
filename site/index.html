@@ -188,20 +188,8 @@
 
       <div class="workspace-feature">
         <div class="workspace-copy"><span class="workspace-kicker">Files</span><h3>Browse the workspace.</h3><p>Open folders in the agent's working directory and find the file you want. Code and images open in a read-only viewer; private files and symlinks stay hidden.</p></div>
-        <div class="workspace-art files-art" role="img" aria-label="Illustration of the Files tab showing folders and files in a session's workspace">
-          <div class="mock-window" aria-hidden="true">
-            <div class="mock-head"><span>‹</span><b>Workspace</b><span>↻</span></div>
-            <div class="mock-tabs"><b>Files</b><span>Changes</span></div>
-            <div class="mock-crumb">⌂ <span>›</span> storefront <span>›</span> src</div>
-            <div class="mock-list">
-              <div><i class="folder">▰</i><b>components</b><span>›</span></div>
-              <div><i class="folder">▰</i><b>lib</b><span>›</span></div>
-              <div><i class="code">{ }</i><b>App.tsx</b><small>3.2 KB</small><span>›</span></div>
-              <div><i class="code">#</i><b>styles.css</b><small>1.8 KB</small><span>›</span></div>
-              <div><i class="picture">▧</i><b>hero.png</b><small>284 KB</small><span>›</span></div>
-            </div>
-            <div class="mock-note">Files are read only.</div>
-          </div>
+        <div class="workspace-art files-art bleed" role="img" aria-label="The app's Files tab at the root of a project: folders and files with their sizes">
+          <figure class="iphone-x rise"><img class="shot" src="/media/files.webp" alt="" loading="lazy" decoding="async"><img class="frame" src="/media/iphone-frame.webp" alt="" width="700" height="1431" decoding="async"></figure>
         </div>
       </div>
 
@@ -214,24 +202,15 @@
 
       <div class="workspace-more">
         <article class="workspace-card">
-          <div class="mini-art read-art" role="img" aria-label="Illustration of syntax-highlighted code beside an image preview">
-            <div class="mini-code" aria-hidden="true"><span>App.tsx <b>File</b></span><code><i>const</i> image = <em>"hero.png"</em>;</code><code><i>return</i> &lt;Preview src={image} /&gt;;</code></div>
-            <div class="mini-image" aria-hidden="true"><div class="mini-sun"></div><div class="mini-hill"></div></div>
-          </div>
+          <div class="mini-art read-art shots" role="img" aria-label="The app's code viewer on exports.js, with an image open in its image viewer"><img class="s-back" src="/media/card-code.webp" alt="" loading="lazy" decoding="async"><img class="s-front" src="/media/card-image.webp" alt="" loading="lazy" decoding="async"></div>
           <h3>Read code and view images</h3><p>Open source files with syntax highlighting and line numbers, or inspect an image right on your phone.</p>
         </article>
         <article class="workspace-card">
-          <div class="mini-art preview-art" role="img" aria-label="Illustration of a running server opening its website in an in-app browser">
-            <div class="server-row" aria-hidden="true"><span>◉</span><div><b>storefront</b><small>:3000 · npm run dev</small></div><strong>Open ↗</strong></div>
-            <div class="preview-browser" aria-hidden="true"><div class="preview-browser-bar"><i></i><span>localhost:3000</span><i></i></div><div class="preview-page"><b>Build faster.</b><span>Preview your changes live</span><em>Explore →</em></div></div>
-          </div>
+          <div class="mini-art preview-art shots" role="img" aria-label="The app's Servers screen with Open and Stop, over the page the server shows"><img class="s-back" src="/media/card-preview.webp" alt="" loading="lazy" decoding="async"><img class="s-top" src="/media/card-server.webp" alt="" loading="lazy" decoding="async"></div>
           <h3>Open the live site</h3><p>Open a server your agent started in the app. Share a preview link or stop the server from your phone.</p>
         </article>
         <article class="workspace-card">
-          <div class="mini-art message-art" role="img" aria-label="Illustration of a message with an attached image ready to send to an agent">
-            <div class="message-bubble" aria-hidden="true">Done. How does this look?</div>
-            <div class="message-composer" aria-hidden="true"><div class="message-thumb"><div class="message-thumb-window"><i></i><i></i><i></i></div><span>×</span></div><div class="message-field"><b>＋</b><span>Fix the spacing here…</span><strong>↑</strong></div></div>
-          </div>
+          <div class="mini-art message-art shots" role="img" aria-label="The app's message composer with a screenshot attached and a note typed"><img class="s-fill" src="/media/card-composer.webp" alt="" loading="lazy" decoding="async"></div>
           <h3>Send images with your message</h3><p>Attach a screenshot to show what you mean. Images your agent produces or inspects also open from the conversation.</p>
         </article>
       </div>
