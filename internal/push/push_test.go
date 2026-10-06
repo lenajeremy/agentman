@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
+	"time"
 )
 
 const goodToken = "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]"
@@ -29,12 +31,12 @@ func TestValidTokenRejectsAnythingNotFromExpo(t *testing.T) {
 func TestStoreRoundTripsThroughDisk(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
-	added, err := store.Register(goodToken)
+	added, err := store.Register(goodToken, nil)
 	if err != nil || !added {
 		t.Fatalf("register: added=%v err=%v", added, err)
 	}
 	// Re-registering is the app reconnecting, not a new device.
-	added, err = store.Register(goodToken)
+	added, err = store.Register(goodToken, nil)
 	if err != nil || added {
 		t.Fatalf("re-register reported a new device: added=%v err=%v", added, err)
 	}
@@ -56,7 +58,7 @@ func TestStoreRoundTripsThroughDisk(t *testing.T) {
 func TestSendDropsATokenExpoReportsUnregistered(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
-	if _, err := store.Register(goodToken); err != nil {
+	if _, err := store.Register(goodToken, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -116,4 +118,101 @@ func TestSendWithNoDevicesDoesNotCallExpo(t *testing.T) {
 	if called {
 		t.Fatal("posted to expo with no registered devices")
 	}
+}
+
+// A phone chooses which alerts it wants, and the choice survives a restart.
+func TestEachPhoneGetsOnlyTheAlertsItChose(t *testing.T) {
+	const quiet = "ExponentPushToken[qqqqqqqqqqqqqqqqqqqqqq]"
+	const everything = "ExponentPushToken[eeeeeeeeeeeeeeeeeeeeee]"
+	dir := t.TempDir()
+	store := NewStore(dir)
+	if _, err := store.Register(quiet, &Prefs{Finished: false, NeedsYou: true}); err != nil {
+		t.Fatal(err)
+	}
+	// An app from before the choice existed sends none, and has always been
+	// sent everything.
+	if _, err := store.Register(everything, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	check := func(label string, s *Store) {
+		t.Helper()
+		if got := sorted(s.TokensFor(KindFinished)); len(got) != 1 || got[0] != everything {
+			t.Errorf("%s: finished goes to %v, want only the phone that kept it", label, got)
+		}
+		if got := sorted(s.TokensFor(KindNeedsYou)); len(got) != 2 {
+			t.Errorf("%s: needs-you goes to %v, want both phones", label, got)
+		}
+	}
+	check("live", store)
+	check("after a restart", NewStore(dir))
+
+	// Re-registering without a choice, as every reconnect of an old app does,
+	// keeps the choice already made rather than resetting it.
+	if _, err := store.Register(quiet, nil); err != nil {
+		t.Fatal(err)
+	}
+	check("after a plain re-registration", store)
+
+	// And a new choice replaces the old one.
+	if _, err := store.Register(quiet, &Prefs{Finished: true, NeedsYou: false}); err != nil {
+		t.Fatal(err)
+	}
+	if got := sorted(store.TokensFor(KindNeedsYou)); len(got) != 1 || got[0] != everything {
+		t.Errorf("needs-you goes to %v after the phone turned it off", got)
+	}
+}
+
+// A token file written before phones could choose reads as everything on.
+func TestATokenFileFromBeforeTheChoiceKeepsEveryAlert(t *testing.T) {
+	dir := t.TempDir()
+	stored := []map[string]any{{"value": goodToken, "lastSeen": time.Now().UnixMilli()}}
+	raw, _ := json.Marshal(stored)
+	if err := os.WriteFile(filepath.Join(dir, "push.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(dir)
+	if len(store.TokensFor(KindFinished)) != 1 || len(store.TokensFor(KindNeedsYou)) != 1 {
+		t.Fatal("an old token file lost alerts it used to get")
+	}
+}
+
+// Send asks Expo only for the phones that want the alert, and calls nothing
+// when none does.
+func TestSendSkipsPhonesThatTurnedTheKindOff(t *testing.T) {
+	const quiet = "ExponentPushToken[qqqqqqqqqqqqqqqqqqqqqq]"
+	store := NewStore(t.TempDir())
+	if _, err := store.Register(quiet, &Prefs{Finished: false, NeedsYou: true}); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var received []expoMessage
+		_ = json.NewDecoder(r.Body).Decode(&received)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"status":"ok"}]}`))
+	}))
+	defer server.Close()
+	sender := NewSender(store, Config{})
+	sender.Endpoint = server.URL
+
+	if err := sender.Send(context.Background(), Alert{Kind: KindFinished, Title: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 {
+		t.Fatalf("Expo was called %d times for an alert nobody wants", calls)
+	}
+	if err := sender.Send(context.Background(), Alert{Kind: KindNeedsYou, Title: "needs you"}); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("Expo was called %d times for an alert the phone wants", calls)
+	}
+}
+
+func sorted(values []string) []string {
+	out := append([]string(nil), values...)
+	sort.Strings(out)
+	return out
 }

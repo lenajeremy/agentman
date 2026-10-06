@@ -57,6 +57,43 @@ type Token struct {
 	// LastSeen is refreshed whenever the app re-registers, which it does on
 	// every connect, so an active phone never expires.
 	LastSeen int64 `json:"lastSeen"`
+	// MuteFinished and MuteNeedsYou record the alerts this phone turned off.
+	// Stored as mutes rather than wishes so a file written before the choice
+	// existed reads as "everything on", which is what those phones received.
+	MuteFinished bool `json:"muteFinished,omitempty"`
+	MuteNeedsYou bool `json:"muteNeedsYou,omitempty"`
+}
+
+// Kind is what an alert is about, which is what a phone chooses by.
+type Kind string
+
+const (
+	// KindFinished: an agent finished its turn.
+	KindFinished Kind = "finished"
+	// KindNeedsYou: an agent is blocked on an approval or a question.
+	KindNeedsYou Kind = "needs_you"
+)
+
+// Prefs is one phone's choice of alerts.
+type Prefs struct {
+	Finished bool
+	NeedsYou bool
+}
+
+// wants reports whether a phone with these preferences takes this kind.
+func (p Prefs) wants(kind Kind) bool {
+	switch kind {
+	case KindFinished:
+		return p.Finished
+	case KindNeedsYou:
+		return p.NeedsYou
+	}
+	return true
+}
+
+type device struct {
+	lastSeen int64
+	prefs    Prefs
 }
 
 // Store holds registered device tokens, persisted beside the daemon's config.
@@ -64,7 +101,7 @@ type Store struct {
 	path string
 
 	mu     sync.Mutex
-	tokens map[string]int64
+	tokens map[string]device
 }
 
 // NewStore loads the token file, tolerating a missing or unreadable one: push
@@ -72,7 +109,7 @@ type Store struct {
 func NewStore(dir string) *Store {
 	s := &Store{
 		path:   filepath.Join(dir, "push.json"),
-		tokens: map[string]int64{},
+		tokens: map[string]device{},
 	}
 	raw, err := os.ReadFile(s.path)
 	if err != nil {
@@ -85,7 +122,10 @@ func NewStore(dir string) *Store {
 	cutoff := time.Now().Add(-tokenTTL).UnixMilli()
 	for _, token := range stored {
 		if ValidToken(token.Value) && token.LastSeen > cutoff {
-			s.tokens[token.Value] = token.LastSeen
+			s.tokens[token.Value] = device{
+				lastSeen: token.LastSeen,
+				prefs:    Prefs{Finished: !token.MuteFinished, NeedsYou: !token.MuteNeedsYou},
+			}
 		}
 	}
 	return s
@@ -107,15 +147,25 @@ func ValidToken(value string) bool {
 	return strings.HasSuffix(value, "]")
 }
 
-// Register records a device, refreshing it if already known. Returns whether
-// anything changed, so a caller can skip a needless disk write.
-func (s *Store) Register(value string) (bool, error) {
+// Register records a device, refreshing it if already known, with its choice
+// of alerts. A nil choice keeps the one already recorded, or turns everything
+// on for a phone seen for the first time: that is an app from before the
+// choice existed, and it has always been sent everything. Returns whether the
+// device is new.
+func (s *Store) Register(value string, prefs *Prefs) (bool, error) {
 	if !ValidToken(value) {
 		return false, fmt.Errorf("push: not an Expo push token")
 	}
 	s.mu.Lock()
-	_, existed := s.tokens[value]
-	s.tokens[value] = time.Now().UnixMilli()
+	previous, existed := s.tokens[value]
+	next := device{lastSeen: time.Now().UnixMilli(), prefs: Prefs{Finished: true, NeedsYou: true}}
+	if existed {
+		next.prefs = previous.prefs
+	}
+	if prefs != nil {
+		next.prefs = *prefs
+	}
+	s.tokens[value] = next
 	if len(s.tokens) > maxTokens {
 		s.evictOldestLocked()
 	}
@@ -145,11 +195,24 @@ func (s *Store) Tokens() []string {
 	return out
 }
 
+// TokensFor returns the devices that want this kind of alert.
+func (s *Store) TokensFor(kind Kind) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.tokens))
+	for token, device := range s.tokens {
+		if device.prefs.wants(kind) {
+			out = append(out, token)
+		}
+	}
+	return out
+}
+
 func (s *Store) evictOldestLocked() {
 	oldest, oldestAt := "", int64(0)
-	for token, seen := range s.tokens {
-		if oldest == "" || seen < oldestAt {
-			oldest, oldestAt = token, seen
+	for token, device := range s.tokens {
+		if oldest == "" || device.lastSeen < oldestAt {
+			oldest, oldestAt = token, device.lastSeen
 		}
 	}
 	delete(s.tokens, oldest)
@@ -158,8 +221,13 @@ func (s *Store) evictOldestLocked() {
 func (s *Store) save() error {
 	s.mu.Lock()
 	stored := make([]Token, 0, len(s.tokens))
-	for token, seen := range s.tokens {
-		stored = append(stored, Token{Value: token, LastSeen: seen})
+	for token, device := range s.tokens {
+		stored = append(stored, Token{
+			Value:        token,
+			LastSeen:     device.lastSeen,
+			MuteFinished: !device.prefs.Finished,
+			MuteNeedsYou: !device.prefs.NeedsYou,
+		})
 	}
 	s.mu.Unlock()
 	body, err := json.MarshalIndent(stored, "", "  ")
@@ -171,6 +239,8 @@ func (s *Store) save() error {
 
 // Alert is one notification to deliver.
 type Alert struct {
+	// Kind decides which phones receive it. Empty reaches every phone.
+	Kind  Kind
 	Title string
 	Body  string
 	// SessionID lets the app open the right screen when the alert is tapped.
@@ -213,7 +283,7 @@ type expoResponse struct {
 	} `json:"data"`
 }
 
-// Send delivers one alert to every registered device.
+// Send delivers one alert to every registered device that wants its kind.
 //
 // Errors are returned for logging but are never fatal: a failed push is a
 // missed convenience, and the app still shows the state when next opened.
@@ -222,6 +292,9 @@ func (s *Sender) Send(ctx context.Context, alert Alert) error {
 		return nil
 	}
 	tokens := s.Store.Tokens()
+	if alert.Kind != "" {
+		tokens = s.Store.TokensFor(alert.Kind)
+	}
 	if len(tokens) == 0 {
 		return nil
 	}

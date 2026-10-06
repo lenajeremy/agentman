@@ -159,6 +159,10 @@ type Request struct {
 	ClientID string `json:"clientId,omitempty"`
 	// PushToken carries an Expo push token on ReqRegisterPush.
 	PushToken string `json:"pushToken,omitempty"`
+	// Notify carries that phone's choice of alerts on ReqRegisterPush. Absent
+	// from an app that predates the choice, which keeps whatever the phone
+	// last chose, or both kinds for a phone that never chose.
+	Notify *NotifyPrefs `json:"notify,omitempty"`
 	// Port names the server on ReqOpenServer and ReqCloseServer.
 	Port int `json:"port,omitempty"`
 	// Path is relative to the session's working directory for workspace reads,
@@ -377,4 +381,12 @@ func NewEnvelope(id string, to Peer, payload any) (Envelope, error) {
 		return Envelope{}, err
 	}
 	return Envelope{V: Version, ID: id, To: to, Payload: body}, nil
+}
+
+// NotifyPrefs is which alerts one phone wants pushed to it.
+type NotifyPrefs struct {
+	// Finished: an agent finished its turn.
+	Finished bool `json:"finished"`
+	// NeedsYou: an agent is blocked on an approval or a question.
+	NeedsYou bool `json:"needsYou"`
 }

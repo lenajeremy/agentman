@@ -259,7 +259,7 @@ func (d *Daemon) SetPush(sender *push.Sender) {
 //
 // Fired in the background: the callers are a discovery sweep and a hook
 // callback, and neither can afford to wait on a third-party HTTP request.
-func (d *Daemon) alert(title, body, sessionID string) {
+func (d *Daemon) alert(kind push.Kind, title, body, sessionID string) {
 	d.mu.Lock()
 	sender := d.push
 	d.mu.Unlock()
@@ -269,7 +269,7 @@ func (d *Daemon) alert(title, body, sessionID string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		_ = sender.Send(ctx, push.Alert{Title: title, Body: body, SessionID: sessionID})
+		_ = sender.Send(ctx, push.Alert{Kind: kind, Title: title, Body: body, SessionID: sessionID})
 	}()
 }
 
@@ -332,7 +332,7 @@ func (d *Daemon) alertTurnComplete(event protocol.Event) {
 	if body == "" {
 		body = "Finished its turn."
 	}
-	d.alert(name, body, event.SessionID)
+	d.alert(push.KindFinished, name, body, event.SessionID)
 }
 
 // alertNeedsAnswer pushes a session that has become blocked on a decision, once
@@ -361,7 +361,7 @@ func (d *Daemon) alertNeedsAnswer(session protocol.Session) {
 	if body == "" {
 		body = "Waiting on you to choose."
 	}
-	d.alert(name+" needs your answer", body, session.ID)
+	d.alert(push.KindNeedsYou, name+" needs your answer", body, session.ID)
 }
 
 // Run drives discovery and hook handling until ctx is cancelled.
@@ -1067,7 +1067,11 @@ func (d *Daemon) HandleFrom(
 				Error: "daemon: push notifications are not configured on this machine",
 			}
 		}
-		if _, err := sender.Store.Register(req.PushToken); err != nil {
+		var prefs *push.Prefs
+		if req.Notify != nil {
+			prefs = &push.Prefs{Finished: req.Notify.Finished, NeedsYou: req.Notify.NeedsYou}
+		}
+		if _, err := sender.Store.Register(req.PushToken, prefs); err != nil {
 			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
 		}
 		return protocol.Event{}

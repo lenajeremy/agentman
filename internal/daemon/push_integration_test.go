@@ -170,3 +170,39 @@ func TestABlockedAgentPushesOncePerQuestion(t *testing.T) {
 		t.Errorf("title = %q", title)
 	}
 }
+
+// A phone that turned "finished" off still hears when an agent needs it, and
+// hears nothing else. Registration runs exactly as the app sends it.
+func TestAPhoneOnlyGetsTheAlertsItChose(t *testing.T) {
+	stub := newExpoStub(t)
+	agent, _, scripted := pushedDaemon(t, stub, push.Config{})
+	ctx := context.Background()
+
+	const token = "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]"
+	if event := agent.HandleFrom(ctx, "device-1", protocol.Request{
+		Type: protocol.ReqRegisterPush, PushToken: token,
+		Notify: &protocol.NotifyPrefs{Finished: false, NeedsYou: true},
+	}); event.Type == protocol.EvtError {
+		t.Fatalf("registration refused: %s", event.Error)
+	}
+
+	// A turn finishes: nothing may reach Expo.
+	agent.refresh(ctx, true)
+	scripted.set(protocol.StateIdle)
+	agent.refresh(ctx, false)
+	time.Sleep(300 * time.Millisecond)
+	if sent := stub.wait(t, 0); len(sent) != 0 {
+		t.Fatalf("a finished turn was pushed to a phone that turned it off: %v", sent)
+	}
+
+	// The agent blocks on a question: that one is wanted.
+	scripted.setQuestion(protocol.StateWaitingInput, &protocol.Question{
+		ID: "q1", Prompt: "Run the migration?",
+		Options: []protocol.QuestionOption{{Key: "1", Label: "Yes"}, {Key: "2", Label: "No"}},
+	})
+	agent.refresh(ctx, false)
+	sent := stub.wait(t, 1)
+	if len(sent) != 1 || sent[0]["to"] != token {
+		t.Fatalf("Expo received %v, want one needs-you alert for the phone", sent)
+	}
+}
