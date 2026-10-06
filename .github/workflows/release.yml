@@ -2,8 +2,9 @@
 #
 #     git tag v0.2.0 && git push origin v0.2.0
 #
-# Builds every platform, publishes the GitHub release, and opens the formula
-# update on the Homebrew tap with checksums it computed itself.
+# Builds every platform, publishes the GitHub release, opens the formula
+# update on the Homebrew tap with checksums it computed itself, and publishes
+# the same binaries to npm as agentman (see scripts/npm-release.mjs).
 name: Release
 
 on:
@@ -12,10 +13,17 @@ on:
 
 permissions:
   contents: write
+  # npm provenance: the registry records that these packages were built here,
+  # from this tag.
+  id-token: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      # At job level so the npm steps' `if` can see whether it is set; a
+      # step's own env is not visible to its condition.
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -44,3 +52,18 @@ jobs:
           # Scoped to this repo only, so publishing to the tap repository
           # needs a separate token with write access to it.
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      # npm gets the binaries GoReleaser just built and released, one package
+      # per platform plus agentman itself. Skipped until an NPM_TOKEN secret
+      # exists, so a release without it still ships everywhere else.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: env.NPM_TOKEN != ''
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Publish to npm
+        if: env.NPM_TOKEN != ''
+        run: node scripts/npm-release.mjs "$GITHUB_REF_NAME" dist --publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
