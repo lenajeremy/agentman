@@ -1,3 +1,4 @@
+import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import Feather from "@expo/vector-icons/Feather";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -25,6 +26,7 @@ import { useStyles, useTheme } from "../lib/appearance";
 import { pair, pairWithToken } from "../lib/client";
 import { DEFAULT_RELAY } from "../lib/pairing";
 import { PRIVACY_POLICY_URL } from "../lib/privacy";
+import { SETUP_GUIDE_URL, SETUP_STEPS } from "../lib/setup-guide";
 import { useStore } from "../lib/store";
 import { PAIRING_CODE_LENGTH } from "../lib/protocol";
 import { font, Palette, radius, size, space } from "../lib/theme";
@@ -152,19 +154,14 @@ export default function Pair() {
             <PairIllustration style={styles.art} />
             <Text style={styles.title}>Pair with your Mac</Text>
             <Text style={styles.lede}>
-              Run this on the Mac where your agents live, then scan the code it shows.
+              Run <Text style={styles.ledeCode}>am pair</Text> on the computer where your agents
+              work, and scan the code it shows. New to Agentman? The setup steps are below.
             </Text>
-            <View style={styles.command}>
-              <Text style={styles.commandPrompt}>$</Text>
-              <Text style={styles.commandText} selectable>
-                am pair
-              </Text>
-            </View>
           </Appear>
 
           {error && !manual ? <ErrorBox message={error} /> : null}
 
-          <Appear delay={90} style={styles.actions}>
+          <Appear delay={110} style={styles.actions}>
             <MotionPressable
               onPress={() => router.push("/scan")}
               style={styles.primaryButton}
@@ -249,6 +246,10 @@ export default function Pair() {
             </Appear>
           ) : null}
 
+          <Appear delay={150}>
+            <SetupGuide />
+          </Appear>
+
           <View style={styles.disclosure}>
             <Text style={styles.footnote}>
               Codes expire in 60 seconds. Live traffic passes through your relay.
@@ -266,6 +267,72 @@ export default function Pair() {
         </ContentColumn>
       </ScrollView>
     </KeyboardAvoidingView>
+  );
+}
+
+/**
+ * The steps on the computer before there is a code to scan. Commands copy with
+ * a tap, and with Universal Clipboard paste straight into a Mac's terminal.
+ */
+function SetupGuide() {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const [copied, setCopied] = useState<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  const copy = (command: string) => {
+    void Clipboard.setStringAsync(command);
+    if (Platform.OS !== "web") void Haptics.selectionAsync().catch(() => {});
+    setCopied(command);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCopied(null), 1600);
+  };
+
+  return (
+    <View style={styles.guide}>
+      <Text style={styles.guideTitle}>First time? Set up your computer</Text>
+      {SETUP_STEPS.map((step, index) => (
+        <View key={step.title} style={styles.step}>
+          <View style={styles.stepNumber}>
+            <Text style={styles.stepNumberText}>{index + 1}</Text>
+          </View>
+          <View style={styles.stepCopy}>
+            <Text style={styles.stepTitle}>{step.title}</Text>
+            <Text style={styles.stepDetail}>{step.detail}</Text>
+            {step.command ? (
+              <MotionPressable
+                onPress={() => copy(step.command!)}
+                pressedScale={0.98}
+                style={styles.stepCommand}
+                accessibilityRole="button"
+                accessibilityLabel={`Copy ${step.command}`}
+                accessibilityHint="Copies the command so you can paste it into a terminal"
+              >
+                <Text style={styles.commandPrompt}>$</Text>
+                <Text style={styles.stepCommandText} numberOfLines={1}>
+                  {step.command}
+                </Text>
+                <Feather
+                  name={copied === step.command ? "check" : "copy"}
+                  size={14}
+                  color={copied === step.command ? color.working : color.faint}
+                />
+              </MotionPressable>
+            ) : null}
+          </View>
+        </View>
+      ))}
+      <MotionPressable
+        onPress={() => void Linking.openURL(SETUP_GUIDE_URL)}
+        style={styles.guideLink}
+        hitSlop={8}
+        accessibilityRole="link"
+      >
+        <Text style={styles.guideLinkText}>The full setup guide</Text>
+        <Feather name="arrow-up-right" size={14} color={color.textSecondary} />
+      </MotionPressable>
+    </View>
   );
 }
 
@@ -308,6 +375,7 @@ const makeStyles = (c: Palette) =>
       color: c.text,
       marginTop: space.xl,
     },
+    ledeCode: { fontFamily: font.mono, fontSize: 14, color: c.text },
     lede: {
       fontFamily: font.sans,
       fontSize: size.body,
@@ -315,20 +383,45 @@ const makeStyles = (c: Palette) =>
       lineHeight: 22,
       marginTop: space.sm,
     },
-    command: {
+    commandPrompt: { fontFamily: font.mono, fontSize: 14, color: c.faint },
+
+    guideTitle: { fontFamily: font.sansBold, fontSize: size.caption, color: c.muted },
+    guide: {
+      marginTop: space.sm,
+      backgroundColor: c.surface,
+      borderRadius: radius.xxl,
+      borderWidth: 1,
+      borderColor: c.line,
+      padding: space.lg,
+      gap: space.lg,
+    },
+    step: { flexDirection: "row", gap: space.md },
+    stepNumber: {
+      width: 26,
+      height: 26,
+      borderRadius: 8,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.fill,
+      marginTop: 1,
+    },
+    stepNumberText: { fontFamily: font.mono, fontSize: 13, color: c.textSecondary },
+    stepCopy: { flex: 1, minWidth: 0, gap: 3 },
+    stepTitle: { fontFamily: font.sansBold, fontSize: size.body, color: c.text },
+    stepDetail: { fontFamily: font.sans, fontSize: size.caption, lineHeight: 18, color: c.muted },
+    stepCommand: {
       flexDirection: "row",
       alignItems: "center",
       gap: space.sm,
-      marginTop: space.lg,
-      paddingHorizontal: space.lg,
-      paddingVertical: 14,
+      marginTop: space.sm,
+      paddingHorizontal: space.md,
+      paddingVertical: 11,
       borderRadius: radius.lg,
-      backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
+      backgroundColor: c.fill,
     },
-    commandPrompt: { fontFamily: font.mono, fontSize: 14, color: c.faint },
-    commandText: { fontFamily: font.mono, fontSize: 14, color: c.text },
+    stepCommandText: { flex: 1, fontFamily: font.mono, fontSize: 13, color: c.text },
+    guideLink: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start" },
+    guideLinkText: { fontFamily: font.sansMedium, fontSize: size.caption, color: c.textSecondary },
 
     actions: { gap: space.xs, marginTop: space.sm },
     primaryButton: {
