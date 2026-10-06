@@ -1,4 +1,4 @@
-import * as Haptics from "expo-haptics";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import React, {
   createContext,
@@ -48,6 +48,13 @@ import { draftNamespace } from "./draft-policy";
 import { resumeOnce } from "./resume";
 import { folderContains } from "./folders";
 import { isPushActive, obtainPushToken, setPushActive } from "./push";
+import {
+  DEFAULT_NOTIFY_PREFS,
+  NOTIFY_PREFS_KEY,
+  NotifyPrefs,
+  parseNotifyPrefs,
+  shouldAlertOnPhone,
+} from "./notification-prefs";
 import {
   PUSH_ACCEPT_MS,
   initialPushRegistration,
@@ -125,6 +132,10 @@ interface Store {
 
   signIn(creds: Credentials): void;
   signOut(): Promise<void>;
+  /** Which alerts this phone wants. */
+  notifyPrefs: NotifyPrefs;
+  /** Saves the choice and tells the Mac, which is what sends the pushes. */
+  setNotifyPrefs(prefs: NotifyPrefs): void;
   refresh(): void;
   openSession(sessionId: string): void;
   closeSession(sessionId: string): void;
@@ -254,12 +265,19 @@ function clearSettledDrafts(before: PendingSend[], after: PendingSend[]): void {
   }
 }
 
-function notifyQuestion(session: Session) {
+function notifyQuestion(session: Session, prefs: NotifyPrefs) {
   if (Platform.OS === "web") return;
   // Once the Mac has a push token it sends these itself, and it can reach a
   // suspended app that this cannot. Scheduling here too would double every
-  // alert.
-  if (isPushActive()) return;
+  // alert. And nothing while the app is open.
+  if (
+    !shouldAlertOnPhone("needsYou", prefs, {
+      appActive: AppState.currentState === "active",
+      pushActive: isPushActive(),
+    })
+  ) {
+    return;
+  }
   void Notifications.scheduleNotificationAsync({
     content: {
       title: `${session.name || session.kind} needs your answer`,
@@ -269,7 +287,6 @@ function notifyQuestion(session: Session) {
     },
     trigger: null,
   }).catch(() => {});
-  void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
 }
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
@@ -394,9 +411,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const pushRegistration = useRef(initialPushRegistration);
   const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Which alerts this phone wants. The Mac sends the pushes, so the choice
+  // travels with the token every time it is registered.
+  const [notifyPrefs, setNotifyPrefsState] = useState<NotifyPrefs>(DEFAULT_NOTIFY_PREFS);
+  const notifyPrefsRef = useRef<NotifyPrefs>(DEFAULT_NOTIFY_PREFS);
+  useEffect(() => {
+    void AsyncStorage.getItem(NOTIFY_PREFS_KEY)
+      .then((raw) => {
+        const prefs = parseNotifyPrefs(raw);
+        notifyPrefsRef.current = prefs;
+        setNotifyPrefsState(prefs);
+      })
+      .catch(() => {});
+  }, []);
+
   const registerPushToken = useCallback((client: Client) => {
     if (!pushToken.current) return;
-    const id = client.registerPush(pushToken.current);
+    const id = client.registerPush(pushToken.current, notifyPrefsRef.current);
     pushRegistration.current = pushRegistrationSent(pushRegistration.current, id);
     setPushActive(pushRegistration.current.active);
     if (!id) return;
@@ -466,7 +497,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
         const alerts = reconcileQuestionAlerts(announcedQuestions.current, list);
         announcedQuestions.current = alerts.announced;
-        for (const session of alerts.newlyPending) notifyQuestion(session);
+        for (const session of alerts.newlyPending) notifyQuestion(session, notifyPrefsRef.current);
         setPending((current) => {
           const next = clearQueuedForSessionTransitions(current, previous, list);
           clearSettledDrafts(current, next);
@@ -494,7 +525,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!updated) break;
         const alert = updateQuestionAlerts(announcedQuestions.current, updated);
         announcedQuestions.current = alert.announced;
-        if (alert.newlyPending) notifyQuestion(alert.newlyPending);
+        if (alert.newlyPending) notifyQuestion(alert.newlyPending, notifyPrefsRef.current);
         const previous = sessionsRef.current;
         const currentIndex = previous.findIndex((session) => session.id === updated.id);
         const next = currentIndex < 0
@@ -657,7 +688,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // The whole point of the product: tell the user their agent finished.
         // Guarded because neither module exists on web, where an unhandled
         // rejection here takes the whole screen down.
-        if (Platform.OS !== "web" && !isPushActive()) {
+        if (
+          Platform.OS !== "web" &&
+          shouldAlertOnPhone("finished", notifyPrefsRef.current, {
+            appActive: AppState.currentState === "active",
+            pushActive: isPushActive(),
+          })
+        ) {
           void Notifications.scheduleNotificationAsync({
             content: {
               title: `${event.sessionName ?? "Agent"} finished`,
@@ -667,9 +704,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             },
             trigger: null,
           }).catch(() => {});
-          void Haptics.notificationAsync(
-            Haptics.NotificationFeedbackType.Success,
-          ).catch(() => {});
         }
         break;
       }
@@ -1026,6 +1060,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 		void saveDismissals({});
         setCredentials(creds);
         attach(creds);
+      },
+
+      notifyPrefs,
+      setNotifyPrefs(prefs: NotifyPrefs) {
+        notifyPrefsRef.current = prefs;
+        setNotifyPrefsState(prefs);
+        void AsyncStorage.setItem(NOTIFY_PREFS_KEY, JSON.stringify(prefs)).catch(() => {});
+        if (clientRef.current) registerPushToken(clientRef.current);
       },
 
       async signOut() {

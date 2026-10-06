@@ -9,6 +9,7 @@ import { ContentColumn } from "../components/ContentColumn";
 import { MotionPressable } from "../components/MotionPressable";
 import { useStyles, useTheme } from "../lib/appearance";
 import { AppearancePreference } from "../lib/appearance-policy";
+import { NotifyPrefs } from "../lib/notification-prefs";
 import { PRIVACY_POLICY_URL } from "../lib/privacy";
 import { isPushActive, pushFailureReason } from "../lib/push";
 import { useStore } from "../lib/store";
@@ -99,6 +100,25 @@ export default function Settings() {
             </View>
           </Appear>
 
+          <Appear delay={15}>
+            <Text style={styles.sectionLabel}>Notifications</Text>
+            <MotionPressable
+              onPress={() => router.push("/notifications")}
+              style={[styles.card, styles.linkRow]}
+              pressedScale={0.99}
+              accessibilityRole="button"
+              accessibilityLabel={`Notifications: ${notifySummary(store.notifyPrefs)}`}
+            >
+              <Text style={styles.rowLabel}>Alerts</Text>
+              <View style={styles.valueWrap}>
+                <Text style={styles.rowValue} numberOfLines={1}>
+                  {notifySummary(store.notifyPrefs)}
+                </Text>
+                <Feather name="chevron-right" size={16} color={color.faint} />
+              </View>
+            </MotionPressable>
+          </Appear>
+
           <Appear delay={30}>
             <Text style={styles.sectionLabel}>Appearance</Text>
             <View style={styles.segmented} accessibilityRole="radiogroup">
@@ -167,6 +187,14 @@ export default function Settings() {
       </ScrollView>
     </View>
   );
+}
+
+/** The current choice in a few words, for the row that opens it. */
+function notifySummary(prefs: NotifyPrefs): string {
+  if (prefs.needsYou && prefs.finished) return "Needs you and finished";
+  if (prefs.needsYou) return "Only when needed";
+  if (prefs.finished) return "Only when finished";
+  return "Off";
 }
 
 function Row({
@@ -277,6 +305,13 @@ const makeStyles = (c: Palette) =>
       color: c.muted,
     },
     divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.line },
+    linkRow: {
+      minHeight: 56,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: space.md,
+    },
 
     segmented: {
       flexDirection: "row",

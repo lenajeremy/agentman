@@ -217,6 +217,8 @@ export interface Request {
   questionId?: string;
   /** Expo push token on register_push. */
   pushToken?: string;
+  /** Which alerts this phone wants pushed, on register_push. */
+  notify?: { finished: boolean; needsYou: boolean };
   /** Chooses an option on answer_question. */
   optionKey?: string;
   optionKeys?: string[];
