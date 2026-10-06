@@ -370,7 +370,7 @@
   <section class="start" id="get-started" aria-labelledby="start-title">
     <div class="wrap">
       <h2 class="h2" id="start-title">Get started</h2>
-      <div class="sub">Install the CLI, pair your phone, start an agent.</div>
+      <div class="sub">Install the command-line tool, pair your phone, start an agent.</div>
       <div class="platforms" role="tablist" aria-label="Platform">
         <button class="platform" role="tab" id="tab-macos" aria-controls="panel-macos" aria-selected="true" data-platform="macos"><svg class="logo" aria-hidden="true"><use href="#l-apple"/></svg>macOS</button>
         <button class="platform" role="tab" id="tab-linux" aria-controls="panel-linux" aria-selected="false" tabindex="-1" data-platform="linux"><svg class="logo" aria-hidden="true"><use href="#l-linux"/></svg>Linux</button>
@@ -379,12 +379,12 @@
       </div>
 
       <div class="panel-body" role="tabpanel" id="panel-macos" aria-labelledby="tab-macos">
-        <div class="command"><code><span class="pr">$</span>brew install lenajeremy/agentman/agentman</code><button class="copy" data-copy="brew install lenajeremy/agentman/agentman"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span></button></div>
-        <p class="steps-list">Then run <code>am install-hooks</code>, <code>am serve</code> and <code>am pair</code>. The terminal agents — Claude Code, Codex, Cursor, Kiro and Antigravity — run in tmux, which Homebrew installs alongside.</p>
+        <div class="command" data-origin-cmd><code><span class="pr">$</span>curl -fsSL https://agentman-nu.vercel.app/install | sh</code><button class="copy" data-copy="curl -fsSL https://agentman-nu.vercel.app/install | sh"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+        <p class="steps-list">Or with Homebrew: <code>brew install lenajeremy/agentman/agentman</code>. Either way you get <code>tmux</code> too, which Agentman uses to type into your agents.</p>
       </div>
       <div class="panel-body" role="tabpanel" id="panel-linux" aria-labelledby="tab-linux" hidden>
-        <div class="command"><code><span class="pr">$</span>go build -o bin/am ./cmd/am</code><button class="copy" data-copy="git clone https://github.com/lenajeremy/agentman.git && cd agentman && go build -o bin/am ./cmd/am"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span></button></div>
-        <p class="steps-list">Build from a clone with Go 1.26, or download a binary for amd64 or arm64 from <a href="https://github.com/lenajeremy/agentman/releases/latest">the latest release</a>.</p>
+        <div class="command" data-origin-cmd><code><span class="pr">$</span>curl -fsSL https://agentman-nu.vercel.app/install | sh</code><button class="copy" data-copy="curl -fsSL https://agentman-nu.vercel.app/install | sh"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+        <p class="steps-list">For amd64 and arm64. Homebrew on Linux works too: <code>brew install lenajeremy/agentman/agentman</code>. Or build from a clone with Go 1.26.</p>
       </div>
       <div class="panel-body" role="tabpanel" id="panel-ios" aria-labelledby="tab-ios" hidden>
         <a class="btn light" href="https://testflight.apple.com/join/UcJvsjED">Open the TestFlight invite <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
@@ -392,6 +392,17 @@
       </div>
       <div class="panel-body" role="tabpanel" id="panel-android" aria-labelledby="tab-android" hidden>
         <p class="panel-note">Build the app from source with Expo. It runs and shows alerts while it's open; background push isn't set up on Android yet. <a href="https://github.com/lenajeremy/agentman#mobile-development">Mobile setup guide</a></p>
+      </div>
+
+      <div class="then">
+        <div class="then-title">Then, on your computer</div>
+        <ol class="then-steps">
+          <li><code>am install-hooks</code><span>connect your agents, once</span></li>
+          <li><code>am serve</code><span>start Agentman, leave it running</span></li>
+          <li><code>am pair</code><span>scan the code with the app</span></li>
+          <li><code>am claude</code><span>start an agent you can answer</span></li>
+        </ol>
+        <a class="btn light" href="/start">The full setup guide <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
       </div>
     </div>
   </section>
