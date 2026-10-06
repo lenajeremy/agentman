@@ -14,7 +14,7 @@
         "ITSAppUsesNonExemptEncryption": false,
         "NSPhotoLibraryAddUsageDescription": "Allow Agentman to save an image from your Mac to your photo library."
       },
-      "buildNumber": "21",
+      "buildNumber": "22",
       "appleTeamId": "N58PT393QS"
     },
     "android": {
