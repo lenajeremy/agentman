@@ -155,6 +155,7 @@
       ".workspace .caps", ".workspace .h2", ".workspace-intro",
       ".workspace-copy", ".workspace-art", ".workspace-card", ".how .caps", ".how .h2",
       ".steps .step", ".moment li", ".moment .h2", ".start .h2", ".platform",
+      ".names > span", ".moment .phones .iphone-x", ".workspace-art .iphone-x", ".grid .tile", ".band .h2", ".band p", ".band-art",
     ];
     const reveal = new IntersectionObserver((entries) => {
       for (const entry of entries) {
@@ -234,6 +235,8 @@
       });
       // Restart the scene's own animations and the progress rule.
       const scene = scenes[index];
+      scenes.forEach((other) => other.querySelectorAll("video").forEach((clip) => { if (other !== scene) clip.pause(); }));
+      if (!reduceMotion) scene.querySelectorAll("video").forEach((clip) => { clip.currentTime = 0; clip.play().catch(() => {}); });
       scene.classList.remove("is-on");
       void scene.offsetWidth;
       scene.classList.add("is-on");
@@ -281,6 +284,64 @@
         else if (!onScreen) pause();
       }, { threshold: .35 }).observe(stepsPanel);
     }
+  }
+
+  // Recordings of the real app play only while they are on screen. With reduced
+  // motion they stay on their poster, a still of the same moment.
+  const clips = Array.from(document.querySelectorAll("video[data-autoplay]"));
+  if (clips.length && !reduceMotion && "IntersectionObserver" in window) {
+    const watch = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const video = entry.target;
+        if (entry.isIntersecting && !video.closest("[hidden]")) {
+          video.preload = "auto";
+          video.play().catch(() => {});
+        } else {
+          video.pause();
+        }
+      }
+    }, { threshold: .25 });
+    clips.forEach((video) => watch.observe(video));
+  }
+
+  // A terminal that follows a recording. Its lines marked data-at appear when
+  // the clip reaches that second, so the Mac carries on the moment the phone
+  // taps Yes (4.48 s into the approval clip), and the alert drops onto the
+  // phone just before the question card slides up.
+  const TAP = 4.48;
+  document.querySelectorAll("[data-sync]").forEach((figure) => {
+    const video = figure.querySelector("video");
+    const term = document.querySelector(`[data-term="${figure.dataset.sync}"]`);
+    if (!video || !term) return;
+    const lines = Array.from(term.querySelectorAll("[data-at]"));
+    const box = term.querySelector("[data-box]");
+    const notif = figure.querySelector("[data-notif]");
+    const paint = (t) => {
+      for (const line of lines) line.classList.toggle("on", t >= Number(line.dataset.at));
+      if (box) {
+        box.classList.toggle("answered", t >= TAP);
+        box.classList.toggle("waiting", !reduceMotion && t >= .5 && t < TAP);
+      }
+      if (notif) notif.classList.toggle("on", t > .05 && t < 1.1);
+    };
+    paint(reduceMotion ? 2 : 0);
+    let frame = 0;
+    const tick = () => { paint(video.currentTime); frame = requestAnimationFrame(tick); };
+    video.addEventListener("play", () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(tick); });
+    video.addEventListener("pause", () => cancelAnimationFrame(frame));
+  });
+
+  // The launch film starts with sound from its own button, then hands over to
+  // the browser's controls.
+  const film = document.getElementById("launch-video");
+  const filmPlay = document.querySelector("[data-film-play]");
+  if (film && filmPlay) {
+    film.controls = false;
+    filmPlay.addEventListener("click", () => {
+      filmPlay.hidden = true;
+      film.controls = true;
+      film.play().catch(() => { filmPlay.hidden = false; });
+    });
   }
 
   // Platform tabs in "Get started".

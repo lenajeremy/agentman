@@ -85,7 +85,8 @@
       </div>
     </header>
 
-    <div class="stage" role="img" aria-label="The Agentman app on a phone, next to a Claude Code permission prompt in a terminal">
+    <div class="stage-tilt">
+    <div class="stage" role="img" aria-label="A recording of the Agentman app approving a Claude Code command, next to the Mac terminal where Claude Code carries on">
       <svg class="bg" viewBox="0 0 1120 620" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
         <circle cx="930" cy="580" r="260" fill="#1D1E22"/>
         <path d="M0 620 V350 A270 270 0 0 1 270 620 Z" fill="#1E1F23"/>
@@ -93,31 +94,36 @@
         <circle cx="480" cy="490" r="110" fill="#1B1C20"/>
       </svg>
       <div class="menubar" aria-hidden="true"><span class="items"><b>Terminal</b><span>Shell</span><span>Edit</span><span>View</span><span>Window</span><span>Help</span></span><span>Wed 9:41 AM</span></div>
-      <div class="term" aria-hidden="true">
-        <div class="term-bar"><i></i><i></i><i></i><span>am claude — ~/code/api</span></div>
+      <div class="term" aria-hidden="true" data-term="hero">
+        <div class="term-bar"><i></i><i></i><i></i><span>am claude — ~/Projects/northstar</span></div>
         <div class="term-body">
-          <p class="w">⏺ The build is green. I'll apply the migrations to staging next.</p>
-          <div class="prompt-box">
+          <p class="w">⏺ Tests pass. Next I'll run the pending database migrations.</p>
+          <div class="prompt-box" data-box>
             <p class="w">Bash command</p>
-            <p class="ind">npm run migrate -- --env staging</p>
-            <p class="ind">Apply 3 pending migrations to staging</p>
+            <p class="ind">npm run migrate</p>
+            <p class="ind dim">Run database migrations</p>
             <p class="w" style="margin-top:10px">Do you want to proceed?</p>
-            <p class="sel">❯ 1. Yes<span class="caret"></span></p>
-            <p class="ind">2. Yes, and don't ask again for npm run</p>
-            <p class="ind">3. No, and tell Claude what to do</p>
+            <p class="sel">❯ 1. Yes<span class="caret"></span><span class="from" data-at="4.48">← from your phone</span></p>
+            <div class="rest">
+              <p class="ind">2. Yes, and don't ask again for: npm run *</p>
+              <p class="ind">3. Yes, and switch to auto mode</p>
+              <p class="ind">4. No</p>
+            </div>
+          </div>
+          <div class="out">
+            <p class="w" data-at="4.9">⏺ Bash(npm run migrate)</p>
+            <p data-at="5.3">  ↳ 001_create_users.sql <span class="dim">..........</span> <span class="ok">ok</span></p>
+            <p data-at="5.7">  ↳ 002_create_exports.sql <span class="dim">........</span> <span class="ok">ok</span></p>
+            <p data-at="6.1">  ↳ 003_add_exports_status.sql <span class="dim">....</span> <span class="ok">ok</span></p>
+            <p class="ok" data-at="6.48">  ✓ 3 migrations applied</p>
           </div>
         </div>
       </div>
-      <div class="notif" aria-hidden="true">
+      <figure class="iphone-x hero-phone" data-sync="hero"><video class="shot" src="/media/hero-approve.mp4" poster="/media/hero-approve.webp" muted playsinline loop preload="none" data-autoplay></video><div class="notif" aria-hidden="true" data-notif>
         <img src="/apple-touch-icon.png" alt="">
-        <div class="body"><div class="top"><b>api-migrations</b><span>now</span></div><div class="msg">Needs your answer</div></div>
-      </div>
-      <div class="phone" aria-hidden="true">
-        <div class="screen">
-          <div class="status"><span>9:41</span><span class="island"></span><span class="bars"><i style="width:17px;height:11px"></i><i style="width:24px;height:12px;border-radius:4px"></i></span></div>
-          <img src="/images/app-agents.png" alt="" width="780" height="1580">
-        </div>
-      </div>
+        <div class="body"><div class="top"><b>Add CSV exports</b><span>now</span></div><div class="msg">Needs your answer: npm run migrate</div></div>
+      </div><img class="frame" src="/media/iphone-frame.webp" alt="" width="700" height="1431" decoding="async"></figure>
+    </div>
     </div>
 
     <section class="strip" id="agents" aria-labelledby="works-with">
@@ -129,6 +135,14 @@
         <span><svg class="logo-ink" aria-hidden="true"><use href="#l-opencode"/></svg>OpenCode</span>
         <span><svg class="logo-kiro" aria-hidden="true"><use href="#l-kiro"/></svg>Kiro</span>
         <span><svg class="logo-ink" aria-hidden="true"><use href="#l-antigravity"/></svg>Antigravity</span>
+      </div>
+    </section>
+
+    <section class="film" aria-labelledby="film-title">
+      <div class="caps" id="film-title">See it in 48 seconds</div>
+      <div class="film-frame">
+        <video id="launch-video" src="/media/launch.mp4" poster="/media/launch.webp" preload="none" playsinline controls width="1920" height="1080"></video>
+        <button class="film-play" type="button" aria-label="Play the launch video, with sound" data-film-play><span class="film-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></span><span>Play with sound</span><small>0:48</small></button>
       </div>
     </section>
 
@@ -193,19 +207,8 @@
 
       <div class="workspace-feature reverse">
         <div class="workspace-copy"><span class="workspace-kicker">Changes</span><h3>Review the actual diff.</h3><p>See staged, unstaged and new files since the last commit. Open a change to compare lines, with additions and removals clearly marked.</p></div>
-        <div class="workspace-art diff-art" role="img" aria-label="Illustration of a working-tree diff with removed and added lines">
-          <div class="mock-window" aria-hidden="true">
-            <div class="mock-head"><span>‹</span><b>App.tsx</b><span>↻</span></div>
-            <div class="mock-tabs"><span>File</span><b>Diff</b></div>
-            <div class="mock-stat"><strong>+8</strong><em>−2</em><span>vs last commit</span></div>
-            <div class="mock-code">
-              <div><span>18</span><code><i>function</i> App() {</code></div>
-              <div class="remove"><span>19</span><code>− &lt;Hero title="Welcome" /&gt;</code></div>
-              <div class="add"><span>19</span><code>+ &lt;Hero title="Build faster" /&gt;</code></div>
-              <div class="add"><span>20</span><code>+ &lt;LivePreview /&gt;</code></div>
-              <div><span>21</span><code>}</code></div>
-            </div>
-          </div>
+        <div class="workspace-art diff-art bleed" role="img" aria-label="Recording of the app opening the files a session changed, then the diff of exports.js">
+          <figure class="iphone-x rise"><video class="shot" src="/media/diff-flow.mp4" poster="/media/diff-flow.webp" muted playsinline loop preload="none" data-autoplay></video><img class="frame" src="/media/iphone-frame.webp" alt="" width="700" height="1431" decoding="async"></figure>
         </div>
       </div>
 
@@ -241,24 +244,15 @@
 
       <div class="workspace-more">
         <article class="workspace-card">
-          <div class="mini-art plan-art" role="img" aria-label="Illustration of an agent's plan with Approve and Request changes buttons">
-            <div class="mini-code" aria-hidden="true"><span>implementation_plan.md <b>Plan</b></span><code><i>1.</i> Add the /export route</code><code><i>2.</i> Stream rows as CSV</code><code><i>3.</i> Test with 10k rows</code></div>
-            <div class="review-actions" aria-hidden="true"><span>Request changes</span><strong>Approve</strong></div>
-          </div>
+          <div class="mini-art clip-art plan-art" role="img" aria-label="Recording of the app approving Claude Code's plan"><video src="/media/card-plan.mp4" poster="/media/card-plan.webp" muted playsinline loop preload="none" data-autoplay></video></div>
           <h3>Review the plan first</h3><p>Plans and walkthroughs an agent writes open on your phone. Approve them, or send them back with a note.</p>
         </article>
         <article class="workspace-card">
-          <div class="mini-art switch-art" role="img" aria-label="Illustration of switching an agent's mode from a menu">
-            <div class="server-row" aria-hidden="true"><span>◐</span><div><b>Opus 5.5 · Plan</b><small>this session only</small></div><strong>Switch</strong></div>
-            <div class="switch-menu" aria-hidden="true"><span>Default</span><span>Accept edits</span><span class="on">Plan <b>✓</b></span></div>
-          </div>
+          <div class="mini-art clip-art mode-art" role="img" aria-label="Recording of the app switching Claude Code from Manual to Plan mode"><video src="/media/card-mode.mp4" poster="/media/card-mode.webp" muted playsinline loop preload="none" data-autoplay></video></div>
           <h3>Switch mode and model</h3><p>Move an agent into plan mode or onto another model mid-session. If a switch would change your Mac's defaults, it asks first.</p>
         </article>
         <article class="workspace-card">
-          <div class="mini-art message-art" role="img" aria-label="Illustration of refusing a command and telling the agent what to do instead">
-            <div class="message-bubble" aria-hidden="true">Run <code>rm -rf build</code>?</div>
-            <div class="message-composer" aria-hidden="true"><div class="refuse-choice">No, and tell the agent why</div><div class="message-field"><span>Use make clean instead</span><strong>↑</strong></div></div>
-          </div>
+          <div class="mini-art clip-art refuse-art" role="img" aria-label="Recording of the app refusing a production migration with a note to run it on staging first"><video src="/media/card-refuse.mp4" poster="/media/card-refuse.webp" muted playsinline loop preload="none" data-autoplay></video></div>
           <h3>Say no, and say why</h3><p>Refuse an action and the agent hears what to do instead, without leaving the question it asked.</p>
         </article>
       </div>
@@ -276,8 +270,8 @@
         </ol>
       </div>
       <div class="phones" aria-hidden="true">
-        <div class="phone"><div class="screen"><div class="status"><span>9:41</span><span class="island"></span><span class="bars"><i style="width:17px;height:11px"></i><i style="width:24px;height:12px;border-radius:4px"></i></span></div><img src="/images/app-session.png" alt="" width="780" height="1580" loading="lazy"></div></div>
-        <div class="phone"><div class="screen"><div class="status"><span>9:41</span><span class="island"></span><span class="bars"><i style="width:17px;height:11px"></i><i style="width:24px;height:12px;border-radius:4px"></i></span></div><img src="/images/app-question.png" alt="" width="780" height="1580" loading="lazy"></div></div>
+        <figure class="iphone-x back"><video class="shot" src="/media/moment-live.mp4" poster="/media/moment-live.webp" muted playsinline loop preload="none" data-autoplay></video><img class="frame" src="/media/iphone-frame.webp" alt="" width="700" height="1431" decoding="async"></figure>
+        <figure class="iphone-x front"><video class="shot" src="/media/moment-plan.mp4" poster="/media/moment-plan.webp" muted playsinline loop preload="none" data-autoplay></video><img class="frame" src="/media/iphone-frame.webp" alt="" width="700" height="1431" decoding="async"></figure>
       </div>
     </section>
 
@@ -327,88 +321,20 @@
           <!-- An iPhone laid out at real size in points (a 393 x 852 screen) and
                scaled as a whole, so proportions and spacing match the device and
                the app's own styles. -->
-          <div class="device" aria-hidden="true">
-            <div class="iphone">
-              <i class="hw action"></i><i class="hw vol-up"></i><i class="hw vol-down"></i><i class="hw power"></i>
-              <div class="bezel">
-                <div class="screen">
-                  <div class="app">
-                    <div class="app-top">
-                      <span class="chip"><i></i>Mac connected</span>
-                      <span class="round"><svg viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></span>
-                    </div>
-                    <div class="app-title">Agents</div>
-                    <div class="tiles">
-                      <div class="tile-c needs"><b class="num swap"><span class="from">1</span><span class="to">0</span></b><span>Needs you</span></div>
-                      <div class="tile-c work"><b class="num swap"><span class="from">2</span><span class="to">3</span></b><span>Working</span></div>
-                      <div class="tile-c idle"><b class="num"><span class="from">1</span></b><span>Idle</span></div>
-                    </div>
-                    <div class="group needs"><span>Needs you</span><span class="count num swap"><span class="from">1</span><span class="to">0</span></span></div>
-                    <div class="ask">
-                      <div class="ask-head">
-                        <span class="pills"><span class="pill-s needs"><i></i>Needs you</span><span class="pill-s work"><i></i>Working</span></span>
-                        <span class="ask-name">api-migrations</span><span class="age">now</span><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
-                      </div>
-                      <div class="q-title">Bash command</div>
-                      <div class="q-detail">npm run migrate -- --env staging</div>
-                      <div class="q-prompt">Do you want to proceed?</div>
-                      <div class="q-row">
-                        <div class="q-actions"><span class="q-yes">Yes</span><span class="q-more"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg></span></div>
-                        <div class="q-sent"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Sent. Back to work.</div>
-                        <span class="fingertip"></span>
-                      </div>
-                    </div>
-                    <div class="group"><span>Working</span><span class="count">2</span></div>
-                    <div class="row-s">
-                      <span class="avatar work"><svg class="logo-claude"><use href="#l-claude"/></svg><i class="pulse"></i></span>
-                      <span class="row-body"><span class="row-top"><span class="name">fix-auth-refresh</span><span class="age">now</span></span><span class="meta"><em>Working</em>· ~/code/api · claude-opus-5</span></span><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
-                    </div>
-                    <div class="row-s">
-                      <span class="avatar work"><svg><use href="#l-openai"/></svg><i class="pulse"></i></span>
-                      <span class="row-body"><span class="row-top"><span class="name">web-checkout</span><span class="age">2m</span></span><span class="meta"><em>Working</em>· ~/code/storefront · gpt-5.6</span></span><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
-                    </div>
-                    <div class="group"><span>Idle</span><span class="count">1</span></div>
-                    <div class="row-s">
-                      <span class="avatar"><svg><use href="#l-opencode"/></svg></span>
-                      <span class="row-body"><span class="row-top"><span class="name">docs-site</span><span class="age">1h</span></span><span class="meta">~/code/docs · OpenCode</span></span><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
-                    </div>
-                  </div>
-
-                  <div class="statusbar">
-                    <span class="sb-time">9:41</span>
-                    <span class="sb-icons">
-                      <svg class="sb-signal" viewBox="0 0 17 11"><rect x="0" y="7" width="3" height="4" rx=".9"/><rect x="4.6" y="4.8" width="3" height="6.2" rx=".9"/><rect x="9.2" y="2.5" width="3" height="8.5" rx=".9"/><rect x="13.8" y="0" width="3" height="11" rx=".9"/></svg>
-                      <svg class="sb-wifi" viewBox="0 0 16 12"><path d="M.22 3.72a11 11 0 0 1 15.56 0l-1.7 1.7a8.6 8.6 0 0 0-12.16 0z"/><path d="M2.91 6.41a7.2 7.2 0 0 1 10.18 0l-1.7 1.7a4.8 4.8 0 0 0-6.78 0z"/><path d="M8 11.5 5.6 9.1a3.4 3.4 0 0 1 4.8 0z"/></svg>
-                      <svg class="sb-battery" viewBox="0 0 28 13"><rect x=".5" y=".5" width="24" height="12" rx="3.8" fill="none" stroke="currentColor" stroke-opacity=".38"/><rect x="2" y="2" width="21" height="9" rx="2.4"/><path d="M26 4.3v4.4c.9-.3 1.6-1.2 1.6-2.2s-.7-1.9-1.6-2.2z" fill-opacity=".45"/></svg>
-                    </span>
-                  </div>
-                  <div class="island"><i></i></div>
-
-                  <div class="banner">
-                    <img src="/apple-touch-icon.png" alt="" width="38" height="38">
-                    <div class="banner-copy">
-                      <div class="banner-top"><b>api-migrations needs you</b><span>now</span></div>
-                      <p>Bash command: npm run migrate -- --env staging. Do you want to proceed?</p>
-                    </div>
-                  </div>
-                  <div class="home"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="term2" aria-hidden="true">
-            <div class="bar"><i></i><i></i><i></i><span>am claude — ~/code/api</span></div>
+          <figure class="iphone-x step-phone" data-sync="step"><video class="shot" src="/media/hero-approve.mp4" poster="/media/hero-approve.webp" muted playsinline loop preload="none" data-autoplay></video><img class="frame" src="/media/iphone-frame.webp" alt="" width="700" height="1431" decoding="async"></figure>
+          <div class="term2" aria-hidden="true" data-term="step">
+            <div class="bar"><i></i><i></i><i></i><span>am claude — ~/Projects/northstar</span></div>
 <pre class="lines"><span class="ln"><span class="w">Do you want to proceed?</span></span>
-<span class="ln r1"><span class="p">❯ 1. Yes</span>  <span class="c">← from your phone</span></span>
-<span class="ln r2"><span class="w">⏺ Running npm run migrate -- --env staging</span></span>
-<span class="ln r3"><span class="ok">  ✓ 3 migrations applied to staging</span></span></pre>
+<span class="ln"><span class="p">❯ 1. Yes</span>  <span class="c" data-at="4.48">← from your phone</span></span>
+<span class="ln" data-at="4.9"><span class="w">⏺ Bash(npm run migrate)</span></span>
+<span class="ln" data-at="6.48"><span class="ok">  ✓ 3 migrations applied</span></span></pre>
           </div>
         </div>
       </div>
       <div class="tabs steps" role="tablist" aria-label="How it works, step by step">
         <button class="step is-on" role="tab" id="tab-mac" aria-controls="step-mac" aria-selected="true"><span class="progress"><i></i></span><h3>Your Mac</h3><p>The daemon finds sessions, reads transcripts from disk and types into the terminal for you.</p></button>
         <button class="step" role="tab" id="tab-relay" aria-controls="step-relay" aria-selected="false" tabindex="-1"><span class="progress"><i></i></span><h3>A stateless relay</h3><p>Checks credentials and forwards live updates. Use the public one or run your own.</p></button>
-        <button class="step" role="tab" id="tab-phone" aria-controls="step-phone" aria-selected="false" tabindex="-1" data-ms="8500"><span class="progress"><i></i></span><h3>Your phone</h3><p>Shows live state, loads history when you scroll back and sends your answers.</p></button>
+        <button class="step" role="tab" id="tab-phone" aria-controls="step-phone" aria-selected="false" tabindex="-1" data-ms="8000"><span class="progress"><i></i></span><h3>Your phone</h3><p>Shows live state, loads history when you scroll back and sends your answers.</p></button>
       </div>
     </section>
   </div>

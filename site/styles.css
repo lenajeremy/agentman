@@ -122,15 +122,6 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .notif .top span { color: var(--faint); font-size: 12px; }
 .notif .msg { font-size: 13.5px; color: var(--ink-2); margin-top: 1px; }
 
-.phone { width: 330px; border-radius: 50px; padding: 10px; background: #E9E8E4; box-shadow: inset 0 0 0 1.5px #D6D5D0, 0 40px 80px -30px rgba(0,0,0,.6); }
-.phone .screen { border-radius: 40px; overflow: hidden; background: var(--paper); }
-.phone .status { height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 4px 26px 0 30px; font-size: 13px; font-weight: 600; }
-.phone .island { width: 98px; height: 28px; border-radius: 16px; background: #000; }
-.phone .bars { display: flex; gap: 4px; align-items: center; }
-.phone .bars i { display: block; background: var(--ink); border-radius: 2px; }
-.phone img { width: 100%; height: auto; }
-.stage .phone { position: absolute; left: 64px; top: 64px; }
-
 /* ---------- Works with ---------- */
 .strip { padding: 56px 0 8px; text-align: center; }
 .caps { font-family: var(--mono); font-size: 12.5px; letter-spacing: 1.5px; color: var(--muted); text-transform: uppercase; }
@@ -214,17 +205,6 @@ section { scroll-margin-top: 24px; }
 .mock-list span { margin-left: auto; color: var(--faint); font-size: 19px; }
 .mock-list small + span { margin-left: 2px; }
 .mock-note { margin: 12px 20px 16px; color: var(--faint); font-size: 11px; }
-.mock-stat { display: flex; align-items: center; gap: 9px; padding: 14px 20px; border-bottom: 1px solid var(--line); font: 12px var(--mono); }
-.mock-stat strong { color: #176847; }
-.mock-stat em { color: #9A3E29; font-style: normal; }
-.mock-stat span { margin-left: auto; color: var(--faint); }
-.mock-code { padding: 24px 0 72px; overflow-x: auto; font: 12px/2 var(--mono); }
-.mock-code > div { display: flex; min-width: max-content; }
-.mock-code > div > span { width: 50px; padding-right: 13px; flex: none; text-align: right; color: var(--faint); user-select: none; }
-.mock-code code { padding-right: 18px; white-space: pre; }
-.mock-code i { color: var(--cobalt-700); font-style: normal; }
-.mock-code .remove { background: #FFF0EB; color: #9A3E29; }
-.mock-code .add { background: #EAF8F1; color: #176847; }
 .workspace-more { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 50px; }
 .workspace-card { min-width: 0; margin: 0; padding: 14px 14px 28px; background: var(--white); border: 1px solid var(--line); border-radius: 20px; }
 .workspace-card h3 { margin: 23px 14px 0; font-size: 21px; letter-spacing: -.45px; }
@@ -269,17 +249,7 @@ section { scroll-margin-top: 24px; }
 /* Controls: reuse the workspace cards, with three small pieces of their own. */
 .control { padding-top: 110px; }
 .plan-art { background: #F1EEFF; }
-.review-actions { position: absolute; left: 18px; right: 46px; bottom: 22px; display: flex; gap: 8px; font-size: 10px; }
-.review-actions span, .review-actions strong { padding: 9px 12px; border-radius: 8px; box-shadow: 0 10px 25px -16px rgba(15,16,18,.3); }
-.review-actions span { background: var(--white); color: var(--ink-2); }
-.review-actions strong { margin-left: auto; background: var(--ink); color: var(--white); font-weight: 600; }
-.switch-art { background: #E7EBFF; }
-.switch-menu { position: absolute; top: 88px; left: 40px; right: 40px; padding: 6px; display: grid; gap: 2px; border-radius: 12px; background: var(--white); box-shadow: 0 16px 30px -15px rgba(15,16,18,.3); font-size: 11px; }
-.switch-menu span { display: flex; justify-content: space-between; padding: 9px 10px; border-radius: 8px; color: var(--ink-2); }
-.switch-menu span.on { background: var(--fill); color: var(--ink); font-weight: 600; }
-.switch-menu b { color: var(--cobalt-700); }
 .message-bubble code { font: 11px var(--mono); }
-.refuse-choice { padding: 9px 10px; border-radius: 9px; background: #FFE9DE; color: #9A3B10; font-size: 11px; font-weight: 600; }
 .message-composer .message-field span { color: var(--ink-2); }
 
 /* How it works */
@@ -342,102 +312,14 @@ section { scroll-margin-top: 24px; }
 .facts li { padding: 7px 12px 7px 30px; border-radius: 999px; background: rgba(255,255,255,.14); color: #fff; font-size: 13.5px; position: relative; }
 .facts li::before { content: "✓"; position: absolute; left: 12px; color: #9DE8C4; font-weight: 600; }
 
-/* Step 3: the phone.
-   Built at real iPhone size in points — a 393 x 852 screen inside titanium,
-   bezel and glass — then scaled as one piece by --s. Everything inside uses
-   the app's own measurements from mobile/lib/theme.ts. */
-.device { --s: .62; flex: none; width: calc(417px * var(--s)); height: calc(876px * var(--s)); }
 .iphone { position: relative; width: 417px; height: 876px; padding: 3.5px; border-radius: 67px; transform: scale(var(--s)); transform-origin: 0 0;
   background: linear-gradient(140deg, #5b5b5f 0%, #2b2b2e 14%, #1b1b1d 48%, #2a2a2d 84%, #57575b 100%);
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.35), inset 0 0 0 2.5px rgba(0,0,0,.55), 0 60px 100px -40px rgba(4,8,50,.9), 0 24px 44px -24px rgba(0,0,0,.65); }
-.hw { position: absolute; width: 4px; background: linear-gradient(90deg, #1e1e20, #626266 55%, #2c2c2f); }
-.hw.action, .hw.vol-up, .hw.vol-down { left: -3px; border-radius: 3px 0 0 3px; }
-.hw.action { top: 132px; height: 34px; }
-.hw.vol-up { top: 196px; height: 64px; }
-.hw.vol-down { top: 274px; height: 64px; }
-.hw.power { right: -3px; top: 220px; height: 102px; border-radius: 0 3px 3px 0; background: linear-gradient(270deg, #1e1e20, #626266 55%, #2c2c2f); }
-.bezel { height: 100%; padding: 8.5px; border-radius: 63.5px; background: #050506; box-shadow: inset 0 0 0 1px rgba(255,255,255,.07); }
-.screen { position: relative; height: 100%; border-radius: 55px; overflow: hidden; background: var(--paper); color: var(--ink); font-family: var(--sans); text-align: left; }
-/* A faint sweep of glare across the glass. */
-.screen::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(118deg, rgba(255,255,255,.2) 0%, rgba(255,255,255,0) 26%); }
 
-.statusbar { position: absolute; left: 0; right: 0; top: 0; height: 59px; display: flex; align-items: center; justify-content: space-between; font-family: -apple-system, "SF Pro Text", var(--sans); }
-.sb-time { width: 134px; text-align: center; font-size: 17px; font-weight: 600; letter-spacing: -.4px; padding-left: 6px; }
-.sb-icons { width: 134px; display: flex; align-items: center; justify-content: center; gap: 6px; padding-right: 6px; color: var(--ink); }
-.sb-icons svg { fill: currentColor; }
-.sb-signal { width: 17px; height: 11px; }
-.sb-wifi { width: 16px; height: 12px; }
-.sb-battery { width: 27px; height: 13px; }
-.island { position: absolute; top: 11px; left: 50%; width: 125px; height: 37px; margin-left: -62.5px; border-radius: 19px; background: #000; }
-.island i { position: absolute; right: 22px; top: 12.5px; width: 12px; height: 12px; border-radius: 50%; background: radial-gradient(circle at 38% 35%, #3a4a78 0 12%, #151b33 38%, #07080d 70%); box-shadow: 0 0 0 1.5px #0e0e10; }
-.home { position: absolute; left: 50%; bottom: 8px; width: 134px; height: 5px; margin-left: -67px; border-radius: 3px; background: rgba(15,16,18,.88); }
-
-/* The Agentman status board, as the app draws it. */
-.app { position: absolute; inset: 0; padding: 66px 16px 0; }
-.app svg { display: block; }
-.app-top { display: flex; align-items: center; justify-content: space-between; }
-.chip { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border-radius: 999px; background: #fff; border: 1px solid var(--line); font-size: 13px; font-weight: 500; color: var(--ink-2); }
-.chip i { width: 7px; height: 7px; border-radius: 50%; background: var(--mint); }
-.round { width: 40px; height: 40px; border-radius: 50%; background: #fff; border: 1px solid var(--line); display: grid; place-items: center; }
 .round svg, .chev { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.round svg { width: 17px; height: 17px; }
-.app-title { margin-top: 16px; font-size: 34px; line-height: 41px; font-weight: 600; letter-spacing: -1.2px; }
-.tiles { display: flex; gap: 8px; margin-top: 16px; }
-.tile-c { flex: 1; border-radius: 20px; padding: 12px; display: grid; gap: 2px; }
-.tile-c.needs { background: var(--tang-50); color: var(--tang-700); }
-.tile-c.work { background: var(--cobalt-50); color: var(--cobalt); }
-.tile-c.idle { background: var(--fill); color: var(--ink); }
-.tile-c > span { font-size: 13px; font-weight: 500; color: var(--muted); }
-.num { display: inline-grid; font-size: 28px; line-height: 34px; font-weight: 600; letter-spacing: -.8px; font-variant-numeric: tabular-nums; }
-.num > span { grid-area: 1 / 1; }
-.num .to { opacity: 0; }
-.group { display: flex; align-items: baseline; justify-content: space-between; margin: 24px 2px 8px; font-size: 13px; font-weight: 600; color: var(--muted); }
-.group.needs { color: var(--tang-700); }
-.group .count { font: 12px var(--mono); letter-spacing: 0; color: var(--faint); }
 .ask { position: relative; background: #fff; border: 1px solid var(--tang-100); border-radius: 20px; padding: 16px; display: grid; gap: 8px; box-shadow: 0 8px 16px rgba(255,106,43,.12); }
-.ask-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-.pills { display: inline-grid; }
-.pill-s { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
-.pill-s i { width: 6px; height: 6px; border-radius: 50%; }
-.pill-s.needs { background: var(--tang-50); color: var(--tang-700); }
-.pill-s.needs i { background: var(--tang); }
-.pill-s.work { background: var(--cobalt-50); color: var(--cobalt-700); opacity: 0; }
-.pill-s.work i { background: var(--cobalt); }
-.ask-name { flex: 1; font: 13px var(--mono); color: var(--ink-2); }
-.age { font-size: 12px; color: var(--faint); }
 .chev { width: 16px; height: 16px; color: var(--faint); flex: none; }
-.q-title { font-size: 17px; font-weight: 600; letter-spacing: -.3px; }
-.q-detail { background: var(--fill); border-radius: 12px; padding: 10px 12px; font: 13px/19px var(--mono); }
-.q-prompt { font-size: 13px; line-height: 18px; color: var(--muted); }
-.q-row { position: relative; margin-top: 4px; }
-.q-actions { display: flex; gap: 8px; }
-.q-yes { flex: 1; height: 44px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 15px; font-weight: 600; display: grid; place-items: center; }
-.q-more { flex: none; width: 44px; height: 44px; border-radius: 50%; background: #fff; border: 1px solid var(--fill-2); display: grid; place-items: center; }
-.q-more svg { width: 18px; height: 18px; fill: var(--ink); }
-.q-sent { position: absolute; inset: 0; border-radius: 999px; background: var(--cobalt-50); color: var(--cobalt-700); font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 7px; opacity: 0; }
-.q-sent svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
-.fingertip { position: absolute; left: calc(50% - 48px); top: -1px; width: 46px; height: 46px; border-radius: 50%; background: rgba(255,255,255,.62); border: 2px solid rgba(15,16,18,.22); box-shadow: 0 6px 16px -4px rgba(0,0,0,.35); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); opacity: 0; pointer-events: none; }
-.row-s { display: flex; align-items: center; gap: 12px; padding: 13px 14px; margin-bottom: 8px; background: #fff; border: 1px solid var(--line); border-radius: 20px; }
-.row-s .chev { width: 18px; height: 18px; }
-.avatar { position: relative; flex: none; width: 40px; height: 40px; border-radius: 12px; background: var(--fill); display: grid; place-items: center; color: var(--ink); }
-.avatar.work { background: var(--cobalt-50); }
-.avatar svg { width: 22px; height: 22px; }
-.avatar .logo-claude { color: #D97757; }
-.pulse { position: absolute; right: -3px; bottom: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--cobalt); border: 2px solid #fff; }
-.row-body { flex: 1; min-width: 0; display: grid; gap: 3px; }
-.row-top { display: flex; align-items: baseline; gap: 8px; }
-.name { flex: 1; font: 500 14.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.meta { font: 12px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.meta em { font: normal 500 12px var(--sans); color: var(--cobalt-700); margin-right: .45em; }
 
-/* An iOS notification, which the phone step opens with. */
-.banner { position: absolute; left: 10px; right: 10px; top: 54px; display: flex; gap: 12px; align-items: flex-start; padding: 13px 14px; border-radius: 24px; background: rgba(246,246,244,.9); -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6); box-shadow: 0 16px 34px -14px rgba(0,0,0,.4), 0 0 0 .5px rgba(0,0,0,.08); font-family: -apple-system, "SF Pro Text", var(--sans); transform: translateY(-170%); }
-.banner img { width: 38px; height: 38px; border-radius: 9px; flex: none; }
-.banner-copy { flex: 1; min-width: 0; }
-.banner-top { display: flex; justify-content: space-between; gap: 8px; font-size: 15px; }
-.banner-top b { font-weight: 600; }
-.banner-top span { font-size: 13px; color: rgba(60,60,67,.6); }
-.banner p { margin: 2px 0 0; font-size: 15px; line-height: 20px; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .scene-phone .term2 { width: 400px; }
 
 /* The three steps double as tabs; the active one fills its top rule. */
@@ -459,9 +341,6 @@ section { scroll-margin-top: 24px; }
 .moment li::before { content: counter(s); width: 28px; height: 28px; border-radius: 8px; background: var(--tang-50); color: var(--tang-700); font-family: var(--mono); font-size: 13px; display: grid; place-items: center; }
 .moment li b { font-weight: 600; color: var(--ink); }
 .moment .phones { position: relative; height: 640px; }
-.moment .phones .phone { position: absolute; }
-.moment .phones .phone:first-child { left: 0; top: 40px; transform: rotate(-4deg); }
-.moment .phones .phone:last-child { right: 0; top: 0; transform: rotate(3deg); }
 
 /* Privacy band */
 .band { margin-top: 130px; background: var(--tang-900); color: #fff; }
@@ -547,7 +426,6 @@ section { scroll-margin-top: 24px; }
      wrapping left one name alone on a line of its own. */
   .names { display: grid; grid-template-columns: repeat(3, max-content); justify-content: center; column-gap: 56px; row-gap: 18px; }
   .term { width: 520px; right: 40px; }
-  .notif { display: none; }
   .scene { gap: 20px; padding: 32px; }
   .window { width: 340px; }
   .term2 { width: 380px; }
@@ -558,7 +436,6 @@ section { scroll-margin-top: 24px; }
   .hero { grid-template-columns: 1fr; gap: 24px; padding: 48px 0 40px; }
   .hero h1 { font-size: 58px; letter-spacing: -2.2px; }
   .stage .term, .stage .menubar { display: none; }
-  .stage .phone { left: 50%; transform: translateX(-50%); top: 40px; }
   .moment { grid-template-columns: 1fr; gap: 40px; }
   .band .wrap { grid-template-columns: 1fr; padding-block: 64px 40px; }
   .band-art { max-width: 420px; }
@@ -587,7 +464,6 @@ section { scroll-margin-top: 24px; }
   .rotor { border-radius: 12px; padding: 0 12px 4px; letter-spacing: -1.2px; }
   .hero p { font-size: 17px; }
   .stage { height: 560px; border-radius: 22px; }
-  .stage .phone { transform: translateX(-50%) scale(.9); transform-origin: top center; top: 28px; }
   .names { display: flex; flex-direction: column; align-items: center; gap: 14px; font-size: 22px; }
   .h2, .start .h2, .band .h2 { font-size: 36px; letter-spacing: -1.2px; }
   .why { padding-top: 72px; }
@@ -603,7 +479,6 @@ section { scroll-margin-top: 24px; }
   .dotrow i::after { display: none; }
   .stats, .tabs { grid-template-columns: 1fr; gap: 24px; }
   .term2 pre { font-size: 11.5px; padding: 4px 14px 14px; }
-  .device { --s: .72; }
   /* On a phone the relay step runs top to bottom: Mac, relay, phone. */
   .route { flex-direction: column; width: auto; }
   .end { width: 160px; height: 88px; }
@@ -614,9 +489,6 @@ section { scroll-margin-top: 24px; }
   .facts li { font-size: 12.5px; }
   .how, .tools, .moment { padding-top: 80px; }
   .moment .phones { height: 560px; }
-  .moment .phones .phone { width: 260px; }
-  .moment .phones .phone:first-child { left: 0; }
-  .moment .phones .phone:last-child { right: 0; }
   .band, .start { margin-top: 80px; }
   .start { padding: 64px 0; }
   .platforms { grid-template-columns: repeat(2, 1fr); }
@@ -658,10 +530,6 @@ section { scroll-margin-top: 24px; }
   .rotor.out { transform: translateY(10px) scale(.94); }
   .agent-pills span { transition: all .3s var(--spring); }
   .agent-pills span.on { transform: translateY(-2px); }
-
-  /* The terminal waits on its choice, and the notification keeps arriving. */
-  .caret { display: inline-block; width: 8px; height: 15px; margin-left: 6px; vertical-align: -2px; background: #9DAAFF; animation: blink 1.1s steps(1) infinite; }
-  .notif { animation: arrive 7s var(--spring) infinite; }
 
   /* Agents in the "works with" strip. */
   .names span { transition: color .2s ease; cursor: default; }
@@ -730,28 +598,14 @@ section { scroll-margin-top: 24px; }
   .scene-relay.is-on .facts li:nth-child(2) { animation-delay: .1s; }
   .scene-relay.is-on .facts li:nth-child(3) { animation-delay: .2s; }
 
-  .scene-phone.is-on .device { animation: rise .6s var(--spring) both; }
-  .scene-phone.is-on .banner { animation: banner 2.3s var(--spring) .35s both; }
   .scene-phone.is-on .ask { animation: attention 1s ease 2.3s both, settle-ask .5s ease 3.4s forwards; }
-  .scene-phone.is-on .fingertip { animation: finger 1.25s var(--spring) 2.15s both; }
-  .scene-phone.is-on .q-yes { animation: press-yes .32s ease 3.05s both; }
-  .scene-phone.is-on .q-actions { animation: fade-out .25s ease 3.35s forwards; }
-  .scene-phone.is-on .q-sent { animation: rise .45s var(--spring) 3.45s both; }
-  .scene-phone.is-on .pill-s.needs { animation: fade-out .25s ease 3.4s forwards; }
-  .scene-phone.is-on .pill-s.work { animation: rise .45s var(--spring) 3.5s both; }
-  .scene-phone.is-on .num.swap .from { animation: count-out .3s ease 3.6s forwards; }
-  .scene-phone.is-on .num .to { animation: count-in .45s var(--spring) 3.7s both; }
-  .scene-phone.is-on .pulse { animation: breathe 1.6s ease-in-out infinite; }
-  .scene-phone.is-on .r1 { animation: rise .4s var(--out) 3.6s both; }
-  .scene-phone.is-on .r2 { animation: rise .4s var(--out) 4.3s both; }
-  .scene-phone.is-on .r3 { animation: rise .4s var(--out) 5.3s both; }
 
   /* The question moment. */
   .moment li::before { transition: transform .4s var(--spring), background .2s ease, color .2s ease; }
   .moment li:hover::before { transform: scale(1.15) rotate(-6deg); background: var(--tang); color: #fff; }
-  .moment .phones .phone { transition: transform .6s var(--spring); }
-  .moment .phones:hover .phone:first-child { transform: rotate(-6deg) translate(-6px, 6px); }
-  .moment .phones:hover .phone:last-child { transform: rotate(5deg) translate(6px, -6px); }
+  .moment .phones .iphone-x { transition: transform .6s var(--spring); }
+  .moment .phones:hover .back { transform: rotate(-6deg) translate(-8px, 6px); }
+  .moment .phones:hover .front { transform: rotate(5deg) translate(8px, -6px); }
 
   /* Get started. */
   .platform { transition: background .15s ease, transform .4s var(--spring); }
@@ -775,11 +629,8 @@ section { scroll-margin-top: 24px; }
 @keyframes flag { 0%, 100% { transform: translate(0, 0) rotate(0); } 30% { transform: translate(4px, -4px) rotate(8deg); } 60% { transform: translate(-1px, 1px) rotate(-3deg); } }
 @keyframes nudge { 0%, 100% { transform: translateX(0); } 40% { transform: translateX(5px); } }
 @keyframes send { 0%, 100% { transform: translateX(0); } 40% { transform: translateX(9px); } 70% { transform: translateX(-2px); } }
-@keyframes flow { to { stroke-dashoffset: -28; } }
 @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.45); opacity: .7; } }
 @keyframes blink { 50% { opacity: 0; } }
-@keyframes buzz { 0%, 70%, 100% { transform: translateX(0); } 74% { transform: translateX(-2px); } 78% { transform: translateX(2px); } 82% { transform: translateX(-1px); } 86% { transform: translateX(0); } }
-@keyframes arrive { 0%, 4% { transform: translateY(-24px) scale(.96); opacity: 0; } 12%, 80% { transform: none; opacity: 1; } 88%, 100% { transform: translateY(-8px) scale(.98); opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(46,75,255,0); } 50% { box-shadow: 0 0 0 4px rgba(46,75,255,.12); } }
@@ -787,8 +638,6 @@ section { scroll-margin-top: 24px; }
 @keyframes go-right { 0% { left: 0; opacity: 0; } 4% { opacity: 1; } 20% { opacity: 1; } 24% { left: calc(100% - 76px); opacity: 0; } 100% { left: calc(100% - 76px); opacity: 0; } }
 @keyframes go-left { 0% { left: calc(100% - 92px); opacity: 0; } 4% { opacity: 1; } 20% { opacity: 1; } 24% { left: 0; opacity: 0; } 100% { left: 0; opacity: 0; } }
 @keyframes relay { 0%, 100% { transform: scale(1); } 12% { transform: scale(1.05); box-shadow: 0 0 0 6px rgba(255,106,43,.18); } 30% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255,106,43,0); } }
-@keyframes press-yes { 50% { transform: scale(.94); } }
-@keyframes fade-out { to { opacity: 0; } }
 @media (max-width: 640px) and (prefers-reduced-motion: no-preference) {
   .scene-relay.is-on .wire:nth-child(2) .packet.out { animation-name: go-down; }
   .scene-relay.is-on .wire:nth-child(4) .packet.out { animation-name: go-down; }
@@ -797,9 +646,123 @@ section { scroll-margin-top: 24px; }
 }
 @keyframes go-down { 0% { top: 0; opacity: 0; } 4% { opacity: 1; } 20% { opacity: 1; } 24% { top: calc(100% - 22px); opacity: 0; } 100% { top: calc(100% - 22px); opacity: 0; } }
 @keyframes go-up { 0% { top: calc(100% - 22px); opacity: 0; } 4% { opacity: 1; } 20% { opacity: 1; } 24% { top: 0; opacity: 0; } 100% { top: 0; opacity: 0; } }
-@keyframes banner { 0% { transform: translateY(-170%); } 20%, 78% { transform: translateY(0); } 100% { transform: translateY(-170%); } }
 @keyframes attention { 0%, 100% { box-shadow: 0 8px 16px rgba(255,106,43,.12); } 40% { box-shadow: 0 0 0 5px rgba(255,106,43,.22), 0 8px 16px rgba(255,106,43,.12); } }
 @keyframes settle-ask { to { border-color: var(--line); box-shadow: 0 8px 16px rgba(15,16,18,.05); } }
 @keyframes finger { 0% { opacity: 0; transform: translate(130px, 230px); } 20% { opacity: 1; } 65% { opacity: 1; transform: translate(0, 0); } 75% { opacity: 1; transform: scale(.82); } 88% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1); } }
-@keyframes count-out { to { opacity: 0; transform: translateY(-10px); } }
-@keyframes count-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+/* ---------- Real devices ----------
+   Apple's iPhone 17 Pro art (from Screenshotter) laid over a recording or a
+   capture of the real app. The art's screen hole is 1206 × 2622 at (72, 69)
+   in a 1350 × 2760 frame, exactly the size of the app's captures, so the media
+   sits in it by percentage and the bezel hides its corners. */
+.iphone-x { position: relative; width: 300px; aspect-ratio: 700 / 1431; margin: 0; flex: none; filter: drop-shadow(0 34px 48px rgba(15,16,18,.26)) drop-shadow(0 6px 12px rgba(15,16,18,.12)); }
+.iphone-x .shot { position: absolute; left: 5.333%; top: 2.5%; width: 89.333%; height: 95%; object-fit: cover; border-radius: 16.1% / 7.4%; background: var(--paper); }
+.iphone-x .frame { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+/* Hero: the phone bleeds off the bottom of the stage; the alert drops onto it. */
+.stage .hero-phone { position: absolute; left: 72px; top: 52px; width: 300px; }
+.iphone-x .notif { left: 8%; right: 8%; top: 6.4%; bottom: auto; width: auto; z-index: 2; padding: 9px 10px; gap: 9px; border-radius: 17px; opacity: 0; transform: translateY(-14px) scale(.96); transition: opacity .3s var(--out), transform .5s var(--spring); }
+.iphone-x .notif.on { opacity: 1; transform: none; }
+.iphone-x .notif img { width: 28px; height: 28px; border-radius: 7px; }
+.iphone-x .notif .top { font-size: 11.5px; }
+.iphone-x .notif .top span { font-size: 10.5px; }
+.iphone-x .notif .msg { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.term-body .dim, .term2 .dim { color: #6E717A; }
+.term-body .ok { color: #5BD69E; }
+.prompt-box { transition: border-color .4s ease, opacity .4s ease; }
+.prompt-box .rest { overflow: hidden; max-height: 90px; transition: max-height .5s var(--out), opacity .3s ease; }
+.prompt-box.answered { border-color: #3A3B41; }
+.prompt-box.answered .rest { max-height: 0; opacity: 0; }
+.prompt-box .caret { display: inline-block; width: 8px; height: 15px; margin-left: 6px; vertical-align: -2px; background: #9DAAFF; animation: blink 1.1s steps(1) infinite; }
+.prompt-box.answered .caret { display: none; }
+.from { margin-left: 12px; color: var(--tang-300); }
+[data-at] { opacity: 0; transform: translateY(4px); transition: opacity .25s ease, transform .35s var(--out); }
+[data-at].on { opacity: 1; transform: none; }
+.term .out p { margin: 0; }
+.prompt-box.waiting { box-shadow: 0 0 0 0 rgba(255,106,43,.0); animation: waiting 1.6s ease-in-out infinite; }
+@keyframes waiting { 50% { box-shadow: 0 0 22px 2px rgba(255,106,43,.28); } }
+
+/* The moment: two phones, one live session and one plan approval. */
+.moment .phones .iphone-x { position: absolute; width: 292px; }
+.moment .phones .back { left: 0; top: 46px; transform: rotate(-4deg); }
+.moment .phones .front { right: 0; top: 0; transform: rotate(3deg); }
+
+/* Cards that loop a short recording of the feature. */
+.clip-art { display: grid; place-items: center; }
+.clip-art video { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.plan-art.clip-art { background: #F1EEFF; }
+.mode-art.clip-art { background: #E7EBFF; }
+.refuse-art.clip-art { background: #FFF0E8; }
+.clip-art video { border-radius: 12px; }
+.workspace-card { transition: transform .45s var(--out), box-shadow .45s var(--out); }
+.workspace-card:hover { transform: translateY(-4px); box-shadow: 0 18px 40px rgba(15,16,18,.08); }
+
+/* Diff: a real phone rising out of its panel. */
+.workspace-art.bleed { position: relative; overflow: hidden; padding: 0; align-items: start; min-height: 470px; }
+.workspace-art.bleed .iphone-x { width: 300px; margin-top: 46px; }
+
+/* How it works, step 3. */
+.scene-phone .step-phone { width: 250px; }
+
+/* The band's shapes spring into place the first time they are seen. */
+@media (prefers-reduced-motion: no-preference) {
+  .js .band-art[data-reveal] > * { transform-box: fill-box; transform-origin: center; transform: scale(.35) rotate(-30deg); opacity: 0; transition: transform .9s var(--spring), opacity .35s ease; }
+  .js .band-art[data-reveal].in > * { transform: none; opacity: 1; }
+  .js .band-art[data-reveal].in > :nth-child(2) { transition-delay: .07s; }
+  .js .band-art[data-reveal].in > :nth-child(3) { transition-delay: .14s; }
+  .js .band-art[data-reveal].in > :nth-child(4) { transition-delay: .21s; }
+  .js .band-art[data-reveal].in > :nth-child(5) { transition-delay: .28s; }
+  .stage .hero-phone { animation: float 7s ease-in-out infinite; }
+  @keyframes float { 50% { translate: 0 -7px; } }
+}
+
+/* ---------- The launch film ---------- */
+.film { padding: 72px 0 0; text-align: center; }
+.film-frame { position: relative; margin-top: 22px; border-radius: 24px; overflow: hidden; background: var(--stage); aspect-ratio: 16 / 9; box-shadow: 0 40px 80px -40px rgba(15,16,18,.5); }
+.film-frame video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.film-play { position: absolute; left: 24px; bottom: 24px; display: flex; align-items: center; gap: 12px; padding: 8px 18px 8px 8px; border-radius: 999px; color: #fff; background: rgba(15,16,18,.55); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); }
+.film-play[hidden] { display: none; }
+.film-icon { position: relative; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: #fff; }
+.film-icon svg { width: 18px; height: 18px; fill: var(--ink); margin-left: 3px; }
+.film-play > span:not(.film-icon) { font-size: 15px; font-weight: 500; }
+.film-play small { font: 12.5px var(--mono); color: rgba(255,255,255,.7); }
+
+/* Tools: tiles lift as you pass. */
+.tile { transition: transform .45s var(--spring), box-shadow .3s ease; }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* The hero arrives on load: words first, then the copy, then the stage. */
+  .hero h1 > span[aria-hidden] { display: block; animation: hero-rise .9s var(--out) both; }
+  .hero > div { animation: hero-rise .9s var(--out) .12s both; }
+  .stage-tilt { animation: hero-rise 1s var(--out) .22s both; }
+  @keyframes hero-rise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
+  /* Then, where the browser can, the stage tips up flat as it scrolls into view. */
+  @supports (animation-timeline: view()) {
+    .film-frame { animation: film-in linear both; animation-timeline: view(); animation-range: entry 0% cover 40%; }
+    @keyframes film-in { from { transform: scale(.9); border-radius: 40px; } to { transform: none; border-radius: 24px; } }
+  }
+  .film-icon { transition: transform .45s var(--spring), background .2s ease; }
+  .film-play:hover .film-icon { transform: scale(1.1); }
+  .film-icon::after { content: ""; position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 0 rgba(255,255,255,.35); animation: halo 2.4s var(--out) infinite; }
+  @keyframes halo { to { box-shadow: 0 0 0 14px rgba(255,255,255,0); } }
+  .tile:hover { transform: translateY(-5px) rotate(-1.2deg); box-shadow: 0 16px 30px -18px rgba(15,16,18,.45); }
+  .tile.center:hover { transform: scale(1.03); }
+  .moment .phones .back { animation: float 8s ease-in-out infinite; }
+  .moment .phones .front { animation: float 8s ease-in-out -4s infinite; }
+}
+
+@media (max-width: 900px) {
+  .stage .hero-phone { left: 50%; margin-left: -150px; top: 40px; }
+  .workspace-art.bleed { min-height: 420px; }
+}
+@media (max-width: 640px) {
+  .stage .hero-phone { width: 260px; margin-left: -130px; top: 30px; }
+  .moment .phones .iphone-x { width: 210px; }
+  .scene-phone .step-phone { width: 230px; }
+  .workspace-art.bleed .iphone-x { width: 250px; margin-top: 28px; }
+  .film { padding-top: 56px; }
+  .film-frame { border-radius: 16px; }
+  .film-play { left: 12px; bottom: 12px; padding: 6px 14px 6px 6px; }
+  .film-icon { width: 36px; height: 36px; }
+  .film-play small { display: none; }
+}
