@@ -423,7 +423,11 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
       // An older Mac leaves an empty list out entirely. That is an empty
       // board, not a malformed frame: dropping it kept ended sessions on screen.
       value.sessions ??= [];
-      if (!boundedArray(value.sessions, 10_000, isSession)) return null;
+      // One session the app cannot read is left out, not the whole list. A
+      // single session with no native id used to reject the frame, and with
+      // it every agent that was not sending live updates: the idle ones.
+      if (!Array.isArray(value.sessions) || value.sessions.length > 10_000) return null;
+      value.sessions = value.sessions.filter(isSession);
       break;
     case "session_update":
       if (!isSession(value.session)) return null;
@@ -476,8 +480,9 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
       break;
     case "directory_sessions":
       value.sessions ??= [];
-      if (!boundedArray(value.sessions, 10_000, isSession) ||
+      if (!Array.isArray(value.sessions) || value.sessions.length > 10_000 ||
           !optionalBoundedString(value.path, 4096)) return null;
+      value.sessions = value.sessions.filter(isSession);
       break;
     case "session_started":
     case "session_ended":

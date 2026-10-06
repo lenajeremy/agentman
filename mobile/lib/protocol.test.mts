@@ -401,3 +401,25 @@ test("switch lists are bounded and every name in them could be sent back", () =>
       models: Array.from({ length: 64 }, (_, index) => "m".repeat(120) + index) },
   }));
 });
+
+test("one session the app cannot read is left out, not the whole board", () => {
+  const idle = {
+    id: "claude:3eed3aaf", kind: "claude", nativeId: "3eed3aaf", name: "google-prep-os",
+    cwd: "/Users/mac/Documents/google-prep-os", state: "idle", inject: "tmux",
+    startedAt: 1791100000000, lastActivityAt: 1791190000000,
+  };
+  // An Antigravity pane on its first-run trust prompt, from an older Mac that
+  // sent it without a native id.
+  const broken = {
+    id: "antigravity:tmux-agentman-antigravity-1", kind: "antigravity", nativeId: "", name: "models",
+    cwd: "/Users/mac/superwhisper/models", state: "waiting_input", inject: "tmux",
+    startedAt: 1791228982000, lastActivityAt: 1791228982000,
+  };
+  const event = decodeDaemonEvent({ type: "sessions", sessions: [broken, idle] });
+  assert.ok(event, "the whole list was rejected over one session");
+  assert.deepEqual(event.sessions?.map((session) => session.id), ["claude:3eed3aaf"]);
+  const folder = decodeDaemonEvent({ type: "directory_sessions", path: "/Users/mac", sessions: [broken, idle] });
+  assert.deepEqual(folder?.sessions?.map((session) => session.id), ["claude:3eed3aaf"]);
+  // Something that is not a list at all is still refused.
+  assert.equal(decodeDaemonEvent({ type: "sessions", sessions: "nope" }), null);
+});
