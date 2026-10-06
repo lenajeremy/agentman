@@ -1,0 +1,19 @@
+{
+  "name": "agentman",
+  "version": "0.0.0",
+  "description": "Watch your coding agents from your phone and answer them when they get stuck",
+  "homepage": "https://agentman-nu.vercel.app",
+  "repository": { "type": "git", "url": "git+https://github.com/lenajeremy/agentman.git" },
+  "bugs": "https://github.com/lenajeremy/agentman/issues",
+  "license": "MIT",
+  "keywords": ["claude-code", "codex", "cursor", "kiro", "antigravity", "opencode", "agents", "remote", "mobile"],
+  "bin": { "am": "bin/am.js", "agentman": "bin/am.js" },
+  "files": ["bin/am.js", "README.md"],
+  "engines": { "node": ">=18" },
+  "optionalDependencies": {
+    "agentman-darwin-arm64": "0.0.0",
+    "agentman-darwin-x64": "0.0.0",
+    "agentman-linux-arm64": "0.0.0",
+    "agentman-linux-x64": "0.0.0"
+  }
+}

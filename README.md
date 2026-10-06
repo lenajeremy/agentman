@@ -31,9 +31,22 @@ delivery, interactive question forms, and local notifications.
 
 ### 1. Install the CLI
 
+On macOS or Linux:
+
+```bash
+curl -fsSL https://agentman-nu.vercel.app/install | sh
+```
+
+The script uses Homebrew when you have it, and otherwise downloads the release
+for your machine, checks it against the release's checksums and installs `am`
+without sudo. To use Homebrew directly, on macOS or Linux:
+
 ```bash
 brew install lenajeremy/agentman/agentman
 ```
+
+Name the tap in full: Homebrew 7 refuses a bare `brew install agentman` from a
+tap you have not trusted (`brew trust lenajeremy/agentman`).
 
 Or build it from source:
 
@@ -49,6 +62,8 @@ or Codex and to answer their terminal prompts:
 ```bash
 brew install tmux
 ```
+
+The full walkthrough is at https://agentman-nu.vercel.app/start.
 
 ### 2. Configure hooks and start the daemon
 

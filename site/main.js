@@ -154,7 +154,7 @@
       ".why .h2", ".why > p", ".cards .card", ".stats > div",
       ".workspace .caps", ".workspace .h2", ".workspace-intro",
       ".workspace-copy", ".workspace-art", ".workspace-card", ".how .caps", ".how .h2",
-      ".steps .step", ".moment li", ".moment .h2", ".start .h2", ".platform",
+      ".steps .step", ".moment li", ".moment .h2", ".start .h2", ".platform", ".setup-step",
       ".names > span", ".moment .phones .iphone-x", ".workspace-art .iphone-x", ".grid .tile", ".band .h2", ".band p", ".band-art",
     ];
     const reveal = new IntersectionObserver((entries) => {
@@ -367,6 +367,18 @@
   document.querySelectorAll("[data-platform-link]").forEach((link) => {
     link.addEventListener("click", () => select(link.dataset.platformLink, false));
   });
+
+  // The install command names the address this page was served from, so it
+  // stays right whichever domain the site is on.
+  if (location.protocol === "https:") {
+    document.querySelectorAll("[data-origin-cmd]").forEach((block) => {
+      const swap = (text) => text.replace(/https:\/\/[^/\s]+\/install/, `${location.origin}/install`);
+      const code = block.querySelector("code");
+      const button = block.querySelector("[data-copy]");
+      code.lastChild.textContent = swap(code.lastChild.textContent);
+      button.dataset.copy = swap(button.dataset.copy);
+    });
+  }
 
   // Copy buttons.
   document.querySelectorAll("[data-copy]").forEach((button) => {

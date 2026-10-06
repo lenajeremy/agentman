@@ -52,3 +52,6 @@ ISSUES.md
 /mobile/build/
 /mobile/credentials.json
 /mobile/credentials/
+
+# npm packages built by scripts/npm-release.mjs
+npm/out/

@@ -188,20 +188,8 @@
 
       <div class="workspace-feature">
         <div class="workspace-copy"><span class="workspace-kicker">Files</span><h3>Browse the workspace.</h3><p>Open folders in the agent's working directory and find the file you want. Code and images open in a read-only viewer; private files and symlinks stay hidden.</p></div>
-        <div class="workspace-art files-art" role="img" aria-label="Illustration of the Files tab showing folders and files in a session's workspace">
-          <div class="mock-window" aria-hidden="true">
-            <div class="mock-head"><span>‹</span><b>Workspace</b><span>↻</span></div>
-            <div class="mock-tabs"><b>Files</b><span>Changes</span></div>
-            <div class="mock-crumb">⌂ <span>›</span> storefront <span>›</span> src</div>
-            <div class="mock-list">
-              <div><i class="folder">▰</i><b>components</b><span>›</span></div>
-              <div><i class="folder">▰</i><b>lib</b><span>›</span></div>
-              <div><i class="code">{ }</i><b>App.tsx</b><small>3.2 KB</small><span>›</span></div>
-              <div><i class="code">#</i><b>styles.css</b><small>1.8 KB</small><span>›</span></div>
-              <div><i class="picture">▧</i><b>hero.png</b><small>284 KB</small><span>›</span></div>
-            </div>
-            <div class="mock-note">Files are read only.</div>
-          </div>
+        <div class="workspace-art files-art bleed" role="img" aria-label="The app's Files tab at the root of a project: folders and files with their sizes">
+          <figure class="iphone-x rise"><img class="shot" src="/media/files.webp" alt="" loading="lazy" decoding="async"><img class="frame" src="/media/iphone-frame.webp" alt="" width="700" height="1431" decoding="async"></figure>
         </div>
       </div>
 
@@ -214,24 +202,15 @@
 
       <div class="workspace-more">
         <article class="workspace-card">
-          <div class="mini-art read-art" role="img" aria-label="Illustration of syntax-highlighted code beside an image preview">
-            <div class="mini-code" aria-hidden="true"><span>App.tsx <b>File</b></span><code><i>const</i> image = <em>"hero.png"</em>;</code><code><i>return</i> &lt;Preview src={image} /&gt;;</code></div>
-            <div class="mini-image" aria-hidden="true"><div class="mini-sun"></div><div class="mini-hill"></div></div>
-          </div>
+          <div class="mini-art read-art shots" role="img" aria-label="The app's code viewer on exports.js, with an image open in its image viewer"><img class="s-back" src="/media/card-code.webp" alt="" loading="lazy" decoding="async"><img class="s-front" src="/media/card-image.webp" alt="" loading="lazy" decoding="async"></div>
           <h3>Read code and view images</h3><p>Open source files with syntax highlighting and line numbers, or inspect an image right on your phone.</p>
         </article>
         <article class="workspace-card">
-          <div class="mini-art preview-art" role="img" aria-label="Illustration of a running server opening its website in an in-app browser">
-            <div class="server-row" aria-hidden="true"><span>◉</span><div><b>storefront</b><small>:3000 · npm run dev</small></div><strong>Open ↗</strong></div>
-            <div class="preview-browser" aria-hidden="true"><div class="preview-browser-bar"><i></i><span>localhost:3000</span><i></i></div><div class="preview-page"><b>Build faster.</b><span>Preview your changes live</span><em>Explore →</em></div></div>
-          </div>
+          <div class="mini-art preview-art shots" role="img" aria-label="The app's Servers screen with Open and Stop, over the page the server shows"><img class="s-back" src="/media/card-preview.webp" alt="" loading="lazy" decoding="async"><img class="s-top" src="/media/card-server.webp" alt="" loading="lazy" decoding="async"></div>
           <h3>Open the live site</h3><p>Open a server your agent started in the app. Share a preview link or stop the server from your phone.</p>
         </article>
         <article class="workspace-card">
-          <div class="mini-art message-art" role="img" aria-label="Illustration of a message with an attached image ready to send to an agent">
-            <div class="message-bubble" aria-hidden="true">Done. How does this look?</div>
-            <div class="message-composer" aria-hidden="true"><div class="message-thumb"><div class="message-thumb-window"><i></i><i></i><i></i></div><span>×</span></div><div class="message-field"><b>＋</b><span>Fix the spacing here…</span><strong>↑</strong></div></div>
-          </div>
+          <div class="mini-art message-art shots" role="img" aria-label="The app's message composer with a screenshot attached and a note typed"><img class="s-fill" src="/media/card-composer.webp" alt="" loading="lazy" decoding="async"></div>
           <h3>Send images with your message</h3><p>Attach a screenshot to show what you mean. Images your agent produces or inspects also open from the conversation.</p>
         </article>
       </div>
@@ -391,7 +370,7 @@
   <section class="start" id="get-started" aria-labelledby="start-title">
     <div class="wrap">
       <h2 class="h2" id="start-title">Get started</h2>
-      <div class="sub">Install the CLI, pair your phone, start an agent.</div>
+      <div class="sub">Install the command-line tool, pair your phone, start an agent.</div>
       <div class="platforms" role="tablist" aria-label="Platform">
         <button class="platform" role="tab" id="tab-macos" aria-controls="panel-macos" aria-selected="true" data-platform="macos"><svg class="logo" aria-hidden="true"><use href="#l-apple"/></svg>macOS</button>
         <button class="platform" role="tab" id="tab-linux" aria-controls="panel-linux" aria-selected="false" tabindex="-1" data-platform="linux"><svg class="logo" aria-hidden="true"><use href="#l-linux"/></svg>Linux</button>
@@ -400,12 +379,12 @@
       </div>
 
       <div class="panel-body" role="tabpanel" id="panel-macos" aria-labelledby="tab-macos">
-        <div class="command"><code><span class="pr">$</span>brew install lenajeremy/agentman/agentman</code><button class="copy" data-copy="brew install lenajeremy/agentman/agentman"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span></button></div>
-        <p class="steps-list">Then run <code>am install-hooks</code>, <code>am serve</code> and <code>am pair</code>. The terminal agents — Claude Code, Codex, Cursor, Kiro and Antigravity — run in tmux, which Homebrew installs alongside.</p>
+        <div class="command" data-origin-cmd><code><span class="pr">$</span>curl -fsSL https://agentman-nu.vercel.app/install | sh</code><button class="copy" data-copy="curl -fsSL https://agentman-nu.vercel.app/install | sh"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+        <p class="steps-list">Or with Homebrew: <code>brew install lenajeremy/agentman/agentman</code>. Either way you get <code>tmux</code> too, which Agentman uses to type into your agents.</p>
       </div>
       <div class="panel-body" role="tabpanel" id="panel-linux" aria-labelledby="tab-linux" hidden>
-        <div class="command"><code><span class="pr">$</span>go build -o bin/am ./cmd/am</code><button class="copy" data-copy="git clone https://github.com/lenajeremy/agentman.git && cd agentman && go build -o bin/am ./cmd/am"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span></button></div>
-        <p class="steps-list">Build from a clone with Go 1.26, or download a binary for amd64 or arm64 from <a href="https://github.com/lenajeremy/agentman/releases/latest">the latest release</a>.</p>
+        <div class="command" data-origin-cmd><code><span class="pr">$</span>curl -fsSL https://agentman-nu.vercel.app/install | sh</code><button class="copy" data-copy="curl -fsSL https://agentman-nu.vercel.app/install | sh"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+        <p class="steps-list">For amd64 and arm64. Homebrew on Linux works too: <code>brew install lenajeremy/agentman/agentman</code>. Or build from a clone with Go 1.26.</p>
       </div>
       <div class="panel-body" role="tabpanel" id="panel-ios" aria-labelledby="tab-ios" hidden>
         <a class="btn light" href="https://testflight.apple.com/join/UcJvsjED">Open the TestFlight invite <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
@@ -413,6 +392,17 @@
       </div>
       <div class="panel-body" role="tabpanel" id="panel-android" aria-labelledby="tab-android" hidden>
         <p class="panel-note">Build the app from source with Expo. It runs and shows alerts while it's open; background push isn't set up on Android yet. <a href="https://github.com/lenajeremy/agentman#mobile-development">Mobile setup guide</a></p>
+      </div>
+
+      <div class="then">
+        <div class="then-title">Then, on your computer</div>
+        <ol class="then-steps">
+          <li><code>am install-hooks</code><span>connect your agents, once</span></li>
+          <li><code>am serve</code><span>start Agentman, leave it running</span></li>
+          <li><code>am pair</code><span>scan the code with the app</span></li>
+          <li><code>am claude</code><span>start an agent you can answer</span></li>
+        </ol>
+        <a class="btn light" href="/start">The full setup guide <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
       </div>
     </div>
   </section>
