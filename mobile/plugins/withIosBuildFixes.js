@@ -1,13 +1,15 @@
 const {
+  withAppDelegate,
   withDangerousMod,
   withEntitlementsPlist,
+  withInfoPlist,
   withXcodeProject,
 } = require("expo/config-plugins");
 const fs = require("fs");
 const path = require("path");
 
 /**
- * Two fixes for the generated iOS project.
+ * Fixes for the generated iOS project.
  *
  * They live here rather than in ios/ because `expo prebuild` regenerates that
  * directory from scratch — anything edited there is lost the next time anyone
@@ -137,6 +139,62 @@ function withoutPushEntitlement(config) {
   });
 }
 
+/**
+ * Adopt the scene life cycle, which iOS 27 requires.
+ *
+ * An app built with the iOS 27 SDK stops at launch on iOS 27 unless it uses
+ * scenes: "Application failed to launch: UIScene life cycle is required for
+ * apps built with this SDK" (TN3187). Builds made with Xcode 27 opened on an
+ * iOS 26 phone and failed on an iOS 27 one.
+ *
+ * Expo ships the scene delegate (ExpoAppSceneDelegate); the app has to name it
+ * in Info.plist and let it create the window. The generated AppDelegate makes
+ * the window and starts React Native itself, so that part is removed and the
+ * delegate declares the provider conformance the scene delegate looks for. If
+ * Expo's template changes shape, this throws rather than shipping a build
+ * that starts React Native twice or not at all.
+ */
+function withSceneLifeCycle(config) {
+  config = withInfoPlist(config, (config) => {
+    config.modResults.UIApplicationSceneManifest = {
+      UIApplicationSupportsMultipleScenes: false,
+      UISceneConfigurations: {
+        UIWindowSceneSessionRoleApplication: [
+          {
+            UISceneConfigurationName: "Default Configuration",
+            UISceneDelegateClassName: "EXExpoAppSceneDelegate",
+          },
+        ],
+      },
+    };
+    return config;
+  });
+  return withAppDelegate(config, (config) => {
+    let source = config.modResults.contents;
+    if (source.includes("ExpoReactNativeFactoryProvider")) return config;
+    source = source.replace(
+      "class AppDelegate: ExpoAppDelegate {",
+      "class AppDelegate: ExpoAppDelegate, ExpoReactNativeFactoryProvider {",
+    );
+    source = source.replace(
+      /#if os\(iOS\) \|\| os\(tvOS\)\n\s*window = UIWindow\(frame: UIScreen\.main\.bounds\)\n\s*factory\.startReactNative\([\s\S]*?\)\n#endif\n/,
+      "    // ExpoAppSceneDelegate creates the window and starts React Native in it.\n",
+    );
+    if (
+      !source.includes("ExpoAppDelegate, ExpoReactNativeFactoryProvider") ||
+      source.includes("UIWindow(frame: UIScreen.main.bounds)")
+    ) {
+      throw new Error(
+        "withIosBuildFixes: the generated AppDelegate no longer matches; adopt the scene life cycle by hand",
+      );
+    }
+    config.modResults.contents = source;
+    return config;
+  });
+}
+
 module.exports = function withIosBuildFixes(config) {
-  return withoutPushEntitlement(withSigningTeam(withPodDeploymentTarget(config)));
+  return withSceneLifeCycle(
+    withoutPushEntitlement(withSigningTeam(withPodDeploymentTarget(config))),
+  );
 };

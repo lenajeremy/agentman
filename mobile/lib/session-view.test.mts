@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { Message } from "./protocol.ts";
-import { showsInFeed, statusChip } from "./session-view.ts";
+import { modeLabel, modelLabel, showsInFeed, statusChip } from "./session-view.ts";
 
 test("the chip shows the agent's mode and how full its context is", () => {
   assert.deepEqual(statusChip("plan", 42), {
@@ -41,4 +41,29 @@ test("everything with something to show keeps its row", () => {
   assert.ok(showsInFeed(message({ role: "system", text: "" })));
   assert.ok(showsInFeed(message({ role: "tool", tool: { name: "Read" } })));
   assert.ok(showsInFeed(message({ tool: { name: "Read" } })));
+});
+
+test("modes read as words, not identifiers", () => {
+  assert.equal(modeLabel("kiro_default"), "Default");
+  assert.equal(modeLabel("kiro_planner"), "Planner");
+  assert.equal(modeLabel("kiro_guide"), "Guide");
+  assert.equal(modeLabel("accept-edits"), "Accept edits");
+  assert.equal(modeLabel("accept edits"), "Accept edits");
+  assert.equal(modeLabel("plan"), "Plan");
+  assert.equal(modeLabel("default"), "Default");
+  // A custom Kiro agent keeps its own name, made readable.
+  assert.equal(modeLabel("kiro_release_bot"), "Release bot");
+  assert.equal(modeLabel("my-reviewer"), "My reviewer");
+});
+
+test("models read as people say them, and names already meant for people are kept", () => {
+  assert.equal(modelLabel("claude-opus-5-5"), "Opus 5.5");
+  assert.equal(modelLabel("claude-sonnet-4.5"), "Sonnet 4.5");
+  assert.equal(modelLabel("claude-haiku-4-5-20251001"), "Haiku 4.5");
+  assert.equal(modelLabel("claude-3.5-sonnet"), "Sonnet 3.5");
+  assert.equal(modelLabel("gpt-6.1-sol"), "GPT-6.1 Sol");
+  assert.equal(modelLabel("gpt-6-luna"), "GPT-6 Luna");
+  assert.equal(modelLabel("auto"), "Auto");
+  assert.equal(modelLabel("Gemini 3.8 Pro (High)"), "Gemini 3.8 Pro (High)");
+  assert.equal(modelLabel("Opus 5.5"), "Opus 5.5");
 });
