@@ -1,8 +1,9 @@
 // Telling someone their app or their Mac is behind, once per new version.
 //
 // Two sources, because the two halves ship separately. The app's latest
-// build is in a small file the iOS release publishes to the website, since
-// TestFlight has no API an app can ask. The Mac's is worked out by the Mac
+// build is in a small file on the website, since TestFlight has no API an app
+// can ask; a build is added to it only once testers can install it
+// (scripts/announce.mjs). The Mac's is worked out by the Mac
 // itself, which asks GitHub and passes the answer along with its session
 // list. Neither request carries anything about the person asking.
 //
@@ -19,20 +20,13 @@ export const DEFAULT_UPGRADE = "curl -fsSL https://agentman-nu.vercel.app/instal
 /** Every release's notes, when the Mac did not send its own link. */
 export const DEFAULT_CHANGELOG = "https://github.com/lenajeremy/agentman/releases";
 
-/**
- * How long after a build ships before the app offers it. Apple processes an
- * upload for a while before TestFlight will install it, and an Update button
- * that leads to nothing new is worse than an offer that comes a little late.
- */
-export const PROCESSING_GRACE_MS = 60 * 60 * 1000;
-
 /** How often the app asks the website again while it stays open. */
 export const RECHECK_MS = 6 * 60 * 60 * 1000;
 
 export interface AppBuildNote {
   build: number;
   version: string;
-  /** Milliseconds. When the build was sent to Apple. */
+  /** Milliseconds. When testers could first install it. */
   date: number;
   changes: string[];
 }
@@ -72,12 +66,10 @@ export interface AppUpdate {
   url: string;
 }
 
-/** The builds this app is missing that TestFlight can install by now. */
-export function appUpdate(currentBuild: number, release: AppRelease | null, now: number): AppUpdate | null {
+/** The builds this app is missing. */
+export function appUpdate(currentBuild: number, release: AppRelease | null): AppUpdate | null {
   if (!release || !Number.isInteger(currentBuild) || currentBuild <= 0) return null;
-  const missing = release.builds.filter(
-    (build) => build.build > currentBuild && now - build.date >= PROCESSING_GRACE_MS,
-  );
+  const missing = release.builds.filter((build) => build.build > currentBuild);
   if (missing.length === 0) return null;
   return { current: currentBuild, latest: missing[0], missing, url: release.url };
 }
@@ -123,10 +115,15 @@ export function nextPrompt(app: AppUpdate | null, mac: MacUpdate | null, prompte
   return null;
 }
 
+/** "0.2.0 (27)": the version people read, and the build TestFlight lists. */
+export function versionLabel(version: string, build: number): string {
+  return build > 0 ? `${version} (${build})` : version;
+}
+
 /** The app's line in Settings. */
 export function appSummary(version: string, build: number, update: AppUpdate | null): string {
-  const current = build > 0 ? `${version} (${build})` : version;
-  return update ? `${current} · build ${update.latest.build} is out` : `${current} · up to date`;
+  const current = versionLabel(version, build);
+  return update ? `${current} · ${update.latest.version} is out` : `${current} · up to date`;
 }
 
 /** The Mac's line in Settings. */
