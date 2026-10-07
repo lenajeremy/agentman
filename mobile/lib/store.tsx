@@ -47,6 +47,7 @@ import {
 import { draftNamespace } from "./draft-policy";
 import { resumeOnce } from "./resume";
 import { folderContains } from "./folders";
+import { ALERT_SOUND_FINISHED, ALERT_SOUND_NEEDS_YOU } from "./alert-sounds";
 import { isPushActive, obtainPushToken, setPushActive } from "./push";
 import {
   DEFAULT_NOTIFY_PREFS,
@@ -282,7 +283,7 @@ function notifyQuestion(session: Session, prefs: NotifyPrefs) {
     content: {
       title: `${session.name || session.kind} needs your answer`,
       body: session.question?.prompt || "The agent is waiting for your input.",
-      sound: true,
+      sound: ALERT_SOUND_NEEDS_YOU,
       data: { sessionId: session.id, kind: "question" },
     },
     trigger: null,
@@ -699,7 +700,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             content: {
               title: `${event.sessionName ?? "Agent"} finished`,
               body: event.preview || "Tap to see what it did.",
-              sound: true,
+              sound: ALERT_SOUND_FINISHED,
               data: { sessionId: event.sessionId },
             },
             trigger: null,
