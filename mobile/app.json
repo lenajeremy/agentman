@@ -46,7 +46,15 @@
           "photosPermission": "Allow Agentman to attach a screenshot or photo to a message for your agent."
         }
       ],
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "sounds": [
+            "./assets/sounds/agentman-needs-you.wav",
+            "./assets/sounds/agentman-finished.wav"
+          ]
+        }
+      ],
       "./plugins/withIosBuildFixes",
       "expo-web-browser",
       "expo-sharing"

@@ -211,6 +211,41 @@ func TestSendSkipsPhonesThatTurnedTheKindOff(t *testing.T) {
 	}
 }
 
+func TestEachKindPlaysItsOwnSound(t *testing.T) {
+	store := NewStore(t.TempDir())
+	if _, err := store.Register(goodToken, nil); err != nil {
+		t.Fatal(err)
+	}
+	var sounds []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var received []expoMessage
+		_ = json.NewDecoder(r.Body).Decode(&received)
+		for _, message := range received {
+			sounds = append(sounds, message.Sound)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"status":"ok"}]}`))
+	}))
+	defer server.Close()
+	sender := NewSender(store, Config{})
+	sender.Endpoint = server.URL
+
+	for _, kind := range []Kind{KindNeedsYou, KindFinished, ""} {
+		if err := sender.Send(context.Background(), Alert{Kind: kind, Title: "t"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{SoundNeedsYou, SoundFinished, "default"}
+	if len(sounds) != len(want) {
+		t.Fatalf("sounds = %v, want %v", sounds, want)
+	}
+	for i := range want {
+		if sounds[i] != want[i] {
+			t.Fatalf("sounds = %v, want %v", sounds, want)
+		}
+	}
+}
+
 func sorted(values []string) []string {
 	out := append([]string(nil), values...)
 	sort.Strings(out)

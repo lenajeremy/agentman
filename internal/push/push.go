@@ -91,6 +91,27 @@ func (p Prefs) wants(kind Kind) bool {
 	return true
 }
 
+// The app's own alert sounds. They ship inside the app (mobile/assets/sounds,
+// bundled by the expo-notifications plugin), which is what lets iOS play them
+// for a push that arrives while the app is closed. A phone on a build without
+// them gets the default sound instead, so the daemon and the app can update in
+// either order.
+const (
+	SoundNeedsYou = "agentman-needs-you.wav"
+	SoundFinished = "agentman-finished.wav"
+)
+
+// sound is the file a push of this kind asks the phone to play.
+func (k Kind) sound() string {
+	switch k {
+	case KindFinished:
+		return SoundFinished
+	case KindNeedsYou:
+		return SoundNeedsYou
+	}
+	return "default"
+}
+
 type device struct {
 	lastSeen int64
 	prefs    Prefs
@@ -302,7 +323,7 @@ func (s *Sender) Send(ctx context.Context, alert Alert) error {
 	messages := make([]expoMessage, 0, len(tokens))
 	for _, token := range tokens {
 		message := expoMessage{
-			To: token, Title: alert.Title, Body: alert.Body, Sound: "default",
+			To: token, Title: alert.Title, Body: alert.Body, Sound: alert.Kind.sound(),
 		}
 		if alert.SessionID != "" {
 			message.Data = map[string]any{"sessionId": alert.SessionID}
