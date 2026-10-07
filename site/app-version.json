@@ -2,6 +2,14 @@
   "url": "https://testflight.apple.com/join/UcJvsjED",
   "builds": [
     {
+      "build": 26,
+      "version": "0.1.1",
+      "date": "2026-10-07T10:00:51.365Z",
+      "changes": [
+        "When a newer version of the app or of agentman on your Mac is out, Agentman tells you once, with what's new and how to update. Settings → Versions shows both."
+      ]
+    },
+    {
       "build": 25,
       "version": "0.1.1",
       "date": "2026-10-07T07:39:22Z",
