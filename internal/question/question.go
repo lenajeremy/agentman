@@ -55,6 +55,9 @@ type Question struct {
 	PreviewLayout bool `json:"-"`
 	// WorkspaceTrust is Claude's unnumbered first-run folder confirmation.
 	WorkspaceTrust bool `json:"-"`
+	// Dialog is one of Claude Code's own dialogs rather than a question from
+	// the agent. Its one answer, DialogCloseKey, is Esc.
+	Dialog bool `json:"-"`
 	// AmendWithTab means Claude's footer offers "Tab to amend": Tab on the
 	// focused choice opens a line for a note to send with it, which is how a
 	// permission prompt's "No" becomes "No, and tell Claude what to do
@@ -181,6 +184,15 @@ func Detect(pane string) *Question {
 	if trust := detectWorkspaceTrust(lines); trust != nil {
 		return trust
 	}
+	if menu := detectMenu(lines); menu != nil {
+		return menu
+	}
+	return detectClaudeDialog(lines)
+}
+
+// detectMenu reads a numbered menu: permission prompts, AskUserQuestion and
+// Codex's approvals.
+func detectMenu(lines []string) *Question {
 	previewColumn := findPreviewColumn(lines)
 	advanceWithTab := strings.Contains(
 		strings.ToLower(strings.Join(strings.Fields(strings.Join(lines, " ")), " ")),
@@ -595,6 +607,105 @@ func detectWorkspaceTrust(lines []string) *Question {
 		},
 		FocusIndex: focus, WorkspaceTrust: true,
 	}
+}
+
+// DialogCloseKey is the one answer to a Claude Code dialog: close it.
+const DialogCloseKey = "close"
+
+// dialogFooter is the key-hint row that closes a Claude Code dialog. Esc is
+// the one key every one of them offers, and the only one the phone presses.
+var dialogFooter = regexp.MustCompile(`(?i)\besc to (?:cancel|close|exit|dismiss|go back)\b`)
+
+// detectClaudeDialog reads a dialog Claude Code opens of its own accord, such
+// as "Teach auto mode about your environment?" after a turn ends. It is not a
+// question from the agent, but it blocks the session the same way: Claude
+// reports it as waiting on a "dialog open", and keys sent to the session go
+// to the dialog, Enter included, whose footer offers "Enter to continue". Shown as a question, the
+// phone can say what is open and close it, and a message from the phone is
+// refused rather than typed into it.
+//
+// Claude draws these in a box under a ▔ rule, ending in a footer that offers
+// Esc. A numbered menu in that box is detectMenu's to read, so one it turned
+// down is not offered here either: Esc on a permission prompt is a refusal,
+// not a way to close something.
+func detectClaudeDialog(lines []string) *Question {
+	end := len(lines) - 1
+	for end >= 0 && strings.TrimSpace(lines[end]) == "" {
+		end--
+	}
+	if end < 0 || !dialogFooter.MatchString(lines[end]) {
+		return nil
+	}
+	top := -1
+	for i := end - 1; i >= 0; i-- {
+		if isDialogRule(strings.TrimSpace(lines[i])) {
+			top = i
+			break
+		}
+	}
+	if top < 0 {
+		return nil
+	}
+	// The title is the box's first line. Its text is the paragraphs set at the
+	// title's indent; the rows after them are the dialog's own controls, which
+	// only make sense at the keyboard.
+	title, indent := "", 0
+	var paragraphs []string
+	var paragraph []string
+	controls := false
+	for _, line := range lines[top+1 : end] {
+		if optionLine.MatchString(line) {
+			return nil
+		}
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "":
+			if len(paragraph) > 0 {
+				paragraphs = append(paragraphs, strings.Join(paragraph, " "))
+				paragraph = nil
+			}
+		case title == "":
+			title, indent = trimmed, leadingColumn(line)
+		case controls || leadingColumn(line) != indent || strings.HasPrefix(trimmed, "❯"):
+			if !controls && len(paragraph) > 0 {
+				paragraphs = append(paragraphs, strings.Join(paragraph, " "))
+				paragraph = nil
+			}
+			controls = true
+		default:
+			paragraph = append(paragraph, trimmed)
+		}
+	}
+	if len(paragraph) > 0 {
+		paragraphs = append(paragraphs, strings.Join(paragraph, " "))
+	}
+	if title == "" {
+		return nil
+	}
+	return &Question{
+		Title:  title,
+		Prompt: strings.Join(paragraphs, "\n\n"),
+		Options: []Option{{
+			Key:         DialogCloseKey,
+			Label:       "Close it",
+			Description: "Claude Code opened this on your Mac. Closing it is the same as pressing Esc there.",
+		}},
+		Dialog: true,
+	}
+}
+
+// isDialogRule reports the ▔ rule Claude Code draws across the top of its
+// dialogs.
+func isDialogRule(trimmed string) bool {
+	if trimmed == "" {
+		return false
+	}
+	for _, r := range trimmed {
+		if r != '▔' {
+			return false
+		}
+	}
+	return true
 }
 
 func isReviewOptions(options []Option) bool {

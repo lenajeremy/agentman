@@ -50,6 +50,9 @@ type ClaudeSource struct {
 	// real pane captures without a terminal. See tmux.AnswerWithNote.
 	answerWithNote func(ctx context.Context, name string, distance int, note string,
 		focused, amending, typed func(string) bool) error
+	// closeDialog presses Esc on a dialog Claude Code has open, and is
+	// injectable for the same reason. See question.Question.Dialog.
+	closeDialog func(ctx context.Context, name string) error
 	// processArgs reads full command lines, which the process snapshot does
 	// not carry; infra remembers what they said. See withoutInfra.
 	processArgs func(context.Context, []int) map[int]string
@@ -119,6 +122,7 @@ func NewClaudeSource(home string) (*ClaudeSource, error) {
 		snapshotProcesses: tmux.SnapshotProcessTree,
 		capturePane:       tmux.Capture,
 		answerWithNote:    tmux.AnswerWithNote,
+		closeDialog:       tmux.Escape,
 		switcher:          newPaneDriver(),
 		processArgs:       claudeProcessArgs,
 		infra:             map[claudeProcessKey]bool{},

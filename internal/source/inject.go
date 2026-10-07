@@ -154,7 +154,9 @@ func rejectSendIntoLiveQuestion(
 		// cannot prove which of those states it is in.
 		return fmt.Errorf("source: could not safely inspect the terminal before sending: %w", err)
 	}
-	if question.Detect(pane) != nil || question.CodexQueued(pane) {
+	if found := question.Detect(pane); found != nil && found.Dialog {
+		return fmt.Errorf("source: close the dialog Claude Code has open before sending a message")
+	} else if found != nil || question.CodexQueued(pane) {
 		return fmt.Errorf("source: answer the pending question before sending a message")
 	}
 	return nil
@@ -361,6 +363,12 @@ func (s *ClaudeSource) Answer(ctx context.Context, sessionID string, answer prot
 		}
 		return tmux.AnswerWorkspaceTrust(ctx, session.tmuxName, answer.OptionKey,
 			target-current.FocusIndex)
+	}
+	if current.Dialog {
+		if answer.Text != "" || len(answer.Options) > 0 || answer.OptionKey != question.DialogCloseKey {
+			return fmt.Errorf("source: a Claude Code dialog can only be closed from here")
+		}
+		return s.closeDialog(ctx, session.tmuxName)
 	}
 
 	if current.Multiple {
