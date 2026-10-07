@@ -69,6 +69,46 @@ func TestDetectsClaudeWorkspaceTrust(t *testing.T) {
 	}
 }
 
+// Claude Code opens dialogs of its own, like this one after a turn ends. The
+// reply above it ends in a numbered list and a question, which must not be
+// mistaken for a menu, nor hide the dialog beneath it.
+func TestDetectsAClaudeCodeDialogAsSomethingToClose(t *testing.T) {
+	pane := readFixture(t, "testdata/claude_auto_mode_setup_dialog_real_pane.txt")
+	q := Detect(pane)
+	if q == nil || !q.Dialog {
+		t.Fatalf("the dialog was not detected: %+v", q)
+	}
+	if q.Title != "Teach auto mode about your environment?" {
+		t.Errorf("Title = %q", q.Title)
+	}
+	want := "Claude Code reads this project, your recent Claude sessions, and optionally your shell history " +
+		"and other repositories. Claude analyzes this data and customizes auto mode to make better decisions."
+	if q.Prompt != want {
+		t.Errorf("Prompt = %q, want the dialog's text without its controls", q.Prompt)
+	}
+	if len(q.Options) != 1 || q.Options[0].Key != DialogCloseKey {
+		t.Fatalf("Options = %+v, want only Close", q.Options)
+	}
+
+	closed := pane + "\n" + strings.Join([]string{
+		"────────────────────────────────────────",
+		"❯ ",
+		"────────────────────────────────────────",
+		"  -- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle)",
+	}, "\n")
+	if stale := Detect(closed); stale != nil {
+		t.Fatalf("a dialog already closed was offered: %+v", stale)
+	}
+	unboxed := strings.Replace(pane, strings.Repeat("▔", 80), "", 1)
+	if loose := Detect(unboxed); loose != nil {
+		t.Fatalf("a footer offering Esc, with no dialog box above it, was offered: %+v", loose)
+	}
+	numbered := []string{"▔▔▔▔▔▔▔▔", "   Pick one", "", "   1. Yes", "   2. No", "", "   Esc to cancel"}
+	if menu := detectClaudeDialog(numbered); menu != nil {
+		t.Fatalf("a numbered menu was offered as a dialog to close: %+v", menu)
+	}
+}
+
 func TestDetectsClaudePermissionPrompt(t *testing.T) {
 	q := Detect(claudePermission)
 	if q == nil {
