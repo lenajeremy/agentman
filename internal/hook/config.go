@@ -11,6 +11,7 @@ import (
 
 	"github.com/lenajeremy/agentman/internal/push"
 	"github.com/lenajeremy/agentman/internal/speech"
+	"github.com/lenajeremy/agentman/internal/update"
 )
 
 // DefaultPort is where the daemon listens for hook deliveries. It binds
@@ -36,6 +37,9 @@ type Config struct {
 	// Push reaches the phone once iOS has suspended the app and the websocket
 	// is gone. The daemon posts straight to Expo, so the relay stays out of it.
 	Push push.Config `json:"push,omitempty"`
+	// Updates is whether the daemon asks GitHub for newer releases, so the
+	// phone can say when this Mac is behind. On unless switched off.
+	Updates update.Config `json:"updates,omitempty"`
 }
 
 // ListenAddr returns the configured safe loopback listener or the default.

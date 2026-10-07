@@ -266,8 +266,37 @@ type Event struct {
 	// omitempty, so a session with none says so with [] instead of leaving
 	// the field out.
 	Artifacts []Artifact `json:"artifacts,omitzero"`
+	// Daemon rides on EvtSessions: which agentman this Mac runs, and what is
+	// newer. A phone too old to know the field ignores it.
+	Daemon *DaemonInfo `json:"daemon,omitempty"`
 
 	Error string `json:"error,omitempty"`
+}
+
+// DaemonInfo describes the agentman running on this Mac.
+type DaemonInfo struct {
+	Version string `json:"version"`
+	// Latest is the newest release. Empty until a check has succeeded, or
+	// when checking is switched off.
+	Latest string `json:"latest,omitempty"`
+	// Behind counts the releases newer than Version.
+	Behind int `json:"behind,omitempty"`
+	// Releases are the newer releases, newest first, with what each changed.
+	Releases []ReleaseNote `json:"releases,omitempty"`
+	// Upgrade is the command that upgrades this install, chosen by how it was
+	// installed: Homebrew, npm or the install script.
+	Upgrade string `json:"upgrade,omitempty"`
+	// Changelog links to every release's notes.
+	Changelog string `json:"changelog,omitempty"`
+}
+
+// ReleaseNote is one release this Mac is missing.
+type ReleaseNote struct {
+	Version string `json:"version"`
+	// Date is when it was published, in milliseconds.
+	Date    int64    `json:"date,omitempty"`
+	Changes []string `json:"changes,omitempty"`
+	URL     string   `json:"url,omitempty"`
 }
 
 // WorkspaceResult is a bounded, read-only view of one session's directory.

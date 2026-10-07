@@ -226,10 +226,16 @@ echo "==> upload"
 xcrun altool --upload-app -f "$ipa" -t ios \
   --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
 
-# Record what shipped. Only app.json is committed, even if other files are
-# dirty, and the tag marks this commit as where the next build's notes start.
+# Announce it on the website, which is how the app learns a newer build is in
+# TestFlight: there is no API it could ask. The app waits an hour before
+# offering it, about as long as Apple takes to make the upload installable.
+node scripts/app-version.mjs "$build_number" "$version" "$notes_file"
+
+# Record what shipped. Only app.json and the announcement are committed, even
+# if other files are dirty, and the tag marks this commit as where the next
+# build's notes start. Pushing main is what publishes the announcement.
 echo "==> tag ios-build-${build_number}"
-git commit -q -m "Ship iOS build ${build_number}" -- app.json
+git commit -q -m "Ship iOS build ${build_number}" -- app.json ../site/app-version.json
 git tag "ios-build-${build_number}"
 if ! git push -q origin HEAD "ios-build-${build_number}"; then
   # The build is already with Apple; a failed push must not look like a

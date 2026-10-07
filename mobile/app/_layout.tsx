@@ -15,6 +15,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ThemeProvider, useTheme } from "../lib/appearance";
 import { StoreProvider } from "../lib/store";
+import { UpdatesProvider } from "../lib/updates-context";
 import { palettes } from "../lib/theme";
 
 // Notifications are the product, not a nicety: an alert that arrives silently
@@ -109,15 +110,21 @@ function ThemedApp({ fontsLoaded }: { fontsLoaded: boolean }) {
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: color.paper }}>
       <SafeAreaProvider>
         <StoreProvider>
-          <NotificationNavigation />
-          <StatusBar style={scheme === "dark" ? "light" : "dark"} />
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: color.paper },
-              animation: "slide_from_right",
-            }}
-          />
+          <UpdatesProvider>
+            <NotificationNavigation />
+            <StatusBar style={scheme === "dark" ? "light" : "dark"} />
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: color.paper },
+                animation: "slide_from_right",
+              }}
+            >
+              {/* A sheet, not a page: it is news to read and put away, and
+                  swiping it down is the natural "not now". */}
+              <Stack.Screen name="update" options={{ presentation: "modal", animation: "default" }} />
+            </Stack>
+          </UpdatesProvider>
         </StoreProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

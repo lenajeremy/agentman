@@ -1,0 +1,31 @@
+{
+  "url": "https://testflight.apple.com/join/UcJvsjED",
+  "builds": [
+    {
+      "build": 25,
+      "version": "0.1.1",
+      "date": "2026-10-07T07:39:22Z",
+      "changes": [
+        "Alerts now have their own sounds: a ping when an agent needs you and a chime when one finishes, even with the app closed."
+      ]
+    },
+    {
+      "build": 24,
+      "version": "0.1.1",
+      "date": "2026-10-06T20:15:51Z",
+      "changes": [
+        "The pairing screen now explains how to set up Agentman on your computer, step by step, with commands you can copy.",
+        "Fixed the switches in Settings → Notifications springing back on. They now turn off when you tap them."
+      ]
+    },
+    {
+      "build": 23,
+      "version": "0.1.1",
+      "date": "2026-10-06T14:06:42Z",
+      "changes": [
+        "Fixed idle agents disappearing from the board. One unreadable session no longer hides all the others.",
+        "No more notifications while you're using the app. In Settings → Notifications, choose whether you're alerted when an agent needs you, when it finishes, or both."
+      ]
+    }
+  ]
+}

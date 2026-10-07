@@ -90,6 +90,9 @@ type Daemon struct {
 	// sessions is the last discovered list, kept so hook events can be matched
 	// against a known session without re-scanning the disk.
 	sessions map[string]protocol.Session
+	// daemonInfo says which agentman this is and what is newer. See
+	// SetDaemonInfo.
+	daemonInfo func() *protocol.DaemonInfo
 	// turns gives hook and polling completions one shared generation to claim.
 	// Unlike a time window, it permits two real short turns to notify while
 	// still making duplicate hook/poll reports for one turn idempotent.
@@ -454,7 +457,7 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 	}
 
 	if initial {
-		_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessions, Sessions: fitSessionList(found)})
+		_ = d.sink.Send(d.sessionsEvent(fitSessionList(found)))
 		return
 	}
 
@@ -478,7 +481,7 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 			list = append(list, session)
 		}
 		source.SortSessions(list)
-		_ = d.sink.Send(protocol.Event{Type: protocol.EvtSessions, Sessions: fitSessionList(list)})
+		_ = d.sink.Send(d.sessionsEvent(fitSessionList(list)))
 	}
 
 	for id, session := range current {
@@ -961,7 +964,7 @@ func (d *Daemon) HandleFrom(
 
 	switch req.Type {
 	case protocol.ReqListSessions:
-		return protocol.Event{Type: protocol.EvtSessions, Sessions: d.snapshot()}
+		return d.sessionsEvent(d.snapshot())
 
 	case protocol.ReqListDirectories:
 		names, err := listLaunchDirectories(req.Path)

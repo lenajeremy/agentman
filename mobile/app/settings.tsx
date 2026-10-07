@@ -13,6 +13,8 @@ import { NotifyPrefs } from "../lib/notification-prefs";
 import { PRIVACY_POLICY_URL } from "../lib/privacy";
 import { isPushActive, pushFailureReason } from "../lib/push";
 import { useStore } from "../lib/store";
+import { appSummary, macSummary } from "../lib/updates";
+import { useUpdates } from "../lib/updates-context";
 import { ago, font, Palette, radius, size, space } from "../lib/theme";
 
 const APPEARANCES: { value: AppearancePreference; label: string }[] = [
@@ -23,6 +25,7 @@ const APPEARANCES: { value: AppearancePreference; label: string }[] = [
 
 export default function Settings() {
   const store = useStore();
+  const updates = useUpdates();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
@@ -119,6 +122,25 @@ export default function Settings() {
             </MotionPressable>
           </Appear>
 
+          <Appear delay={22}>
+            <Text style={styles.sectionLabel}>Versions</Text>
+            <View style={styles.card}>
+              <VersionRow
+                label="This app"
+                value={appSummary(updates.appVersion, updates.appBuild, updates.app)}
+                behind={Boolean(updates.app)}
+                onPress={() => router.push("/update?kind=app")}
+              />
+              <View style={styles.divider} />
+              <VersionRow
+                label="Your Mac"
+                value={macSummary(updates.daemonInfo)}
+                behind={Boolean(updates.mac)}
+                onPress={() => router.push("/update?kind=mac")}
+              />
+            </View>
+          </Appear>
+
           <Appear delay={30}>
             <Text style={styles.sectionLabel}>Appearance</Text>
             <View style={styles.segmented} accessibilityRole="radiogroup">
@@ -195,6 +217,40 @@ function notifySummary(prefs: NotifyPrefs): string {
   if (prefs.needsYou) return "Only when needed";
   if (prefs.finished) return "Only when finished";
   return "Off";
+}
+
+/** A version, which opens what is new when there is something newer. */
+function VersionRow({
+  label,
+  value,
+  behind,
+  onPress,
+}: {
+  label: string;
+  value: string;
+  behind: boolean;
+  onPress(): void;
+}) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  if (!behind) return <Row label={label} value={value} />;
+  return (
+    <MotionPressable
+      onPress={onPress}
+      style={styles.row}
+      pressedScale={0.99}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}: ${value}`}
+    >
+      <Text style={styles.rowLabel}>{label}</Text>
+      <View style={styles.valueWrap}>
+        <Text style={[styles.rowValue, { color: color.workingText }]} numberOfLines={2}>
+          {value}
+        </Text>
+        <Feather name="chevron-right" size={16} color={color.faint} />
+      </View>
+    </MotionPressable>
+  );
 }
 
 function Row({

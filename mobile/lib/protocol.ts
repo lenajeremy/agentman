@@ -327,6 +327,32 @@ export interface DaemonEvent {
   folders?: Folder[];
   /** The answer on "artifacts"; [] when the session has none. */
   artifacts?: Artifact[];
+  /** Rides on "sessions": which agentman the Mac runs, and what is newer. */
+  daemon?: DaemonInfo;
+}
+
+/** The agentman running on the Mac. */
+export interface DaemonInfo {
+  version: string;
+  /** The newest release. Absent until the Mac has checked, or when its
+   *  checks are switched off. */
+  latest?: string;
+  /** How many releases are newer than `version`. */
+  behind?: number;
+  /** Those releases, newest first, with what each changed. */
+  releases?: ReleaseNote[];
+  /** The command that upgrades this install: Homebrew, npm or the script. */
+  upgrade?: string;
+  /** Where every release's notes can be read. */
+  changelog?: string;
+}
+
+export interface ReleaseNote {
+  version: string;
+  /** Milliseconds. */
+  date?: number;
+  changes?: string[];
+  url?: string;
 }
 
 /** One directory agents have run in.
@@ -428,6 +454,8 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
       // it every agent that was not sending live updates: the idle ones.
       if (!Array.isArray(value.sessions) || value.sessions.length > 10_000) return null;
       value.sessions = value.sessions.filter(isSession);
+      // Extra news about the Mac, never a reason to lose the board.
+      if (value.daemon !== undefined && !isDaemonInfo(value.daemon)) delete value.daemon;
       break;
     case "session_update":
       if (!isSession(value.session)) return null;
@@ -528,6 +556,25 @@ function isArtifact(value: unknown): value is Artifact {
 
 function optionalFolders(value: unknown): boolean {
   return value === undefined || boundedArray(value, 500, isFolder);
+}
+
+export function isDaemonInfo(value: unknown): value is DaemonInfo {
+  return isRecord(value) &&
+    boundedString(value.version, 64, true) &&
+    optionalBoundedString(value.latest, 64) &&
+    optionalFiniteNumber(value.behind) &&
+    (value.releases === undefined || boundedArray(value.releases, 20, isReleaseNote)) &&
+    optionalBoundedString(value.upgrade, 512) &&
+    optionalBoundedString(value.changelog, 2048);
+}
+
+function isReleaseNote(value: unknown): value is ReleaseNote {
+  return isRecord(value) &&
+    boundedString(value.version, 64, true) &&
+    optionalFiniteNumber(value.date) &&
+    (value.changes === undefined ||
+      boundedArray(value.changes, 50, (change): change is string => boundedString(change, 1000))) &&
+    optionalBoundedString(value.url, 2048);
 }
 
 function isFolder(value: unknown): value is Folder {
