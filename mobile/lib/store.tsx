@@ -69,6 +69,7 @@ import { failPending } from "./pending-requests";
 import {
   Artifact,
   DaemonEvent,
+  DaemonInfo,
   Folder,
   Message,
   Page,
@@ -119,6 +120,9 @@ interface Store {
   connection: ConnectionState;
   /** Whether the Mac itself is reachable, which is distinct from the relay. */
   daemonOnline: boolean;
+  /** Which agentman the Mac runs and what is newer, from its last session
+   *  list. Null until one arrives, and from a Mac too old to say. */
+  daemonInfo: DaemonInfo | null;
   lastSeenAt: number | null;
   sessions: Session[];
   /** What the status board shows: sessions minus the ones swiped away, which
@@ -295,6 +299,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [credentials, setCredentials] = useState<Credentials | null>(null);
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [daemonOnline, setDaemonOnline] = useState(false);
+  const [daemonInfo, setDaemonInfo] = useState<DaemonInfo | null>(null);
   const [lastSeenAt, setLastSeenAt] = useState<number | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
@@ -467,6 +472,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     switch (event.type) {
       case "sessions": {
         const list = event.sessions ?? [];
+        setDaemonInfo(event.daemon ?? null);
         const previous = sessionsRef.current;
         const liveIds = new Set(list.map((session) => session.id));
         const removedIds = sessionsToForget(
@@ -1033,6 +1039,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       credentials,
       connection,
       daemonOnline,
+      daemonInfo,
       lastSeenAt,
       sessions,
       visibleSessions,
@@ -1568,7 +1575,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         });
       },
     }),
-    [ready, credentials, connection, daemonOnline, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, folderFilter, folderLoading, setFolderFilter, folderSessions, stateFilter, notifyPrefs, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, resumeSessionOnce, registerPushToken, clearLaunchRequests, clearWorkspaceRequests],
+    [ready, credentials, connection, daemonOnline, daemonInfo, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, folderFilter, folderLoading, setFolderFilter, folderSessions, stateFilter, notifyPrefs, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, resumeSessionOnce, registerPushToken, clearLaunchRequests, clearWorkspaceRequests],
   );
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;

@@ -1,6 +1,6 @@
 import Feather from "@expo/vector-icons/Feather";
-import { Redirect, useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { Redirect, useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   RefreshControl,
@@ -26,6 +26,7 @@ import { emptyBoard, folderLabel } from "../lib/folders";
 import { Session } from "../lib/protocol";
 import { sessionNeedsAnswer } from "../lib/question-alerts";
 import { useStore } from "../lib/store";
+import { useUpdates } from "../lib/updates-context";
 import {
   agentLabel,
   ago,
@@ -40,6 +41,9 @@ import {
 
 /** The states a chip can narrow the list to. */
 type StateFilter = Session["state"];
+
+/** Set once an update has been offered, until the app is next launched. */
+let promptedThisLaunch = false;
 
 export default function Agents() {
   const store = useStore();
@@ -76,6 +80,22 @@ export default function Agents() {
   );
   const hiddenCount = store.sessions.length - store.visibleSessions.length;
   const incompatible = store.connection === "incompatible";
+
+  // A newer app or Mac is offered here, on the board, once per version: never
+  // over a session someone is reading, not before the board has drawn, and
+  // not twice in one launch, so the two never arrive back to back.
+  const { pending } = useUpdates();
+  const paired = Boolean(store.credentials);
+  useFocusEffect(
+    useCallback(() => {
+      if (!pending || !paired || promptedThisLaunch) return;
+      const timer = setTimeout(() => {
+        promptedThisLaunch = true;
+        router.push(`/update?kind=${pending}`);
+      }, 1200);
+      return () => clearTimeout(timer);
+    }, [pending, paired, router]),
+  );
 
   if (!store.ready) return <View style={styles.page} />;
   if (!store.credentials) return <Redirect href="/pair" />;

@@ -14,6 +14,7 @@ import (
 	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/source"
+	"github.com/lenajeremy/agentman/internal/update"
 )
 
 // runHook is the handler the agent CLIs invoke: `am hook <kind> <event>`.
@@ -333,6 +334,23 @@ func runDoctor(ctx context.Context, args []string) error {
 		warn("hook listener", "not running — start it with `am serve`")
 	} else {
 		check(true, "hook listener", "responding on "+listenAddr)
+	}
+	// Being behind is worth knowing, not a fault: the old version still works.
+	switch {
+	case version == "dev":
+		check(true, "version", "dev build, not compared with releases")
+	case !cfg.Updates.Enabled():
+		check(true, "version", version+", update checks are off")
+	default:
+		status, err := update.Check(ctx, &http.Client{Timeout: 10 * time.Second}, update.ReleasesURL, version)
+		switch {
+		case err != nil:
+			warn("version", version+", could not check for a newer one: "+err.Error())
+		case status.Behind > 0:
+			warn("version", describeBehind(status)+" — "+update.UpgradeCommand(installedPath()))
+		default:
+			check(true, "version", version+", the latest")
+		}
 	}
 
 	fmt.Println("\nTranscript formats")

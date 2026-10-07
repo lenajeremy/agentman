@@ -29,6 +29,7 @@ import (
 	"github.com/lenajeremy/agentman/internal/relay"
 	"github.com/lenajeremy/agentman/internal/servers"
 	"github.com/lenajeremy/agentman/internal/source"
+	"github.com/lenajeremy/agentman/internal/update"
 )
 
 // relayEnv overrides the built-in relay without passing a flag every time.
@@ -261,6 +262,22 @@ func runServe(ctx context.Context, args []string) error {
 	agent := daemon.New(registry, multiSink{sinks: sinks})
 	if client != nil {
 		client.OnDeviceDisconnected = agent.DisconnectSubscriber
+	}
+
+	// Which agentman this is travels with every session list, and so does
+	// what is newer, once GitHub has said. The phone offers the upgrade; this
+	// only finds out.
+	updates := update.NewChecker(version)
+	upgrade := update.UpgradeCommand(installedPath())
+	agent.SetDaemonInfo(func() *protocol.DaemonInfo { return daemonInfo(updates, upgrade) })
+	if cfg.Updates.Enabled() && version != "dev" {
+		updates.OnChange = func(status update.Status) {
+			if status.Behind > 0 {
+				fmt.Printf("%s %s\n", stamp(), dim("update     "+describeBehind(status)+" — "+upgrade))
+			}
+			agent.AnnounceDaemonInfo()
+		}
+		go updates.Run(ctx, update.Every)
 	}
 
 	// Servers agents start are found either way; sharing one as a preview
