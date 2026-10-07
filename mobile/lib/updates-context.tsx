@@ -56,7 +56,6 @@ export function UpdatesProvider({ children }: { children: React.ReactNode }) {
   const [{ version: appVersion, build: appBuild }] = useState(builtAs);
   const [release, setRelease] = useState<AppRelease | null>(null);
   const [prompted, setPrompted] = useState<Prompted | null>(null);
-  const [now, setNow] = useState(() => Date.now());
   const fetchedAt = useRef(0);
 
   // What was known last time, so Settings can say something before the
@@ -71,7 +70,6 @@ export function UpdatesProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refresh = useCallback(() => {
-    setNow(Date.now());
     if (Date.now() - fetchedAt.current < RECHECK_MS) return;
     fetchedAt.current = Date.now();
     const controller = new AbortController();
@@ -103,7 +101,7 @@ export function UpdatesProvider({ children }: { children: React.ReactNode }) {
     setPrompted((current) => {
       const next: Prompted = { ...current };
       if (kind === "app") {
-        const build = appUpdate(appBuild, release, Date.now())?.latest.build;
+        const build = appUpdate(appBuild, release)?.latest.build;
         if (build) next.app = build;
       } else {
         const latest = macUpdate(daemonInfo)?.latest;
@@ -115,7 +113,7 @@ export function UpdatesProvider({ children }: { children: React.ReactNode }) {
   }, [appBuild, release, daemonInfo]);
 
   const value = useMemo<Updates>(() => {
-    const app = appUpdate(appBuild, release, now);
+    const app = appUpdate(appBuild, release);
     const mac = macUpdate(daemonInfo);
     return {
       appVersion,
@@ -128,7 +126,7 @@ export function UpdatesProvider({ children }: { children: React.ReactNode }) {
       pending: prompted ? nextPrompt(app, mac, prompted) : null,
       markPrompted,
     };
-  }, [appVersion, appBuild, release, now, daemonInfo, prompted, markPrompted]);
+  }, [appVersion, appBuild, release, daemonInfo, prompted, markPrompted]);
 
   return <UpdatesContext.Provider value={value}>{children}</UpdatesContext.Provider>;
 }

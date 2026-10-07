@@ -46,11 +46,30 @@
 # the build number and tags that commit ios-build-<n>. The tag is where the
 # next build's notes start from.
 #
+# Every release has a semantic version, MAJOR.MINOR.PATCH, and saying which
+# part moves is part of releasing (see scripts/semver.mjs):
+#
+#   patch  fixes only
+#   minor  something new, and nothing that stops an older Mac working with it
+#   major  a change people must act on, such as needing a newer agentman
+#
+# The new version is counted from the last one shipped, not from app.json, so
+# a run that fails before uploading cannot skip a number. The build number
+# goes on counting across versions: Apple needs it to, and the app compares
+# builds to tell when it is behind.
+#
+# After the upload, the build goes to the testers outside the team too, the
+# public link's included (scripts/testflight-publish.mjs). For two weeks that
+# step did not exist and the public link served the same old build. The first
+# build of a new version waits on Beta App Review before those testers can
+# install it, so the app is only told about a build, through the website,
+# once it is approved (scripts/announce.mjs, also `npm run announce:ios`).
+#
 # Usage:
-#   mobile/scripts/release-ios.sh              # bump, build, upload, notes, tag
-#   mobile/scripts/release-ios.sh --no-upload  # stop after the .ipa
-#   mobile/scripts/release-ios.sh --keep       # skip prebuild --clean
-#   mobile/scripts/release-ios.sh --allow-dirty  # build uncommitted app code
+#   npm run release:ios -- minor               # bump, build, upload, notes, tag, publish
+#   mobile/scripts/release-ios.sh patch --no-upload  # stop after the .ipa
+#   mobile/scripts/release-ios.sh patch --keep       # skip prebuild --clean
+#   mobile/scripts/release-ios.sh patch --allow-dirty  # build uncommitted app code
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -58,14 +77,23 @@ cd "$(dirname "$0")/.."
 upload=1
 clean="--clean"
 allow_dirty=0
+bump=""
 for arg in "$@"; do
   case "$arg" in
+    patch|minor|major) bump="$arg" ;;
     --no-upload) upload=0 ;;
     --keep) clean="" ;;
     --allow-dirty) allow_dirty=1 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
+if [ -z "$bump" ]; then
+  echo "say which part of the version this release moves:" >&2
+  echo "  npm run release:ios -- patch   fixes only" >&2
+  echo "  npm run release:ios -- minor   something new" >&2
+  echo "  npm run release:ios -- major   a change people must act on" >&2
+  exit 2
+fi
 
 [ -f .asc.env ] && . ./.asc.env
 
@@ -127,6 +155,18 @@ fi
 # script learned to tag has nothing to count from, so it takes the last ten.
 last_build=$(git describe --tags --match 'ios-build-*' --abbrev=0 2>/dev/null || true)
 if [ -n "$last_build" ]; then range=("$last_build..HEAD"); else range=(-n 10 HEAD); fi
+
+# The version this release ships as, counted from the last one that shipped.
+if [ -n "$last_build" ]; then
+  shipped=$(git show "${last_build}:mobile/app.json" | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).expo.version')
+else
+  shipped=$(node -p 'require("./app.json").expo.version')
+fi
+version=$(node scripts/semver.mjs "$bump" "$shipped")
+if git rev-parse -q --verify "refs/tags/ios-v${version}" >/dev/null; then
+  echo "ios-v${version} is already tagged; nothing shipped it from here since?" >&2
+  exit 1
+fi
 mkdir -p build
 notes_file="build/whats-new.txt"
 git log --no-merges "${range[@]}" \
@@ -146,17 +186,25 @@ git log --no-merges "${range[@]}" \
 # which is why app.json never carried one; keeping it here instead puts every
 # submitted build in the git history, where a duplicate is obvious before
 # Apple rejects it rather than after.
-build_number=$(node -e '
+build_number=$(VERSION="$version" node -e '
 const fs = require("fs");
-const path = "app.json";
-const config = JSON.parse(fs.readFileSync(path, "utf8"));
+const write = (path, value) => fs.writeFileSync(path, JSON.stringify(value, null, 2) + "\n");
+const config = JSON.parse(fs.readFileSync("app.json", "utf8"));
 const ios = (config.expo.ios ??= {});
 ios.buildNumber = String((parseInt(ios.buildNumber ?? "0", 10) || 0) + 1);
-fs.writeFileSync(path, JSON.stringify(config, null, 2) + "\n");
+config.expo.version = process.env.VERSION;
+write("app.json", config);
+// The same version everywhere npm would show one.
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+pkg.version = process.env.VERSION;
+write("package.json", pkg);
+const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
+lock.version = process.env.VERSION;
+if (lock.packages?.[""]) lock.packages[""].version = process.env.VERSION;
+write("package-lock.json", lock);
 process.stdout.write(ios.buildNumber);
 ')
-version=$(node -p 'require("./app.json").expo.version')
-echo "==> agentman ${version} (${build_number}), changes since ${last_build:-the last ten commits}:"
+echo "==> agentman ${version} (${build_number}), a ${bump} release after ${shipped}; changes since ${last_build:-the last ten commits}:"
 sed 's/^/    /' "$notes_file"
 
 # Regenerated rather than reused: ios/ is gitignored build output, and a
@@ -226,22 +274,18 @@ echo "==> upload"
 xcrun altool --upload-app -f "$ipa" -t ios \
   --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
 
-# Announce it on the website, which is how the app learns a newer build is in
-# TestFlight: there is no API it could ask. The app waits an hour before
-# offering it, about as long as Apple takes to make the upload installable.
-node scripts/app-version.mjs "$build_number" "$version" "$notes_file"
-
-# Record what shipped. Only app.json and the announcement are committed, even
-# if other files are dirty, and the tag marks this commit as where the next
-# build's notes start. Pushing main is what publishes the announcement.
-echo "==> tag ios-build-${build_number}"
-git commit -q -m "Ship iOS build ${build_number}" -- app.json ../site/app-version.json
+# Record what shipped. Only the version files are committed, even if other
+# files are dirty. ios-build-<n> marks where the next build's notes start, and
+# ios-v<version> where the next version is counted from.
+echo "==> tag ios-build-${build_number} and ios-v${version}"
+git commit -q -m "Ship iOS build ${build_number} (${version})" -- app.json package.json package-lock.json
 git tag "ios-build-${build_number}"
-if ! git push -q origin HEAD "ios-build-${build_number}"; then
+git tag "ios-v${version}"
+if ! git push -q origin HEAD "ios-build-${build_number}" "ios-v${version}"; then
   # The build is already with Apple; a failed push must not look like a
   # failed release. It needs pushing before the next run, though, or that
-  # run's notes will start from the wrong place on another machine.
-  echo "    push failed — run: git push origin HEAD ios-build-${build_number}" >&2
+  # run's notes and version will start from the wrong place on another machine.
+  echo "    push failed — run: git push origin HEAD ios-build-${build_number} ios-v${version}" >&2
 fi
 
 # Last, because it waits for Apple to register the upload. A failure here is
@@ -251,6 +295,22 @@ if ! node scripts/testflight-notes.mjs "$build_number" "$notes_file"; then
   echo "    notes not set — retry: node scripts/testflight-notes.mjs $build_number $notes_file" >&2
 fi
 
+# Then to the testers outside the team, the public link's among them. Like
+# the notes, a failure is reported, not fatal: the build shipped either way.
+echo "==> publish to external testers"
+if ! node scripts/testflight-publish.mjs "$build_number"; then
+  echo "    not published — retry: node scripts/testflight-publish.mjs $build_number" >&2
+fi
+
+# And, once they can install it, to the app. A build of a version Apple has
+# already approved is usually let through within minutes; a new version waits
+# on Beta App Review, which this does not wait out.
+echo "==> announce to the app"
+if node scripts/announce.mjs "$build_number" --wait 15; then
+  :
+else
+  echo "    not announced yet — once Apple approves it, run: npm run announce:ios" >&2
+fi
+
 echo
-echo "==> ${version} (${build_number}) uploaded — Apple processes it before it"
-echo "    appears in TestFlight, usually within fifteen minutes."
+echo "==> ${version} (${build_number}) shipped."

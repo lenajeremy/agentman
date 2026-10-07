@@ -10,7 +10,7 @@ import { ContentColumn } from "../components/ContentColumn";
 import { MotionPressable } from "../components/MotionPressable";
 import { useStyles, useTheme } from "../lib/appearance";
 import { font, Palette, radius, size, space } from "../lib/theme";
-import { behindText, PromptKind } from "../lib/updates";
+import { behindText, PromptKind, versionLabel } from "../lib/updates";
 import { useUpdates } from "../lib/updates-context";
 
 type FeatherName = ComponentProps<typeof Feather>["name"];
@@ -63,10 +63,11 @@ export default function UpdateSheet() {
   if (kind === "app" && app) {
     icon = "smartphone";
     title = "A new version of Agentman";
-    lede = `Build ${app.latest.build} is ready in TestFlight. You have build ${app.current}.`;
+    lede = `Version ${versionLabel(app.latest.version, app.latest.build)} is ready in TestFlight. ` +
+      `You have ${versionLabel(updates.appVersion, app.current)}.`;
     sections = app.missing.map((build) => ({
       key: String(build.build),
-      heading: `Build ${build.build} · ${shortDate(build.date)}`,
+      heading: `${versionLabel(build.version, build.build)} · ${shortDate(build.date)}`,
       changes: build.changes,
     }));
     primary = {

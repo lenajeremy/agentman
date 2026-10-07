@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test --disable-warning=MODULE_TYPELESS_PACKAGE_JSON 'lib/**/*.test.mts'",
     "device": "expo run:ios --device --configuration Release",
-    "release:ios": "./scripts/release-ios.sh"
+    "release:ios": "./scripts/release-ios.sh",
+    "announce:ios": "node scripts/announce.mjs"
   },
   "dependencies": {
     "@expo-google-fonts/geist": "^0.4.2",
