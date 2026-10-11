@@ -12,7 +12,7 @@ test("renders a markdown link as a tappable token", () => {
 
 test("keeps bold and code working alongside links", () => {
   assert.deepEqual(tokenizeInline("**bold** `npm run x` [go](http://a.dev)"), [
-    { kind: "bold", text: "bold" },
+    { kind: "bold", children: [{ kind: "text", text: "bold" }] },
     { kind: "text", text: " " },
     { kind: "code", text: "npm run x" },
     { kind: "text", text: " " },
@@ -116,7 +116,63 @@ test("a refused link keeps its label's formatting", () => {
 
 test("a refused link with a bold label keeps the bold", () => {
   assert.deepEqual(tokenizeInline("[**careful**](javascript:alert(1))"), [
-    { kind: "bold", text: "careful" },
+    { kind: "bold", children: [{ kind: "text", text: "careful" }] },
+  ]);
+});
+
+// Regression: Claude bolds its links, and the bold span was read as plain text,
+// so a reply listing Mobbin screens showed every [label](https://…) raw.
+test("a link inside emphasis is still a link", () => {
+  assert.deepEqual(
+    tokenizeInline(
+      "**[Copilot categories](https://mobbin.com/screens/319f)**, **[Origin](https://mobbin.com/screens/2d9a)** and more",
+    ),
+    [
+      {
+        kind: "bold",
+        children: [
+          { kind: "link", text: "Copilot categories", href: "https://mobbin.com/screens/319f" },
+        ],
+      },
+      { kind: "text", text: ", " },
+      {
+        kind: "bold",
+        children: [{ kind: "link", text: "Origin", href: "https://mobbin.com/screens/2d9a" }],
+      },
+      { kind: "text", text: " and more" },
+    ],
+  );
+  assert.deepEqual(tokenizeInline("*see [the docs](https://a.dev) first*"), [
+    {
+      kind: "italic",
+      children: [
+        { kind: "text", text: "see " },
+        { kind: "link", text: "the docs", href: "https://a.dev" },
+        { kind: "text", text: " first" },
+      ],
+    },
+  ]);
+});
+
+test("emphasis nests, and code inside it stays literal", () => {
+  assert.deepEqual(tokenizeInline("**run `a *b*` *now* please**"), [
+    {
+      kind: "bold",
+      children: [
+        { kind: "text", text: "run " },
+        { kind: "code", text: "a *b*" },
+        { kind: "text", text: " " },
+        { kind: "italic", children: [{ kind: "text", text: "now" }] },
+        { kind: "text", text: " please" },
+      ],
+    },
+  ]);
+});
+
+// The same guard applies inside emphasis: bolding a link does not launder it.
+test("a bolded link with an unsafe target is still refused", () => {
+  assert.deepEqual(tokenizeInline("**[pair](agentman://pair?token=x)**"), [
+    { kind: "bold", children: [{ kind: "text", text: "pair" }] },
   ]);
 });
 
@@ -124,21 +180,27 @@ test("a refused link with a bold label keeps the bold", () => {
 // testing carried eleven single-asterisk emphases and twenty-five inline TeX
 // spans, every one of which reached the phone as literal punctuation.
 test("single-asterisk and underscore emphasis are italic", () => {
-  assert.deepEqual(tokenizeInline("*emphasis*"), [{ kind: "italic", text: "emphasis" }]);
-  assert.deepEqual(tokenizeInline("_emphasis_"), [{ kind: "italic", text: "emphasis" }]);
+  assert.deepEqual(tokenizeInline("*emphasis*"), [
+    { kind: "italic", children: [{ kind: "text", text: "emphasis" }] },
+  ]);
+  assert.deepEqual(tokenizeInline("_emphasis_"), [
+    { kind: "italic", children: [{ kind: "text", text: "emphasis" }] },
+  ]);
   assert.deepEqual(tokenizeInline("spot it *before* it melts"), [
     { kind: "text", text: "spot it " },
-    { kind: "italic", text: "before" },
+    { kind: "italic", children: [{ kind: "text", text: "before" }] },
     { kind: "text", text: " it melts" },
   ]);
 });
 
 test("bold still wins over italic", () => {
-  assert.deepEqual(tokenizeInline("**bold**"), [{ kind: "bold", text: "bold" }]);
+  assert.deepEqual(tokenizeInline("**bold**"), [
+    { kind: "bold", children: [{ kind: "text", text: "bold" }] },
+  ]);
   assert.deepEqual(tokenizeInline("**a** and *b*"), [
-    { kind: "bold", text: "a" },
+    { kind: "bold", children: [{ kind: "text", text: "a" }] },
     { kind: "text", text: " and " },
-    { kind: "italic", text: "b" },
+    { kind: "italic", children: [{ kind: "text", text: "b" }] },
   ]);
 });
 
@@ -157,7 +219,7 @@ test("underscores inside a word are not emphasis", () => {
   }
   assert.deepEqual(tokenizeInline("a _real_ word"), [
     { kind: "text", text: "a " },
-    { kind: "italic", text: "real" },
+    { kind: "italic", children: [{ kind: "text", text: "real" }] },
     { kind: "text", text: " word" },
   ]);
 });

@@ -4,7 +4,7 @@ import { ReactNode, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { parseBlocks, type Block } from "../lib/markdown-blocks";
-import { tokenizeInline } from "../lib/markdown-inline";
+import { type InlineToken, tokenizeInline } from "../lib/markdown-inline";
 import { cellWidth, type Table } from "../lib/markdown-table";
 import { useStyles, useTheme } from "../lib/appearance";
 import { CodeViewer } from "./CodeViewer";
@@ -274,20 +274,24 @@ function openLink(href: string) {
 // Bold, code spans and links cover the vocabulary agents actually use.
 // Tokenising is in lib/markdown-inline so it can be tested on Node.
 function renderInline(text: string, styles: Styles): ReactNode[] {
-  return tokenizeInline(text).map((token, key) => {
+  return renderTokens(tokenizeInline(text), styles);
+}
+
+function renderTokens(tokens: InlineToken[], styles: Styles): ReactNode[] {
+  return tokens.map((token, key) => {
     switch (token.kind) {
       case "text":
         return token.text;
       case "bold":
         return (
           <Text key={key} style={styles.bold}>
-            {token.text}
+            {renderTokens(token.children, styles)}
           </Text>
         );
       case "italic":
         return (
           <Text key={key} style={styles.italic}>
-            {token.text}
+            {renderTokens(token.children, styles)}
           </Text>
         );
       case "math":
