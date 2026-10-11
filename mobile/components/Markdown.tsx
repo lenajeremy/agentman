@@ -3,17 +3,21 @@ import * as WebBrowser from "expo-web-browser";
 import { ReactNode, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { parseBlocks, type Block } from "../lib/markdown-blocks";
-import { type InlineToken, tokenizeInline } from "../lib/markdown-inline";
-import { cellWidth, type Table } from "../lib/markdown-table";
+import {
+  MAX_MARKDOWN_CHARS,
+  parseMarkdown,
+  plainText,
+  type Block,
+  type Inline,
+  type ListItem,
+  type Table,
+} from "../lib/markdown";
 import { useStyles, useTheme } from "../lib/appearance";
 import { CodeViewer } from "./CodeViewer";
 import { SyntaxCode } from "./SyntaxCode";
 import { font, Palette, radius, size, space } from "../lib/theme";
 
 type Styles = ReturnType<typeof makeStyles>;
-
-const MAX_MARKDOWN_CHARS = 200_000;
 
 /**
  * Longest span rendered as a rounded chip. An inline View is a single
@@ -33,26 +37,26 @@ const MAX_CODE_CHIP = 40;
 const CODE_LINES = 12;
 
 /**
- * Renders the small markdown vocabulary agents use in ordinary replies.
+ * Renders an agent's reply as markdown.
  *
- * This is intentionally local and linear rather than a general HTML/markdown
- * engine. Agent output is untrusted: the former parser dependency had known
- * quadratic-complexity advisories, could fetch remote images, and opened custom
- * URL schemes. This renderer fetches nothing, bounds the amount of one message
- * it will parse, and opens only http(s) links — in an in-app browser, so a
- * tapped link can never reach the OS scheme handler. See lib/markdown-inline.
+ * Parsing is marked's, through lib/markdown, which is also where the safety
+ * rules live: agent output is untrusted, so nothing is fetched, HTML is shown
+ * rather than interpreted, parsing is bounded, and only http(s) links open —
+ * in an in-app browser, so a tapped link can never reach the OS scheme
+ * handler. This file only draws the result.
  */
 export function Markdown({ children }: { children: string }) {
   const clipped = children.length > MAX_MARKDOWN_CHARS;
-  const source = clipped ? children.slice(0, MAX_MARKDOWN_CHARS) : children;
-  const blocks = parseBlocks(source);
+  // A transcript re-renders far more often than a message changes.
+  const blocks = useMemo(
+    () => parseMarkdown(clipped ? children.slice(0, MAX_MARKDOWN_CHARS) : children),
+    [children, clipped],
+  );
   const styles = useStyles(makeStyles);
 
   return (
     <View style={styles.body}>
-      {blocks.map((block, index) => (
-        <BlockView key={`${index}:${block.kind}`} block={block} styles={styles} />
-      ))}
+      <Blocks blocks={blocks} styles={styles} muted={false} />
       {clipped ? (
         <Text style={styles.truncated}>
           Message truncated on this device after {MAX_MARKDOWN_CHARS.toLocaleString()} characters.
@@ -159,12 +163,27 @@ function CodeBlock({
   );
 }
 
-function BlockView({ block, styles }: { block: Block; styles: Styles }) {
+/** `muted` carries a quote's quieter tone into everything inside it. */
+function Blocks({ blocks, styles, muted }: { blocks: Block[]; styles: Styles; muted: boolean }) {
+  return blocks.map((block, index) => (
+    <BlockView key={`${index}:${block.kind}`} block={block} styles={styles} muted={muted} />
+  ));
+}
+
+function BlockView({ block, styles, muted }: { block: Block; styles: Styles; muted: boolean }) {
   switch (block.kind) {
     case "heading":
       return (
-        <Text selectable style={[styles.text, styles.heading, headingSize(block.level, styles)]}>
-          {renderInline(block.text, styles)}
+        <Text
+          selectable
+          style={[
+            styles.text,
+            styles.heading,
+            headingSize(block.level, styles),
+            muted && styles.muted,
+          ]}
+        >
+          {renderInline(block.content, styles)}
         </Text>
       );
     case "rule":
@@ -174,30 +193,60 @@ function BlockView({ block, styles }: { block: Block; styles: Styles }) {
     case "quote":
       return (
         <View style={styles.quote}>
-          <Text selectable style={[styles.text, styles.muted]}>
-            {renderInline(block.text, styles)}
-          </Text>
+          <Blocks blocks={block.blocks} styles={styles} muted />
         </View>
       );
     case "table":
       return <TableView table={block.table} styles={styles} />;
-    case "bullet":
-    case "number":
+    case "list":
+      return <ListView items={block.items} styles={styles} muted={muted} />;
+    case "paragraph":
       return (
-        <View style={styles.listRow}>
-          <Text style={styles.marker}>{block.marker}</Text>
-          <Text selectable style={[styles.text, styles.listText]}>
-            {renderInline(block.text, styles)}
-          </Text>
-        </View>
-      );
-    default:
-      return (
-        <Text selectable style={styles.text}>
-          {renderInline(block.text, styles)}
+        <Text selectable style={[styles.text, muted && styles.muted]}>
+          {renderInline(block.content, styles)}
         </Text>
       );
   }
+}
+
+function ListView({
+  items,
+  styles,
+  muted,
+}: {
+  items: ListItem[];
+  styles: Styles;
+  muted: boolean;
+}) {
+  const { color } = useTheme();
+  return (
+    <View style={styles.list}>
+      {items.map((item, index) => (
+        <View key={index} style={styles.listRow}>
+          {item.checked === undefined ? (
+            <Text style={styles.marker}>{item.marker}</Text>
+          ) : (
+            // A task's box stands where its bullet would: whether it is done
+            // is the point of the line.
+            <View
+              style={styles.taskBox}
+              accessible
+              accessibilityLabel={item.checked ? "Done" : "Not done"}
+            >
+              <Feather
+                name={item.checked ? "check-square" : "square"}
+                size={13}
+                color={color.faint}
+              />
+            </View>
+          )}
+          <View style={styles.listBody}>
+            <Blocks blocks={item.blocks} styles={styles} muted={muted} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
 }
 
 function TableView({ table, styles }: { table: Table; styles: Styles }) {
@@ -206,12 +255,35 @@ function TableView({ table, styles }: { table: Table; styles: Styles }) {
   // do not line up with one another.
   const widths = table.header.map((heading, index) => {
     const longest = table.rows.reduce(
-      (worst, row) => Math.max(worst, cellWidth(row[index] ?? "")),
-      cellWidth(heading),
+      (worst, row) => Math.max(worst, plainText(row[index] ?? []).length),
+      plainText(heading).length,
     );
     return Math.min(240, Math.max(76, longest * 7.6 + 24));
   });
 
+  return (
+    <View>
+      <TableGrid table={table} widths={widths} styles={styles} />
+      {table.hiddenRows > 0 ? (
+        <Text style={styles.truncated}>
+          {table.hiddenRows === 1
+            ? "1 more row not shown."
+            : `${table.hiddenRows.toLocaleString()} more rows not shown.`}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function TableGrid({
+  table,
+  widths,
+  styles,
+}: {
+  table: Table;
+  widths: number[];
+  styles: Styles;
+}) {
   return (
     <ScrollView
       horizontal
@@ -262,7 +334,7 @@ function TableView({ table, styles }: { table: Table; styles: Styles }) {
 /**
  * Opens a link the agent wrote.
  *
- * Deliberately the in-app browser rather than Linking.openURL: the tokenizer
+ * Deliberately the in-app browser rather than Linking.openURL: lib/markdown
  * already refuses every scheme but http(s), and routing through WebBrowser
  * means even a mistake there cannot hand a custom scheme to the OS. A failure
  * to open is swallowed — a tap that does nothing beats a crash mid-transcript.
@@ -271,37 +343,28 @@ function openLink(href: string) {
   void WebBrowser.openBrowserAsync(href).catch(() => {});
 }
 
-// Bold, code spans and links cover the vocabulary agents actually use.
-// Tokenising is in lib/markdown-inline so it can be tested on Node.
-function renderInline(text: string, styles: Styles): ReactNode[] {
-  return renderTokens(tokenizeInline(text), styles);
-}
-
-function renderTokens(tokens: InlineToken[], styles: Styles): ReactNode[] {
-  return tokens.map((token, key) => {
-    switch (token.kind) {
+function renderInline(content: Inline[], styles: Styles, inLink = false): ReactNode[] {
+  return content.map((node, key) => {
+    switch (node.kind) {
       case "text":
-        return token.text;
+        return node.text;
+      case "break":
+        return "\n";
       case "bold":
-        return (
-          <Text key={key} style={styles.bold}>
-            {renderTokens(token.children, styles)}
-          </Text>
-        );
       case "italic":
+      case "strike":
         return (
-          <Text key={key} style={styles.italic}>
-            {renderTokens(token.children, styles)}
+          <Text key={key} style={styles[node.kind]}>
+            {renderInline(node.children, styles, inLink)}
           </Text>
         );
       case "math":
-        // Not typeset — that would be a maths engine, and this renderer
-        // deliberately has no dependencies. Set in mono because that is what
-        // this system does with machine notation, which reads O(N^2)
-        // correctly and drops the dollars nobody meant to see.
+        // Not typeset — that would be a maths engine. Set in mono because
+        // that is what this system does with machine notation, which reads
+        // O(N^2) correctly and drops the dollars nobody meant to see.
         return (
           <Text key={key} style={styles.math}>
-            {token.text}
+            {node.text}
           </Text>
         );
       case "code":
@@ -310,14 +373,15 @@ function renderTokens(tokens: InlineToken[], styles: Styles): ReactNode[] {
         // the radius and padding set on it are silently dropped. A View
         // nested in Text is laid out as an inline block, which does honour
         // them. It cannot wrap internally though, so a long span stays flat
-        // text rather than becoming a chip that overflows the column.
-        return token.text.length <= MAX_CODE_CHIP ? (
+        // text rather than becoming a chip that overflows the column. Inside
+        // a link it stays text too, so a tap on it reaches the link.
+        return !inLink && node.text.length <= MAX_CODE_CHIP ? (
           <View key={key} style={styles.inlineCodeChip}>
-            <Text style={styles.inlineCode}>{token.text}</Text>
+            <Text style={styles.inlineCode}>{node.text}</Text>
           </View>
         ) : (
           <Text key={key} style={[styles.inlineCode, styles.inlineCodeFlat]}>
-            {token.text}
+            {node.text}
           </Text>
         );
       case "link":
@@ -325,11 +389,11 @@ function renderTokens(tokens: InlineToken[], styles: Styles): ReactNode[] {
           <Text
             key={key}
             style={styles.link}
-            onPress={() => openLink(token.href)}
+            onPress={() => openLink(node.href)}
             accessibilityRole="link"
-            accessibilityHint={`Opens ${token.href}`}
+            accessibilityHint={`Opens ${node.href}`}
           >
-            {token.text}
+            {renderInline(node.children, styles, true)}
           </Text>
         );
     }
@@ -383,6 +447,7 @@ function makeStyles(c: Palette) {
     // The fallback keeps the old flat highlight, which wraps.
     inlineCodeFlat: { backgroundColor: c.fill },
     italic: { fontStyle: "italic" },
+    strike: { textDecorationLine: "line-through" },
     math: { fontFamily: font.mono, fontSize: size.caption },
     codeFrame: {
       backgroundColor: c.fill,
@@ -417,11 +482,13 @@ function makeStyles(c: Palette) {
     },
     codeFullRow: { flexDirection: "row", alignItems: "center", gap: space.xs },
     quote: {
+      gap: space.sm,
       borderLeftWidth: 3,
       borderLeftColor: c.fillStrong,
       paddingLeft: space.md,
     },
     muted: { color: c.muted },
+    list: { gap: space.sm },
     listRow: { flexDirection: "row", alignItems: "flex-start", gap: space.sm },
     marker: {
       minWidth: 16,
@@ -430,7 +497,8 @@ function makeStyles(c: Palette) {
       color: c.faint,
       lineHeight: 23,
     },
-    listText: { flex: 1 },
+    taskBox: { minWidth: 16, height: 23, justifyContent: "center" },
+    listBody: { flex: 1, gap: space.sm },
     // A table is the one block with a natural width the screen cannot always
     // give it, so it scrolls sideways inside its own container rather than
     // forcing the whole feed to.
