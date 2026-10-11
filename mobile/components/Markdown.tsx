@@ -183,7 +183,7 @@ function BlockView({ block, styles, muted }: { block: Block; styles: Styles; mut
             muted && styles.muted,
           ]}
         >
-          {renderInline(block.content, styles)}
+          {renderInline(block.content, styles, { ...PLAIN, bold: true })}
         </Text>
       );
     case "rule":
@@ -343,7 +343,16 @@ function openLink(href: string) {
   void WebBrowser.openBrowserAsync(href).catch(() => {});
 }
 
-function renderInline(content: Inline[], styles: Styles, inLink = false): ReactNode[] {
+/** What the text around an inline span is already set in. */
+interface Setting {
+  bold: boolean;
+  italic: boolean;
+  inLink: boolean;
+}
+
+const PLAIN: Setting = { bold: false, italic: false, inLink: false };
+
+function renderInline(content: Inline[], styles: Styles, setting = PLAIN): ReactNode[] {
   return content.map((node, key) => {
     switch (node.kind) {
       case "text":
@@ -351,11 +360,28 @@ function renderInline(content: Inline[], styles: Styles, inLink = false): ReactN
       case "break":
         return "\n";
       case "bold":
-      case "italic":
+      case "italic": {
+        // Each weight and slant is a face of its own, and a nested span
+        // replaces the face around it rather than adding to it — so italic
+        // inside bold has to ask for the bold italic by name.
+        const inner = {
+          ...setting,
+          bold: setting.bold || node.kind === "bold",
+          italic: setting.italic || node.kind === "italic",
+        };
+        return (
+          <Text
+            key={key}
+            style={inner.bold ? (inner.italic ? styles.boldItalic : styles.bold) : styles.italic}
+          >
+            {renderInline(node.children, styles, inner)}
+          </Text>
+        );
+      }
       case "strike":
         return (
-          <Text key={key} style={styles[node.kind]}>
-            {renderInline(node.children, styles, inLink)}
+          <Text key={key} style={styles.strike}>
+            {renderInline(node.children, styles, setting)}
           </Text>
         );
       case "math":
@@ -375,12 +401,16 @@ function renderInline(content: Inline[], styles: Styles, inLink = false): ReactN
         // them. It cannot wrap internally though, so a long span stays flat
         // text rather than becoming a chip that overflows the column. Inside
         // a link it stays text too, so a tap on it reaches the link.
-        return !inLink && node.text.length <= MAX_CODE_CHIP ? (
+        return !setting.inLink && node.text.length <= MAX_CODE_CHIP ? (
           <View key={key} style={styles.inlineCodeChip}>
             <Text style={styles.inlineCode}>{node.text}</Text>
           </View>
         ) : (
-          <Text key={key} style={[styles.inlineCode, styles.inlineCodeFlat]}>
+          <Text
+            key={key}
+            // Its own colour would otherwise hide that it is part of a link.
+            style={[styles.inlineCode, styles.inlineCodeFlat, setting.inLink && styles.link]}
+          >
             {node.text}
           </Text>
         );
@@ -393,7 +423,7 @@ function renderInline(content: Inline[], styles: Styles, inLink = false): ReactN
             accessibilityRole="link"
             accessibilityHint={`Opens ${node.href}`}
           >
-            {renderInline(node.children, styles, true)}
+            {renderInline(node.children, styles, { ...setting, inLink: true })}
           </Text>
         );
     }
@@ -446,7 +476,8 @@ function makeStyles(c: Palette) {
     },
     // The fallback keeps the old flat highlight, which wraps.
     inlineCodeFlat: { backgroundColor: c.fill },
-    italic: { fontStyle: "italic" },
+    italic: { fontFamily: font.sansItalic },
+    boldItalic: { fontFamily: font.sansBoldItalic },
     strike: { textDecorationLine: "line-through" },
     math: { fontFamily: font.mono, fontSize: size.caption },
     codeFrame: {
@@ -527,10 +558,9 @@ function makeStyles(c: Palette) {
     tableHeadCell: { fontFamily: font.sansMedium, color: c.muted },
 
     truncated: {
-      fontFamily: font.sans,
+      fontFamily: font.sansItalic,
       fontSize: size.caption,
       color: c.faint,
-      fontStyle: "italic",
     },
   });
 }

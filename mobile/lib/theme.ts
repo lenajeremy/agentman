@@ -117,11 +117,16 @@ export const palettes: Record<"light" | "dark", Palette> = { light, dark };
  * machine-authored text. Paths, session ids, shell commands and agent names
  * are strings a program produced, and setting them in mono says so at a
  * glance.
+ *
+ * Italics are faces of their own. iOS does not slant a custom font for
+ * fontStyle: "italic", so emphasis set that way rendered upright.
  */
 export const font = {
   sans: "Geist_400Regular",
+  sansItalic: "Geist_400Regular_Italic",
   sansMedium: "Geist_500Medium",
   sansBold: "Geist_600SemiBold",
+  sansBoldItalic: "Geist_600SemiBold_Italic",
   mono: "GeistMono_400Regular",
   monoMedium: "GeistMono_500Medium",
 } as const;

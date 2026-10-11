@@ -1,7 +1,9 @@
 import {
   Geist_400Regular,
+  Geist_400Regular_Italic,
   Geist_500Medium,
   Geist_600SemiBold,
+  Geist_600SemiBold_Italic,
   useFonts,
 } from "@expo-google-fonts/geist";
 import { GeistMono_400Regular, GeistMono_500Medium } from "@expo-google-fonts/geist-mono";
@@ -62,8 +64,10 @@ function NotificationNavigation() {
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     Geist_400Regular,
+    Geist_400Regular_Italic,
     Geist_500Medium,
     Geist_600SemiBold,
+    Geist_600SemiBold_Italic,
     GeistMono_400Regular,
     GeistMono_500Medium,
   });
