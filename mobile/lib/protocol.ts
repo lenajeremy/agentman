@@ -204,7 +204,11 @@ export type RequestType =
   | "read_artifact"
   | "review_artifact"
   | "set_mode"
-  | "set_model";
+  | "set_model"
+  | "list_commits"
+  | "commit_files"
+  | "commit_diff"
+  | "list_branches";
 
 export interface Request {
   type: RequestType;
@@ -235,6 +239,11 @@ export interface Request {
   kind?: AgentKind;
   /** The verdict on review_artifact; `text` carries the comment. */
   approve?: boolean;
+  /** A full commit hash, as list_commits reported it. */
+  commit?: string;
+  /** The branch list_commits reads, in full, as list_branches reported it.
+   *  Absent reads whatever is checked out. */
+  ref?: string;
 }
 
 export type EventType =
@@ -279,8 +288,42 @@ export interface ImageSource {
   reduced?: boolean;
 }
 
+/**
+ * One commit, as far as it concerns the session's directory. Files, added and
+ * removed count only what changed there, and a merge is measured against its
+ * first parent. All three are absent when the Mac could not count in time.
+ */
+export interface WorkspaceCommit {
+  hash: string;
+  subject: string;
+  /** The rest of the message, on kind "commit" only. */
+  body?: string;
+  author: string;
+  /** Epoch milliseconds. */
+  authoredAt: number;
+  merge?: boolean;
+  files?: number;
+  added?: number;
+  removed?: number;
+}
+
+/** A branch whose history can be shown. Showing it checks nothing out. */
+export interface WorkspaceBranch {
+  /** "main", or "origin/main" for a remote one. */
+  name: string;
+  /** The full name to send back: refs/heads/… or refs/remotes/…. */
+  ref: string;
+  remote?: boolean;
+  /** The branch checked out on the Mac. */
+  current?: boolean;
+  /** When its newest commit was made, epoch milliseconds. */
+  updatedAt: number;
+}
+
 export interface WorkspaceResult {
-  kind: "directory" | "file" | "changes" | "diff" | "chunk" | "artifact";
+  kind:
+    | "directory" | "file" | "changes" | "diff" | "chunk" | "artifact"
+    | "commits" | "commit" | "branches";
   sessionId: string;
   path?: string;
   entries?: WorkspaceEntry[];
@@ -300,6 +343,15 @@ export interface WorkspaceResult {
   offset?: number;
   size?: number;
   version?: string;
+  /** One page of history on kind "commits", newest first. `truncated` means
+   *  older commits follow. */
+  commits?: WorkspaceCommit[];
+  /** The checked-out branch, absent when HEAD is detached. */
+  branch?: string;
+  /** The commit on kind "commit", whose files are in `changes`. */
+  commit?: WorkspaceCommit;
+  /** The answer on kind "branches", newest first. */
+  branches?: WorkspaceBranch[];
 }
 
 export type SendStatus = "delivered" | "queued" | "failed";
@@ -606,7 +658,7 @@ function isImageSource(value: unknown): value is ImageSource {
 
 function isWorkspaceResult(value: unknown): value is WorkspaceResult {
   if (!isRecord(value) ||
-      !isOneOf(value.kind, ["directory", "file", "changes", "diff", "chunk", "artifact"] as const) ||
+      !isOneOf(value.kind, ["directory", "file", "changes", "diff", "chunk", "artifact", "commits", "commit", "branches"] as const) ||
       !boundedString(value.sessionId, 512, true) || !optionalBoundedString(value.path, 4096) ||
       !optionalBoundedString(value.text, 256 * 1024) ||
       !optionalBoundedString(value.image, 3 * 1024 * 1024) ||
@@ -626,6 +678,10 @@ function isWorkspaceResult(value: unknown): value is WorkspaceResult {
       !/^[A-Za-z0-9+/]*={0,2}$/.test(value.image)
   )) return false;
   if (value.source !== undefined && !isImageSource(value.source)) return false;
+  if (value.commits !== undefined && !boundedArray(value.commits, 200, isCommit)) return false;
+  if (value.commit !== undefined && !isCommit(value.commit)) return false;
+  if (!optionalBoundedString(value.branch, 512)) return false;
+  if (value.branches !== undefined && !boundedArray(value.branches, 300, isBranch)) return false;
   // A piece is written straight to a file, so everything about it is checked
   // here: nothing empty, nothing oversized, and nothing that is not base64.
   if (value.kind === "chunk") {
@@ -637,6 +693,42 @@ function isWorkspaceResult(value: unknown): value is WorkspaceResult {
       boundedString(value.version, 64, true);
   }
   return value.data === undefined;
+}
+
+const COMMIT_HASH = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+
+/** The hash is the one thing here that goes back to the Mac, in the next
+ *  request, so it is held to exactly the shape the daemon accepts. */
+function isCommit(value: unknown): value is WorkspaceCommit {
+  return isRecord(value) &&
+    typeof value.hash === "string" && COMMIT_HASH.test(value.hash) &&
+    boundedString(value.subject, 4096) &&
+    optionalBoundedString(value.body, 64 * 1024) &&
+    boundedString(value.author, 1024) &&
+    finiteNumber(value.authoredAt) &&
+    (value.merge === undefined || typeof value.merge === "boolean") &&
+    (value.files === undefined || isCount(value.files)) &&
+    (value.added === undefined || isLineCount(value.added)) &&
+    (value.removed === undefined || isLineCount(value.removed));
+}
+
+/** The ref goes back to the Mac in the next request, so it is held to the
+ *  shape the daemon accepts: a plain local or remote branch name. */
+const BRANCH_REF = /^refs\/(heads|remotes)\/(?!.*(\.\.|@\{|\/\/))[^\s~^:?*[\\\x00-\x1f\x7f]+$/;
+
+function isBranch(value: unknown): value is WorkspaceBranch {
+  return isRecord(value) &&
+    boundedString(value.name, 512, true) &&
+    typeof value.ref === "string" && value.ref.length <= 512 && BRANCH_REF.test(value.ref) &&
+    (value.remote === undefined || typeof value.remote === "boolean") &&
+    (value.current === undefined || typeof value.current === "boolean") &&
+    finiteNumber(value.updatedAt);
+}
+
+/** A commit can touch more lines than isCount allows; a vendored dependency
+ *  or a generated lockfile easily passes a hundred thousand. */
+function isLineCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 1e9;
 }
 
 function isSession(value: unknown): value is Session {

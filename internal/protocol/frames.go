@@ -133,6 +133,23 @@ const (
 	// ClientID once the adapter has seen the switch take.
 	ReqSetMode  RequestType = "set_mode"
 	ReqSetModel RequestType = "set_model"
+	// ReqListCommits pages through the commits that touched a session's
+	// directory, newest first, starting Offset commits in. ReqCommitFiles
+	// lists the files one Commit changed, and ReqCommitDiff is one of them,
+	// named by Path, as a diff against the commit's first parent. Each is
+	// answered with EvtWorkspace, of kind "commits", "commit" and "diff".
+	//
+	// Additive: an older daemon rejects the types and the app says the Mac
+	// needs updating.
+	ReqListCommits RequestType = "list_commits"
+	ReqCommitFiles RequestType = "commit_files"
+	ReqCommitDiff  RequestType = "commit_diff"
+	// ReqListBranches names the repository's local and remote-tracking
+	// branches, newest first, answered with EvtWorkspace of kind "branches".
+	// A branch is shown by passing its Ref to ReqListCommits, which reads its
+	// history without checking it out: the working tree, the index and HEAD
+	// stay as the agent left them.
+	ReqListBranches RequestType = "list_branches"
 )
 
 // Request is anything the app asks of the daemon.
@@ -180,6 +197,12 @@ type Request struct {
 	// Approve is the verdict on ReqReviewArtifact: true approves the
 	// artifact, false asks for changes, described by Text.
 	Approve bool `json:"approve,omitempty"`
+	// Commit is a full commit hash on ReqCommitFiles and ReqCommitDiff, as
+	// ReqListCommits reported it.
+	Commit string `json:"commit,omitempty"`
+	// Ref is the branch ReqListCommits reads, in full — refs/heads/… or
+	// refs/remotes/… — as ReqListBranches reported it. Empty reads HEAD.
+	Ref string `json:"ref,omitempty"`
 }
 
 /* ----------------------------- daemon → app ------------------------------ */
@@ -328,6 +351,47 @@ type WorkspaceResult struct {
 	// requests, and an agent can rewrite a screenshot between two of them; a
 	// download stitched from both would be neither image.
 	Version string `json:"version,omitempty"`
+	// Commits is one page of history on kind "commits", newest first, with
+	// Truncated set when older commits follow. Branch names the branch that
+	// is checked out, and is empty when HEAD is detached.
+	Commits []WorkspaceCommit `json:"commits,omitempty"`
+	Branch  string            `json:"branch,omitempty"`
+	// Commit describes the commit on kind "commit", whose files are in
+	// Changes.
+	Commit *WorkspaceCommit `json:"commit,omitempty"`
+	// Branches is the answer on kind "branches", newest first.
+	Branches []WorkspaceBranch `json:"branches,omitempty"`
+}
+
+// WorkspaceBranch is one branch a session's history can be shown from.
+type WorkspaceBranch struct {
+	// Name is what to show: "main", or "origin/main" for a remote one.
+	Name string `json:"name"`
+	// Ref is the full name to send back on ReqListCommits.
+	Ref    string `json:"ref"`
+	Remote bool   `json:"remote,omitempty"`
+	// Current marks the branch that is checked out.
+	Current bool `json:"current,omitempty"`
+	// UpdatedAt is when its newest commit was made, in milliseconds.
+	UpdatedAt int64 `json:"updatedAt"`
+}
+
+// WorkspaceCommit is one commit, as far as it concerns a session's directory.
+type WorkspaceCommit struct {
+	Hash    string `json:"hash"`
+	Subject string `json:"subject"`
+	// Body is the rest of the message, sent on kind "commit" only.
+	Body   string `json:"body,omitempty"`
+	Author string `json:"author"`
+	// AuthoredAt is when the change was written, in milliseconds.
+	AuthoredAt int64 `json:"authoredAt"`
+	Merge      bool  `json:"merge,omitempty"`
+	// Files, Added and Removed size the commit within the session's
+	// directory. A merge is measured against its first parent, which is what
+	// it brought in. All three are absent when Git could not count in time.
+	Files   int `json:"files,omitempty"`
+	Added   int `json:"added,omitempty"`
+	Removed int `json:"removed,omitempty"`
 }
 
 // ImageSource describes the file an image preview was made from.

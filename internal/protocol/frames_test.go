@@ -131,3 +131,51 @@ func TestSwitchingWireNames(t *testing.T) {
 		t.Fatal("a wire name changed")
 	}
 }
+
+// The app reads these names, and sends Commit back, so they are pinned here
+// the way mobile/lib/protocol.test.mts pins its side.
+func TestCommitHistoryWireNames(t *testing.T) {
+	encoded, err := json.Marshal(WorkspaceResult{
+		Kind: "commits", SessionID: "claude:s", Branch: "main", Truncated: true,
+		Commits: []WorkspaceCommit{{
+			Hash: strings.Repeat("a", 40), Subject: "Fix", Author: "Ada", AuthoredAt: 1,
+			Merge: true, Files: 2, Added: 3, Removed: 4,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"kind":"commits","sessionId":"claude:s","truncated":true,"commits":[{"hash":"` +
+		strings.Repeat("a", 40) + `","subject":"Fix","author":"Ada","authoredAt":1,"merge":true,` +
+		`"files":2,"added":3,"removed":4}],"branch":"main"}`
+	if string(encoded) != want {
+		t.Fatalf("commits encoded as\n%s\nwant\n%s", encoded, want)
+	}
+
+	var req Request
+	if err := json.Unmarshal([]byte(`{"type":"commit_diff","sessionId":"claude:s",`+
+		`"commit":"`+strings.Repeat("b", 40)+`","path":"a.go"}`), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Type != ReqCommitDiff || req.Commit != strings.Repeat("b", 40) || req.Path != "a.go" {
+		t.Fatalf("commit diff request decoded as %+v", req)
+	}
+}
+
+func TestBranchWireNames(t *testing.T) {
+	encoded, err := json.Marshal(WorkspaceBranch{Name: "origin/main", Ref: "refs/remotes/origin/main", Remote: true, Current: true, UpdatedAt: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"name":"origin/main","ref":"refs/remotes/origin/main","remote":true,"current":true,"updatedAt":1}`
+	if string(encoded) != want {
+		t.Fatalf("branch encoded as\n%s\nwant\n%s", encoded, want)
+	}
+	var req Request
+	if err := json.Unmarshal([]byte(`{"type":"list_commits","sessionId":"claude:s","ref":"refs/heads/feature"}`), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Type != ReqListCommits || req.Ref != "refs/heads/feature" {
+		t.Fatalf("list_commits decoded as %+v", req)
+	}
+}

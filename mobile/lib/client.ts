@@ -363,7 +363,9 @@ export class Client {
     const id = newFrameId();
 	if (request.type === "fetch_messages" || request.type === "list_files" ||
 	    request.type === "read_file" || request.type === "list_changes" ||
-	    request.type === "file_diff" || request.type === "list_directories") {
+	    request.type === "file_diff" || request.type === "list_directories" ||
+	    request.type === "list_commits" || request.type === "commit_files" ||
+	    request.type === "commit_diff" || request.type === "list_branches") {
 	  // Queue while offline and replay after a disconnect. Bound the queue so a
 	  // broken caller cannot retain arbitrary request state forever.
 	  if (this.replayable.size >= 64) return null;

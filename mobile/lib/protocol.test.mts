@@ -72,6 +72,43 @@ test("accepts bounded workspace views and rejects unsafe image payloads", () => 
   } }), null);
 });
 
+test("accepts commit history and holds its hashes to the daemon's shape", () => {
+  const hash = "50812ec".padEnd(40, "0");
+  const commit = { hash, subject: "Show links", author: "Jeremiah", authoredAt: 1_790_856_000_000 };
+  assert.ok(decodeDaemonEvent({ type: "workspace", workspace: {
+    kind: "commits", sessionId: "codex:one", branch: "main", truncated: true,
+    commits: [commit, { ...commit, hash: "a".repeat(64), merge: true, files: 3, added: 250_000, removed: 2 }],
+  } }));
+  // A repository with nothing committed yet answers with no commits at all.
+  assert.ok(decodeDaemonEvent({ type: "workspace", workspace: { kind: "commits", sessionId: "codex:one" } }));
+  assert.ok(decodeDaemonEvent({ type: "workspace", workspace: {
+    kind: "commit", sessionId: "codex:one", commit: { ...commit, body: "Why." },
+    changes: [{ path: "lib/markdown.ts", status: "A", added: 400 }], hidden: 1,
+  } }));
+  for (const bad of ["HEAD", hash.slice(0, 7), hash.toUpperCase(), `${hash}^`, `--output=${hash}`]) {
+    assert.equal(decodeDaemonEvent({ type: "workspace", workspace: {
+      kind: "commits", sessionId: "codex:one", commits: [{ ...commit, hash: bad }],
+    } }), null, bad);
+  }
+  assert.equal(decodeDaemonEvent({ type: "workspace", workspace: {
+    kind: "commit", sessionId: "codex:one", commit: { ...commit, authoredAt: "yesterday" },
+  } }), null);
+});
+
+test("accepts branches and sends back only plain branch refs", () => {
+  const branch = { name: "main", ref: "refs/heads/main", current: true, updatedAt: 1 };
+  assert.ok(decodeDaemonEvent({ type: "workspace", workspace: {
+    kind: "branches", sessionId: "codex:one",
+    branches: [branch, { name: "origin/feat/x", ref: "refs/remotes/origin/feat/x", remote: true, updatedAt: 2 }],
+  } }));
+  for (const ref of ["main", "refs/tags/v1", "refs/heads/main^", "refs/heads/a..b", "refs/heads/x@{1}",
+    "refs/heads/a b", "--all", "refs/heads/m\u0000"]) {
+    assert.equal(decodeDaemonEvent({ type: "workspace", workspace: {
+      kind: "branches", sessionId: "codex:one", branches: [{ ...branch, ref }],
+    } }), null, ref);
+  }
+});
+
 test("accepts launch replies and bounds directory listings", () => {
   assert.ok(decodeDaemonEvent({ type: "directories", path: "Desktop",
     directories: ["agentman", "project"] }));
