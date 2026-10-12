@@ -1154,6 +1154,10 @@ func (d *Daemon) HandleFrom(
 		protocol.ReqReadFileChunk:
 		return d.workspace(ctx, req)
 
+	case protocol.ReqListCommits, protocol.ReqCommitFiles, protocol.ReqCommitDiff,
+		protocol.ReqListBranches:
+		return d.history(ctx, req)
+
 	case protocol.ReqReadSeenFile:
 		return d.readSeenFile(req)
 
@@ -1251,7 +1255,9 @@ func validateRequest(req protocol.Request) error {
 		req.Type == protocol.ReqReadFileChunk || req.Type == protocol.ReqReadSeenFileChunk ||
 		req.Type == protocol.ReqListArtifacts || req.Type == protocol.ReqReadArtifact ||
 		req.Type == protocol.ReqReviewArtifact ||
-		req.Type == protocol.ReqSetMode || req.Type == protocol.ReqSetModel
+		req.Type == protocol.ReqSetMode || req.Type == protocol.ReqSetModel ||
+		req.Type == protocol.ReqListCommits || req.Type == protocol.ReqCommitFiles ||
+		req.Type == protocol.ReqCommitDiff || req.Type == protocol.ReqListBranches
 	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
 		return fmt.Errorf("daemon: invalid session id")
 	}
@@ -1303,6 +1309,25 @@ func validateRequest(req protocol.Request) error {
 		}
 		_, err := workspacePath(req.Path, req.Type == protocol.ReqListFiles || req.Type == protocol.ReqListChanges)
 		return err
+	case protocol.ReqListCommits:
+		if req.Offset < 0 || req.Offset > maxCommitOffset {
+			return fmt.Errorf("daemon: invalid commit offset")
+		}
+		if req.Ref != "" && !validBranchRef(req.Ref) {
+			return fmt.Errorf("daemon: that is not a branch")
+		}
+		return nil
+	case protocol.ReqListBranches:
+		return nil
+	case protocol.ReqCommitFiles, protocol.ReqCommitDiff:
+		if !commitHash.MatchString(req.Commit) {
+			return fmt.Errorf("daemon: that is not a commit")
+		}
+		if req.Type == protocol.ReqCommitDiff {
+			_, err := workspacePath(req.Path, false)
+			return err
+		}
+		return nil
 	case protocol.ReqReadSeenFile, protocol.ReqReadSeenFileChunk:
 		if req.Offset < 0 || req.Offset > maxImageInput {
 			return fmt.Errorf("daemon: invalid file offset")
