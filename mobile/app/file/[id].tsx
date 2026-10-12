@@ -18,6 +18,7 @@ import { ImageViewer } from "../../components/ImageViewer";
 import { MotionPressable } from "../../components/MotionPressable";
 import { SyntaxCode } from "../../components/SyntaxCode";
 import { useStyles, useTheme } from "../../lib/appearance";
+import { shortHash } from "../../lib/commits";
 import { diffStat, parseDiff, type DiffRow } from "../../lib/diff";
 import { describeSource, fetchOriginal, saveName } from "../../lib/original";
 import { WorkspaceResult } from "../../lib/protocol";
@@ -31,16 +32,24 @@ export default function FileScreen() {
     path: pathParam,
     tab: tabParam,
     seen,
+    commit: commitParam,
   } = useLocalSearchParams<{
     id: string;
     path: string;
     tab?: string;
     seen?: string;
+    commit?: string;
   }>();
   // A file outside the session's directory, reachable only because this
   // session's agent opened it. It has no working tree to diff against and no
   // folder above it to go back to, so the screen shows just the picture.
   const seenOnly = seen === "1";
+  // A file as one commit changed it. History has no "file" to show beside the
+  // diff without choosing a side, so this screen is the diff alone.
+  const commit =
+    typeof commitParam === "string" && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(commitParam)
+      ? commitParam
+      : "";
   const sessionId = decodeURIComponent(String(id));
   const filePath = typeof pathParam === "string" ? pathParam : "";
   const store = useStore();
@@ -50,7 +59,7 @@ export default function FileScreen() {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
   const [tab, setTab] = useState<"code" | "diff">(() =>
-    tabParam === "diff" ? "diff" : "code",
+    tabParam === "diff" || commit ? "diff" : "code",
   );
   const [result, setResult] = useState<WorkspaceResult | null>(null);
   const [error, setError] = useState("");
@@ -85,10 +94,14 @@ export default function FileScreen() {
         sessionId,
         seenOnly
           ? "read_seen_file"
-          : tab === "code"
-            ? "read_file"
-            : "file_diff",
+          : commit
+            ? "commit_diff"
+            : tab === "code"
+              ? "read_file"
+              : "file_diff",
         filePath,
+        undefined,
+        commit ? { commit } : undefined,
       )
       .then((value) => {
         if (current) setResult(value);
@@ -104,7 +117,7 @@ export default function FileScreen() {
       current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, filePath, tab, refresh, seenOnly]);
+  }, [sessionId, filePath, tab, refresh, seenOnly, commit]);
 
   const name = filePath.split("/").at(-1) || "File";
   const rows = useMemo(
@@ -286,7 +299,7 @@ export default function FileScreen() {
           onPress={() => router.back()}
           style={styles.iconButton}
           accessibilityRole="button"
-          accessibilityLabel="Back to files"
+          accessibilityLabel={commit ? "Back to commit" : "Back to files"}
         >
           <Feather name="chevron-left" size={20} color={color.text} />
         </MotionPressable>
@@ -299,19 +312,23 @@ export default function FileScreen() {
             {filePath}
           </Text>
         </View>
-        <MotionPressable
-          onPress={() => setRefresh((value) => value + 1)}
-          style={styles.iconButton}
-          accessibilityRole="button"
-          accessibilityLabel="Refresh file"
-        >
-          <Feather name="refresh-cw" size={17} color={color.text} />
-        </MotionPressable>
+        {/* A commit never changes, so its diff has nothing to refresh. */}
+        {!commit ? (
+          <MotionPressable
+            onPress={() => setRefresh((value) => value + 1)}
+            style={styles.iconButton}
+            accessibilityRole="button"
+            accessibilityLabel="Refresh file"
+          >
+            <Feather name="refresh-cw" size={17} color={color.text} />
+          </MotionPressable>
+        ) : null}
       </ContentColumn>
       {/* A file outside the working tree has nothing to diff against, so the
-          tabs would offer a choice with one broken half. */}
+          tabs would offer a choice with one broken half. A commit's file is
+          only ever its diff. */}
       <ContentColumn style={styles.tabs}>
-        {(seenOnly ? [] : (["code", "diff"] as const)).map((value) => (
+        {(seenOnly || commit ? [] : (["code", "diff"] as const)).map((value) => (
           <MotionPressable
             key={value}
             onPress={() => setTab(value)}
@@ -326,6 +343,17 @@ export default function FileScreen() {
             </Text>
           </MotionPressable>
         ))}
+        {/* With no tabs to choose between, the counts take their place
+            rather than a row of their own under an empty one. */}
+        {commit && stat ? (
+          <View style={styles.inlineStat}>
+            <StatCounts stat={stat} styles={styles} />
+            <Text style={styles.statNote}>in</Text>
+            <View style={styles.statHash}>
+              <Text style={styles.statHashText}>{shortHash(commit)}</Text>
+            </View>
+          </View>
+        ) : null}
         <View style={styles.spacer} />
         {!result?.image ? (
           <MotionPressable
@@ -346,10 +374,9 @@ export default function FileScreen() {
           </MotionPressable>
         ) : null}
       </ContentColumn>
-      {stat ? (
+      {stat && !commit ? (
         <ContentColumn style={styles.statBar}>
-          <Text style={styles.statAdd}>+{stat.added}</Text>
-          <Text style={styles.statRemove}>−{stat.removed}</Text>
+          <StatCounts stat={stat} styles={styles} />
           <Text style={styles.statNote}>vs last commit</Text>
         </ContentColumn>
       ) : null}
@@ -376,7 +403,12 @@ export default function FileScreen() {
           ) : (
             <ContentColumn style={styles.message}>
               <Text style={styles.empty}>
-                No working tree changes for this file.
+                {/* git describes a binary change in one line and no hunks. */}
+                {/^Binary files .* differ$/m.test(result.diff ?? "")
+                  ? "This is a binary file, so there are no lines to compare."
+                  : commit
+                    ? "This commit changed no lines in this file."
+                    : "No working tree changes for this file."}
               </Text>
             </ContentColumn>
           )}
@@ -390,6 +422,26 @@ export default function FileScreen() {
         </ScrollView>
       )}
     </View>
+  );
+}
+
+/** "+5", not "+5 −0": a side that did not change says nothing. */
+function StatCounts({
+  stat,
+  styles,
+}: {
+  stat: { added: number; removed: number };
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  return (
+    <>
+      {stat.added > 0 || stat.removed === 0 ? (
+        <Text style={styles.statAdd}>+{stat.added}</Text>
+      ) : null}
+      {stat.removed > 0 ? (
+        <Text style={styles.statRemove}>−{stat.removed}</Text>
+      ) : null}
+    </>
   );
 }
 
@@ -678,6 +730,19 @@ const makeStyles = (c: Palette) =>
       fontSize: 12,
     },
     statNote: { color: c.faint, fontFamily: font.sans, fontSize: 11.5 },
+    inlineStat: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingLeft: space.xxs,
+    },
+    statHash: {
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: radius.sm - 2,
+      backgroundColor: c.fill,
+    },
+    statHashText: { color: c.muted, fontFamily: font.mono, fontSize: 11 },
 
     diffFrame: {
       backgroundColor: c.surface,

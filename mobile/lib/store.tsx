@@ -44,6 +44,7 @@ import {
   saveDismissals,
   type Dismissals,
 } from "./dismissed";
+import { historyError, isHistoryRequest, type HistoryRequest } from "./commits";
 import { draftNamespace } from "./draft-policy";
 import { resumeOnce } from "./resume";
 import { folderContains } from "./folders";
@@ -166,10 +167,13 @@ interface Store {
   workspace(
     sessionId: string,
     type: "list_files" | "read_file" | "list_changes" | "file_diff" | "read_seen_file" |
-      "read_file_chunk" | "read_seen_file_chunk",
+      "read_file_chunk" | "read_seen_file_chunk" | HistoryRequest,
     path?: string,
-    /** Where a chunk request starts reading. */
+    /** Where a chunk request starts reading, or how many commits to skip. */
     offset?: number,
+    /** The commit a commit_files or commit_diff request is about, and the
+     *  branch list_commits reads. */
+    history?: { commit?: string; ref?: string },
   ): Promise<WorkspaceResult>;
   /** Browse one directory: its child folders, and how many agents each has
    *  under it. Counts are absent from a Mac too old to send them. */
@@ -1368,11 +1372,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         });
       },
 
-      workspace(sessionId, type, path = "", offset) {
-        return new Promise<WorkspaceResult>((resolve, reject) => {
-          const id = clientRef.current?.send(
-            offset ? { type, sessionId, path, offset } : { type, sessionId, path },
-          );
+      workspace(sessionId, type, path = "", offset, history) {
+        const request = new Promise<WorkspaceResult>((resolve, reject) => {
+          const id = clientRef.current?.send({
+            type,
+            sessionId,
+            path,
+            ...(offset ? { offset } : {}),
+            ...(history?.commit ? { commit: history.commit } : {}),
+            ...(history?.ref ? { ref: history.ref } : {}),
+          });
           if (!id) {
             reject(new Error("Not connected to your Mac right now."));
             return;
@@ -1381,6 +1390,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             settleWorkspaceRequest(id, undefined, "The Mac took too long to read this workspace.");
           }, 30_000);
           workspaceRequests.current.set(id, { resolve, reject, timer });
+        });
+        if (!isHistoryRequest(type)) return request;
+        return request.catch((reason: unknown) => {
+          throw new Error(historyError(reason instanceof Error ? reason.message : String(reason)));
         });
       },
 
