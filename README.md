@@ -23,7 +23,7 @@ delivery, interactive question forms, and local notifications.
 - Send instructions through tmux or an agent's native API.
 - Answer single-select, multi-select, custom-text, preview, and review forms.
 - Receive local notifications when an agent completes a turn or needs input.
-- Browse a session's files, preview images, and inspect working tree diffs from the app.
+- Browse a session's files, preview images, and inspect working tree diffs and commit history from the app.
 - Pair a phone without creating an account.
 - Self-host a stateless relay with no transcript database.
 
@@ -499,8 +499,10 @@ The relay keeps live tunnels in memory, so run a single instance.
   the names that carry credentials — `.env*`, `.ssh`, `.aws`, `.docker`, `.npmrc`,
   private keys, anything containing "secret" or "credential" — along with `.git`
   itself. Other dot folders are shown, and the count of what was withheld travels
-  with each listing. File contents pass through the relay, which can inspect live
-  traffic.
+  with each listing. Commit history is read from Git's object store under the
+  same name rules, limited to the session's directory, so it can show content
+  that a later commit removed. File contents pass through the relay, which can
+  inspect live traffic.
 
 ## Development
 
