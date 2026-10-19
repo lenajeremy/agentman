@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as Clipboard from "expo-clipboard";
 
 import { canAttachMore, MAX_ATTACHMENTS } from "./attachments";
-import { clipboardHasImage, pasteImage, pickImages } from "./imagesource";
+import { clipboardHasImage, pasteImage, pickImages, preparePasted } from "./imagesource";
 import { uploadImage } from "./upload";
 import type { Credentials } from "./client";
 
@@ -92,6 +92,22 @@ export function useAttachments(credentials: Credentials | null) {
     [add, attachments.length],
   );
 
+  /** Images the text box's own Paste handed over, already on disk. */
+  const addPasted = useCallback(
+    (images: { uri: string; width: number; height: number }[]) =>
+      add(async () => {
+        const remaining = MAX_ATTACHMENTS - attachments.length;
+        if (remaining <= 0) return [];
+        const prepared = await preparePasted(images.slice(0, remaining));
+        return prepared.map((image) => ({
+          key: `a${++sequence}`,
+          uri: image.uri,
+          base64: image.base64,
+        }));
+      }),
+    [add, attachments.length],
+  );
+
   const remove = useCallback((key: string) => {
     setAttachments((current) => current.filter((item) => item.key !== key));
   }, []);
@@ -126,6 +142,7 @@ export function useAttachments(credentials: Credentials | null) {
     canAdd: canAttachMore(attachments.length),
     pick,
     paste,
+    addPasted,
     remove,
     clear,
     upload,

@@ -21,7 +21,9 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AgentIcon } from "../../components/AgentIcon";
 import { Appear } from "../../components/Appear";
+import { addPastedImagesListener, pasteTakesImages } from "../../modules/image-paste";
 import { MessageMenu, type MessageMenuItem } from "../../components/MessageMenu";
 import { Toast } from "../../components/Toast";
 import { ContentColumn } from "../../components/ContentColumn";
@@ -98,6 +100,17 @@ export default function SessionScreen() {
     null,
   );
   const [inputFocused, setInputFocused] = useState(false);
+  // The text box, measured when the model menu opens so the menu sits on it.
+  const fieldRef = useRef<View>(null);
+  const [modelMenuBottom, setModelMenuBottom] = useState<number | null>(null);
+  // Paste in the text box takes an image only while it is focused: a paste
+  // goes to whichever box has focus, and this one is where images belong.
+  const { addPasted } = images;
+  useEffect(() => {
+    if (!inputFocused) return;
+    const subscription = addPastedImagesListener((pasted) => void addPasted(pasted));
+    return () => subscription?.remove();
+  }, [inputFocused, addPasted]);
   const [keyboardVisible, setKeyboardVisible] = useState(
     () => Platform.OS !== "web" && Keyboard.isVisible(),
   );
@@ -579,6 +592,31 @@ export default function SessionScreen() {
   const chip = session
     ? statusChip(session.mode, session.contextPercent, modeChoices !== null)
     : null;
+  const headerControls = session
+    ? shownHeaderControls({
+        mode: chip?.mode && chip.mode !== "mode" ? chip.mode : undefined,
+        modePending: switching?.kind === "mode" ? switching.value : undefined,
+        onMode: modeChoices ? () => setSwitchMenu("mode") : undefined,
+        contextPercent: session.contextPercent,
+      })
+    : null;
+  const openModelMenu = () => {
+    const open = () =>
+      fieldRef.current?.measureInWindow((_x, y) => {
+        setModelMenuBottom(viewportHeight - y + space.xs);
+        setSwitchMenu("model");
+      });
+    // The text box drops when the keyboard goes, so it is measured after.
+    if (Keyboard.isVisible()) {
+      const subscription = Keyboard.addListener("keyboardDidHide", () => {
+        subscription.remove();
+        open();
+      });
+      Keyboard.dismiss();
+    } else {
+      open();
+    }
+  };
   const artifactCount = session?.artifacts ?? 0;
   const artifactsToReview = session?.artifactsToReview ?? 0;
 
@@ -599,6 +637,14 @@ export default function SessionScreen() {
           >
             <Feather name="chevron-left" size={20} color={color.text} />
           </MotionPressable>
+          {/* Whose chat this is, in the shape the agents list already uses:
+              the logo is read before the name is, and the same tile on both
+              screens says this is the row you tapped. */}
+          {session ? (
+            <View style={styles.agentTile}>
+              <AgentIcon kind={session.kind} size={20} />
+            </View>
+          ) : null}
           <View style={styles.headerBody}>
             <Text style={styles.title} numberOfLines={1}>
               {session?.name ?? "Session"}
@@ -697,19 +743,11 @@ export default function SessionScreen() {
           ) : null}
         </ContentColumn>
         {/* Its own row, the full width of the screen: beside the buttons there
-            was room for two chips, and the third was cut off. */}
-        {session ? (
+            was room for two chips, and the third was cut off. The model is
+            not here: it sits by the text box, where it is chosen. */}
+        {session && headerControls ? (
           <ContentColumn style={styles.controlsBar}>
-            <HeaderControls
-              model={session.model}
-              modelPending={switching?.kind === "model" ? switching.value : undefined}
-              onModel={modelChoices ? () => setSwitchMenu("model") : undefined}
-              mode={chip?.mode && chip.mode !== "mode" ? chip.mode : undefined}
-              modePending={switching?.kind === "mode" ? switching.value : undefined}
-              onMode={modeChoices ? () => setSwitchMenu("mode") : undefined}
-              contextPercent={session.contextPercent}
-              disabled={switchLocked}
-            />
+            <HeaderControls {...headerControls} disabled={switchLocked} />
           </ContentColumn>
         ) : null}
       </View>
@@ -726,8 +764,9 @@ export default function SessionScreen() {
         <Popover
           visible
           onDismiss={() => setSwitchMenu(null)}
-          top={headerHeight}
-          align="left"
+          {...(switchMenu === "model" && modelMenuBottom !== null
+            ? { bottom: modelMenuBottom, align: "right" as const }
+            : { top: headerHeight, align: "left" as const })}
           title={switchTitle}
           items={switchItems}
         />
@@ -922,6 +961,7 @@ export default function SessionScreen() {
                 <Text style={styles.attachError}>{images.error}</Text>
               ) : null}
               <View
+                ref={fieldRef}
                 style={[
                   styles.field,
                   images.attachments.length > 0 && styles.fieldWithImages,
@@ -933,7 +973,50 @@ export default function SessionScreen() {
                   attachments={images.attachments}
                   onRemove={images.remove}
                 />
-                <View style={styles.fieldRow}>
+                {/* Where the text box's own Paste can take an image (iOS, via
+                  modules/image-paste), holding it brings up Paste like any
+                  other text box. Elsewhere a long press here pastes the image
+                  instead, in the place the gesture already suggests; on iOS
+                  it would attach the image a second time. */}
+                <Pressable
+                  onLongPress={
+                    pasteTakesImages
+                      ? undefined
+                      : () => {
+                          if (!images.clipboardReady || !images.canAdd) return;
+                          void images.paste();
+                        }
+                  }
+                  delayLongPress={400}
+                  style={styles.inputWrap}
+                  accessibilityLabel={
+                    images.clipboardReady && !pasteTakesImages
+                      ? "Hold to paste the image on the clipboard"
+                      : undefined
+                  }
+                >
+                  <TextInput
+                    style={styles.input}
+                    value={draft}
+                    onChangeText={setDraft}
+                    onFocus={() => setInputFocused(true)}
+                    onBlur={() => setInputFocused(false)}
+                    editable={canSend && !awaitingSend}
+                    placeholder={
+                      awaitingSend
+                        ? "Waiting for delivery…"
+                        : canSend
+                          ? `Message ${session ? agentLabel(session.kind).name : "the agent"}…`
+                          : "This session can't receive messages"
+                    }
+                    placeholderTextColor={color.faint}
+                    multiline
+                    onSubmitEditing={() => void submit()}
+                    returnKeyType="send"
+                    accessibilityLabel="Instruction"
+                  />
+                </Pressable>
+                <View style={styles.toolbar}>
                   {/* Two ways in, because copying a screenshot and choosing one
                     from the library are different habits and neither
                     substitutes for the other. Paste only appears when there is
@@ -972,44 +1055,20 @@ export default function SessionScreen() {
                       />
                     )}
                   </MotionPressable>
-                  {/* iOS's own edit menu can paste text into a TextInput but not
-                    an image: RCTUITextView.paste: hands straight to UITextView,
-                    and no onPaste reaches JS. So a long press here offers the
-                    image instead, in the place the gesture already suggests. */}
-                  <Pressable
-                    onLongPress={() => {
-                      if (!images.clipboardReady || !images.canAdd) return;
-                      void images.paste();
-                    }}
-                    delayLongPress={400}
-                    style={styles.inputWrap}
-                    accessibilityLabel={
-                      images.clipboardReady
-                        ? "Hold to paste the image on the clipboard"
-                        : undefined
-                    }
-                  >
-                    <TextInput
-                      style={styles.input}
-                      value={draft}
-                      onChangeText={setDraft}
-                      onFocus={() => setInputFocused(true)}
-                      onBlur={() => setInputFocused(false)}
-                      editable={canSend && !awaitingSend}
-                      placeholder={
-                        awaitingSend
-                          ? "Waiting for delivery…"
-                          : canSend
-                            ? `Message ${session ? agentLabel(session.kind).name : "the agent"}…`
-                            : "This session can't receive messages"
-                      }
-                      placeholderTextColor={color.faint}
-                      multiline
-                      onSubmitEditing={() => void submit()}
-                      returnKeyType="send"
-                      accessibilityLabel="Instruction"
+                  <View style={styles.toolbarGap} />
+                  {/* Beside send, as in Claude's and ChatGPT's apps: the model
+                    is part of what you are about to send, and choosing it
+                    belongs where the message is written, not in the header. */}
+                  {session?.model || switching?.kind === "model" ? (
+                    <ModelButton
+                      model={modelLabel(
+                        (switching?.kind === "model" ? switching.value : session?.model) ?? "",
+                      )}
+                      pending={switching?.kind === "model"}
+                      onPress={modelChoices ? openModelMenu : undefined}
+                      disabled={switchLocked}
                     />
-                  </Pressable>
+                  ) : null}
                   <MotionPressable
                     onPress={() => void submit()}
                     disabled={!canSend || awaitingSend || nothingToSend}
@@ -1054,42 +1113,40 @@ export default function SessionScreen() {
   );
 }
 
+interface HeaderControlsProps {
+  mode?: string;
+  modePending?: string;
+  onMode?: () => void;
+  contextPercent?: number;
+}
+
+/** The header's chips, or null when there is nothing to put in the row. */
+function shownHeaderControls(props: HeaderControlsProps): HeaderControlsProps | null {
+  const { mode, modePending, onMode, contextPercent } = props;
+  const context = contextPercent !== undefined && contextPercent > 0;
+  return mode || modePending || onMode || context ? props : null;
+}
+
 /**
- * The agent's mode and how full its context is, in one chip beside the model.
- * Machine words in mono, like the model beside it.
- */
-/**
- * What is answering, in which mode, and how full its context is: one row of
- * chips under the title, each with room for its whole name.
+ * Which mode the agent is in and how full its context is: one row of chips
+ * under the title, each with room for its whole name.
  *
  * They were squeezed onto the line with the folder, where at phone width
  * every one of them was cut short. A chip with a chevron opens the switcher
- * for that setting; one without is only a fact.
+ * for that setting; one without is only a fact. The model used to lead this
+ * row; it moved to the text box, beside the button that sends with it.
  */
 function HeaderControls({
-  model,
-  modelPending,
-  onModel,
   mode,
   modePending,
   onMode,
   contextPercent,
   disabled,
-}: {
-  model?: string;
-  modelPending?: string;
-  onModel?: () => void;
-  mode?: string;
-  modePending?: string;
-  onMode?: () => void;
-  contextPercent?: number;
-  disabled?: boolean;
-}) {
+}: HeaderControlsProps & { disabled?: boolean }) {
   const styles = useStyles(makeStyles);
   const context =
     contextPercent && contextPercent > 0 ? `${Math.min(100, Math.round(contextPercent))}% context` : undefined;
   const shownMode = modePending ?? mode;
-  if (!model && !shownMode && !onMode && !context) return null;
   return (
     <ScrollView
       horizontal
@@ -1097,19 +1154,6 @@ function HeaderControls({
       style={styles.controls}
       contentContainerStyle={styles.controlsContent}
     >
-      {model || modelPending ? (
-        <ControlChip
-          label={modelLabel(modelPending ?? model ?? "")}
-          pending={Boolean(modelPending)}
-          onPress={onModel}
-          disabled={disabled}
-          accessibilityLabel={
-            modelPending
-              ? `Switching model to ${modelLabel(modelPending)}`
-              : `Model ${modelLabel(model ?? "")}${onModel ? ". Switch model" : ""}`
-          }
-        />
-      ) : null}
       {shownMode || onMode ? (
         <ControlChip
           label={shownMode ? modeLabel(shownMode) : "Mode"}
@@ -1129,6 +1173,57 @@ function HeaderControls({
         </View>
       ) : null}
     </ScrollView>
+  );
+}
+
+/**
+ * The model, at the foot of the text box beside send.
+ *
+ * Quiet text with a chevron rather than a filled chip, as in Claude's and
+ * ChatGPT's apps: it is read far more often than it is changed, and send is
+ * the one thing in the row that should look pressable first. Without a list
+ * to choose from it is only the name.
+ */
+function ModelButton({
+  model,
+  pending,
+  onPress,
+  disabled,
+}: {
+  model: string;
+  pending: boolean;
+  onPress?: () => void;
+  disabled?: boolean;
+}) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const body = (
+    <>
+      <Text style={[styles.modelText, pending && styles.switchPending]} numberOfLines={1}>
+        {pending ? `${model}…` : model}
+      </Text>
+      {onPress ? <Feather name="chevron-down" size={13} color={color.muted} /> : null}
+    </>
+  );
+  if (!onPress) {
+    return (
+      <View style={styles.modelButton} accessible accessibilityRole="text" accessibilityLabel={`Model ${model}`}>
+        {body}
+      </View>
+    );
+  }
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      hitSlop={6}
+      style={({ pressed }) => [styles.modelButton, pressed && styles.modelButtonPressed]}
+      accessibilityRole="button"
+      accessibilityLabel={pending ? `Switching model to ${model}` : `Model ${model}. Switch model`}
+      accessibilityState={{ disabled, busy: pending }}
+    >
+      {body}
+    </Pressable>
   );
 }
 
@@ -1621,23 +1716,34 @@ const makeStyles = (c: Palette) =>
     // row before it started.
     backButton: {
       width: 30,
-      height: 34,
-      // Centred on the title's line rather than on the whole header.
-      marginTop: -7,
+      // The logo's height, so the chevron sits level with its middle.
+      height: 38,
       alignItems: "center",
       justifyContent: "center",
     },
     iconButton: {
       width: 40,
       height: 40,
-      // Centred on the title's line, like the back button.
-      marginTop: -10,
+      // Centred on the logo, like the back button: a point taller than it,
+      // so a point above it.
+      marginTop: -1,
       borderRadius: radius.pill,
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: c.surface,
       borderWidth: 1,
       borderColor: c.line,
+    },
+    // Spans the title and the line under it, as an avatar does beside a
+    // name, so it sits level with both rather than with one.
+    agentTile: {
+      width: 38,
+      height: 38,
+      marginRight: space.xs,
+      borderRadius: radius.md,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.fill,
     },
     headerBody: { flex: 1 },
     // Full width rather than indented under the title. It is a banner about
@@ -1720,7 +1826,8 @@ const makeStyles = (c: Palette) =>
     subtitlePath: { flexShrink: 1 },
     // Gives way with the path when the row runs out, and inside it the mode
     // name gives way first: the percentage is the part worth keeping whole.
-    // Starts where the title starts: past the screen edge and the back button.
+    // Starts under the logo, past the screen edge and the back button, so
+    // the logo, the title and the chips read as one block.
     controlsBar: { paddingLeft: space.md + 30 + space.xs, paddingBottom: space.sm, marginTop: -2 },
     controls: { flexGrow: 0 },
     controlsContent: { flexDirection: "row", alignItems: "center", gap: 6, paddingRight: space.sm },
@@ -1892,7 +1999,10 @@ const makeStyles = (c: Palette) =>
     composerShell: { backgroundColor: c.paper },
     composer: { paddingHorizontal: space.lg, paddingTop: space.sm },
     // Input and send share one container, so the send button reads as part of
-    // the field instead of sitting next to it.
+    // the field instead of sitting next to it. The text has the full width
+    // and the controls a row of their own under it, as in Claude's and
+    // ChatGPT's apps: beside the text, the model's name would take the room
+    // a sentence needs.
     field: {
       backgroundColor: c.surface,
       borderRadius: radius.xxl,
@@ -1900,7 +2010,8 @@ const makeStyles = (c: Palette) =>
       borderColor: c.line,
       paddingLeft: 6,
       paddingRight: 6,
-      paddingVertical: 6,
+      paddingTop: 4,
+      paddingBottom: 6,
       shadowColor: c.shadow,
       shadowOpacity: 0.06,
       shadowRadius: 16,
@@ -1909,11 +2020,13 @@ const makeStyles = (c: Palette) =>
     },
     fieldFocused: { borderColor: c.working },
     fieldDisabled: { opacity: 0.55 },
+    // Inset so the text starts where the + under it does.
     input: {
-      flex: 1,
       minHeight: 38,
       maxHeight: 120,
-      paddingVertical: space.sm,
+      paddingHorizontal: 10,
+      paddingTop: space.sm,
+      paddingBottom: space.xs,
       fontFamily: font.sans,
       fontSize: size.body,
       color: c.text,
@@ -1925,11 +2038,23 @@ const makeStyles = (c: Palette) =>
       paddingTop: space.sm,
       paddingLeft: space.sm,
     },
-    fieldRow: { flexDirection: "row", alignItems: "flex-end", gap: space.xs },
+    toolbar: { flexDirection: "row", alignItems: "center", gap: space.xs },
+    toolbarGap: { flex: 1 },
+    modelButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+      height: 32,
+      maxWidth: 200,
+      paddingHorizontal: 10,
+      borderRadius: radius.pill,
+    },
+    modelButtonPressed: { backgroundColor: c.fill },
+    modelText: { flexShrink: 1, fontFamily: font.sansMedium, fontSize: 13, color: c.muted },
     // A wrapper so the long press has something to land on: the gesture cannot
     // be attached to the TextInput itself without swallowing taps that should
     // place the caret.
-    inputWrap: { flex: 1 },
+    inputWrap: {},
     attachError: {
       fontFamily: font.sans,
       fontSize: size.label,
