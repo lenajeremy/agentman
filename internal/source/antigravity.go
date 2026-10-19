@@ -264,6 +264,11 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 		if tmuxName != "" {
 			session.Inject = protocol.InjectTmux
 			footer = s.applyPane(ctx, &session, tmuxName)
+			if footer.queued && process.log != "" {
+				if text, ok := s.logTail(process.log); ok {
+					session.Queued = antigravityQueued(text, session.Queued)
+				}
+			}
 		} else if process.log != "" {
 			// No pane to read: the process's own log says what the
 			// transcript cannot — a prompt waiting on the user, or a turn
@@ -499,6 +504,10 @@ type antigravityFooter struct {
 	mode      string
 	subagents int
 	tasks     int
+	// queued says agy is holding messages sent while it works, and
+	// sendNowKey is the key, in tmux's spelling, that sends them at once.
+	queued     bool
+	sendNowKey string
 }
 
 func parseAntigravityFooter(lines []string) antigravityFooter {
@@ -565,6 +574,14 @@ func (s *AntigravitySource) applyPane(
 	}
 	if state, ok := antigravityPaneState(lines); ok {
 		session.State = state
+	}
+	// What the pane shows of held messages; Discover fills in their full
+	// text from the log where it can.
+	shown, texts, key := antigravityPaneQueue(lines)
+	footer.queued, footer.sendNowKey = shown, key
+	if shown {
+		session.Queued = texts
+		session.CanSendQueued = key != ""
 	}
 	return footer
 }

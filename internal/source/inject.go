@@ -125,7 +125,7 @@ func (s *ClaudeSource) SendQueued(ctx context.Context, sessionID string) error {
 	if session.tmuxName == "" {
 		return fmt.Errorf("source: only sessions started with `am claude` can be told to send now")
 	}
-	return tmux.SendQueued(ctx, session.tmuxName)
+	return tmux.SendQueued(ctx, session.tmuxName, "C-x", "C-s")
 }
 
 // Inject implements Injector for Codex.
@@ -143,6 +143,10 @@ func (s *CodexSource) Inject(ctx context.Context, sessionID, text string) (proto
 		}
 		if err := tmux.Send(ctx, session.tmuxName, text); err != nil {
 			return protocol.InjectNone, err
+		}
+		// Typed into a running turn, it waits for the tool call under way.
+		if session.meta.State == protocol.StateBusy || session.meta.State == protocol.StateWaitingInput {
+			s.held.add(sessionID, session.transcript, text)
 		}
 		return protocol.InjectTmux, nil
 	}

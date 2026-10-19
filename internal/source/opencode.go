@@ -262,8 +262,12 @@ type ocMessageInfo struct {
 	} `json:"model"`
 	Time struct {
 		Created int64 `json:"created"`
+		// Completed is set on an assistant message once it is finished.
+		Completed int64 `json:"completed"`
 	} `json:"time"`
-	Error json.RawMessage `json:"error"`
+	// ParentID is, on an assistant message, the user message it answers.
+	ParentID string          `json:"parentID"`
+	Error    json.RawMessage `json:"error"`
 }
 
 // ocPart is one element of an assistant message's content.
@@ -794,6 +798,21 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 		s.answerMu.Unlock()
 	}
 
+	// A message sent while OpenCode works is in its history at once but read
+	// only after the step under way; say which ones are still waiting.
+	for id, session := range next {
+		working := session.meta.State == protocol.StateBusy || session.meta.State == protocol.StateWaitingInput
+		if !working || session.baseURL == "" {
+			continue
+		}
+		texts, rows, err := s.queuedFor(ctx, session)
+		if err != nil {
+			continue // a failed look leaves the session as it was
+		}
+		session.meta.Queued, session.meta.QueuedMessageIDs = texts, rows
+		next[id] = session
+	}
+
 	live := make(map[string]bool, len(next))
 	for id := range next {
 		live[id] = true
@@ -1164,6 +1183,65 @@ func (s *OpenCodeSource) Page(ctx context.Context, sessionID, before string, lim
 
 	cursor := headers.Get("X-Next-Cursor")
 	return protocol.NewPage(sessionID, messages, cursor, cursor != ""), nil
+}
+
+// openCodeQueuePeek is how many of the newest messages queuedFor reads: the
+// reply under way and the messages sent since, which are rarely more than one.
+const openCodeQueuePeek = 6
+
+// queuedFor reads a working session's newest messages for those still waiting.
+func (s *OpenCodeSource) queuedFor(ctx context.Context, session openCodeSession) ([]string, []string, error) {
+	query := url.Values{"limit": {strconv.Itoa(openCodeQueuePeek)}}
+	if session.directory != "" {
+		query.Set("directory", session.directory)
+	}
+	path := openCodePath(fmt.Sprintf("/session/%s/message", openCodeSegment(session.nativeID)), query)
+	var response []ocMessage
+	if _, err := s.doAtLimit(ctx, session.baseURL, http.MethodGet, path, nil, &response,
+		maxOpenCodeMessageResponse); err != nil {
+		return nil, nil, err
+	}
+	texts, rows := openCodeWaiting(session.meta.ID, response)
+	return texts, rows, nil
+}
+
+// openCodeWaiting picks out the user messages OpenCode has not read yet: the
+// ones after the reply still being written that no reply answers. OpenCode
+// saves a message the moment it is sent, then reads the newest when the step
+// under way ends, so until then it sits in the history looking read. It
+// returns their texts and their rows in the feed, so the phone can show those
+// rows as waiting.
+func openCodeWaiting(sessionID string, messages []ocMessage) (texts, rows []string) {
+	running := -1
+	answered := map[string]bool{}
+	for i, message := range messages {
+		if message.Info.Role != "assistant" {
+			continue
+		}
+		answered[message.Info.ParentID] = true
+		if message.Info.Time.Completed == 0 {
+			running = i
+		}
+	}
+	if running < 0 {
+		return nil, nil
+	}
+	for _, message := range messages[running+1:] {
+		if message.Info.Role != "user" || answered[message.Info.ID] {
+			continue
+		}
+		var parts []string
+		for _, row := range openCodeMessages(sessionID, message) {
+			if row.Role == protocol.RoleUser && row.Text != "" {
+				parts = append(parts, row.Text)
+				rows = append(rows, row.ID)
+			}
+		}
+		if len(parts) > 0 {
+			texts = append(texts, strings.Join(parts, "\n"))
+		}
+	}
+	return texts, rows
 }
 
 // openCodeMessages flattens one API message into the normalized feed.

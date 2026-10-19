@@ -278,6 +278,7 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 		// the step ends; without this the phone showed nothing for them.
 		working := meta.State == protocol.StateBusy || meta.State == protocol.StateWaitingInput
 		meta.Queued = s.queue.pending(id, transcript, working)
+		meta.CanSendQueued = tmuxName != "" && len(meta.Queued) > 0
 
 		found = append(found, meta)
 		next[id] = claudeSession{

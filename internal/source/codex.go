@@ -155,6 +155,9 @@ func anyCodexPane(panes []tmux.Session) bool {
 // CodexSource observes Codex rollout transcripts.
 type CodexSource struct {
 	home string
+	// held follows messages the phone sent into a running turn until the
+	// rollout shows Codex read them.
+	held *heldSends
 	// processCheck is injectable so discovery can be tested without depending
 	// on whether the machine running the tests happens to have Codex open.
 	processCheck func(context.Context) bool
@@ -294,6 +297,7 @@ func NewCodexSource(home string) (*CodexSource, error) {
 		refuseWithNote: tmux.RefuseThenSend,
 		switcher:       newPaneDriver(),
 		models:         newModelCache(),
+		held:           newHeldSends(func(line []byte) string { return parser.CodexUserText(string(line)) }),
 		readMeta:       readCodexMeta,
 		readActivity:   codexActivity,
 		rolloutCache:   map[string]codexRolloutCacheEntry{},
@@ -605,6 +609,16 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 		next[id] = codexSession{meta: session, transcript: "", tmuxName: pane.Name}
 	}
 
+	// A message the phone sent into a running turn waits until the tool call
+	// under way finishes; show it as waiting until the rollout has it.
+	for i := range found {
+		session := next[found[i].ID]
+		working := found[i].State == protocol.StateBusy || found[i].State == protocol.StateWaitingInput
+		found[i].Queued = s.held.pending(found[i].ID, session.transcript, working)
+		session.meta.Queued = found[i].Queued
+		next[found[i].ID] = session
+	}
+
 	// Newest first, so the caller's ordering does not depend on readdir order.
 	sort.Slice(found, func(i, j int) bool {
 		return found[i].LastActivityAt > found[j].LastActivityAt
@@ -615,6 +629,7 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 		live[id] = true
 	}
 	s.models.forget(live)
+	s.held.forget(live)
 	s.forgetCodexRollouts(liveRollouts)
 
 	s.mu.Lock()
