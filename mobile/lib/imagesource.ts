@@ -103,6 +103,22 @@ export async function pasteImage(): Promise<PickedImage | null> {
 }
 
 /**
+ * Prepare images the system Paste command handed over.
+ *
+ * They arrive as full-size files rather than through the clipboard API, which
+ * would ask permission to read what the person just chose to paste.
+ */
+export async function preparePasted(
+  images: { uri: string; width: number; height: number }[],
+): Promise<PickedImage[]> {
+  const prepared: PickedImage[] = [];
+  for (const image of images) {
+    prepared.push(await prepare(image.uri, { width: image.width, height: image.height }));
+  }
+  return prepared.filter(usable);
+}
+
+/**
  * Whether an image is small enough to send.
  *
  * The relay would refuse it anyway; refusing here means the wait happens
