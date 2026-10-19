@@ -3,6 +3,7 @@ const {
   withDangerousMod,
   withEntitlementsPlist,
   withInfoPlist,
+  withPodfileProperties,
   withXcodeProject,
 } = require("expo/config-plugins");
 const fs = require("fs");
@@ -193,8 +194,30 @@ function withSceneLifeCycle(config) {
   });
 }
 
+/**
+ * Build Expo's own modules from source rather than using its precompiled ones.
+ *
+ * The generated Podfile turns precompiled modules on unless told otherwise.
+ * They are compiled by Expo with whichever Swift it had, and Swift cannot load
+ * a module another Swift version compiled, so it falls back to the module's
+ * text interface. That fallback is what broke the build when this Mac moved
+ * to Xcode 27.1 (Swift 6.4) on top of SDK 57's Swift 6.3.1 modules, and there
+ * is an open report of the precompiled ExpoModulesCore crashing at launch on
+ * Xcode 27 as well (expo/expo#51454). From source, every module is compiled
+ * by the Xcode doing the build. It costs a slower first build; Xcode's cache
+ * makes later ones normal.
+ */
+function withSourceBuiltExpoModules(config) {
+  return withPodfileProperties(config, (config) => {
+    config.modResults.EXPO_USE_PRECOMPILED_MODULES = "false";
+    return config;
+  });
+}
+
 module.exports = function withIosBuildFixes(config) {
-  return withSceneLifeCycle(
-    withoutPushEntitlement(withSigningTeam(withPodDeploymentTarget(config))),
+  return withSourceBuiltExpoModules(
+    withSceneLifeCycle(
+      withoutPushEntitlement(withSigningTeam(withPodDeploymentTarget(config))),
+    ),
   );
 };

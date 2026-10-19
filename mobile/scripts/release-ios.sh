@@ -143,7 +143,7 @@ archive="build/${scheme}.xcarchive"
 export_dir="build/ipa"
 
 # The app code that goes into the build. Paths are relative to mobile/.
-app_paths=(app components lib assets)
+app_paths=(app components lib assets modules)
 
 if [ "$allow_dirty" -eq 0 ] && [ -n "$(git status --porcelain -- "${app_paths[@]}")" ]; then
   echo "app code has uncommitted changes — commit them first, so this build" >&2
