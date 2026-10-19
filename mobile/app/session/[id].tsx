@@ -21,6 +21,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AgentIcon } from "../../components/AgentIcon";
 import { Appear } from "../../components/Appear";
 import { MessageMenu, type MessageMenuItem } from "../../components/MessageMenu";
 import { Toast } from "../../components/Toast";
@@ -599,6 +600,14 @@ export default function SessionScreen() {
           >
             <Feather name="chevron-left" size={20} color={color.text} />
           </MotionPressable>
+          {/* Whose chat this is, in the shape the agents list already uses:
+              the logo is read before the name is, and the same tile on both
+              screens says this is the row you tapped. */}
+          {session ? (
+            <View style={styles.agentTile}>
+              <AgentIcon kind={session.kind} size={20} />
+            </View>
+          ) : null}
           <View style={styles.headerBody}>
             <Text style={styles.title} numberOfLines={1}>
               {session?.name ?? "Session"}
@@ -1621,23 +1630,34 @@ const makeStyles = (c: Palette) =>
     // row before it started.
     backButton: {
       width: 30,
-      height: 34,
-      // Centred on the title's line rather than on the whole header.
-      marginTop: -7,
+      // The logo's height, so the chevron sits level with its middle.
+      height: 38,
       alignItems: "center",
       justifyContent: "center",
     },
     iconButton: {
       width: 40,
       height: 40,
-      // Centred on the title's line, like the back button.
-      marginTop: -10,
+      // Centred on the logo, like the back button: a point taller than it,
+      // so a point above it.
+      marginTop: -1,
       borderRadius: radius.pill,
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: c.surface,
       borderWidth: 1,
       borderColor: c.line,
+    },
+    // Spans the title and the line under it, as an avatar does beside a
+    // name, so it sits level with both rather than with one.
+    agentTile: {
+      width: 38,
+      height: 38,
+      marginRight: space.xs,
+      borderRadius: radius.md,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.fill,
     },
     headerBody: { flex: 1 },
     // Full width rather than indented under the title. It is a banner about
@@ -1720,7 +1740,8 @@ const makeStyles = (c: Palette) =>
     subtitlePath: { flexShrink: 1 },
     // Gives way with the path when the row runs out, and inside it the mode
     // name gives way first: the percentage is the part worth keeping whole.
-    // Starts where the title starts: past the screen edge and the back button.
+    // Starts under the logo, past the screen edge and the back button, so
+    // the logo, the title and the chips read as one block.
     controlsBar: { paddingLeft: space.md + 30 + space.xs, paddingBottom: space.sm, marginTop: -2 },
     controls: { flexGrow: 0 },
     controlsContent: { flexDirection: "row", alignItems: "center", gap: 6, paddingRight: space.sm },
