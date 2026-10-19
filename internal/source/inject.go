@@ -112,6 +112,22 @@ func (s *ClaudeSource) Interrupt(ctx context.Context, sessionID string) error {
 	return tmux.Interrupt(ctx, session.tmuxName)
 }
 
+// SendQueued implements QueueSender for Claude: the messages it is holding
+// until its current step ends go now, as Ctrl-X Ctrl-S at the Mac would send
+// them.
+func (s *ClaudeSource) SendQueued(ctx context.Context, sessionID string) error {
+	s.mu.RLock()
+	session, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("source: unknown claude session %q", sessionID)
+	}
+	if session.tmuxName == "" {
+		return fmt.Errorf("source: only sessions started with `am claude` can be told to send now")
+	}
+	return tmux.SendQueued(ctx, session.tmuxName)
+}
+
 // Inject implements Injector for Codex.
 func (s *CodexSource) Inject(ctx context.Context, sessionID, text string) (protocol.InjectMode, error) {
 	s.mu.RLock()
