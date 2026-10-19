@@ -22,6 +22,7 @@ import {
   applyAgentActionResult,
   applyPendingSendResult,
   reconcileCursorSendEchoes,
+  settleQueuedEchoes,
   clearQueuedForSessionTransitions,
   clearQueuedForTurn,
   questionIdentity,
@@ -148,6 +149,9 @@ interface Store {
   loadOlder(sessionId: string): void;
   sendMessage(sessionId: string, text: string, uploadIds?: string[]): string;
   interruptSession(sessionId: string): void;
+  /** Tell the agent to read the messages it is holding now, rather than when
+   *  its current step ends (Ctrl-X Ctrl-S in Claude Code). */
+  sendQueuedNow(sessionId: string): void;
   answerQuestion(sessionId: string, answer: QuestionAnswer): void;
   dismissPending(clientId: string): void;
   /** Hide an idle session until it does something again. */
@@ -510,7 +514,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         announcedQuestions.current = alerts.announced;
         for (const session of alerts.newlyPending) notifyQuestion(session, notifyPrefsRef.current);
         setPending((current) => {
-          const next = clearQueuedForSessionTransitions(current, previous, list);
+          const next = settleQueuedEchoes(
+            clearQueuedForSessionTransitions(current, previous, list),
+            list,
+          );
           clearSettledDrafts(current, next);
           return next;
         });
@@ -545,7 +552,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               index === currentIndex ? updated : session,
             );
         setPending((current) => {
-          const nextPending = clearQueuedForSessionTransitions(current, previous, next);
+          const nextPending = settleQueuedEchoes(
+            clearQueuedForSessionTransitions(current, previous, next),
+            next,
+          );
           clearSettledDrafts(current, nextPending);
           return nextPending;
         });
@@ -757,11 +767,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             if (sent?.draftScope) void clearDraft(sent.draftScope, sent.sessionId);
           }
           const next = applyPendingSendResult(current, event);
+          // The Mac may already have listed it as queued, or the transcript
+          // already have it, before this acknowledgement arrived.
           return event.status === "delivered" && sent?.retainUntilTranscript
-            ? reconcileCursorSendEchoes(
-                next,
-                sent.sessionId,
-                messagesRef.current[sent.sessionId] ?? [],
+            ? settleQueuedEchoes(
+                reconcileCursorSendEchoes(
+                  next,
+                  sent.sessionId,
+                  messagesRef.current[sent.sessionId] ?? [],
+                ),
+                sessionsRef.current,
               )
             : next;
         });
@@ -1208,8 +1223,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       sendMessage(sessionId, text, uploadIds) {
         const clientId = `send-${newFrameId()}`;
         const draftScope = credentials ? draftNamespace(credentials) : undefined;
+        // Kept past the Mac's acknowledgement when the agent will not show the
+        // message straight away: Cursor's transcript lags its terminal, and
+        // Claude holds a message sent while it works until its step ends.
         const retainUntilTranscript = sessionsRef.current.some(
-          (session) => session.id === sessionId && session.kind === "cursor-cli",
+          (session) =>
+            session.id === sessionId &&
+            (session.kind === "cursor-cli" ||
+              (session.kind === "claude" &&
+                (session.state === "busy" || session.state === "waiting_input"))),
         );
         const knownUserMessageIds = retainUntilTranscript
           ? (messagesRef.current[sessionId] ?? [])
@@ -1262,6 +1284,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           sessionId,
           clientId,
         });
+        if (!sent) {
+          setActions((current) =>
+            applyAgentActionResult(current, {
+              clientId,
+              status: "failed",
+              error: "Your Mac is not connected.",
+            }),
+          );
+        }
+      },
+
+      sendQueuedNow(sessionId) {
+        const clientId = `send-now-${newFrameId()}`;
+        setActions((current) =>
+          upsertAgentAction(current, { clientId, sessionId, kind: "send_queued", status: "sending" }),
+        );
+        const sent = clientRef.current?.send({ type: "send_queued", sessionId, clientId });
         if (!sent) {
           setActions((current) =>
             applyAgentActionResult(current, {

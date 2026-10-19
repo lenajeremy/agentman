@@ -67,7 +67,10 @@ import {
 
 type Row =
   | { kind: "message"; message: Message }
-  | { kind: "pending"; pending: PendingSend };
+  | { kind: "pending"; pending: PendingSend }
+  // A message the agent is holding until its current step ends, sent from
+  // the phone or typed at the Mac.
+  | { kind: "queued"; key: string; text: string };
 
 /**
  * Where the popover hangs from: the header's own height, so the menu opens
@@ -234,10 +237,16 @@ export default function SessionScreen() {
     };
   }, []);
 
+  const queued = session?.queued;
   const rows = useMemo<Row[]>(() => {
     const sent = store.pending
       .filter((p) => p.sessionId === sessionId)
       .map((pending) => ({ kind: "pending" as const, pending }));
+    const waiting = (queued ?? []).map((text, index) => ({
+      kind: "queued" as const,
+      key: `queued:${index}:${text}`,
+      text,
+    }));
     const chronological: Row[] = [
       // Filtered here rather than drawn as nothing: an empty cell still takes
       // the list's gap, and a withdrawn preview would leave a hole.
@@ -245,10 +254,32 @@ export default function SessionScreen() {
         .filter(showsInFeed)
         .map((message) => ({ kind: "message" as const, message })),
       ...sent,
+      ...waiting,
     ];
     // Reversed to feed an inverted list — see the FlatList below.
     return chronological.reverse();
-  }, [messages, store.pending, sessionId]);
+  }, [messages, store.pending, sessionId, queued]);
+  // What a message waiting in the agent's queue says under it. Only Claude
+  // queues; its label is the same whether the phone or the Mac sent it.
+  const waitingLabel =
+    session?.kind === "claude" && (session.state === "busy" || session.state === "waiting_input")
+      ? session.state === "busy"
+        ? "Pending · Claude is working"
+        : "Pending · Claude reads it once you answer"
+      : undefined;
+  // Ctrl-X Ctrl-S has to be pressed in the agent's own terminal, which the
+  // Mac can only do for a Claude it runs in tmux.
+  const canSendNow = session?.kind === "claude" && session.inject === "tmux";
+  const sendNowAction = store.actions.find(
+    (action) => action.sessionId === sessionId && action.kind === "send_queued",
+  );
+  // A failed Send now says why once, where the copy confirmation appears; the
+  // messages stay waiting, and the button is there to try again.
+  const sendNowFailure = sendNowAction?.status === "failed" ? sendNowAction : undefined;
+  useEffect(() => {
+    if (sendNowFailure) setToast(`Couldn't send now${sendNowFailure.error ? `: ${sendNowFailure.error}` : ""}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sendNowFailure?.clientId]);
 
   // A blocked agent will not read a new instruction until the question is
   // resolved, so the composer steps aside rather than accepting text that
@@ -858,7 +889,11 @@ export default function SessionScreen() {
           data={rows}
           inverted
           keyExtractor={(row) =>
-            row.kind === "message" ? row.message.id : row.pending.clientId
+            row.kind === "message"
+              ? row.message.id
+              : row.kind === "pending"
+                ? row.pending.clientId
+                : row.key
           }
           renderItem={({ item }) =>
             item.kind === "message" ? (
@@ -871,10 +906,20 @@ export default function SessionScreen() {
                 }
                 onCopied={showCopied}
               />
-            ) : (
+            ) : item.kind === "pending" ? (
               <PendingRow
                 pending={item.pending}
+                waitingLabel={item.pending.retainUntilTranscript ? waitingLabel : undefined}
                 onDismiss={store.dismissPending}
+                onCopied={showCopied}
+              />
+            ) : (
+              <PendingRow
+                pending={{ clientId: item.key, sessionId, text: item.text, status: "delivered" }}
+                waitingLabel={waitingLabel ?? "Pending"}
+                onSendNow={canSendNow ? () => store.sendQueuedNow(sessionId) : undefined}
+                sendingNow={sendNowAction?.status === "sending" || sendNowAction?.status === "delivered"}
+                onDismiss={() => {}}
                 onCopied={showCopied}
               />
             )
@@ -1619,10 +1664,20 @@ function SentMessage({
 
 function PendingRow({
   pending,
+  waitingLabel,
+  onSendNow,
+  sendingNow,
   onDismiss,
   onCopied,
 }: {
   pending: PendingSend;
+  /** Set while the agent is holding this message until its step ends: said
+   *  under it in place of "Sent", and nothing to dismiss until it is read. */
+  waitingLabel?: string;
+  /** Sends everything the agent is holding now (Ctrl-X Ctrl-S at the Mac).
+   *  Absent where the agent can't be told to. */
+  onSendNow?: () => void;
+  sendingNow?: boolean;
   onDismiss: (clientId: string) => void;
   onCopied(): void;
 }) {
@@ -1632,7 +1687,8 @@ function PendingRow({
   const failed = pending.status === "failed";
   const queued = pending.status === "queued";
   const delivered = pending.status === "delivered";
-  const dismissable = failed || delivered;
+  const waiting = delivered && waitingLabel !== undefined;
+  const dismissable = failed || (delivered && !waiting);
 
   const actions = sentMessageActions(pending.text, onCopied);
   if (dismissable) {
@@ -1651,16 +1707,44 @@ function PendingRow({
         ? "Queued — arrives when this turn ends"
         : failed
           ? `Didn't send${pending.error ? `: ${pending.error}` : ""} · tap to dismiss`
-          : delivered
-            ? "Sent · syncing…"
-            : "";
+          : waiting
+            ? waitingLabel
+            : delivered
+              ? "Sent · syncing…"
+              : "";
+  const sendNow = waiting && onSendNow;
   const body = (
     <>
-      <Text style={styles.userText}>{pending.text}</Text>
-      <Text style={[styles.pendingStatus, failed && { color: color.errorText }]}>{status}</Text>
+      <Text style={[styles.userText, sendNow && styles.pendingFaded]}>{pending.text}</Text>
+      {sendNow ? (
+        <View style={styles.pendingFooter}>
+          <Text style={[styles.pendingStatus, styles.pendingFooterLabel, styles.pendingFaded]} numberOfLines={2}>
+            {status}
+          </Text>
+          {/* Plain words rather than a button: the bubble is the thing being
+              read, and this is a quiet way to hurry it. It sends the whole
+              queue, as the keys at the Mac do, not just this one. */}
+          <Pressable
+            onPress={onSendNow}
+            disabled={sendingNow}
+            hitSlop={10}
+            style={({ pressed }) => [styles.sendNow, (pressed || sendingNow) && styles.sendNowPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Send now"
+            accessibilityHint="Sends every waiting message now instead of when this step ends"
+            accessibilityState={{ disabled: sendingNow, busy: sendingNow }}
+          >
+            <Text style={styles.sendNowText}>{sendingNow ? "Sending…" : "Send now"}</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <Text style={[styles.pendingStatus, failed && { color: color.errorText }]}>{status}</Text>
+      )}
     </>
   );
-  const bubble = [styles.userRow, styles.pendingRow, failed && styles.pendingFailed];
+  // With Send now in it the bubble keeps full strength and only its words
+  // fade: faded, Send now would read as something that can't be pressed.
+  const bubble = [styles.userRow, !sendNow && styles.pendingRow, failed && styles.pendingFailed];
 
   return (
     <>
@@ -1967,6 +2051,12 @@ const makeStyles = (c: Palette) =>
     },
 
     pendingRow: { opacity: 0.7 },
+    pendingFaded: { opacity: 0.7 },
+    pendingFooter: { flexDirection: "row", alignItems: "center", gap: space.sm, marginTop: space.xs },
+    pendingFooterLabel: { flexShrink: 1, marginTop: 0 },
+    sendNow: { justifyContent: "center" },
+    sendNowPressed: { opacity: 0.5 },
+    sendNowText: { fontFamily: font.sansMedium, fontSize: size.label, color: c.workingText },
     pendingFailed: { opacity: 1, backgroundColor: c.errorWash },
     pendingStatus: {
       fontFamily: font.sans,

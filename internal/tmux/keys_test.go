@@ -99,3 +99,11 @@ func TestAKeyIsSentByName(t *testing.T) {
 		t.Fatalf("args = %q, want %q", got, want)
 	}
 }
+
+func TestSendQueuedRefusesSessionsAgentmanDidNotStart(t *testing.T) {
+	for _, name := range []string{"", "work", Prefix} {
+		if err := SendQueued(context.Background(), name); err == nil {
+			t.Errorf("SendQueued(%q) pressed keys in a session Agentman did not start", name)
+		}
+	}
+}

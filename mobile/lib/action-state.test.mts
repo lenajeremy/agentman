@@ -9,6 +9,8 @@ import {
   clearQueuedForTurn,
   questionIdentity,
   reconcileAgentActions,
+  settleQueuedEchoes,
+  isQueued,
   upsertAgentAction,
   type PendingAgentAction,
 } from "./action-state.ts";
@@ -218,4 +220,47 @@ test("an image-only Cursor send settles when its row arrives", () => {
   assert.equal(reconcileCursorSendEchoes(delivered, sessionId, [old]).length, 1);
   assert.equal(reconcileCursorSendEchoes(delivered, sessionId, [old, fresh]).length, 0);
   assert.equal(reconcileCursorSendEchoes(delivered, sessionId, [old, { ...fresh, text: "" }]).length, 0);
+});
+
+test("a message sent while Claude works stays until Claude's own queue shows it", () => {
+  const sent = [{
+    clientId: "send-q", sessionId: "claude:s1", text: "also update the README",
+    status: "delivered" as const, retainUntilTranscript: true,
+  }];
+  // Delivered, but the Mac has not reported the queue yet: keep the bubble.
+  assert.equal(settleQueuedEchoes(sent, [session()]).length, 1);
+  // Listed in the queue: the queued row takes over, so the echo goes.
+  assert.equal(settleQueuedEchoes(sent, [session({ queued: ["also update the README"] })]).length, 0);
+  // Still waiting on a question: kept.
+  assert.equal(settleQueuedEchoes(sent, [session({ state: "waiting_input" })]).length, 1);
+  // The turn ended, so the queue was read: nothing left to wait for.
+  assert.equal(settleQueuedEchoes(sent, [session({ state: "idle" })]).length, 0);
+});
+
+test("settling queued echoes leaves everything else alone", () => {
+  const items = [
+    { clientId: "a", sessionId: "claude:s1", text: "x", status: "sending" as const, retainUntilTranscript: true },
+    { clientId: "b", sessionId: "claude:s1", text: "x", status: "delivered" as const },
+    { clientId: "c", sessionId: "cursor-cli:c", text: "x", status: "delivered" as const, retainUntilTranscript: true },
+    { clientId: "d", sessionId: "claude:gone", text: "x", status: "delivered" as const, retainUntilTranscript: true },
+  ];
+  const sessions = [session({ state: "idle", queued: ["x"] }), session({ id: "cursor-cli:c", kind: "cursor-cli", state: "idle" })];
+  assert.deepEqual(settleQueuedEchoes(items, sessions).map((item) => item.clientId), ["a", "b", "c", "d"]);
+});
+
+test("a queued message matches the text sent, with the agent's additions around it", () => {
+  assert.equal(isQueued(session({ queued: ["  fix it  "] }), "fix it"), true);
+  assert.equal(isQueued(session({ queued: ["fix it\n[Image #1]"] }), "fix it"), true);
+  assert.equal(isQueued(session({ queued: ["something else"] }), "fix it"), false);
+  assert.equal(isQueued(session({ queued: ["anything"] }), "   "), false);
+  assert.equal(isQueued(session(), "fix it"), false);
+});
+
+test("Send now stays in progress until Claude has nothing left waiting", () => {
+  const action: PendingAgentAction = { clientId: "now-1", sessionId: "claude:s1", kind: "send_queued", status: "delivered" };
+  assert.equal(reconcileAgentActions([action], [session({ queued: ["later"] })]).length, 1);
+  assert.equal(reconcileAgentActions([action], [session()]).length, 0);
+  // A failure is kept so it can be said, until the next attempt replaces it.
+  assert.equal(reconcileAgentActions([{ ...action, status: "failed" }], [session()]).length, 1);
+  assert.equal(reconcileAgentActions([action], []).length, 0);
 });

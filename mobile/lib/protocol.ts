@@ -107,6 +107,11 @@ export interface Session {
   question?: Question;
   /** Web servers the agent has started. Absent from daemons that predate it. */
   servers?: Server[];
+  /** Messages sent while the agent was working that it has not read yet,
+   *  oldest first. The agent holds them until its current step ends; each
+   *  leaves this list when it is read, and arrives as an ordinary message.
+   *  Absent from daemons that predate it, and for agents without a queue. */
+  queued?: string[];
 }
 
 /** A local web server an agent started, which the phone can open. */
@@ -181,6 +186,7 @@ export type RequestType =
   | "fetch_messages"
   | "send_message"
   | "interrupt"
+  | "send_queued"
   | "answer_question"
   | "register_push"
   | "open_server"
@@ -750,8 +756,14 @@ function isSession(value: unknown): value is Session {
     (value.models === undefined || boundedArray(value.models, MAX_MODELS, isModelName)) &&
     (value.modelScope === undefined || isOneOf(value.modelScope, ["session", "default"] as const)) &&
     (value.question === undefined || isQuestion(value.question)) &&
-    (value.servers === undefined || boundedArray(value.servers, 64, isServer));
+    (value.servers === undefined || boundedArray(value.servers, 64, isServer)) &&
+    (value.queued === undefined ||
+      boundedArray(value.queued, MAX_QUEUED, (text): text is string => boundedString(text, 64 * 1024, true)));
 }
+
+/** More waiting messages than anyone types ahead of an agent; past it the
+ *  session is refused rather than drawn. */
+const MAX_QUEUED = 50;
 
 function isServer(value: unknown): value is Server {
   return isRecord(value) && isPort(value.port) &&

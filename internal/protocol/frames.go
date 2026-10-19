@@ -48,6 +48,10 @@ const (
 	ReqFetchMessages RequestType = "fetch_messages"
 	ReqSendMessage   RequestType = "send_message"
 	ReqInterrupt     RequestType = "interrupt"
+	// ReqSendQueued tells the agent to read the messages it is holding now,
+	// rather than when its current step ends: Ctrl-X Ctrl-S in Claude Code.
+	// Answered with a send_result, like interrupt.
+	ReqSendQueued RequestType = "send_queued"
 	// ReqAnswer selects an option in a pending question.
 	ReqAnswer RequestType = "answer_question"
 	// ReqRegisterPush hands the daemon an Expo push token so it can reach the

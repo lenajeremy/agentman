@@ -486,6 +486,7 @@ export class Client {
 
 function isAction(request: Request): boolean {
   return request.type === "send_message" || request.type === "interrupt" ||
+	    request.type === "send_queued" ||
 	    request.type === "answer_question" || request.type === "start_session";
 }
 

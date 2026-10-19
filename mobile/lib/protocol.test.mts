@@ -460,3 +460,16 @@ test("one session the app cannot read is left out, not the whole board", () => {
   // Something that is not a list at all is still refused.
   assert.equal(decodeDaemonEvent({ type: "sessions", sessions: "nope" }), null);
 });
+
+test("accepts a session's queued messages and refuses a malformed list", () => {
+  const queued = { ...baseSession, queued: ["also update the README", "and the changelog"] };
+  const decoded = decodeDaemonEvent({ type: "session_update", session: queued });
+  assert.ok(decoded);
+  assert.deepEqual((decoded as { session: { queued: string[] } }).session.queued, queued.queued);
+  // From a daemon that predates queues, nothing changes.
+  assert.ok(decodeDaemonEvent({ type: "session_update", session: baseSession }));
+  for (const bad of [[""], [42], "not a list", Array.from({ length: 51 }, () => "x")]) {
+    assert.equal(decodeDaemonEvent({ type: "session_update", session: { ...baseSession, queued: bad } }), null,
+      JSON.stringify(bad).slice(0, 40));
+  }
+});

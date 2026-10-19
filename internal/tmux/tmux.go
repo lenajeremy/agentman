@@ -296,6 +296,35 @@ func Escape(ctx context.Context, name string) error {
 	return nil
 }
 
+// SendQueued presses Ctrl-X then Ctrl-S, Claude Code's binding for "send the
+// messages I queued now" rather than when its current step ends. Its own
+// function rather than two more names in namedKeys: those keys drive menus,
+// and this is a request to the agent, like Interrupt's Ctrl-C.
+func SendQueued(ctx context.Context, name string) error {
+	if len(name) <= len(Prefix) || !strings.HasPrefix(name, Prefix) {
+		return errors.New("tmux: refusing to press keys in a session Agentman did not start")
+	}
+	if !Available() {
+		return ErrNotInstalled
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	if _, err := run(ctx, "send-keys", "-t", name, "C-x"); err != nil {
+		return fmt.Errorf("tmux: could not send the queued messages: %w", err)
+	}
+	// A chord: the TUI has to see the first key before the second.
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(keyInterval):
+	}
+	if _, err := run(ctx, "send-keys", "-t", name, "C-s"); err != nil {
+		return fmt.Errorf("tmux: could not send the queued messages: %w", err)
+	}
+	return nil
+}
+
 // Kill terminates a session.
 func Kill(ctx context.Context, name string) error {
 	_, err := run(ctx, "kill-session", "-t", name)

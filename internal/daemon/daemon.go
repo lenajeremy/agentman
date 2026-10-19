@@ -933,7 +933,8 @@ func (d *Daemon) HandleFrom(
 	if err := validateRequest(req); err != nil {
 		if req.Type == protocol.ReqSendMessage || req.Type == protocol.ReqAnswer ||
 			req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqReviewArtifact ||
-			req.Type == protocol.ReqSetMode || req.Type == protocol.ReqSetModel {
+			req.Type == protocol.ReqSetMode || req.Type == protocol.ReqSetModel ||
+			req.Type == protocol.ReqSendQueued {
 			return protocol.Event{
 				Type: protocol.EvtSendResult, SessionID: req.SessionID,
 				ClientID: req.ClientID, Status: protocol.StatusFailed, Error: err.Error(),
@@ -1140,6 +1141,18 @@ func (d *Daemon) HandleFrom(
 			ClientID: req.ClientID, Status: protocol.StatusDelivered,
 		}
 
+	case protocol.ReqSendQueued:
+		if err := d.registry.SendQueued(ctx, req.SessionID); err != nil {
+			return protocol.Event{
+				Type: protocol.EvtSendResult, SessionID: req.SessionID,
+				ClientID: req.ClientID, Status: protocol.StatusFailed, Error: err.Error(),
+			}
+		}
+		return protocol.Event{
+			Type: protocol.EvtSendResult, SessionID: req.SessionID,
+			ClientID: req.ClientID, Status: protocol.StatusDelivered,
+		}
+
 	case protocol.ReqOpenServer:
 		return d.openServer(ctx, req.SessionID, req.Port)
 
@@ -1187,7 +1200,10 @@ func requestMutatesSession(kind protocol.RequestType) bool {
 		// Resume and end start or stop a process. Run concurrently, two resumes
 		// of one session each launched their own.
 		kind == protocol.ReqResumeSession || kind == protocol.ReqEndSession ||
-		kind == protocol.ReqReviewArtifact || kind == protocol.ReqSetMode || kind == protocol.ReqSetModel
+		kind == protocol.ReqReviewArtifact || kind == protocol.ReqSetMode || kind == protocol.ReqSetModel ||
+		// After a send, in order, so a message just sent is in the queue
+		// before the keys that send the queue are pressed.
+		kind == protocol.ReqSendQueued
 }
 
 func (d *Daemon) actionLock(sessionID string) *sync.Mutex {
@@ -1247,6 +1263,7 @@ func validateRequest(req protocol.Request) error {
 	requiresSession := req.Type == protocol.ReqSubscribe || req.Type == protocol.ReqUnsubscribe ||
 		req.Type == protocol.ReqFetchMessages || req.Type == protocol.ReqSendMessage ||
 		req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqAnswer ||
+		req.Type == protocol.ReqSendQueued ||
 		req.Type == protocol.ReqOpenServer || req.Type == protocol.ReqCloseServer ||
 		req.Type == protocol.ReqStopServer ||
 		req.Type == protocol.ReqListFiles || req.Type == protocol.ReqReadFile ||
@@ -1272,7 +1289,8 @@ func validateRequest(req protocol.Request) error {
 	}
 	switch req.Type {
 	case protocol.ReqListSessions, protocol.ReqSubscribe, protocol.ReqUnsubscribe,
-		protocol.ReqFetchMessages, protocol.ReqInterrupt, protocol.ReqRegisterPush:
+		protocol.ReqFetchMessages, protocol.ReqInterrupt, protocol.ReqSendQueued,
+		protocol.ReqRegisterPush:
 		return nil
 	case protocol.ReqListDirectories:
 		return validateLaunchPath(req.Path, true)

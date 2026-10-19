@@ -221,6 +221,26 @@ type Interrupter interface {
 	Interrupt(ctx context.Context, sessionID string) error
 }
 
+// QueueSender is implemented by adapters whose agent holds messages sent
+// while it works and can be told to read them now.
+type QueueSender interface {
+	SendQueued(ctx context.Context, sessionID string) error
+}
+
+// SendQueued tells a session's agent to read the messages it is holding now,
+// rather than when its current step ends.
+func (r *Registry) SendQueued(ctx context.Context, sessionID string) error {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return err
+	}
+	sender, ok := s.(QueueSender)
+	if !ok {
+		return fmt.Errorf("source: %s sessions cannot send queued messages early", s.Kind())
+	}
+	return sender.SendQueued(ctx, sessionID)
+}
+
 // LaunchCursor starts a new managed Cursor conversation through the adapter's
 // structured streaming channel. Terminal-launched chats stay on tmux.
 func (r *Registry) LaunchCursor(ctx context.Context, cwd, prompt string) (string, error) {

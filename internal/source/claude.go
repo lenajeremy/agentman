@@ -34,6 +34,9 @@ type ClaudeSource struct {
 	// models remembers each session's model so the transcript tail is not
 	// re-read on every one-second discovery sweep.
 	models *modelCache
+	// queue follows the messages each session's Claude is holding until its
+	// current step ends.
+	queue *claudeQueue
 
 	home string
 	// pending holds messages for sessions with no live input channel, handed
@@ -116,6 +119,7 @@ func NewClaudeSource(home string) (*ClaudeSource, error) {
 	return &ClaudeSource{
 		home:              home,
 		models:            newModelCache(),
+		queue:             newClaudeQueue(),
 		sessions:          map[string]claudeSession{},
 		questionSpecs:     map[string]claudeQuestionSpecCache{},
 		listPanes:         tmux.List,
@@ -270,6 +274,10 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 		if switched, ok := s.switched(id, transcript); ok {
 			meta.Model = switched
 		}
+		// Messages sent while it works wait in Claude Code's own queue until
+		// the step ends; without this the phone showed nothing for them.
+		working := meta.State == protocol.StateBusy || meta.State == protocol.StateWaitingInput
+		meta.Queued = s.queue.pending(id, transcript, working)
 
 		found = append(found, meta)
 		next[id] = claudeSession{
@@ -315,6 +323,7 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 		live[id] = true
 	}
 	s.models.forget(live)
+	s.queue.forget(live)
 	s.forgetClaudeQuestionSpecs(live)
 
 	s.mu.Lock()

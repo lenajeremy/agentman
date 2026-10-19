@@ -1,6 +1,6 @@
 import type { Message, Question, SendStatus, Session } from "./protocol";
 
-export type AgentActionKind = "answer" | "interrupt";
+export type AgentActionKind = "answer" | "interrupt" | "send_queued";
 
 /** A non-message command whose result needs to stay visible in the UI. */
 export interface PendingAgentAction {
@@ -114,6 +114,44 @@ export function reconcileCursorSendEchoes<T extends PendingSendLike>(
   });
 }
 
+/**
+ * Hand a message sent while Claude was working over to Claude's own queue.
+ *
+ * Claude Code holds such a message until its current step ends, so the
+ * transcript has nothing to show for it yet, and the phone used to drop the
+ * bubble the moment the keys were typed. A message sent while it works is
+ * kept instead (see `retainUntilTranscript`), until one of these:
+ *
+ * - The Mac lists it in `session.queued`. The queued row shows it from then
+ *   on, with the same label, so the bubble never leaves the screen.
+ * - The session stops working: the queue has been read, and the message is
+ *   in the transcript or about to be.
+ *
+ * The transcript arriving first is handled by reconcileCursorSendEchoes.
+ */
+export function settleQueuedEchoes<T extends PendingSendLike>(
+  pending: readonly T[],
+  sessions: readonly Session[],
+): T[] {
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  return pending.filter((item) => {
+    if (!item.retainUntilTranscript || item.status !== "delivered") return true;
+    const session = byId.get(item.sessionId);
+    if (!session || session.kind !== "claude") return true;
+    if (isQueued(session, item.text)) return false;
+    return session.state === "busy" || session.state === "waiting_input";
+  });
+}
+
+/** Whether the Mac lists this text among the session's waiting messages. The
+ *  agent may store it with its images' references added, so containing the
+ *  sent text is enough. */
+export function isQueued(session: Pick<Session, "queued">, text: string | undefined): boolean {
+  const sent = text?.trim();
+  if (!sent) return false;
+  return (session.queued ?? []).some((queued) => queued.trim().includes(sent));
+}
+
 /** Apply the daemon's acknowledgement to an answer or interrupt command. */
 export function applyAgentActionResult(
   actions: readonly PendingAgentAction[],
@@ -156,6 +194,11 @@ export function reconcileAgentActions(
     const session = live.get(action.sessionId);
     if (!session) return false;
     if (action.kind === "interrupt") return session.state === "busy";
+    // Done once the agent has nothing left waiting: it read them. A failure
+    // stays until the next attempt replaces it, so it can be said.
+    if (action.kind === "send_queued") {
+      return action.status === "failed" || Boolean(session.queued?.length);
+    }
     return Boolean(
       session.question &&
         action.questionIdentity === questionIdentity(session.question),
