@@ -119,6 +119,12 @@ type Session struct {
 	// watching which listening ports belong to its processes. The phone lists
 	// them so the user can open one without touching the laptop.
 	Servers []Server `json:"servers,omitempty"`
+	// Queued are messages the user sent while the agent was working that it
+	// has not read yet, oldest first. The agent holds them until its current
+	// step ends, so the phone shows them as waiting rather than as nothing at
+	// all. Each one leaves this list when the agent takes it, and arrives in
+	// the conversation as an ordinary user message.
+	Queued []string `json:"queued,omitempty"`
 
 	// AgentPID is the agent's own process, when the adapter knows it. It
 	// never leaves the machine: it is only how the daemon tells which
@@ -213,7 +219,8 @@ func (s Session) SameAs(other Session) bool {
 		slices.Equal(s.Modes, other.Modes) && slices.Equal(s.Models, other.Models) &&
 		s.ModelScope == other.ModelScope &&
 		s.AgentPID == other.AgentPID &&
-		s.Question.sameAs(other.Question) && SameServers(s.Servers, other.Servers)
+		s.Question.sameAs(other.Question) && SameServers(s.Servers, other.Servers) &&
+		slices.Equal(s.Queued, other.Queued)
 }
 
 // SameServers reports whether two server lists are identical, in order.

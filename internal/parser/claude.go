@@ -28,6 +28,21 @@ type claudeRecord struct {
 	Subtype string          `json:"subtype"`
 	Level   string          `json:"level"`
 	Content json.RawMessage `json:"content"`
+	// Attachment is what an "attachment" record carries. One kind matters
+	// here: a message the user sent while Claude was working, which it took
+	// in the middle of a turn rather than as a new one.
+	Attachment *claudeAttachment `json:"attachment"`
+}
+
+type claudeAttachment struct {
+	Type string `json:"type"`
+	// Prompt is the message: a string, or content blocks.
+	Prompt      json.RawMessage `json:"prompt"`
+	CommandMode string          `json:"commandMode"`
+	IsMeta      bool            `json:"isMeta"`
+	Origin      struct {
+		Kind string `json:"kind"`
+	} `json:"origin"`
 }
 
 type claudeMessage struct {
@@ -90,6 +105,9 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 	}
 	if rec.Type == "system" {
 		return p.notice(rec, offset)
+	}
+	if rec.Type == "attachment" {
+		return p.takenMidTurn(rec, offset)
 	}
 	if rec.Type != "user" && rec.Type != "assistant" {
 		return nil
@@ -225,6 +243,38 @@ func (p *ClaudeParser) notice(rec claudeRecord, offset int64) []protocol.Message
 	return []protocol.Message{{
 		ID: id, SessionID: p.sessionID, Role: protocol.RoleSystem, Ts: parseTime(rec.Timestamp),
 		Text: ClipBlock(text, PreviewLines, PreviewChars), IsSidechain: rec.IsSidechain,
+	}}
+}
+
+// takenMidTurn turns a message the user sent while Claude was working, and
+// which Claude read in the middle of that turn, into a user row.
+//
+// Claude Code records such a message only as a "queued_command" attachment,
+// never as an ordinary user record, so without this it never appeared in the
+// conversation at all. Messages read when a turn ends are ordinary user
+// records and need nothing here. The same attachment also carries Claude
+// Code's own traffic, which nobody typed: reports handed back by its agents
+// (origin "peer", marked meta) and background task notifications (a
+// different commandMode).
+func (p *ClaudeParser) takenMidTurn(rec claudeRecord, offset int64) []protocol.Message {
+	a := rec.Attachment
+	if a == nil || a.Type != "queued_command" || a.CommandMode != "prompt" || a.IsMeta || rec.IsMeta {
+		return nil
+	}
+	if a.Origin.Kind != "" && a.Origin.Kind != "human" {
+		return nil
+	}
+	text := strings.TrimSpace(flattenClaudeResult(a.Prompt))
+	if text == "" || claudeCommandWrapper.MatchString(text) {
+		return nil
+	}
+	id := rec.UUID
+	if id == "" {
+		id = fmt.Sprintf("o%d", offset)
+	}
+	return []protocol.Message{{
+		ID: id, SessionID: p.sessionID, Role: protocol.RoleUser, Ts: parseTime(rec.Timestamp),
+		Text: text, IsSidechain: rec.IsSidechain,
 	}}
 }
 
