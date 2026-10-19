@@ -54,6 +54,11 @@ export function Popover({
   items,
   /** Distance from the top of the screen, below whatever opened it. */
   top,
+  /**
+   * Or, for a control at the foot of the screen, distance from the bottom:
+   * the menu then opens upward, above whatever opened it.
+   */
+  bottom,
   /** Which edge it hangs from: the side the control that opened it is on. */
   align = "right",
   /** A line above the items saying what choosing one does. */
@@ -62,7 +67,8 @@ export function Popover({
   visible: boolean;
   onDismiss: () => void;
   items: PopoverItem[];
-  top: number;
+  top?: number;
+  bottom?: number;
   align?: "left" | "right";
   title?: string;
 }) {
@@ -72,8 +78,12 @@ export function Popover({
   const window = useWindowDimensions();
   const reduceMotion = useReducedMotion();
   // A list of models can be longer than the screen; it scrolls inside the
-  // card rather than running off the bottom.
-  const maxHeight = Math.max(160, window.height - insets.top - top - insets.bottom - space.xl);
+  // card rather than running off the edge it opens towards.
+  const maxHeight =
+    bottom !== undefined
+      ? Math.max(160, window.height - bottom - insets.top - space.xl)
+      : Math.max(160, window.height - insets.top - (top ?? 0) - insets.bottom - space.xl);
+  const position = bottom !== undefined ? { bottom } : { top: insets.top + (top ?? 0) };
 
   if (items.length === 0) return null;
 
@@ -88,7 +98,7 @@ export function Popover({
         style={[
           styles.card,
           align === "left" ? styles.cardLeft : styles.cardRight,
-          { top: insets.top + top, maxHeight, maxWidth: window.width - space.lg * 2 },
+          { ...position, maxHeight, maxWidth: window.width - space.lg * 2 },
         ]}
       >
         <ScrollView style={styles.scroll} bounces={false} accessibilityRole="menu">
