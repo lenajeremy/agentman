@@ -47,6 +47,8 @@ type ocFake struct {
 	requests     []ocCapturedRequest
 	failSession  bool
 	scopePending bool
+	// providers is the /config/providers answer; empty serves a 404.
+	providers map[string]any
 }
 
 type ocCapturedRequest struct {
@@ -171,6 +173,16 @@ func (f *ocFake) start(t *testing.T) *httptest.Server {
 			w.Header().Set("X-Next-Cursor", f.cursor)
 		}
 		json.NewEncoder(w).Encode(f.messages)
+	})
+	mux.HandleFunc("/config/providers", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		providers := f.providers
+		f.mu.Unlock()
+		if providers == nil {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(providers)
 	})
 	mux.HandleFunc("/session/"+f.id()+"/prompt_async", func(w http.ResponseWriter, r *http.Request) {
 		f.capture(r)

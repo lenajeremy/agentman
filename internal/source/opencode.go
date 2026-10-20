@@ -63,6 +63,13 @@ const (
 
 // OpenCodeSource talks to a local `opencode serve` instance.
 type OpenCodeSource struct {
+	// switchMu guards the model lists and phone-chosen models below (see
+	// opencode_switch.go).
+	switchMu sync.Mutex
+	catalogs map[string]*openCodeCatalog
+	choices  map[string]openCodeChoice
+	reported map[string]string
+
 	baseURL string
 	client  *http.Client
 	// password is OPENCODE_SERVER_PASSWORD when the server requires auth.
@@ -801,15 +808,17 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 	// A message sent while OpenCode works is in its history at once but read
 	// only after the step under way; say which ones are still waiting.
 	for id, session := range next {
-		working := session.meta.State == protocol.StateBusy || session.meta.State == protocol.StateWaitingInput
-		if !working || session.baseURL == "" {
+		if session.baseURL == "" {
 			continue
 		}
-		texts, rows, err := s.queuedFor(ctx, session)
-		if err != nil {
-			continue // a failed look leaves the session as it was
+		// The models it can be switched to, and the one chosen from the phone.
+		s.offerModels(ctx, id, &session)
+		working := session.meta.State == protocol.StateBusy || session.meta.State == protocol.StateWaitingInput
+		if working {
+			if texts, rows, err := s.queuedFor(ctx, session); err == nil {
+				session.meta.Queued, session.meta.QueuedMessageIDs = texts, rows
+			}
 		}
-		session.meta.Queued, session.meta.QueuedMessageIDs = texts, rows
 		next[id] = session
 	}
 
@@ -818,6 +827,7 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 		live[id] = true
 	}
 	s.models.forget(live)
+	s.forgetChoices(live)
 
 	s.mu.Lock()
 	s.sessions = next
@@ -1497,6 +1507,11 @@ func (s *OpenCodeSource) Inject(ctx context.Context, sessionID, text string) (pr
 
 	body := map[string]any{
 		"parts": []map[string]any{{"type": "text", "text": text}},
+	}
+	// A model chosen from the phone goes with every message: OpenCode has no
+	// per-session model to set (see opencode_switch.go).
+	if model, ok := s.chosenModel(sessionID); ok {
+		body["model"] = map[string]string{"providerID": model.providerID, "modelID": model.modelID}
 	}
 	query := url.Values{}
 	if session.directory != "" {
