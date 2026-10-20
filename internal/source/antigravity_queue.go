@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -41,6 +42,11 @@ var (
 	antigravitySendHint = regexp.MustCompile(`\s*\(((?:alt|ctrl)\+[a-z]) to send immediately\)\s*$`)
 )
 
+// antigravityDefaultSendKey is that binding's default, alt+m. The hint sits at
+// the end of the first held message's line, so a message longer than the pane
+// is wide pushes it off the edge; then this is the key.
+const antigravityDefaultSendKey = "M-m"
+
 // antigravityPaneQueue reads what the pane shows of agy's held messages:
 // whether there are any, their visible text, and the key that sends them now
 // in tmux's spelling ("M-m"), empty when the pane names none Agentman presses.
@@ -67,6 +73,15 @@ func antigravityPaneQueue(lines []string) (shown bool, texts []string, key strin
 		if text = strings.TrimSpace(text); text != "" {
 			texts = append(texts, text)
 		}
+	}
+	switch {
+	case slices.ContainsFunc(lines[max(0, len(lines)-24):], func(line string) bool {
+		return strings.Contains(line, "Sending to agent")
+	}):
+		// Already on their way after a send-now: nothing to press.
+		key = ""
+	case key == "":
+		key = antigravityDefaultSendKey
 	}
 	return true, texts, key
 }

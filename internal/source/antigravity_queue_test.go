@@ -118,3 +118,19 @@ func TestAntigravitySendNowRefusesWhenNothingCanBeSent(t *testing.T) {
 		t.Error("SendQueued for a session without a pane did not fail")
 	}
 }
+
+func TestAntigravitySendKeyWhenTheHintIsOffThePane(t *testing.T) {
+	// A long held message pushes the hint past the pane's edge, as on a real
+	// 80-column pane on 2026-10-20.
+	long := strings.Replace(antigravityHoldingPane,
+		"▸ Also give it a title. (alt+m to send immediately)",
+		"▸ Also give it a title, and make the ending less abrupt than the draft you just wro", 1)
+	if shown, _, key := antigravityPaneQueue(paneLines(long)); !shown || key != "M-m" {
+		t.Fatalf("shown = %v, key = %q, want agy's default", shown, key)
+	}
+	// After a send-now they are already going: nothing to press.
+	sending := strings.Replace(antigravityHoldingPane, "(alt+m to send immediately)", "\n  ⎿  Sending to agent...", 1)
+	if shown, _, key := antigravityPaneQueue(paneLines(sending)); !shown || key != "" {
+		t.Fatalf("while sending: shown = %v, key = %q", shown, key)
+	}
+}
