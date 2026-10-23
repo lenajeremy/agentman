@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -41,6 +42,11 @@ var (
 // re-pairing means physically fetching a code from the Mac, and the token
 // grants access only to that one account's live sockets.
 const DeviceTokenTTL = 365 * 24 * time.Hour
+
+// verifiedTokens avoids repeating HMAC and JSON work on every reconnect.
+// The cache key includes the active relay secret so rotating the secret does
+// not reuse entries produced by the previous one.
+var verifiedTokens sync.Map
 
 // AccountID identifies one user's daemon-and-devices group.
 type AccountID string
@@ -101,6 +107,10 @@ func VerifyDeviceToken(secret, token string) (AccountID, error) {
 	if secret == "" {
 		return "", ErrTokenSignature
 	}
+	cacheKey := secret + "\x00" + token
+	if cached, ok := verifiedTokens.Load(cacheKey); ok {
+		return cached.(AccountID), nil
+	}
 	encoded, signature, ok := strings.Cut(token, ".")
 	if !ok || encoded == "" || signature == "" {
 		return "", ErrTokenMalformed
@@ -125,6 +135,7 @@ func VerifyDeviceToken(secret, token string) (AccountID, error) {
 	if time.Now().Unix() > claims.Expires {
 		return "", ErrTokenExpired
 	}
+	verifiedTokens.Store(cacheKey, claims.Account)
 	return claims.Account, nil
 }
 
