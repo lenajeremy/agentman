@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -259,7 +260,29 @@ func runServe(ctx context.Context, args []string) error {
 		fmt.Printf("%s\n", dim("relay      disabled — this daemon is not reachable from your phone"))
 	}
 
+	// Apps on this Mac, Agentman for Mac first, reach the daemon over a socket
+	// in the config directory: no relay in between, and only this user can
+	// open it. A second daemon on the same config leaves the socket alone.
+	var local *daemon.LocalServer
+	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
+		local = daemon.NewLocalServer(filepath.Join(dir, "am.sock"))
+		if err := local.Listen(); err != nil {
+			fmt.Printf("%s\n", dim("app        "+err.Error()))
+			local = nil
+		} else {
+			sinks = append(sinks, local)
+			fmt.Printf("%s\n", dim("app        listening on "+collapseHome(local.Path())))
+		}
+	}
+
 	agent := daemon.New(registry, multiSink{sinks: sinks})
+	if local != nil {
+		go func() {
+			if err := local.Serve(ctx, agent.HandleFrom, agent.DisconnectSubscriber); err != nil {
+				fmt.Fprintf(os.Stderr, "am: %v\n", err)
+			}
+		}()
+	}
 	if client != nil {
 		client.OnDeviceDisconnected = agent.DisconnectSubscriber
 	}

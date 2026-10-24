@@ -181,24 +181,11 @@ func (c *Client) connectOnce(
 	c.mu.Unlock()
 	connectionCtx, stopConnection := context.WithCancel(ctx)
 	devices := map[string]struct{}{}
-	requests := make(chan struct{}, maxConcurrentRequests)
-	mutationJobs := make(chan daemonRequestJob, maxConcurrentRequests)
-	var requestWG sync.WaitGroup
-	requestWG.Add(1)
-	go func() {
-		defer requestWG.Done()
-		runOrderedMutationQueue(
-			connectionCtx,
-			mutationJobs,
-			handler,
-			func(replyTo string, event protocol.Event) { c.sendReplyOn(conn, replyTo, event) },
-			func() { <-requests },
-		)
-	}()
+	dispatch := newRequestDispatch(connectionCtx, handler,
+		func(replyTo string, event protocol.Event) { c.sendReplyOn(conn, replyTo, event) })
 	defer func() {
 		stopConnection()
-		close(mutationJobs)
-		requestWG.Wait()
+		dispatch.close()
 		if c.OnDeviceDisconnected != nil {
 			for deviceID := range devices {
 				c.OnDeviceDisconnected(deviceID)
@@ -253,45 +240,7 @@ func (c *Client) connectOnce(
 		if err != nil {
 			continue
 		}
-
-		// Subscription ownership is connection state, not background work. Apply
-		// it synchronously so subscribe -> unsubscribe can never be reversed by
-		// the scheduler and leave a transcript follower running after navigation.
-		if req.Type == protocol.ReqSubscribe || req.Type == protocol.ReqUnsubscribe {
-			event := handler(connectionCtx, envelope.From, req)
-			if event.Type != "" {
-				c.sendReplyOn(conn, envelope.ID, event)
-			}
-			continue
-		}
-
-		// History reads remain concurrent, while terminal mutations enter one
-		// arrival-ordered queue. A mutex alone only prevents overlap; it does not
-		// promise FIFO and could send two rapid messages in reverse order.
-		select {
-		case requests <- struct{}{}:
-		default:
-			c.sendReplyOn(conn, envelope.ID, protocol.Event{
-				Type: protocol.EvtError, Error: "daemon is handling too many requests",
-			})
-			continue
-		}
-		if queuedInOrder(req.Type) {
-			mutationJobs <- daemonRequestJob{
-				req: req, replyTo: envelope.ID, deviceID: envelope.From,
-			}
-			continue
-		}
-		requestWG.Add(1)
-		go func(req protocol.Request, replyTo, deviceID string) {
-			defer requestWG.Done()
-			defer func() { <-requests }()
-			event := handler(connectionCtx, deviceID, req)
-			if event.Type == "" {
-				return // acknowledged with nothing to say (subscribe/unsubscribe)
-			}
-			c.sendReplyOn(conn, replyTo, event)
-		}(req, envelope.ID, envelope.From)
+		dispatch.dispatch(envelope.From, envelope.ID, req)
 	}
 }
 
