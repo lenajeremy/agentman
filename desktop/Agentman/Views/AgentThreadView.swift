@@ -10,6 +10,8 @@ struct AgentThreadView: View {
     @State private var dropping = false
     @State private var sending = false
     @State private var showFiles = false
+    @State private var confirmEnd = false
+    @State private var resuming = false
     @State private var filesTab: WorkspaceTab = .changes
     /// How many files the agent has changed since the last commit.
     @State private var changed = 0
@@ -109,6 +111,15 @@ struct AgentThreadView: View {
                         .foregroundStyle(Palette.errorText)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                if Self.resumable(session) {
+                    ResumeBar(session: session, resuming: resuming) {
+                        resuming = true
+                        Task {
+                            store.actionError[session.id] = await store.resume(session.id)
+                            resuming = false
+                        }
+                    }
+                } else {
                 Composer(
                     text: $draft,
                     attachments: session.canReceive ? $attachments : nil,
@@ -118,12 +129,21 @@ struct AgentThreadView: View {
                     onDropTargeted: { dropping = $0 },
                     onSend: send
                 )
+                }
             }
             .padding(.horizontal, 36)
             .padding(.top, 4)
             .padding(.bottom, 22)
             .frame(maxWidth: 820)
             .frame(maxWidth: .infinity)
+        }
+        .confirmationDialog("End this session?", isPresented: $confirmEnd) {
+            Button("End session") {
+                Task { store.actionError[session.id] = await store.end(session.id) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Its terminal closes. The conversation is kept, and you can resume it from its folder.")
         }
         .inspector(isPresented: $showFiles) {
             WorkspacePanel(session: session, tab: $filesTab)
@@ -178,6 +198,15 @@ struct AgentThreadView: View {
                 }
                 .help(showFiles ? "Hide files" : "Files, changes and history")
                 .keyboardShortcut("e", modifiers: [.command, .shift])
+                if Self.endable(session) {
+                    Menu {
+                        Button("End session…") { confirmEnd = true }
+                    } label: {
+                        Label("More", systemImage: "ellipsis")
+                    }
+                    .menuIndicator(.hidden)
+                    .help("More")
+                }
                 StateChip(state: session.state)
                 if session.state == .busy, session.canReceive {
                     Button {
@@ -189,6 +218,18 @@ struct AgentThreadView: View {
                 }
             }
         }
+    }
+
+    private static let resumableKinds: Set<String> = ["claude", "codex", "cursor-cli", "kiro", "antigravity"]
+
+    /// An ended session its agent can reopen, as the phone decides it.
+    static func resumable(_ session: Session) -> Bool {
+        session.inject == "none" && session.state == .ended && resumableKinds.contains(session.kind)
+    }
+
+    /// A session running in a terminal agentman can close and reopen.
+    static func endable(_ session: Session) -> Bool {
+        session.inject == "tmux" && resumableKinds.contains(session.kind)
     }
 
     /// Where it works and on which model, under its name in the title bar.
@@ -302,6 +343,37 @@ private struct ThreadTitle: View {
         editing = false
         guard !new.isEmpty, new != session.name else { return }
         Task { await store.rename(session.id, to: new) }
+    }
+}
+
+/// In place of the message box for a session that has ended.
+private struct ResumeBar: View {
+    let session: Session
+    let resuming: Bool
+    let resume: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "moon.zzz")
+                .foregroundStyle(Palette.muted)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("This session has ended")
+                    .font(TextStyle.captionMedium)
+                    .foregroundStyle(Palette.text)
+                Text("Its conversation is here to read. Resume it to carry on.")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
+            }
+            Spacer()
+            Button(action: resume) {
+                if resuming { ProgressView().controlSize(.small) } else { Text("Resume") }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(resuming)
+        }
+        .padding(14)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.line))
     }
 }
 

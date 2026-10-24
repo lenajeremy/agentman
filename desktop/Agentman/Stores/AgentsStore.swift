@@ -5,6 +5,7 @@ import Observation
 /// What the main window shows.
 enum SidebarItem: Hashable {
     case manager
+    case newAgent
     case agent(String)
 }
 
@@ -33,6 +34,22 @@ final class AgentsStore {
     /// of them arrives in its conversation.
     private(set) var queued: [String: [String]] = [:]
     var search = ""
+    /// The status the sidebar shows, when it is filtered to one.
+    var stateFilter: SessionState?
+    /// The folder the sidebar shows, with its subfolders, when filtered.
+    var folderFilter: String? {
+        didSet { if folderFilter != oldValue { Task { await loadPastSessions() } } }
+    }
+    /// Sessions recorded in the folder filtered to, running ones included.
+    var pastSessions: [Session] = []
+
+    /// The ones of them that have ended: those not running now.
+    var earlierHere: [Session] {
+        let running = Set(sessions.map(\.id))
+        return pastSessions.filter { !running.contains($0.id) }
+    }
+    /// Folders agents have run in, newest first.
+    var folders: [Folder] = []
     var selection: SidebarItem? = .manager {
         didSet { selectionChanged(from: oldValue) }
     }
@@ -102,7 +119,7 @@ final class AgentsStore {
     // MARK: - Reading
 
     func session(_ id: String) -> Session? {
-        sessions.first { $0.id == id }
+        sessions.first { $0.id == id } ?? pastSessions.first { $0.id == id }
     }
 
     var needsYou: [Session] { sessions.filter { $0.state == .waitingInput } }
@@ -113,8 +130,10 @@ final class AgentsStore {
     /// waiting on you first, then the most recently active.
     var groups: [AgentGroup] {
         let query = search.trimmingCharacters(in: .whitespaces)
-        let shown = query.isEmpty ? sessions : sessions.filter {
-            $0.name.localizedCaseInsensitiveContains(query) || $0.cwd.localizedCaseInsensitiveContains(query)
+        let shown = sessions.filter { session in
+            (query.isEmpty || session.name.localizedCaseInsensitiveContains(query) || session.cwd.localizedCaseInsensitiveContains(query))
+                && Self.inFolder(session.cwd, folderFilter)
+                && (stateFilter == nil || Self.filterState(session) == stateFilter)
         }
         return Dictionary(grouping: shown, by: \.cwd)
             .map { cwd, members in
@@ -140,6 +159,8 @@ final class AgentsStore {
             if let id = id.removingPercentEncoding, !id.isEmpty {
                 selection = .agent(id)
             }
+        case "new":
+            selection = .newAgent
         case "home":
             selection = .manager
             if url.path().hasPrefix("/conversation") {
@@ -218,6 +239,121 @@ final class AgentsStore {
 
     nonisolated static func toolRunKey(_ calls: [Message]) -> String {
         "\(calls.first?.id ?? "")|\(calls.last?.id ?? "")|\(calls.count)"
+    }
+
+    // MARK: - Folders, filters and starting agents
+
+    /// How many agents need the user, are working, and are idle.
+    var stateCounts: (needsYou: Int, working: Int, idle: Int) {
+        var counts = (needsYou: 0, working: 0, idle: 0)
+        for session in sessions where Self.inFolder(session.cwd, folderFilter) {
+            switch Self.filterState(session) {
+            case .waitingInput: counts.needsYou += 1
+            case .busy: counts.working += 1
+            default: counts.idle += 1
+            }
+        }
+        return counts
+    }
+
+    /// A session's status as the filters count it: waiting on the user
+    /// whenever a question is up.
+    nonisolated static func filterState(_ session: Session) -> SessionState {
+        if session.question != nil || session.state == .waitingInput { return .waitingInput }
+        return session.state == .busy ? .busy : .idle
+    }
+
+    nonisolated static func inFolder(_ cwd: String, _ folder: String?) -> Bool {
+        guard let folder else { return true }
+        return cwd == folder || cwd.hasPrefix(folder.hasSuffix("/") ? folder : folder + "/")
+    }
+
+    func loadFolders() async {
+        if let reply = try? await client.request(DaemonRequest(.listFolders)), let folders = reply.folders {
+            self.folders = folders.sorted { ($0.lastActivityAt ?? 0) > ($1.lastActivityAt ?? 0) }
+        }
+    }
+
+    /// The ended sessions in the folder filtered to, read-only until resumed.
+    func loadPastSessions() async {
+        guard let folder = folderFilter else {
+            pastSessions = []
+            return
+        }
+        var request = DaemonRequest(.directorySessions)
+        request.path = folder
+        guard let reply = try? await client.request(request), reply.type != "error" else {
+            pastSessions = []
+            return
+        }
+        pastSessions = (reply.sessions ?? [])
+            .sorted { ($0.lastActivityAt ?? 0) > ($1.lastActivityAt ?? 0) }
+    }
+
+    /// Starts an agent in a folder in the user's home, with a first message
+    /// if there is one, and opens it once it shows. Returns the problem, if
+    /// any.
+    func startAgent(kind: String, folder: String, message: String) async -> String? {
+        let home = NSHomeDirectory()
+        guard folder == home || folder.hasPrefix(home + "/") else {
+            return "Choose a folder inside your home folder."
+        }
+        var request = DaemonRequest(.startSession)
+        request.kind = kind
+        request.path = String(folder.dropFirst(home.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        request.text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        request.clientId = "mac-start-\(UUID().uuidString)"
+        do {
+            let reply = try await client.request(request)
+            guard reply.type != "error", let id = reply.sessionId else {
+                return (reply.error ?? "It didn't start.").replacingOccurrences(of: "^daemon: ", with: "", options: .regularExpression)
+            }
+            await open(started: id)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// Opens a session that has just started, once the daemon lists it.
+    private func open(started id: String) async {
+        for _ in 0..<40 where sessions.first(where: { $0.id == id }) == nil {
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        folderFilter = nil
+        stateFilter = nil
+        selection = .agent(id)
+    }
+
+    /// Reopens an ended session where it can be typed into. Returns the
+    /// problem, if any.
+    func resume(_ sessionId: String) async -> String? {
+        var request = DaemonRequest(.resumeSession, sessionId: sessionId)
+        request.clientId = "mac-resume-\(UUID().uuidString)"
+        do {
+            let reply = try await client.request(request)
+            guard reply.type != "error", let id = reply.sessionId else {
+                return (reply.error ?? "It couldn't be resumed.").replacingOccurrences(of: "^daemon: ", with: "", options: .regularExpression)
+            }
+            await open(started: id)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// Closes the pane a session runs in. Its conversation is kept, and it
+    /// can be resumed. Returns the problem, if any.
+    func end(_ sessionId: String) async -> String? {
+        do {
+            let reply = try await client.request(DaemonRequest(.endSession, sessionId: sessionId))
+            if reply.type == "error" {
+                return (reply.error ?? "It couldn't be ended.").replacingOccurrences(of: "^daemon: ", with: "", options: .regularExpression)
+            }
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
     }
 
     /// Switches a session's mode or model to one it offers. Returns the

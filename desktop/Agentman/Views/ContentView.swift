@@ -21,6 +21,8 @@ struct ContentView: View {
                     } else {
                         GoneView()
                     }
+                case .newAgent:
+                    NewAgentView()
                 case .manager, nil:
                     ManagerChatView()
                 }
@@ -51,6 +53,9 @@ struct ContentView: View {
             let environment = ProcessInfo.processInfo.environment
             if let link = environment["AGENTMAN_OPEN"], let url = URL(string: link) {
                 open(url)
+            }
+            if let folder = environment["AGENTMAN_FOLDER"] {
+                store.folderFilter = folder
             }
             if let session = environment["AGENTMAN_RENAMING"] {
                 store.renaming = session

@@ -10,6 +10,19 @@ struct Sidebar: View {
             AgentmanRow()
                 .tag(SidebarItem.manager)
                 .padding(.vertical, 4)
+            Label {
+                Text("New agent")
+                    .font(Fonts.sans(13.5))
+                    .foregroundStyle(Palette.text)
+            } icon: {
+                Image(systemName: "square.and.pencil")
+                    .foregroundStyle(Palette.muted)
+            }
+            .tag(SidebarItem.newAgent)
+            .padding(.vertical, 2)
+
+            SidebarFilters()
+                .listRowSeparator(.hidden)
 
             ForEach(store.groups) { group in
                 Section {
@@ -31,6 +44,22 @@ struct Sidebar: View {
                         .foregroundStyle(Palette.faint)
                         .textCase(nil)
                         .help(group.id)
+                }
+            }
+
+            // In a folder, the sessions that ran there and ended: read them,
+            // or resume one.
+            if store.folderFilter != nil, !store.earlierHere.isEmpty {
+                Section {
+                    ForEach(store.earlierHere) { session in
+                        AgentRow(session: session)
+                            .tag(SidebarItem.agent(session.id))
+                    }
+                } header: {
+                    Text("Earlier here")
+                        .font(TextStyle.label)
+                        .foregroundStyle(Palette.faint)
+                        .textCase(nil)
                 }
             }
         }
@@ -260,5 +289,82 @@ private struct RenameField: View {
         store.renaming = nil
         guard new != session.name else { return }
         Task { await store.rename(session.id, to: new) }
+    }
+}
+
+/// The folder the list shows, and its statuses to narrow it to: Needs you,
+/// Working, Idle, each only when something is in it.
+private struct SidebarFilters: View {
+    @Environment(AgentsStore.self) private var store
+
+    var body: some View {
+        let counts = store.stateCounts
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                Menu {
+                    Button {
+                        store.folderFilter = nil
+                    } label: {
+                        if store.folderFilter == nil { Label("All folders", systemImage: "checkmark") } else { Text("All folders") }
+                    }
+                    Divider()
+                    ForEach(store.folders.prefix(15)) { folder in
+                        Button {
+                            store.folderFilter = folder.path
+                        } label: {
+                            let title = "\((folder.path as NSString).lastPathComponent)  ·  \(folder.agents)"
+                            if store.folderFilter == folder.path { Label(title, systemImage: "checkmark") } else { Text(title) }
+                        }
+                    }
+                } label: {
+                    chip(store.folderFilter.map { ($0 as NSString).lastPathComponent } ?? "All folders",
+                         icon: "folder", on: store.folderFilter != nil)
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Show one folder, with the sessions that ended there")
+
+                stateChip(.waitingInput, "needs you", counts.needsYou, tint: Palette.needsYouText)
+                stateChip(.busy, "working", counts.working, tint: Palette.workingText)
+                stateChip(.idle, "idle", counts.idle, tint: Palette.muted)
+            }
+            .padding(.vertical, 2)
+        }
+        .task { await store.loadFolders() }
+    }
+
+    @ViewBuilder private func stateChip(_ state: SessionState, _ label: String, _ count: Int, tint: Color) -> some View {
+        if count > 0 || store.stateFilter == state {
+            Button {
+                store.stateFilter = store.stateFilter == state ? nil : state
+            } label: {
+                HStack(spacing: 4) {
+                    Text("\(count)").foregroundStyle(store.stateFilter == state ? Palette.onInverse : tint)
+                    Text(label)
+                }
+                .font(TextStyle.caption)
+                .foregroundStyle(store.stateFilter == state ? Palette.onInverse : Palette.textSecondary)
+                .padding(.horizontal, 9)
+                .frame(height: 24)
+                .background(store.stateFilter == state ? Palette.inverse : Palette.fill, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .help(store.stateFilter == state ? "Show every agent" : "Show only these")
+        }
+    }
+
+    private func chip(_ title: String, icon: String, on: Bool) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(.system(size: 10, weight: .medium))
+            Text(title).lineLimit(1)
+            Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold)).foregroundStyle(Palette.faint)
+        }
+        .font(TextStyle.caption)
+        .foregroundStyle(on ? Palette.workingText : Palette.textSecondary)
+        .padding(.horizontal, 9)
+        .frame(height: 24)
+        .background(on ? Palette.workingWash : Palette.fill, in: Capsule())
     }
 }

@@ -18,6 +18,12 @@ struct AgentmanApp: App {
         }
         .defaultSize(width: 1180, height: 760)
         .windowToolbarStyle(.unified(showsTitle: true))
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("New Agent") { store.selection = .newAgent }
+                    .keyboardShortcut("n", modifiers: .command)
+            }
+        }
 
         Settings {
             SettingsView()

@@ -47,6 +47,11 @@ enum RequestType: String, Codable, Sendable {
     case commitFiles = "commit_files"
     case commitDiff = "commit_diff"
     case listBranches = "list_branches"
+    case startSession = "start_session"
+    case listFolders = "list_folders"
+    case directorySessions = "directory_sessions"
+    case resumeSession = "resume_session"
+    case endSession = "end_session"
     case toolsTitle = "tools_title"
     case managerSend = "manager_send"
     case managerHistory = "manager_history"
@@ -118,6 +123,8 @@ struct DaemonEvent: Codable, Sendable {
     var type: String
     var sessionId: String?
     var sessions: [Session]?
+    /// Folders agents have run in, on "folders".
+    var folders: [Folder]?
     var session: Session?
     var messages: [Message]?
     var page: Page?
@@ -224,6 +231,15 @@ struct WorkspaceResult: Codable, Sendable {
     var branch: String?
     var commit: WorkspaceCommit?
     var branches: [WorkspaceBranch]?
+}
+
+/// A folder agents have run in, with how many there and how many running.
+struct Folder: Codable, Sendable, Hashable, Identifiable {
+    var path: String
+    var agents: Int
+    var running: Int?
+    var lastActivityAt: Int64?
+    var id: String { path }
 }
 
 struct WorkspaceEntry: Codable, Sendable, Hashable, Identifiable {
