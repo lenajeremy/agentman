@@ -180,6 +180,15 @@ func init() {
 			run:         runReadKnowledge,
 		},
 		{
+			name: "delete_note",
+			description: "Delete one of the user's notes, by the name search_knowledge gave. Only when the user has asked " +
+				"you, in so many words, to delete, remove or forget that note: never on your own, never to tidy up, never " +
+				"because a note looks out of date. If you think a note should go, say so and let them decide.",
+			properties: map[string]any{"name": map[string]any{"type": "string"}},
+			required:   []string{"name"},
+			run:        runDeleteNote,
+		},
+		{
 			name: "suggest_note",
 			description: "Suggest a note for the user to keep: a lasting preference, a convention, or a fact about a project " +
 				"worth remembering, whether they asked you to remember it or you noticed it yourself. It appears to them " +
@@ -711,6 +720,22 @@ func runReadKnowledge(_ context.Context, m *Manager, input map[string]any) toolR
 		text:     fmt.Sprintf("# %s (%s, always: %v)\n\n%s", note.Title, note.Tier, note.Always, note.Body),
 		activity: "Read your note “" + note.Title + "”",
 	}
+}
+
+func runDeleteNote(_ context.Context, m *Manager, input map[string]any) toolResult {
+	name, _ := input["name"].(string)
+	note, err := m.knowledge.Read("", strings.TrimSpace(name))
+	if err != nil {
+		return toolResult{text: "No note called " + name + "; search_knowledge finds them.", isError: true}
+	}
+	if err := m.knowledge.Delete(note.Tier, note.Name); err != nil {
+		return toolResult{text: "Couldn't delete it: " + strings.TrimPrefix(err.Error(), "knowledge: "), isError: true}
+	}
+	text := fmt.Sprintf("Deleted %s (%s).", note.Name, note.Tier)
+	if note.Always {
+		text += " It was in every project's instructions: project instruction files keep it until update_instructions runs for them."
+	}
+	return toolResult{text: text, activity: "Deleted your note “" + note.Title + "”"}
 }
 
 func runListKeys(_ context.Context, m *Manager, _ map[string]any) toolResult {

@@ -113,3 +113,32 @@ func TestTheSameNoteIsNotSuggestedTwice(t *testing.T) {
 		t.Fatalf("again = %+v", again)
 	}
 }
+
+// Agentman deletes a note when the user asks it to.
+func TestAgentmanDeletesANoteWhenAsked(t *testing.T) {
+	model := &scriptedModel{replies: []string{
+		toolReply("t1", "delete_note", `{"name":"commits"}`),
+		textReply("Deleted."),
+	}}
+	h := newHarness(t, model, true)
+	store := knowledge.Open(filepath.Join(t.TempDir(), "knowledge"))
+	h.m.knowledge = store
+	if _, err := store.Write(knowledge.Note{Tier: knowledge.Private, Title: "Commits", Body: "No attribution."}); err != nil {
+		t.Fatal(err)
+	}
+	h.m.send(context.Background(), "delete my commits note")
+	h.waitIdle(t)
+	if got := notes(t, store); len(got) != 0 {
+		t.Fatalf("still kept: %+v", got)
+	}
+	var shown bool
+	for _, entry := range h.entries() {
+		shown = shown || (entry.Role == "activity" && entry.Text == "Deleted your note “Commits”")
+	}
+	if !shown {
+		t.Fatalf("entries = %+v", h.entries())
+	}
+	if gone := runDeleteNote(context.Background(), h.m, map[string]any{"name": "commits"}); !gone.isError {
+		t.Fatalf("deleting it again = %+v", gone)
+	}
+}
