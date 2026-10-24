@@ -53,7 +53,7 @@ final class AgentsStore {
     /// call; empty when there is none to be had.
     var toolTitles: [String: String] = [:]
 
-    private let client: DaemonClient
+    let client: DaemonClient
     private var cursors: [String: String] = [:]
     private var followed: String?
     private var started = false

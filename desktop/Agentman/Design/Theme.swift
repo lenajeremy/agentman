@@ -52,6 +52,17 @@ enum Palette {
     static let errorText = Color(light: 0xC4343A, dark: 0xFF8A8E)
     static let errorWash = Color(light: 0xFDEDEE, dark: 0x2C1517)
 
+    // Code: quiet colours that read on paper and ink alike.
+    static let codeKeyword = Color(light: 0x8E3BB8, dark: 0xD19AF5)
+    static let codeString = Color(light: 0x1C7F4B, dark: 0x7FD3A0)
+    static let codeNumber = Color(light: 0xB25A12, dark: 0xF2A867)
+    static let codeComment = Color(light: 0x8A8D94, dark: 0x6E727B)
+    static let codeType = Color(light: 0x1F5FB8, dark: 0x8DB8F5)
+    // Diffs: a line added, a line removed, and where a hunk begins.
+    static let diffAdd = Color(light: 0xE8F7EE, dark: 0x13281C)
+    static let diffRemove = Color(light: 0xFDECEC, dark: 0x2C1517)
+    static let diffHunk = Color(light: 0xEEF1FF, dark: 0x1A1F3D)
+
     /// The dot beside an agent: what state it is in, at a glance.
     static func dot(_ state: SessionState) -> Color {
         switch state {

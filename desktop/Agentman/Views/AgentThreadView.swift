@@ -9,6 +9,10 @@ struct AgentThreadView: View {
     @State private var attachments: [Attachment] = []
     @State private var dropping = false
     @State private var sending = false
+    @State private var showFiles = false
+    @State private var filesTab: WorkspaceTab = .changes
+    /// How many files the agent has changed since the last commit.
+    @State private var changed = 0
 
     /// Claude Code in tmux reads the messages it is holding on Ctrl-X
     /// Ctrl-S, so they can be sent now rather than when the step ends.
@@ -16,6 +20,16 @@ struct AgentThreadView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if changed > 0 {
+                ChangedBar(count: changed) {
+                    filesTab = .changes
+                    showFiles = true
+                }
+                .padding(.horizontal, 36)
+                .padding(.top, 10)
+                .frame(maxWidth: 820)
+                .frame(maxWidth: .infinity)
+            }
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 24) {
@@ -111,6 +125,24 @@ struct AgentThreadView: View {
             .frame(maxWidth: 820)
             .frame(maxWidth: .infinity)
         }
+        .inspector(isPresented: $showFiles) {
+            WorkspacePanel(session: session, tab: $filesTab)
+                .inspectorColumnWidth(min: 320, ideal: 480, max: 1100)
+        }
+        .onAppear {
+            // For screenshots and tests: the files panel open on a tab.
+            if let tab = ProcessInfo.processInfo.environment["AGENTMAN_FILES"].flatMap(WorkspaceTab.init(rawValue:)) {
+                filesTab = tab
+                showFiles = true
+            }
+        }
+        // The count is read when the thread opens and after each turn.
+        .task(id: session.state == .busy) {
+            guard session.state != .busy else { return }
+            if let result = try? await store.workspace(.listChanges, session: session.id) {
+                changed = result.changes?.count ?? 0
+            }
+        }
         // Images dropped anywhere on the conversation wait in the box.
         .onDrop(of: [.fileURL, .image], isTargeted: Binding(get: { dropping }, set: { dropping = $0 && session.canReceive })) { providers in
             guard session.canReceive else { return false }
@@ -139,6 +171,13 @@ struct AgentThreadView: View {
                 }
             }
             ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    showFiles.toggle()
+                } label: {
+                    Label("Files", systemImage: "sidebar.right")
+                }
+                .help(showFiles ? "Hide files" : "Files, changes and history")
+                .keyboardShortcut("e", modifiers: [.command, .shift])
                 StateChip(state: session.state)
                 if session.state == .busy, session.canReceive {
                     Button {
@@ -263,6 +302,36 @@ private struct ThreadTitle: View {
         editing = false
         guard !new.isEmpty, new != session.name else { return }
         Task { await store.rename(session.id, to: new) }
+    }
+}
+
+/// "4 files changed", over a thread, opening the agent's changes.
+private struct ChangedBar: View {
+    let count: Int
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 8) {
+                Image(systemName: "folder")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.working)
+                Text("\(count) file\(count == 1 ? "" : "s") changed")
+                    .font(TextStyle.captionMedium)
+                    .foregroundStyle(Palette.text)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Palette.faint)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.line))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("See what changed")
     }
 }
 

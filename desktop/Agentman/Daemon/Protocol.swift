@@ -39,6 +39,14 @@ enum RequestType: String, Codable, Sendable {
     case renameSession = "rename_session"
     case setMode = "set_mode"
     case setModel = "set_model"
+    case listFiles = "list_files"
+    case readFile = "read_file"
+    case listChanges = "list_changes"
+    case fileDiff = "file_diff"
+    case listCommits = "list_commits"
+    case commitFiles = "commit_files"
+    case commitDiff = "commit_diff"
+    case listBranches = "list_branches"
     case toolsTitle = "tools_title"
     case managerSend = "manager_send"
     case managerHistory = "manager_history"
@@ -83,6 +91,12 @@ struct DaemonRequest: Codable, Sendable {
     var steps: [ToolCall]?
     /// A note's tier, on the knowledge requests.
     var kind: String?
+    /// Where a page of commits starts, or a chunk of a file.
+    var offset: Int?
+    /// The commit a commit_files or commit_diff request is about.
+    var commit: String?
+    /// The branch list_commits reads; absent for the one checked out.
+    var ref: String?
 
     init(_ type: RequestType, sessionId: String? = nil) {
         self.type = type
@@ -189,14 +203,65 @@ struct Key: Codable, Sendable, Hashable, Identifiable {
     var id: String { name }
 }
 
-/// A file read from an agent's folder, or an image it opened.
+/// What an agent's folder holds: a listing, its changes, a file, a diff,
+/// or its history.
 struct WorkspaceResult: Codable, Sendable {
     var kind: String
     var sessionId: String
     var path: String?
+    var entries: [WorkspaceEntry]?
+    var changes: [WorkspaceChange]?
+    var text: String?
     /// Base64, for a supported image small enough to send.
     var image: String?
     var mime: String?
+    var diff: String?
+    var truncated: Bool?
+    /// Entries withheld because they hold secrets.
+    var hidden: Int?
+    var commits: [WorkspaceCommit]?
+    /// The branch checked out; absent when detached.
+    var branch: String?
+    var commit: WorkspaceCommit?
+    var branches: [WorkspaceBranch]?
+}
+
+struct WorkspaceEntry: Codable, Sendable, Hashable, Identifiable {
+    var name: String
+    var directory: Bool
+    var size: Int64?
+    var id: String { name }
+}
+
+struct WorkspaceChange: Codable, Sendable, Hashable, Identifiable {
+    var path: String
+    /// "modified", "added", "deleted", "renamed" or "untracked".
+    var status: String
+    var added: Int?
+    var removed: Int?
+    var id: String { path }
+}
+
+struct WorkspaceCommit: Codable, Sendable, Hashable, Identifiable {
+    var hash: String
+    var subject: String
+    var body: String?
+    var author: String
+    var authoredAt: Int64
+    var merge: Bool?
+    var files: Int?
+    var added: Int?
+    var removed: Int?
+    var id: String { hash }
+}
+
+struct WorkspaceBranch: Codable, Sendable, Hashable, Identifiable {
+    var name: String
+    var ref: String
+    var remote: Bool?
+    var current: Bool?
+    var updatedAt: Int64
+    var id: String { ref }
 }
 
 // MARK: - Agentman
