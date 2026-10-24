@@ -9,7 +9,6 @@ import (
 
 	"github.com/lenajeremy/agentman/internal/knowledge"
 	"github.com/lenajeremy/agentman/internal/protocol"
-	"github.com/lenajeremy/agentman/internal/tmux"
 )
 
 // What agents can ask Agentman, through am mcp: the user's shared notes,
@@ -99,17 +98,25 @@ func (m *Manager) handleAgent(ctx context.Context, req protocol.Request) protoco
 	return fail(errors.New("unknown agent request"))
 }
 
-// agentAt is the agent asking: the one whose process the asker descends
-// from, else the one working in its folder, else an agent Agentman doesn't
-// know by name, in that folder.
+// agentAt is the agent asking: the nearest one whose process the asker
+// descends from (an agent started inside another agent's shell is itself
+// the one asking), else the one working in its folder, else an agent
+// Agentman doesn't know by name, in that folder.
 func (m *Manager) agentAt(ctx context.Context, pid int, cwd string) protocol.Session {
 	sessions := m.agents.Sessions()
 	if pid > 0 {
-		if tree, err := tmux.SnapshotProcessTree(ctx); err == nil {
+		if tree, err := m.processTree(ctx); err == nil {
+			var nearest protocol.Session
 			for _, s := range sessions {
-				if s.AgentPID > 0 && tree.OwnsPID(s.AgentPID, pid) {
-					return s
+				if s.AgentPID <= 0 || !tree.OwnsPID(s.AgentPID, pid) {
+					continue
 				}
+				if nearest.ID == "" || tree.OwnsPID(nearest.AgentPID, s.AgentPID) {
+					nearest = s
+				}
+			}
+			if nearest.ID != "" {
+				return nearest
 			}
 		}
 	}

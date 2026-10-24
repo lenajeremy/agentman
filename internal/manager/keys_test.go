@@ -11,6 +11,7 @@ import (
 
 	"github.com/lenajeremy/agentman/internal/knowledge"
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/tmux"
 )
 
 const elevenValue = "sk_eleven_SECRET_value_123"
@@ -278,5 +279,24 @@ func TestAgentsAreToldWhenAgentmanIsOff(t *testing.T) {
 	h := newHarness(t, &scriptedModel{}, false)
 	if event := h.m.Handle(context.Background(), protocol.Request{Type: protocol.ReqAgentKeys, Path: "/w"}); event.Type != protocol.EvtError {
 		t.Fatalf("event = %+v", event)
+	}
+}
+
+// An agent started inside another agent's shell is the one asking, not
+// the agent whose shell it is.
+func TestTheNearestAgentIsTheOneAsking(t *testing.T) {
+	h, _ := keyHarness(t, protocol.KeyAuto)
+	sessions := h.agents.Sessions()
+	sessions[0].AgentPID = 100 // site, the outer agent
+	sessions[1].AgentPID = 200 // api, started from site's shell
+	h.agents.setSessions(sessions)
+	h.m.processTree = func(context.Context) (*tmux.ProcessTree, error) {
+		return tmux.ProcessTreeFromTable("100 1 claude\n150 100 zsh\n200 150 codex\n300 200 am\n400 100 am\n"), nil
+	}
+	if got := h.m.agentAt(context.Background(), 300, "/anywhere"); got.ID != "codex:b" {
+		t.Fatalf("am under api = %s", got.ID)
+	}
+	if got := h.m.agentAt(context.Background(), 400, "/anywhere"); got.ID != "claude:a" {
+		t.Fatalf("am under site = %s", got.ID)
 	}
 }

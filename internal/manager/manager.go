@@ -23,6 +23,7 @@ import (
 	"github.com/lenajeremy/agentman/internal/knowledge"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/secrets"
+	"github.com/lenajeremy/agentman/internal/tmux"
 )
 
 // Config is what a Manager needs from am serve.
@@ -39,6 +40,9 @@ type Config struct {
 	Emit func(protocol.Event)
 	// NewModel makes a model client from an API key. Tests replace it.
 	NewModel func(apiKey string) Model
+	// ProcessTree reads the process table, to tell which agent is asking.
+	// Tests replace it.
+	ProcessTree func(context.Context) (*tmux.ProcessTree, error)
 }
 
 type Manager struct {
@@ -47,6 +51,7 @@ type Manager struct {
 	agents       Agents
 	emitEvent    func(protocol.Event)
 	newModel     func(string) Model
+	processTree  func(context.Context) (*tmux.ProcessTree, error)
 	conversation *conversation
 	briefs       *briefStore
 	knowledge    *knowledge.Store
@@ -96,6 +101,7 @@ func New(cfg Config) (*Manager, error) {
 		agents:       cfg.Agents,
 		emitEvent:    cfg.Emit,
 		newModel:     cfg.NewModel,
+		processTree:  cfg.ProcessTree,
 		conversation: conversation,
 		briefs:       loadBriefs(cfg.Dir),
 		knowledge:    cfg.Knowledge,
@@ -110,6 +116,9 @@ func New(cfg Config) (*Manager, error) {
 	}
 	if m.newModel == nil {
 		m.newModel = newClaudeModel
+	}
+	if m.processTree == nil {
+		m.processTree = tmux.SnapshotProcessTree
 	}
 	if m.knowledge == nil {
 		m.knowledge = knowledge.Open(filepath.Join(cfg.Dir, "knowledge"))
