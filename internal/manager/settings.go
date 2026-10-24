@@ -53,7 +53,9 @@ func loadSettings(path string) protocol.ManagerSettings {
 	if err != nil {
 		return settings
 	}
-	var stored protocol.ManagerSettings
+	// Read over the defaults, so a setting added since the file was saved
+	// takes its default rather than its zero value.
+	stored := defaultSettings()
 	if json.Unmarshal(raw, &stored) != nil {
 		return settings
 	}

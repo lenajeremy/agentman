@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -402,4 +403,23 @@ func slicesContain(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// Settings saved before a setting existed load with that setting's default,
+// not switched off; one the user turned off stays off.
+func TestNewSettingsTakeTheirDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/settings.json"
+	if err := os.WriteFile(path, []byte(`{"chatModel":"claude-opus-5-5","briefModel":"claude-opus-5-5","effort":"medium","briefs":true,"style":"x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !loadSettings(path).AutoApprove {
+		t.Fatal("approving was switched off by an older settings file")
+	}
+	if err := os.WriteFile(path, []byte(`{"chatModel":"claude-opus-5-5","briefModel":"claude-opus-5-5","effort":"medium","autoApprove":false,"style":"x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if loadSettings(path).AutoApprove {
+		t.Fatal("the user's choice to turn approving off was lost")
+	}
 }
