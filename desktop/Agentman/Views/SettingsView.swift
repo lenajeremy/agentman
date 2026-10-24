@@ -56,6 +56,17 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle("Approve low-risk requests for me", isOn: binding.autoApprove)
+                } header: {
+                    Text("Permissions")
+                } footer: {
+                    Text("Reading and searching, tests and builds, \"continue?\", and changes to files in the agent's own folder. " +
+                        "Deleting, installing, committing, pushing, deploying and anything on the network always wait for you, as a card.")
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.muted)
+                }
+
+                Section {
                     TextEditor(text: binding.style)
                         .font(TextStyle.body)
                         .frame(minHeight: 70)

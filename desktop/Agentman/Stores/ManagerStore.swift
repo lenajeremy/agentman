@@ -16,12 +16,55 @@ final class ManagerStore {
     /// The last thing that went wrong talking to Agentman.
     var problem: String?
     private(set) var loaded = false
+    /// When the user last saw the conversation, in milliseconds. Kept across
+    /// launches, so what arrived while the app was closed shows as new.
+    private(set) var lastRead: Int64
+
+    /// Something worth telling the user arrived: Agentman finished a reply,
+    /// or put up a card or a brief.
+    var onNews: ((ManagerEntry) -> Void)?
+    /// A card no longer needs the user, wherever it was answered.
+    var onCardClosed: ((ManagerCard) -> Void)?
 
     private let client: DaemonClient
+    private let defaults: UserDefaults
     private var images: [String: NSImage] = [:]
+    private static let lastReadKey = "managerLastRead"
 
-    init(client: DaemonClient) {
+    init(client: DaemonClient, defaults: UserDefaults = .standard) {
         self.client = client
+        self.defaults = defaults
+        let stored = defaults.object(forKey: Self.lastReadKey) as? Int64
+        // The first launch starts with nothing unread, not the whole history.
+        lastRead = stored ?? Int64(Date().timeIntervalSince1970 * 1000)
+        if stored == nil { defaults.set(lastRead, forKey: Self.lastReadKey) }
+    }
+
+    /// What arrived since the user last looked: Agentman's replies, briefs,
+    /// and cards still waiting on them.
+    var unread: [ManagerEntry] {
+        entries.filter { $0.ts > lastRead && Self.isNews($0) }
+    }
+
+    /// Cards still waiting on the user.
+    var openCards: [ManagerCard] {
+        entries.compactMap(\.card).filter(\.isOpen)
+    }
+
+    static func isNews(_ entry: ManagerEntry) -> Bool {
+        switch entry.role {
+        case "assistant": entry.streaming != true && !entry.text.isEmpty
+        case "brief": true
+        case "card": entry.card?.isOpen == true
+        default: false
+        }
+    }
+
+    /// The user has seen everything so far.
+    func markRead() {
+        guard let latest = entries.last?.ts, latest > lastRead else { return }
+        lastRead = latest
+        defaults.set(latest, forKey: Self.lastReadKey)
     }
 
     var thinking: Bool { status.state == "thinking" }
@@ -104,6 +147,37 @@ final class ManagerStore {
         return nil
     }
 
+    // MARK: - Cards
+
+    /// Answers a card: the agent's question, or a reply to an agent waiting
+    /// on the user. Returns the problem, if any.
+    func reply(to card: ManagerCard, with reply: QuestionReply) async -> String? {
+        var request = DaemonRequest(.managerCardReply)
+        request.cardId = card.id
+        if card.kind == "question" {
+            request.optionKey = reply.optionKey
+            request.optionKeys = reply.optionKeys
+            request.answerText = reply.text
+        } else {
+            request.text = reply.text
+        }
+        return await perform(request)
+    }
+
+    /// Puts a card away unanswered.
+    func dismiss(_ card: ManagerCard) async -> String? {
+        var request = DaemonRequest(.managerCardDismiss)
+        request.cardId = card.id
+        return await perform(request)
+    }
+
+    private func perform(_ request: DaemonRequest) async -> String? {
+        guard let reply = try? await client.request(request) else { return "Couldn't reach am serve." }
+        if reply.type == "error" { return reply.error ?? "That didn't work." }
+        apply(reply)
+        return nil
+    }
+
     /// An image an agent opened, for showing what Agentman looked at.
     func image(sessionId: String, path: String) async -> NSImage? {
         let key = sessionId + "\u{0}" + path
@@ -129,7 +203,15 @@ final class ManagerStore {
                   let index = entries.firstIndex(where: { $0.id == id }) else { return }
             entries[index].text += delta
         case "manager_status":
-            if let status = event.managerStatus { self.status = status }
+            if let status = event.managerStatus {
+                let finished = self.status.state == "thinking" && status.state != "thinking"
+                self.status = status
+                // One notice per reply, when it is done, with its last words.
+                if finished, let reply = entries.last(where: { $0.role == "assistant" && !$0.text.isEmpty }),
+                   reply.ts > lastRead {
+                    onNews?(reply)
+                }
+            }
         case "manager_settings":
             if let settings = event.managerSettings { self.settings = settings }
             if let status = event.managerStatus { self.status = status }
@@ -149,9 +231,19 @@ final class ManagerStore {
     private func upsert(_ entry: ManagerEntry) {
         if let index = entries.firstIndex(where: { $0.id == entry.id }) {
             if entry.streaming == true, !entries[index].text.isEmpty { return }
+            let before = entries[index]
             entries[index] = entry
+            if let card = entry.card, before.card?.isOpen == true, !card.isOpen {
+                onCardClosed?(card)
+            } else if let card = entry.card, card.isOpen, before.card?.suggested != card.suggested {
+                // Agentman marked its pick: the user has something to confirm.
+                onNews?(entry)
+            }
         } else {
             entries.append(entry)
+            if entry.role == "brief" || entry.card?.isOpen == true {
+                onNews?(entry)
+            }
         }
     }
 }

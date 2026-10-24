@@ -118,6 +118,8 @@ enum ChatItem: Identifiable {
             }
         }
         for entry in entries {
+            // A card answered in the agent itself, or put away, is gone.
+            if entry.card?.isGone == true { continue }
             if entry.role == "activity" {
                 if entry.path != nil {
                     flush()
@@ -157,6 +159,14 @@ private struct ChatItemView: View {
                 AssistantReply(entry: entry)
             case "brief":
                 BriefCard(entry: entry)
+            case "card":
+                if let card = entry.card {
+                    if card.isOpen {
+                        ManagerCardView(card: card)
+                    } else {
+                        CardReceipt(card: card)
+                    }
+                }
             case "error":
                 Label(entry.text, systemImage: "exclamationmark.circle")
                     .font(TextStyle.caption)
@@ -310,6 +320,148 @@ private struct BriefCard: View {
         .padding(14)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.line))
+    }
+}
+
+/// A decision only the user can make, answerable where it stands: the
+/// agent's question with its own options, or a box to reply in words.
+private struct ManagerCardView: View {
+    @Environment(AgentsStore.self) private var store
+    let card: ManagerCard
+    @State private var reply = ""
+    @State private var problem: String?
+    @State private var busy = false
+
+    var body: some View {
+        let session = store.session(card.sessionId)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                AgentMark(kind: session?.kind ?? "", size: 18)
+                Text(card.agentName)
+                    .font(TextStyle.bodyMedium)
+                    .foregroundStyle(Palette.text)
+                Circle().fill(Palette.needsYou).frame(width: 6, height: 6)
+                Text("needs you")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.needsYouText)
+                Spacer(minLength: 8)
+                if session != nil {
+                    Button("Open") { store.selection = .agent(card.sessionId) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+                Button {
+                    act { await store.manager.dismiss(card) }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Palette.muted)
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .help("Put away (or swipe it aside)")
+            }
+
+            Text(card.title)
+                .font(TextStyle.body)
+                .foregroundStyle(Palette.text)
+                .textSelection(.enabled)
+            if let detail = card.detail, !detail.isEmpty {
+                CodeBox(text: detail)
+            }
+            if let reason = card.reason, !reason.isEmpty {
+                Label("Waits for you: \(reason)", systemImage: "hand.raised")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.needsYouText)
+            }
+            if let context = card.context, !context.isEmpty {
+                Text(context)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(3)
+            }
+            if card.suggested != nil {
+                Label("Agentman's pick is marked. One tap sends it.", systemImage: "sparkle")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.working)
+            }
+
+            if let question = card.question {
+                QuestionChoices(question: question, suggested: card.suggested) { answer in
+                    await send(answer)
+                }
+            } else {
+                HStack(spacing: 8) {
+                    TextField("Reply to \(card.agentName)", text: $reply, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .font(TextStyle.body)
+                        .lineLimit(1...5)
+                        .onSubmit { replyInWords() }
+                    Button("Send", action: replyInWords)
+                        .buttonStyle(.borderedProminent)
+                        .disabled(reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busy)
+                }
+            }
+            if let problem {
+                Text(problem)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.errorText)
+            }
+        }
+        .padding(16)
+        .background(Palette.needsYouWash, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.needsYouEdge))
+        .disabled(busy)
+        .swipeToDismiss {
+            problem = await store.manager.dismiss(card)
+            return problem == nil
+        }
+    }
+
+    private func send(_ answer: QuestionReply) async -> Bool {
+        problem = await store.manager.reply(to: card, with: answer)
+        return problem == nil
+    }
+
+    private func replyInWords() {
+        let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        act {
+            let problem = await store.manager.reply(to: card, with: QuestionReply(text: text))
+            if problem == nil { reply = "" }
+            return problem
+        }
+    }
+
+    private func act(_ work: @escaping () async -> String?) {
+        busy = true
+        Task {
+            problem = await work()
+            busy = false
+        }
+    }
+}
+
+/// A card the user answered here, folded to what they chose.
+private struct CardReceipt: View {
+    @Environment(AgentsStore.self) private var store
+    let card: ManagerCard
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(Palette.ok)
+            Text("\(card.agentName) · \(card.outcome ?? "Answered")")
+                .lineLimit(1)
+            if store.session(card.sessionId) != nil {
+                Button("Open") { store.selection = .agent(card.sessionId) }
+                    .buttonStyle(.link)
+            }
+        }
+        .font(TextStyle.caption)
+        .foregroundStyle(Palette.muted)
+        .padding(.leading, 34)
     }
 }
 

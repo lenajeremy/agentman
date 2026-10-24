@@ -58,17 +58,35 @@ private struct AgentmanRow: View {
             AgentmanBadge(size: 28)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Agentman")
-                    .font(TextStyle.bodyMedium)
+                    .font(unread > 0 ? Fonts.sans(14, .semibold) : TextStyle.bodyMedium)
                     .foregroundStyle(Palette.text)
                 Text(summary)
                     .font(TextStyle.caption)
                     .foregroundStyle(store.needsYou.isEmpty ? Palette.muted : Palette.needsYouText)
                     .lineLimit(1)
             }
+            Spacer(minLength: 4)
+            if unread > 0 {
+                Text(unread > 99 ? "99+" : String(unread))
+                    .font(TextStyle.label)
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .frame(minWidth: 18, minHeight: 18)
+                    .background(Palette.working, in: Capsule())
+                    .accessibilityLabel("\(unread) new")
+            }
         }
     }
 
+    /// What arrived since the user last looked at the conversation.
+    private var unread: Int {
+        store.viewingManager ? 0 : store.manager.unread.count
+    }
+
     private var summary: String {
+        let cards = store.manager.openCards.count
+        if cards > 0 { return cards == 1 ? "1 card waiting for you" : "\(cards) cards waiting for you" }
         let waiting = store.needsYou.count
         let working = store.working.count
         if waiting > 0 { return waiting == 1 ? "1 agent needs you" : "\(waiting) agents need you" }

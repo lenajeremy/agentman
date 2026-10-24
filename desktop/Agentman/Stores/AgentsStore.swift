@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -38,6 +39,11 @@ final class AgentsStore {
 
     /// The conversation with Agentman, on the same connection.
     let manager: ManagerStore
+    /// Agentman's notifications and the Dock badge.
+    let notifier = Notifier()
+    /// Whether the app is in front, so news can be shown rather than
+    /// notified.
+    private(set) var appActive = true
 
     private let client: DaemonClient
     private var cursors: [String: String] = [:]
@@ -47,6 +53,12 @@ final class AgentsStore {
     init(client: DaemonClient = DaemonClient()) {
         self.client = client
         manager = ManagerStore(client: client)
+        manager.onNews = { [weak self] entry in self?.news(entry) }
+        manager.onCardClosed = { [weak self] card in
+            self?.notifier.withdraw(card)
+            self?.refreshBadge()
+        }
+        notifier.onOpen = { [weak self] url in self?.open(url) }
     }
 
     var socketPath: String { client.socketPath }
@@ -54,6 +66,20 @@ final class AgentsStore {
     func start() {
         guard !started else { return }
         started = true
+        appActive = NSApplication.shared.isActive
+        notifier.start()
+        let center = NotificationCenter.default
+        Task {
+            for await _ in center.notifications(named: NSApplication.didBecomeActiveNotification) {
+                appActive = true
+                seeManagerIfShown()
+            }
+        }
+        Task {
+            for await _ in center.notifications(named: NSApplication.didResignActiveNotification) {
+                appActive = false
+            }
+        }
         client.start()
         Task { for await status in client.statuses { statusChanged(status) } }
         Task { for await event in client.events { apply(event) } }
@@ -131,6 +157,15 @@ final class AgentsStore {
         return await perform(request, for: sessionId)
     }
 
+    /// Answers a question however the reply was given.
+    @discardableResult
+    func answer(_ sessionId: String, question: Question, reply: QuestionReply) async -> Bool {
+        if let keys = reply.optionKeys, !keys.isEmpty {
+            return await answerMultiple(sessionId, question: question, keys: keys)
+        }
+        return await answer(sessionId, question: question, optionKey: reply.optionKey, text: reply.text)
+    }
+
     /// Answers a multiple-choice question with every option that is ticked.
     @discardableResult
     func answerMultiple(_ sessionId: String, question: Question, keys: [String]) async -> Bool {
@@ -138,6 +173,16 @@ final class AgentsStore {
         request.questionId = question.id
         request.optionKeys = keys
         request.clientId = "mac-answer-\(UUID().uuidString)"
+        return await perform(request, for: sessionId)
+    }
+
+    /// Has the agent read the messages it is holding now, rather than when
+    /// its current step ends: Ctrl-X Ctrl-S in Claude Code. Sends the whole
+    /// queue, as the keys do.
+    @discardableResult
+    func sendQueuedNow(_ sessionId: String) async -> Bool {
+        var request = DaemonRequest(.sendQueued, sessionId: sessionId)
+        request.clientId = "mac-send-now-\(UUID().uuidString)"
         return await perform(request, for: sessionId)
     }
 
@@ -169,6 +214,8 @@ final class AgentsStore {
                 apply(event)
             }
             await manager.reload()
+            seeManagerIfShown()
+            refreshBadge()
             // A reconnect starts the daemon's side afresh: follow again.
             if let followed {
                 follow(followed)
@@ -229,8 +276,36 @@ final class AgentsStore {
 
     // MARK: - Following one agent
 
+    // MARK: - Agentman's news
+
+    /// Whether the user is looking at the conversation with Agentman.
+    var viewingManager: Bool { selection == .manager && appActive }
+
+    /// News from Agentman: seen at once if the user is looking, a
+    /// notification if not.
+    private func news(_ entry: ManagerEntry) {
+        if viewingManager {
+            manager.markRead()
+        } else {
+            notifier.announce(entry)
+        }
+        refreshBadge()
+    }
+
+    private func seeManagerIfShown() {
+        guard viewingManager else { return }
+        manager.markRead()
+        notifier.clearAll()
+        refreshBadge()
+    }
+
+    private func refreshBadge() {
+        notifier.setBadge(manager.unread.count)
+    }
+
     private func selectionChanged(from old: SidebarItem?) {
         guard old != selection else { return }
+        seeManagerIfShown()
         if case .agent(let id) = old {
             client.send(DaemonRequest(.unsubscribe, sessionId: id))
             followed = nil

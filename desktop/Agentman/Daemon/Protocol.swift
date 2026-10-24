@@ -33,6 +33,7 @@ enum RequestType: String, Codable, Sendable {
     case fetchMessages = "fetch_messages"
     case sendMessage = "send_message"
     case interrupt
+    case sendQueued = "send_queued"
     case answerQuestion = "answer_question"
     case readSeenFile = "read_seen_file"
     case managerSend = "manager_send"
@@ -42,6 +43,8 @@ enum RequestType: String, Codable, Sendable {
     case managerSetSettings = "manager_set_settings"
     case managerSetKey = "manager_set_key"
     case managerBriefs = "manager_briefs"
+    case managerCardReply = "manager_card_reply"
+    case managerCardDismiss = "manager_card_dismiss"
 }
 
 struct DaemonRequest: Codable, Sendable {
@@ -57,6 +60,7 @@ struct DaemonRequest: Codable, Sendable {
     var clientId: String?
     var path: String?
     var manager: ManagerSettings?
+    var cardId: String?
 
     init(_ type: RequestType, sessionId: String? = nil) {
         self.type = type
@@ -125,6 +129,46 @@ struct ManagerEntry: Codable, Sendable, Identifiable, Hashable {
     var streaming: Bool?
     /// An image an activity looked at.
     var path: String?
+    /// On a "card" entry: a decision only the user can make.
+    var card: ManagerCard?
+}
+
+/// A decision Agentman put in front of the user: an agent's question, with
+/// its options, or its need in words, with a box to reply.
+struct ManagerCard: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    /// "question" or "needs_you".
+    var kind: String
+    /// "open", "answered" (here, on the card), "settled" (no longer needs
+    /// the user: answered in the agent, or the agent moved on) or
+    /// "dismissed" (put away unanswered).
+    var state: String
+    var sessionId: String
+    var agentName: String
+    var title: String
+    var detail: String?
+    /// Why Agentman didn't answer it itself.
+    var reason: String?
+    /// Agentman's brief on the agent, for what it is working on.
+    var context: String?
+    var questionId: String?
+    var options: [QuestionOption]?
+    var multiple: Bool?
+    var custom: Bool?
+    /// The option Agentman would pick, waiting on the user's OK.
+    var suggested: String?
+    var outcome: String?
+
+    var isOpen: Bool { state == "open" }
+    /// Settled or put away: the conversation no longer shows it.
+    var isGone: Bool { state == "settled" || state == "dismissed" }
+
+    /// The agent's question, for answering it on the card.
+    var question: Question? {
+        guard kind == "question", let questionId else { return nil }
+        return Question(id: questionId, prompt: "", title: nil, detail: nil,
+                        options: options ?? [], multiple: multiple, custom: custom)
+    }
 }
 
 struct ManagerSettings: Codable, Sendable, Hashable {
@@ -132,6 +176,8 @@ struct ManagerSettings: Codable, Sendable, Hashable {
     var briefModel: String
     var effort: String
     var briefs: Bool
+    /// Agentman answers low-risk requests itself.
+    var autoApprove: Bool
     var style: String
     var instructions: String
     var keySet: Bool

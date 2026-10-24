@@ -8,6 +8,10 @@ struct AgentThreadView: View {
     @State private var draft = ""
     @State private var sending = false
 
+    /// Claude Code in tmux reads the messages it is holding on Ctrl-X
+    /// Ctrl-S, so they can be sent now rather than when the step ends.
+    private var canSendNow: Bool { session.kind == "claude" && session.inject == "tmux" }
+
     var body: some View {
         VStack(spacing: 0) {
             ThreadHeader(session: session)
@@ -30,7 +34,8 @@ struct AgentThreadView: View {
                                 .id(message.id)
                         }
                         ForEach(Array((session.queued ?? []).enumerated()), id: \.offset) { _, text in
-                            QueuedBubble(text: text, note: "Waiting for the agent to read it")
+                            QueuedBubble(text: text, note: "Waiting for the agent to read it",
+                                         onSendNow: canSendNow ? { await store.sendQueuedNow(session.id) } : nil)
                         }
                         ForEach(Array((store.queued[session.id] ?? []).enumerated()), id: \.offset) { _, text in
                             QueuedBubble(text: text, note: "Queued: it reaches the agent when its turn ends")
@@ -243,6 +248,10 @@ private struct ToolRow: View {
 private struct QueuedBubble: View {
     let text: String
     let note: String
+    /// Hurries the agent's queue, where the agent can be: Claude Code in
+    /// tmux, which reads what it holds on Ctrl-X Ctrl-S.
+    var onSendNow: (() async -> Bool)?
+    @State private var sending = false
 
     var body: some View {
         HStack {
@@ -257,9 +266,24 @@ private struct QueuedBubble: View {
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
                             .strokeBorder(Palette.line, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                     )
-                Text(note)
-                    .font(TextStyle.caption)
-                    .foregroundStyle(Palette.faint)
+                HStack(spacing: 8) {
+                    Text(note)
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.faint)
+                    if let onSendNow {
+                        Button(sending ? "Sending…" : "Send now") {
+                            sending = true
+                            Task {
+                                _ = await onSendNow()
+                                sending = false
+                            }
+                        }
+                        .buttonStyle(.link)
+                        .font(TextStyle.caption)
+                        .disabled(sending)
+                        .help("Sends every waiting message now instead of when this step ends")
+                    }
+                }
             }
         }
     }
