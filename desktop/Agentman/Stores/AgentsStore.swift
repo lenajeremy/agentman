@@ -27,6 +27,10 @@ final class AgentsStore {
     private(set) var loadingOlder: Set<String> = []
     /// The last thing that went wrong sending to or answering an agent.
     var actionError: [String: String] = [:]
+    /// Messages the daemon queued for an agent it cannot type into: they
+    /// reach it when its current turn ends. Shown until the agent's own copy
+    /// of them arrives in its conversation.
+    private(set) var queued: [String: [String]] = [:]
     var search = ""
     var selection: SidebarItem? = .manager {
         didSet { selectionChanged(from: oldValue) }
@@ -109,7 +113,11 @@ final class AgentsStore {
         var request = DaemonRequest(.sendMessage, sessionId: sessionId)
         request.text = text
         request.clientId = "mac-send-\(UUID().uuidString)"
-        return await perform(request, for: sessionId)
+        let status = await performWithStatus(request, for: sessionId)
+        if status == .queued {
+            queued[sessionId, default: []].append(text)
+        }
+        return status != .failed
     }
 
     /// Answers the question an agent is showing, with an option, a note, or both.
@@ -199,17 +207,23 @@ final class AgentsStore {
     }
 
     private func perform(_ request: DaemonRequest, for sessionId: String) async -> Bool {
+        await performWithStatus(request, for: sessionId) != .failed
+    }
+
+    /// Sends an action and says how far it got: delivered, queued for the
+    /// agent's next turn end, or failed, with the reason kept for display.
+    private func performWithStatus(_ request: DaemonRequest, for sessionId: String) async -> SendStatus {
         actionError[sessionId] = nil
         do {
             let reply = try await client.request(request)
             if reply.type == "error" || reply.status == .failed {
                 actionError[sessionId] = reply.error ?? "The agent didn't take that."
-                return false
+                return .failed
             }
-            return true
+            return reply.status ?? .delivered
         } catch {
             actionError[sessionId] = error.localizedDescription
-            return false
+            return .failed
         }
     }
 
@@ -244,9 +258,20 @@ final class AgentsStore {
     private func merge(_ new: [Message], into sessionId: String) {
         var current = messages[sessionId] ?? []
         let known = Set(current.map(\.id))
-        current.append(contentsOf: new.filter { !known.contains($0.id) })
+        let added = new.filter { !known.contains($0.id) }
+        current.append(contentsOf: added)
         current.sort { $0.ts < $1.ts }
         messages[sessionId] = current
+        // A queued message that has reached the agent shows as its own.
+        if var waiting = queued[sessionId], !waiting.isEmpty {
+            for message in added where message.role == .user {
+                let text = (message.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if let index = waiting.firstIndex(where: { text.contains($0.trimmingCharacters(in: .whitespacesAndNewlines)) }) {
+                    waiting.remove(at: index)
+                }
+            }
+            queued[sessionId] = waiting
+        }
     }
 
     // MARK: - Helpers

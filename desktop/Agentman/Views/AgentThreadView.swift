@@ -30,7 +30,10 @@ struct AgentThreadView: View {
                                 .id(message.id)
                         }
                         ForEach(Array((session.queued ?? []).enumerated()), id: \.offset) { _, text in
-                            QueuedBubble(text: text)
+                            QueuedBubble(text: text, note: "Waiting for the agent to read it")
+                        }
+                        ForEach(Array((store.queued[session.id] ?? []).enumerated()), id: \.offset) { _, text in
+                            QueuedBubble(text: text, note: "Queued: it reaches the agent when its turn ends")
                         }
                     }
                     .padding(.horizontal, 32)
@@ -74,6 +77,9 @@ struct AgentThreadView: View {
     private var placeholder: String {
         if !session.canReceive { return "Start this agent with am \(session.kind) to message it from here" }
         if session.question != nil { return "Answer the question above first" }
+        if session.inject == "hook" {
+            return "Message \(session.name): it reads it when its turn ends (start it with am \(session.kind) to type in directly)"
+        }
         return "Message \(session.name)"
     }
 
@@ -232,9 +238,11 @@ private struct ToolRow: View {
     }
 }
 
-/// A message the agent is holding until its current step ends.
+/// A message the agent has not read yet: held until its current step ends,
+/// or queued until its turn does.
 private struct QueuedBubble: View {
     let text: String
+    let note: String
 
     var body: some View {
         HStack {
@@ -249,7 +257,7 @@ private struct QueuedBubble: View {
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
                             .strokeBorder(Palette.line, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                     )
-                Text("Waiting for the agent to read it")
+                Text(note)
                     .font(TextStyle.caption)
                     .foregroundStyle(Palette.faint)
             }
