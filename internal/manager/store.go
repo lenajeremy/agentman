@@ -24,7 +24,9 @@ import (
 // Both are JSON lines in the manager directory, only ever appended to, so a
 // restart continues the same conversation, and the model's history is never
 // rewritten: Claude checks that the turns its thinking was written against
-// have not changed.
+// have not changed. An entry that changes later, such as a card once it is
+// answered, is appended again under the same ID, and the latest copy wins in
+// the first one's place.
 type conversation struct {
 	mu          sync.Mutex
 	entriesPath string
@@ -45,11 +47,18 @@ func loadConversation(dir string) (*conversation, error) {
 		entriesPath: filepath.Join(dir, "entries.jsonl"),
 		historyPath: filepath.Join(dir, "history.jsonl"),
 	}
+	at := map[string]int{}
 	if err := readLines(c.entriesPath, func(line []byte) {
 		var entry protocol.ManagerEntry
-		if json.Unmarshal(line, &entry) == nil && entry.ID != "" {
-			c.entries = append(c.entries, entry)
+		if json.Unmarshal(line, &entry) != nil || entry.ID == "" {
+			return
 		}
+		if i, ok := at[entry.ID]; ok {
+			c.entries[i] = entry
+			return
+		}
+		at[entry.ID] = len(c.entries)
+		c.entries = append(c.entries, entry)
 	}); err != nil {
 		return nil, err
 	}
@@ -115,9 +124,16 @@ func appendLine(path string, value any) error {
 	return err
 }
 
+// addEntry keeps a new entry, or the new state of one already kept.
 func (c *conversation) addEntry(entry protocol.ManagerEntry) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	for i := len(c.entries) - 1; i >= 0; i-- {
+		if c.entries[i].ID == entry.ID {
+			c.entries[i] = entry
+			return appendLine(c.entriesPath, entry)
+		}
+	}
 	c.entries = append(c.entries, entry)
 	if len(c.entries) > maxEntriesInMemory {
 		c.entries = c.entries[len(c.entries)-maxEntriesInMemory:]
@@ -141,6 +157,19 @@ func (c *conversation) page(before string, limit int) ([]protocol.ManagerEntry, 
 	}
 	start := max(0, end-limit)
 	return append([]protocol.ManagerEntry(nil), c.entries[start:end]...), start > 0
+}
+
+// openCards is the cards still waiting on the user, oldest first.
+func (c *conversation) openCards() []protocol.ManagerEntry {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var open []protocol.ManagerEntry
+	for _, entry := range c.entries {
+		if entry.Card != nil && entry.Card.State == protocol.CardOpen {
+			open = append(open, entry)
+		}
+	}
+	return open
 }
 
 func (c *conversation) appendHistory(message anthropic.BetaMessageParam) error {

@@ -23,6 +23,11 @@ const (
 	ReqManagerSetKey RequestType = "manager_set_key"
 	// ReqManagerBriefs lists the latest brief for every agent.
 	ReqManagerBriefs RequestType = "manager_briefs"
+	// ReqManagerCardReply answers the card named by CardID: OptionKey (or
+	// OptionKeys, with AnswerText) for a question, Text for a reply to an
+	// agent. ReqManagerCardDismiss puts a card away unanswered.
+	ReqManagerCardReply   RequestType = "manager_card_reply"
+	ReqManagerCardDismiss RequestType = "manager_card_dismiss"
 )
 
 const (
@@ -60,6 +65,66 @@ type ManagerEntry struct {
 	Streaming bool `json:"streaming,omitempty"`
 	// Path is an image an activity looked at, which the app shows too.
 	Path string `json:"path,omitempty"`
+	// Card is set on a "card" entry: something only the user can decide,
+	// put in front of them to answer on the spot. When it is settled, the
+	// entry comes again with the card's new state.
+	Card *ManagerCard `json:"card,omitempty"`
+}
+
+// Card kinds.
+const (
+	// CardQuestion is an agent's question or permission request that
+	// Agentman may not answer itself.
+	CardQuestion = "question"
+	// CardNeedsYou is an agent waiting on the user for something that is not
+	// a question on screen: a decision, an approval, an answer in words.
+	CardNeedsYou = "needs_you"
+)
+
+// Card states.
+const (
+	CardOpen = "open"
+	// CardAnswered: the user answered it here, on the card.
+	CardAnswered = "answered"
+	// CardSettled: it no longer needs the user. They answered the agent
+	// directly, the agent moved on or ended, or Agentman put it away. Apps
+	// take it out of the conversation.
+	CardSettled = "settled"
+	// CardDismissed: the user put it away unanswered.
+	CardDismissed = "dismissed"
+)
+
+// ManagerCard is a decision put in front of the user: an agent's question,
+// with its options, or its need in words, with a box to reply.
+type ManagerCard struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	State     string `json:"state"`
+	SessionID string `json:"sessionId"`
+	AgentName string `json:"agentName"`
+	// Title says what is asked, in a line: "wants to run `git push`".
+	Title string `json:"title"`
+	// Detail is the command, the file, or what the agent needs, in full.
+	Detail string `json:"detail,omitempty"`
+	// Reason is why Agentman did not answer it itself: "it pushes to a
+	// remote".
+	Reason string `json:"reason,omitempty"`
+	// Context is Agentman's latest brief on the agent, for what it is
+	// working on when it asks.
+	Context string `json:"context,omitempty"`
+	// QuestionID and Options are the agent's question, on a question card:
+	// an answer is checked against QuestionID, so a card for a question
+	// already answered cannot answer the next one.
+	QuestionID string           `json:"questionId,omitempty"`
+	Options    []QuestionOption `json:"options,omitempty"`
+	Multiple   bool             `json:"multiple,omitempty"`
+	Custom     bool             `json:"custom,omitempty"`
+	// Suggested is the option Agentman would pick, when the user asked it to
+	// answer and the answer needs their OK.
+	Suggested string `json:"suggested,omitempty"`
+	// Outcome says how it was settled: "You chose Yes", "Answered in the
+	// agent".
+	Outcome string `json:"outcome,omitempty"`
 }
 
 // ManagerSettings is how Agentman works, as the user set it.
@@ -71,6 +136,10 @@ type ManagerSettings struct {
 	Effort string `json:"effort"`
 	// Briefs turns the per-agent briefs on or off.
 	Briefs bool `json:"briefs"`
+	// AutoApprove lets Agentman answer low-risk requests itself: reading,
+	// searching, tests and builds, "continue?", and changes to files in the
+	// agent's own folder. Everything else becomes a card.
+	AutoApprove bool `json:"autoApprove"`
 	// Style is how Agentman talks; Instructions is anything else it should
 	// know or do. Both go into its prompt.
 	Style        string `json:"style"`

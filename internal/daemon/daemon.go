@@ -481,6 +481,9 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 			gone = append(gone, id)
 		}
 	}
+	if len(changed)+len(gone) > 0 {
+		defer d.managerSessionsChanged()
+	}
 	bulk := len(changed)+len(gone) > maxIncrementalSessionEvents
 	if bulk {
 		list := make([]protocol.Session, 0, len(current))

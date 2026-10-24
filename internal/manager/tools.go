@@ -115,6 +115,49 @@ var toolDefs = []toolDef{
 		required:    []string{"agent"},
 		run:         runListCommits,
 	},
+	{
+		name: "send_to_agent",
+		description: "Send one agent a message, as its user, when the user asks you to. It is typed into the agent, " +
+			"or queued until its current turn ends if it can only be reached between turns. " +
+			"The user sees exactly what you sent.",
+		properties: map[string]any{
+			"agent": agentProperty,
+			"text":  map[string]any{"type": "string", "description": "The message, written as the user would write it to the agent."},
+		},
+		required: []string{"agent", "text"},
+		run:      runSendToAgent,
+	},
+	{
+		name: "answer_question",
+		description: "Answer the question or permission request an agent is showing, when the user asks you to. " +
+			"Low-risk approvals and any \"no\" are sent at once. Anything else needs the user's OK: " +
+			"your pick is marked on the question's card for them to confirm with one tap.",
+		properties: map[string]any{
+			"agent":  agentProperty,
+			"option": map[string]any{"type": "string", "description": "The option to choose: its key or its label, from list_agents."},
+			"text":   map[string]any{"type": "string", "description": "A typed answer, for a question that takes one, or a note with an option that carries one."},
+		},
+		required: []string{"agent"},
+		run:      runAnswerQuestion,
+	},
+	{
+		name:        "interrupt",
+		description: "Stop what one agent is doing, like pressing Escape in its terminal, when the user asks you to.",
+		properties:  map[string]any{"agent": agentProperty},
+		required:    []string{"agent"},
+		run:         runInterrupt,
+	},
+	{
+		name: "dismiss_card",
+		description: "Take away a card that no longer needs the user: they answered the agent themselves, " +
+			"the agent moved on, or it was dealt with some other way. Cards are listed by list_agents.",
+		properties: map[string]any{
+			"card":   map[string]any{"type": "string", "description": "The card's id."},
+			"reason": map[string]any{"type": "string", "description": "Why, in a few words: \"answered in the agent\"."},
+		},
+		required: []string{"card", "reason"},
+		run:      runDismissCard,
+	},
 }
 
 // apiTools is the tool list as the API takes it. Built once, in a fixed
@@ -195,6 +238,7 @@ func runListAgents(_ context.Context, m *Manager, _ map[string]any) toolResult {
 	if len(sessions) == 0 {
 		return toolResult{text: "No agents are running.", activity: "Checked the agents"}
 	}
+	cards := m.conversation.openCards()
 	var b strings.Builder
 	now := time.Now()
 	for _, s := range sessions {
@@ -208,6 +252,18 @@ func runListAgents(_ context.Context, m *Manager, _ map[string]any) toolResult {
 		}
 		if brief, ok := m.briefs.get(s.ID); ok && brief.Summary != "" {
 			fmt.Fprintf(&b, "\n  brief: %s", brief.Summary)
+		}
+		if s.Question != nil && len(s.Question.Options) > 0 {
+			var options []string
+			for _, option := range s.Question.Options {
+				options = append(options, fmt.Sprintf("%s=%q", option.Key, option.Label))
+			}
+			fmt.Fprintf(&b, "\n  options: %s", strings.Join(options, ", "))
+		}
+		for _, card := range cards {
+			if card.Card.SessionID == s.ID {
+				fmt.Fprintf(&b, "\n  card %s, waiting on the user: %s", card.Card.ID, card.Text)
+			}
 		}
 		b.WriteString("\n")
 	}
@@ -352,6 +408,143 @@ func runListCommits(ctx context.Context, m *Manager, input map[string]any) toolR
 	return toolResult{text: b.String(), activity: "Read " + session.Name + "'s commits", sessionID: session.ID}
 }
 
+func runSendToAgent(ctx context.Context, m *Manager, input map[string]any) toolResult {
+	session, err := m.resolveAgent(input)
+	if err != nil {
+		return toolResult{text: err.Error(), isError: true}
+	}
+	text, _ := input["text"].(string)
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return toolResult{text: "Say what to send.", isError: true}
+	}
+	if session.Inject == "" || session.Inject == protocol.InjectNone {
+		return toolResult{text: session.Name + " can't be messaged from here; the user has to open it.", isError: true}
+	}
+	status, err := m.sendTo(ctx, session, text)
+	if err != nil {
+		return toolResult{text: "Couldn't send it: " + err.Error(), isError: true}
+	}
+	result := "Sent. " + session.Name + " has it."
+	if status == protocol.StatusQueued {
+		result = "Queued: " + session.Name + " reads it when its current turn ends."
+	}
+	return toolResult{
+		text:      result,
+		activity:  fmt.Sprintf("Sent %s: “%s”", session.Name, clip(text, 120)),
+		sessionID: session.ID,
+	}
+}
+
+func runAnswerQuestion(ctx context.Context, m *Manager, input map[string]any) toolResult {
+	session, err := m.resolveAgent(input)
+	if err != nil {
+		return toolResult{text: err.Error(), isError: true}
+	}
+	q := session.Question
+	if q == nil {
+		return toolResult{text: session.Name + " isn't asking anything right now.", isError: true}
+	}
+	choice, _ := input["option"].(string)
+	text, _ := input["text"].(string)
+	text = strings.TrimSpace(text)
+	key := ""
+	if choice = strings.TrimSpace(choice); choice != "" {
+		for _, option := range q.Options {
+			if option.Key == choice || strings.EqualFold(option.Label, choice) {
+				key = option.Key
+				break
+			}
+		}
+		if key == "" {
+			return toolResult{text: fmt.Sprintf("%s has no option %q; list_agents shows the options.", session.Name, choice), isError: true}
+		}
+	}
+	if key == "" && text == "" {
+		return toolResult{text: "Say which option, or what to answer.", isError: true}
+	}
+
+	// Approving is for the rules to decide, not the model: only what the
+	// user let Agentman approve, or a no, goes straight to the agent.
+	d := classify(session, q)
+	safe := key != "" && ((d.auto && key == d.optionKey) || isDenial(q.Options, key))
+	m.cardMu.Lock()
+	defer m.cardMu.Unlock()
+	if !safe {
+		if key == "" {
+			m.postQuestionCardLocked(session, d, "")
+			return toolResult{
+				text:      "A typed answer needs the user. Their card for this question is up; tell them what you'd write.",
+				activity:  "Left " + session.Name + "'s question to you",
+				sessionID: session.ID,
+			}
+		}
+		m.postQuestionCardLocked(session, d, key)
+		reason := d.reason
+		if reason == "" {
+			reason = "only the user can approve that"
+		}
+		return toolResult{
+			text: fmt.Sprintf("Not sent: that needs the user's OK (%s). Your pick is marked on the card, "+
+				"so it takes them one tap. Tell them it's there.", reason),
+			activity:  "Marked a pick on " + session.Name + "'s question for you",
+			sessionID: session.ID,
+		}
+	}
+	if err := m.answer(ctx, session.ID, protocol.Request{QuestionID: q.ID, OptionKey: key, AnswerText: text}); err != nil {
+		return toolResult{text: "Couldn't answer: " + err.Error(), isError: true}
+	}
+	chosen := chosenText(q.Options, protocol.Request{OptionKey: key, AnswerText: text})
+	if open := m.openCardLocked(session.ID, q.ID); open != nil {
+		m.closeCardLocked(*open, protocol.CardSettled, "Agentman answered "+chosen)
+	}
+	return toolResult{
+		text:      "Answered " + chosen + ".",
+		activity:  fmt.Sprintf("Answered %s: %s", session.Name, chosen),
+		sessionID: session.ID,
+	}
+}
+
+func runInterrupt(ctx context.Context, m *Manager, input map[string]any) toolResult {
+	session, err := m.resolveAgent(input)
+	if err != nil {
+		return toolResult{text: err.Error(), isError: true}
+	}
+	event := m.agents.Request(ctx, protocol.Request{Type: protocol.ReqInterrupt, SessionID: session.ID})
+	if event.Type == protocol.EvtError || event.Status == protocol.StatusFailed {
+		return toolResult{text: "Couldn't stop it: " + strings.TrimPrefix(event.Error, "daemon: "), isError: true}
+	}
+	return toolResult{text: "Stopped " + session.Name + ".", activity: "Stopped " + session.Name, sessionID: session.ID}
+}
+
+func runDismissCard(_ context.Context, m *Manager, input map[string]any) toolResult {
+	id, _ := input["card"].(string)
+	reason, _ := input["reason"].(string)
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "No longer needed"
+	}
+	m.cardMu.Lock()
+	defer m.cardMu.Unlock()
+	entry, ok := m.cardByIDLocked(strings.TrimSpace(id))
+	if !ok {
+		return toolResult{text: "No open card has that id; it may already be gone.", isError: true}
+	}
+	m.closeCardLocked(entry, protocol.CardSettled, capitalize(reason))
+	return toolResult{
+		text:      "Taken away.",
+		activity:  fmt.Sprintf("Took away %s's card: %s", entry.Card.AgentName, reason),
+		sessionID: entry.Card.SessionID,
+	}
+}
+
+func capitalize(text string) string {
+	if text == "" {
+		return text
+	}
+	return strings.ToUpper(text[:1]) + text[1:]
+}
+
 // formatTranscript renders messages one per line or paragraph, oldest first,
 // within maxToolText, keeping the newest when it must cut.
 func formatTranscript(messages []protocol.Message) string {
@@ -402,7 +595,7 @@ func stateText(s protocol.Session) string {
 			} else if s.Question.Prompt != "" {
 				ask += " " + clip(s.Question.Prompt, 160)
 			}
-			return "needs the user: " + strings.TrimSpace(ask)
+			return "needs the user: " + strings.Join(strings.Fields(ask), " ")
 		}
 		return "needs the user"
 	case protocol.StateBusy:

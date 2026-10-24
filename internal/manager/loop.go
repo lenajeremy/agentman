@@ -35,7 +35,13 @@ func (m *Manager) runTurn(ctx context.Context, model Model, text string) {
 	settled := "idle"
 	defer func() { m.setStatus(settled, "") }()
 
-	if err := m.conversation.appendHistory(anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(text))); err != nil {
+	// What happened since the user last wrote, such as requests Agentman
+	// approved and cards it put up, goes first, so the model knows.
+	blocks := []anthropic.BetaContentBlockParamUnion{anthropic.NewBetaTextBlock(text)}
+	if notes := m.takeNotes(); notes != "" {
+		blocks = append([]anthropic.BetaContentBlockParamUnion{anthropic.NewBetaTextBlock(notes)}, blocks...)
+	}
+	if err := m.conversation.appendHistory(anthropic.NewBetaUserMessage(blocks...)); err != nil {
 		m.addEntry(protocol.ManagerEntry{Role: "error", Text: "Couldn't save the conversation: " + err.Error()})
 		return
 	}

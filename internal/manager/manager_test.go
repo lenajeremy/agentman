@@ -87,7 +87,30 @@ type fakeAgents struct {
 	answer   func(protocol.Request) protocol.Event
 }
 
-func (f *fakeAgents) Sessions() []protocol.Session { return f.sessions }
+func (f *fakeAgents) Sessions() []protocol.Session {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]protocol.Session(nil), f.sessions...)
+}
+
+func (f *fakeAgents) setSessions(sessions []protocol.Session) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sessions = sessions
+}
+
+// sent is the requests of one type Agentman made.
+func (f *fakeAgents) sent(kind protocol.RequestType) []protocol.Request {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []protocol.Request
+	for _, req := range f.requests {
+		if req.Type == kind {
+			out = append(out, req)
+		}
+	}
+	return out
+}
 
 func (f *fakeAgents) Request(_ context.Context, req protocol.Request) protocol.Event {
 	f.mu.Lock()
@@ -146,7 +169,7 @@ func newHarness(t *testing.T, model *scriptedModel, withKey bool) *harness {
 		agents: &fakeAgents{sessions: []protocol.Session{
 			{ID: "claude:a", Kind: "claude", Name: "site", Cwd: "/w/site", State: protocol.StateBusy, LastActivityAt: time.Now().UnixMilli()},
 			{ID: "codex:b", Kind: "codex", Name: "api", Cwd: "/w/api", State: protocol.StateWaitingInput,
-				Question: &protocol.Question{ID: "q1", Title: "Bash command", Detail: "npm test", Prompt: "Proceed?"}},
+				Inject: protocol.InjectTmux, Question: permission("q1", "npm test")},
 		}},
 		secrets: &memorySecrets{values: map[string]string{}},
 		dir:     t.TempDir(),
@@ -268,7 +291,7 @@ func TestAgentmanChecksTheAgentsAndSaysWhatItDid(t *testing.T) {
 	second := model.request(1)
 	last := second.Messages[len(second.Messages)-1]
 	raw, _ := json.Marshal(last)
-	if !strings.Contains(string(raw), "tool_result") || !strings.Contains(string(raw), "needs the user: Bash command npm test") {
+	if !strings.Contains(string(raw), "tool_result") || !strings.Contains(string(raw), "needs the user: Bash command Run it npm test") {
 		t.Fatalf("the tool result sent back was %s", raw)
 	}
 }
@@ -439,7 +462,8 @@ func TestTheRequestIsShapedForTheModel(t *testing.T) {
 	for _, tool := range params.Tools {
 		names = append(names, tool.OfTool.Name)
 	}
-	if !slices.Equal(names, []string{"list_agents", "get_brief", "read_messages", "view_image", "list_changes", "file_diff", "list_commits"}) {
+	if !slices.Equal(names, []string{"list_agents", "get_brief", "read_messages", "view_image", "list_changes", "file_diff",
+		"list_commits", "send_to_agent", "answer_question", "interrupt", "dismiss_card"}) {
 		t.Fatalf("tools = %v", names)
 	}
 	if !slices.Contains(params.Betas, anthropic.AnthropicBetaServerSideFallback2026_07_01) ||
@@ -507,25 +531,32 @@ func TestABriefIsWrittenFromWhatIsNewAndToldOnce(t *testing.T) {
 	}
 }
 
-// A question is briefed almost at once; finished turns wait for the burst
-// to settle.
-func TestQuestionsAreBriefedSoonerThanTurns(t *testing.T) {
+// A finished turn is briefed once the burst settles. A question is not
+// briefed at all: it is taken at once, without a call to the model, and
+// once however many sweeps see it.
+func TestQuestionsAreTakenAtOnceAndTurnsBriefedLater(t *testing.T) {
 	h := newHarness(t, &scriptedModel{}, true)
+	h.agents.answer = delivered
 	h.m.TurnComplete(h.agents.sessions[0])
 	h.m.NeedsAnswer(h.agents.sessions[1])
 	h.m.NeedsAnswer(h.agents.sessions[1])
 
 	h.m.briefMu.Lock()
-	turnDue, questionDue := h.m.briefDue["claude:a"], h.m.briefDue["codex:b"]
+	turnDue, questionBriefed := h.m.briefDue["claude:a"], h.m.briefDue["codex:b"]
 	h.m.briefMu.Unlock()
-	if until := time.Until(questionDue); until > 3*time.Second {
-		t.Fatalf("a question is briefed in %v", until)
-	}
 	if until := time.Until(turnDue); until < 15*time.Second {
 		t.Fatalf("a finished turn is briefed in %v, before the burst can settle", until)
 	}
-	if due := h.m.dueBriefs(time.Now().Add(5 * time.Second)); !slices.Equal(due, []string{"codex:b"}) {
-		t.Fatalf("due after 5s = %v", due)
+	if !questionBriefed.IsZero() {
+		t.Fatal("a question was scheduled for a brief")
+	}
+	waitFor(t, "the question to be approved", func() bool { return len(h.agents.sent(protocol.ReqAnswer)) > 0 })
+	time.Sleep(20 * time.Millisecond)
+	if n := len(h.agents.sent(protocol.ReqAnswer)); n != 1 {
+		t.Fatalf("the question was answered %d times", n)
+	}
+	if h.model.calls() != 0 {
+		t.Fatal("taking a question called the model")
 	}
 }
 

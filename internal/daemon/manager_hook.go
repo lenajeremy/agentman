@@ -19,6 +19,10 @@ type ManagerHook interface {
 	// discovery and from hook delivery.
 	TurnComplete(session protocol.Session)
 	NeedsAnswer(session protocol.Session)
+	// SessionsChanged hands over the session list after a discovery sweep
+	// that changed it, so Agentman can see a question answered elsewhere or
+	// an agent pick up again. It must not block either.
+	SessionsChanged(sessions []protocol.Session)
 }
 
 // SetManager installs the manager. Without one, manager requests are
@@ -50,6 +54,12 @@ func (d *Daemon) managerTurnComplete(sessionID string) {
 	d.mu.Unlock()
 	if ok {
 		manager.TurnComplete(session)
+	}
+}
+
+func (d *Daemon) managerSessionsChanged() {
+	if manager := d.managerHook(); manager != nil {
+		manager.SessionsChanged(d.snapshot())
 	}
 }
 

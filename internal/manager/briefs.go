@@ -114,15 +114,13 @@ func (b *briefStore) put(brief protocol.Brief, lastMessageID string) (bool, erro
 }
 
 // Brief timing. A burst of turns is briefed once, after it settles, and a
-// busy agent at most once a turnGap. An agent that needs the user is briefed
-// almost at once, since that is the news that matters most.
+// busy agent at most once a turnGap. A question on screen is not briefed: it
+// becomes a card at once (cards.go).
 const (
-	briefAfterTurn     = 20 * time.Second
-	briefTurnGap       = 90 * time.Second
-	briefAfterQuestion = 2 * time.Second
-	briefQuestionGap   = 15 * time.Second
-	briefTick          = 3 * time.Second
-	briefMessages      = 60
+	briefAfterTurn = 20 * time.Second
+	briefTurnGap   = 90 * time.Second
+	briefTick      = 3 * time.Second
+	briefMessages  = 60
 )
 
 // briefSchema is the brief's shape, as structured output.
@@ -278,7 +276,20 @@ func (m *Manager) writeBrief(ctx context.Context, sessionID string) {
 		return
 	}
 	m.emit(protocol.Event{Type: protocol.EvtManagerBrief, SessionID: sessionID, Brief: &brief})
-	if post {
+
+	// What the agent needs from the user goes in front of them as a card with
+	// a box to reply, unless its question is on screen, which has a card of
+	// its own. Once a brief no longer says it, the card goes.
+	m.cardMu.Lock()
+	needsYou := strings.TrimSpace(brief.NeedsYou) != "" && session.Question == nil
+	switch {
+	case needsYou:
+		m.postNeedsYouLocked(session, brief)
+	case strings.TrimSpace(brief.NeedsYou) == "":
+		m.settleNeedsYouLocked(sessionID, "No longer needed")
+	}
+	m.cardMu.Unlock()
+	if post && !needsYou {
 		m.addEntry(protocol.ManagerEntry{
 			Role: "brief", Text: brief.Summary, SessionID: sessionID,
 		})

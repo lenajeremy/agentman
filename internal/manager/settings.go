@@ -40,7 +40,10 @@ func defaultSettings() protocol.ManagerSettings {
 		BriefModel: defaultModel,
 		Effort:     defaultEffort,
 		Briefs:     true,
-		Style:      defaultStyle,
+		// The user chose this: Agentman handles the simple, low-risk requests,
+		// edits in the agent's own folder included.
+		AutoApprove: true,
+		Style:       defaultStyle,
 	}
 }
 

@@ -178,6 +178,8 @@ type Request struct {
 	// ClientID is echoed on SendResult so the app can settle its optimistic
 	// message bubble.
 	ClientID string `json:"clientId,omitempty"`
+	// CardID names the card on ReqManagerCardReply and ReqManagerCardDismiss.
+	CardID string `json:"cardId,omitempty"`
 	// PushToken carries an Expo push token on ReqRegisterPush.
 	PushToken string `json:"pushToken,omitempty"`
 	// Notify carries that phone's choice of alerts on ReqRegisterPush. Absent

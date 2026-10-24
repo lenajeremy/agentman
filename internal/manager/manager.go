@@ -54,12 +54,25 @@ type Manager struct {
 	// stopTurn cancels the reply being written, if there is one.
 	stopTurn context.CancelFunc
 
+	// notes are what happened outside a reply, for the model to read with
+	// the user's next message. Guarded by mu.
+	notes []string
+
 	briefMu     sync.Mutex
 	briefDue    map[string]time.Time
 	lastBriefAt map[string]time.Time
-	// asked is the question each agent was last briefed for asking, so a
-	// question is briefed once, not on every sweep that sees it.
+	// asked is the question each agent was last seen asking, so a question
+	// is taken once, not on every sweep that sees it.
 	asked map[string]string
+
+	// cardMu orders every change to a card: posting, answering, settling.
+	cardMu sync.Mutex
+	// lastState is each agent's state at the last check, to see one pick up.
+	lastState map[string]protocol.State
+
+	sessionsMu      sync.Mutex
+	latestSessions  []protocol.Session
+	sessionsChanged chan struct{}
 }
 
 // New loads the manager's state from cfg.Dir.
@@ -83,6 +96,9 @@ func New(cfg Config) (*Manager, error) {
 		briefDue:     map[string]time.Time{},
 		lastBriefAt:  map[string]time.Time{},
 		asked:        map[string]string{},
+		lastState:    map[string]protocol.State{},
+
+		sessionsChanged: make(chan struct{}, 1),
 	}
 	if m.newModel == nil {
 		m.newModel = newClaudeModel
@@ -99,8 +115,9 @@ func New(cfg Config) (*Manager, error) {
 	return m, nil
 }
 
-// Run writes briefs until ctx ends.
+// Run writes briefs and keeps the cards current until ctx ends.
 func (m *Manager) Run(ctx context.Context) {
+	go m.watchSessions(ctx)
 	m.runBriefs(ctx)
 }
 
@@ -109,7 +126,7 @@ func (m *Manager) Handles(kind protocol.RequestType) bool {
 	switch kind {
 	case protocol.ReqManagerSend, protocol.ReqManagerHistory, protocol.ReqManagerStop,
 		protocol.ReqManagerSettings, protocol.ReqManagerSetSettings, protocol.ReqManagerSetKey,
-		protocol.ReqManagerBriefs:
+		protocol.ReqManagerBriefs, protocol.ReqManagerCardReply, protocol.ReqManagerCardDismiss:
 		return true
 	}
 	return false
@@ -142,6 +159,10 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 		return m.setKey(ctx, req.Text)
 	case protocol.ReqManagerBriefs:
 		return protocol.Event{Type: protocol.EvtManagerBrief, Briefs: m.briefs.all()}
+	case protocol.ReqManagerCardReply:
+		return m.replyToCard(ctx, req)
+	case protocol.ReqManagerCardDismiss:
+		return m.dismissCard(req.CardID)
 	}
 	return protocol.Event{Type: protocol.EvtError, Error: "unknown manager request"}
 }
@@ -151,7 +172,9 @@ func (m *Manager) TurnComplete(session protocol.Session) {
 	m.scheduleBrief(session.ID, briefAfterTurn, briefTurnGap)
 }
 
-// NeedsAnswer hears that an agent is waiting on the user.
+// NeedsAnswer hears that an agent is asking something. The daemon says so on
+// every sweep that sees the question; it is taken once: approved, or put in
+// front of the user as a card, at once and without a call to the model.
 func (m *Manager) NeedsAnswer(session protocol.Session) {
 	if session.Question == nil {
 		return
@@ -161,7 +184,7 @@ func (m *Manager) NeedsAnswer(session protocol.Session) {
 	m.asked[session.ID] = session.Question.ID
 	m.briefMu.Unlock()
 	if !seen {
-		m.scheduleBrief(session.ID, briefAfterQuestion, briefQuestionGap)
+		go m.takeQuestion(context.Background(), session)
 	}
 }
 
