@@ -32,6 +32,9 @@ final class AgentsStore {
         didSet { selectionChanged(from: oldValue) }
     }
 
+    /// The conversation with Agentman, on the same connection.
+    let manager: ManagerStore
+
     private let client: DaemonClient
     private var cursors: [String: String] = [:]
     private var followed: String?
@@ -39,6 +42,7 @@ final class AgentsStore {
 
     init(client: DaemonClient = DaemonClient()) {
         self.client = client
+        manager = ManagerStore(client: client)
     }
 
     var socketPath: String { client.socketPath }
@@ -156,6 +160,7 @@ final class AgentsStore {
             if let event = try? await client.request(DaemonRequest(.listSessions)) {
                 apply(event)
             }
+            await manager.reload()
             // A reconnect starts the daemon's side afresh: follow again.
             if let followed {
                 follow(followed)
@@ -164,6 +169,10 @@ final class AgentsStore {
     }
 
     private func apply(_ event: DaemonEvent) {
+        if event.type.hasPrefix("manager_") {
+            manager.apply(event)
+            return
+        }
         switch event.type {
         case "sessions":
             sessions = (event.sessions ?? []).sorted(by: Self.boardOrder)

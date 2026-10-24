@@ -1,14 +1,12 @@
 import SwiftUI
 
-/// Agentman's place in the window. Until the manager can talk (the next
-/// phase), it is the overview the chat will grow out of: who needs you,
-/// who is working, and the way to each of them.
-struct ManagerHomeView: View {
+/// What an empty conversation with Agentman opens on: who needs you, who is
+/// working, and the way to each of them.
+struct ManagerWelcome: View {
     @Environment(AgentsStore.self) private var store
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
+        VStack(alignment: .leading, spacing: 28) {
                 VStack(alignment: .leading, spacing: 8) {
                     AgentmanBadge(size: 40)
                     Text(greeting)
@@ -41,14 +39,8 @@ struct ManagerHomeView: View {
                         }
                     }
                 }
-
-                ComingSoon()
-            }
-            .padding(.horizontal, 40)
-            .padding(.vertical, 44)
-            .frame(maxWidth: 760, alignment: .leading)
-            .frame(maxWidth: .infinity)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var greeting: String {
@@ -179,27 +171,5 @@ private struct AgentLinkRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-}
-
-/// Where the chat goes, said plainly rather than shown as a box that does
-/// nothing.
-private struct ComingSoon: View {
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "bubble.left.and.text.bubble.right")
-                .foregroundStyle(Palette.working)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Chat with Agentman is next")
-                    .font(TextStyle.bodyMedium)
-                    .foregroundStyle(Palette.text)
-                Text("One conversation that reads every agent for you, briefs you on what happened, and answers the easy questions itself.")
-                    .font(TextStyle.caption)
-                    .foregroundStyle(Palette.muted)
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.workingWash, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }

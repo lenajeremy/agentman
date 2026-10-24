@@ -34,6 +34,14 @@ enum RequestType: String, Codable, Sendable {
     case sendMessage = "send_message"
     case interrupt
     case answerQuestion = "answer_question"
+    case readSeenFile = "read_seen_file"
+    case managerSend = "manager_send"
+    case managerHistory = "manager_history"
+    case managerStop = "manager_stop"
+    case managerSettings = "manager_settings"
+    case managerSetSettings = "manager_set_settings"
+    case managerSetKey = "manager_set_key"
+    case managerBriefs = "manager_briefs"
 }
 
 struct DaemonRequest: Codable, Sendable {
@@ -47,6 +55,8 @@ struct DaemonRequest: Codable, Sendable {
     var optionKeys: [String]?
     var answerText: String?
     var clientId: String?
+    var path: String?
+    var manager: ManagerSettings?
 
     init(_ type: RequestType, sessionId: String? = nil) {
         self.type = type
@@ -61,6 +71,10 @@ enum SendStatus: String, Codable, Sendable {
 }
 
 struct DaemonEvent: Codable, Sendable {
+    init(type: String) {
+        self.type = type
+    }
+
     var type: String
     var sessionId: String?
     var sessions: [Session]?
@@ -73,6 +87,78 @@ struct DaemonEvent: Codable, Sendable {
     var status: SendStatus?
     var error: String?
     var daemon: DaemonInfo?
+    var workspace: WorkspaceResult?
+
+    // Agentman, the manager.
+    var entry: ManagerEntry?
+    var entries: [ManagerEntry]?
+    var entryId: String?
+    var delta: String?
+    var managerStatus: ManagerStatus?
+    var managerSettings: ManagerSettings?
+    var brief: Brief?
+    var briefs: [Brief]?
+    var more: Bool?
+}
+
+/// A file read from an agent's folder, or an image it opened.
+struct WorkspaceResult: Codable, Sendable {
+    var kind: String
+    var sessionId: String
+    var path: String?
+    /// Base64, for a supported image small enough to send.
+    var image: String?
+    var mime: String?
+}
+
+// MARK: - Agentman
+
+/// One entry in the conversation with Agentman.
+struct ManagerEntry: Codable, Sendable, Identifiable, Hashable {
+    var id: String
+    /// "user", "assistant", "activity", "brief" or "error".
+    var role: String
+    var text: String
+    var ts: Int64
+    var sessionId: String?
+    var tool: String?
+    var streaming: Bool?
+    /// An image an activity looked at.
+    var path: String?
+}
+
+struct ManagerSettings: Codable, Sendable, Hashable {
+    var chatModel: String
+    var briefModel: String
+    var effort: String
+    var briefs: Bool
+    var style: String
+    var instructions: String
+    var keySet: Bool
+}
+
+struct ManagerStatus: Codable, Sendable, Hashable {
+    /// "idle", "thinking", "needs_key" or "error".
+    var state: String
+    var error: String?
+    var keySet: Bool
+}
+
+/// Agentman's living summary of one agent.
+struct Brief: Codable, Sendable, Hashable, Identifiable {
+    var sessionId: String
+    var name: String
+    var summary: String
+    var goal: String?
+    var done: [String]?
+    var now: String?
+    var blocked: String?
+    var needsYou: String?
+    var files: [String]?
+    var notable: Bool?
+    var updatedAt: Int64
+
+    var id: String { sessionId }
 }
 
 // MARK: - Domain

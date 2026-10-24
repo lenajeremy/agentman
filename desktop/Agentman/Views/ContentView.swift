@@ -20,7 +20,7 @@ struct ContentView: View {
                         GoneView()
                     }
                 case .manager, nil:
-                    ManagerHomeView()
+                    ManagerChatView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
