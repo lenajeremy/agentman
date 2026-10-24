@@ -63,10 +63,8 @@ func runSuggestNote(_ context.Context, m *Manager, input map[string]any) toolRes
 	}
 	text := fmt.Sprintf("Suggested a note: “%s”", title)
 	m.addEntry(protocol.ManagerEntry{ID: id, Role: "card", Text: text, Card: card})
-	return toolResult{
-		text:     "Suggested. The user decides: nothing is saved unless they approve it, and they may edit it first.",
-		activity: fmt.Sprintf("Suggested a note, “%s”", title),
-	}
+	// No activity line: the card says it.
+	return toolResult{text: "Suggested. The user decides: nothing is saved unless they approve it, and they may edit it first."}
 }
 
 // answerNoteCardLocked saves a suggested note the user approved, with their

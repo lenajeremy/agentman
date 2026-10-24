@@ -61,6 +61,12 @@ final class ManagerStore {
         entries.compactMap(\.card).filter(\.isOpen)
     }
 
+    /// Notes Agentman suggests, waiting for the user to approve, edit or
+    /// dismiss them.
+    var noteSuggestions: [ManagerCard] {
+        openCards.filter { $0.kind == "note" }
+    }
+
     static func isNews(_ entry: ManagerEntry) -> Bool {
         switch entry.role {
         case "assistant": entry.streaming != true && !entry.text.isEmpty
@@ -177,6 +183,17 @@ final class ManagerStore {
             request.text = reply.text
         }
         return await perform(request)
+    }
+
+    /// Saves a suggested note, as Agentman wrote it or as the user edited
+    /// it. Returns the problem, if any.
+    func saveNote(_ card: ManagerCard, as edited: Note? = nil) async -> String? {
+        var request = DaemonRequest(.managerCardReply)
+        request.cardId = card.id
+        request.note = edited
+        let problem = await perform(request)
+        if problem == nil { await loadNotes() }
+        return problem
     }
 
     /// Puts a card away unanswered.

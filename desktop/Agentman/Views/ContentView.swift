@@ -33,6 +33,11 @@ struct ContentView: View {
             .toolbarBackground(Palette.paper, for: .windowToolbar)
             .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         }
+        // A note Agentman suggests, over whatever is on screen.
+        .overlay(alignment: .topTrailing) {
+            NoteSuggestionPopup()
+        }
+        .animation(.spring(duration: 0.3), value: store.manager.noteSuggestions.first?.id)
         .overlay {
             if let box = store.lightbox {
                 LightboxView(box: box)

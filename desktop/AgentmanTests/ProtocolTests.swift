@@ -85,4 +85,13 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(images.first?["data"], "iVBORw0KGgo=")
         XCTAssertEqual(json["type"] as? String, "manager_send")
     }
+
+    func testANoteCardCarriesItsNote() throws {
+        let json = #"{"id":"c1","kind":"note","state":"open","sessionId":"","agentName":"Agentman","title":"suggests a note","reason":"You said so twice.","note":{"name":"","tier":"shared","title":"Commits","body":"No attribution.","updatedAt":0}}"#
+        let card = try JSONDecoder().decode(ManagerCard.self, from: Data(json.utf8))
+        XCTAssertEqual(card.kind, "note")
+        XCTAssertEqual(card.note?.title, "Commits")
+        XCTAssertEqual(card.note?.tier, "shared")
+        XCTAssertTrue(card.isOpen)
+    }
 }

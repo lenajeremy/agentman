@@ -299,7 +299,13 @@ private struct ChatItemView: View {
                 ScheduledLine(entry: entry)
             case "card":
                 if let card = entry.card {
-                    if card.isOpen {
+                    if card.kind == "note" {
+                        if card.isOpen {
+                            NoteSuggestionCard(card: card)
+                        } else {
+                            NoteReceipt(card: card)
+                        }
+                    } else if card.isOpen {
                         ManagerCardView(card: card)
                     } else {
                         CardReceipt(card: card)

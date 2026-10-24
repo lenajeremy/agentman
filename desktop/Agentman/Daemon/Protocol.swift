@@ -222,7 +222,7 @@ struct ManagerEntry: Codable, Sendable, Identifiable, Hashable {
 /// its options, or its need in words, with a box to reply.
 struct ManagerCard: Codable, Sendable, Hashable, Identifiable {
     var id: String
-    /// "question", "needs_you" or "key".
+    /// "question", "needs_you", "key" or "note".
     var kind: String
     /// "open", "answered" (here, on the card), "settled" (no longer needs
     /// the user: answered in the agent, or the agent moved on) or
@@ -245,6 +245,8 @@ struct ManagerCard: Codable, Sendable, Hashable, Identifiable {
     /// The option Agentman would pick, waiting on the user's OK.
     var suggested: String?
     var outcome: String?
+    /// The note a note card suggests keeping.
+    var note: Note?
 
     var isOpen: Bool { state == "open" }
     /// Settled or put away: the conversation no longer shows it.

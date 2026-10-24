@@ -24,7 +24,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.sound = .default
         var identifier = entry.id
         var link = "agentman://home/conversation"
-        if let card = entry.card {
+        if let card = entry.card, card.kind == "note" {
+            identifier = card.id
+            content.title = "Agentman suggests a note"
+            content.body = card.note?.title ?? card.title
+            content.sound = nil
+        } else if let card = entry.card {
             identifier = card.id
             content.title = "\(agentName ?? card.agentName) needs you"
             content.body = [card.title, card.detail].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
