@@ -353,49 +353,65 @@ private struct ActivityRun: View {
     @State private var open = false
 
     var body: some View {
+        // In the same soft card as an agent's tool calls: one line for one
+        // thing Agentman did, a line that opens for several.
         VStack(alignment: .leading, spacing: 6) {
-            Button {
-                withAnimation(.easeOut(duration: 0.15)) { open.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: Self.icon(entries.last?.tool))
-                        .font(.system(size: 10, weight: .semibold))
-                    Text(summary)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .rotationEffect(.degrees(open ? 90 : 0))
-                }
-                .font(TextStyle.caption)
-                .foregroundStyle(Palette.muted)
-            }
-            .buttonStyle(.plain)
-            .padding(.leading, 34)
-            if open {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(entries) { entry in
-                        HStack(alignment: .firstTextBaseline, spacing: 7) {
-                            Image(systemName: Self.icon(entry.tool))
-                                .font(.system(size: 9, weight: .semibold))
-                                .frame(width: 12)
-                            Text(entry.text)
-                                .lineLimit(2)
-                        }
-                        .font(TextStyle.caption)
-                        .foregroundStyle(Palette.faint)
+            if entries.count == 1, let entry = entries.first {
+                row(entry)
+            } else {
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { open.toggle() }
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: Self.icon(entries.last?.tool))
+                            .font(.system(size: 10, weight: .semibold))
+                            .frame(width: 12)
+                        Text(entries.last?.text ?? "")
+                            .lineLimit(1)
+                        // Apart from the line, so a long one never cuts it off.
+                        Text("and \(entries.count - 1) more")
+                            .foregroundStyle(Palette.faint)
+                            .fixedSize()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .rotationEffect(.degrees(open ? 90 : 0))
                     }
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
+                    .contentShape(Rectangle())
                 }
-                .padding(.leading, 50)
+                .buttonStyle(.plain)
+                if open {
+                    Rectangle()
+                        .fill(Palette.toolCardEdge)
+                        .frame(height: 1)
+                        .padding(.vertical, 3)
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(entries) { entry in
+                            row(entry)
+                        }
+                    }
+                    .padding(.leading, 18)
+                    .padding(.bottom, 2)
+                }
             }
         }
+        .toolCard()
+        .padding(.leading, 34)
     }
 
-    /// The newest thing Agentman did, and how many more, since the newest
-    /// is what the reply that follows is about.
-    private var summary: String {
-        guard let last = entries.last else { return "" }
-        if entries.count == 1 { return last.text }
-        return "\(last.text) and \(entries.count - 1) more"
+    private func row(_ entry: ManagerEntry) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+            Image(systemName: Self.icon(entry.tool))
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(Palette.faint)
+                .frame(width: 12)
+            Text(entry.text)
+                .foregroundStyle(Palette.textSecondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(TextStyle.caption)
     }
 
     /// An icon for what Agentman did.
@@ -422,7 +438,7 @@ private struct ImageActivity: View {
 
     var body: some View {
         if let sessionId = entry.sessionId, let path = entry.path {
-            ImageThumbnail(sessionId: sessionId, path: path, label: entry.text)
+            ImageThumbnail(sessionId: sessionId, path: path, label: entry.text, carded: true)
                 .padding(.leading, 34)
         }
     }
