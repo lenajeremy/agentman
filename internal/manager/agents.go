@@ -42,7 +42,7 @@ func (m *Manager) handleAgent(ctx context.Context, req protocol.Request) protoco
 		for _, hit := range hits {
 			fmt.Fprintf(&b, "## %s (%s)\n%s\n\n", hit.Title, hit.Name, hit.Snippet)
 		}
-		b.WriteString("Read one in full with agentman_read_note.")
+		b.WriteString("Read one in full with read_note.")
 		return reply(b.String())
 	case protocol.ReqAgentKnowledgeRead:
 		note, err := m.knowledge.Read(knowledge.Shared, strings.TrimSpace(req.Text))
@@ -72,7 +72,7 @@ func (m *Manager) handleAgent(ctx context.Context, req protocol.Request) protoco
 			}
 			b.WriteString("\n")
 		}
-		b.WriteString("Ask for one with agentman_request_key; it is written into your project's .env.")
+		b.WriteString("Ask for one with request_key; it is written into your project's .env.")
 		return reply(b.String())
 	case protocol.ReqAgentRequestKey:
 		text, err := m.giveKey(ctx, session, req.Text, req.AnswerText)
