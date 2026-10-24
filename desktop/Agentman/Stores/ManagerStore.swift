@@ -17,6 +17,8 @@ final class ManagerStore {
     private(set) var notes: [Note] = []
     /// The keys Agentman keeps, by name.
     private(set) var keys: [Key] = []
+    /// What Agentman has scheduled for itself, soonest first.
+    private(set) var schedules: [ManagerSchedule] = []
     /// The last thing that went wrong talking to Agentman.
     var problem: String?
     private(set) var loaded = false
@@ -82,6 +84,7 @@ final class ManagerStore {
     func reload() async {
         async let settingsReply = try? client.request(DaemonRequest(.managerSettings))
         async let briefsReply = try? client.request(DaemonRequest(.managerBriefs))
+        async let schedulesReply = try? client.request(DaemonRequest(.managerSchedules))
         var historyRequest = DaemonRequest(.managerHistory)
         historyRequest.limit = 80
         async let historyReply = try? client.request(historyRequest)
@@ -95,6 +98,9 @@ final class ManagerStore {
         if let reply = await historyReply {
             entries = reply.entries ?? []
             hasOlder = reply.more ?? false
+        }
+        if let reply = await schedulesReply {
+            schedules = reply.schedules ?? []
         }
         loaded = true
     }
@@ -224,6 +230,16 @@ final class ManagerStore {
         return nil
     }
 
+    /// Cancels one of Agentman's reminders or watches.
+    func cancel(_ schedule: ManagerSchedule) async -> String? {
+        var request = DaemonRequest(.managerScheduleCancel)
+        request.scheduleId = schedule.id
+        guard let reply = try? await client.request(request) else { return "Couldn't reach am serve." }
+        if reply.type == "error" { return reply.error }
+        schedules = reply.schedules ?? []
+        return nil
+    }
+
     func loadKeys() async {
         if let reply = try? await client.request(DaemonRequest(.keysList)), let keys = reply.keys {
             self.keys = keys
@@ -285,6 +301,8 @@ final class ManagerStore {
             if let status = event.managerStatus { self.status = status }
         case "keys":
             if let keys = event.keys { self.keys = keys }
+        case "manager_schedules":
+            schedules = event.schedules ?? []
         case "manager_brief":
             if let brief = event.brief { briefs[brief.sessionId] = brief }
             if let all = event.briefs {

@@ -98,6 +98,13 @@ struct ManagerChatView: View {
             }
         }
         .navigationTitle("")
+        .toolbar {
+            if !manager.schedules.isEmpty {
+                ToolbarItem(placement: .primaryAction) {
+                    SchedulesButton()
+                }
+            }
+        }
     }
 
     /// Changes whenever the conversation grows, so it can follow along.
@@ -253,6 +260,8 @@ private struct ChatItemView: View {
                 AssistantReply(entry: entry)
             case "brief", "agent":
                 BriefCard(entry: entry)
+            case "scheduled":
+                ScheduledLine(entry: entry)
             case "card":
                 if let card = entry.card {
                     if card.isOpen {
@@ -703,5 +712,133 @@ private struct KeyBox: View {
             if problem == nil { key = "" }
             saving = false
         }
+    }
+}
+
+/// One of Agentman's own reminders or watches waking it: a quiet line above
+/// the turn it takes.
+private struct ScheduledLine: View {
+    let entry: ManagerEntry
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: entry.tool == "watch" ? "eye" : "bell")
+                .font(.system(size: 10, weight: .medium))
+                .frame(width: 12)
+            Text(entry.text)
+                .lineLimit(2)
+            Text(Date(timeIntervalSince1970: TimeInterval(entry.ts) / 1000), format: .dateTime.hour().minute())
+                .foregroundStyle(Palette.faint)
+        }
+        .font(TextStyle.caption)
+        .foregroundStyle(Palette.muted)
+        .padding(.leading, 34)
+    }
+}
+
+/// The clock in the title bar while Agentman has something scheduled, with
+/// the list to see and cancel it.
+private struct SchedulesButton: View {
+    @Environment(AgentsStore.self) private var store
+    @State private var open = false
+
+    var body: some View {
+        Button {
+            open.toggle()
+        } label: {
+            Label("\(store.manager.schedules.count) scheduled", systemImage: "clock")
+                .labelStyle(.titleAndIcon)
+                .font(TextStyle.caption)
+        }
+        .help("What Agentman has scheduled for itself")
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            SchedulesList()
+                .environment(store)
+        }
+    }
+}
+
+/// Agentman's reminders and watches: what each is for, when it comes due,
+/// and a button to cancel it.
+private struct SchedulesList: View {
+    @Environment(AgentsStore.self) private var store
+    @State private var problem: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Scheduled")
+                .font(TextStyle.title)
+                .foregroundStyle(Palette.text)
+            if store.manager.schedules.isEmpty {
+                Text("Nothing scheduled. Ask Agentman to remind itself, or to watch an agent until it's done.")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(store.manager.schedules) { item in
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: item.kind == "watch" ? "eye" : (item.every ?? 0) > 0 ? "repeat" : "bell")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Palette.working)
+                        .frame(width: 16)
+                        .padding(.top, 2)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title(item))
+                            .font(TextStyle.body)
+                            .foregroundStyle(Palette.text)
+                            .lineSpacing(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(when(item))
+                            .font(TextStyle.caption)
+                            .foregroundStyle(Palette.muted)
+                    }
+                    Spacer(minLength: 8)
+                    Button {
+                        Task { problem = await store.manager.cancel(item) }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Palette.faint)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Cancel")
+                }
+            }
+            if let problem {
+                Text(problem)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.errorText)
+            }
+        }
+        .padding(18)
+        .frame(width: 360)
+    }
+
+    private func title(_ item: ManagerSchedule) -> String {
+        guard item.kind == "watch" else { return item.text }
+        let name = item.agentName ?? "An agent"
+        let until: String = switch item.condition {
+        case "needs_user": "needs you"
+        case "idle": "is idle"
+        case "ended": "ends"
+        default: "finishes its turn"
+        }
+        return "When \(name) \(until)" + (item.text.isEmpty ? "" : ": \(item.text)")
+    }
+
+    private func when(_ item: ManagerSchedule) -> String {
+        let time = item.dueDate.formatted(date: .omitted, time: .shortened)
+        if item.kind == "watch" { return "Gives up at \(time)" }
+        var text = "Next at \(time)"
+        if let every = item.every, every > 0 {
+            let minutes = every / 60
+            text += minutes % 60 == 0 && minutes >= 60 ? " · every \(minutes / 60) h" : " · every \(minutes) min"
+            if let times = item.times, times > 0 {
+                text += " · \(times - (item.fired ?? 0)) more"
+            } else if let until = item.until, until > 0 {
+                text += " · until " + Date(timeIntervalSince1970: TimeInterval(until) / 1000).formatted(date: .omitted, time: .shortened)
+            }
+        }
+        return text
     }
 }

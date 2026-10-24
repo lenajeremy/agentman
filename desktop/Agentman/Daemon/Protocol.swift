@@ -49,6 +49,8 @@ enum RequestType: String, Codable, Sendable {
     case knowledgeRead = "knowledge_read"
     case knowledgeWrite = "knowledge_write"
     case knowledgeDelete = "knowledge_delete"
+    case managerSchedules = "manager_schedules"
+    case managerScheduleCancel = "manager_schedule_cancel"
     case keysList = "keys_list"
     case keySet = "key_set"
     case keyDelete = "key_delete"
@@ -70,6 +72,7 @@ struct DaemonRequest: Codable, Sendable {
     var cardId: String?
     var note: Note?
     var key: Key?
+    var scheduleId: String?
     /// A note's tier, on the knowledge requests.
     var kind: String?
 
@@ -115,10 +118,34 @@ struct DaemonEvent: Codable, Sendable {
     var briefs: [Brief]?
     var more: Bool?
 
+    var schedules: [ManagerSchedule]?
+
     // Knowledge and keys.
     var notes: [Note]?
     var note: Note?
     var keys: [Key]?
+}
+
+/// Something Agentman scheduled for itself: a reminder, once or repeating,
+/// or a watch on an agent whose result comes back to it.
+struct ManagerSchedule: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    /// "reminder" or "watch".
+    var kind: String
+    var text: String
+    /// When a reminder next fires, or a watch gives up, in milliseconds.
+    var due: Int64
+    var every: Int?
+    var times: Int?
+    var until: Int64?
+    var fired: Int?
+    var sessionId: String?
+    var agentName: String?
+    /// For a watch: "turn_end", "needs_user", "idle" or "ended".
+    var condition: String?
+    var createdAt: Int64
+
+    var dueDate: Date { Date(timeIntervalSince1970: TimeInterval(due) / 1000) }
 }
 
 /// One of the user's notes for their agents. Body is empty in a list.
