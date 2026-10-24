@@ -49,6 +49,7 @@ enum RequestType: String, Codable, Sendable {
     case knowledgeRead = "knowledge_read"
     case knowledgeWrite = "knowledge_write"
     case knowledgeDelete = "knowledge_delete"
+    case managerImage = "manager_image"
     case managerSchedules = "manager_schedules"
     case managerScheduleCancel = "manager_schedule_cancel"
     case keysList = "keys_list"
@@ -73,6 +74,7 @@ struct DaemonRequest: Codable, Sendable {
     var note: Note?
     var key: Key?
     var scheduleId: String?
+    var images: [InlineImage]?
     /// A note's tier, on the knowledge requests.
     var kind: String?
 
@@ -124,6 +126,12 @@ struct DaemonEvent: Codable, Sendable {
     var notes: [Note]?
     var note: Note?
     var keys: [Key]?
+}
+
+/// An image sent with a message: its type and its bytes, in base64.
+struct InlineImage: Codable, Sendable, Hashable {
+    var mime: String
+    var data: String
 }
 
 /// Something Agentman scheduled for itself: a reminder, once or repeating,
@@ -199,6 +207,9 @@ struct ManagerEntry: Codable, Sendable, Identifiable, Hashable {
     var streaming: Bool?
     /// An image an activity looked at.
     var path: String?
+    /// The images a user's message came with, by the names the daemon keeps
+    /// them under.
+    var images: [String]?
     /// On a "card" entry: a decision only the user can make.
     var card: ManagerCard?
 }

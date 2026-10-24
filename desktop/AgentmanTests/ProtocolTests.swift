@@ -72,4 +72,17 @@ final class ProtocolTests: XCTestCase {
                       session("busy-new", .busy, 5)].sorted(by: AgentsStore.boardOrder)
         XCTAssertEqual(sorted.map(\.id), ["ask", "busy-new", "busy", "idle"])
     }
+
+    // A message's images go as the daemon reads them: a list of type and
+    // base64 bytes.
+    func testAMessageCarriesItsImages() throws {
+        var request = DaemonRequest(.managerSend)
+        request.text = "look"
+        request.images = [InlineImage(mime: "image/png", data: "iVBORw0KGgo=")]
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        let images = try XCTUnwrap(json["images"] as? [[String: String]])
+        XCTAssertEqual(images.first?["mime"], "image/png")
+        XCTAssertEqual(images.first?["data"], "iVBORw0KGgo=")
+        XCTAssertEqual(json["type"] as? String, "manager_send")
+    }
 }

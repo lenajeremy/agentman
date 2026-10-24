@@ -201,7 +201,7 @@ func (s *LocalServer) serveConn(
 	}()
 
 	scanner := bufio.NewScanner(conn)
-	scanner.Buffer(make([]byte, 64<<10), maxFrame)
+	scanner.Buffer(make([]byte, 64<<10), maxLocalFrame)
 	for scanner.Scan() {
 		var envelope protocol.Envelope
 		if json.Unmarshal(scanner.Bytes(), &envelope) != nil {
@@ -221,10 +221,15 @@ func (s *LocalServer) serveConn(
 		dispatch.dispatch(app.id, envelope.ID, req)
 	}
 	// The loop ends when the app hangs up or the daemon stops, or on a line
-	// longer than maxFrame, which no request needs: all three end the
+	// longer than maxLocalFrame, which no request needs: all three end the
 	// connection, and the app reconnects for a fresh start.
 	_ = scanner.Err()
 }
+
+// maxLocalFrame bounds one frame on the socket. It is larger than the
+// relay's: nothing crosses a network here, and a message to Agentman can
+// carry four screenshots at the size the model reads them.
+const maxLocalFrame = 16 << 20
 
 // Send delivers an event to every connected app.
 func (s *LocalServer) Send(event protocol.Event) error {
@@ -249,7 +254,7 @@ func (s *LocalServer) enqueue(app *localConn, replyTo string, event protocol.Eve
 	}
 	envelope.ReplyTo = replyTo
 	frame, err := json.Marshal(envelope)
-	if err != nil || len(frame) > maxFrame {
+	if err != nil || len(frame) > maxLocalFrame {
 		return
 	}
 	frame = append(frame, '\n')

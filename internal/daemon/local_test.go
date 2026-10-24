@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -252,5 +253,24 @@ func TestAnAppThatStopsReadingIsDropped(t *testing.T) {
 			t.Fatal("an app that stopped reading was never dropped")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A message with screenshots in it is larger than a relay frame, and the
+// local socket takes it whole.
+func TestTheLocalSocketTakesAMessageWithScreenshots(t *testing.T) {
+	h := startLocal(t, func(_ context.Context, _ string, req protocol.Request) protocol.Event {
+		total := 0
+		for _, image := range req.Images {
+			total += len(image.Data)
+		}
+		return protocol.Event{Type: protocol.EvtAgentReply, Preview: fmt.Sprint(total)}
+	})
+	app := dialLocal(t, h.server.Path())
+	image := protocol.InlineImage{MIME: "image/png", Data: strings.Repeat("A", 2_500_000)}
+	app.send(t, "big", protocol.Request{Type: protocol.ReqManagerSend, Images: []protocol.InlineImage{image, image, image, image}})
+	envelope, event := app.read(t)
+	if envelope.ReplyTo != "big" || event.Preview != "10000000" {
+		t.Fatalf("reply = %+v / %+v", envelope, event)
 	}
 }

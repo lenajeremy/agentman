@@ -43,8 +43,12 @@ struct ContentView: View {
         .task {
             // AGENTMAN_OPEN names a link to open at launch, so a copy started
             // for a screenshot or a test opens where it is needed.
-            if let link = ProcessInfo.processInfo.environment["AGENTMAN_OPEN"], let url = URL(string: link) {
+            let environment = ProcessInfo.processInfo.environment
+            if let link = environment["AGENTMAN_OPEN"], let url = URL(string: link) {
                 open(url)
+            }
+            if let path = environment["AGENTMAN_LIGHTBOX"], let image = NSImage(contentsOfFile: path) {
+                store.lightbox = Lightbox(image: image, title: (path as NSString).lastPathComponent)
             }
         }
     }

@@ -107,9 +107,10 @@ final class ManagerStore {
 
     // MARK: - Talking to Agentman
 
-    func send(_ text: String) async -> Bool {
+    func send(_ text: String, images: [Attachment] = []) async -> Bool {
         var request = DaemonRequest(.managerSend)
         request.text = text
+        request.images = images.isEmpty ? nil : Attachments.encoded(images)
         problem = nil
         do {
             let reply = try await client.request(request)
@@ -260,6 +261,20 @@ final class ManagerStore {
         var request = DaemonRequest(.keyDelete)
         request.path = key.name
         return await perform(request)
+    }
+
+    /// An image the user sent Agentman, kept with the conversation.
+    func keptImage(_ name: String) async -> NSImage? {
+        let key = "kept\u{0}" + name
+        if let cached = images[key] { return cached }
+        var request = DaemonRequest(.managerImage)
+        request.path = name
+        guard let reply = try? await client.request(request),
+              let base64 = reply.workspace?.image,
+              let data = Data(base64Encoded: base64),
+              let image = NSImage(data: data) else { return nil }
+        images[key] = image
+        return image
     }
 
     /// An image an agent opened, for showing what Agentman looked at.

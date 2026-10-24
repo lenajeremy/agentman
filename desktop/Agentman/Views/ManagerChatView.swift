@@ -5,7 +5,9 @@ import SwiftUI
 struct ManagerChatView: View {
     @Environment(AgentsStore.self) private var store
     @State private var draft = ""
+    @State private var attachments: [Attachment] = []
     @State private var sending = false
+    @State private var dropping = false
 
     private var manager: ManagerStore { store.manager }
 
@@ -40,7 +42,7 @@ struct ManagerChatView: View {
                                     .id("thinking")
                             }
                             if entry {
-                                EntryHero(draft: $draft, sending: sending, send: { send(draft) }) {
+                                EntryHero(draft: $draft, attachments: $attachments, sending: sending, send: { send(draft) }) {
                                     manager.showEntry = false
                                     if let first = manager.entries.first(where: { $0.card?.isOpen == true }) {
                                         withAnimation(.easeOut(duration: 0.25)) {
@@ -83,7 +85,7 @@ struct ManagerChatView: View {
                                 .foregroundStyle(Palette.errorText)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        ManagerComposer(text: $draft, thinking: manager.thinking, sending: sending) {
+                        ManagerComposer(text: $draft, attachments: $attachments, thinking: manager.thinking, sending: sending) {
                             send(draft)
                         } onStop: {
                             manager.stop()
@@ -95,6 +97,39 @@ struct ManagerChatView: View {
                     .frame(maxWidth: 780)
                     .frame(maxWidth: .infinity)
                 }
+            }
+        }
+        // Images dropped anywhere on the conversation wait in the box.
+        .onDrop(of: [.fileURL, .image], isTargeted: $dropping) { providers in
+            Task { @MainActor in
+                let found = await Attachments.from(providers: providers)
+                let room = Attachments.maxCount - attachments.count
+                attachments.append(contentsOf: found.prefix(max(0, room)))
+            }
+            return true
+        }
+        .overlay {
+            if dropping {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Palette.working, style: StrokeStyle(lineWidth: 2, dash: [6, 5]))
+                    .background(Palette.workingWash.opacity(0.6), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay {
+                        Label("Drop images for Agentman", systemImage: "photo.on.rectangle")
+                            .font(TextStyle.bodyMedium)
+                            .foregroundStyle(Palette.workingText)
+                    }
+                    .padding(18)
+                    .allowsHitTesting(false)
+            }
+        }
+        .task {
+            // For screenshots and tests: images and words waiting in the box.
+            let environment = ProcessInfo.processInfo.environment
+            if let paths = environment["AGENTMAN_ATTACH"], attachments.isEmpty {
+                attachments = paths.split(separator: ":").compactMap { Attachments.make(file: URL(fileURLWithPath: String($0))) }
+            }
+            if let text = environment["AGENTMAN_DRAFT"], draft.isEmpty {
+                draft = text.replacingOccurrences(of: "\\n", with: "\n")
             }
         }
         .navigationTitle("")
@@ -114,11 +149,13 @@ struct ManagerChatView: View {
 
     private func send(_ text: String) {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty, !sending else { return }
+        guard !message.isEmpty || !attachments.isEmpty, !sending else { return }
         sending = true
+        let images = attachments
         Task {
-            if await manager.send(message) {
+            if await manager.send(message, images: images) {
                 draft = ""
+                attachments = []
                 manager.showEntry = false
             }
             sending = false
@@ -131,6 +168,7 @@ struct ManagerChatView: View {
 private struct EntryHero: View {
     @Environment(AgentsStore.self) private var store
     @Binding var draft: String
+    @Binding var attachments: [Attachment]
     var sending: Bool
     var send: () -> Void
     var showCards: () -> Void
@@ -154,7 +192,7 @@ private struct EntryHero: View {
                 } else if manager.needsKey {
                     KeyBox()
                 } else {
-                    ManagerComposer(text: $draft, thinking: false, sending: sending, large: true,
+                    ManagerComposer(text: $draft, attachments: $attachments, thinking: false, sending: sending, large: true,
                                     onSend: send, onStop: {})
                 }
             }
@@ -245,17 +283,23 @@ private struct ChatItemView: View {
         case .entry(let entry):
             switch entry.role {
             case "user":
-                HStack {
-                    Spacer(minLength: 80)
-                    Text(entry.text)
-                        .font(TextStyle.body)
-                        .foregroundStyle(Palette.text)
-                        .lineSpacing(5)
-                        .textSelection(.enabled)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .background(Palette.fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                VStack(alignment: .trailing, spacing: 8) {
+                    if let images = entry.images, !images.isEmpty {
+                        SentImages(names: images)
+                    }
+                    if !entry.text.isEmpty {
+                        Text(entry.text)
+                            .font(TextStyle.body)
+                            .foregroundStyle(Palette.text)
+                            .lineSpacing(5)
+                            .textSelection(.enabled)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(Palette.fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    }
                 }
+                .padding(.leading, 80)
+                .frame(maxWidth: .infinity, alignment: .trailing)
             case "assistant":
                 AssistantReply(entry: entry)
             case "brief", "agent":
@@ -611,9 +655,12 @@ private struct ThinkingDots: View {
 }
 
 /// The composer, a soft pill whose button stops Agentman while it is
-/// replying. Larger on the entry page.
+/// replying. Larger on the entry page. Images can be attached with the
+/// button, pasted or dropped, and wait above the words until sent. Return
+/// sends; Shift-Return starts a new line; the box grows to ten lines.
 private struct ManagerComposer: View {
     @Binding var text: String
+    var attachments: Binding<[Attachment]> = .constant([])
     var thinking: Bool
     var sending: Bool
     var large = false
@@ -623,28 +670,53 @@ private struct ManagerComposer: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            TextField(placeholder, text: $text, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(large ? Fonts.sans(15) : TextStyle.body)
-                .lineLimit(1...8)
-                .focused($focused)
-                .onSubmit { if !thinking { onSend() } }
-                .padding(.vertical, large ? 9 : 6)
-            Button {
-                thinking ? onStop() : onSend()
-            } label: {
-                Image(systemName: thinking ? "stop.fill" : "arrow.up")
-                    .font(.system(size: thinking ? 11 : 13, weight: .bold))
-                    .foregroundStyle(Palette.onInverse)
-                    .frame(width: large ? 32 : 28, height: large ? 32 : 28)
-                    .background(Palette.inverse.opacity(canSend || thinking ? 1 : 0.25), in: Circle())
+        VStack(alignment: .leading, spacing: 4) {
+            if !attachments.wrappedValue.isEmpty {
+                AttachmentStrip(attachments: attachments)
             }
-            .buttonStyle(.plain)
-            .disabled(!thinking && !canSend)
-            .help(thinking ? "Stop" : "Send")
+            HStack(alignment: .bottom, spacing: 10) {
+                Button(action: attach) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Palette.muted)
+                        .frame(width: large ? 32 : 28, height: large ? 32 : 28)
+                        .background(Palette.fill, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(attachments.wrappedValue.count >= Attachments.maxCount)
+                .help("Attach images (or paste or drop them)")
+
+                TextField(placeholder, text: $text, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(large ? Fonts.sans(15) : TextStyle.body)
+                    .lineSpacing(3)
+                    .lineLimit(1...10)
+                    .focused($focused)
+                    .onKeyPress(.return, phases: .down) { press in
+                        // Shift-Return is a new line where the cursor is;
+                        // Return alone sends, through onSubmit.
+                        guard press.modifiers.contains(.shift) else { return .ignored }
+                        NSApp.sendAction(#selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)), to: nil, from: nil)
+                        return .handled
+                    }
+                    .onSubmit { if !thinking, canSend { onSend() } }
+                    .padding(.vertical, large ? 9 : 6)
+
+                Button {
+                    thinking ? onStop() : onSend()
+                } label: {
+                    Image(systemName: thinking ? "stop.fill" : "arrow.up")
+                        .font(.system(size: thinking ? 11 : 13, weight: .bold))
+                        .foregroundStyle(Palette.onInverse)
+                        .frame(width: large ? 32 : 28, height: large ? 32 : 28)
+                        .background(Palette.inverse.opacity(canSend || thinking ? 1 : 0.25), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!thinking && !canSend)
+                .help(thinking ? "Stop" : "Send")
+            }
         }
-        .padding(.leading, large ? 20 : 16)
+        .padding(.leading, large ? 12 : 10)
         .padding(.trailing, 8)
         .padding(.vertical, large ? 9 : 7)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: large ? 26 : 22, style: .continuous))
@@ -653,11 +725,29 @@ private struct ManagerComposer: View {
                 .strokeBorder(focused ? Palette.fillStrong : Palette.line, lineWidth: 1)
         )
         .shadow(color: .black.opacity(large ? 0.06 : 0.04), radius: large ? 18 : 8, y: large ? 6 : 2)
+        .modifier(PasteImages(active: focused) { found in add(found) })
         .onAppear { if large { focused = true } }
     }
 
     private var canSend: Bool {
-        !sending && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !sending && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.wrappedValue.isEmpty)
+    }
+
+    private func add(_ found: [Attachment]) {
+        let room = Attachments.maxCount - attachments.wrappedValue.count
+        withAnimation(.easeOut(duration: 0.12)) {
+            attachments.wrappedValue.append(contentsOf: found.prefix(max(0, room)))
+        }
+    }
+
+    private func attach() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = true
+        panel.message = "Choose images for Agentman"
+        if panel.runModal() == .OK {
+            add(panel.urls.compactMap(Attachments.make(file:)))
+        }
     }
 }
 

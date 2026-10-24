@@ -7,11 +7,11 @@ import Foundation
 /// last newline is kept for the next read.
 struct LineFramer {
     private var pending = Data()
-    /// A line longer than this is discarded: the daemon caps its frames at
-    /// 4 MB, so anything bigger is not a frame.
+    /// A line longer than this is discarded: the daemon caps its local
+    /// socket's frames at 16 MB, so anything bigger is not a frame.
     let maxLine: Int
 
-    init(maxLine: Int = 4 << 20) {
+    init(maxLine: Int = 16 << 20) {
         self.maxLine = maxLine
     }
 

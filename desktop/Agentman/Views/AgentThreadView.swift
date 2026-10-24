@@ -597,7 +597,8 @@ private struct QueuedBubble: View {
     }
 }
 
-/// The box at the foot of a chat. Return sends; Option-Return starts a line.
+/// The box at the foot of a chat. Return sends; Shift-Return starts a new
+/// line; it grows to ten lines.
 struct Composer: View {
     @Binding var text: String
     var placeholder: String
@@ -609,7 +610,15 @@ struct Composer: View {
             TextField(placeholder, text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(TextStyle.body)
-                .lineLimit(1...8)
+                .lineSpacing(3)
+                .lineLimit(1...10)
+                .onKeyPress(.return, phases: .down) { press in
+                    // Shift-Return is a new line where the cursor is;
+                    // Return alone sends, through onSubmit.
+                    guard press.modifiers.contains(.shift) else { return .ignored }
+                    NSApp.sendAction(#selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)), to: nil, from: nil)
+                    return .handled
+                }
                 .onSubmit(onSend)
                 .disabled(!enabled)
                 .padding(.vertical, 6)

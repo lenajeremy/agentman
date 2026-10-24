@@ -122,3 +122,121 @@ struct LightboxView: View {
         .transition(.opacity)
     }
 }
+
+/// The images the user sent with a message, as thumbnails that open full
+/// window.
+struct SentImages: View {
+    let names: [String]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(names, id: \.self) { name in
+                SentImage(name: name)
+            }
+        }
+    }
+}
+
+private struct SentImage: View {
+    @Environment(AgentsStore.self) private var store
+    let name: String
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Button {
+                    store.lightbox = Lightbox(image: image, title: "Sent to Agentman")
+                } label: {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: min(220, max(80, 110 * image.size.width / max(image.size.height, 1))), height: 110)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Open full window")
+            } else {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Palette.fill)
+                    .frame(width: 110, height: 110)
+                    .overlay(ProgressView().controlSize(.small))
+            }
+        }
+        .task(id: name) { image = await store.manager.keptImage(name) }
+    }
+}
+
+/// Images waiting in the message box, each with a way to take it out.
+struct AttachmentStrip: View {
+    @Binding var attachments: [Attachment]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(attachments) { attachment in
+                Image(nsImage: attachment.image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 56, height: 56)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.line))
+                    .overlay(alignment: .topTrailing) {
+                        Button {
+                            withAnimation(.easeOut(duration: 0.12)) {
+                                attachments.removeAll { $0.id == attachment.id }
+                            }
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 18, height: 18)
+                                .background(.black.opacity(0.65), in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .offset(x: 5, y: -5)
+                        .help("Remove")
+                    }
+            }
+        }
+        .padding(.top, 6)
+        .padding(.trailing, 6)
+    }
+}
+
+/// Pasting images into the message box: ⌘V with images on the pasteboard
+/// attaches them; with text, it pastes as ever.
+struct PasteImages: ViewModifier {
+    var active: Bool
+    var onImages: ([Attachment]) -> Void
+    @State private var monitor: Any?
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { install() }
+            .onDisappear { remove() }
+    }
+
+    private func install() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let paste = event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command &&
+                event.charactersIgnoringModifiers?.lowercased() == "v"
+            guard paste else { return event }
+            let taken = MainActor.assumeIsolated { () -> Bool in
+                guard active else { return false }
+                let found = Attachments.from(pasteboard: .general)
+                guard !found.isEmpty else { return false }
+                onImages(found)
+                return true
+            }
+            return taken ? nil : event
+        }
+    }
+
+    private func remove() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+}

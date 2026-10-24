@@ -23,7 +23,7 @@ const (
 	// maxImageBytes is the API's own limit for one image.
 	maxImageBytes = 5 << 20
 	// maxImageReply keeps a kept image within one frame to an app.
-	maxImageReply = 3 << 20
+	maxImageReply = 10 << 20
 )
 
 var imageExtensions = map[string]string{
