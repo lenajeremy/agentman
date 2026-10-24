@@ -15,6 +15,14 @@ enum EditorOpener {
         openWindow(id: "editor", value: store.root.path)
     }
 
+    /// Opens the folder's editor with its terminal showing.
+    @MainActor
+    static func openTerminal(folder: String, with openWindow: OpenWindowAction) {
+        let store = EditorRegistry.shared.store(for: folder)
+        store.showTerminal = true
+        openWindow(id: "editor", value: store.root.path)
+    }
+
     @MainActor
     static func chooseFolder() -> String? {
         let panel = NSOpenPanel()
@@ -35,6 +43,7 @@ struct EditorWindow: View {
     @State private var naming: Naming?
     @State private var trashing: FileEntry?
     @State private var keyMonitor: Any?
+    @AppStorage("terminalHeight") private var terminalHeight = 260.0
 
     init(folder: String) {
         _store = State(initialValue: EditorRegistry.shared.store(for: folder))
@@ -63,6 +72,13 @@ struct EditorWindow: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if store.showTerminal {
+                    PanelDivider(height: $terminalHeight, maximum: (store.window?.frame.height ?? 800) * 0.75)
+                        .padding(.vertical, -3)
+                        .zIndex(1)
+                    TerminalPanel(store: store)
+                        .frame(height: terminalHeight)
+                }
                 StatusBar(store: store)
             }
             .background(Palette.surface)
@@ -82,6 +98,12 @@ struct EditorWindow: View {
                     Label("Go to File", systemImage: "magnifyingglass")
                 }
                 .help("Go to File (⌘P)")
+                Button {
+                    store.showTerminal.toggle()
+                } label: {
+                    Label("Terminal", systemImage: "terminal")
+                }
+                .help(store.showTerminal ? "Hide the terminal (⌃`)" : "Show the terminal (⌃`)")
                 Button {
                     NSWorkspace.shared.activateFileViewerSelecting([store.active?.url ?? store.root])
                 } label: {
@@ -739,6 +761,25 @@ struct EditorCommands: Commands {
             Button("Go to File…") { editor?.quickOpen = true }
                 .keyboardShortcut("p", modifiers: .command)
                 .disabled(editor == nil)
+        }
+        CommandMenu("Terminal") {
+            // Titles here don't follow the editor's state, so they never
+            // depend on it: one toggle, and commands that do nothing when
+            // there is nothing to act on.
+            Button("Toggle Terminal") { editor?.showTerminal.toggle() }
+                .keyboardShortcut("`", modifiers: .control)
+                .disabled(editor == nil)
+            Button("New Terminal") { editor?.newTerminal() }
+                .keyboardShortcut("`", modifiers: [.control, .shift])
+                .disabled(editor == nil)
+            Button("Clear Terminal") { editor?.activeTerminal?.clear() }
+                .keyboardShortcut("k", modifiers: .command)
+                .disabled(editor == nil)
+            Divider()
+            Button("Stop and Close Terminal") {
+                if let session = editor?.activeTerminal { editor?.closeTerminal(session) }
+            }
+            .disabled(editor == nil)
         }
         CommandMenu("Editor") {
             Button("Comment Lines") { editorTextView?.toggleComment() }

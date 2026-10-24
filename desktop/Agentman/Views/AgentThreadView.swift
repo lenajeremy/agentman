@@ -215,6 +215,12 @@ struct AgentThreadView: View {
                         Label("Open in Editor", systemImage: "chevron.left.forwardslash.chevron.right")
                     }
                     .help("Open \((session.cwd as NSString).lastPathComponent) in the editor")
+                    Button {
+                        EditorOpener.openTerminal(folder: session.cwd, with: openWindow)
+                    } label: {
+                        Label("Open Terminal", systemImage: "terminal")
+                    }
+                    .help("A terminal in \((session.cwd as NSString).lastPathComponent)")
                 }
                 Button {
                     showFiles.toggle()

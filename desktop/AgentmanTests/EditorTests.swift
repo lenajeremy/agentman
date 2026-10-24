@@ -89,4 +89,13 @@ final class EditorTests: XCTestCase {
         plain.insertNewline(nil)
         XCTAssertEqual(plain.string, "  call()\n  ")
     }
+
+    @MainActor
+    func testTheTerminalSaysWhatItIsAndLeavesTmuxOut() {
+        let environment = TerminalSession.environment
+        XCTAssertTrue(environment.contains("TERM=xterm-256color"))
+        XCTAssertTrue(environment.contains("TERM_PROGRAM=Agentman"))
+        XCTAssertFalse(environment.contains { $0.hasPrefix("TMUX=") })
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: TerminalSession.shell))
+    }
 }

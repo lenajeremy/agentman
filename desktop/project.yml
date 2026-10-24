@@ -21,6 +21,12 @@ packages:
   Markdown:
     url: https://github.com/swiftlang/swift-markdown
     from: 0.9.0
+  # The terminal under the editor: a full emulator on a real pty
+  # (Terminal/TerminalSession.swift). Held at 1.11: later releases need
+  # Xcode's Metal toolchain and then a build plugin every builder must trust.
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    exactVersion: 1.11.2
 targets:
   Agentman:
     type: application
@@ -29,6 +35,7 @@ targets:
       - path: Agentman
     dependencies:
       - package: Markdown
+      - package: SwiftTerm
     info:
       path: Agentman/Info.plist
       properties:

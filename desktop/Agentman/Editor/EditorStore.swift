@@ -74,6 +74,13 @@ final class EditorStore {
     private(set) var branch: String?
     private(set) var isRepository = false
     var quickOpen = false
+    /// The shells in the terminal panel; they run on while the panel is
+    /// hidden or the window closed, until the app quits.
+    private(set) var terminals: [TerminalSession] = []
+    var activeTerminalID: UUID?
+    var showTerminal = false {
+        didSet { if showTerminal && terminals.isEmpty { newTerminal() } }
+    }
     /// A tab asking whether to save its edits before it closes.
     var closing: EditorDocument?
     var problem: String?
@@ -171,6 +178,28 @@ final class EditorStore {
 
     func saveAll() {
         for document in documents where document.isDirty { document.save() }
+    }
+
+    // MARK: - Terminal
+
+    var activeTerminal: TerminalSession? { terminals.first { $0.id == activeTerminalID } }
+
+    /// A new shell in the folder, in front.
+    func newTerminal() {
+        let session = TerminalSession(folder: root, number: terminals.count + 1)
+        terminals.append(session)
+        activeTerminalID = session.id
+        if !showTerminal { showTerminal = true }
+    }
+
+    func closeTerminal(_ session: TerminalSession) {
+        session.terminate()
+        guard let index = terminals.firstIndex(where: { $0.id == session.id }) else { return }
+        terminals.remove(at: index)
+        if activeTerminalID == session.id {
+            activeTerminalID = terminals.isEmpty ? nil : terminals[min(index, terminals.count - 1)].id
+        }
+        if terminals.isEmpty { showTerminal = false }
     }
 
     // MARK: - Files
