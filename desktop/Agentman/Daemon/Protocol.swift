@@ -55,6 +55,9 @@ enum RequestType: String, Codable, Sendable {
     case listArtifacts = "list_artifacts"
     case readArtifact = "read_artifact"
     case reviewArtifact = "review_artifact"
+    case openServer = "open_server"
+    case closeServer = "close_server"
+    case stopServer = "stop_server"
     case toolsTitle = "tools_title"
     case managerSend = "manager_send"
     case managerHistory = "manager_history"
@@ -107,6 +110,8 @@ struct DaemonRequest: Codable, Sendable {
     var ref: String?
     /// Which way a review_artifact goes: approved, or changes asked for.
     var approve: Bool?
+    /// The server an open_server, close_server or stop_server is about.
+    var port: Int?
 
     init(_ type: RequestType, sessionId: String? = nil) {
         self.type = type
@@ -132,6 +137,9 @@ struct DaemonEvent: Codable, Sendable {
     var folders: [Folder]?
     /// The documents a session's agent wrote, on "artifacts".
     var artifacts: [Artifact]?
+    /// The server shared, and its public link, on "server_opened".
+    var port: Int?
+    var link: String?
     var session: Session?
     var messages: [Message]?
     var page: Page?
@@ -238,6 +246,18 @@ struct WorkspaceResult: Codable, Sendable {
     var branch: String?
     var commit: WorkspaceCommit?
     var branches: [WorkspaceBranch]?
+}
+
+/// A dev server an agent is running.
+struct Server: Codable, Sendable, Hashable, Identifiable {
+    var port: Int
+    /// The listening program: "node", "python3".
+    var command: String?
+    /// The page's title, when it serves HTML.
+    var title: String?
+    /// The public preview link while it is shared.
+    var link: String?
+    var id: Int { port }
 }
 
 /// A document an agent wrote for the user: a plan, a task list, a
@@ -460,6 +480,8 @@ struct Session: Codable, Sendable, Identifiable, Hashable {
     /// them wait for their review.
     var artifacts: Int?
     var artifactsToReview: Int?
+    /// The dev servers it is running.
+    var servers: [Server]?
     var contextPercent: Int?
     var question: Question?
     var queued: [String]?
@@ -469,7 +491,8 @@ struct Session: Codable, Sendable, Identifiable, Hashable {
             lhs.lastActivityAt == rhs.lastActivityAt && lhs.question?.id == rhs.question?.id &&
             lhs.model == rhs.model && lhs.queued == rhs.queued && lhs.mode == rhs.mode &&
             lhs.modes == rhs.modes && lhs.models == rhs.models && lhs.originalName == rhs.originalName &&
-            lhs.artifacts == rhs.artifacts && lhs.artifactsToReview == rhs.artifactsToReview
+            lhs.artifacts == rhs.artifacts && lhs.artifactsToReview == rhs.artifactsToReview &&
+            lhs.servers == rhs.servers
     }
 
     func hash(into hasher: inout Hasher) { hasher.combine(id) }

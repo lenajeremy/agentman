@@ -201,6 +201,9 @@ struct AgentThreadView: View {
                 }
             }
             ToolbarItemGroup(placement: .primaryAction) {
+                if let servers = session.servers, !servers.isEmpty {
+                    ServersMenu(session: session, servers: servers)
+                }
                 Button {
                     showFiles.toggle()
                 } label: {
@@ -384,6 +387,82 @@ private struct ResumeBar: View {
         .padding(14)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.line))
+    }
+}
+
+/// The dev servers an agent runs: open one here, share a link to it, or
+/// stop it.
+private struct ServersMenu: View {
+    @Environment(AgentsStore.self) private var store
+    let session: Session
+    let servers: [Server]
+    @State private var stopping: Server?
+
+    var body: some View {
+        Menu {
+            ForEach(servers) { server in
+                Section(Self.heading(server)) {
+                    Button("Open in browser") {
+                        if let url = URL(string: "http://localhost:\(server.port)") { NSWorkspace.shared.open(url) }
+                    }
+                    if let link = server.link {
+                        Button("Copy share link") { copy(link) }
+                        Button("Stop sharing") { store.unshareServer(session.id, port: server.port) }
+                    } else {
+                        Button("Share a link…") { share(server) }
+                    }
+                    Button("Stop server…", role: .destructive) { stopping = server }
+                }
+            }
+        } label: {
+            Label {
+                Text(verbatim: servers.count == 1 ? ":" + String(servers[0].port) : "\(servers.count) servers")
+            } icon: {
+                Image(systemName: "globe")
+            }
+            .labelStyle(.titleAndIcon)
+        }
+        .help("Dev servers")
+        .confirmationDialog(
+            stopping.map { "Stop the server on port " + String($0.port) + "?" } ?? "",
+            isPresented: Binding(get: { stopping != nil }, set: { if !$0 { stopping = nil } })
+        ) {
+            Button("Stop server", role: .destructive) {
+                if let server = stopping {
+                    Task { store.actionError[session.id] = await store.stopServer(session.id, port: server.port) }
+                }
+                stopping = nil
+            }
+            Button("Cancel", role: .cancel) { stopping = nil }
+        } message: {
+            Text("Its process ends. Agentman can't start it again.")
+        }
+    }
+
+    /// A server as its menu section names it: its page's title, or its
+    /// program, and its port, written as a port rather than a number.
+    static func heading(_ server: Server) -> String {
+        let port = ":" + String(server.port)
+        if let title = server.title, !title.isEmpty { return title + " · " + port }
+        if let command = server.command, !command.isEmpty { return port + " · " + command }
+        return port
+    }
+
+    private func share(_ server: Server) {
+        Task {
+            do {
+                let link = try await store.shareServer(session.id, port: server.port)
+                copy(link)
+                store.actionError[session.id] = nil
+            } catch {
+                store.actionError[session.id] = error.localizedDescription
+            }
+        }
+    }
+
+    private func copy(_ link: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(link, forType: .string)
     }
 }
 

@@ -170,6 +170,17 @@ struct AgentRow: View {
                     .font(Fonts.sans(11.5))
                     .foregroundStyle(session.state == .waitingInput ? Palette.needsYouText : Palette.muted)
                     .lineLimit(1)
+                if let servers = session.servers, !servers.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "globe")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Palette.ok)
+                        Text(servers.map { ":\($0.port)" }.joined(separator: "  "))
+                            .font(Fonts.mono(10.5))
+                            .foregroundStyle(Palette.muted)
+                    }
+                    .help("Dev servers it is running")
+                }
             }
             Spacer(minLength: 4)
             Circle()

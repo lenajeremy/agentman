@@ -26,6 +26,32 @@ extension AgentsStore {
         return result
     }
 
+    /// Shares a dev server through the relay and returns its public link.
+    func shareServer(_ session: String, port: Int) async throws -> String {
+        var request = DaemonRequest(.openServer, sessionId: session)
+        request.port = port
+        let reply = try await client.request(request, timeout: 45)
+        guard reply.type != "error", let link = reply.link else {
+            throw WorkspaceError(message: (reply.error ?? "It couldn't be shared.").replacingOccurrences(of: "^daemon: ", with: "", options: .regularExpression))
+        }
+        return link
+    }
+
+    /// Stops sharing a dev server; the link stops working at once.
+    func unshareServer(_ session: String, port: Int) {
+        var request = DaemonRequest(.closeServer, sessionId: session)
+        request.port = port
+        client.send(request)
+    }
+
+    /// Ends the process listening on a port. Returns the problem, if any.
+    func stopServer(_ session: String, port: Int) async -> String? {
+        var request = DaemonRequest(.stopServer, sessionId: session)
+        request.port = port
+        guard let reply = try? await client.request(request) else { return "Couldn't reach am serve." }
+        return reply.type == "error" ? (reply.error ?? "It couldn't be stopped.").replacingOccurrences(of: "^daemon: ", with: "", options: .regularExpression) : nil
+    }
+
     /// The documents a session's agent wrote, newest first.
     func artifacts(_ session: String) async throws -> [Artifact] {
         let reply = try await client.request(DaemonRequest(.listArtifacts, sessionId: session))
