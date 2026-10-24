@@ -32,6 +32,12 @@ enum Palette {
     static let fill = Color(light: 0xEDECE8, dark: 0x202226)
     static let fillStrong = Color(light: 0xE4E3DE, dark: 0x2C2E33)
     static let line = Color(light: 0xE3E2DD, dark: 0x25272C)
+    // Tool calls in a thread: a soft card a step greyer than the page, set
+    // apart from the conversation and from the user's own bubbles, with a
+    // well inside it for a command's output.
+    static let toolCard = Color(light: 0xEEEEEA, dark: 0x17181B)
+    static let toolCardEdge = Color(light: 0xE5E4DF, dark: 0x212327)
+    static let toolWell = Color(light: 0xF8F8F5, dark: 0x0F1012)
     static let text = Color(light: 0x0F1012, dark: 0xF2F3F5)
     static let textSecondary = Color(light: 0x34363B, dark: 0xD2D4D9)
     static let muted = Color(light: 0x6A6D75, dark: 0x9A9DA5)

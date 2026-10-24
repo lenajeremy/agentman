@@ -66,6 +66,7 @@ struct AgentThreadView: View {
                             case .image(let call, let path):
                                 ImageThumbnail(sessionId: session.id, path: path,
                                                label: "Read " + (path as NSString).lastPathComponent)
+                                    .toolCard()
                                     .id(item.id)
                             }
                         }
@@ -556,7 +557,7 @@ private struct StepDetail: View {
                 }
                 .frame(maxHeight: 220)
                 .fixedSize(horizontal: false, vertical: true)
-                .background(Palette.fill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(Palette.toolWell, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
         }
     }
@@ -812,16 +813,21 @@ struct ToolRun: View {
                 }
                 .buttonStyle(.plain)
                 if open {
+                    Rectangle()
+                        .fill(Palette.toolCardEdge)
+                        .frame(height: 1)
+                        .padding(.vertical, 3)
                     VStack(alignment: .leading, spacing: 9) {
                         ForEach(calls) { call in
                             ToolCallRow(call: call)
                         }
                     }
                     .padding(.leading, 18)
-                    .padding(.top, 4)
+                    .padding(.bottom, 2)
                 }
             }
         }
+        .toolCard()
         .opacity(calls.allSatisfy { $0.isSidechain == true } ? 0.6 : 1)
         // Once the run has finished, Agentman says what it did and why.
         .task(id: finished ? AgentsStore.toolRunKey(calls) + (store.status == .connected ? "" : "~") : "") {
@@ -955,6 +961,18 @@ private struct ToolCallRow: View {
             }
         }
         .opacity(call.isSidechain == true ? 0.6 : 1)
+    }
+}
+
+extension View {
+    /// A tool call's soft card: a step greyer than the page, so the work
+    /// stands apart from the conversation.
+    func toolCard() -> some View {
+        padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.toolCard, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.toolCardEdge))
     }
 }
 
@@ -1256,16 +1274,18 @@ struct Composer: View {
     }
 }
 
-/// An agent's reply, with Copy under it when the pointer is over it, as
-/// ChatGPT and Claude offer, and in its context menu.
+/// An agent's reply, with Copy beside it when the pointer is over it, in a
+/// narrow column of its own so it never moves the thread, and in its
+/// context menu.
 private struct AgentReply: View {
     let text: String
     @State private var hovering = false
     @State private var copied = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .top, spacing: 6) {
             MarkdownView(text)
+                .frame(maxWidth: .infinity, alignment: .leading)
             Button {
                 Clipboard.copy(text)
                 copied = true
@@ -1274,13 +1294,15 @@ private struct AgentReply: View {
                     copied = false
                 }
             } label: {
-                Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
-                    .font(TextStyle.caption)
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 11))
                     .foregroundStyle(copied ? Palette.ok : Palette.muted)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .opacity(hovering || copied ? 1 : 0)
-            .help("Copy the reply")
+            .help(copied ? "Copied" : "Copy the reply")
         }
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
