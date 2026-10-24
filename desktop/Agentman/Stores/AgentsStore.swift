@@ -363,13 +363,8 @@ final class AgentsStore {
     }
 
     /// Adds messages to an agent's conversation, once each, in time order.
-    /// Live messages and history pages overlap, and both carry stable IDs.
     private func merge(_ new: [Message], into sessionId: String) {
-        var current = messages[sessionId] ?? []
-        let known = Set(current.map(\.id))
-        let added = new.filter { !known.contains($0.id) }
-        current.append(contentsOf: added)
-        current.sort { $0.ts < $1.ts }
+        let (current, added) = Self.merged(messages[sessionId] ?? [], with: new)
         messages[sessionId] = current
         // A queued message that has reached the agent shows as its own.
         if var waiting = queued[sessionId], !waiting.isEmpty {
@@ -384,6 +379,33 @@ final class AgentsStore {
     }
 
     // MARK: - Helpers
+
+    /// A conversation with new messages folded in, and those that were new.
+    /// Live messages and history pages overlap, and both carry stable IDs. A
+    /// later copy of a message replaces the earlier one: that is how a tool
+    /// call that was running arrives finished. Never the other way: a history
+    /// page read before the result was written must not set a finished call
+    /// running again.
+    nonisolated static func merged(_ current: [Message], with new: [Message]) -> (all: [Message], added: [Message]) {
+        var all = current
+        var index: [String: Int] = [:]
+        for (i, message) in all.enumerated() { index[message.id] = i }
+        var added: [Message] = []
+        for message in new {
+            if let i = index[message.id] {
+                let finished = all[i].tool.map { $0.status != "running" } ?? false
+                if finished, message.tool?.status == "running" { continue }
+                all[i] = message
+                if let j = added.firstIndex(where: { $0.id == message.id }) { added[j] = message }
+            } else {
+                index[message.id] = all.count
+                all.append(message)
+                added.append(message)
+            }
+        }
+        all.sort { $0.ts < $1.ts }
+        return (all, added)
+    }
 
     nonisolated static func boardOrder(_ a: Session, _ b: Session) -> Bool {
         if a.state.rank != b.state.rank { return a.state.rank < b.state.rank }

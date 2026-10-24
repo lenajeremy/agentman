@@ -723,12 +723,13 @@ func TestAnUnsettledPageReadsOnButStopsAtHalfAgainItsSize(t *testing.T) {
 func TestAnUnsettledPageThatRunsOutOfBytesKeepsItsCursor(t *testing.T) {
 	lines := []string{
 		`{"n":0}`,
-		fmt.Sprintf(`{"n":1,"pad":%q}`, strings.Repeat("x", 2*UnsettledScanBytes)),
+		fmt.Sprintf(`{"n":1,"pad":%q}`, strings.Repeat("x", 512<<10)),
 		`{"n":2}`,
 	}
 	path := writeFixture(t, lines)
 	result, err := CollectBackward(path, BackwardOptions{
 		Want: 1, Map: asMessage, Unsettled: func() bool { return true }, ChunkSize: 4096,
+		UnsettledBytes: 256 << 10,
 	})
 	if err != nil {
 		t.Fatal(err)

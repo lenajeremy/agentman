@@ -111,6 +111,8 @@ func (d *Daemon) keptFor(sessionID, path string) bool {
 	d.mu.Lock()
 	store := d.attachments
 	d.mu.Unlock()
-	kept, ok := store.(interface{ Holds(sessionID, path string) bool })
+	kept, ok := store.(interface {
+		Holds(sessionID, path string) bool
+	})
 	return ok && kept.Holds(sessionID, path)
 }

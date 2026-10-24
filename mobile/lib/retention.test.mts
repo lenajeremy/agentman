@@ -49,3 +49,10 @@ test("a watched session that becomes reachable is reported once", () => {
   assert.deepEqual(newlyReachable([], [ended], watched), []);
   assert.deepEqual(newlyReachable([], [running], new Set()), []);
 });
+
+test("a finished tool call is never set running again by an older copy", () => {
+  const call = (status: "running" | "ok") =>
+    ({ id: "t1", sessionId: "s", role: "tool", ts: 1, tool: { name: "Bash", summary: "ls", status } }) as Message;
+  assert.equal(mergeRetainedMessages([call("running")], [call("ok")]).messages[0].tool?.status, "ok");
+  assert.equal(mergeRetainedMessages([call("ok")], [call("running")]).messages[0].tool?.status, "ok");
+});
