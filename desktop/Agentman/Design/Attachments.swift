@@ -56,15 +56,27 @@ enum Attachments {
     /// The images on a pasteboard: image data, or image files copied in
     /// Finder. Empty when it holds only text.
     static func from(pasteboard: NSPasteboard) -> [Attachment] {
-        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] {
-            let files = urls.compactMap(make(file:))
-            if !files.isEmpty { return files }
+        // Copied files are the files: Finder puts each one's icon beside it,
+        // and a copied video must paste its name, never its icon.
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+           !urls.isEmpty {
+            return urls.compactMap(make(file:))
         }
         if pasteboard.canReadItem(withDataConformingToTypes: [UTType.png.identifier, UTType.tiff.identifier, UTType.jpeg.identifier]),
            let images = pasteboard.readObjects(forClasses: [NSImage.self]) as? [NSImage] {
             return images.compactMap { make($0) }
         }
         return []
+    }
+
+    /// Whether a pasteboard holds images, without reading them: for a drag
+    /// that is still over the box.
+    static func holdsImages(_ pasteboard: NSPasteboard) -> Bool {
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+           !urls.isEmpty {
+            return urls.contains { UTType(filenameExtension: $0.pathExtension)?.conforms(to: .image) == true }
+        }
+        return pasteboard.canReadItem(withDataConformingToTypes: [UTType.image.identifier])
     }
 
     /// The images in a drop: image files, or image data.

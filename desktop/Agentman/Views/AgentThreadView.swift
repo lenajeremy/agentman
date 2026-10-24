@@ -6,6 +6,8 @@ struct AgentThreadView: View {
     @Environment(AgentsStore.self) private var store
     let session: Session
     @State private var draft = ""
+    @State private var attachments: [Attachment] = []
+    @State private var dropping = false
     @State private var sending = false
 
     /// Claude Code in tmux reads the messages it is holding on Ctrl-X
@@ -69,6 +71,9 @@ struct AgentThreadView: View {
                 .overlay {
                     if isEmpty { EmptyThread(session: session) }
                 }
+                .overlay {
+                    if dropping { DropTarget(label: "Drop images for \(session.name)") }
+                }
                 .onChange(of: store.messages[session.id]?.last?.id) { _, last in
                     guard let last else { return }
                     withAnimation(.easeOut(duration: 0.2)) {
@@ -92,8 +97,10 @@ struct AgentThreadView: View {
                 }
                 Composer(
                     text: $draft,
+                    attachments: session.canReceive ? $attachments : nil,
                     placeholder: placeholder,
                     enabled: session.canReceive && !sending && session.question == nil,
+                    onDropTargeted: { dropping = $0 },
                     onSend: send
                 )
             }
@@ -102,6 +109,15 @@ struct AgentThreadView: View {
             .padding(.bottom, 22)
             .frame(maxWidth: 820)
             .frame(maxWidth: .infinity)
+        }
+        // Images dropped anywhere on the conversation wait in the box.
+        .onDrop(of: [.fileURL, .image], isTargeted: Binding(get: { dropping }, set: { dropping = $0 && session.canReceive })) { providers in
+            guard session.canReceive else { return false }
+            Task { @MainActor in
+                let found = await Attachments.from(providers: providers)
+                attachments.append(contentsOf: found.prefix(max(0, Attachments.maxCount - attachments.count)))
+            }
+            return true
         }
         // The window keeps the name; the toolbar shows ThreadTitle instead,
         // which renames the session when clicked.
@@ -158,11 +174,13 @@ struct AgentThreadView: View {
 
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty || !attachments.isEmpty else { return }
         sending = true
+        let images = Attachments.encoded(attachments)
         Task {
-            if await store.send(text, to: session.id) {
+            if await store.send(text, images: images, to: session.id) {
                 draft = ""
+                attachments = []
             }
             sending = false
         }
@@ -314,13 +332,22 @@ struct MessageRow: View {
             if let text = message.text, MessageRow.isCompactionSummary(text) {
                 FoldedText(label: "Summary of the earlier conversation", text: text)
             } else {
-                HStack {
-                    Spacer(minLength: 80)
-                    LongText(text: message.text ?? "")
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .background(Palette.fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                let sent = SentMessage(message.text ?? "")
+                VStack(alignment: .trailing, spacing: 8) {
+                    if !sent.images.isEmpty {
+                        SentFiles(paths: sent.images)
+                    }
+                    if !sent.text.isEmpty {
+                        HStack {
+                            Spacer(minLength: 80)
+                            LongText(text: sent.text)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                                .background(Palette.fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        }
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
         case .assistant:
             MarkdownView(message.text ?? "")
@@ -691,30 +718,84 @@ private struct QueuedBubble: View {
 }
 
 /// The box at the foot of a chat. Return sends; Shift-Return starts a new
-/// line; it grows to ten lines.
+/// line; it grows to ten lines. With attachments, images can be attached
+/// with the button, pasted or dropped, and wait above the words until sent.
 struct Composer: View {
     @Binding var text: String
+    /// Nil for an agent that can't be messaged, so nothing offers images.
+    var attachments: Binding<[Attachment]>?
     var placeholder: String
     var enabled: Bool
+    var onDropTargeted: ((Bool) -> Void)? = nil
     var onSend: () -> Void
+    @State private var focused = false
+
+    private var canSend: Bool {
+        enabled && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !(attachments?.wrappedValue.isEmpty ?? true))
+    }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            TextField(placeholder, text: $text, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(TextStyle.body)
-                .lineSpacing(3)
-                .lineLimit(1...10)
-                .onKeyPress(.return, phases: .down) { press in
-                    // Shift-Return is a new line where the cursor is;
-                    // Return alone sends, through onSubmit.
-                    guard press.modifiers.contains(.shift) else { return .ignored }
-                    NSApp.sendAction(#selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)), to: nil, from: nil)
-                    return .handled
+        VStack(alignment: .leading, spacing: 4) {
+            if let attachments, !attachments.wrappedValue.isEmpty {
+                AttachmentStrip(attachments: attachments)
+            }
+            HStack(alignment: .bottom, spacing: 10) {
+                if let attachments {
+                    Button(action: attach) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Palette.muted)
+                            .frame(width: 28, height: 28)
+                            .background(Palette.fill, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!enabled || attachments.wrappedValue.count >= Attachments.maxCount)
+                    .help("Attach images (or paste or drop them)")
                 }
-                .onSubmit(onSend)
-                .disabled(!enabled)
+                MessageField(
+                    text: $text,
+                    placeholder: placeholder,
+                    enabled: enabled,
+                    focused: $focused,
+                    onSubmit: { if canSend { onSend() } },
+                    onImages: attachments == nil ? nil : { add($0) },
+                    onDropTargeted: onDropTargeted
+                )
+                .opacity(enabled ? 1 : 0.6)
                 .padding(.vertical, 6)
+                sendButton
+            }
+        }
+        .padding(.leading, attachments == nil ? 16 : 10)
+        .padding(.trailing, 8)
+        .padding(.vertical, 8)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(focused ? Palette.fillStrong : Palette.line, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+    }
+
+    private func add(_ found: [Attachment]) {
+        guard let attachments else { return }
+        let room = Attachments.maxCount - attachments.wrappedValue.count
+        withAnimation(.easeOut(duration: 0.12)) {
+            attachments.wrappedValue.append(contentsOf: found.prefix(max(0, room)))
+        }
+    }
+
+    private func attach() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = true
+        panel.message = "Choose images to send"
+        if panel.runModal() == .OK {
+            add(panel.urls.compactMap(Attachments.make(file:)))
+        }
+    }
+
+    private var sendButton: some View {
             Button(action: onSend) {
                 Image(systemName: "arrow.up")
                     .font(.system(size: 13, weight: .bold))
@@ -723,19 +804,9 @@ struct Composer: View {
                     .background(Palette.inverse, in: Circle())
             }
             .buttonStyle(.plain)
-            .disabled(!enabled || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(!canSend)
             .opacity(enabled ? 1 : 0.4)
             .keyboardShortcut(.return, modifiers: .command)
             .help("Send")
-        }
-        .padding(.leading, 16)
-        .padding(.trailing, 8)
-        .padding(.vertical, 8)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Palette.line, lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
     }
 }

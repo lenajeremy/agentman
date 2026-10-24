@@ -151,13 +151,15 @@ final class AgentsStore {
 
     /// Sends a message to an agent. Returns whether the daemon took it.
     @discardableResult
-    func send(_ text: String, to sessionId: String) async -> Bool {
+    func send(_ text: String, images: [InlineImage] = [], to sessionId: String) async -> Bool {
         var request = DaemonRequest(.sendMessage, sessionId: sessionId)
         request.text = text
+        request.images = images.isEmpty ? nil : images
         request.clientId = "mac-send-\(UUID().uuidString)"
         let status = await performWithStatus(request, for: sessionId)
         if status == .queued {
-            queued[sessionId, default: []].append(text)
+            let note = images.count == 1 ? "1 image" : "\(images.count) images"
+            queued[sessionId, default: []].append(images.isEmpty ? text : text.isEmpty ? note : "\(note) · \(text)")
         }
         return status != .failed
     }

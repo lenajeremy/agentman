@@ -205,70 +205,100 @@ struct AttachmentStrip: View {
     }
 }
 
-/// Pasting images into the message box: ⌘V with images on the pasteboard
-/// attaches them; with text, it pastes as ever.
-struct PasteImages: ViewModifier {
-    var active: Bool
-    var onImages: ([Attachment]) -> Void
-    @State private var monitor = PasteMonitor()
+/// Where dropped images will land, over the conversation while they are
+/// dragged across it.
+struct DropTarget: View {
+    let label: String
 
-    func body(content: Content) -> some View {
-        // The monitor outlives this copy of the view, so it is handed what is
-        // true now on every update rather than keeping what was true when it
-        // was installed: then, the box had not taken focus yet.
-        monitor.active = active
-        monitor.onImages = onImages
-        return content
-            .onAppear { monitor.start() }
-            .onDisappear { monitor.stop() }
+    var body: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .strokeBorder(Palette.working, style: StrokeStyle(lineWidth: 2, dash: [6, 5]))
+            .background(Palette.workingWash.opacity(0.6), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                Label(label, systemImage: "photo.on.rectangle")
+                    .font(TextStyle.bodyMedium)
+                    .foregroundStyle(Palette.workingText)
+            }
+            .padding(18)
+            .allowsHitTesting(false)
     }
 }
 
-/// Watches for ⌘V on its way to the focused text field, and takes it when
-/// the pasteboard holds images.
-@MainActor
-final class PasteMonitor {
-    var active = false
-    var onImages: ([Attachment]) -> Void = { _ in }
-    private var token: Any?
+/// A message the user sent an agent, split into the images that went with
+/// it and its words. The daemon types each image's path ahead of the words,
+/// from the folder where it keeps them.
+struct SentMessage: Equatable {
+    var images: [String] = []
+    var text: String
 
-    func start() {
-        guard token == nil else { return }
-        token = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard PasteMonitor.isPaste(event) else { return event }
-            let taken = MainActor.assumeIsolated { self?.take() ?? false }
-            return taken ? nil : event
+    init(_ message: String) {
+        var rest = Substring(message)
+        while let space = rest.firstIndex(of: " ") ?? (rest.isEmpty ? nil : rest.endIndex),
+              SentMessage.isKeptImage(rest[..<space]) {
+            images.append(String(rest[..<space]))
+            rest = rest[space...].drop(while: { $0 == " " })
+        }
+        text = String(rest)
+    }
+
+    /// An image the daemon filed for a message: under its own images folder,
+    /// so nothing else a message mentions is read from disk.
+    static func isKeptImage(_ token: Substring) -> Bool {
+        token.hasPrefix("/") && token.contains("/.agentman/images/") && !token.contains("..") &&
+            ["png", "jpg", "jpeg", "gif", "webp"].contains(token.split(separator: ".").last?.lowercased() ?? "")
+    }
+}
+
+/// The images sent with a message, as thumbnails that open full window,
+/// read from where the daemon filed them on this Mac.
+struct SentFiles: View {
+    let paths: [String]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(paths, id: \.self) { path in
+                SentFile(path: path)
+            }
         }
     }
+}
 
-    func stop() {
-        if let token { NSEvent.removeMonitor(token) }
-        token = nil
-    }
+private struct SentFile: View {
+    @Environment(AgentsStore.self) private var store
+    let path: String
+    @State private var image: NSImage?
+    @State private var missing = false
 
-    /// Attaches the pasteboard's images, if the box is focused and there
-    /// are any.
-    func take(from pasteboard: NSPasteboard = .general) -> Bool {
-        guard active else { return false }
-        let found = Attachments.from(pasteboard: pasteboard)
-        guard !found.isEmpty else { return false }
-        onImages(found)
-        return true
-    }
-
-    /// ⌘V, with Caps Lock on or off. On a layout without Latin letters
-    /// (Cyrillic, Greek…) it is the key where V is on a US keyboard, as it
-    /// is for the Edit menu. ⌥ and ⌃ make it a different shortcut.
-    nonisolated static func isPaste(_ event: NSEvent) -> Bool {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard flags.contains(.command), flags.isDisjoint(with: [.option, .control]) else { return false }
-        return isPasteKey(characters: event.charactersIgnoringModifiers ?? "", keyCode: event.keyCode)
-    }
-
-    nonisolated static func isPasteKey(characters: String, keyCode: UInt16) -> Bool {
-        let typed = characters.lowercased()
-        if typed == "v" { return true }
-        let latin = typed.unicodeScalars.allSatisfy { $0.isASCII }
-        return !latin && keyCode == 9
+    var body: some View {
+        Group {
+            if let image {
+                Button {
+                    store.lightbox = Lightbox(image: image, title: (path as NSString).lastPathComponent)
+                } label: {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: min(220, max(80, 110 * image.size.width / max(image.size.height, 1))), height: 110)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Open full window")
+            } else if missing {
+                Label("Image no longer kept", systemImage: "photo")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
+            } else {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Palette.fill)
+                    .frame(width: 110, height: 110)
+            }
+        }
+        .task(id: path) {
+            let loaded = await Task.detached { NSImage(contentsOfFile: path) }.value
+            image = loaded
+            missing = loaded == nil
+        }
     }
 }

@@ -42,7 +42,7 @@ struct ManagerChatView: View {
                                     .id("thinking")
                             }
                             if entry {
-                                EntryHero(draft: $draft, attachments: $attachments, sending: sending, send: { send(draft) }) {
+                                EntryHero(draft: $draft, attachments: $attachments, dropping: $dropping, sending: sending, send: { send(draft) }) {
                                     manager.showEntry = false
                                     if let first = manager.entries.first(where: { $0.card?.isOpen == true }) {
                                         withAnimation(.easeOut(duration: 0.25)) {
@@ -85,7 +85,8 @@ struct ManagerChatView: View {
                                 .foregroundStyle(Palette.errorText)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        ManagerComposer(text: $draft, attachments: $attachments, thinking: manager.thinking, sending: sending) {
+                        ManagerComposer(text: $draft, attachments: $attachments, thinking: manager.thinking, sending: sending,
+                                        onDropTargeted: { dropping = $0 }) {
                             send(draft)
                         } onStop: {
                             manager.stop()
@@ -109,18 +110,7 @@ struct ManagerChatView: View {
             return true
         }
         .overlay {
-            if dropping {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Palette.working, style: StrokeStyle(lineWidth: 2, dash: [6, 5]))
-                    .background(Palette.workingWash.opacity(0.6), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay {
-                        Label("Drop images for Agentman", systemImage: "photo.on.rectangle")
-                            .font(TextStyle.bodyMedium)
-                            .foregroundStyle(Palette.workingText)
-                    }
-                    .padding(18)
-                    .allowsHitTesting(false)
-            }
+            if dropping { DropTarget(label: "Drop images for Agentman") }
         }
         .task {
             // For screenshots and tests: images and words waiting in the box.
@@ -169,6 +159,7 @@ private struct EntryHero: View {
     @Environment(AgentsStore.self) private var store
     @Binding var draft: String
     @Binding var attachments: [Attachment]
+    @Binding var dropping: Bool
     var sending: Bool
     var send: () -> Void
     var showCards: () -> Void
@@ -193,7 +184,7 @@ private struct EntryHero: View {
                     KeyBox()
                 } else {
                     ManagerComposer(text: $draft, attachments: $attachments, thinking: false, sending: sending, large: true,
-                                    onSend: send, onStop: {})
+                                    onDropTargeted: { dropping = $0 }, onSend: send, onStop: {})
                 }
             }
             .frame(maxWidth: 620)
@@ -665,9 +656,12 @@ private struct ManagerComposer: View {
     var sending: Bool
     var large = false
     var placeholder = "Ask Agentman about your agents"
+    /// Images dragged over the box, so the conversation shows where they
+    /// will land.
+    var onDropTargeted: ((Bool) -> Void)? = nil
     var onSend: () -> Void
     var onStop: () -> Void
-    @FocusState private var focused: Bool
+    @State private var focused = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -686,21 +680,16 @@ private struct ManagerComposer: View {
                 .disabled(attachments.wrappedValue.count >= Attachments.maxCount)
                 .help("Attach images (or paste or drop them)")
 
-                TextField(placeholder, text: $text, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(large ? Fonts.sans(15) : TextStyle.body)
-                    .lineSpacing(3)
-                    .lineLimit(1...10)
-                    .focused($focused)
-                    .onKeyPress(.return, phases: .down) { press in
-                        // Shift-Return is a new line where the cursor is;
-                        // Return alone sends, through onSubmit.
-                        guard press.modifiers.contains(.shift) else { return .ignored }
-                        NSApp.sendAction(#selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)), to: nil, from: nil)
-                        return .handled
-                    }
-                    .onSubmit { if !thinking, canSend { onSend() } }
-                    .padding(.vertical, large ? 9 : 6)
+                MessageField(
+                    text: $text,
+                    placeholder: placeholder,
+                    fontSize: large ? 15 : 14,
+                    focused: $focused,
+                    onSubmit: { if !thinking, canSend { onSend() } },
+                    onImages: { add($0) },
+                    onDropTargeted: onDropTargeted
+                )
+                .padding(.vertical, large ? 9 : 6)
 
                 Button {
                     thinking ? onStop() : onSend()
@@ -725,7 +714,6 @@ private struct ManagerComposer: View {
                 .strokeBorder(focused ? Palette.fillStrong : Palette.line, lineWidth: 1)
         )
         .shadow(color: .black.opacity(large ? 0.06 : 0.04), radius: large ? 18 : 8, y: large ? 6 : 2)
-        .modifier(PasteImages(active: focused) { found in add(found) })
         .onAppear { if large { focused = true } }
     }
 
