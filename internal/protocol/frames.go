@@ -207,6 +207,8 @@ type Request struct {
 	// Ref is the branch ReqListCommits reads, in full — refs/heads/… or
 	// refs/remotes/… — as ReqListBranches reported it. Empty reads HEAD.
 	Ref string `json:"ref,omitempty"`
+	// Manager is the settings on ReqManagerSetSettings.
+	Manager *ManagerSettings `json:"manager,omitempty"`
 }
 
 /* ----------------------------- daemon → app ------------------------------ */
@@ -296,6 +298,18 @@ type Event struct {
 	// Daemon rides on EvtSessions: which agentman this Mac runs, and what is
 	// newer. A phone too old to know the field ignores it.
 	Daemon *DaemonInfo `json:"daemon,omitempty"`
+
+	// Agentman, the manager (manager.go).
+	Entry           *ManagerEntry    `json:"entry,omitempty"`
+	Entries         []ManagerEntry   `json:"entries,omitempty"`
+	EntryID         string           `json:"entryId,omitempty"`
+	Delta           string           `json:"delta,omitempty"`
+	ManagerStatus   *ManagerStatus   `json:"managerStatus,omitempty"`
+	ManagerSettings *ManagerSettings `json:"managerSettings,omitempty"`
+	Brief           *Brief           `json:"brief,omitempty"`
+	Briefs          []Brief          `json:"briefs,omitempty"`
+	// More says older manager entries remain, on EvtManagerHistory.
+	More bool `json:"more,omitempty"`
 
 	Error string `json:"error,omitempty"`
 }

@@ -93,6 +93,9 @@ type Daemon struct {
 	// daemonInfo says which agentman this is and what is newer. See
 	// SetDaemonInfo.
 	daemonInfo func() *protocol.DaemonInfo
+	// manager is Agentman, the manager agent, when am serve runs one. See
+	// SetManager.
+	manager ManagerHook
 	// turns gives hook and polling completions one shared generation to claim.
 	// Unlike a time window, it permits two real short turns to notify while
 	// still making duplicate hook/poll reports for one turn idempotent.
@@ -318,6 +321,9 @@ func (d *Daemon) suppressTurnAlert(sessionID string, now time.Time) string {
 // alertTurnComplete pushes a finished turn. The preview only travels when the
 // user has opted in, since it leaves the machine.
 func (d *Daemon) alertTurnComplete(event protocol.Event) {
+	// Agentman hears every finished turn, whether or not a phone is set up
+	// for push.
+	d.managerTurnComplete(event.SessionID)
 	d.mu.Lock()
 	sender := d.push
 	d.mu.Unlock()
@@ -344,6 +350,7 @@ func (d *Daemon) alertNeedsAnswer(session protocol.Session) {
 	if session.Question == nil {
 		return
 	}
+	d.managerNeedsAnswer(session)
 	d.mu.Lock()
 	previous, seen := d.pushedQuestions[session.ID]
 	if seen && previous == session.Question.ID {
@@ -930,6 +937,11 @@ func (d *Daemon) HandleFrom(
 	subscriberID string,
 	req protocol.Request,
 ) protocol.Event {
+	// The manager's requests are about the conversation with it, not about a
+	// session, so they skip the session checks below.
+	if manager := d.managerHook(); manager != nil && manager.Handles(req.Type) {
+		return manager.Handle(ctx, req)
+	}
 	if err := validateRequest(req); err != nil {
 		if req.Type == protocol.ReqSendMessage || req.Type == protocol.ReqAnswer ||
 			req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqReviewArtifact ||

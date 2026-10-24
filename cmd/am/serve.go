@@ -26,8 +26,10 @@ import (
 	"github.com/lenajeremy/agentman/internal/attachments"
 	"github.com/lenajeremy/agentman/internal/daemon"
 	"github.com/lenajeremy/agentman/internal/hook"
+	"github.com/lenajeremy/agentman/internal/manager"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/relay"
+	"github.com/lenajeremy/agentman/internal/secrets"
 	"github.com/lenajeremy/agentman/internal/servers"
 	"github.com/lenajeremy/agentman/internal/source"
 	"github.com/lenajeremy/agentman/internal/update"
@@ -275,7 +277,8 @@ func runServe(ctx context.Context, args []string) error {
 		}
 	}
 
-	agent := daemon.New(registry, multiSink{sinks: sinks})
+	sink := multiSink{sinks: sinks}
+	agent := daemon.New(registry, sink)
 	if local != nil {
 		go func() {
 			if err := local.Serve(ctx, agent.HandleFrom, agent.DisconnectSubscriber); err != nil {
@@ -301,6 +304,29 @@ func runServe(ctx context.Context, args []string) error {
 			agent.AnnounceDaemonInfo()
 		}
 		go updates.Run(ctx, update.Every)
+	}
+
+	// Agentman, the manager agent: one conversation, here in the daemon, that
+	// reads every agent for the user. It runs on the user's own Claude API
+	// key, set from Agentman for Mac and kept in the Keychain.
+	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
+		boss, err := manager.New(manager.Config{
+			Dir:     filepath.Join(dir, "manager"),
+			Secrets: secrets.Default(dir),
+			Agents:  managerAgents{daemon: agent},
+			Emit:    func(event protocol.Event) { _ = sink.Send(event) },
+		})
+		if err != nil {
+			fmt.Printf("%s\n", dim("agentman   "+err.Error()))
+		} else {
+			agent.SetManager(boss)
+			go boss.Run(ctx)
+			state := "ready"
+			if settings := boss.Handle(ctx, protocol.Request{Type: protocol.ReqManagerSettings}); settings.ManagerSettings == nil || !settings.ManagerSettings.KeySet {
+				state = "waiting for an API key (set it in Agentman for Mac)"
+			}
+			fmt.Printf("%s\n", dim("agentman   "+state))
+		}
 	}
 
 	// Servers agents start are found either way; sharing one as a preview
