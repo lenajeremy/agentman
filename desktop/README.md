@@ -52,4 +52,6 @@ python3 desktop/scripts/agent-marks.py   # from mobile/components/agentMarks.ts
 python3 desktop/scripts/app-icon.py      # from mobile/assets/images/icon.png
 ```
 
-Geist is bundled under the SIL Open Font License (`Agentman/Resources/Fonts/OFL.txt`).
+Google Sans and Google Sans Code are bundled, unmodified, under the SIL Open Font
+License (`Agentman/Resources/Fonts/OFL-*.txt`; see `TRADEMARKS-GoogleSans.md` for
+how the names may be used).

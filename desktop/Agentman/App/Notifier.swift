@@ -23,7 +23,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.threadIdentifier = "agentman"
         content.sound = .default
         var identifier = entry.id
-        var link = "agentman://home"
+        var link = "agentman://home/conversation"
         if let card = entry.card {
             identifier = card.id
             content.title = "\(card.agentName) needs you"

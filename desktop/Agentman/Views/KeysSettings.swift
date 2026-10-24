@@ -11,52 +11,55 @@ struct KeysSettings: View {
     private var manager: ManagerStore { store.manager }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Agents ask for these with Agentman's tools, or Agentman gives one when you ask. A key goes into the project's .env, and only when git ignores that file.")
-                .font(TextStyle.caption)
-                .foregroundStyle(Palette.muted)
-                .fixedSize(horizontal: false, vertical: true)
-
-            List {
-                ForEach(manager.keys) { key in
-                    HStack(spacing: 10) {
-                        Image(systemName: "key")
-                            .foregroundStyle(key.set ? Palette.working : Palette.faint)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(key.name)
-                                .font(TextStyle.code)
-                            Text([key.description, Self.ruleText(key)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
-                                .font(TextStyle.caption)
-                                .foregroundStyle(Palette.muted)
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                        if !key.set {
-                            Text("No value")
-                                .font(TextStyle.caption)
-                                .foregroundStyle(Palette.needsYouText)
-                        }
-                        Button("Edit") { editing = KeyDraft(key) }
-                            .buttonStyle(.borderless)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Keys")
+                            .font(TextStyle.display)
+                            .foregroundStyle(Palette.text)
+                        Text("API keys for your agents. They ask for one through Agentman, or Agentman gives one when you ask. It goes into the project's .env, and only when git ignores that file.")
+                            .font(TextStyle.caption)
+                            .foregroundStyle(Palette.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(.vertical, 3)
+                    Spacer(minLength: 16)
+                    Button {
+                        editing = KeyDraft()
+                    } label: {
+                        Label("Add key", systemImage: "plus")
+                    }
                 }
-            }
-            .overlay {
+
                 if manager.keys.isEmpty {
                     Text("No keys yet")
                         .font(TextStyle.caption)
                         .foregroundStyle(Palette.muted)
+                        .frame(maxWidth: .infinity, minHeight: 120)
+                        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
+                } else {
+                    SettingsSection {
+                        ForEach(Array(manager.keys.enumerated()), id: \.element.id) { index, key in
+                            SettingsRow(title: key.name,
+                                        detail: [key.description, Self.ruleText(key)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "),
+                                        divider: index < manager.keys.count - 1) {
+                                HStack(spacing: 10) {
+                                    if !key.set {
+                                        Text("No value")
+                                            .font(TextStyle.caption)
+                                            .foregroundStyle(Palette.needsYouText)
+                                    }
+                                    Button("Edit") { editing = KeyDraft(key) }
+                                }
+                            }
+                        }
+                    }
                 }
             }
-
-            HStack {
-                Spacer()
-                Button("Add key") { editing = KeyDraft() }
-                    .buttonStyle(.borderedProminent)
-            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 26)
         }
-        .padding(16)
         .task { await manager.loadKeys() }
         .sheet(item: $editing) { draft in
             KeyEditor(draft: draft)
@@ -108,12 +111,18 @@ private struct KeyEditor: View {
 
     var body: some View {
         Form {
-            TextField("Name", text: $draft.name, prompt: Text("ELEVENLABS_API_KEY"))
-                .font(TextStyle.code)
-                .disabled(draft.original != nil)
-            SecureField("Value", text: $draft.value,
-                        prompt: Text(draft.original?.set == true ? "Leave empty to keep the current one" : "Paste the key"))
-                .font(TextStyle.code)
+            LabeledContent("Name") {
+                TextField("", text: $draft.name, prompt: Text("ELEVENLABS_API_KEY"))
+                    .font(TextStyle.code)
+                    .multilineTextAlignment(.trailing)
+                    .disabled(draft.original != nil)
+            }
+            LabeledContent("Value") {
+                SecureField("", text: $draft.value,
+                            prompt: Text(draft.original?.set == true ? "Leave empty to keep the current one" : "Paste the key"))
+                    .font(TextStyle.code)
+                    .multilineTextAlignment(.trailing)
+            }
             TextField("What it's for", text: $draft.description, prompt: Text("Voices for the launch videos"))
             Picker("Give it", selection: $draft.rule) {
                 Text("To any agent that asks").tag("auto")

@@ -18,18 +18,11 @@ struct Sidebar: View {
                             .tag(SidebarItem.agent(session.id))
                     }
                 } header: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "folder")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text(group.name)
-                            .font(TextStyle.label)
-                        Spacer()
-                        Text("\(group.sessions.count)")
-                            .font(TextStyle.label)
-                            .foregroundStyle(Palette.faint)
-                    }
-                    .foregroundStyle(Palette.muted)
-                    .help(group.id)
+                    Text(group.name)
+                        .font(TextStyle.label)
+                        .foregroundStyle(Palette.faint)
+                        .textCase(nil)
+                        .help(group.id)
                 }
             }
         }
@@ -58,7 +51,7 @@ private struct AgentmanRow: View {
             AgentmanBadge(size: 28)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Agentman")
-                    .font(unread > 0 ? Fonts.sans(14, .semibold) : TextStyle.bodyMedium)
+                    .font(unread > 0 ? Fonts.sans(14, .bold) : TextStyle.bodyMedium)
                     .foregroundStyle(Palette.text)
                 Text(summary)
                     .font(TextStyle.caption)
@@ -124,24 +117,24 @@ struct AgentRow: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            AgentMark(kind: session.kind, size: 16)
+            AgentMark(kind: session.kind, size: 15)
             VStack(alignment: .leading, spacing: 1) {
                 Text(session.name)
-                    .font(TextStyle.body)
+                    .font(Fonts.sans(13.5))
                     .foregroundStyle(Palette.text)
                     .lineLimit(1)
                 Text(detail)
-                    .font(TextStyle.caption)
+                    .font(Fonts.sans(11.5))
                     .foregroundStyle(session.state == .waitingInput ? Palette.needsYouText : Palette.muted)
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
             Circle()
                 .fill(Palette.dot(session.state))
-                .frame(width: 7, height: 7)
+                .frame(width: 6, height: 6)
                 .accessibilityLabel(stateName)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
     }
 
     private var stateName: String {
@@ -180,6 +173,9 @@ private struct ConnectionFooter: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        // Its own ground, so the list ends above it instead of running under.
+        .background(SidebarMaterial())
+        .overlay(alignment: .top) { Divider() }
         .help(store.socketPath)
     }
 

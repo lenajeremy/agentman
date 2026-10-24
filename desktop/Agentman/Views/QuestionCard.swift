@@ -9,8 +9,8 @@ struct QuestionCard: View {
     let question: Question
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 7) {
                 Circle().fill(Palette.needsYou).frame(width: 7, height: 7)
                 Text(question.title ?? "Needs your answer")
                     .font(TextStyle.bodyMedium)
@@ -28,12 +28,19 @@ struct QuestionCard: View {
                 await store.answer(session.id, question: question, reply: reply)
             }
         }
-        .padding(16)
-        .background(Palette.needsYouWash, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Palette.needsYouEdge, lineWidth: 1)
-        )
+        .modifier(DecisionPanel())
+    }
+}
+
+/// The panel a decision sits in: a quiet surface with a fine edge, the same
+/// for an agent's question in its thread and a card in Agentman's.
+struct DecisionPanel: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(20)
+            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.line))
+            .shadow(color: .black.opacity(0.035), radius: 10, y: 3)
     }
 }
 
@@ -46,8 +53,11 @@ struct CodeBox: View {
             .font(TextStyle.code)
             .foregroundStyle(Palette.text)
             .textSelection(.enabled)
+            // Always whole: what is being approved must never be cut short.
+            .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .background(Palette.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
@@ -97,30 +107,18 @@ struct QuestionChoices: View {
     }
 
     private var singleChoice: some View {
-        FlowLayout(spacing: 8) {
-            ForEach(question.options) { option in
-                Button {
+        VStack(spacing: 4) {
+            ForEach(Array(question.options.enumerated()), id: \.element.id) { index, option in
+                OptionRow(
+                    number: index + 1, option: option,
+                    pick: option.key == suggested, leading: option.id == primaryKey
+                ) {
                     if option.withText == true {
                         noting = option
                     } else {
                         send(QuestionReply(optionKey: option.key))
                     }
-                } label: {
-                    HStack(spacing: 5) {
-                        if option.key == suggested {
-                            Image(systemName: "sparkle")
-                                .font(.system(size: 10, weight: .bold))
-                        }
-                        Text(option.label)
-                            .font(TextStyle.bodyMedium)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
                 }
-                .buttonStyle(ChoiceButtonStyle(primary: option.id == primaryKey))
-                .help(option.key == suggested ? "Agentman's pick" : (option.description ?? option.label))
             }
         }
     }
@@ -211,6 +209,71 @@ struct ChoiceButtonStyle: ButtonStyle {
                     .strokeBorder(primary ? Color.clear : Palette.line, lineWidth: 1)
             )
             .opacity(configuration.isPressed ? 0.75 : 1)
+    }
+}
+
+/// One choice: its number, its words in full, and Agentman's pick marked.
+/// The likeliest answer is lightly filled; the rest fill as the pointer
+/// passes.
+private struct OptionRow: View {
+    let number: Int
+    let option: QuestionOption
+    var pick = false
+    var leading = false
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("\(number)")
+                    .font(TextStyle.label)
+                    .monospacedDigit()
+                    .foregroundStyle(Palette.muted)
+                    .frame(width: 20, height: 20)
+                    .background(Palette.fill, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .alignmentGuide(.firstTextBaseline) { $0[.firstTextBaseline] }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(option.label)
+                        .font(TextStyle.body)
+                        .foregroundStyle(Palette.text)
+                        .lineSpacing(4)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let description = option.description, !description.isEmpty {
+                        Text(description)
+                            .font(TextStyle.caption)
+                            .foregroundStyle(Palette.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 8)
+                if pick {
+                    Label("Agentman's pick", systemImage: "sparkle")
+                        .font(TextStyle.label)
+                        .foregroundStyle(Palette.workingText)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Palette.workingWash, in: Capsule())
+                }
+                if hovering {
+                    Image(systemName: "return")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Palette.faint)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(hovering ? Palette.fillStrong : (leading || pick ? Palette.fill : Color.clear))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(option.withText == true ? "Choose, and add a note for the agent" : option.label)
     }
 }
 

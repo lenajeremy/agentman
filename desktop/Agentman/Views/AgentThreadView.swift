@@ -14,11 +14,9 @@ struct AgentThreadView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ThreadHeader(session: session)
-            Divider().overlay(Palette.line)
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
+                    LazyVStack(alignment: .leading, spacing: 24) {
                         if store.hasMore[session.id] == true {
                             Button {
                                 Task { await store.loadOlder(session.id) }
@@ -29,9 +27,19 @@ struct AgentThreadView: View {
                             .buttonStyle(.link)
                             .frame(maxWidth: .infinity)
                         }
-                        ForEach(store.messages[session.id] ?? []) { message in
-                            MessageRow(message: message)
-                                .id(message.id)
+                        ForEach(ThreadItem.items(from: store.messages[session.id] ?? [])) { item in
+                            switch item {
+                            case .message(let message):
+                                MessageRow(message: message)
+                                    .id(item.id)
+                            case .tools(let calls):
+                                ToolRun(calls: calls)
+                                    .id(item.id)
+                            case .image(let call, let path):
+                                ImageThumbnail(sessionId: session.id, path: path,
+                                               label: "Read " + (path as NSString).lastPathComponent)
+                                    .id(item.id)
+                            }
                         }
                         ForEach(Array((session.queued ?? []).enumerated()), id: \.offset) { _, text in
                             QueuedBubble(text: text, note: "Waiting for the agent to read it",
@@ -40,25 +48,42 @@ struct AgentThreadView: View {
                         ForEach(Array((store.queued[session.id] ?? []).enumerated()), id: \.offset) { _, text in
                             QueuedBubble(text: text, note: "Queued: it reaches the agent when its turn ends")
                         }
+                        // The question is part of the conversation, so it
+                        // scrolls with it and is never squeezed to fit.
+                        if let question = session.question {
+                            QuestionCard(session: session, question: question)
+                                .id("question")
+                        }
+                        // Below the last message, so following the thread
+                        // keeps room above the composer.
+                        Color.clear.frame(height: 1).id("end")
                     }
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 24)
+                    .padding(.horizontal, 36)
+                    .padding(.top, 24)
+                    .padding(.bottom, 6)
                     .frame(maxWidth: 820)
                     .frame(maxWidth: .infinity)
                 }
                 .defaultScrollAnchor(.bottom)
+                .modifier(TopFade())
+                .overlay {
+                    if isEmpty { EmptyThread(session: session) }
+                }
                 .onChange(of: store.messages[session.id]?.last?.id) { _, last in
                     guard let last else { return }
                     withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo(last, anchor: .bottom)
+                        proxy.scrollTo("end", anchor: .bottom)
+                    }
+                }
+                .onChange(of: session.question?.id) { _, id in
+                    guard id != nil else { return }
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo("end", anchor: .bottom)
                     }
                 }
             }
 
             VStack(spacing: 10) {
-                if let question = session.question {
-                    QuestionCard(session: session, question: question)
-                }
                 if let error = store.actionError[session.id] {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .font(TextStyle.caption)
@@ -72,11 +97,39 @@ struct AgentThreadView: View {
                     onSend: send
                 )
             }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 18)
+            .padding(.horizontal, 36)
+            .padding(.top, 4)
+            .padding(.bottom, 22)
             .frame(maxWidth: 820)
             .frame(maxWidth: .infinity)
         }
+        .navigationTitle(session.name)
+        .navigationSubtitle(subtitle)
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                StateChip(state: session.state)
+                if session.state == .busy, session.canReceive {
+                    Button {
+                        store.interrupt(session.id)
+                    } label: {
+                        Label("Stop", systemImage: "stop.fill")
+                    }
+                    .help("Stop the agent's current turn")
+                }
+            }
+        }
+    }
+
+    /// Where it works and on which model, under its name in the title bar.
+    private var subtitle: String {
+        let folder = session.cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        guard let model = session.model, !model.isEmpty else { return folder }
+        return folder + " · " + model
+    }
+
+    private var isEmpty: Bool {
+        (store.messages[session.id] ?? []).isEmpty && (session.queued ?? []).isEmpty &&
+            (store.queued[session.id] ?? []).isEmpty && session.question == nil
     }
 
     private var placeholder: String {
@@ -101,41 +154,22 @@ struct AgentThreadView: View {
     }
 }
 
-private struct ThreadHeader: View {
-    @Environment(AgentsStore.self) private var store
+/// An agent with nothing to show yet.
+private struct EmptyThread: View {
     let session: Session
 
     var body: some View {
-        HStack(spacing: 12) {
-            AgentMark(kind: session.kind, size: 26)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(session.name)
-                    .font(TextStyle.title)
-                    .foregroundStyle(Palette.text)
-                HStack(spacing: 6) {
-                    Text(session.cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-                    if let model = session.model {
-                        Text("·")
-                        Text(model)
-                    }
-                }
+        VStack(spacing: 10) {
+            AgentMark(kind: session.kind, size: 28)
+                .opacity(0.9)
+            Text("No messages yet")
+                .font(TextStyle.bodyMedium)
+                .foregroundStyle(Palette.textSecondary)
+            Text(session.canReceive ? "What you send appears here, then the agent's replies." : "Its conversation appears here as it works.")
                 .font(TextStyle.caption)
                 .foregroundStyle(Palette.muted)
-                .lineLimit(1)
-            }
-            Spacer()
-            StateChip(state: session.state)
-            if session.state == .busy, session.canReceive {
-                Button {
-                    store.interrupt(session.id)
-                } label: {
-                    Label("Stop", systemImage: "stop.fill")
-                }
-                .help("Stop the agent's current turn")
-            }
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 14)
+        .allowsHitTesting(false)
     }
 }
 
@@ -184,22 +218,22 @@ struct MessageRow: View {
     var body: some View {
         switch message.role {
         case .user:
-            HStack {
-                Spacer(minLength: 80)
-                Text(message.text ?? "")
-                    .font(TextStyle.body)
-                    .foregroundStyle(Palette.text)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Palette.fill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            if let text = message.text, MessageRow.isCompactionSummary(text) {
+                FoldedText(label: "Summary of the earlier conversation", text: text)
+            } else {
+                HStack {
+                    Spacer(minLength: 80)
+                    LongText(text: message.text ?? "")
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(Palette.fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
             }
         case .assistant:
             MarkdownView(message.text ?? "")
                 .opacity(message.isSidechain == true ? 0.6 : 1)
         case .tool:
-            ToolRow(tool: message.tool, fallback: message.text)
-                .opacity(message.isSidechain == true ? 0.6 : 1)
+            ToolRun(calls: [message])
         case .system:
             Text(message.text ?? "")
                 .font(TextStyle.caption)
@@ -209,37 +243,311 @@ struct MessageRow: View {
     }
 }
 
-private struct ToolRow: View {
-    let tool: ToolCall?
-    let fallback: String?
+extension MessageRow {
+    /// The summary Claude Code writes when it compacts a conversation, which
+    /// arrives as a message from the user.
+    static func isCompactionSummary(_ text: String) -> Bool {
+        text.hasPrefix("This session is being continued from a previous conversation")
+    }
+}
+
+/// A user's message, clipped to a few lines when it is long, with the way
+/// to read the rest.
+private struct LongText: View {
+    let text: String
+    @State private var open = false
+    private var long: Bool { text.count > 700 || text.filter(\.isNewline).count > 10 }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(text)
+                .font(TextStyle.body)
+                .foregroundStyle(Palette.text)
+                .lineSpacing(5)
+                .textSelection(.enabled)
+                .lineLimit(long && !open ? 8 : nil)
+            if long {
+                Button(open ? "Show less" : "Show more") {
+                    withAnimation(.easeOut(duration: 0.15)) { open.toggle() }
+                }
+                .buttonStyle(.link)
+                .font(TextStyle.caption)
+            }
+        }
+    }
+}
+
+/// Text that rarely needs reading, folded into one quiet line.
+private struct FoldedText: View {
+    let label: String
+    let text: String
+    @State private var open = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { open.toggle() }
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "text.alignleft")
+                        .font(.system(size: 10, weight: .medium))
+                    Text(label)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                }
+                .font(TextStyle.caption)
+                .foregroundStyle(Palette.muted)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if open {
+                Text(text)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.textSecondary)
+                    .textSelection(.enabled)
+                    .padding(12)
+                    .background(Palette.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
+    }
+}
+
+/// What a thread shows: messages, with runs of tool calls folded into one
+/// line each.
+enum ThreadItem: Identifiable {
+    case message(Message)
+    case tools([Message])
+    /// An image the agent read, shown as a thumbnail rather than its path.
+    case image(Message, path: String)
+
+    /// The last message's ID, so scrolling to the newest message finds it.
+    var id: String {
+        switch self {
+        case .message(let message), .image(let message, _): message.id
+        case .tools(let calls): calls.last?.id ?? ""
+        }
+    }
+
+    static func items(from messages: [Message]) -> [ThreadItem] {
+        var items: [ThreadItem] = []
+        var run: [Message] = []
+        func flush() {
+            if !run.isEmpty {
+                items.append(.tools(run))
+                run = []
+            }
+        }
+        for message in messages {
+            if message.role == .tool, ToolKind(message.tool?.name) == .read,
+               let path = ImageThumbnail.imagePath(in: message.tool?.summary ?? message.text ?? "") {
+                flush()
+                items.append(.image(message, path: path))
+            } else if message.role == .tool {
+                run.append(message)
+            } else {
+                flush()
+                items.append(.message(message))
+            }
+        }
+        flush()
+        return items
+    }
+}
+
+/// A run of tool calls as one quiet line: what was done, in counts, or what
+/// is running now. Opened, one tidy row a call.
+struct ToolRun: View {
+    let calls: [Message]
+    @State private var open = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if calls.count == 1, let call = calls.first {
+                ToolCallRow(call: call)
+            } else {
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { open.toggle() }
+                } label: {
+                    HStack(spacing: 7) {
+                        statusIcon
+                        Text(summary)
+                            .lineLimit(1)
+                        if failures > 0 {
+                            Text("· \(failures) failed")
+                                .foregroundStyle(Palette.errorText)
+                        }
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .rotationEffect(.degrees(open ? 90 : 0))
+                    }
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if open {
+                    VStack(alignment: .leading, spacing: 9) {
+                        ForEach(calls) { call in
+                            ToolCallRow(call: call)
+                        }
+                    }
+                    .padding(.leading, 18)
+                    .padding(.top, 4)
+                }
+            }
+        }
+        .opacity(calls.allSatisfy { $0.isSidechain == true } ? 0.6 : 1)
+    }
+
+    private var failures: Int { calls.filter { $0.tool?.status == "error" }.count }
+
+    @ViewBuilder private var statusIcon: some View {
+        if calls.last?.tool?.status == "running" {
+            ProgressView().controlSize(.mini).frame(width: 11, height: 11)
+        } else {
+            Image(systemName: "wrench.and.screwdriver")
+                .font(.system(size: 10, weight: .medium))
+        }
+    }
+
+    /// "Ran 3 commands, read 2 files and edited a file", or what is running.
+    private var summary: String {
+        if let running = calls.last, running.tool?.status == "running" {
+            let kind = ToolKind(running.tool?.name)
+            return "\(kind.verb) \(ToolKind.tidy(running.tool?.summary ?? running.text ?? ""))…"
+        }
+        var counts: [ToolKind: Int] = [:]
+        var order: [ToolKind] = []
+        for call in calls {
+            let kind = ToolKind(call.tool?.name)
+            if counts[kind] == nil { order.append(kind) }
+            counts[kind, default: 0] += 1
+        }
+        let phrases = order.map { $0.phrase(count: counts[$0] ?? 1) }
+        guard var sentence = phrases.first else { return "Used tools" }
+        let rest = phrases.dropFirst().map { $0.prefix(1).lowercased() + $0.dropFirst() }
+        if rest.count == 1 {
+            sentence += " and " + rest[0]
+        } else if rest.count > 1 {
+            sentence += ", " + rest.dropLast().joined(separator: ", ") + " and " + rest.last!
+        }
+        return sentence
+    }
+}
+
+/// One tool call in a line: what it did, then its target, cut in the middle
+/// when long.
+private struct ToolCallRow: View {
+    let call: Message
+
+    var body: some View {
+        let kind = ToolKind(call.tool?.name)
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
             Group {
-                switch tool?.status {
+                switch call.tool?.status {
                 case "running":
-                    ProgressView().controlSize(.mini)
+                    ProgressView().controlSize(.mini).frame(width: 11, height: 11)
                 case "error":
                     Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.error)
                 default:
-                    Image(systemName: "checkmark.circle").foregroundStyle(Palette.faint)
+                    Image(systemName: kind.icon).foregroundStyle(Palette.faint)
                 }
             }
-            .font(.system(size: 11))
-            .frame(width: 14)
-            Text(tool?.name ?? "Tool")
-                .font(TextStyle.label)
+            .font(.system(size: 10, weight: .medium))
+            .frame(width: 12)
+            Text(kind.verb)
+                .font(TextStyle.captionMedium)
                 .foregroundStyle(Palette.textSecondary)
-            if let summary = tool?.summary ?? fallback, !summary.isEmpty {
-                Text(summary)
-                    .font(TextStyle.code)
+            let target = ToolKind.tidy(call.tool?.summary ?? call.text ?? "")
+            if !target.isEmpty {
+                Text(target)
+                    .font(Fonts.mono(11.5))
                     .foregroundStyle(Palette.muted)
-                    .lineLimit(2)
+                    .lineLimit(1)
                     .truncationMode(.middle)
                     .textSelection(.enabled)
+                    .help(call.tool?.summary ?? "")
             }
         }
-        .padding(.vertical, 2)
+        .opacity(call.isSidechain == true ? 0.6 : 1)
+    }
+}
+
+/// What kind of thing a tool call does, by the agent's name for the tool.
+enum ToolKind: Hashable {
+    case command, read, edit, write, search, web, task, plan, other(String)
+
+    init(_ name: String?) {
+        let name = (name ?? "").lowercased()
+        switch name {
+        case "bash", "shell", "exec_command", "run_shell_command", "local_shell", "terminal": self = .command
+        case "read", "read_file", "view", "cat", "notebookread": self = .read
+        case "edit", "multiedit", "apply_patch", "str_replace", "str_replace_editor", "notebookedit", "replace": self = .edit
+        case "write", "create_file", "write_file": self = .write
+        case "grep", "glob", "search", "find", "list", "ls", "codebase_search", "file_search": self = .search
+        case "webfetch", "fetch", "websearch", "web_search", "web_fetch": self = .web
+        case "task", "agent", "subagent": self = .task
+        case "todowrite", "update_plan", "todo_write": self = .plan
+        default:
+            if name.hasPrefix("mcp__") {
+                self = .other(String(name.split(separator: "_").last ?? "tool"))
+            } else {
+                self = .other(name.isEmpty ? "tool" : name)
+            }
+        }
+    }
+
+    var verb: String {
+        switch self {
+        case .command: "Ran"
+        case .read: "Read"
+        case .edit: "Edited"
+        case .write: "Wrote"
+        case .search: "Searched"
+        case .web: "Fetched"
+        case .task: "Delegated"
+        case .plan: "Planned"
+        case .other(let name): "Used " + name
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .command: "terminal"
+        case .read: "doc.text"
+        case .edit, .write: "pencil"
+        case .search: "magnifyingglass"
+        case .web: "globe"
+        case .task: "person.2"
+        case .plan: "checklist"
+        case .other: "wrench"
+        }
+    }
+
+    func phrase(count: Int) -> String {
+        let one = count == 1
+        switch self {
+        case .command: return one ? "Ran a command" : "Ran \(count) commands"
+        case .read: return one ? "Read a file" : "Read \(count) files"
+        case .edit: return one ? "Edited a file" : "Edited \(count) files"
+        case .write: return one ? "Wrote a file" : "Wrote \(count) files"
+        case .search: return one ? "Searched once" : "Searched \(count) times"
+        case .web: return one ? "Fetched a page" : "Fetched \(count) pages"
+        case .task: return one ? "Delegated a task" : "Delegated \(count) tasks"
+        case .plan: return "Updated the plan"
+        case .other: return one ? "Used a tool" : "Used \(count) tools"
+        }
+    }
+
+    /// A target made readable: home as ~, an agent's own temporary folder
+    /// left out (scratchpad/…, tasks/…), and whitespace on one line.
+    static func tidy(_ text: String) -> String {
+        var text = text.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        if let session = try? Regex(#"/(?:private/)?tmp/claude-\d+/[^/\s]+/[0-9a-f-]{36}/"#) {
+            text = text.replacing(session, with: "")
+        }
+        return text.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
     }
 }
 

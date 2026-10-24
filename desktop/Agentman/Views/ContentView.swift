@@ -27,17 +27,37 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Palette.paper)
+            // The title bar is the same paper as the page, so there is no
+            // band above the conversation, and what scrolls up goes behind
+            // it rather than under the title.
+            .toolbarBackground(Palette.paper, for: .windowToolbar)
+            .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         }
-        .onOpenURL { url in
-            // agentman://settings opens Settings, at a tab with
-            // agentman://settings/keys; the rest are the store's to open.
-            if url.host() == "settings" {
-                let tab = url.path().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-                if ["general", "knowledge", "keys"].contains(tab) { settingsTab = tab }
-                openSettings()
-            } else {
-                store.open(url)
+        .overlay {
+            if let box = store.lightbox {
+                LightboxView(box: box)
             }
+        }
+        .animation(.easeOut(duration: 0.15), value: store.lightbox?.id)
+        .onOpenURL(perform: open)
+        .task {
+            // AGENTMAN_OPEN names a link to open at launch, so a copy started
+            // for a screenshot or a test opens where it is needed.
+            if let link = ProcessInfo.processInfo.environment["AGENTMAN_OPEN"], let url = URL(string: link) {
+                open(url)
+            }
+        }
+    }
+
+    /// agentman://settings opens Settings, at a tab with
+    /// agentman://settings/keys; the rest are the store's to open.
+    private func open(_ url: URL) {
+        if url.host() == "settings" {
+            let tab = url.path().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            if SettingsPage(rawValue: tab) != nil { settingsTab = tab }
+            openSettings()
+        } else {
+            store.open(url)
         }
     }
 }

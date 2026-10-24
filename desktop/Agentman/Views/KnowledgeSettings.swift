@@ -13,28 +13,39 @@ struct KnowledgeSettings: View {
     private var manager: ManagerStore { store.manager }
 
     var body: some View {
-        HSplitView {
-            VStack(spacing: 0) {
-                List(selection: $selection) {
-                    ForEach(manager.notes) { note in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(note.title)
-                                .font(TextStyle.bodyMedium)
-                                .lineLimit(1)
-                            HStack(spacing: 4) {
-                                Image(systemName: note.tier == "shared" ? "person.2" : "lock")
-                                Text(note.tier == "shared" ? "Shared" : "Private")
-                                if note.always == true {
-                                    Text("· In instructions")
-                                }
-                            }
-                            .font(TextStyle.caption)
-                            .foregroundStyle(Palette.muted)
-                        }
-                        .padding(.vertical, 2)
-                        .tag(note.id)
-                    }
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Knowledge")
+                        .font(TextStyle.display)
+                        .foregroundStyle(Palette.text)
+                    Text("Notes for your agents: how you like things done, facts about your projects. Shared notes any agent can read through Agentman; private ones only Agentman reads.")
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                Spacer(minLength: 16)
+                Button {
+                    selection = nil
+                    draft = NoteDraft()
+                    problem = nil
+                } label: {
+                    Label("New note", systemImage: "plus")
+                }
+            }
+
+            HStack(alignment: .top, spacing: 12) {
+                ScrollView {
+                    VStack(spacing: 2) {
+                        ForEach(manager.notes) { note in
+                            NoteRow(note: note, selected: selection == note.id) { selection = note.id }
+                        }
+                    }
+                    .padding(6)
+                }
+                .frame(width: 210)
+                .background(Palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
                 .overlay {
                     if manager.notes.isEmpty {
                         Text("No notes yet")
@@ -42,25 +53,14 @@ struct KnowledgeSettings: View {
                             .foregroundStyle(Palette.muted)
                     }
                 }
-                Divider()
-                HStack {
-                    Button {
-                        selection = nil
-                        draft = NoteDraft()
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("New note")
-                    Spacer()
-                }
-                .padding(6)
-            }
-            .frame(minWidth: 180, idealWidth: 200, maxWidth: 260)
 
-            editor
-                .frame(minWidth: 320)
+                editor
+                    .background(Palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
+            }
         }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 26)
         .task { await manager.loadNotes() }
         .onChange(of: selection) { _, id in
             guard let id, let note = manager.notes.first(where: { $0.id == id }) else { return }
@@ -86,17 +86,19 @@ struct KnowledgeSettings: View {
                 .labelsHidden()
                 .fixedSize()
                 if draft.tier == "shared" {
-                    Toggle("Put in project instructions", isOn: $draft.always)
+                    Toggle("In project instructions", isOn: $draft.always)
+                        .toggleStyle(.checkbox)
+                        .fixedSize()
                         .help("Agentman writes it into CLAUDE.md or AGENTS.md when you ask it to update an agent's instructions.")
                 }
-                Spacer()
+                Spacer(minLength: 0)
             }
             .font(TextStyle.caption)
             TextEditor(text: $draft.body)
-                .font(TextStyle.code)
+                .font(TextStyle.body)
                 .scrollContentBackground(.hidden)
                 .padding(8)
-                .background(Palette.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(Palette.paper, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             HStack {
                 if let problem {
                     Text(problem)
@@ -137,6 +139,39 @@ struct KnowledgeSettings: View {
             }
             saving = false
         }
+    }
+}
+
+/// A note in the list: its title, and who can read it.
+private struct NoteRow: View {
+    let note: Note
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(note.title)
+                    .font(TextStyle.bodyMedium)
+                    .foregroundStyle(Palette.text)
+                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Image(systemName: note.tier == "shared" ? "person.2" : "lock")
+                    Text(note.tier == "shared" ? "Shared" : "Private")
+                    if note.always == true {
+                        Text("· In instructions")
+                    }
+                }
+                .font(TextStyle.caption)
+                .foregroundStyle(Palette.muted)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? Palette.fill : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

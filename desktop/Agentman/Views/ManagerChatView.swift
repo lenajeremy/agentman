@@ -9,19 +9,21 @@ struct ManagerChatView: View {
 
     private var manager: ManagerStore { store.manager }
 
+    /// The entry page: Agentman and one box, with nothing else competing.
+    /// Shown when the app opens, and whenever Agentman can't take a message
+    /// yet; writing to it moves on to the conversation, which sits above.
+    private var entry: Bool {
+        guard !manager.thinking else { return false }
+        return manager.entries.isEmpty || manager.showEntry || manager.needsKey || store.status != .connected
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 18) {
-                        if manager.entries.isEmpty {
-                            ManagerWelcome()
-                                .padding(.top, 20)
-                            if !manager.needsKey {
-                                Suggestions { prompt in send(prompt) }
-                            }
-                        } else {
-                            if manager.hasOlder {
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 28) {
+                            if manager.hasOlder, !manager.entries.isEmpty {
                                 Button("Earlier messages") {
                                     Task { await manager.loadOlder() }
                                 }
@@ -37,43 +39,65 @@ struct ManagerChatView: View {
                                 ThinkingRow()
                                     .id("thinking")
                             }
+                            if entry {
+                                EntryHero(draft: $draft, sending: sending, send: { send(draft) }) {
+                                    manager.showEntry = false
+                                    if let first = manager.entries.first(where: { $0.card?.isOpen == true }) {
+                                        withAnimation(.easeOut(duration: 0.25)) {
+                                            proxy.scrollTo(first.id, anchor: .top)
+                                        }
+                                    }
+                                }
+                                // The whole visible height, the title bar's
+                                // too, so nothing earlier shows above it.
+                                .frame(minHeight: geometry.size.height + geometry.safeAreaInsets.top)
+                                .id("entry")
+                            } else {
+                                // The end of the conversation, below the last
+                                // message, so following it keeps room above
+                                // the composer.
+                                Color.clear.frame(height: 1).id("end")
+                            }
+                        }
+                        .padding(.horizontal, 36)
+                        .padding(.top, entry ? 0 : 28)
+                        .padding(.bottom, entry ? 0 : 6)
+                        .frame(maxWidth: 780)
+                        .frame(maxWidth: .infinity)
+                    }
+                    .defaultScrollAnchor(.bottom)
+                    .modifier(TopFade())
+                    .onChange(of: scrollKey) { _, _ in
+                        guard !entry else { return }
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            proxy.scrollTo("end", anchor: .bottom)
                         }
                     }
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 24)
+                }
+
+                if !entry {
+                    VStack(spacing: 8) {
+                        if let problem = manager.problem {
+                            Label(problem, systemImage: "exclamationmark.triangle")
+                                .font(TextStyle.caption)
+                                .foregroundStyle(Palette.errorText)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        ManagerComposer(text: $draft, thinking: manager.thinking, sending: sending) {
+                            send(draft)
+                        } onStop: {
+                            manager.stop()
+                        }
+                    }
+                    .padding(.horizontal, 36)
+                    .padding(.top, 4)
+                    .padding(.bottom, 22)
                     .frame(maxWidth: 780)
                     .frame(maxWidth: .infinity)
                 }
-                .defaultScrollAnchor(.bottom)
-                .onChange(of: scrollKey) { _, _ in
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo(manager.thinking ? "thinking" : manager.entries.last?.id, anchor: .bottom)
-                    }
-                }
             }
-
-            VStack(spacing: 8) {
-                if let problem = manager.problem {
-                    Label(problem, systemImage: "exclamationmark.triangle")
-                        .font(TextStyle.caption)
-                        .foregroundStyle(Palette.errorText)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                if manager.needsKey {
-                    KeySetupCard()
-                } else {
-                    ManagerComposer(text: $draft, thinking: manager.thinking, sending: sending) {
-                        send(draft)
-                    } onStop: {
-                        manager.stop()
-                    }
-                }
-            }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 18)
-            .frame(maxWidth: 780)
-            .frame(maxWidth: .infinity)
         }
+        .navigationTitle("")
     }
 
     /// Changes whenever the conversation grows, so it can follow along.
@@ -88,9 +112,78 @@ struct ManagerChatView: View {
         Task {
             if await manager.send(message) {
                 draft = ""
+                manager.showEntry = false
             }
             sending = false
         }
+    }
+}
+
+/// Agentman's name and the one box to talk to it: a message, its API key
+/// before it has one, or a note that am serve isn't running.
+private struct EntryHero: View {
+    @Environment(AgentsStore.self) private var store
+    @Binding var draft: String
+    var sending: Bool
+    var send: () -> Void
+    var showCards: () -> Void
+
+    var body: some View {
+        let manager = store.manager
+        VStack(spacing: 0) {
+            Spacer(minLength: 48)
+            VStack(spacing: 16) {
+                AgentmanBadge(size: 46)
+                Text("Agentman")
+                    .font(TextStyle.wordmark)
+                    .foregroundStyle(Palette.text)
+            }
+            .padding(.bottom, 28)
+
+            Group {
+                if store.status != .connected {
+                    ManagerComposer(text: .constant(""), thinking: false, sending: true, large: true,
+                                    placeholder: "Waiting for am serve…", onSend: {}, onStop: {})
+                } else if manager.needsKey {
+                    KeyBox()
+                } else {
+                    ManagerComposer(text: $draft, thinking: false, sending: sending, large: true,
+                                    onSend: send, onStop: {})
+                }
+            }
+            .frame(maxWidth: 620)
+
+            Group {
+                if case .unavailable = store.status {
+                    Text("am serve isn't running. Start it in a terminal with **am serve**.")
+                } else if store.status == .connecting {
+                    Text("Connecting…")
+                } else if manager.needsKey {
+                    HStack(spacing: 4) {
+                        Text("Agentman runs on your Anthropic API key, kept in your Keychain.")
+                        Link("Get a key", destination: URL(string: "https://console.anthropic.com/settings/keys")!)
+                    }
+                } else if !manager.openCards.isEmpty {
+                    let count = manager.openCards.count
+                    Button(action: showCards) {
+                        Label(count == 1 ? "1 card is waiting for you" : "\(count) cards are waiting for you",
+                              systemImage: "arrow.up")
+                            .foregroundStyle(Palette.needsYouText)
+                    }
+                    .buttonStyle(.plain)
+                } else if let problem = manager.problem {
+                    Text(problem).foregroundStyle(Palette.errorText)
+                }
+            }
+            .font(TextStyle.caption)
+            .foregroundStyle(Palette.muted)
+            .padding(.top, 14)
+            .frame(height: 34, alignment: .top)
+
+            Spacer(minLength: 48)
+            Spacer(minLength: 24)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -150,10 +243,11 @@ private struct ChatItemView: View {
                     Text(entry.text)
                         .font(TextStyle.body)
                         .foregroundStyle(Palette.text)
+                        .lineSpacing(5)
                         .textSelection(.enabled)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Palette.fill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(Palette.fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
             case "assistant":
                 AssistantReply(entry: entry)
@@ -188,7 +282,7 @@ private struct AssistantReply: View {
     let entry: ManagerEntry
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 14) {
             AgentmanBadge(size: 22)
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 6) {
@@ -214,7 +308,7 @@ private struct ActivityRun: View {
                 withAnimation(.easeOut(duration: 0.15)) { open.toggle() }
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "eye")
+                    Image(systemName: Self.icon(entries.last?.tool))
                         .font(.system(size: 10, weight: .semibold))
                     Text(summary)
                         .lineLimit(1)
@@ -228,11 +322,17 @@ private struct ActivityRun: View {
             .buttonStyle(.plain)
             .padding(.leading, 34)
             if open {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(entries) { entry in
-                        Text(entry.text)
-                            .font(TextStyle.caption)
-                            .foregroundStyle(Palette.faint)
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            Image(systemName: Self.icon(entry.tool))
+                                .font(.system(size: 9, weight: .semibold))
+                                .frame(width: 12)
+                            Text(entry.text)
+                                .lineLimit(2)
+                        }
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.faint)
                     }
                 }
                 .padding(.leading, 50)
@@ -240,47 +340,40 @@ private struct ActivityRun: View {
         }
     }
 
+    /// The newest thing Agentman did, and how many more, since the newest
+    /// is what the reply that follows is about.
     private var summary: String {
-        if entries.count == 1 { return entries[0].text }
-        return "\(entries[0].text) and \(entries.count - 1) more"
+        guard let last = entries.last else { return "" }
+        if entries.count == 1 { return last.text }
+        return "\(last.text) and \(entries.count - 1) more"
+    }
+
+    /// An icon for what Agentman did.
+    static func icon(_ tool: String?) -> String {
+        switch tool {
+        case "send_to_agent": "paperplane"
+        case "answer_question": "checkmark.bubble"
+        case "approve": "checkmark.shield"
+        case "interrupt": "stop.circle"
+        case "dismiss_card": "xmark.circle"
+        case "give_key": "key"
+        case "search_knowledge", "read_knowledge", "save_knowledge": "book"
+        case "update_instructions": "doc.text"
+        case "view_image": "photo"
+        default: "eye"
+        }
     }
 }
 
-/// An image Agentman looked at, shown to the user as well.
+/// An image Agentman looked at, shown to the user as well: a short label
+/// and a thumbnail that opens full window.
 private struct ImageActivity: View {
-    @Environment(AgentsStore.self) private var store
     let entry: ManagerEntry
-    @State private var image: NSImage?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "photo")
-                    .font(.system(size: 10, weight: .semibold))
-                Text(entry.text)
-            }
-            .font(TextStyle.caption)
-            .foregroundStyle(Palette.muted)
-            Group {
-                if let image {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: 520, maxHeight: 360, alignment: .leading)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
-                } else {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Palette.fill)
-                        .frame(width: 240, height: 140)
-                        .overlay(ProgressView().controlSize(.small))
-                }
-            }
-        }
-        .padding(.leading, 34)
-        .task(id: entry.id) {
-            guard let sessionId = entry.sessionId, let path = entry.path else { return }
-            image = await store.manager.image(sessionId: sessionId, path: path)
+        if let sessionId = entry.sessionId, let path = entry.path {
+            ImageThumbnail(sessionId: sessionId, path: path, label: entry.text)
+                .padding(.leading, 34)
         }
     }
 }
@@ -303,6 +396,7 @@ private struct BriefCard: View {
                 Text(entry.text)
                     .font(TextStyle.body)
                     .foregroundStyle(Palette.textSecondary)
+                    .lineSpacing(5)
                     .textSelection(.enabled)
                 if let needs = brief?.needsYou, !needs.isEmpty {
                     Label(needs, systemImage: "hand.raised")
@@ -312,14 +406,16 @@ private struct BriefCard: View {
             }
             Spacer(minLength: 8)
             if let session {
-                Button("Open") { store.selection = .agent(session.id) }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                Button("Open agent") { store.selection = .agent(session.id) }
+                    .buttonStyle(.borderless)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
             }
         }
-        .padding(14)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.line))
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.line))
     }
 }
 
@@ -334,7 +430,7 @@ private struct ManagerCardView: View {
 
     var body: some View {
         let session = store.session(card.sessionId)
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
                 AgentMark(kind: session?.kind ?? "", size: 18)
                 Text(card.agentName)
@@ -346,9 +442,10 @@ private struct ManagerCardView: View {
                     .foregroundStyle(Palette.needsYouText)
                 Spacer(minLength: 8)
                 if session != nil {
-                    Button("Open") { store.selection = .agent(card.sessionId) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                    Button("Open agent") { store.selection = .agent(card.sessionId) }
+                        .buttonStyle(.borderless)
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.muted)
                 }
                 Button {
                     act { await store.manager.dismiss(card) }
@@ -391,16 +488,28 @@ private struct ManagerCardView: View {
                     await send(answer)
                 }
             } else {
-                HStack(spacing: 8) {
+                HStack(alignment: .bottom, spacing: 8) {
                     TextField("Reply to \(card.agentName)", text: $reply, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(.plain)
                         .font(TextStyle.body)
                         .lineLimit(1...5)
                         .onSubmit { replyInWords() }
-                    Button("Send", action: replyInWords)
-                        .buttonStyle(.borderedProminent)
-                        .disabled(reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busy)
+                        .padding(.vertical, 5)
+                    Button(action: replyInWords) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(Palette.onInverse)
+                            .frame(width: 26, height: 26)
+                            .background(Palette.inverse.opacity(reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.25 : 1), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busy)
+                    .help("Send to \(card.agentName)")
                 }
+                .padding(.leading, 12)
+                .padding(.trailing, 6)
+                .padding(.vertical, 5)
+                .background(Palette.fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
             if let problem {
                 Text(problem)
@@ -408,9 +517,7 @@ private struct ManagerCardView: View {
                     .foregroundStyle(Palette.errorText)
             }
         }
-        .padding(16)
-        .background(Palette.needsYouWash, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.needsYouEdge))
+        .modifier(DecisionPanel())
         .disabled(busy)
         .swipeToDismiss {
             problem = await store.manager.dismiss(card)
@@ -471,6 +578,7 @@ private struct ThinkingRow: View {
             AgentmanBadge(size: 22)
             ThinkingDots()
         }
+        .padding(.bottom, 8)
     }
 }
 
@@ -493,109 +601,97 @@ private struct ThinkingDots: View {
     }
 }
 
-private struct Suggestions: View {
-    var send: (String) -> Void
-    private let prompts = ["What is everyone working on?", "Does anything need me?", "What changed in the last hour?"]
-
-    var body: some View {
-        FlowLayout(spacing: 8) {
-            ForEach(prompts, id: \.self) { prompt in
-                Button {
-                    send(prompt)
-                } label: {
-                    Text(prompt)
-                        .font(TextStyle.body)
-                        .foregroundStyle(Palette.text)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(Palette.surface, in: Capsule())
-                        .overlay(Capsule().strokeBorder(Palette.line))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-}
-
-/// The composer, whose button stops Agentman while it is replying.
+/// The composer, a soft pill whose button stops Agentman while it is
+/// replying. Larger on the entry page.
 private struct ManagerComposer: View {
     @Binding var text: String
     var thinking: Bool
     var sending: Bool
+    var large = false
+    var placeholder = "Ask Agentman about your agents"
     var onSend: () -> Void
     var onStop: () -> Void
+    @FocusState private var focused: Bool
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            TextField("Ask Agentman about your agents", text: $text, axis: .vertical)
+            TextField(placeholder, text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(TextStyle.body)
+                .font(large ? Fonts.sans(15) : TextStyle.body)
                 .lineLimit(1...8)
+                .focused($focused)
                 .onSubmit { if !thinking { onSend() } }
-                .padding(.vertical, 6)
+                .padding(.vertical, large ? 9 : 6)
             Button {
                 thinking ? onStop() : onSend()
             } label: {
                 Image(systemName: thinking ? "stop.fill" : "arrow.up")
                     .font(.system(size: thinking ? 11 : 13, weight: .bold))
                     .foregroundStyle(Palette.onInverse)
-                    .frame(width: 28, height: 28)
-                    .background(Palette.inverse, in: Circle())
+                    .frame(width: large ? 32 : 28, height: large ? 32 : 28)
+                    .background(Palette.inverse.opacity(canSend || thinking ? 1 : 0.25), in: Circle())
             }
             .buttonStyle(.plain)
-            .disabled(!thinking && (sending || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+            .disabled(!thinking && !canSend)
             .help(thinking ? "Stop" : "Send")
         }
-        .padding(.leading, 16)
+        .padding(.leading, large ? 20 : 16)
         .padding(.trailing, 8)
-        .padding(.vertical, 8)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Palette.line, lineWidth: 1))
-        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+        .padding(.vertical, large ? 9 : 7)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: large ? 26 : 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: large ? 26 : 22, style: .continuous)
+                .strokeBorder(focused ? Palette.fillStrong : Palette.line, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(large ? 0.06 : 0.04), radius: large ? 18 : 8, y: large ? 6 : 2)
+        .onAppear { if large { focused = true } }
+    }
+
+    private var canSend: Bool {
+        !sending && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 
-/// Where the API key goes, in place of the composer until there is one.
-private struct KeySetupCard: View {
+/// Where the API key goes on the entry page, in place of the message box
+/// until there is one.
+private struct KeyBox: View {
     @Environment(AgentsStore.self) private var store
     @State private var key = ""
     @State private var saving = false
     @State private var problem: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Image(systemName: "key")
-                    .foregroundStyle(Palette.working)
-                Text("Agentman runs on your Anthropic API key")
-                    .font(TextStyle.bodyMedium)
-                    .foregroundStyle(Palette.text)
-            }
-            Text("It stays in your Mac's Keychain and is only sent to Anthropic. Create one in the Claude Console.")
-                .font(TextStyle.caption)
-                .foregroundStyle(Palette.muted)
-            HStack(spacing: 8) {
-                SecureField("sk-ant-…", text: $key)
-                    .textFieldStyle(.roundedBorder)
-                    .font(TextStyle.code)
+                    .foregroundStyle(Palette.muted)
+                SecureField("Paste your Anthropic API key to start", text: $key)
+                    .textFieldStyle(.plain)
+                    .font(Fonts.sans(15))
                     .onSubmit(save)
-                Button("Save", action: save)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(key.trimmingCharacters(in: .whitespaces).isEmpty || saving)
-            }
-            HStack {
-                Link("Get a key", destination: URL(string: "https://console.anthropic.com/settings/keys")!)
-                    .font(TextStyle.caption)
-                if let problem {
-                    Text(problem)
-                        .font(TextStyle.caption)
-                        .foregroundStyle(Palette.errorText)
+                    .padding(.vertical, 9)
+                Button(action: save) {
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Palette.onInverse)
+                        .frame(width: 32, height: 32)
+                        .background(Palette.inverse.opacity(key.isEmpty ? 0.25 : 1), in: Circle())
                 }
+                .buttonStyle(.plain)
+                .disabled(key.trimmingCharacters(in: .whitespaces).isEmpty || saving)
+            }
+            .padding(.leading, 20)
+            .padding(.trailing, 8)
+            .padding(.vertical, 9)
+            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(Palette.line))
+            .shadow(color: .black.opacity(0.06), radius: 18, y: 6)
+            if let problem {
+                Text(problem)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.errorText)
             }
         }
-        .padding(16)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.line))
     }
 
     private func save() {

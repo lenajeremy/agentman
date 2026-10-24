@@ -44,6 +44,9 @@ final class AgentsStore {
     /// Whether the app is in front, so news can be shown rather than
     /// notified.
     private(set) var appActive = true
+    private var resignedAt: Date?
+    /// An image open full window, over everything.
+    var lightbox: Lightbox?
 
     private let client: DaemonClient
     private var cursors: [String: String] = [:]
@@ -72,12 +75,18 @@ final class AgentsStore {
         Task {
             for await _ in center.notifications(named: NSApplication.didBecomeActiveNotification) {
                 appActive = true
+                // Back after a while away: Agentman starts fresh on its entry
+                // page, the conversation still above it.
+                if let away = resignedAt, Date().timeIntervalSince(away) > 30 * 60, !manager.thinking {
+                    manager.showEntry = true
+                }
                 seeManagerIfShown()
             }
         }
         Task {
             for await _ in center.notifications(named: NSApplication.didResignActiveNotification) {
                 appActive = false
+                resignedAt = Date()
             }
         }
         client.start()
@@ -115,7 +124,9 @@ final class AgentsStore {
     }
 
     /// Opens what an agentman:// link names: agentman://agent/<session id>,
-    /// or agentman://home for Agentman itself.
+    /// agentman://home for Agentman itself, or agentman://home/conversation
+    /// for its conversation rather than its entry page, as a notification
+    /// about a reply or a card does.
     func open(_ url: URL) {
         guard url.scheme == "agentman" else { return }
         switch url.host() {
@@ -126,6 +137,9 @@ final class AgentsStore {
             }
         case "home":
             selection = .manager
+            if url.path().hasPrefix("/conversation") {
+                manager.showEntry = false
+            }
         default:
             break
         }

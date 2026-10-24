@@ -17,7 +17,7 @@ struct AgentmanApp: App {
                 .task { store.start() }
         }
         .defaultSize(width: 1180, height: 760)
-        .windowToolbarStyle(.unified(showsTitle: false))
+        .windowToolbarStyle(.unified(showsTitle: true))
 
         Settings {
             SettingsView()

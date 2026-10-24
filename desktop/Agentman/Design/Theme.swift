@@ -62,7 +62,11 @@ enum Palette {
     }
 }
 
-/// Geist, bundled with the app, as the phone bundles it.
+/// Google Sans for text and Google Sans Code for code, bundled with the app
+/// (both under the SIL Open Font License, in Resources/Fonts). Both are
+/// variable fonts: Google Sans has Regular, Medium and Bold faces, Google
+/// Sans Code every weight from Light to ExtraBold, and the system picks the
+/// optical size for the point size.
 enum Fonts {
     static func register() {
         let urls = Bundle.main.urls(forResourcesWithExtension: "ttf", subdirectory: nil) ?? []
@@ -72,25 +76,24 @@ enum Fonts {
     }
 
     static func sans(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        switch weight {
-        case .semibold, .bold, .heavy, .black: .custom("Geist-SemiBold", size: size)
-        case .medium: .custom("Geist-Medium", size: size)
-        default: .custom("Geist-Regular", size: size)
-        }
+        .custom("Google Sans", size: size).weight(weight)
     }
 
-    static func mono(_ size: CGFloat) -> Font {
-        .custom("GeistMono-Regular", size: size)
+    static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        .custom("Google Sans Code", size: size).weight(weight)
     }
 }
 
 /// The type scale, in the phone's sizes adjusted for a desktop's distance.
 enum TextStyle {
-    static let display = Fonts.sans(30, .semibold)
-    static let title = Fonts.sans(17, .semibold)
+    /// Agentman's name on the entry page.
+    static let wordmark = Fonts.sans(34)
+    static let display = Fonts.sans(28, .medium)
+    static let title = Fonts.sans(16, .medium)
     static let body = Fonts.sans(14)
     static let bodyMedium = Fonts.sans(14, .medium)
     static let caption = Fonts.sans(12)
+    static let captionMedium = Fonts.sans(12, .medium)
     static let label = Fonts.sans(11, .medium)
     static let code = Fonts.mono(12.5)
 }
@@ -120,4 +123,29 @@ struct AgentMark: View {
                 .accessibilityLabel(kind)
         }
     }
+}
+
+/// A conversation fades out as it scrolls up to the title bar, rather than
+/// being cut off at its edge.
+struct TopFade: ViewModifier {
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .top) {
+            LinearGradient(colors: [Palette.paper, Palette.paper.opacity(0)], startPoint: .top, endPoint: .bottom)
+                .frame(height: 20)
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+/// The sidebar's own translucent material, for things that sit on it.
+struct SidebarMaterial: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .sidebar
+        view.blendingMode = .behindWindow
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
 }

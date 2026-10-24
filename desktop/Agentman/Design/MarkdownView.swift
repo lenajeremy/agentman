@@ -15,7 +15,7 @@ struct MarkdownView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             ForEach(blocks) { block in
                 BlockView(block: block)
             }
@@ -121,7 +121,7 @@ private struct BlockBuilder {
 }
 
 /// Inline nodes to one attributed string: bold, italic, code, strikethrough
-/// and links, with the code in Geist Mono on a fill.
+/// and links, with the code in Google Sans Code on a fill.
 private enum Inline {
     static func render(_ node: Markup) -> AttributedString {
         var out = AttributedString()
@@ -188,22 +188,25 @@ private struct BlockView: View {
             SwiftUI.Text(text)
                 .font(TextStyle.body)
                 .foregroundStyle(Palette.text)
-                .lineSpacing(3)
+                .lineSpacing(6)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         case .heading(let level, let text):
             SwiftUI.Text(text)
-                .font(Fonts.sans(level <= 1 ? 19 : level == 2 ? 16.5 : 14.5, .semibold))
+                .font(Fonts.sans(level <= 1 ? 19 : level == 2 ? 16.5 : 14.5, .medium))
                 .foregroundStyle(Palette.text)
-                .padding(.top, level <= 2 ? 6 : 2)
+                .lineSpacing(3)
+                .padding(.top, level <= 2 ? 10 : 4)
                 .textSelection(.enabled)
         case .code(_, let code):
             ScrollView(.horizontal, showsIndicators: false) {
                 SwiftUI.Text(code)
                     .font(TextStyle.code)
                     .foregroundStyle(Palette.text)
+                    .lineSpacing(4)
                     .textSelection(.enabled)
-                    .padding(12)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
             }
             .background(Palette.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         case .quote(let blocks):
@@ -211,20 +214,20 @@ private struct BlockView: View {
                 RoundedRectangle(cornerRadius: 1.5)
                     .fill(Palette.line)
                     .frame(width: 3)
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
                     ForEach(blocks) { BlockView(block: $0) }
                 }
                 .opacity(0.85)
             }
         case .list(let ordered, let start, let items):
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
                         SwiftUI.Text(ordered ? "\(start + index)." : "•")
                             .font(TextStyle.body)
                             .foregroundStyle(Palette.muted)
                             .frame(minWidth: ordered ? 18 : 10, alignment: .trailing)
-                        VStack(alignment: .leading, spacing: 6) {
+                        VStack(alignment: .leading, spacing: 8) {
                             ForEach(item) { BlockView(block: $0) }
                         }
                     }
@@ -236,7 +239,7 @@ private struct BlockView: View {
             Rectangle()
                 .fill(Palette.line)
                 .frame(height: 1)
-                .padding(.vertical, 4)
+                .padding(.vertical, 8)
         }
     }
 }
