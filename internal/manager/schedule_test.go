@@ -279,3 +279,36 @@ func TestTimesAreReadAsLocal(t *testing.T) {
 		t.Error("read nonsense as a time")
 	}
 }
+
+// A schedule changes in place: a watch's timeout, a reminder's time and
+// repeat, keeping its id.
+func TestSchedulesChangeInPlace(t *testing.T) {
+	h, c := scheduleHarness(t,
+		toolReply("t1", "update_schedule", `{"id":"PLACEHOLDER","timeout_minutes":20}`),
+		textReply("Shortened it."),
+	)
+	site := h.agents.Sessions()[0]
+	watched, _ := h.m.watch(site, protocol.WatchTurnEnd, "", 90*time.Minute)
+	h.model.replies[0] = strings.Replace(h.model.replies[0], "PLACEHOLDER", watched.ID, 1)
+	h.m.send(context.Background(), "90 minutes is long; make it 20")
+	h.waitIdle(t)
+	items := h.m.schedules.list()
+	if len(items) != 1 || items[0].ID != watched.ID || items[0].Due != c.Now().Add(20*time.Minute).UnixMilli() {
+		t.Fatalf("after the change: %+v", items)
+	}
+
+	reminder, _ := h.m.remind("check in", c.Now().Add(time.Hour), 0, 0, time.Time{})
+	at := c.Now().Add(15 * time.Minute)
+	every := 10 * time.Minute
+	changed, err := h.m.updateSchedule(reminder.ID, scheduleChange{at: &at, every: &every})
+	if err != nil || changed.Due != at.UnixMilli() || changed.Every != 600 || changed.Until != at.Add(repeatSpan).UnixMilli() {
+		t.Fatalf("changed = %+v, %v", changed, err)
+	}
+	if _, err := h.m.updateSchedule(watched.ID, scheduleChange{every: &every}); err == nil {
+		t.Fatal("a watch was given a repeat")
+	}
+	timeout := 2 * maxWatch
+	if _, err := h.m.updateSchedule(watched.ID, scheduleChange{timeout: &timeout}); err == nil {
+		t.Fatal("a watch was given more than a day")
+	}
+}

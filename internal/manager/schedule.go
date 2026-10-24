@@ -199,6 +199,79 @@ func (m *Manager) watch(session protocol.Session, condition, note string, timeou
 	return item, nil
 }
 
+// scheduleChange is what update_schedule changes; unset fields stay.
+type scheduleChange struct {
+	text    *string
+	at      *time.Time
+	every   *time.Duration
+	times   *int
+	until   *time.Time
+	timeout *time.Duration
+}
+
+// updateSchedule changes a schedule in place: a reminder's time, repeat or
+// text, or a watch's timeout or note.
+func (m *Manager) updateSchedule(id string, change scheduleChange) (protocol.ManagerSchedule, error) {
+	m.schedules.mu.Lock()
+	item, ok := m.schedules.items[strings.TrimSpace(id)]
+	m.schedules.mu.Unlock()
+	if !ok {
+		return item, errors.New("nothing is scheduled with that id; it may have fired already")
+	}
+	now := m.now()
+	if change.text != nil {
+		text := strings.TrimSpace(*change.text)
+		if text == "" && item.Kind == protocol.ScheduleReminder {
+			return item, errors.New("a reminder needs to say what it is for")
+		}
+		item.Text = clip(text, 500)
+	}
+	switch item.Kind {
+	case protocol.ScheduleReminder:
+		if change.timeout != nil {
+			return item, errors.New("a reminder has no timeout; change its time instead")
+		}
+		if change.at != nil {
+			if change.at.Before(now.Add(-time.Second)) || change.at.After(now.Add(maxAhead)) {
+				return item, errors.New("the new time must be from now to a week ahead")
+			}
+			item.Due = change.at.UnixMilli()
+		}
+		if change.every != nil {
+			if *change.every != 0 && *change.every < minEvery {
+				return item, errors.New("a repeat is at least a minute apart")
+			}
+			item.Every = int(*change.every / time.Second)
+		}
+		if change.times != nil {
+			item.Times = *change.times
+		}
+		if change.until != nil {
+			item.Until = change.until.UnixMilli()
+		}
+		if item.Every == 0 {
+			item.Times, item.Until = 0, 0
+		} else if item.Times == 0 && item.Until == 0 {
+			item.Until = time.UnixMilli(item.Due).Add(repeatSpan).UnixMilli()
+		}
+	case protocol.ScheduleWatch:
+		if change.at != nil || change.every != nil || change.times != nil || change.until != nil {
+			return item, errors.New("a watch has a timeout, not a time or a repeat")
+		}
+		if change.timeout != nil {
+			if *change.timeout <= 0 || *change.timeout > maxWatch {
+				return item, errors.New("a watch waits from a minute to a day")
+			}
+			item.Due = now.Add(*change.timeout).UnixMilli()
+		}
+	}
+	if err := m.schedules.put(item); err != nil {
+		return item, err
+	}
+	m.emitSchedules()
+	return item, nil
+}
+
 // cancelSchedule removes a schedule, by the user or by Agentman.
 func (m *Manager) cancelSchedule(id string) (protocol.ManagerSchedule, error) {
 	item, ok := m.schedules.remove(strings.TrimSpace(id))

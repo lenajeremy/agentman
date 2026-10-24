@@ -262,6 +262,23 @@ func init() {
 			run:         runListSchedules,
 		},
 		{
+			name: "update_schedule",
+			description: "Change one of your reminders or watches in place, by its id: a reminder's time, repeat or message, " +
+				"or a watch's timeout or note. Leave out what stays the same.",
+			properties: map[string]any{
+				"id":              map[string]any{"type": "string"},
+				"message":         map[string]any{"type": "string", "description": "A reminder's new message, or a watch's new note."},
+				"in_minutes":      map[string]any{"type": "number", "description": "A reminder's new time, in minutes from now."},
+				"at":              map[string]any{"type": "string", "description": "A reminder's new time: HH:MM or ISO 8601."},
+				"every_minutes":   map[string]any{"type": "number", "description": "A reminder's new interval; 0 makes it fire once."},
+				"times":           map[string]any{"type": "integer", "description": "A repeat's new count in all."},
+				"until":           map[string]any{"type": "string", "description": "A repeat's new end: HH:MM or ISO 8601."},
+				"timeout_minutes": map[string]any{"type": "number", "description": "A watch's new timeout, in minutes from now."},
+			},
+			required: []string{"id"},
+			run:      runUpdateSchedule,
+		},
+		{
 			name:        "cancel_schedule",
 			description: "Cancel one of your reminders or watches, by its id from list_schedules.",
 			properties:  map[string]any{"id": map[string]any{"type": "string"}},
@@ -849,6 +866,49 @@ func runListSchedules(_ context.Context, m *Manager, _ map[string]any) toolResul
 		b.WriteString("\n")
 	}
 	return toolResult{text: b.String(), activity: "Checked your schedule"}
+}
+
+func runUpdateSchedule(_ context.Context, m *Manager, input map[string]any) toolResult {
+	id, _ := input["id"].(string)
+	now := m.now()
+	var change scheduleChange
+	if text, ok := input["message"].(string); ok {
+		change.text = &text
+	}
+	if minutes, ok := input["in_minutes"].(float64); ok {
+		at := now.Add(time.Duration(minutes * float64(time.Minute)))
+		change.at = &at
+	} else if text, _ := input["at"].(string); strings.TrimSpace(text) != "" {
+		at, err := parseWhen(text, now)
+		if err != nil {
+			return toolResult{text: err.Error(), isError: true}
+		}
+		change.at = &at
+	}
+	if minutes, ok := input["every_minutes"].(float64); ok {
+		every := time.Duration(minutes * float64(time.Minute))
+		change.every = &every
+	}
+	if value, ok := input["times"].(float64); ok {
+		times := int(value)
+		change.times = &times
+	}
+	if text, _ := input["until"].(string); strings.TrimSpace(text) != "" {
+		until, err := parseWhen(text, now)
+		if err != nil {
+			return toolResult{text: err.Error(), isError: true}
+		}
+		change.until = &until
+	}
+	if minutes, ok := input["timeout_minutes"].(float64); ok {
+		timeout := time.Duration(minutes * float64(time.Minute))
+		change.timeout = &timeout
+	}
+	item, err := m.updateSchedule(id, change)
+	if err != nil {
+		return toolResult{text: "Couldn't change it: " + err.Error(), isError: true}
+	}
+	return toolResult{text: "Changed: " + scheduleLabel(item), activity: "Changed a schedule: " + scheduleLabel(item)}
 }
 
 func runCancelSchedule(_ context.Context, m *Manager, input map[string]any) toolResult {
