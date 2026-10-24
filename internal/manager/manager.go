@@ -168,7 +168,7 @@ func (m *Manager) Handles(kind protocol.RequestType) bool {
 		protocol.ReqAgentKnowledgeSearch, protocol.ReqAgentKnowledgeRead, protocol.ReqAgentKeys,
 		protocol.ReqAgentRequestKey, protocol.ReqAgentTell,
 		protocol.ReqManagerSchedules, protocol.ReqManagerScheduleCancel, protocol.ReqManagerImage,
-		protocol.ReqToolsTitle:
+		protocol.ReqToolsTitle, protocol.ReqManagerOpenCards:
 		return true
 	}
 	return false
@@ -183,6 +183,8 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 		return m.readImage(req.Path)
 	case protocol.ReqToolsTitle:
 		return m.toolsTitle(ctx, req)
+	case protocol.ReqManagerOpenCards:
+		return protocol.Event{Type: protocol.EvtManagerHistory, Entries: m.conversation.openCards()}
 	case protocol.ReqManagerHistory:
 		limit := req.Limit
 		if limit <= 0 || limit > 200 {

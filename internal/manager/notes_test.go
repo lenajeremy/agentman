@@ -142,3 +142,19 @@ func TestAgentmanDeletesANoteWhenAsked(t *testing.T) {
 		t.Fatalf("deleting it again = %+v", gone)
 	}
 }
+
+// The phone asks only for the cards still waiting, not the conversation.
+func TestOpenCardsAreListedAlone(t *testing.T) {
+	h, _, entry := suggesting(t)
+	event := h.m.Handle(context.Background(), protocol.Request{Type: protocol.ReqManagerOpenCards})
+	var found bool
+	for _, open := range event.Entries {
+		if open.Card == nil || open.Card.State != protocol.CardOpen {
+			t.Fatalf("listed %+v", open)
+		}
+		found = found || open.Card.ID == entry.Card.ID
+	}
+	if event.Type != protocol.EvtManagerHistory || !found {
+		t.Fatalf("event = %+v", event)
+	}
+}

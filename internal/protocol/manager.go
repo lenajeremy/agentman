@@ -16,6 +16,10 @@ const (
 	// ReqManagerHistory pages back through the conversation: Limit entries
 	// before the one named by Before, newest last. Empty Before is the end.
 	ReqManagerHistory RequestType = "manager_history"
+	// ReqManagerOpenCards lists the cards still waiting on the user, as a
+	// manager_history event, for an app that does not show the whole
+	// conversation: the phone, for the notes Agentman suggests.
+	ReqManagerOpenCards RequestType = "manager_open_cards"
 	// ReqManagerStop cuts short the reply Agentman is writing.
 	ReqManagerStop RequestType = "manager_stop"
 	// ReqManagerSettings reads the settings; ReqManagerSetSettings replaces
