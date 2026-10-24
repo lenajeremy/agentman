@@ -148,6 +148,9 @@ export interface Tool {
   name: string;
   summary?: string;
   status?: "running" | "ok" | "error";
+  /** What the step did in plain words ("Ran the Go tests"); summary is the
+   *  raw command or path behind it. Absent from an older Mac. */
+  title?: string;
 }
 
 export interface Message {
@@ -197,6 +200,7 @@ export type RequestType =
   | "list_changes"
   | "file_diff"
   | "read_seen_file"
+  | "tools_title"
   | "read_file_chunk"
   | "read_seen_file_chunk"
   | "list_directories"
@@ -241,6 +245,8 @@ export interface Request {
   offset?: number;
   /** Tickets for images already left with the relay, on send_message. */
   uploadIds?: string[];
+  /** The tool calls a tools_title request is about. */
+  steps?: Tool[];
   /** Agent to launch; path is relative to the Mac user's home directory. */
   kind?: AgentKind;
   /** The verdict on review_artifact; `text` carries the comment. */
@@ -258,6 +264,7 @@ export type EventType =
   | "session_gone"
   | "messages"
   | "page"
+  | "tools_title"
   | "turn_complete"
   | "send_result"
   | "server_opened"
@@ -499,7 +506,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     "sessions", "session_update", "session_gone", "messages", "page",
     "turn_complete", "send_result", "server_opened", "server_stopped", "error", "workspace",
     "directories", "session_started", "folders", "directory_sessions",
-    "session_ended", "artifacts",
+    "session_ended", "artifacts", "tools_title",
   ] as const)) return null;
 
   switch (value.type) {
@@ -527,6 +534,9 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
       break;
     case "page":
       if (!isPage(value.page)) return null;
+      break;
+    case "tools_title":
+      if (!optionalBoundedString(value.preview, 4096)) return null;
       break;
     case "turn_complete":
       if (!boundedString(value.sessionId, 512, true) ||
@@ -836,6 +846,10 @@ function isMessage(value: unknown): value is Message {
       !finiteNumber(value.ts) || !optionalBoundedString(value.text, 512 * 1024) ||
       (value.isSidechain !== undefined && typeof value.isSidechain !== "boolean")) return false;
   if (value.tool === undefined) return true;
+  // A title the app cannot use is dropped, not the message with it.
+  if (isRecord(value.tool) && value.tool.title !== undefined && !optionalBoundedString(value.tool.title, 4096)) {
+    delete value.tool.title;
+  }
   return isRecord(value.tool) && boundedString(value.tool.name, 4096, true) &&
     optionalBoundedString(value.tool.summary, 64 * 1024) &&
     (value.tool.status === undefined ||

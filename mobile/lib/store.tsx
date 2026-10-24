@@ -74,6 +74,7 @@ import {
   DaemonInfo,
   Folder,
   Message,
+  Tool,
   Page,
   QuestionAnswer,
   SendStatus,
@@ -168,6 +169,9 @@ interface Store {
   closeServer(sessionId: string, port: number): void;
   /** End the process listening on a port. Nothing here can start it again. */
   stopServer(sessionId: string, port: number): Promise<void>;
+  /** Agentman's plain line for what a finished run of tool calls did and
+   *  why. Rejects when there is none, such as on a Mac without a key. */
+  titleTools(sessionId: string, said: string, steps: Tool[]): Promise<string>;
   workspace(
     sessionId: string,
     type: "list_files" | "read_file" | "list_changes" | "file_diff" | "read_seen_file" |
@@ -249,6 +253,12 @@ interface ServerRequest {
 
 interface WorkspaceRequest {
   resolve(result: WorkspaceResult): void;
+  reject(error: Error): void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+interface TitleRequest {
+  resolve(title: string): void;
   reject(error: Error): void;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -337,6 +347,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   /** open_server requests waiting for their link, by frame id. */
   const serverRequests = useRef(new Map<string, ServerRequest>());
   const workspaceRequests = useRef(new Map<string, WorkspaceRequest>());
+  const titleRequests = useRef(new Map<string, TitleRequest>());
   const launchRequests = useRef(new Map<string, LaunchRequest>());
 
   const settleLaunchRequest = useCallback((replyTo: string, event?: DaemonEvent) => {
@@ -383,6 +394,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     clientRef.current?.cancelRead(replyTo);
     if (result) request.resolve(result);
     else request.reject(new Error(error || "Could not read this workspace."));
+    return true;
+  }, []);
+
+  const settleTitleRequest = useCallback((replyTo: string, title?: string, error?: string) => {
+    const request = titleRequests.current.get(replyTo);
+    if (!request) return false;
+    titleRequests.current.delete(replyTo);
+    clearTimeout(request.timer);
+    if (title) request.resolve(title);
+    else request.reject(new Error(error || "No title"));
     return true;
   }, []);
 
@@ -741,6 +762,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         break;
       }
 
+      case "tools_title":
+        if (replyTo) settleTitleRequest(replyTo, event.preview);
+        break;
       case "workspace": {
         if (replyTo && event.workspace) settleWorkspaceRequest(replyTo, event.workspace);
         break;
@@ -788,6 +812,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 		if (replyTo) rejectPushRegistration(replyTo);
 		if (replyTo && settleLaunchRequest(replyTo, event)) break;
 		if (replyTo && settleWorkspaceRequest(replyTo, undefined, event.error)) break;
+		if (replyTo && settleTitleRequest(replyTo, undefined, event.error)) break;
 		if (replyTo && settleServerRequest(replyTo, undefined, serverErrorMessage(event.error))) break;
 		// A failed history request must release its loading state. Otherwise a
 		// transient adapter error leaves the spinner and pagination disabled for
@@ -1408,6 +1433,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             settleServerRequest(id, undefined, "Your Mac took too long to stop this server.");
           }, OPEN_SERVER_TIMEOUT_MS);
           serverRequests.current.set(id, { resolve: () => resolve(), reject, timer });
+        });
+      },
+
+      titleTools(sessionId, said, steps) {
+        return new Promise<string>((resolve, reject) => {
+          const id = clientRef.current?.send({ type: "tools_title", sessionId, text: said, steps });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => settleTitleRequest(id, undefined, "No title in time"), 30_000);
+          titleRequests.current.set(id, { resolve, reject, timer });
         });
       },
 

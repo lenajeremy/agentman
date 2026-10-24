@@ -29,6 +29,8 @@ import { Toast } from "../../components/Toast";
 import { ContentColumn } from "../../components/ContentColumn";
 import { Markdown } from "../../components/Markdown";
 import { SentImages } from "../../components/SentImages";
+import { ToolGroup } from "../../components/ToolGroup";
+import { groupTools } from "../../lib/toolgroups";
 import { splitSentMessage } from "../../lib/sentimages";
 import { MotionPressable } from "../../components/MotionPressable";
 import { Pulse } from "../../components/Pulse";
@@ -69,6 +71,7 @@ import {
 
 type Row =
   | { kind: "message"; message: Message }
+  | { kind: "tools"; key: string; calls: Message[]; said: string }
   | { kind: "pending"; pending: PendingSend }
   // A message the agent is holding until its current step ends, sent from
   // the phone or typed at the Mac.
@@ -252,9 +255,8 @@ export default function SessionScreen() {
     const chronological: Row[] = [
       // Filtered here rather than drawn as nothing: an empty cell still takes
       // the list's gap, and a withdrawn preview would leave a hole.
-      ...messages
-        .filter(showsInFeed)
-        .map((message) => ({ kind: "message" as const, message })),
+      // Calls in a row read as one line saying what was done.
+      ...groupTools(messages.filter(showsInFeed)),
       ...sent,
       ...waiting,
     ];
@@ -893,7 +895,9 @@ export default function SessionScreen() {
           keyExtractor={(row) =>
             row.kind === "message"
               ? row.message.id
-              : row.kind === "pending"
+              : row.kind === "tools"
+                ? row.key
+                : row.kind === "pending"
                 ? row.pending.clientId
                 : row.key
           }
@@ -908,6 +912,8 @@ export default function SessionScreen() {
                 }
                 onCopied={showCopied}
               />
+            ) : item.kind === "tools" ? (
+              <ToolGroup calls={item.calls} said={item.said} cwd={session?.cwd ?? ""} />
             ) : item.kind === "pending" ? (
               <PendingRow
                 pending={item.pending}
