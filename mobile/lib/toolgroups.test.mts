@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { Message } from "./protocol.ts";
-import { groupTools, runFinished, runFromSteps } from "./toolgroups.ts";
+import { groupTools, runCounts, runFinished, runFromSteps } from "./toolgroups.ts";
 
 const said = (id: string, text: string): Message => ({ id, sessionId: "s", role: "assistant", ts: 1, text });
 const call = (id: string, title?: string, status: "running" | "ok" = "ok"): Message => ({
@@ -33,4 +33,10 @@ test("a run is told by its steps' own words", () => {
 test("a run is finished when no call is running", () => {
   assert.equal(runFinished([call("1"), call("2")]), true);
   assert.equal(runFinished([call("1"), call("2", undefined, "running")]), false);
+});
+
+test("a run from an older Mac is told by what kinds of step it took", () => {
+  const named = (id: string, name: string): Message => ({ id, sessionId: "s", role: "tool", ts: 1, tool: { name, status: "ok" } });
+  assert.equal(runCounts([named("1", "Bash"), named("2", "Bash"), named("3", "Read")]), "Ran 2 commands and read a file");
+  assert.equal(runCounts([named("1", "Edit"), named("2", "Grep"), named("3", "Bash")]), "Edited a file, searched once and ran a command");
 });

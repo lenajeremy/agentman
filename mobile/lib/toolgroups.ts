@@ -55,3 +55,39 @@ export function runFromSteps(calls: readonly Message[]): string | undefined {
   const more = titles.length - 2;
   return `${titles[0]}, ${lower(titles[1])} and ${more} more step${more === 1 ? "" : "s"}`;
 }
+
+const KINDS: [RegExp, string, string][] = [
+  [/^(bash|shell|exec_command|run_shell_command|local_shell|terminal|bashoutput)$/i, "Ran", "command"],
+  [/^(read|read_file|view|cat|notebookread)$/i, "Read", "file"],
+  [/^(edit|multiedit|apply_patch|str_replace|str_replace_editor|notebookedit|replace)$/i, "Edited", "file"],
+  [/^(write|create_file|write_file)$/i, "Wrote", "file"],
+  [/^(grep|glob|search|find|list|ls|codebase_search|file_search)$/i, "Searched", "time"],
+  [/^(webfetch|fetch|websearch|web_search|web_fetch)$/i, "Looked up", "page"],
+];
+
+/**
+ * A run told by what kinds of step it took: "Ran 3 commands and read 2
+ * files". For a Mac too old to describe the steps themselves.
+ */
+export function runCounts(calls: readonly Message[]): string {
+  const order: string[] = [];
+  const counts = new Map<string, { verb: string; noun: string; n: number }>();
+  for (const call of calls) {
+    const name = call.tool?.name ?? "tool";
+    const kind = KINDS.find(([pattern]) => pattern.test(name));
+    const verb = kind?.[1] ?? "Used";
+    const noun = kind?.[2] ?? "tool";
+    const id = `${verb} ${noun}`;
+    if (!counts.has(id)) order.push(id);
+    const entry = counts.get(id) ?? { verb, noun, n: 0 };
+    entry.n += 1;
+    counts.set(id, entry);
+  }
+  const phrases = order.map((id, i) => {
+    const { verb, noun, n } = counts.get(id)!;
+    const words = `${i === 0 ? verb : verb.toLowerCase()} ${n === 1 ? `a ${noun}` : `${n} ${noun}s`}`;
+    return verb === "Searched" ? `${i === 0 ? "Searched" : "searched"} ${n === 1 ? "once" : `${n} times`}` : words;
+  });
+  if (phrases.length <= 1) return phrases[0] ?? "Used tools";
+  return `${phrases.slice(0, -1).join(", ")} and ${phrases.at(-1)}`;
+}

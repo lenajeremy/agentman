@@ -6,7 +6,7 @@ import { useStyles, useTheme } from "../lib/appearance";
 import type { Message } from "../lib/protocol";
 import { useStore } from "../lib/store";
 import { font, Palette, radius, size, space } from "../lib/theme";
-import { runFinished, runFromSteps, toolRunKey } from "../lib/toolgroups";
+import { runCounts, runFinished, runFromSteps, toolRunKey } from "../lib/toolgroups";
 import { MotionPressable } from "./MotionPressable";
 import { ToolRow } from "./ToolRow";
 
@@ -48,7 +48,7 @@ export function ToolGroup({ calls, said, cwd }: { calls: Message[]; said: string
   const failures = calls.filter((call) => call.tool?.status === "error").length;
   const line = running
     ? `${running.tool?.title || "Working"}…`
-    : title || runFromSteps(calls) || `${calls.length} steps`;
+    : title || runFromSteps(calls) || runCounts(calls);
 
   return (
     <View style={styles.group}>
