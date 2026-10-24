@@ -18,10 +18,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// Tells the user about news from Agentman; agentName is the agent an
     /// entry is from, when it is one's.
-    func announce(_ entry: ManagerEntry, agentName: String? = nil) {
+    func announce(_ entry: ManagerEntry, agentName: String? = nil, folder: String? = nil) {
+        let kind: NotificationPolicy.Kind = entry.card.map { $0.kind == "note" ? .note : .needsYou } ?? .agentman
+        guard NotificationPolicy.allows(kind, folder: folder) else { return }
         let content = UNMutableNotificationContent()
         content.threadIdentifier = "agentman"
-        content.sound = .default
+        content.sound = NotificationPolicy.sound() ? .default : nil
         var identifier = entry.id
         var link = "agentman://home/conversation"
         if let card = entry.card, card.kind == "note" {
@@ -60,7 +62,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     func agent(title: String, body: String, sessionId: String, id: String) {
         let content = UNMutableNotificationContent()
         content.threadIdentifier = "agent-" + sessionId
-        content.sound = .default
+        content.sound = NotificationPolicy.sound() ? .default : nil
         content.title = title
         content.body = String(Self.plain(body).prefix(400))
         if let encoded = sessionId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) {

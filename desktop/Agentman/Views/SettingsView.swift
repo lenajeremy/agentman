@@ -767,19 +767,128 @@ private struct AboutSection: View {
     }
 }
 
-/// When the Mac speaks up about agents.
+/// When the Mac speaks up: which kinds, folders kept quiet, quiet hours,
+/// and sound. The phone has its own, in its settings.
 private struct NotificationsPage: View {
-    @AppStorage("notifyFinished") private var finished = true
-    @AppStorage("notifyNeedsYou") private var needsYou = true
+    @Environment(AgentsStore.self) private var store
+    @AppStorage(NotificationPolicy.Key.finished) private var finished = true
+    @AppStorage(NotificationPolicy.Key.needsYou) private var needsYou = true
+    @AppStorage(NotificationPolicy.Key.agentman) private var agentman = true
+    @AppStorage(NotificationPolicy.Key.notes) private var notes = true
+    @AppStorage(NotificationPolicy.Key.sound) private var sound = true
+    @AppStorage(NotificationPolicy.Key.quiet) private var quiet = false
+    @AppStorage(NotificationPolicy.Key.quietStart) private var quietStart = NotificationPolicy.defaultQuietStart
+    @AppStorage(NotificationPolicy.Key.quietEnd) private var quietEnd = NotificationPolicy.defaultQuietEnd
+    @AppStorage(NotificationPolicy.Key.quietLetsNeedsYou) private var quietLetsNeedsYou = true
+    @State private var muted: [String] = NotificationPolicy.mutedFolders()
 
     var body: some View {
         SettingsSection(title: "Agents", footer: "Never for the thread you're looking at. With an Anthropic key set, Agentman's cards tell you when an agent needs you instead.") {
-            SettingsRow(title: "An agent finishes", detail: "When it ends a turn, with what it said last.") {
-                Toggle("", isOn: $finished).toggleStyle(.switch).labelsHidden()
-            }
-            SettingsRow(title: "An agent needs you", detail: "When it waits on an approval or a question.", divider: false) {
-                Toggle("", isOn: $needsYou).toggleStyle(.switch).labelsHidden()
-            }
+            toggle("An agent finishes", "When it ends a turn, with what it said last.", $finished)
+            toggle("An agent needs you", "When it waits on an approval or a question.", $needsYou, divider: false)
         }
+        SettingsSection(title: "Agentman") {
+            toggle("Agentman's messages", "Its replies and briefs while you're elsewhere.", $agentman)
+            toggle("Note suggestions", "Quietly, when it suggests something worth remembering.", $notes, divider: false)
+        }
+        SettingsSection(title: "Quiet hours", footer: "Nothing else comes through in quiet hours; it's all in Agentman when you look.") {
+            toggle("Use quiet hours", nil, $quiet)
+            SettingsRow(title: "From", divider: true) {
+                HStack(spacing: 8) {
+                    timePicker($quietStart)
+                    Text("to").font(TextStyle.caption).foregroundStyle(Palette.muted)
+                    timePicker($quietEnd)
+                }
+            }
+            .disabled(!quiet)
+            .opacity(quiet ? 1 : 0.5)
+            toggle("Still tell me when an agent needs me", nil, $quietLetsNeedsYou, divider: false)
+                .disabled(!quiet)
+                .opacity(quiet ? 1 : 0.5)
+        }
+        SettingsSection(title: "Muted folders", footer: "Agents working in these folders, or in folders inside them, don't notify. You can also mute a folder from its name in the sidebar.") {
+            if muted.isEmpty {
+                HStack {
+                    Text("None")
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.muted)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+                Divider()
+            }
+            ForEach(muted, id: \.self) { folder in
+                VStack(spacing: 0) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "bell.slash")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.muted)
+                        Text((folder as NSString).abbreviatingWithTildeInPath)
+                            .font(TextStyle.body)
+                            .foregroundStyle(Palette.text)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                        Spacer()
+                        Button("Unmute") { setMuted(folder, false) }
+                            .buttonStyle(.link)
+                            .font(TextStyle.caption)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    Divider()
+                }
+            }
+            HStack {
+                Menu("Mute a Folder…") {
+                    ForEach(store.folders.prefix(15).filter { !muted.contains($0.path) }) { folder in
+                        Button((folder.path as NSString).abbreviatingWithTildeInPath) { setMuted(folder.path, true) }
+                    }
+                    Divider()
+                    Button("Choose…") {
+                        let panel = NSOpenPanel()
+                        panel.canChooseDirectories = true
+                        panel.canChooseFiles = false
+                        panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory())
+                        panel.prompt = "Mute"
+                        if panel.runModal() == .OK, let url = panel.url { setMuted(url.path, true) }
+                    }
+                }
+                .menuStyle(.button)
+                .fixedSize()
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .task { await store.loadFolders() }
+        SettingsSection(title: "Sound") {
+            toggle("Play a sound", "With each notification but note suggestions.", $sound, divider: false)
+        }
+    }
+
+    private func toggle(_ title: String, _ detail: String?, _ value: Binding<Bool>, divider: Bool = true) -> some View {
+        SettingsRow(title: title, detail: detail, divider: divider) {
+            Toggle("", isOn: value).toggleStyle(.switch).labelsHidden()
+        }
+    }
+
+    /// Minutes after midnight, as a time of day.
+    private func timePicker(_ minutes: Binding<Int>) -> some View {
+        DatePicker("", selection: Binding(
+            get: { Calendar.current.startOfDay(for: Date()).addingTimeInterval(TimeInterval(minutes.wrappedValue * 60)) },
+            set: { date in
+                let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+                minutes.wrappedValue = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+            }
+        ), displayedComponents: .hourAndMinute)
+        .labelsHidden()
+        .datePickerStyle(.field)
+        .fixedSize()
+    }
+
+    private func setMuted(_ folder: String, _ on: Bool) {
+        NotificationPolicy.setMuted(folder, on)
+        muted = NotificationPolicy.mutedFolders()
     }
 }

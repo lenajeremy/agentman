@@ -39,11 +39,7 @@ struct Sidebar: View {
                             }
                     }
                 } header: {
-                    Text(group.name)
-                        .font(TextStyle.label)
-                        .foregroundStyle(Palette.faint)
-                        .textCase(nil)
-                        .help(group.id)
+                    FolderHeader(name: group.name, folder: group.id)
                 }
             }
 
@@ -377,5 +373,36 @@ private struct SidebarFilters: View {
         .padding(.horizontal, 9)
         .frame(height: 24)
         .background(on ? Palette.workingWash : Palette.fill, in: Capsule())
+    }
+}
+
+/// A folder's name over its agents; its menu mutes the folder's
+/// notifications.
+private struct FolderHeader: View {
+    let name: String
+    let folder: String
+    @State private var muted = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(name)
+                .font(TextStyle.label)
+                .foregroundStyle(Palette.faint)
+                .textCase(nil)
+            if muted {
+                Image(systemName: "bell.slash")
+                    .font(.system(size: 8.5))
+                    .foregroundStyle(Palette.faint)
+                    .help("Notifications from this folder are muted")
+            }
+        }
+        .help(folder)
+        .contextMenu {
+            Button(muted ? "Unmute Notifications" : "Mute Notifications") {
+                NotificationPolicy.setMuted(folder, !muted)
+                muted.toggle()
+            }
+        }
+        .onAppear { muted = NotificationPolicy.isMuted(folder) }
     }
 }

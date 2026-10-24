@@ -466,7 +466,8 @@ final class AgentsStore {
                 daemonInfo = info
             }
         case "turn_complete":
-            guard let id = event.sessionId, Self.notifies("notifyFinished"), !looking(at: id) else { return }
+            guard let id = event.sessionId, !looking(at: id),
+                  NotificationPolicy.allows(.finished, folder: self.session(id)?.cwd) else { return }
             let name = self.session(id)?.name ?? event.sessionName ?? "An agent"
             notifier.agent(title: "\(name) finished", body: event.preview ?? "Its turn is done.",
                            sessionId: id, id: "finished-\(id)-\(Date().timeIntervalSince1970)")
@@ -477,7 +478,8 @@ final class AgentsStore {
                 // Agentman's card already does.
                 let before = sessions[index]
                 if session.question != nil, before.question?.id != session.question?.id,
-                   Self.notifies("notifyNeedsYou"), manager.settings?.keySet != true, !looking(at: session.id) {
+                   manager.settings?.keySet != true, !looking(at: session.id),
+                   NotificationPolicy.allows(.needsYou, folder: session.cwd) {
                     notifier.agent(title: "\(session.name) needs you", body: session.question?.title ?? "It's waiting on you.",
                                    sessionId: session.id, id: "needs-\(session.id)-\(session.question?.id ?? "")")
                 }
@@ -531,7 +533,8 @@ final class AgentsStore {
         if viewingManager {
             manager.markRead()
         } else {
-            notifier.announce(entry, agentName: entry.sessionId.flatMap { session($0)?.name })
+            let agent = entry.sessionId.flatMap { session($0) }
+            notifier.announce(entry, agentName: agent?.name, folder: agent?.cwd)
         }
         refreshBadge()
     }
@@ -595,10 +598,6 @@ final class AgentsStore {
         appActive && selection == .agent(sessionId)
     }
 
-    /// A notification setting, on unless the user switched it off.
-    nonisolated static func notifies(_ key: String) -> Bool {
-        UserDefaults.standard.object(forKey: key) as? Bool ?? true
-    }
 
     /// A conversation with new messages folded in, and those that were new.
     /// Live messages and history pages overlap, and both carry stable IDs. A
