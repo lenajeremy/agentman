@@ -210,6 +210,10 @@ func (m *Manager) replyToCard(ctx context.Context, req protocol.Request) protoco
 		return protocol.Event{Type: protocol.EvtError, Error: "That card has already been dealt with."}
 	}
 	card := entry.Card
+	// A suggested note is about no agent.
+	if card.Kind == protocol.CardNote {
+		return m.answerNoteCardLocked(entry, req)
+	}
 	session, live := m.session(card.SessionID)
 	if !live {
 		m.settleCardLocked(entry, "The agent ended")
@@ -289,6 +293,15 @@ func (m *Manager) dismissCard(id string) protocol.Event {
 	if !ok {
 		return protocol.Event{Type: protocol.EvtError, Error: "That card has already been dealt with."}
 	}
+	if entry.Card.Kind == protocol.CardNote {
+		closed := m.closeCardLocked(entry, protocol.CardDismissed, "Not saved")
+		title := ""
+		if entry.Card.Note != nil {
+			title = entry.Card.Note.Title
+		}
+		m.note(fmt.Sprintf("The user dismissed the note you suggested, “%s” [card %s]. Nothing was saved; don't suggest it again.", title, id))
+		return protocol.Event{Type: protocol.EvtManagerEntry, Entry: &closed}
+	}
 	closed := m.closeCardLocked(entry, protocol.CardDismissed, "Put away")
 	m.note(fmt.Sprintf("The user put away the card about %s [card %s] without answering it here.", entry.Card.AgentName, id))
 	return protocol.Event{Type: protocol.EvtManagerEntry, Entry: &closed}
@@ -339,6 +352,10 @@ func (m *Manager) reconcile(ctx context.Context, sessions []protocol.Session) {
 	var pickedUp []protocol.ManagerEntry
 	for _, entry := range m.conversation.openCards() {
 		card := entry.Card
+		// A suggested note waits for the user, whatever the agents do.
+		if card.Kind == protocol.CardNote {
+			continue
+		}
 		s, live := byID[card.SessionID]
 		switch {
 		case !live:

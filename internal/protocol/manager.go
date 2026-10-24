@@ -149,6 +149,9 @@ const (
 	// CardKey is a key an agent asked for, which its rule says to ask the
 	// user about, or which needs .env added to .gitignore first.
 	CardKey = "key"
+	// CardNote is a note Agentman suggests keeping. Nothing is saved until
+	// the user approves it, as it is or as they edited it.
+	CardNote = "note"
 )
 
 // Card states.
@@ -197,6 +200,8 @@ type ManagerCard struct {
 	// Outcome says how it was settled: "You chose Yes", "Answered in the
 	// agent".
 	Outcome string `json:"outcome,omitempty"`
+	// Note is the note a note card suggests.
+	Note *Note `json:"note,omitempty"`
 }
 
 // ManagerSettings is how Agentman works, as the user set it.

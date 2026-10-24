@@ -10,7 +10,6 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 
-	"github.com/lenajeremy/agentman/internal/knowledge"
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
 
@@ -181,19 +180,21 @@ func init() {
 			run:         runReadKnowledge,
 		},
 		{
-			name: "save_knowledge",
-			description: "Save a note when the user asks you to remember something, or to change a note. " +
-				"Shared notes can be read by every agent; private ones only by you. " +
-				"A shared note marked always goes into each project's instruction file when update_instructions runs.",
+			name: "suggest_note",
+			description: "Suggest a note for the user to keep: a lasting preference, a convention, or a fact about a project " +
+				"worth remembering, whether they asked you to remember it or you noticed it yourself. It appears to them " +
+				"as a card to approve, edit or dismiss; nothing is saved unless they approve it. Shared notes can be read " +
+				"by every agent; private ones only by you. Suggest sparingly: one clear, lasting thing per note.",
 			properties: map[string]any{
-				"title":  map[string]any{"type": "string"},
-				"body":   map[string]any{"type": "string", "description": "The note, in Markdown."},
+				"title":  map[string]any{"type": "string", "description": "In a line."},
+				"body":   map[string]any{"type": "string", "description": "The note, in Markdown, short."},
+				"why":    map[string]any{"type": "string", "description": "What you noticed that makes it worth keeping, in a line."},
 				"tier":   map[string]any{"type": "string", "enum": []string{"shared", "private"}, "description": "Default shared."},
 				"always": map[string]any{"type": "boolean", "description": "Put it in every project's instructions. Default false."},
-				"name":   map[string]any{"type": "string", "description": "An existing note's name, to change it. Leave out for a new note."},
+				"name":   map[string]any{"type": "string", "description": "An existing note's name, to suggest a change to it."},
 			},
 			required: []string{"title", "body"},
-			run:      runSaveKnowledge,
+			run:      runSuggestNote,
 		},
 		{
 			name: "list_keys",
@@ -709,29 +710,6 @@ func runReadKnowledge(_ context.Context, m *Manager, input map[string]any) toolR
 	return toolResult{
 		text:     fmt.Sprintf("# %s (%s, always: %v)\n\n%s", note.Title, note.Tier, note.Always, note.Body),
 		activity: "Read your note “" + note.Title + "”",
-	}
-}
-
-func runSaveKnowledge(_ context.Context, m *Manager, input map[string]any) toolResult {
-	title, _ := input["title"].(string)
-	body, _ := input["body"].(string)
-	tier, _ := input["tier"].(string)
-	name, _ := input["name"].(string)
-	always, _ := input["always"].(bool)
-	if tier == "" {
-		tier = knowledge.Shared
-	}
-	saved, err := m.knowledge.Write(knowledge.Note{Name: strings.TrimSpace(name), Tier: tier, Title: title, Body: body, Always: always})
-	if err != nil {
-		return toolResult{text: strings.TrimPrefix(err.Error(), "knowledge: "), isError: true}
-	}
-	where := "shared with your agents"
-	if saved.Tier == knowledge.Private {
-		where = "private"
-	}
-	return toolResult{
-		text:     fmt.Sprintf("Saved as %s (%s).", saved.Name, saved.Tier),
-		activity: fmt.Sprintf("Saved a note, “%s”, %s", saved.Title, where),
 	}
 }
 

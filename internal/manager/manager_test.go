@@ -464,7 +464,7 @@ func TestTheRequestIsShapedForTheModel(t *testing.T) {
 	}
 	if !slices.Equal(names, []string{"list_agents", "get_brief", "read_messages", "view_image", "list_changes", "file_diff",
 		"list_commits", "send_to_agent", "answer_question", "interrupt", "dismiss_card",
-		"search_knowledge", "read_knowledge", "save_knowledge", "list_keys", "give_key", "update_instructions",
+		"search_knowledge", "read_knowledge", "suggest_note", "list_keys", "give_key", "update_instructions",
 		"schedule_reminder", "watch_agent", "rename_agent", "list_schedules", "update_schedule", "cancel_schedule"}) {
 		t.Fatalf("tools = %v", names)
 	}
