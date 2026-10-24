@@ -1,8 +1,31 @@
 import SwiftUI
 
-/// Agentman's settings: the key it runs on, the models it uses, and how it
-/// talks. Saved in the daemon, so the phone sees the same Agentman.
+/// Agentman's settings: how it works, the notes it shares with agents, and
+/// the keys it hands out. Saved in the daemon, so the phone sees the same
+/// Agentman.
 struct SettingsView: View {
+    @AppStorage("settingsTab") private var tab = "general"
+
+    var body: some View {
+        TabView(selection: $tab) {
+            GeneralSettings()
+                .tabItem { Label("General", systemImage: "gearshape") }
+                .tag("general")
+            KnowledgeSettings()
+                .frame(width: 680, height: 520)
+                .tabItem { Label("Knowledge", systemImage: "book") }
+                .tag("knowledge")
+            KeysSettings()
+                .frame(width: 560, height: 480)
+                .tabItem { Label("Keys", systemImage: "key") }
+                .tag("keys")
+        }
+    }
+}
+
+/// The key Agentman runs on, the models it uses, what it may approve, and
+/// how it talks.
+private struct GeneralSettings: View {
     @Environment(AgentsStore.self) private var store
     @State private var draft: ManagerSettings?
     @State private var key = ""

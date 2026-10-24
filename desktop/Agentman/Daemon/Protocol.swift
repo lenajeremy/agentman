@@ -45,6 +45,13 @@ enum RequestType: String, Codable, Sendable {
     case managerBriefs = "manager_briefs"
     case managerCardReply = "manager_card_reply"
     case managerCardDismiss = "manager_card_dismiss"
+    case knowledgeList = "knowledge_list"
+    case knowledgeRead = "knowledge_read"
+    case knowledgeWrite = "knowledge_write"
+    case knowledgeDelete = "knowledge_delete"
+    case keysList = "keys_list"
+    case keySet = "key_set"
+    case keyDelete = "key_delete"
 }
 
 struct DaemonRequest: Codable, Sendable {
@@ -61,6 +68,10 @@ struct DaemonRequest: Codable, Sendable {
     var path: String?
     var manager: ManagerSettings?
     var cardId: String?
+    var note: Note?
+    var key: Key?
+    /// A note's tier, on the knowledge requests.
+    var kind: String?
 
     init(_ type: RequestType, sessionId: String? = nil) {
         self.type = type
@@ -103,6 +114,38 @@ struct DaemonEvent: Codable, Sendable {
     var brief: Brief?
     var briefs: [Brief]?
     var more: Bool?
+
+    // Knowledge and keys.
+    var notes: [Note]?
+    var note: Note?
+    var keys: [Key]?
+}
+
+/// One of the user's notes for their agents. Body is empty in a list.
+struct Note: Codable, Sendable, Hashable, Identifiable {
+    var name: String
+    /// "shared" (agents can read it) or "private" (only Agentman).
+    var tier: String
+    var title: String
+    var always: Bool?
+    var body: String?
+    var updatedAt: Int64
+
+    var id: String { tier + "/" + name }
+}
+
+/// An API key Agentman keeps for agents, without its value.
+struct Key: Codable, Sendable, Hashable, Identifiable {
+    /// The environment variable it becomes: ELEVENLABS_API_KEY.
+    var name: String
+    var description: String?
+    /// "auto", "projects" or "ask".
+    var rule: String
+    var projects: [String]?
+    var set: Bool
+    var updatedAt: Int64
+
+    var id: String { name }
 }
 
 /// A file read from an agent's folder, or an image it opened.
@@ -137,7 +180,7 @@ struct ManagerEntry: Codable, Sendable, Identifiable, Hashable {
 /// its options, or its need in words, with a box to reply.
 struct ManagerCard: Codable, Sendable, Hashable, Identifiable {
     var id: String
-    /// "question" or "needs_you".
+    /// "question", "needs_you" or "key".
     var kind: String
     /// "open", "answered" (here, on the card), "settled" (no longer needs
     /// the user: answered in the agent, or the agent moved on) or
@@ -155,6 +198,8 @@ struct ManagerCard: Codable, Sendable, Hashable, Identifiable {
     var options: [QuestionOption]?
     var multiple: Bool?
     var custom: Bool?
+    /// The key a key card is about.
+    var keyName: String?
     /// The option Agentman would pick, waiting on the user's OK.
     var suggested: String?
     var outcome: String?
@@ -163,11 +208,19 @@ struct ManagerCard: Codable, Sendable, Hashable, Identifiable {
     /// Settled or put away: the conversation no longer shows it.
     var isGone: Bool { state == "settled" || state == "dismissed" }
 
-    /// The agent's question, for answering it on the card.
+    /// The choices on the card: the agent's question, or whether to give a
+    /// key.
     var question: Question? {
-        guard kind == "question", let questionId else { return nil }
-        return Question(id: questionId, prompt: "", title: nil, detail: nil,
-                        options: options ?? [], multiple: multiple, custom: custom)
+        switch kind {
+        case "question":
+            guard let questionId else { return nil }
+            return Question(id: questionId, prompt: "", title: nil, detail: nil,
+                            options: options ?? [], multiple: multiple, custom: custom)
+        case "key":
+            return Question(id: id, prompt: "", title: nil, detail: nil, options: options ?? [], multiple: false, custom: false)
+        default:
+            return nil
+        }
     }
 }
 

@@ -4,6 +4,8 @@ import SwiftUI
 /// the agent you picked.
 struct ContentView: View {
     @Environment(AgentsStore.self) private var store
+    @Environment(\.openSettings) private var openSettings
+    @AppStorage("settingsTab") private var settingsTab = "general"
 
     var body: some View {
         NavigationSplitView {
@@ -25,6 +27,17 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Palette.paper)
+        }
+        .onOpenURL { url in
+            // agentman://settings opens Settings, at a tab with
+            // agentman://settings/keys; the rest are the store's to open.
+            if url.host() == "settings" {
+                let tab = url.path().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                if ["general", "knowledge", "keys"].contains(tab) { settingsTab = tab }
+                openSettings()
+            } else {
+                store.open(url)
+            }
         }
     }
 }

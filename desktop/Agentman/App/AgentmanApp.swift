@@ -15,7 +15,6 @@ struct AgentmanApp: App {
             ContentView()
                 .environment(store)
                 .task { store.start() }
-                .onOpenURL { store.open($0) }
         }
         .defaultSize(width: 1180, height: 760)
         .windowToolbarStyle(.unified(showsTitle: false))

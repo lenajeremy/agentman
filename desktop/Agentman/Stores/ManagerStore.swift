@@ -13,6 +13,10 @@ final class ManagerStore {
     private(set) var status = ManagerStatus(state: "idle", keySet: false)
     private(set) var settings: ManagerSettings?
     private(set) var briefs: [String: Brief] = [:]
+    /// The user's notes for their agents, without bodies, newest first.
+    private(set) var notes: [Note] = []
+    /// The keys Agentman keeps, by name.
+    private(set) var keys: [Key] = []
     /// The last thing that went wrong talking to Agentman.
     var problem: String?
     private(set) var loaded = false
@@ -54,7 +58,7 @@ final class ManagerStore {
     static func isNews(_ entry: ManagerEntry) -> Bool {
         switch entry.role {
         case "assistant": entry.streaming != true && !entry.text.isEmpty
-        case "brief": true
+        case "brief", "agent": true
         case "card": entry.card?.isOpen == true
         default: false
         }
@@ -154,7 +158,7 @@ final class ManagerStore {
     func reply(to card: ManagerCard, with reply: QuestionReply) async -> String? {
         var request = DaemonRequest(.managerCardReply)
         request.cardId = card.id
-        if card.kind == "question" {
+        if card.kind == "question" || card.kind == "key" {
             request.optionKey = reply.optionKey
             request.optionKeys = reply.optionKeys
             request.answerText = reply.text
@@ -176,6 +180,66 @@ final class ManagerStore {
         if reply.type == "error" { return reply.error ?? "That didn't work." }
         apply(reply)
         return nil
+    }
+
+    // MARK: - Knowledge and keys
+
+    func loadNotes() async {
+        if let reply = try? await client.request(DaemonRequest(.knowledgeList)), let notes = reply.notes {
+            self.notes = notes
+        }
+    }
+
+    /// A note in full.
+    func note(_ name: String, tier: String) async -> Note? {
+        var request = DaemonRequest(.knowledgeRead)
+        request.path = name
+        request.kind = tier
+        return try? await client.request(request).note
+    }
+
+    /// Saves a note. Returns it as saved, or the problem.
+    func save(_ note: Note) async -> Result<Note, ManagerProblem> {
+        var request = DaemonRequest(.knowledgeWrite)
+        request.note = note
+        guard let reply = try? await client.request(request) else { return .failure(ManagerProblem("Couldn't reach am serve.")) }
+        guard reply.type != "error", let saved = reply.note else {
+            return .failure(ManagerProblem(reply.error ?? "Couldn't save the note."))
+        }
+        await loadNotes()
+        return .success(saved)
+    }
+
+    func delete(_ note: Note) async -> String? {
+        var request = DaemonRequest(.knowledgeDelete)
+        request.path = note.name
+        request.kind = note.tier
+        guard let reply = try? await client.request(request) else { return "Couldn't reach am serve." }
+        if reply.type == "error" { return reply.error }
+        if let notes = reply.notes { self.notes = notes }
+        return nil
+    }
+
+    func loadKeys() async {
+        if let reply = try? await client.request(DaemonRequest(.keysList)), let keys = reply.keys {
+            self.keys = keys
+        }
+    }
+
+    /// Saves a key's details, and its value when one is given. The value
+    /// goes to the daemon, which keeps it in the Keychain; it never comes
+    /// back.
+    func save(_ key: Key, value: String) async -> String? {
+        var request = DaemonRequest(.keySet)
+        request.key = key
+        request.text = value.isEmpty ? nil : value
+        return await perform(request)
+    }
+
+    func delete(_ key: Key) async -> String? {
+        var request = DaemonRequest(.keyDelete)
+        request.path = key.name
+        return await perform(request)
     }
 
     /// An image an agent opened, for showing what Agentman looked at.
@@ -215,6 +279,8 @@ final class ManagerStore {
         case "manager_settings":
             if let settings = event.managerSettings { self.settings = settings }
             if let status = event.managerStatus { self.status = status }
+        case "keys":
+            if let keys = event.keys { self.keys = keys }
         case "manager_brief":
             if let brief = event.brief { briefs[brief.sessionId] = brief }
             if let all = event.briefs {
@@ -241,9 +307,15 @@ final class ManagerStore {
             }
         } else {
             entries.append(entry)
-            if entry.role == "brief" || entry.card?.isOpen == true {
+            if entry.role == "brief" || entry.role == "agent" || entry.card?.isOpen == true {
                 onNews?(entry)
             }
         }
     }
+}
+
+/// Something that went wrong, in words for the user.
+struct ManagerProblem: Error, Sendable {
+    let message: String
+    init(_ message: String) { self.message = message }
 }

@@ -157,7 +157,7 @@ private struct ChatItemView: View {
                 }
             case "assistant":
                 AssistantReply(entry: entry)
-            case "brief":
+            case "brief", "agent":
                 BriefCard(entry: entry)
             case "card":
                 if let card = entry.card {

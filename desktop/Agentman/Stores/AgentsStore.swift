@@ -287,7 +287,7 @@ final class AgentsStore {
         if viewingManager {
             manager.markRead()
         } else {
-            notifier.announce(entry)
+            notifier.announce(entry, agentName: entry.sessionId.flatMap { session($0)?.name })
         }
         refreshBadge()
     }

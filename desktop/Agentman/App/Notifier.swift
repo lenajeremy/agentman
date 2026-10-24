@@ -16,8 +16,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.delegate = self
     }
 
-    /// Tells the user about news from Agentman.
-    func announce(_ entry: ManagerEntry) {
+    /// Tells the user about news from Agentman; agentName is the agent an
+    /// entry is from, when it is one's.
+    func announce(_ entry: ManagerEntry, agentName: String? = nil) {
         let content = UNMutableNotificationContent()
         content.threadIdentifier = "agentman"
         content.sound = .default
@@ -30,8 +31,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             if card.suggested != nil {
                 content.subtitle = "Agentman marked its pick for you to confirm"
             }
-        } else if entry.role == "brief" {
-            content.title = "Agentman"
+        } else if entry.role == "brief" || entry.role == "agent" {
+            content.title = entry.role == "agent" ? "\(agentName ?? "An agent") says" : "Agentman"
             content.body = entry.text
             if let sessionId = entry.sessionId,
                let encoded = sessionId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) {
