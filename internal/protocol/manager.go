@@ -40,6 +40,11 @@ const (
 	// ReqManagerScheduleCancel cancels the one named by ScheduleID.
 	ReqManagerSchedules      RequestType = "manager_schedules"
 	ReqManagerScheduleCancel RequestType = "manager_schedule_cancel"
+	// ReqManagerCheckPermission asks what Agentman would do with a request,
+	// as the Settings' "Try it" does: Kind ("command", "edit", "read" or
+	// "network"), Text (the command, path or URL) and Path (the agent's
+	// folder). It is answered with EvtManagerPermission.
+	ReqManagerCheckPermission RequestType = "manager_check_permission"
 )
 
 const (
@@ -60,6 +65,8 @@ const (
 	// EvtManagerSchedules is everything Agentman has scheduled, in
 	// Schedules, whenever that changes.
 	EvtManagerSchedules EventType = "manager_schedules"
+	// EvtManagerPermission answers ReqManagerCheckPermission, in Permission.
+	EvtManagerPermission EventType = "manager_permission"
 )
 
 // Schedule kinds.
@@ -221,6 +228,14 @@ type ManagerSettings struct {
 	// searching, tests and builds, "continue?", and changes to files in the
 	// agent's own folder. Everything else becomes a card.
 	AutoApprove bool `json:"autoApprove"`
+	// Approve narrows which low-risk kinds AutoApprove covers; nil means
+	// all of them. On a set, nil keeps what is stored.
+	Approve *ApproveKinds `json:"approve,omitempty"`
+	// Rules are the user's own, checked before the built-in ones: allow a
+	// command or path, or always ask about it, everywhere or in one folder.
+	// An "ask" rule wins over everything. On a set, nil keeps what is
+	// stored and an empty list clears them.
+	Rules []PermissionRule `json:"rules,omitempty"`
 	// Style is how Agentman talks; Instructions is anything else it should
 	// know or do. Both go into its prompt.
 	Style        string `json:"style"`
@@ -256,4 +271,42 @@ type Brief struct {
 	Notable bool `json:"notable,omitempty"`
 	// UpdatedAt is when it was written, in milliseconds.
 	UpdatedAt int64 `json:"updatedAt"`
+}
+
+// ApproveKinds are the kinds of low-risk request Agentman may answer by
+// itself, each the user's to switch off.
+type ApproveKinds struct {
+	// Reads is reading and searching files inside the agent's folder.
+	Reads bool `json:"reads"`
+	// Edits is changing files inside the agent's folder.
+	Edits bool `json:"edits"`
+	// Commands is read-only commands, tests, builds and linters.
+	Commands bool `json:"commands"`
+	// Continue is a bare "continue?".
+	Continue bool `json:"continue"`
+}
+
+// PermissionRule is one of the user's own rules.
+type PermissionRule struct {
+	// Action is "allow" (Agentman may approve it) or "ask" (it always waits
+	// for the user).
+	Action string `json:"action"`
+	// Kind is "command", "edit", "read", "network" or "any".
+	Kind string `json:"kind"`
+	// Pattern is matched against the command, or the path (inside the
+	// agent's folder, or absolute) or URL: * stands for anything, ? for one
+	// character.
+	Pattern string `json:"pattern"`
+	// Folder limits the rule to agents working in it, or below it; empty
+	// for every agent.
+	Folder string `json:"folder,omitempty"`
+}
+
+// PermissionCheck is what Agentman would do with one request.
+type PermissionCheck struct {
+	// Auto means Agentman would approve it by itself.
+	Auto bool `json:"auto"`
+	// Summary says what is asked; Reason why it would wait, when it would.
+	Summary string `json:"summary"`
+	Reason  string `json:"reason,omitempty"`
 }

@@ -95,7 +95,7 @@ func validateSettings(s protocol.ManagerSettings) error {
 	if len(s.Style) > maxStyle || len(s.Instructions) > maxStyle {
 		return errors.New("style and instructions are limited to 8000 characters each")
 	}
-	return nil
+	return validateRules(s.Rules)
 }
 
 // supportsFallbacks reports the models that take server-side refusal

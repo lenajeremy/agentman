@@ -168,7 +168,7 @@ func (m *Manager) Handles(kind protocol.RequestType) bool {
 		protocol.ReqAgentKnowledgeSearch, protocol.ReqAgentKnowledgeRead, protocol.ReqAgentKeys,
 		protocol.ReqAgentRequestKey, protocol.ReqAgentTell,
 		protocol.ReqManagerSchedules, protocol.ReqManagerScheduleCancel, protocol.ReqManagerImage,
-		protocol.ReqToolsTitle, protocol.ReqManagerOpenCards:
+		protocol.ReqToolsTitle, protocol.ReqManagerOpenCards, protocol.ReqManagerCheckPermission:
 		return true
 	}
 	return false
@@ -183,6 +183,9 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 		return m.readImage(req.Path)
 	case protocol.ReqToolsTitle:
 		return m.toolsTitle(ctx, req)
+	case protocol.ReqManagerCheckPermission:
+		check := checkPermission(m.currentSettings(), string(req.Kind), req.Text, req.Path)
+		return protocol.Event{Type: protocol.EvtManagerPermission, Permission: &check}
 	case protocol.ReqManagerOpenCards:
 		return protocol.Event{Type: protocol.EvtManagerHistory, Entries: m.conversation.openCards()}
 	case protocol.ReqManagerHistory:
@@ -321,6 +324,17 @@ func (m *Manager) currentSettings() protocol.ManagerSettings {
 func (m *Manager) setSettings(next *protocol.ManagerSettings) protocol.Event {
 	if next == nil {
 		return protocol.Event{Type: protocol.EvtError, Error: "No settings were sent."}
+	}
+	// An app that doesn't know the permission switches and rules leaves
+	// them out; that keeps them as they are rather than clearing them.
+	if next.Approve == nil || next.Rules == nil {
+		current := m.currentSettings()
+		if next.Approve == nil {
+			next.Approve = current.Approve
+		}
+		if next.Rules == nil {
+			next.Rules = current.Rules
+		}
 	}
 	if err := validateSettings(*next); err != nil {
 		return protocol.Event{Type: protocol.EvtError, Error: err.Error()}

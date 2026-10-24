@@ -157,6 +157,15 @@ final class ManagerStore {
         return nil
     }
 
+    /// What Agentman would do with a request, under the settings as saved.
+    func checkPermission(kind: String, target: String, folder: String) async -> PermissionCheck? {
+        var request = DaemonRequest(.managerCheckPermission)
+        request.kind = kind
+        request.text = target
+        request.path = folder
+        return try? await client.request(request).permission
+    }
+
     /// Stores the API key in the Mac's Keychain, through the daemon, or
     /// removes it when key is empty. The key is never sent back.
     func setKey(_ key: String) async -> String? {

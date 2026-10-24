@@ -329,6 +329,7 @@ type Event struct {
 	ManagerSettings *ManagerSettings `json:"managerSettings,omitempty"`
 	Brief           *Brief           `json:"brief,omitempty"`
 	Briefs          []Brief          `json:"briefs,omitempty"`
+	Permission      *PermissionCheck `json:"permission,omitempty"`
 	// More says older manager entries remain, on EvtManagerHistory.
 	More bool `json:"more,omitempty"`
 	// Notes, Note and Keys answer the knowledge and key requests.

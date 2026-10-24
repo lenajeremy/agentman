@@ -265,6 +265,7 @@ private struct GeneralPage: View {
 /// What Agentman may approve without asking.
 private struct PermissionsPage: View {
     @Binding var draft: ManagerSettings?
+    @State private var adding = false
 
     var body: some View {
         if let binding = Binding($draft) {
@@ -276,33 +277,334 @@ private struct PermissionsPage: View {
                         .labelsHidden()
                 }
             }
-        }
-        SettingsSection(title: "Approved for you") {
-            ForEach(Array(Self.approved.enumerated()), id: \.offset) { index, item in
-                RuleRow(icon: "checkmark.circle", tint: Palette.ok, text: item, divider: index < Self.approved.count - 1)
+            SettingsSection(title: "Agentman may approve", footer: "Inside the agent's own folder, and never anything that touches keys or credentials.") {
+                kindRow("Reading and searching files", \.reads)
+                kindRow("Changing files", \.edits)
+                kindRow("Tests, builds and read-only commands", \.commands)
+                kindRow("“Continue?” prompts", \.continue, divider: false)
+            }
+            .disabled(!binding.wrappedValue.autoApprove)
+            .opacity(binding.wrappedValue.autoApprove ? 1 : 0.5)
+
+            SettingsSection(title: "Your rules",
+                            footer: "An “Always ask” rule wins over everything. No rule lets an agent touch keys and credentials or run anything as root. Use * for anything and ? for one character.") {
+                let rules = binding.wrappedValue.rules ?? []
+                if rules.isEmpty {
+                    HStack {
+                        Text("No rules yet. Allow something Agentman would ask you about, or make it always ask.")
+                            .font(TextStyle.caption)
+                            .foregroundStyle(Palette.muted)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    Divider()
+                }
+                ForEach(Array(rules.enumerated()), id: \.offset) { index, rule in
+                    PermissionRuleRow(rule: rule) {
+                        draft?.rules?.remove(at: index)
+                    }
+                }
+                HStack {
+                    Button {
+                        adding = true
+                    } label: {
+                        Label("Add Rule…", systemImage: "plus")
+                    }
+                    .buttonStyle(.link)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            }
+            .sheet(isPresented: $adding) {
+                NewRuleSheet { rule in
+                    draft?.rules = (draft?.rules ?? []) + [rule]
+                }
             }
         }
-        SettingsSection(title: "Always waits for you", footer: "Anything on neither list waits for you too, as a card in Agentman.") {
+
+        TryPermission()
+
+        SettingsSection(title: "Always waits for you", footer: "Unless one of your rules allows it. Anything Agentman doesn't recognise waits for you too, as a card.") {
             ForEach(Array(Self.asked.enumerated()), id: \.offset) { index, item in
                 RuleRow(icon: "hand.raised", tint: Palette.needsYou, text: item, divider: index < Self.asked.count - 1)
             }
         }
     }
 
-    static let approved = [
-        "Reading and searching files",
-        "Running tests, builds and linters",
-        "“Continue?” prompts",
-        "Changing files inside the agent's own folder",
-    ]
+    private func kindRow(_ title: String, _ key: WritableKeyPath<ApproveKinds, Bool>, divider: Bool = true) -> some View {
+        SettingsRow(title: title, divider: divider) {
+            Toggle("", isOn: Binding(
+                get: { (draft?.approve ?? .all)[keyPath: key] },
+                set: { on in
+                    var kinds = draft?.approve ?? .all
+                    kinds[keyPath: key] = on
+                    draft?.approve = kinds
+                }
+            ))
+            .toggleStyle(.switch)
+            .labelsHidden()
+        }
+    }
+
     static let asked = [
         "Deleting files",
         "Installing software",
         "Commits, pushes and anything else that changes git history",
         "Deploys and cloud changes",
         "Anything on the network",
-        "Keys, tokens and credentials",
+        "Keys, tokens and credentials (no rule can allow these)",
+        "Anything run as root (no rule can allow these)",
     ]
+}
+
+/// A rule as a line: what it does, to what, and where.
+private struct PermissionRuleRow: View {
+    let rule: PermissionRule
+    let remove: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text(rule.action == "allow" ? "Allow" : "Always ask")
+                    .font(TextStyle.captionMedium)
+                    .foregroundStyle(rule.action == "allow" ? Palette.ok : Palette.needsYouText)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(rule.action == "allow" ? Palette.ok.opacity(0.12) : Palette.needsYouWash, in: Capsule())
+                Image(systemName: RuleKind.icon(rule.kind))
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.muted)
+                    .help(RuleKind.title(rule.kind))
+                Text(rule.pattern)
+                    .font(Fonts.mono(12))
+                    .foregroundStyle(Palette.text)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                Text(rule.folder.map { "in " + ($0 as NSString).lastPathComponent } ?? "everywhere")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.faint)
+                    .help(rule.folder ?? "Every agent")
+                Spacer()
+                Button(action: remove) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Palette.muted)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .opacity(hovering ? 1 : 0)
+                .help("Remove the rule")
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+            Divider()
+        }
+    }
+}
+
+enum RuleKind {
+    static let all = ["command", "edit", "read", "network", "any"]
+
+    static func title(_ kind: String) -> String {
+        switch kind {
+        case "command": "Commands"
+        case "edit": "Changing files"
+        case "read": "Reading files"
+        case "network": "Network"
+        default: "Anything"
+        }
+    }
+
+    static func icon(_ kind: String) -> String {
+        switch kind {
+        case "command": "terminal"
+        case "edit": "pencil"
+        case "read": "doc.text.magnifyingglass"
+        case "network": "globe"
+        default: "asterisk"
+        }
+    }
+
+    static func placeholder(_ kind: String) -> String {
+        switch kind {
+        case "command": "npm run *"
+        case "edit", "read": "docs/*"
+        case "network": "https://api.example.com/*"
+        default: "*.env"
+        }
+    }
+}
+
+/// Adding a rule: allow or always ask, for what, matching what, and where.
+private struct NewRuleSheet: View {
+    let add: (PermissionRule) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var action = "allow"
+    @State private var kind = "command"
+    @State private var pattern = ""
+    @State private var folder: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("New Rule")
+                .font(TextStyle.title)
+                .foregroundStyle(Palette.text)
+            Picker("", selection: $action) {
+                Text("Allow").tag("allow")
+                Text("Always ask").tag("ask")
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            VStack(alignment: .leading, spacing: 6) {
+                Text("For")
+                    .font(TextStyle.label)
+                    .foregroundStyle(Palette.faint)
+                Picker("", selection: $kind) {
+                    ForEach(RuleKind.all, id: \.self) { Label(RuleKind.title($0), systemImage: RuleKind.icon($0)).tag($0) }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(kind == "command" ? "Command" : kind == "network" ? "Address" : kind == "any" ? "Matching" : "Path")
+                    .font(TextStyle.label)
+                    .foregroundStyle(Palette.faint)
+                TextField(RuleKind.placeholder(kind), text: $pattern)
+                    .textFieldStyle(.roundedBorder)
+                    .font(Fonts.mono(12.5))
+                Text(hint)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(problem == nil ? Palette.muted : Palette.errorText)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Where")
+                    .font(TextStyle.label)
+                    .foregroundStyle(Palette.faint)
+                HStack {
+                    Text(folder.map { ($0 as NSString).abbreviatingWithTildeInPath } ?? "Every agent, in any folder")
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                    Spacer()
+                    if folder != nil {
+                        Button("Everywhere") { folder = nil }
+                    }
+                    Button("Choose a Folder…", action: chooseFolder)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Add Rule") {
+                    add(PermissionRule(action: action, kind: kind, pattern: pattern.trimmingCharacters(in: .whitespaces), folder: folder))
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(problem != nil)
+            }
+        }
+        .padding(24)
+        .frame(width: 460)
+    }
+
+    private var problem: String? {
+        let trimmed = pattern.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return "" }
+        if action == "allow" && trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "*? ")).isEmpty {
+            return "That would allow everything. Name something more specific."
+        }
+        return nil
+    }
+
+    private var hint: String {
+        if let problem, !problem.isEmpty { return problem }
+        switch kind {
+        case "command": return "Checked against each part of a command: `npm run *` covers npm run build."
+        case "edit", "read": return "A path inside the agent's folder, or a full one: `docs/*`, `*.md`."
+        case "network": return "The address the agent wants to open."
+        default: return "Any request whose command, path or address matches."
+        }
+    }
+
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.directoryURL = URL(fileURLWithPath: folder ?? NSHomeDirectory())
+        panel.prompt = "Choose"
+        if panel.runModal() == .OK, let url = panel.url { folder = url.path }
+    }
+}
+
+/// "Try it": what Agentman would do with a command or path, under the
+/// settings as saved.
+private struct TryPermission: View {
+    @Environment(AgentsStore.self) private var store
+    @State private var kind = "command"
+    @State private var target = ""
+    @State private var folder = NSHomeDirectory()
+    @State private var check: PermissionCheck?
+
+    var body: some View {
+        SettingsSection(title: "Try it", footer: "Uses your saved settings, so save changes first to try them.") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Picker("", selection: $kind) {
+                        ForEach(["command", "edit", "read", "network"], id: \.self) { Text(RuleKind.title($0)).tag($0) }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    TextField(kind == "command" ? "git push origin main" : kind == "network" ? "https://example.com" : "src/app.ts", text: $target)
+                        .textFieldStyle(.roundedBorder)
+                        .font(Fonts.mono(12))
+                        .onSubmit(run)
+                    Button("Check", action: run)
+                        .disabled(target.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                HStack(spacing: 6) {
+                    Text("For an agent in")
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.muted)
+                    Menu((folder as NSString).abbreviatingWithTildeInPath) {
+                        ForEach(store.folders.prefix(12)) { recent in
+                            Button((recent.path as NSString).abbreviatingWithTildeInPath) { folder = recent.path }
+                        }
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize()
+                }
+                if let check {
+                    Label {
+                        Text(check.auto ? "Agentman would approve it: \(check.summary)." : "It would wait for you: \(check.reason ?? check.summary).")
+                            .font(TextStyle.caption)
+                            .foregroundStyle(Palette.text)
+                    } icon: {
+                        Image(systemName: check.auto ? "checkmark.circle.fill" : "hand.raised.fill")
+                            .foregroundStyle(check.auto ? Palette.ok : Palette.needsYou)
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .task { await store.loadFolders() }
+    }
+
+    private func run() {
+        let target = target
+        Task { check = await store.manager.checkPermission(kind: kind, target: target, folder: folder) }
+    }
 }
 
 private struct RuleRow: View {

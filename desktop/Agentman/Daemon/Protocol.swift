@@ -75,6 +75,7 @@ enum RequestType: String, Codable, Sendable {
     case managerImage = "manager_image"
     case managerSchedules = "manager_schedules"
     case managerScheduleCancel = "manager_schedule_cancel"
+    case managerCheckPermission = "manager_check_permission"
     case keysList = "keys_list"
     case keySet = "key_set"
     case keyDelete = "key_delete"
@@ -160,6 +161,8 @@ struct DaemonEvent: Codable, Sendable {
     var managerSettings: ManagerSettings?
     var brief: Brief?
     var briefs: [Brief]?
+    /// What Agentman would do with a request, on "manager_permission".
+    var permission: PermissionCheck?
     var more: Bool?
 
     var schedules: [ManagerSchedule]?
@@ -401,9 +404,42 @@ struct ManagerSettings: Codable, Sendable, Hashable {
     var briefs: Bool
     /// Agentman answers low-risk requests itself.
     var autoApprove: Bool
+    /// Which low-risk kinds it answers; nil means all of them.
+    var approve: ApproveKinds?
+    /// The user's own rules, checked first; an "ask" rule wins over all.
+    var rules: [PermissionRule]?
     var style: String
     var instructions: String
     var keySet: Bool
+}
+
+/// The kinds of low-risk request Agentman may answer by itself.
+struct ApproveKinds: Codable, Sendable, Hashable {
+    var reads: Bool
+    var edits: Bool
+    var commands: Bool
+    var `continue`: Bool
+
+    static let all = ApproveKinds(reads: true, edits: true, commands: true, continue: true)
+}
+
+/// One of the user's permission rules.
+struct PermissionRule: Codable, Sendable, Hashable {
+    /// "allow" or "ask".
+    var action: String
+    /// "command", "edit", "read", "network" or "any".
+    var kind: String
+    /// The command, path or URL, with * for anything and ? for one character.
+    var pattern: String
+    /// Only for agents working in this folder; nil for every agent.
+    var folder: String?
+}
+
+/// What Agentman would do with one request.
+struct PermissionCheck: Codable, Sendable, Hashable {
+    var auto: Bool
+    var summary: String
+    var reason: String?
 }
 
 struct ManagerStatus: Codable, Sendable, Hashable {

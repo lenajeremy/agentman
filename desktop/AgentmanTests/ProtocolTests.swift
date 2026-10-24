@@ -101,4 +101,15 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(event.artifacts?.first?.kind, "plan")
         XCTAssertEqual(event.artifacts?.first?.review, true)
     }
+
+    func testPermissionSettingsRoundTrip() throws {
+        let json = #"{"chatModel":"claude-opus-5-5","briefModel":"claude-opus-5-5","effort":"medium","briefs":true,"autoApprove":true,"approve":{"reads":true,"edits":false,"commands":true,"continue":true},"rules":[{"action":"allow","kind":"command","pattern":"git push*","folder":"/work/app"}],"style":"","instructions":"","keySet":true}"#
+        let settings = try JSONDecoder().decode(ManagerSettings.self, from: Data(json.utf8))
+        XCTAssertEqual(settings.approve?.edits, false)
+        XCTAssertEqual(settings.rules?.first?.pattern, "git push*")
+        let again = try JSONDecoder().decode(ManagerSettings.self, from: JSONEncoder().encode(settings))
+        XCTAssertEqual(again, settings)
+        let older = #"{"chatModel":"claude-opus-5-5","briefModel":"claude-opus-5-5","effort":"medium","briefs":true,"autoApprove":true,"style":"","instructions":"","keySet":false}"#
+        XCTAssertNil(try JSONDecoder().decode(ManagerSettings.self, from: Data(older.utf8)).rules)
+    }
 }

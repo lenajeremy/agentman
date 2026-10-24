@@ -40,37 +40,70 @@ type decision struct {
 	reason string
 }
 
-// classify decides one question an agent is showing.
-func classify(session protocol.Session, q *protocol.Question) decision {
+// classify decides one question an agent is showing, under the user's
+// switches and rules.
+func classify(session protocol.Session, q *protocol.Question, p policy) decision {
 	if q == nil {
 		return decision{reason: "nothing is being asked"}
 	}
-	yes := plainYes(q.Options)
 	kind, target := requestOf(q)
+	return decide(session, kind, target, plainYes(q.Options), p)
+}
+
+// decide is the policy itself, for one request of kind on target; yes is
+// the option that agrees, empty when there is none to choose.
+func decide(session protocol.Session, kind, target, yes string, p policy) decision {
 	d := decision{kind: kind, target: target}
 	switch kind {
 	case "command":
 		d.summary = "run `" + clip(target, 80) + "`"
-		if ok, why := commandIsSafe(target, session.Cwd); !ok {
+	case "edit":
+		d.summary = "change " + filepath.Base(target)
+	case "read":
+		d.summary = "read " + filepath.Base(target)
+	case "network":
+		d.summary = "open " + clip(target, 80)
+	case "continue":
+		d.summary = "carry on"
+	default:
+		d.summary, d.reason = "answer a question", "it is a question for you"
+		return d
+	}
+
+	// The user's "ask" rules win over everything, for a command over any of
+	// its parts.
+	targets := []string{target}
+	if kind == "command" {
+		targets = append(targets, splitCommand(target)...)
+	}
+	for _, each := range targets {
+		if rule, ok := p.match("ask", kind, each, session.Cwd); ok {
+			d.reason = "your rule says " + describe(rule)
+			return d
+		}
+	}
+
+	switch kind {
+	case "command":
+		if ok, why := commandAllowed(target, session.Cwd, p); !ok {
 			d.reason = why
 			return d
 		}
 		return approve(d, yes)
-	case "edit":
-		d.summary = "change " + filepath.Base(target)
+	case "edit", "read":
 		if private(target) {
 			d.reason = "it touches keys or credentials"
 			return d
 		}
-		if !insideFolder(target, session.Cwd) {
-			d.reason = "it is outside the agent's folder"
+		if _, ok := p.match("allow", kind, target, session.Cwd); ok {
+			return approve(d, yes)
+		}
+		if kind == "edit" && !p.kinds.Edits {
+			d.reason = "you approve changes to files yourself"
 			return d
 		}
-		return approve(d, yes)
-	case "read":
-		d.summary = "read " + filepath.Base(target)
-		if private(target) {
-			d.reason = "it touches keys or credentials"
+		if kind == "read" && !p.kinds.Reads {
+			d.reason = "you approve reading files yourself"
 			return d
 		}
 		if !insideFolder(target, session.Cwd) {
@@ -79,14 +112,18 @@ func classify(session protocol.Session, q *protocol.Question) decision {
 		}
 		return approve(d, yes)
 	case "network":
-		d.summary, d.reason = "open "+clip(target, 80), "it uses the network"
+		if _, ok := p.match("allow", kind, target, session.Cwd); ok {
+			return approve(d, yes)
+		}
+		d.reason = "it uses the network"
 		return d
-	case "continue":
-		d.summary = "carry on"
-		return approve(d, yes)
 	}
-	d.summary, d.reason = "answer a question", "it is a question for you"
-	return d
+	// A bare "continue?".
+	if !p.kinds.Continue {
+		d.reason = "you answer “continue?” yourself"
+		return d
+	}
+	return approve(d, yes)
 }
 
 // isDenial reports whether the option with key says no.
@@ -243,9 +280,18 @@ var (
 	packageScripts = []string{"test", "t", "lint", "build", "typecheck", "type-check", "check", "format:check", "tsc"}
 )
 
-// commandIsSafe decides a shell command: every part of it must be read-only,
-// a test or build, or a change to files inside the folder.
+// commandIsSafe decides a shell command by the built-in policy alone: every
+// part of it must be read-only, a test or build, or a change to files inside
+// the folder.
 func commandIsSafe(command, folder string) (bool, string) {
+	return commandAllowed(command, folder, policy{kinds: allKinds})
+}
+
+// commandAllowed decides a shell command under the user's switches and
+// rules: each part must be allowed by a rule, or safe by the built-in policy
+// with commands switched on. Nothing nested, nothing touching keys and
+// nothing run as root, whatever the rules.
+func commandAllowed(command, folder string, p policy) (bool, string) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return false, "the command is empty"
@@ -256,6 +302,7 @@ func commandIsSafe(command, folder string) (bool, string) {
 	}
 	// A cd moves where the relative paths after it land, so each part is
 	// checked from the folder the cds before it left the command in.
+	_, wholeAllowed := p.match("allow", "command", command, folder)
 	base := folder
 	for _, part := range splitCommand(command) {
 		if words := strings.Fields(part); len(words) > 0 && words[0] == "cd" {
@@ -265,6 +312,18 @@ func commandIsSafe(command, folder string) (bool, string) {
 			}
 			base = resolvePath(target, base)
 			continue
+		}
+		if private(part) {
+			return false, "it touches keys or credentials"
+		}
+		if runsAsRoot(part) {
+			return false, "it runs as root"
+		}
+		if _, ok := p.match("allow", "command", part, folder); ok || wholeAllowed {
+			continue
+		}
+		if !p.kinds.Commands {
+			return false, "you approve commands yourself"
 		}
 		if ok, why := partIsSafe(part, base, folder); !ok {
 			return false, why

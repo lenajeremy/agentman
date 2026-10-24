@@ -42,8 +42,9 @@ func (m *Manager) takeQuestion(ctx context.Context, session protocol.Session) {
 	if m.openCardLocked(session.ID, q.ID) != nil {
 		return
 	}
-	d := classify(session, q)
-	if d.auto && m.currentSettings().AutoApprove {
+	settings := m.currentSettings()
+	d := classify(session, q, policyOf(settings))
+	if d.auto && settings.AutoApprove {
 		err := m.answer(ctx, session.ID, protocol.Request{QuestionID: q.ID, OptionKey: d.optionKey})
 		if err == nil {
 			text := fmt.Sprintf("Approved for %s: %s", session.Name, d.summary)

@@ -60,7 +60,7 @@ func TestRealPromptsAreApprovedOnlyWhenLowRisk(t *testing.T) {
 	}
 	for _, c := range cases {
 		q := fixture(t, c.fixture)
-		d := classify(protocol.Session{Name: "agent", Cwd: c.cwd}, q)
+		d := classify(protocol.Session{Name: "agent", Cwd: c.cwd}, q, policy{kinds: allKinds})
 		if d.auto != c.auto || d.kind != c.kind {
 			t.Errorf("%s in %s: auto=%v kind=%q (target %q, reason %q), want auto=%v kind=%q",
 				c.fixture, c.cwd, d.auto, d.kind, d.target, d.reason, c.auto, c.kind)
@@ -84,7 +84,7 @@ func TestApprovalIsNeverAlwaysAllow(t *testing.T) {
 		}
 		q := asProtocol(found)
 		// The widest folder there is, so every edit and read is "inside".
-		d := classify(protocol.Session{Cwd: "/"}, q)
+		d := classify(protocol.Session{Cwd: "/"}, q, policy{kinds: allKinds})
 		if !d.auto {
 			continue
 		}
@@ -193,7 +193,7 @@ func TestPathsOutsideTheFolderWait(t *testing.T) {
 	d := classify(protocol.Session{Cwd: homeDir()}, &protocol.Question{
 		Title: "Read: " + filepath.Join(homeDir(), ".ssh", "id_ed25519"), Prompt: "Allow access to this file?",
 		Options: []protocol.QuestionOption{{Key: "1", Label: "Yes, allow access"}},
-	})
+	}, policy{kinds: allKinds})
 	if d.auto {
 		t.Error("an agent in the home folder could read a private key unasked")
 	}
