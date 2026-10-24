@@ -7,8 +7,12 @@ package protocol
 // events.
 
 const (
-	// ReqManagerSend is the user saying something to Agentman, in Text.
+	// ReqManagerSend is the user saying something to Agentman, in Text,
+	// with any images in Images.
 	ReqManagerSend RequestType = "manager_send"
+	// ReqManagerImage reads an image kept with the conversation, named by
+	// Path as an entry's Images name it, into Workspace.
+	ReqManagerImage RequestType = "manager_image"
 	// ReqManagerHistory pages back through the conversation: Limit entries
 	// before the one named by Before, newest last. Empty Before is the end.
 	ReqManagerHistory RequestType = "manager_history"
@@ -118,10 +122,20 @@ type ManagerEntry struct {
 	Streaming bool `json:"streaming,omitempty"`
 	// Path is an image an activity looked at, which the app shows too.
 	Path string `json:"path,omitempty"`
+	// Images names the images a user's message came with, kept beside the
+	// conversation; ReqManagerImage reads one.
+	Images []string `json:"images,omitempty"`
 	// Card is set on a "card" entry: something only the user can decide,
 	// put in front of them to answer on the spot. When it is settled, the
 	// entry comes again with the card's new state.
 	Card *ManagerCard `json:"card,omitempty"`
+}
+
+// InlineImage is an image sent with a message: its type and its bytes, in
+// base64.
+type InlineImage struct {
+	MIME string `json:"mime"`
+	Data string `json:"data"`
 }
 
 // Card kinds.

@@ -22,7 +22,14 @@ var toolsOnce = sync.OnceValue(apiTools)
 // runTurn writes Agentman's reply to what the user said: it streams text to
 // the apps as it arrives, runs the tools the model asks for, and goes on
 // until the model is done.
-func (m *Manager) runTurn(ctx context.Context, model Model, text string) {
+// turnInput is what a turn starts from: the user's words and images, or a
+// wake-up's prompt.
+type turnInput struct {
+	text   string
+	images []anthropic.BetaContentBlockParamUnion
+}
+
+func (m *Manager) runTurn(ctx context.Context, model Model, input turnInput) {
 	defer func() {
 		m.mu.Lock()
 		if m.stopTurn != nil {
@@ -39,9 +46,14 @@ func (m *Manager) runTurn(ctx context.Context, model Model, text string) {
 
 	// What happened since the user last wrote, such as requests Agentman
 	// approved and cards it put up, goes first, so the model knows.
-	blocks := []anthropic.BetaContentBlockParamUnion{anthropic.NewBetaTextBlock(text)}
+	// Then the user's images, then their words.
+	var blocks []anthropic.BetaContentBlockParamUnion
 	if notes := m.takeNotes(); notes != "" {
-		blocks = append([]anthropic.BetaContentBlockParamUnion{anthropic.NewBetaTextBlock(notes)}, blocks...)
+		blocks = append(blocks, anthropic.NewBetaTextBlock(notes))
+	}
+	blocks = append(blocks, input.images...)
+	if input.text != "" {
+		blocks = append(blocks, anthropic.NewBetaTextBlock(input.text))
 	}
 	if err := m.conversation.appendHistory(anthropic.NewBetaUserMessage(blocks...)); err != nil {
 		m.addEntry(protocol.ManagerEntry{Role: "error", Text: "Couldn't save the conversation: " + err.Error()})

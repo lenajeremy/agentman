@@ -182,6 +182,8 @@ type Request struct {
 	CardID string `json:"cardId,omitempty"`
 	// ScheduleID names the schedule on ReqManagerScheduleCancel.
 	ScheduleID string `json:"scheduleId,omitempty"`
+	// Images are sent with a message to Agentman on ReqManagerSend.
+	Images []InlineImage `json:"images,omitempty"`
 	// Note and Key are saved by ReqKnowledgeWrite and ReqKeySet.
 	Note *Note `json:"note,omitempty"`
 	Key  *Key  `json:"key,omitempty"`

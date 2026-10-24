@@ -165,7 +165,7 @@ func (m *Manager) Handles(kind protocol.RequestType) bool {
 		protocol.ReqKeysList, protocol.ReqKeySet, protocol.ReqKeyDelete,
 		protocol.ReqAgentKnowledgeSearch, protocol.ReqAgentKnowledgeRead, protocol.ReqAgentKeys,
 		protocol.ReqAgentRequestKey, protocol.ReqAgentTell,
-		protocol.ReqManagerSchedules, protocol.ReqManagerScheduleCancel:
+		protocol.ReqManagerSchedules, protocol.ReqManagerScheduleCancel, protocol.ReqManagerImage:
 		return true
 	}
 	return false
@@ -175,7 +175,9 @@ func (m *Manager) Handles(kind protocol.RequestType) bool {
 func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Event {
 	switch req.Type {
 	case protocol.ReqManagerSend:
-		return m.send(ctx, req.Text)
+		return m.send(ctx, req.Text, req.Images...)
+	case protocol.ReqManagerImage:
+		return m.readImage(req.Path)
 	case protocol.ReqManagerHistory:
 		limit := req.Limit
 		if limit <= 0 || limit > 200 {
@@ -249,9 +251,9 @@ func (m *Manager) NeedsAnswer(session protocol.Session) {
 	}
 }
 
-func (m *Manager) send(ctx context.Context, text string) protocol.Event {
+func (m *Manager) send(ctx context.Context, text string, images ...protocol.InlineImage) protocol.Event {
 	text = strings.TrimSpace(text)
-	if text == "" {
+	if text == "" && len(images) == 0 {
 		return protocol.Event{Type: protocol.EvtError, Error: "Say something to Agentman."}
 	}
 	model, err := m.model(ctx)
@@ -270,8 +272,17 @@ func (m *Manager) send(ctx context.Context, text string) protocol.Event {
 	m.stopTurn = cancel
 	m.mu.Unlock()
 
-	entry := m.addEntry(protocol.ManagerEntry{Role: "user", Text: text})
-	go m.runTurn(turnCtx, model, text)
+	entryID := newID()
+	names, blocks, err := m.keepImages(entryID, images)
+	if err != nil {
+		m.mu.Lock()
+		m.stopTurn = nil
+		m.mu.Unlock()
+		cancel()
+		return protocol.Event{Type: protocol.EvtError, Error: "Couldn't send that: " + err.Error()}
+	}
+	entry := m.addEntry(protocol.ManagerEntry{ID: entryID, Role: "user", Text: text, Images: names})
+	go m.runTurn(turnCtx, model, turnInput{text: text, images: blocks})
 	return protocol.Event{Type: protocol.EvtManagerEntry, Entry: &entry}
 }
 
