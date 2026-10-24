@@ -6,7 +6,7 @@ import { useStyles, useTheme } from "../lib/appearance";
 import type { Message } from "../lib/protocol";
 import { useStore } from "../lib/store";
 import { font, Palette, radius, size, space } from "../lib/theme";
-import { runCounts, runFinished, runFromSteps, toolRunKey } from "../lib/toolgroups";
+import { runCounts, runFinished, toolRunKey } from "../lib/toolgroups";
 import { MotionPressable } from "./MotionPressable";
 import { ToolRow } from "./ToolRow";
 
@@ -27,28 +27,38 @@ export function ToolGroup({ calls, said, cwd }: { calls: Message[]; said: string
   const finished = runFinished(calls);
   const [title, setTitle] = useState(titles.get(key) ?? "");
 
+  const online = store.connection === "online";
   useEffect(() => {
-    if (!finished || titles.has(key)) return;
+    if (!finished || !online || titles.has(key)) return;
     let current = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     const steps = calls.flatMap((call) => (call.tool ? [call.tool] : []));
-    void store
-      .titleTools(calls[0].sessionId, said, steps)
-      .then((written) => {
-        titles.set(key, written);
-        if (current) setTitle(written);
-      })
-      .catch(() => {});
+    // A Mac that is restarting, or a moment without signal, should not leave
+    // the run untitled for good: ask again a little later, a few times.
+    const ask = (attempt: number) => {
+      void store
+        .titleTools(calls[0].sessionId, said, steps)
+        .then((written) => {
+          titles.set(key, written);
+          if (current) setTitle(written);
+        })
+        .catch(() => {
+          if (current && attempt < 3) retry = setTimeout(() => ask(attempt + 1), 4000 * 2 ** attempt);
+        });
+    };
+    ask(0);
     return () => {
       current = false;
+      if (retry) clearTimeout(retry);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, finished]);
+  }, [key, finished, online]);
 
   const running = calls.find((call) => call.tool?.status === "running");
   const failures = calls.filter((call) => call.tool?.status === "error").length;
   const line = running
     ? `${running.tool?.title || "Working"}…`
-    : title || runFromSteps(calls) || runCounts(calls);
+    : title || runCounts(calls);
 
   return (
     <View style={styles.group}>

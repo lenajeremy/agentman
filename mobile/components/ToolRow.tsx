@@ -410,7 +410,7 @@ export function ToolRow({
       >
         <StatusTile status={tool.status} name={tool.name} />
         {title ? (
-          <Text style={[styles.title, failed && styles.nameFailed]} numberOfLines={1}>
+          <Text style={[styles.title, failed && styles.nameFailed]} numberOfLines={2}>
             {title}
           </Text>
         ) : (

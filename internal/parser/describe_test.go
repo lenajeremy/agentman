@@ -17,7 +17,9 @@ func TestDescribeToolSaysWhatAStepDid(t *testing.T) {
 		{"Bash", "x", "The tests", "The tests"},
 		// File tools.
 		{"Edit", "/Users/me/agentman/internal/manager/tools.go", "", "Edited tools.go"},
-		{"Read", "/tmp/shot.png", "", "Read shot.png"},
+		{"Read", "/tmp/shot.png", "", "Looked at shot.png"},
+		{"Read", "/Users/me/.agentman/images/s/72v33m2m3pjbqp54.jpg", "", "Looked at an image"},
+		{"Read", "/tmp/notes.md", "", "Read notes.md"},
 		{"Write", "/tmp/new.md", "", "Wrote new.md"},
 		{"Grep", "toolPath", "", "Searched for “toolPath”"},
 		{"WebFetch", "https://www.example.com/docs", "", "Fetched a page from example.com"},

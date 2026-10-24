@@ -210,6 +210,9 @@ final class AgentsStore {
         if let reply = try? await client.request(request), reply.type == "tools_title",
            let title = reply.preview, !title.isEmpty {
             toolTitles[key] = title
+        } else {
+            // Asked again when the run is next shown or the Mac reconnects.
+            toolTitles[key] = nil
         }
     }
 

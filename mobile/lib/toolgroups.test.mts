@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { Message } from "./protocol.ts";
-import { groupTools, runCounts, runFinished, runFromSteps } from "./toolgroups.ts";
+import { groupTools, runCounts, runFinished } from "./toolgroups.ts";
 
 const said = (id: string, text: string): Message => ({ id, sessionId: "s", role: "assistant", ts: 1, text });
 const call = (id: string, title?: string, status: "running" | "ok" = "ok"): Message => ({
@@ -21,15 +21,6 @@ test("calls in a row make a run, with what the agent said before it", () => {
   );
 });
 
-test("a run is told by its steps' own words", () => {
-  assert.equal(runFromSteps([call("1", "Rebuilt the daemon"), call("2", "Paired the phone")]), "Rebuilt the daemon, then paired the phone");
-  assert.equal(
-    runFromSteps([call("1", "Rebuilt the daemon"), call("2", "Paired the phone"), call("3", "Took a screenshot")]),
-    "Rebuilt the daemon, paired the phone and 1 more step",
-  );
-  assert.equal(runFromSteps([call("1"), call("2", "Paired the phone")]), undefined);
-});
-
 test("a run is finished when no call is running", () => {
   assert.equal(runFinished([call("1"), call("2")]), true);
   assert.equal(runFinished([call("1"), call("2", undefined, "running")]), false);
@@ -39,4 +30,6 @@ test("a run from an older Mac is told by what kinds of step it took", () => {
   const named = (id: string, name: string): Message => ({ id, sessionId: "s", role: "tool", ts: 1, tool: { name, status: "ok" } });
   assert.equal(runCounts([named("1", "Bash"), named("2", "Bash"), named("3", "Read")]), "Ran 2 commands and read a file");
   assert.equal(runCounts([named("1", "Edit"), named("2", "Grep"), named("3", "Bash")]), "Edited a file, searched once and ran a command");
+  const image: Message = { id: "4", sessionId: "s", role: "tool", ts: 1, tool: { name: "Read", summary: "/x/72v33m2m3pjbqp54.jpg", status: "ok" } };
+  assert.equal(runCounts([image, named("5", "Bash"), named("6", "Bash")]), "Looked at an image and ran 2 commands");
 });

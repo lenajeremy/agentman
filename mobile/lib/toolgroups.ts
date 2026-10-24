@@ -41,20 +41,7 @@ export function runFinished(calls: readonly Message[]): boolean {
   return !calls.some((call) => call.tool?.status === "running");
 }
 
-/**
- * A run told by its steps' own words: "Rebuilt the daemon, then paired the
- * phone", or the first two and how many more. Undefined when the steps have
- * no words of their own, as from an older Mac.
- */
-export function runFromSteps(calls: readonly Message[]): string | undefined {
-  const titles = calls.map((call) => call.tool?.title ?? "").filter(Boolean);
-  if (titles.length !== calls.length || titles.length === 0) return undefined;
-  const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
-  if (titles.length === 1) return titles[0];
-  if (titles.length === 2) return `${titles[0]}, then ${lower(titles[1])}`;
-  const more = titles.length - 2;
-  return `${titles[0]}, ${lower(titles[1])} and ${more} more step${more === 1 ? "" : "s"}`;
-}
+const IMAGE = /\.(png|jpe?g|gif|webp|heic)$/i;
 
 const KINDS: [RegExp, string, string][] = [
   [/^(bash|shell|exec_command|run_shell_command|local_shell|terminal|bashoutput)$/i, "Ran", "command"],
@@ -75,8 +62,9 @@ export function runCounts(calls: readonly Message[]): string {
   for (const call of calls) {
     const name = call.tool?.name ?? "tool";
     const kind = KINDS.find(([pattern]) => pattern.test(name));
-    const verb = kind?.[1] ?? "Used";
-    const noun = kind?.[2] ?? "tool";
+    const image = kind?.[2] === "file" && kind[1] === "Read" && IMAGE.test(call.tool?.summary ?? "");
+    const verb = image ? "Looked at" : (kind?.[1] ?? "Used");
+    const noun = image ? "image" : (kind?.[2] ?? "tool");
     const id = `${verb} ${noun}`;
     if (!counts.has(id)) order.push(id);
     const entry = counts.get(id) ?? { verb, noun, n: 0 };
@@ -85,7 +73,8 @@ export function runCounts(calls: readonly Message[]): string {
   }
   const phrases = order.map((id, i) => {
     const { verb, noun, n } = counts.get(id)!;
-    const words = `${i === 0 ? verb : verb.toLowerCase()} ${n === 1 ? `a ${noun}` : `${n} ${noun}s`}`;
+    const one = /^[aeiou]/.test(noun) ? `an ${noun}` : `a ${noun}`;
+    const words = `${i === 0 ? verb : verb.toLowerCase()} ${n === 1 ? one : `${n} ${noun}s`}`;
     return verb === "Searched" ? `${i === 0 ? "Searched" : "searched"} ${n === 1 ? "once" : `${n} times`}` : words;
   });
   if (phrases.length <= 1) return phrases[0] ?? "Used tools";

@@ -24,7 +24,14 @@ func DescribeTool(name, summary, own string) string {
 	first := oneLine(headLine(summary))
 	switch toolKind(name) {
 	case "read":
-		return withTarget("Read", fileName(first))
+		name := fileName(first)
+		if isImageName(name) {
+			if generatedName(name) {
+				return "Looked at an image"
+			}
+			return "Looked at " + name
+		}
+		return withTarget("Read", name)
 	case "edit":
 		return withTarget("Edited", fileName(first))
 	case "write":
@@ -351,6 +358,30 @@ func isWord(s string) bool {
 		}
 	}
 	return true
+}
+
+func isImageName(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".bmp", ".tif", ".tiff":
+		return true
+	}
+	return false
+}
+
+// generatedName reports whether a file's name was made by a program rather
+// than a person — "72v33m2m3pjbqp54.jpg" — and so tells a reader nothing.
+func generatedName(name string) bool {
+	stem := strings.TrimSuffix(name, filepath.Ext(name))
+	if len(stem) < 8 || strings.ContainsAny(stem, " -_.") {
+		return false
+	}
+	digits := 0
+	for _, r := range stem {
+		if unicode.IsDigit(r) {
+			digits++
+		}
+	}
+	return digits*4 >= len(stem)
 }
 
 func withTarget(verb, target string) string {

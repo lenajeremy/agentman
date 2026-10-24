@@ -524,7 +524,7 @@ struct ToolRun: View {
         }
         .opacity(calls.allSatisfy { $0.isSidechain == true } ? 0.6 : 1)
         // Once the run has finished, Agentman says what it did and why.
-        .task(id: finished ? AgentsStore.toolRunKey(calls) : "") {
+        .task(id: finished ? AgentsStore.toolRunKey(calls) + (store.status == .connected ? "" : "~") : "") {
             guard finished, calls.count > 1 else { return }
             await store.titleTools(calls, said: said)
         }
@@ -554,7 +554,6 @@ struct ToolRun: View {
         if let title = store.toolTitles[AgentsStore.toolRunKey(calls)], !title.isEmpty {
             return title
         }
-        if let words = ToolRun.fromSteps(calls) { return words }
         var counts: [ToolKind: Int] = [:]
         var order: [ToolKind] = []
         for call in calls {
@@ -571,24 +570,6 @@ struct ToolRun: View {
             sentence += ", " + rest.dropLast().joined(separator: ", ") + " and " + rest.last!
         }
         return sentence
-    }
-}
-
-extension ToolRun {
-    /// A run told by its steps' own words: "Rebuilt the daemon, then paired
-    /// the phone", or the first two and how many more. Nil when the steps
-    /// have no words of their own.
-    static func fromSteps(_ calls: [Message]) -> String? {
-        let titles = calls.compactMap { $0.tool?.title }.filter { !$0.isEmpty }
-        guard titles.count == calls.count, let first = titles.first else { return nil }
-        func lower(_ s: String) -> String { s.prefix(1).lowercased() + s.dropFirst() }
-        switch titles.count {
-        case 1: return first
-        case 2: return "\(first), then \(lower(titles[1]))"
-        default:
-            let more = titles.count - 2
-            return "\(first), \(lower(titles[1])) and \(more) more step\(more == 1 ? "" : "s")"
-        }
     }
 }
 
@@ -609,8 +590,8 @@ private struct ToolCallRow: View {
                         Text(title)
                             .font(TextStyle.caption)
                             .foregroundStyle(Palette.textSecondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .contentShape(Rectangle())
                 }
