@@ -41,6 +41,13 @@ struct ContentView: View {
             NoteSuggestionPopup()
         }
         .animation(.spring(duration: 0.3), value: store.manager.noteSuggestions.first?.id)
+        // What happened while the user was away, on their return.
+        .overlay {
+            if let digest = store.away.digest {
+                AwaySummary(digest: digest)
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: store.away.digest?.id)
         .overlay {
             if let box = store.lightbox {
                 LightboxView(box: box)

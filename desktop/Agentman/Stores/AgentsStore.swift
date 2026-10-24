@@ -61,6 +61,9 @@ final class AgentsStore {
     /// Whether the app is in front, so news can be shown rather than
     /// notified.
     private(set) var appActive = true
+    /// What happened while the user was away, for the summary on their
+    /// return.
+    let away = AwayLog()
     private var resignedAt: Date?
     /// An image open full window, over everything.
     var lightbox: Lightbox?
@@ -112,6 +115,7 @@ final class AgentsStore {
         Task {
             for await _ in center.notifications(named: NSApplication.didBecomeActiveNotification) {
                 appActive = true
+                cameBack()
                 // Back after a while away: Agentman starts fresh on its entry
                 // page, the conversation still above it.
                 if let away = resignedAt, Date().timeIntervalSince(away) > 30 * 60, !manager.thinking {
@@ -124,6 +128,28 @@ final class AgentsStore {
             for await _ in center.notifications(named: NSApplication.didResignActiveNotification) {
                 appActive = false
                 resignedAt = Date()
+                away.left()
+            }
+        }
+        // The screen locked, or the Mac asleep, is away too, with the app in
+        // front or not; unlocked with the app in front is back.
+        let distributed = DistributedNotificationCenter.default()
+        Task {
+            for await _ in distributed.notifications(named: Notification.Name("com.apple.screenIsLocked")) { away.left() }
+        }
+        Task {
+            for await _ in distributed.notifications(named: Notification.Name("com.apple.screenIsUnlocked")) {
+                if NSApplication.shared.isActive { cameBack() }
+            }
+        }
+        Task {
+            for await _ in NSWorkspace.shared.notificationCenter.notifications(named: NSWorkspace.willSleepNotification) { away.left() }
+        }
+        // For screenshots and tests: the summary since some minutes ago.
+        if let minutes = ProcessInfo.processInfo.environment["AGENTMAN_AWAY"].flatMap(Double.init) {
+            Task {
+                try? await Task.sleep(for: .seconds(4))
+                showAway(since: Date().addingTimeInterval(-minutes * 60))
             }
         }
         client.start()
@@ -466,6 +492,7 @@ final class AgentsStore {
                 daemonInfo = info
             }
         case "turn_complete":
+            if let id = event.sessionId { away.record(.finished(event.preview), sessionId: id) }
             guard let id = event.sessionId, !looking(at: id),
                   NotificationPolicy.allows(.finished, folder: self.session(id)?.cwd) else { return }
             let name = self.session(id)?.name ?? event.sessionName ?? "An agent"
@@ -477,6 +504,9 @@ final class AgentsStore {
                 // Waiting on the user now, and not before: say so, unless
                 // Agentman's card already does.
                 let before = sessions[index]
+                if session.question != nil, before.question?.id != session.question?.id {
+                    away.record(.needsYou(session.question?.title), sessionId: session.id)
+                }
                 if session.question != nil, before.question?.id != session.question?.id,
                    manager.settings?.keySet != true, !looking(at: session.id),
                    NotificationPolicy.allows(.needsYou, folder: session.cwd) {
@@ -589,6 +619,25 @@ final class AgentsStore {
             }
             queued[sessionId] = waiting
         }
+    }
+
+    // MARK: - Away
+
+    /// Back at the Mac: the summary of what happened, when it was long
+    /// enough and the user wants one.
+    private func cameBack() {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: "awaySummary") as? Bool ?? true else {
+            away.reset()
+            return
+        }
+        let minutes = defaults.object(forKey: "awayMinutes") as? Double ?? 15
+        away.returned(minimum: minutes * 60, sessions: sessions, briefs: manager.briefs, entries: manager.entries)
+    }
+
+    /// The summary since a time, on request.
+    func showAway(since: Date) {
+        away.show(since: since, sessions: sessions, briefs: manager.briefs, entries: manager.entries)
     }
 
     // MARK: - Helpers

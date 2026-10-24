@@ -781,6 +781,8 @@ private struct NotificationsPage: View {
     @AppStorage(NotificationPolicy.Key.quietEnd) private var quietEnd = NotificationPolicy.defaultQuietEnd
     @AppStorage(NotificationPolicy.Key.quietLetsNeedsYou) private var quietLetsNeedsYou = true
     @State private var muted: [String] = NotificationPolicy.mutedFolders()
+    @AppStorage("awaySummary") private var awaySummary = true
+    @AppStorage("awayMinutes") private var awayMinutes = 15.0
 
     var body: some View {
         SettingsSection(title: "Agents", footer: "Never for the thread you're looking at. With an Anthropic key set, Agentman's cards tell you when an agent needs you instead.") {
@@ -862,6 +864,22 @@ private struct NotificationsPage: View {
             .padding(.vertical, 10)
         }
         .task { await store.loadFolders() }
+        SettingsSection(title: "While you were away", footer: "Back at the Mac after a while (the app in the background, the screen locked or the Mac asleep), a summary of what each agent did and what needs you.") {
+            toggle("Show a summary when I'm back", nil, $awaySummary)
+            SettingsRow(title: "After being away for", divider: false) {
+                Picker("", selection: $awayMinutes) {
+                    Text("10 minutes").tag(10.0)
+                    Text("15 minutes").tag(15.0)
+                    Text("30 minutes").tag(30.0)
+                    Text("1 hour").tag(60.0)
+                    Text("2 hours").tag(120.0)
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            .disabled(!awaySummary)
+            .opacity(awaySummary ? 1 : 0.5)
+        }
         SettingsSection(title: "Sound") {
             toggle("Play a sound", "With each notification but note suggestions.", $sound, divider: false)
         }
