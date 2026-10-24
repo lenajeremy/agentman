@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"net/http"
@@ -91,8 +92,8 @@ func readWorkspaceChunk(root *os.Root, rel string, offset int64, result *protoco
 }
 
 // readSeenFileChunk reads a piece of an image the session's agent opened.
-func (d *Daemon) readSeenFileChunk(req protocol.Request) protocol.Event {
-	file, _, refusal := d.openSeenFile(req)
+func (d *Daemon) readSeenFileChunk(ctx context.Context, req protocol.Request) protocol.Event {
+	file, _, refusal := d.openSeenFile(ctx, req)
 	if refusal != "" {
 		return workspaceError(req, refusal)
 	}

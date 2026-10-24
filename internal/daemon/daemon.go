@@ -1187,10 +1187,10 @@ func (d *Daemon) HandleFrom(
 		return d.history(ctx, req)
 
 	case protocol.ReqReadSeenFile:
-		return d.readSeenFile(req)
+		return d.readSeenFile(ctx, req)
 
 	case protocol.ReqReadSeenFileChunk:
-		return d.readSeenFileChunk(req)
+		return d.readSeenFileChunk(ctx, req)
 
 	case protocol.ReqListArtifacts:
 		return d.listArtifacts(ctx, req)
