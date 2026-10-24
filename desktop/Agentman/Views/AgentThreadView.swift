@@ -159,6 +159,9 @@ struct AgentThreadView: View {
             WorkspacePanel(session: session, tab: $filesTab)
                 .inspectorColumnWidth(min: 320, ideal: 480, max: 1100)
         }
+        // An unsent draft waits for the user's return, as on the phone.
+        .onAppear { draft = store.drafts[session.id] ?? "" }
+        .onChange(of: draft) { _, now in store.saveDraft(now, for: session.id) }
         .onAppear {
             // For screenshots and tests: the files panel open on a tab.
             if let tab = ProcessInfo.processInfo.environment["AGENTMAN_FILES"].flatMap(WorkspaceTab.init(rawValue:)) {
@@ -638,13 +641,16 @@ struct MessageRow: View {
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 12)
                                 .background(Palette.fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                .contextMenu {
+                                    Button("Copy") { Clipboard.copy(sent.text) }
+                                }
                         }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
         case .assistant:
-            MarkdownView(message.text ?? "")
+            AgentReply(text: message.text ?? "")
                 .opacity(message.isSidechain == true ? 0.6 : 1)
         case .tool:
             ToolRun(calls: [message])
@@ -1247,5 +1253,46 @@ struct Composer: View {
             .opacity(enabled ? 1 : 0.4)
             .keyboardShortcut(.return, modifiers: .command)
             .help("Send")
+    }
+}
+
+/// An agent's reply, with Copy under it when the pointer is over it, as
+/// ChatGPT and Claude offer, and in its context menu.
+private struct AgentReply: View {
+    let text: String
+    @State private var hovering = false
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            MarkdownView(text)
+            Button {
+                Clipboard.copy(text)
+                copied = true
+                Task {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    copied = false
+                }
+            } label: {
+                Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(copied ? Palette.ok : Palette.muted)
+            }
+            .buttonStyle(.plain)
+            .opacity(hovering || copied ? 1 : 0)
+            .help("Copy the reply")
+        }
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .contextMenu {
+            Button("Copy") { Clipboard.copy(text) }
+        }
+    }
+}
+
+enum Clipboard {
+    @MainActor static func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 }

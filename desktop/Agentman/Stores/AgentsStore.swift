@@ -66,6 +66,21 @@ final class AgentsStore {
     var lightbox: Lightbox?
     /// The session being renamed in the sidebar, if one is.
     var renaming: String?
+    /// Unsent messages, by session, kept across launches.
+    private(set) var drafts: [String: String] = (UserDefaults.standard.dictionary(forKey: "drafts") as? [String: String]) ?? [:]
+
+    /// Keeps a session's unsent message, or forgets it once empty.
+    func saveDraft(_ text: String, for sessionId: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { drafts[sessionId] = nil } else { drafts[sessionId] = text }
+        // A bounded few: drafts for sessions long gone are let go.
+        if drafts.count > 50 {
+            let live = Set(sessions.map(\.id))
+            drafts = drafts.filter { live.contains($0.key) }
+        }
+        UserDefaults.standard.set(drafts, forKey: "drafts")
+    }
+
     /// Agentman's titles for runs of tool calls, by the run's first and last
     /// call; empty when there is none to be had.
     var toolTitles: [String: String] = [:]
