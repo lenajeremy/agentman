@@ -81,6 +81,16 @@ func (s *Store) Save(ctx context.Context, sessionID, uploadID string) (string, e
 	if err != nil {
 		return "", err
 	}
+	return s.SaveData(sessionID, data)
+}
+
+// SaveData files one image that arrived with a message, from the Mac app
+// rather than through the relay, and returns its absolute path. What the
+// bytes are is decided here, as for an upload, and the name is generated.
+func (s *Store) SaveData(sessionID string, data []byte) (string, error) {
+	if len(data) > maxAttachmentBytes {
+		return "", errors.New("attachments: that image is too large")
+	}
 	ext, ok := sniff(data)
 	if !ok {
 		return "", errors.New("attachments: that upload is not an image")

@@ -345,9 +345,10 @@ func runServe(ctx context.Context, args []string) error {
 	ignoreHookPort(watcher)
 	agent.SetServers(watcher, sharer)
 
-	// Images a phone sends arrive through the relay and are written here, so a
-	// daemon without one simply cannot receive them.
-	if relayURL != "" {
+	// Images sent with a message are written here: a phone's arrive through
+	// the relay, the Mac app's with the message itself, so a daemon without a
+	// relay still keeps the Mac's.
+	{
 		if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
 			store := attachments.New(dir, relayURL, cfg.Token)
 			agent.SetAttachments(store)

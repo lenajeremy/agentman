@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
 	"path/filepath"
 	"strings"
 
@@ -43,4 +45,28 @@ func (d *Daemon) placeAttachment(ctx context.Context, sessionID, path string) st
 		return path
 	}
 	return placed
+}
+
+// saveInlineImages files the images the Mac app sent with a message and
+// returns their paths, in order.
+func (d *Daemon) saveInlineImages(sessionID string, images []protocol.InlineImage) ([]string, error) {
+	d.mu.Lock()
+	store := d.attachments
+	d.mu.Unlock()
+	if store == nil {
+		return nil, errors.New("this daemon has nowhere to keep images")
+	}
+	paths := make([]string, 0, len(images))
+	for _, image := range images {
+		data, err := base64.StdEncoding.DecodeString(image.Data)
+		if err != nil {
+			return nil, errors.New("an image wasn't readable")
+		}
+		path, err := store.SaveData(sessionID, data)
+		if err != nil {
+			return nil, err
+		}
+		paths = append(paths, path)
+	}
+	return paths, nil
 }

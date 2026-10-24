@@ -222,7 +222,10 @@ func New(registry *source.Registry, sink Transport) *Daemon {
 // where it landed on disk. An interface so a daemon without a relay simply has
 // none, and so tests need no network.
 type AttachmentStore interface {
+	// Save collects a phone's upload from the relay.
 	Save(ctx context.Context, sessionID, uploadID string) (string, error)
+	// SaveData files an image that came with the message itself.
+	SaveData(sessionID string, data []byte) (string, error)
 }
 
 // SetAttachments installs the store images are collected into.
@@ -977,6 +980,19 @@ func (d *Daemon) HandleFrom(
 		}
 		attachmentPaths = saved
 	}
+	// The Mac app sends its images with the message rather than through the
+	// relay; they are filed the same way and reach the agent the same way.
+	if req.Type == protocol.ReqSendMessage && len(req.Images) > 0 {
+		saved, saveErr := d.saveInlineImages(req.SessionID, req.Images)
+		if saveErr != nil {
+			return protocol.Event{
+				Type: protocol.EvtSendResult, SessionID: req.SessionID,
+				ClientID: req.ClientID, Status: protocol.StatusFailed,
+				Error: saveErr.Error(),
+			}
+		}
+		attachmentPaths = append(attachmentPaths, saved...)
+	}
 	if requestMutatesSession(req.Type) {
 		lock := d.actionLock(req.SessionID)
 		lock.Lock()
@@ -1380,10 +1396,10 @@ func validateRequest(req protocol.Request) error {
 		return nil
 	case protocol.ReqSendMessage:
 		// A message that is only images is a real message: "look at this".
-		if strings.TrimSpace(req.Text) == "" && len(req.UploadIDs) == 0 {
+		if strings.TrimSpace(req.Text) == "" && len(req.UploadIDs) == 0 && len(req.Images) == 0 {
 			return fmt.Errorf("daemon: refusing to send an empty message")
 		}
-		if len(req.UploadIDs) > maxUploadIDs {
+		if len(req.UploadIDs)+len(req.Images) > maxUploadIDs {
 			return fmt.Errorf("daemon: too many images on one message")
 		}
 		for _, id := range req.UploadIDs {

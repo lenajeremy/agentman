@@ -24,6 +24,8 @@ type slowStore struct {
 	started, release chan struct{}
 }
 
+func (s *slowStore) SaveData(string, []byte) (string, error) { return "/tmp/inline.png", nil }
+
 func (s *slowStore) Save(ctx context.Context, _, _ string) (string, error) {
 	close(s.started)
 	select {
