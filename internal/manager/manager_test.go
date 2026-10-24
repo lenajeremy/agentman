@@ -463,7 +463,8 @@ func TestTheRequestIsShapedForTheModel(t *testing.T) {
 		names = append(names, tool.OfTool.Name)
 	}
 	if !slices.Equal(names, []string{"list_agents", "get_brief", "read_messages", "view_image", "list_changes", "file_diff",
-		"list_commits", "send_to_agent", "answer_question", "interrupt", "dismiss_card"}) {
+		"list_commits", "send_to_agent", "answer_question", "interrupt", "dismiss_card",
+		"search_knowledge", "read_knowledge", "save_knowledge", "list_keys", "give_key", "update_instructions"}) {
 		t.Fatalf("tools = %v", names)
 	}
 	if !slices.Contains(params.Betas, anthropic.AnthropicBetaServerSideFallback2026_07_01) ||
