@@ -450,3 +450,17 @@ func TestAgentmanRenamesAnAgent(t *testing.T) {
 		t.Fatalf("entries = %+v", h.entries())
 	}
 }
+
+// A renamed agent is still found by the name it had.
+func TestARenamedAgentIsFoundByItsOldName(t *testing.T) {
+	h := newHarness(t, &scriptedModel{}, true)
+	sessions := h.agents.Sessions()
+	sessions[1].OriginalName, sessions[1].Name = sessions[1].Name, "Billing API"
+	h.agents.setSessions(sessions)
+	for _, query := range []string{"Billing API", "api", "billing"} {
+		got, err := h.m.resolveAgent(map[string]any{"agent": query})
+		if err != nil || got.ID != "codex:b" {
+			t.Errorf("%q found %+v, %v", query, got, err)
+		}
+	}
+}

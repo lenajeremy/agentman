@@ -345,15 +345,19 @@ func (m *Manager) resolveAgent(input map[string]any) (protocol.Session, error) {
 			return s, nil
 		}
 	}
+	// By the name it shows, or by its agent's own name when the user renamed
+	// it: an agent stays findable by the name it had a minute ago.
 	var matches []protocol.Session
 	for _, s := range sessions {
-		if strings.EqualFold(s.Name, query) {
+		if strings.EqualFold(s.Name, query) || (s.OriginalName != "" && strings.EqualFold(s.OriginalName, query)) {
 			matches = append(matches, s)
 		}
 	}
 	if len(matches) == 0 {
+		lower := strings.ToLower(query)
 		for _, s := range sessions {
-			if strings.Contains(strings.ToLower(s.Name), strings.ToLower(query)) {
+			if strings.Contains(strings.ToLower(s.Name), lower) ||
+				(s.OriginalName != "" && strings.Contains(strings.ToLower(s.OriginalName), lower)) {
 				matches = append(matches, s)
 			}
 		}
@@ -382,6 +386,9 @@ func runListAgents(_ context.Context, m *Manager, _ map[string]any) toolResult {
 	now := time.Now()
 	for _, s := range sessions {
 		fmt.Fprintf(&b, "- %s (%s, %s) — %s", s.Name, s.Kind, shortPath(s.Cwd), stateText(s))
+		if s.OriginalName != "" {
+			fmt.Fprintf(&b, "; the user renamed it from %q", s.OriginalName)
+		}
 		if s.LastActivityAt > 0 {
 			fmt.Fprintf(&b, ", last active %s", ago(now, s.LastActivityAt))
 		}
