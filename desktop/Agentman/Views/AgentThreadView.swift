@@ -65,8 +65,7 @@ struct AgentThreadView: View {
                                     .id(item.id)
                             case .image(let call, let path):
                                 ImageThumbnail(sessionId: session.id, path: path,
-                                               label: "Read " + (path as NSString).lastPathComponent)
-                                    .toolCard()
+                                               label: "Read " + (path as NSString).lastPathComponent, carded: true)
                                     .id(item.id)
                             }
                         }
@@ -1192,7 +1191,13 @@ struct Composer: View {
                 Text("\(SessionLabels.model(value)) also becomes the default model for new \(AgentName.of(session.kind)) sessions on your Mac.")
             }
         }
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        // A click on the card around the text, not on a control, goes to
+        // the text.
+        .background {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Palette.surface)
+                .onTapGesture { if enabled { focused = true } }
+        }
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(focused ? Palette.fillStrong : Palette.line, lineWidth: 1)

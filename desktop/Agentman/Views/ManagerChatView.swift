@@ -714,7 +714,13 @@ private struct ManagerComposer: View {
         .padding(.leading, large ? 12 : 10)
         .padding(.trailing, 8)
         .padding(.vertical, large ? 9 : 7)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: large ? 26 : 22, style: .continuous))
+        // A click on the card around the text, not on a control, goes to
+        // the text.
+        .background {
+            RoundedRectangle(cornerRadius: large ? 26 : 22, style: .continuous)
+                .fill(Palette.surface)
+                .onTapGesture { focused = true }
+        }
         .overlay(
             RoundedRectangle(cornerRadius: large ? 26 : 22, style: .continuous)
                 .strokeBorder(focused ? Palette.fillStrong : Palette.line, lineWidth: 1)

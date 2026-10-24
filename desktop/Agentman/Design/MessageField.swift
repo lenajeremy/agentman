@@ -43,10 +43,11 @@ struct MessageField: NSViewRepresentable {
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.focusChanged = { [weak coordinator = context.coordinator] now in coordinator?.focusChanged(now) }
         context.coordinator.textView = textView
 
-        let scroll = NSScrollView()
+        let scroll = MessageScrollView()
         scroll.drawsBackground = false
         scroll.borderType = .noBorder
         scroll.hasVerticalScroller = true
@@ -92,16 +93,27 @@ struct MessageField: NSViewRepresentable {
         textView.onDropTargeted = onDropTargeted
     }
 
-    /// As tall as its lines, from one to `maxLines`.
+    /// As tall as its lines, from one to `maxLines`. Measured on the text
+    /// alone, never the live text view: SwiftUI asks at several widths, and
+    /// resizing the view's text container to each one left it at the last,
+    /// a narrow guess, so lines wrapped there and clicks to its right went
+    /// nowhere; and changing it in the middle of a layout pass started a
+    /// loop of layouts that AppKit ends by crashing.
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
-        guard let textView = context.coordinator.textView,
-              let layout = textView.layoutManager, let container = textView.textContainer else { return nil }
         let width = max(proposal.width ?? 200, 40)
-        let line = ceil(layout.defaultLineHeight(for: Self.font(fontSize)) + Self.lineSpacing)
-        container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
-        layout.ensureLayout(for: container)
-        let used = ceil(layout.usedRect(for: container).height)
-        return CGSize(width: width, height: min(max(used, line), line * CGFloat(maxLines)))
+        let font = Self.font(fontSize)
+        let line = ceil(font.ascender - font.descender + font.leading + Self.lineSpacing)
+        var string = context.coordinator.textView?.string ?? text
+        // A last empty line counts, as the text view shows it.
+        if string.isEmpty || string.hasSuffix("\n") { string += " " }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = Self.lineSpacing
+        let used = (string as NSString).boundingRect(
+            with: NSSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font, .paragraphStyle: paragraph]
+        ).height
+        return CGSize(width: width, height: min(max(ceil(used), line), line * CGFloat(maxLines)))
     }
 
     static func font(_ size: CGFloat) -> NSFont {
@@ -129,6 +141,31 @@ struct MessageField: NSViewRepresentable {
                 if parent.focused != now { parent.focused = now }
             }
         }
+    }
+}
+
+/// The scroll view around a message box's text. It keeps the text view
+/// exactly as wide as the box, and its text with it, and at least as tall,
+/// so the whole box takes clicks and lines wrap at its edge. A click here
+/// that still misses the text goes to it.
+final class MessageScrollView: NSScrollView {
+    override func tile() {
+        super.tile()
+        guard let textView = documentView as? NSTextView else { return }
+        let size = contentSize
+        textView.minSize = NSSize(width: 0, height: size.height)
+        if textView.frame.width != size.width || textView.frame.height < size.height {
+            textView.setFrameSize(NSSize(width: size.width, height: max(textView.frame.height, size.height)))
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let textView = documentView as? MessageTextView, textView.isEditable else {
+            super.mouseDown(with: event)
+            return
+        }
+        textView.takeFocus()
+        textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
     }
 }
 

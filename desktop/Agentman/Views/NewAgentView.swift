@@ -54,7 +54,11 @@ struct NewAgentView: View {
                 }
             }
             .padding(10)
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .background {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Palette.surface)
+                    .onTapGesture { focused = true }
+            }
             .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Palette.line))
             .shadow(color: .black.opacity(0.06), radius: 18, y: 6)
             .frame(maxWidth: 640)

@@ -15,44 +15,20 @@ struct ImageThumbnail: View {
     let sessionId: String
     let path: String
     let label: String
+    /// In an agent's thread: the tool call that read it in a tool card, and
+    /// the picture under the card, outside it.
+    var carded = false
     @State private var image: NSImage?
     @State private var failed = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 6) {
-                Image(systemName: "photo")
-                    .font(.system(size: 10, weight: .medium))
-                    .frame(width: 12)
-                Text(label)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .font(TextStyle.caption)
-            .foregroundStyle(Palette.muted)
-            .help(path)
-
-            if let image {
-                Button {
-                    store.lightbox = Lightbox(image: image, title: label)
-                } label: {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: thumbnailWidth(image), height: 120)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.line))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Open full window")
-                .padding(.leading, 18)
-            } else if !failed {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Palette.fill)
-                    .frame(width: 160, height: 120)
-                    .overlay(ProgressView().controlSize(.small))
-                    .padding(.leading, 18)
+        VStack(alignment: .leading, spacing: carded ? 8 : 7) {
+            if carded {
+                header.toolCard()
+                picture.padding(.leading, 12)
+            } else {
+                header
+                picture.padding(.leading, 18)
             }
         }
         .task(id: path) {
@@ -64,6 +40,43 @@ struct ImageThumbnail: View {
                 if image != nil || Task.isCancelled { break }
             }
             failed = image == nil
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "photo")
+                .font(.system(size: 10, weight: .medium))
+                .frame(width: 12)
+            Text(label)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .font(TextStyle.caption)
+        .foregroundStyle(Palette.muted)
+        .help(path)
+    }
+
+    @ViewBuilder private var picture: some View {
+        if let image {
+            Button {
+                store.lightbox = Lightbox(image: image, title: label)
+            } label: {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: thumbnailWidth(image), height: 120)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.line))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Open full window")
+        } else if !failed {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Palette.fill)
+                .frame(width: 160, height: 120)
+                .overlay(ProgressView().controlSize(.small))
         }
     }
 
