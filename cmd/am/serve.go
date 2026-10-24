@@ -280,6 +280,10 @@ func runServe(ctx context.Context, args []string) error {
 
 	sink := multiSink{sinks: sinks}
 	agent := daemon.New(registry, sink)
+	// The user's names for sessions, before the first sweep names them.
+	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
+		agent.SetNamesFile(filepath.Join(dir, "names.json"))
+	}
 	if local != nil {
 		go func() {
 			if err := local.Serve(ctx, agent.HandleFrom, agent.DisconnectSubscriber); err != nil {

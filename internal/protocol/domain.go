@@ -65,7 +65,11 @@ type Session struct {
 	NativeID string `json:"nativeId"`
 	// Name is a human label. Claude supplies one; otherwise we derive it from
 	// the working directory.
-	Name           string     `json:"name"`
+	Name string `json:"name"`
+	// OriginalName is the agent's own name for a session the user renamed;
+	// Name is then the user's. Empty when it was never renamed. A display
+	// name only: ID stays the agent's.
+	OriginalName   string     `json:"originalName,omitempty"`
 	Cwd            string     `json:"cwd"`
 	State          State      `json:"state"`
 	Inject         InjectMode `json:"inject"`
@@ -211,7 +215,7 @@ func (s Session) SameAs(other Session) bool {
 	// Field by field, because Servers makes the struct incomparable with !=.
 	// TestSameAsCoversEveryField fails if a new field is left out here.
 	return s.ID == other.ID && s.Kind == other.Kind && s.NativeID == other.NativeID &&
-		s.Name == other.Name && s.Cwd == other.Cwd && s.State == other.State &&
+		s.Name == other.Name && s.OriginalName == other.OriginalName && s.Cwd == other.Cwd && s.State == other.State &&
 		s.Inject == other.Inject && s.StartedAt == other.StartedAt &&
 		s.LastActivityAt == other.LastActivityAt && s.Model == other.Model &&
 		s.Mode == other.Mode && s.ContextPercent == other.ContextPercent &&

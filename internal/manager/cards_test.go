@@ -423,3 +423,30 @@ func TestNewSettingsTakeTheirDefaults(t *testing.T) {
 		t.Fatal("the user's choice to turn approving off was lost")
 	}
 }
+
+// Agentman renames an agent through the daemon, as the app does.
+func TestAgentmanRenamesAnAgent(t *testing.T) {
+	model := &scriptedModel{replies: []string{
+		toolReply("t1", "rename_agent", `{"agent":"api","name":"Billing API"}`),
+		textReply("Done."),
+	}}
+	h := newHarness(t, model, true)
+	h.agents.answer = func(req protocol.Request) protocol.Event {
+		renamed := h.agents.Sessions()[1]
+		renamed.OriginalName, renamed.Name = renamed.Name, req.Text
+		return protocol.Event{Type: protocol.EvtSessionUpdate, Session: &renamed}
+	}
+	h.m.send(context.Background(), "call api Billing API")
+	h.waitIdle(t)
+	sent := h.agents.sent(protocol.ReqRenameSession)
+	if len(sent) != 1 || sent[0].SessionID != "codex:b" || sent[0].Text != "Billing API" {
+		t.Fatalf("sent = %+v", sent)
+	}
+	var shown bool
+	for _, entry := range h.entries() {
+		shown = shown || (entry.Role == "activity" && entry.Text == "Renamed api to Billing API")
+	}
+	if !shown {
+		t.Fatalf("entries = %+v", h.entries())
+	}
+}

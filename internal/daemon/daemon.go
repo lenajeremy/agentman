@@ -84,7 +84,9 @@ type Transport interface {
 // Daemon wires discovery, hooks, and subscriptions together.
 type Daemon struct {
 	registry *source.Registry
-	sink     Transport
+	// names is the user's names for sessions, applied as they are found.
+	names *sessionNames
+	sink  Transport
 
 	mu sync.Mutex
 	// sessions is the last discovered list, kept so hook events can be matched
@@ -436,6 +438,9 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 	current := make(map[string]protocol.Session, len(found))
 	for _, session := range found {
 		session = d.applyHookStateLocked(session, time.Now())
+		// The user's name for it, before anything sees it: alerts, apps,
+		// Agentman.
+		session = d.names.apply(session)
 		session.Servers = d.serverLists[session.ID]
 		current[session.ID] = session
 		before, existed := previous[session.ID]
@@ -1186,6 +1191,9 @@ func (d *Daemon) HandleFrom(
 		protocol.ReqListBranches:
 		return d.history(ctx, req)
 
+	case protocol.ReqRenameSession:
+		return d.renameSession(req)
+
 	case protocol.ReqReadSeenFile:
 		return d.readSeenFile(ctx, req)
 
@@ -1289,7 +1297,8 @@ func validateRequest(req protocol.Request) error {
 		req.Type == protocol.ReqReviewArtifact ||
 		req.Type == protocol.ReqSetMode || req.Type == protocol.ReqSetModel ||
 		req.Type == protocol.ReqListCommits || req.Type == protocol.ReqCommitFiles ||
-		req.Type == protocol.ReqCommitDiff || req.Type == protocol.ReqListBranches
+		req.Type == protocol.ReqCommitDiff || req.Type == protocol.ReqListBranches ||
+		req.Type == protocol.ReqRenameSession
 	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
 		return fmt.Errorf("daemon: invalid session id")
 	}
@@ -1407,6 +1416,11 @@ func validateRequest(req protocol.Request) error {
 		}
 		return nil
 	case protocol.ReqListArtifacts:
+		return nil
+	case protocol.ReqRenameSession:
+		if len(req.Text) > 4*maxSessionName {
+			return fmt.Errorf("daemon: that name is too long")
+		}
 		return nil
 	case protocol.ReqReadArtifact, protocol.ReqReviewArtifact:
 		if !validArtifactName(req.Path) {

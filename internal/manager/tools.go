@@ -256,6 +256,17 @@ func init() {
 			run:      runWatchAgent,
 		},
 		{
+			name: "rename_agent",
+			description: "Give an agent the display name the user asks for, everywhere it shows: the Mac, the phone, notifications and your tools. " +
+				"Its id stays the same; an empty name gives it back the agent's own.",
+			properties: map[string]any{
+				"agent": agentProperty,
+				"name":  map[string]any{"type": "string", "description": "The new name, up to 80 characters; empty for the agent's own."},
+			},
+			required: []string{"agent", "name"},
+			run:      runRenameAgent,
+		},
+		{
 			name:        "list_schedules",
 			description: "Your reminders and watches: what each is for, when it comes due, and its id.",
 			properties:  map[string]any{},
@@ -846,6 +857,30 @@ func runWatchAgent(_ context.Context, m *Manager, input map[string]any) toolResu
 	return toolResult{
 		text:      fmt.Sprintf("Watching [%s]: %s. You'll get the result as a message.", item.ID, scheduleLabel(item)),
 		activity:  "Watching " + scheduleLabel(item),
+		sessionID: session.ID,
+	}
+}
+
+func runRenameAgent(ctx context.Context, m *Manager, input map[string]any) toolResult {
+	session, err := m.resolveAgent(input)
+	if err != nil {
+		return toolResult{text: err.Error(), isError: true}
+	}
+	name, _ := input["name"].(string)
+	event := m.agents.Request(ctx, protocol.Request{Type: protocol.ReqRenameSession, SessionID: session.ID, Text: name})
+	if event.Type == protocol.EvtError || event.Session == nil {
+		return toolResult{text: "Couldn't rename it: " + strings.TrimPrefix(event.Error, "daemon: "), isError: true}
+	}
+	if event.Session.OriginalName == "" {
+		return toolResult{
+			text:      fmt.Sprintf("%s has its own name back.", event.Session.Name),
+			activity:  "Gave " + event.Session.Name + " its own name back",
+			sessionID: session.ID,
+		}
+	}
+	return toolResult{
+		text:      fmt.Sprintf("Renamed %s to %s; its id is still %s.", session.Name, event.Session.Name, session.ID),
+		activity:  fmt.Sprintf("Renamed %s to %s", session.Name, event.Session.Name),
 		sessionID: session.ID,
 	}
 }

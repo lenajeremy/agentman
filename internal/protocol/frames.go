@@ -154,6 +154,10 @@ const (
 	// history without checking it out: the working tree, the index and HEAD
 	// stay as the agent left them.
 	ReqListBranches RequestType = "list_branches"
+	// ReqRenameSession gives the session named by SessionID the display
+	// name in Text, everywhere it shows; an empty Text gives it back the
+	// agent's own name. The session's ID never changes.
+	ReqRenameSession RequestType = "rename_session"
 )
 
 // Request is anything the app asks of the daemon.
