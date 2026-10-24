@@ -103,25 +103,24 @@ struct AgentThreadView: View {
             .frame(maxWidth: 820)
             .frame(maxWidth: .infinity)
         }
-        // The title renames the session: click it, then Rename.
-        .navigationTitle(Binding(
-            get: { session.name },
-            set: { name in
-                let new = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !new.isEmpty, new != session.name else { return }
-                Task { await store.rename(session.id, to: new) }
-            }
-        ))
-        .navigationSubtitle(subtitle)
-        .toolbarTitleMenu {
-            RenameButton()
-            if let own = session.originalName {
-                Button("Use the agent's own name, “\(own)”") {
-                    Task { await store.rename(session.id, to: "") }
+        // The window keeps the name; the toolbar shows ThreadTitle instead,
+        // which renames the session when clicked.
+        .navigationTitle(session.name)
+        .toolbar(removing: .title)
+        .toolbar {
+            if #available(macOS 26, *) {
+                // Plain text on the title bar, as the system title was, with
+                // the state at the far end.
+                ToolbarItem(placement: .navigation) {
+                    ThreadTitle(session: session, subtitle: subtitle)
+                }
+                .sharedBackgroundVisibility(.hidden)
+                ToolbarSpacer(.flexible)
+            } else {
+                ToolbarItem(placement: .navigation) {
+                    ThreadTitle(session: session, subtitle: subtitle)
                 }
             }
-        }
-        .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 StateChip(state: session.state)
                 if session.state == .busy, session.canReceive {
@@ -167,6 +166,84 @@ struct AgentThreadView: View {
             }
             sending = false
         }
+    }
+}
+
+/// The thread's name and where it works, in the title bar. Clicking the
+/// name renames the session in place: Return keeps it, Escape or clicking
+/// away leaves it as it was.
+private struct ThreadTitle: View {
+    @Environment(AgentsStore.self) private var store
+    let session: Session
+    let subtitle: String
+    @State private var editing = false
+    @State private var name = ""
+    @State private var hovering = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            if editing {
+                TextField("Name", text: $name)
+                    .textFieldStyle(.plain)
+                    .font(TextStyle.title)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .frame(width: 320)
+                    .background(Palette.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Palette.working.opacity(0.6)))
+                    .focused($focused)
+                    .onSubmit(save)
+                    .onExitCommand { editing = false }
+                    .onChange(of: focused) { _, now in
+                        if !now { editing = false }
+                    }
+            } else {
+                Button(action: begin) {
+                    Text(session.name)
+                        .font(TextStyle.title)
+                        .foregroundStyle(Palette.text)
+                        .lineLimit(1)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(hovering ? Palette.fill : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { hovering = $0 }
+                .help(session.originalName.map { "Click to rename · renamed from “\($0)”" } ?? "Click to rename")
+                .accessibilityLabel("Rename \(session.name)")
+            }
+            Text(subtitle)
+                .font(TextStyle.caption)
+                .foregroundStyle(Palette.muted)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.horizontal, 5)
+        }
+        .frame(maxWidth: 440, alignment: .leading)
+        .contextMenu {
+            Button("Rename…", action: begin)
+            if let own = session.originalName {
+                Button("Use the agent's own name, “\(own)”") {
+                    Task { await store.rename(session.id, to: "") }
+                }
+            }
+        }
+        .onChange(of: session.id) { _, _ in editing = false }
+    }
+
+    private func begin() {
+        name = session.name
+        editing = true
+        focused = true
+    }
+
+    private func save() {
+        let new = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        editing = false
+        guard !new.isEmpty, new != session.name else { return }
+        Task { await store.rename(session.id, to: new) }
     }
 }
 
