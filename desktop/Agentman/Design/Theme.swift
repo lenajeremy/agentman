@@ -38,6 +38,8 @@ enum Palette {
     static let toolCard = Color(light: 0xEEEEEA, dark: 0x17181B)
     static let toolCardEdge = Color(light: 0xE5E4DF, dark: 0x212327)
     static let toolWell = Color(light: 0xF8F8F5, dark: 0x0F1012)
+    // Git, in the editor's tree: a file changed.
+    static let gitModified = Color(light: 0xA8690F, dark: 0xE2B45C)
     static let text = Color(light: 0x0F1012, dark: 0xF2F3F5)
     static let textSecondary = Color(light: 0x34363B, dark: 0xD2D4D9)
     static let muted = Color(light: 0x6A6D75, dark: 0x9A9DA5)

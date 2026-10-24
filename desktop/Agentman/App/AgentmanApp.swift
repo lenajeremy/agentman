@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct AgentmanApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var store = AgentsStore()
 
     init() {
@@ -28,9 +29,46 @@ struct AgentmanApp: App {
             }
         }
 
+        // The editor: one window per folder, coming back as it was after a
+        // relaunch.
+        WindowGroup("Editor", id: "editor", for: String.self) { $folder in
+            if let folder {
+                EditorWindow(folder: folder)
+            }
+        }
+        .defaultSize(width: 1180, height: 760)
+        .windowToolbarStyle(.unified(showsTitle: true))
+        .commands { EditorCommands() }
+
         Settings {
             SettingsView()
                 .environment(store)
+        }
+    }
+}
+
+/// Asks before quitting with unsaved edits in the editor.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated {
+            let unsaved = EditorRegistry.shared.unsaved
+            guard !unsaved.isEmpty else { return .terminateNow }
+            let alert = NSAlert()
+            alert.messageText = unsaved.count == 1
+                ? "Save the changes to \(unsaved[0].name) before quitting?"
+                : "Save the changes to \(unsaved.count) files before quitting?"
+            alert.informativeText = unsaved.count == 1 ? "Your changes are lost if you don't save them." : unsaved.map(\.path).joined(separator: "\n")
+            alert.addButton(withTitle: unsaved.count == 1 ? "Save" : "Save All")
+            alert.addButton(withTitle: "Cancel")
+            alert.addButton(withTitle: "Don't Save")
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                return unsaved.allSatisfy { $0.save() } ? .terminateNow : .terminateCancel
+            case .alertThirdButtonReturn:
+                return .terminateNow
+            default:
+                return .terminateCancel
+            }
         }
     }
 }

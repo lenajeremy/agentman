@@ -10,6 +10,7 @@ struct AgentThreadView: View {
     @State private var dropping = false
     @State private var sending = false
     @State private var showFiles = false
+    @Environment(\.openWindow) private var openWindow
     @State private var confirmEnd = false
     @State private var resuming = false
     @State private var filesTab: WorkspaceTab = .changes
@@ -206,6 +207,14 @@ struct AgentThreadView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 if let servers = session.servers, !servers.isEmpty {
                     ServersMenu(session: session, servers: servers)
+                }
+                if FileManager.default.fileExists(atPath: session.cwd) {
+                    Button {
+                        EditorOpener.open(folder: session.cwd, with: openWindow)
+                    } label: {
+                        Label("Open in Editor", systemImage: "chevron.left.forwardslash.chevron.right")
+                    }
+                    .help("Open \((session.cwd as NSString).lastPathComponent) in the editor")
                 }
                 Button {
                     showFiles.toggle()

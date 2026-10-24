@@ -650,6 +650,7 @@ private struct FileBar: View {
     /// Whether the file is the one on this Mac now, which Finder can show.
     var local = true
     @State private var copied = false
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         HStack(spacing: 10) {
@@ -695,6 +696,17 @@ private struct FileBar: View {
                 .help(copied ? "Copied" : "Copy")
             }
             if local {
+                Button {
+                    EditorOpener.open(folder: session.cwd, file: path, with: openWindow)
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 11))
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.muted)
+                .help("Edit in the editor")
                 Button {
                     let url = URL(fileURLWithPath: session.cwd).appendingPathComponent(path)
                     NSWorkspace.shared.activateFileViewerSelecting([url])

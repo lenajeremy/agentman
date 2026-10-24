@@ -1,0 +1,772 @@
+import AppKit
+import SwiftUI
+
+extension FocusedValues {
+    /// The editor of the window in front, for the menu's Save and Go to File.
+    @Entry var editorStore: EditorStore?
+}
+
+/// Opens a folder in the editor, at a file when one is given.
+enum EditorOpener {
+    @MainActor
+    static func open(folder: String, file: String? = nil, with openWindow: OpenWindowAction) {
+        let store = EditorRegistry.shared.store(for: folder)
+        if let file, !file.isEmpty { store.open(file) }
+        openWindow(id: "editor", value: store.root.path)
+    }
+
+    @MainActor
+    static func chooseFolder() -> String? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory())
+        panel.message = "Choose a folder to open in the editor"
+        panel.prompt = "Open"
+        return panel.runModal() == .OK ? panel.url?.path : nil
+    }
+}
+
+/// A small editor for one folder: its files in a tree with what git says
+/// changed, the files open in tabs, and a status bar, in the manner of VS
+/// Code, Zed and the code views in v0 and AI Studio.
+struct EditorWindow: View {
+    @State private var store: EditorStore
+    @State private var naming: Naming?
+    @State private var trashing: FileEntry?
+    @State private var keyMonitor: Any?
+
+    init(folder: String) {
+        _store = State(initialValue: EditorRegistry.shared.store(for: folder))
+    }
+
+    var body: some View {
+        NavigationSplitView {
+            FileTree(store: store, naming: $naming, trashing: $trashing)
+                .navigationSplitViewColumnWidth(min: 190, ideal: 250, max: 420)
+        } detail: {
+            VStack(spacing: 0) {
+                if !store.documents.isEmpty {
+                    TabStrip(store: store)
+                }
+                if let document = store.active {
+                    PathBar(store: store, document: document)
+                    DiskBanner(document: document, close: { store.close(document) })
+                }
+                ZStack {
+                    EditorPanes(store: store)
+                    if let document = store.active, document.kind != .text {
+                        NonTextView(document: document)
+                    }
+                    if store.active == nil {
+                        EditorEmpty(store: store)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                StatusBar(store: store)
+            }
+            .background(Palette.surface)
+            .overlay {
+                if store.quickOpen {
+                    GoToFile(store: store)
+                }
+            }
+        }
+        .navigationTitle(store.name)
+        .navigationSubtitle(store.branch.map { "on \($0)" } ?? (store.root.path as NSString).abbreviatingWithTildeInPath)
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    store.quickOpen = true
+                } label: {
+                    Label("Go to File", systemImage: "magnifyingglass")
+                }
+                .help("Go to File (⌘P)")
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([store.active?.url ?? store.root])
+                } label: {
+                    Label("Show in Finder", systemImage: "folder")
+                }
+                .help("Show in Finder")
+            }
+        }
+        .focusedSceneValue(\.editorStore, store)
+        .background(WindowReader { store.window = $0 })
+        // Agents change files while the editor is open: the tree, git's
+        // marks and the open files follow them.
+        .task {
+            while !Task.isCancelled {
+                await store.refresh()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+        .onAppear(perform: installKeys)
+        .onDisappear {
+            if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+            keyMonitor = nil
+        }
+        .confirmationDialog(
+            store.closing.map { "Save the changes to \($0.name)?" } ?? "",
+            isPresented: Binding(get: { store.closing != nil }, set: { if !$0 { store.closing = nil } })
+        ) {
+            if let document = store.closing {
+                Button("Save") {
+                    if document.save() { store.close(document) }
+                    store.closing = nil
+                }
+                Button("Don't Save", role: .destructive) { store.close(document) }
+                Button("Cancel", role: .cancel) { store.closing = nil }
+            }
+        } message: {
+            Text("Your changes are lost if you don't save them.")
+        }
+        .confirmationDialog(
+            trashing.map { "Move \($0.name) to the Trash?" } ?? "",
+            isPresented: Binding(get: { trashing != nil }, set: { if !$0 { trashing = nil } })
+        ) {
+            Button("Move to Trash", role: .destructive) {
+                if let entry = trashing { store.problem = store.trash(entry) }
+                trashing = nil
+            }
+            Button("Cancel", role: .cancel) { trashing = nil }
+        } message: {
+            Text("You can put it back from the Trash.")
+        }
+        .alert(naming?.title ?? "", isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {
+            TextField("Name", text: Binding(get: { naming?.name ?? "" }, set: { naming?.name = $0 }))
+            Button(naming?.action ?? "OK") {
+                if let naming { store.problem = naming.apply(store) }
+                naming = nil
+            }
+            Button("Cancel", role: .cancel) { naming = nil }
+        }
+        .alert(store.problem ?? "", isPresented: Binding(get: { store.problem != nil }, set: { if !$0 { store.problem = nil } })) {
+            Button("OK", role: .cancel) { store.problem = nil }
+        }
+    }
+
+    /// ⌘W closes the tab in front, and the window once no tab is left.
+    private func installKeys() {
+        guard keyMonitor == nil else { return }
+        let store = self.store
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.window === store.window,
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  event.charactersIgnoringModifiers == "w",
+                  let document = store.active else { return event }
+            store.requestClose(document)
+            return nil
+        }
+    }
+}
+
+/// Asking for a name: a new file or folder, or a new name for one.
+struct Naming {
+    enum Kind { case file, folder, rename(FileEntry) }
+    let kind: Kind
+    let folder: String
+    var name = ""
+
+    var title: String {
+        switch kind {
+        case .file: "New File"
+        case .folder: "New Folder"
+        case .rename(let entry): "Rename \(entry.name)"
+        }
+    }
+
+    var action: String {
+        if case .rename = kind { return "Rename" }
+        return "Create"
+    }
+
+    @MainActor
+    func apply(_ store: EditorStore) -> String? {
+        switch kind {
+        case .file: store.newFile(in: folder, named: name)
+        case .folder: store.newFolder(in: folder, named: name)
+        case .rename(let entry): store.rename(entry, to: name)
+        }
+    }
+}
+
+// MARK: - Tree
+
+private struct FileTree: View {
+    @Bindable var store: EditorStore
+    @Binding var naming: Naming?
+    @Binding var trashing: FileEntry?
+
+    var body: some View {
+        List(selection: $store.selection) {
+            Section {
+                FileTreeLevel(store: store, folder: "")
+            } header: {
+                Text(store.name.uppercased())
+                    .font(TextStyle.label)
+                    .foregroundStyle(Palette.faint)
+            }
+        }
+        .listStyle(.sidebar)
+        .onChange(of: store.selection) { _, path in
+            guard let path, let entry = entry(path), !entry.isDirectory else { return }
+            if store.active?.path != path { store.open(path) }
+        }
+        .contextMenu(forSelectionType: String.self) { paths in
+            menu(for: paths.first.flatMap(entry))
+        } primaryAction: { paths in
+            guard let path = paths.first, let entry = entry(path) else { return }
+            if entry.isDirectory {
+                store.setExpanded(path, !store.isExpanded(path))
+            } else {
+                store.open(path)
+            }
+        }
+    }
+
+    private func entry(_ path: String) -> FileEntry? {
+        store.entries(in: (path as NSString).deletingLastPathComponent).first { $0.path == path }
+    }
+
+    @ViewBuilder private func menu(for entry: FileEntry?) -> some View {
+        let folder = entry.map { $0.isDirectory ? $0.path : ($0.path as NSString).deletingLastPathComponent } ?? ""
+        Button("New File…") { naming = Naming(kind: .file, folder: folder) }
+        Button("New Folder…") { naming = Naming(kind: .folder, folder: folder) }
+        if let entry {
+            Divider()
+            Button("Rename…") { naming = Naming(kind: .rename(entry), folder: folder, name: entry.name) }
+            Button("Show in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([store.root.appendingPathComponent(entry.path)])
+            }
+            Button("Copy Path") { Clipboard.copy(store.root.appendingPathComponent(entry.path).path) }
+            Button("Copy Relative Path") { Clipboard.copy(entry.path) }
+            Divider()
+            Button("Move to Trash…", role: .destructive) { trashing = entry }
+        }
+    }
+}
+
+private struct FileTreeLevel: View {
+    let store: EditorStore
+    let folder: String
+
+    var body: some View {
+        ForEach(store.entries(in: folder)) { entry in
+            if entry.isDirectory {
+                DisclosureGroup(isExpanded: Binding(
+                    get: { store.isExpanded(entry.path) },
+                    set: { store.setExpanded(entry.path, $0) }
+                )) {
+                    FileTreeLevel(store: store, folder: entry.path)
+                } label: {
+                    FileRow(store: store, entry: entry)
+                }
+                .tag(entry.path)
+            } else {
+                FileRow(store: store, entry: entry)
+                    .tag(entry.path)
+            }
+        }
+    }
+}
+
+private struct FileRow: View {
+    let store: EditorStore
+    let entry: FileEntry
+
+    var body: some View {
+        let mark = entry.isDirectory ? nil : store.mark(for: entry.path)
+        let quiet = entry.name.hasPrefix(".") || EditorStore.quietFolders.contains(entry.name)
+        let open = store.documents.first { $0.path == entry.path }
+        HStack(spacing: 6) {
+            Image(systemName: entry.isDirectory ? "folder" : FileIcon.symbol(entry.name))
+                .font(.system(size: 11))
+                .foregroundStyle(entry.isDirectory ? Palette.muted : FileIcon.tint(entry.name))
+                .frame(width: 16)
+            Text(entry.name)
+                .font(Fonts.sans(12.5))
+                .foregroundStyle(mark?.tint ?? (quiet ? Palette.faint : Palette.text))
+                .strikethrough(mark == .deleted)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 4)
+            if open?.isDirty == true {
+                Circle().fill(Palette.textSecondary).frame(width: 6, height: 6)
+                    .help("Unsaved changes")
+            }
+            if let mark {
+                Text(mark.letter)
+                    .font(Fonts.mono(10.5, .medium))
+                    .foregroundStyle(mark.tint)
+            } else if entry.isDirectory, store.changedFolders.contains(entry.path) {
+                Circle().fill(Palette.gitModified.opacity(0.8)).frame(width: 5, height: 5)
+                    .help("Something inside changed")
+            }
+        }
+    }
+}
+
+// MARK: - Tabs
+
+private struct TabStrip: View {
+    let store: EditorStore
+
+    var body: some View {
+        // Two tabs with one name show their folders too.
+        let names = Dictionary(grouping: store.documents, by: \.name)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                ForEach(store.documents) { document in
+                    EditorTab(store: store, document: document,
+                              active: document.id == store.activeID,
+                              folder: (names[document.name]?.count ?? 0) > 1 ? (document.path as NSString).deletingLastPathComponent : nil)
+                }
+            }
+        }
+        .frame(height: 36)
+        .background(Palette.paper)
+        .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
+    }
+}
+
+private struct EditorTab: View {
+    let store: EditorStore
+    let document: EditorDocument
+    let active: Bool
+    let folder: String?
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: FileIcon.symbol(document.name))
+                .font(.system(size: 10.5))
+                .foregroundStyle(FileIcon.tint(document.name))
+            Text(document.name)
+                .font(Fonts.sans(12.5, active ? .medium : .regular))
+                .foregroundStyle(active ? Palette.text : Palette.muted)
+                .strikethrough(document.deletedOnDisk)
+            if let folder, !folder.isEmpty {
+                Text(folder)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.faint)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+            ZStack {
+                if document.isDirty && !hovering {
+                    Circle().fill(Palette.textSecondary).frame(width: 7, height: 7)
+                } else {
+                    Button {
+                        store.requestClose(document)
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8.5, weight: .bold))
+                            .foregroundStyle(Palette.muted)
+                            .frame(width: 16, height: 16)
+                            .background(hovering ? Palette.fill : .clear, in: RoundedRectangle(cornerRadius: 4))
+                    }
+                    .buttonStyle(.plain)
+                    .opacity(hovering || active ? 1 : 0)
+                    .help("Close (⌘W)")
+                }
+            }
+            .frame(width: 16, height: 16)
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
+        .frame(height: 36)
+        .background(active ? Palette.surface : .clear)
+        .overlay(alignment: .top) {
+            if active { Rectangle().fill(Palette.working).frame(height: 2) }
+        }
+        .overlay(alignment: .trailing) { Rectangle().fill(Palette.line).frame(width: 1) }
+        .overlay(alignment: .bottom) {
+            if active { Rectangle().fill(Palette.surface).frame(height: 1) }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { store.activate(document) }
+        .onHover { hovering = $0 }
+        .help(document.path)
+        .contextMenu {
+            Button("Close") { store.requestClose(document) }
+            Button("Close Others") { store.closeOthers(than: document) }
+            Button("Close Saved") { store.closeSaved() }
+            Divider()
+            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([document.url]) }
+            Button("Copy Path") { Clipboard.copy(document.url.path) }
+            Button("Copy Relative Path") { Clipboard.copy(document.path) }
+        }
+    }
+}
+
+/// Where the file sits, and Save and Revert while it has changes.
+private struct PathBar: View {
+    let store: EditorStore
+    let document: EditorDocument
+
+    var body: some View {
+        HStack(spacing: 4) {
+            let parts = [store.name] + document.path.split(separator: "/").map(String.init)
+            ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
+                if index > 0 {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 7.5, weight: .semibold))
+                        .foregroundStyle(Palette.faint)
+                }
+                Text(part)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(index == parts.count - 1 ? Palette.textSecondary : Palette.faint)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 12)
+            if document.isDirty {
+                Button("Revert") { document.revert() }
+                    .buttonStyle(.plain)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
+                    .help("Back to the saved file")
+                Button {
+                    document.save()
+                } label: {
+                    Text("Save")
+                        .font(TextStyle.captionMedium)
+                        .foregroundStyle(Palette.onInverse)
+                        .padding(.horizontal, 10)
+                        .frame(height: 20)
+                        .background(Palette.inverse, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Save (⌘S)")
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 28)
+        .background(Palette.surface)
+        .alert(document.problem ?? "", isPresented: Binding(get: { document.problem != nil }, set: { if !$0 { document.problem = nil } })) {
+            Button("OK", role: .cancel) { document.problem = nil }
+        }
+    }
+}
+
+/// Says when an agent, or anything else, changed or deleted the file while
+/// it had unsaved edits, and what can be done about it.
+private struct DiskBanner: View {
+    let document: EditorDocument
+    let close: () -> Void
+
+    var body: some View {
+        if document.changedOnDisk || document.deletedOnDisk {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Palette.needsYou)
+                Text(document.deletedOnDisk
+                     ? "This file was deleted on disk. Save to put it back."
+                     : "This file changed on disk while you were editing it.")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.text)
+                Spacer()
+                if document.deletedOnDisk {
+                    Button("Close", action: close)
+                } else {
+                    Button("Keep Mine") { document.keepMine() }
+                        .help("Keep your edits; saving writes over the version on disk")
+                    Button("Use the Disk Version") { document.reloadFromDisk() }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            .controlSize(.small)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(Palette.needsYouWash)
+            .overlay(alignment: .bottom) { Rectangle().fill(Palette.needsYouEdge).frame(height: 1) }
+        }
+    }
+}
+
+// MARK: - The text
+
+/// Every open file's text view at once, only the one in front shown, so
+/// each keeps its scroll, selection and undo while another is in front.
+private struct EditorPanes: View {
+    let store: EditorStore
+    @AppStorage("editorFontSize") private var fontSize = 13.0
+
+    var body: some View {
+        ZStack {
+            ForEach(store.documents.filter { $0.kind == .text }) { document in
+                CodeTextView(
+                    text: document.text,
+                    path: document.path,
+                    editable: true,
+                    revision: document.revision,
+                    fontSize: fontSize,
+                    visible: document.id == store.activeID,
+                    indentUnit: document.indent,
+                    undoManager: document.undo,
+                    onChange: { document.text = $0 },
+                    onCursor: { line, column in
+                        document.line = line
+                        document.column = column
+                    }
+                )
+            }
+        }
+    }
+}
+
+/// A file the editor shows but doesn't edit: an image, or one it can't.
+private struct NonTextView: View {
+    let document: EditorDocument
+
+    var body: some View {
+        Group {
+            if document.kind == .image, let image = document.image {
+                ScrollView([.vertical, .horizontal]) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: max(image.size.width, 120), maxHeight: max(image.size.height, 120))
+                        .padding(24)
+                }
+            } else {
+                VStack(spacing: 10) {
+                    Image(systemName: document.kind == .missing ? "questionmark.folder" : "doc.badge.ellipsis")
+                        .font(.system(size: 28))
+                        .foregroundStyle(Palette.faint)
+                    Text(message)
+                        .font(TextStyle.body)
+                        .foregroundStyle(Palette.textSecondary)
+                    if document.kind != .missing {
+                        Button("Open with Its App") { NSWorkspace.shared.open(document.url) }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Palette.surface)
+    }
+
+    private var message: String {
+        switch document.kind {
+        case .binary: "This file isn't text."
+        case .tooLarge: "This file is too large to edit here."
+        case .missing: "This file isn't there any more."
+        default: ""
+        }
+    }
+}
+
+/// No file open: how to find one, and what agents changed lately.
+private struct EditorEmpty: View {
+    let store: EditorStore
+
+    var body: some View {
+        VStack(spacing: 18) {
+            VStack(spacing: 6) {
+                Image(systemName: "chevron.left.forwardslash.chevron.right")
+                    .font(.system(size: 26, weight: .light))
+                    .foregroundStyle(Palette.faint)
+                Text(store.name)
+                    .font(TextStyle.title)
+                    .foregroundStyle(Palette.text)
+                Text((store.root.path as NSString).abbreviatingWithTildeInPath)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.faint)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                shortcut("Go to File", "⌘P") { store.quickOpen = true }
+                shortcut("Save", "⌘S", action: nil)
+                shortcut("Close Tab", "⌘W", action: nil)
+                shortcut("Comment Lines", "⌘/", action: nil)
+            }
+            let changed = store.marks.filter { $0.value != .deleted }.keys.sorted().prefix(8)
+            if !changed.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Changed")
+                        .font(TextStyle.label)
+                        .foregroundStyle(Palette.faint)
+                    ForEach(Array(changed), id: \.self) { path in
+                        Button {
+                            store.open(path)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(store.marks[path]?.letter ?? "")
+                                    .font(Fonts.mono(10.5, .medium))
+                                    .foregroundStyle(store.marks[path]?.tint ?? Palette.muted)
+                                    .frame(width: 12)
+                                Text(path)
+                                    .font(TextStyle.caption)
+                                    .foregroundStyle(Palette.textSecondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.head)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(width: 300, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Palette.surface)
+    }
+
+    private func shortcut(_ title: String, _ keys: String, action: (() -> Void)?) -> some View {
+        HStack {
+            if let action {
+                Button(title, action: action).buttonStyle(.link)
+            } else {
+                Text(title).foregroundStyle(Palette.muted)
+            }
+            Spacer()
+            Text(keys).foregroundStyle(Palette.faint)
+        }
+        .font(TextStyle.caption)
+        .frame(width: 220)
+    }
+}
+
+/// Branch and changes on the left; the cursor and the file's settings on
+/// the right.
+private struct StatusBar: View {
+    let store: EditorStore
+
+    var body: some View {
+        HStack(spacing: 14) {
+            if let branch = store.branch {
+                Label(branch, systemImage: "arrow.triangle.branch")
+                    .labelStyle(.titleAndIcon)
+            }
+            if !store.marks.isEmpty {
+                Text("\(store.marks.count) changed")
+            }
+            Spacer()
+            if let document = store.active {
+                if document.kind == .text {
+                    Text(verbatim: "Ln \(document.line), Col \(document.column)")
+                    Text(document.indent == "\t" ? "Tabs" : "Spaces: \(document.indent.count)")
+                    Text("UTF-8")
+                    Text(document.crlf ? "CRLF" : "LF")
+                }
+                Text(document.languageName)
+            }
+        }
+        .font(Fonts.sans(11))
+        .foregroundStyle(Palette.muted)
+        .padding(.horizontal, 12)
+        .frame(height: 24)
+        .background(Palette.paper)
+        .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 1) }
+    }
+}
+
+/// ⌘P: any file in the folder by a few of its letters.
+private struct GoToFile: View {
+    let store: EditorStore
+
+    var body: some View {
+        PaletteView(
+            placeholder: "Go to file",
+            results: results,
+            choose: { item in
+                store.quickOpen = false
+                store.open(item.id)
+            },
+            dismiss: { store.quickOpen = false }
+        )
+        .task { await store.loadAllFiles() }
+    }
+
+    private func results(_ query: String) -> [PaletteItem] {
+        let paths: [String]
+        if query.trimmingCharacters(in: .whitespaces).isEmpty {
+            // Open files first, then what changed.
+            let open = store.documents.map(\.path)
+            paths = open + store.marks.keys.sorted().filter { !open.contains($0) }
+        } else {
+            paths = store.allFiles
+                .compactMap { path in Fuzzy.score(query, path).map { (path, $0) } }
+                .sorted { $0.1 > $1.1 }
+                .prefix(60)
+                .map(\.0)
+        }
+        return paths.prefix(60).map { path in
+            let folder = (path as NSString).deletingLastPathComponent
+            return PaletteItem(id: path, title: (path as NSString).lastPathComponent,
+                               detail: folder.isEmpty ? nil : folder,
+                               icon: FileIcon.symbol(path), tint: FileIcon.tint(path))
+        }
+    }
+}
+
+/// Hands the hosting window to a view that needs it.
+struct WindowReader: NSViewRepresentable {
+    let found: (NSWindow) -> Void
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async {
+            if let window = view.window { found(window) }
+        }
+    }
+}
+
+/// The editor's menu commands.
+struct EditorCommands: Commands {
+    @FocusedValue(\.editorStore) private var editor
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .saveItem) {
+            Button("Save") { editor?.saveActive() }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(editor == nil)
+            Button("Save All") { editor?.saveAll() }
+                .keyboardShortcut("s", modifiers: [.command, .option])
+                .disabled(editor == nil)
+            Button("Revert to Saved") { editor?.active?.revert() }
+                .disabled(editor == nil)
+        }
+        CommandGroup(replacing: .printItem) {}
+        CommandGroup(after: .newItem) {
+            Button("Open Folder in Editor…") {
+                if let folder = EditorOpener.chooseFolder() {
+                    EditorOpener.open(folder: folder, with: openWindow)
+                }
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+            Button("Go to File…") { editor?.quickOpen = true }
+                .keyboardShortcut("p", modifiers: .command)
+                .disabled(editor == nil)
+        }
+        CommandMenu("Editor") {
+            Button("Comment Lines") { editorTextView?.toggleComment() }
+                .disabled(editor == nil)
+            Button("Indent Lines") { editorTextView?.shiftLines(by: 1) }
+                .disabled(editor == nil)
+            Button("Outdent Lines") { editorTextView?.shiftLines(by: -1) }
+                .disabled(editor == nil)
+            Divider()
+            Button("Bigger Text") { adjustFont(1) }
+                .keyboardShortcut("+", modifiers: .command)
+                .disabled(editor == nil)
+            Button("Smaller Text") { adjustFont(-1) }
+                .keyboardShortcut("-", modifiers: .command)
+                .disabled(editor == nil)
+            Button("Actual Size") { UserDefaults.standard.set(13.0, forKey: "editorFontSize") }
+                .keyboardShortcut("0", modifiers: .command)
+                .disabled(editor == nil)
+        }
+    }
+
+    /// The text view with the keyboard, in the editor in front.
+    @MainActor private var editorTextView: EditorTextView? {
+        editor?.window?.firstResponder as? EditorTextView
+    }
+
+    @MainActor private func adjustFont(_ step: Double) {
+        let now = UserDefaults.standard.object(forKey: "editorFontSize") as? Double ?? 13
+        UserDefaults.standard.set(min(max(now + step, 9), 28), forKey: "editorFontSize")
+    }
+}

@@ -5,6 +5,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(AgentsStore.self) private var store
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
     @AppStorage("settingsTab") private var settingsTab = "general"
 
     var body: some View {
@@ -69,7 +70,12 @@ struct ContentView: View {
     /// agentman://settings opens Settings, at a tab with
     /// agentman://settings/keys; the rest are the store's to open.
     private func open(_ url: URL) {
-        if url.host() == "settings" {
+        if url.host() == "edit" {
+            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            if let folder = items.first(where: { $0.name == "folder" })?.value {
+                EditorOpener.open(folder: folder, file: items.first(where: { $0.name == "file" })?.value, with: openWindow)
+            }
+        } else if url.host() == "settings" {
             let tab = url.path().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             if SettingsPage(rawValue: tab) != nil { settingsTab = tab }
             openSettings()
