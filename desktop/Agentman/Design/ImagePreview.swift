@@ -210,33 +210,65 @@ struct AttachmentStrip: View {
 struct PasteImages: ViewModifier {
     var active: Bool
     var onImages: ([Attachment]) -> Void
-    @State private var monitor: Any?
+    @State private var monitor = PasteMonitor()
 
     func body(content: Content) -> some View {
-        content
-            .onAppear { install() }
-            .onDisappear { remove() }
+        // The monitor outlives this copy of the view, so it is handed what is
+        // true now on every update rather than keeping what was true when it
+        // was installed: then, the box had not taken focus yet.
+        monitor.active = active
+        monitor.onImages = onImages
+        return content
+            .onAppear { monitor.start() }
+            .onDisappear { monitor.stop() }
     }
+}
 
-    private func install() {
-        guard monitor == nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let paste = event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command &&
-                event.charactersIgnoringModifiers?.lowercased() == "v"
-            guard paste else { return event }
-            let taken = MainActor.assumeIsolated { () -> Bool in
-                guard active else { return false }
-                let found = Attachments.from(pasteboard: .general)
-                guard !found.isEmpty else { return false }
-                onImages(found)
-                return true
-            }
+/// Watches for ⌘V on its way to the focused text field, and takes it when
+/// the pasteboard holds images.
+@MainActor
+final class PasteMonitor {
+    var active = false
+    var onImages: ([Attachment]) -> Void = { _ in }
+    private var token: Any?
+
+    func start() {
+        guard token == nil else { return }
+        token = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard PasteMonitor.isPaste(event) else { return event }
+            let taken = MainActor.assumeIsolated { self?.take() ?? false }
             return taken ? nil : event
         }
     }
 
-    private func remove() {
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
+    func stop() {
+        if let token { NSEvent.removeMonitor(token) }
+        token = nil
+    }
+
+    /// Attaches the pasteboard's images, if the box is focused and there
+    /// are any.
+    func take(from pasteboard: NSPasteboard = .general) -> Bool {
+        guard active else { return false }
+        let found = Attachments.from(pasteboard: pasteboard)
+        guard !found.isEmpty else { return false }
+        onImages(found)
+        return true
+    }
+
+    /// ⌘V, with Caps Lock on or off. On a layout without Latin letters
+    /// (Cyrillic, Greek…) it is the key where V is on a US keyboard, as it
+    /// is for the Edit menu. ⌥ and ⌃ make it a different shortcut.
+    nonisolated static func isPaste(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command), flags.isDisjoint(with: [.option, .control]) else { return false }
+        return isPasteKey(characters: event.charactersIgnoringModifiers ?? "", keyCode: event.keyCode)
+    }
+
+    nonisolated static func isPasteKey(characters: String, keyCode: UInt16) -> Bool {
+        let typed = characters.lowercased()
+        if typed == "v" { return true }
+        let latin = typed.unicodeScalars.allSatisfy { $0.isASCII }
+        return !latin && keyCode == 9
     }
 }
