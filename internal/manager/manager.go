@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lenajeremy/agentman/internal/knowledge"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/secrets"
 )
@@ -31,6 +32,9 @@ type Config struct {
 	Dir     string
 	Secrets secrets.Store
 	Agents  Agents
+	// Knowledge is the user's notes, ~/.agentman/knowledge. Without it, the
+	// notes live beside the conversation.
+	Knowledge *knowledge.Store
 	// Emit sends an event to every connected app.
 	Emit func(protocol.Event)
 	// NewModel makes a model client from an API key. Tests replace it.
@@ -45,6 +49,8 @@ type Manager struct {
 	newModel     func(string) Model
 	conversation *conversation
 	briefs       *briefStore
+	knowledge    *knowledge.Store
+	keys         *keyStore
 
 	mu       sync.Mutex
 	settings protocol.ManagerSettings
@@ -92,6 +98,8 @@ func New(cfg Config) (*Manager, error) {
 		newModel:     cfg.NewModel,
 		conversation: conversation,
 		briefs:       loadBriefs(cfg.Dir),
+		knowledge:    cfg.Knowledge,
+		keys:         loadKeys(cfg.Dir),
 		settings:     loadSettings(filepath.Join(cfg.Dir, "settings.json")),
 		briefDue:     map[string]time.Time{},
 		lastBriefAt:  map[string]time.Time{},
@@ -102,6 +110,9 @@ func New(cfg Config) (*Manager, error) {
 	}
 	if m.newModel == nil {
 		m.newModel = newClaudeModel
+	}
+	if m.knowledge == nil {
+		m.knowledge = knowledge.Open(filepath.Join(cfg.Dir, "knowledge"))
 	}
 	if m.emitEvent == nil {
 		m.emitEvent = func(protocol.Event) {}
@@ -126,7 +137,11 @@ func (m *Manager) Handles(kind protocol.RequestType) bool {
 	switch kind {
 	case protocol.ReqManagerSend, protocol.ReqManagerHistory, protocol.ReqManagerStop,
 		protocol.ReqManagerSettings, protocol.ReqManagerSetSettings, protocol.ReqManagerSetKey,
-		protocol.ReqManagerBriefs, protocol.ReqManagerCardReply, protocol.ReqManagerCardDismiss:
+		protocol.ReqManagerBriefs, protocol.ReqManagerCardReply, protocol.ReqManagerCardDismiss,
+		protocol.ReqKnowledgeList, protocol.ReqKnowledgeRead, protocol.ReqKnowledgeWrite, protocol.ReqKnowledgeDelete,
+		protocol.ReqKeysList, protocol.ReqKeySet, protocol.ReqKeyDelete,
+		protocol.ReqAgentKnowledgeSearch, protocol.ReqAgentKnowledgeRead, protocol.ReqAgentKeys,
+		protocol.ReqAgentRequestKey, protocol.ReqAgentTell:
 		return true
 	}
 	return false
@@ -163,6 +178,17 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 		return m.replyToCard(ctx, req)
 	case protocol.ReqManagerCardDismiss:
 		return m.dismissCard(req.CardID)
+	case protocol.ReqKnowledgeList, protocol.ReqKnowledgeRead, protocol.ReqKnowledgeWrite, protocol.ReqKnowledgeDelete:
+		return m.handleKnowledge(req)
+	case protocol.ReqKeysList:
+		return protocol.Event{Type: protocol.EvtKeys, Keys: m.keys.list()}
+	case protocol.ReqKeySet:
+		return m.saveKey(ctx, req.Key, req.Text)
+	case protocol.ReqKeyDelete:
+		return m.deleteKey(ctx, req.Path)
+	case protocol.ReqAgentKnowledgeSearch, protocol.ReqAgentKnowledgeRead, protocol.ReqAgentKeys,
+		protocol.ReqAgentRequestKey, protocol.ReqAgentTell:
+		return m.handleAgent(ctx, req)
 	}
 	return protocol.Event{Type: protocol.EvtError, Error: "unknown manager request"}
 }

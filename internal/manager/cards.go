@@ -228,6 +228,12 @@ func (m *Manager) replyToCard(ctx context.Context, req protocol.Request) protoco
 			return protocol.Event{Type: protocol.EvtError, Error: "Couldn't answer " + card.AgentName + ": " + err.Error()}
 		}
 		outcome = "You chose " + chosenText(card.Options, req)
+	case protocol.CardKey:
+		result, err := m.answerKeyCardLocked(ctx, session, card, req.OptionKey)
+		if err != nil {
+			return protocol.Event{Type: protocol.EvtError, Error: "Couldn't do that: " + err.Error()}
+		}
+		outcome = result
 	case protocol.CardNeedsYou:
 		text := strings.TrimSpace(req.Text)
 		if text == "" {

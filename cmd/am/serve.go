@@ -26,6 +26,7 @@ import (
 	"github.com/lenajeremy/agentman/internal/attachments"
 	"github.com/lenajeremy/agentman/internal/daemon"
 	"github.com/lenajeremy/agentman/internal/hook"
+	"github.com/lenajeremy/agentman/internal/knowledge"
 	"github.com/lenajeremy/agentman/internal/manager"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/relay"
@@ -311,10 +312,11 @@ func runServe(ctx context.Context, args []string) error {
 	// key, set from Agentman for Mac and kept in the Keychain.
 	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
 		boss, err := manager.New(manager.Config{
-			Dir:     filepath.Join(dir, "manager"),
-			Secrets: secrets.Default(dir),
-			Agents:  managerAgents{daemon: agent},
-			Emit:    func(event protocol.Event) { _ = sink.Send(event) },
+			Dir:       filepath.Join(dir, "manager"),
+			Secrets:   secrets.Default(dir),
+			Agents:    managerAgents{daemon: agent},
+			Knowledge: knowledge.Open(filepath.Join(dir, "knowledge")),
+			Emit:      func(event protocol.Event) { _ = sink.Send(event) },
 		})
 		if err != nil {
 			fmt.Printf("%s\n", dim("agentman   "+err.Error()))

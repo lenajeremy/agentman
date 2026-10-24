@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 
+	"github.com/lenajeremy/agentman/internal/knowledge"
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
 
@@ -157,6 +158,66 @@ var toolDefs = []toolDef{
 		},
 		required: []string{"card", "reason"},
 		run:      runDismissCard,
+	},
+	{
+		name: "search_knowledge",
+		description: "Search the user's notes, shared and private: style guides, conventions, how they like things done, " +
+			"facts about their projects. Returns the matching notes with the lines that matched.",
+		properties: map[string]any{"query": map[string]any{"type": "string", "description": "Words to look for."}},
+		required:   []string{"query"},
+		run:        runSearchKnowledge,
+	},
+	{
+		name:        "read_knowledge",
+		description: "Read one of the user's notes in full, by the name search_knowledge gave.",
+		properties:  map[string]any{"name": map[string]any{"type": "string"}},
+		required:    []string{"name"},
+		run:         runReadKnowledge,
+	},
+	{
+		name: "save_knowledge",
+		description: "Save a note when the user asks you to remember something, or to change a note. " +
+			"Shared notes can be read by every agent; private ones only by you. " +
+			"A shared note marked always goes into each project's instruction file when update_instructions runs.",
+		properties: map[string]any{
+			"title":  map[string]any{"type": "string"},
+			"body":   map[string]any{"type": "string", "description": "The note, in Markdown."},
+			"tier":   map[string]any{"type": "string", "enum": []string{"shared", "private"}, "description": "Default shared."},
+			"always": map[string]any{"type": "boolean", "description": "Put it in every project's instructions. Default false."},
+			"name":   map[string]any{"type": "string", "description": "An existing note's name, to change it. Leave out for a new note."},
+		},
+		required: []string{"title", "body"},
+		run:      runSaveKnowledge,
+	},
+	{
+		name: "list_keys",
+		description: "The API keys you keep for the user's agents, by name: what each is for, whether it has a value, " +
+			"and its rule (auto: give it to any agent; projects: only to listed folders without asking; ask: always ask the user). " +
+			"You never see the values.",
+		properties: map[string]any{},
+		run:        runListKeys,
+	},
+	{
+		name: "give_key",
+		description: "Give an agent one of the keys, when the user asks: it is written into the .env in the agent's folder, " +
+			"if git ignores .env. When the key's rule says to ask, or .env isn't ignored, the user gets a card instead. " +
+			"After it is given, tell the agent with send_to_agent which variable to read.",
+		properties: map[string]any{
+			"agent":  agentProperty,
+			"key":    map[string]any{"type": "string", "description": "The key's name, like ELEVENLABS_API_KEY."},
+			"reason": map[string]any{"type": "string", "description": "Why the agent needs it, for the user if they are asked."},
+		},
+		required: []string{"agent", "key"},
+		run:      runGiveKey,
+	},
+	{
+		name: "update_instructions",
+		description: "Write the user's shared notes marked always into one agent's project instructions " +
+			"(CLAUDE.md for Claude Code, AGENTS.md for the others), in a block Agentman keeps; the rest of the file is untouched. " +
+			"Only when the user asks.",
+		properties: map[string]any{"agent": agentProperty},
+		required:   []string{"agent"},
+		run:        runUpdateInstructions,
 	},
 }
 
@@ -535,6 +596,127 @@ func runDismissCard(_ context.Context, m *Manager, input map[string]any) toolRes
 		text:      "Taken away.",
 		activity:  fmt.Sprintf("Took away %s's card: %s", entry.Card.AgentName, reason),
 		sessionID: entry.Card.SessionID,
+	}
+}
+
+func runSearchKnowledge(_ context.Context, m *Manager, input map[string]any) toolResult {
+	query, _ := input["query"].(string)
+	hits, err := m.knowledge.Search(query, "", 8)
+	if err != nil {
+		return toolResult{text: strings.TrimPrefix(err.Error(), "knowledge: "), isError: true}
+	}
+	if len(hits) == 0 {
+		return toolResult{text: "No notes match.", activity: "Searched your notes"}
+	}
+	var b strings.Builder
+	for _, hit := range hits {
+		fmt.Fprintf(&b, "## %s (name: %s, %s)\n%s\n\n", hit.Title, hit.Name, hit.Tier, hit.Snippet)
+	}
+	return toolResult{text: b.String(), activity: "Searched your notes"}
+}
+
+func runReadKnowledge(_ context.Context, m *Manager, input map[string]any) toolResult {
+	name, _ := input["name"].(string)
+	note, err := m.knowledge.Read("", strings.TrimSpace(name))
+	if err != nil {
+		return toolResult{text: "No note called " + name + "; search_knowledge finds them.", isError: true}
+	}
+	return toolResult{
+		text:     fmt.Sprintf("# %s (%s, always: %v)\n\n%s", note.Title, note.Tier, note.Always, note.Body),
+		activity: "Read your note “" + note.Title + "”",
+	}
+}
+
+func runSaveKnowledge(_ context.Context, m *Manager, input map[string]any) toolResult {
+	title, _ := input["title"].(string)
+	body, _ := input["body"].(string)
+	tier, _ := input["tier"].(string)
+	name, _ := input["name"].(string)
+	always, _ := input["always"].(bool)
+	if tier == "" {
+		tier = knowledge.Shared
+	}
+	saved, err := m.knowledge.Write(knowledge.Note{Name: strings.TrimSpace(name), Tier: tier, Title: title, Body: body, Always: always})
+	if err != nil {
+		return toolResult{text: strings.TrimPrefix(err.Error(), "knowledge: "), isError: true}
+	}
+	where := "shared with your agents"
+	if saved.Tier == knowledge.Private {
+		where = "private"
+	}
+	return toolResult{
+		text:     fmt.Sprintf("Saved as %s (%s).", saved.Name, saved.Tier),
+		activity: fmt.Sprintf("Saved a note, “%s”, %s", saved.Title, where),
+	}
+}
+
+func runListKeys(_ context.Context, m *Manager, _ map[string]any) toolResult {
+	keys := m.keys.list()
+	if len(keys) == 0 {
+		return toolResult{text: "No keys are kept yet. The user adds them in Agentman's settings, under Keys.", activity: "Checked your keys"}
+	}
+	var b strings.Builder
+	for _, key := range keys {
+		fmt.Fprintf(&b, "- %s, rule %s", key.Name, key.Rule)
+		if len(key.Projects) > 0 {
+			var folders []string
+			for _, project := range key.Projects {
+				folders = append(folders, shortPath(project))
+			}
+			fmt.Fprintf(&b, " (%s)", strings.Join(folders, ", "))
+		}
+		if !key.Set {
+			b.WriteString(", no value yet")
+		}
+		if key.Description != "" {
+			fmt.Fprintf(&b, ": %s", key.Description)
+		}
+		b.WriteString("\n")
+	}
+	return toolResult{text: b.String(), activity: "Checked your keys"}
+}
+
+func runGiveKey(ctx context.Context, m *Manager, input map[string]any) toolResult {
+	session, err := m.resolveAgent(input)
+	if err != nil {
+		return toolResult{text: err.Error(), isError: true}
+	}
+	name, _ := input["key"].(string)
+	reason, _ := input["reason"].(string)
+	if reason == "" {
+		reason = "You asked Agentman to give it."
+	}
+	text, err := m.giveKey(ctx, session, name, reason)
+	if err != nil {
+		return toolResult{text: "Couldn't give it: " + err.Error(), isError: true}
+	}
+	return toolResult{text: text, sessionID: session.ID}
+}
+
+func runUpdateInstructions(_ context.Context, m *Manager, input map[string]any) toolResult {
+	session, err := m.resolveAgent(input)
+	if err != nil {
+		return toolResult{text: err.Error(), isError: true}
+	}
+	path, count, err := m.knowledge.SyncInstructions(session.Cwd, string(session.Kind))
+	if err != nil {
+		return toolResult{text: "Couldn't update the instructions: " + err.Error(), isError: true}
+	}
+	notes := fmt.Sprintf("%d notes", count)
+	if count == 1 {
+		notes = "1 note"
+	}
+	if count == 0 {
+		return toolResult{
+			text:      "No shared notes are marked always, so there is nothing to add; any old block was taken out of " + shortPath(path) + ".",
+			activity:  "Checked " + session.Name + "'s instructions",
+			sessionID: session.ID,
+		}
+	}
+	return toolResult{
+		text:      fmt.Sprintf("Wrote %s into %s. The agent reads it at its next start, or tell it to reread the file.", notes, shortPath(path)),
+		activity:  fmt.Sprintf("Put %s in %s's %s", notes, session.Name, filepath.Base(path)),
+		sessionID: session.ID,
 	}
 }
 

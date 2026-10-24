@@ -180,6 +180,9 @@ type Request struct {
 	ClientID string `json:"clientId,omitempty"`
 	// CardID names the card on ReqManagerCardReply and ReqManagerCardDismiss.
 	CardID string `json:"cardId,omitempty"`
+	// Note and Key are saved by ReqKnowledgeWrite and ReqKeySet.
+	Note *Note `json:"note,omitempty"`
+	Key  *Key  `json:"key,omitempty"`
 	// PushToken carries an Expo push token on ReqRegisterPush.
 	PushToken string `json:"pushToken,omitempty"`
 	// Notify carries that phone's choice of alerts on ReqRegisterPush. Absent
@@ -312,6 +315,10 @@ type Event struct {
 	Briefs          []Brief          `json:"briefs,omitempty"`
 	// More says older manager entries remain, on EvtManagerHistory.
 	More bool `json:"more,omitempty"`
+	// Notes, Note and Keys answer the knowledge and key requests.
+	Notes []Note `json:"notes,omitempty"`
+	Note  *Note  `json:"note,omitempty"`
+	Keys  []Key  `json:"keys,omitempty"`
 
 	Error string `json:"error,omitempty"`
 }

@@ -51,7 +51,8 @@ const (
 type ManagerEntry struct {
 	ID string `json:"id"`
 	// Role is who it is from: "user", "assistant", "activity" (something
-	// Agentman did, such as reading an agent), "brief" (news from an agent)
+	// Agentman did, such as reading an agent), "brief" (news from an agent),
+	// "agent" (an agent telling Agentman something, through am mcp), "card"
 	// or "error".
 	Role string `json:"role"`
 	Text string `json:"text"`
@@ -79,6 +80,9 @@ const (
 	// CardNeedsYou is an agent waiting on the user for something that is not
 	// a question on screen: a decision, an approval, an answer in words.
 	CardNeedsYou = "needs_you"
+	// CardKey is a key an agent asked for, which its rule says to ask the
+	// user about, or which needs .env added to .gitignore first.
+	CardKey = "key"
 )
 
 // Card states.
@@ -119,6 +123,8 @@ type ManagerCard struct {
 	Options    []QuestionOption `json:"options,omitempty"`
 	Multiple   bool             `json:"multiple,omitempty"`
 	Custom     bool             `json:"custom,omitempty"`
+	// KeyName is the key a key card is about.
+	KeyName string `json:"keyName,omitempty"`
 	// Suggested is the option Agentman would pick, when the user asked it to
 	// answer and the answer needs their OK.
 	Suggested string `json:"suggested,omitempty"`
