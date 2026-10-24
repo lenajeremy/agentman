@@ -14,6 +14,28 @@ import (
 var claudeCommandWrapper = regexp.MustCompile(
 	`^\s*<(command-name|command-message|command-args|local-command-stdout|user-prompt-submit-hook)`)
 
+// claudeTaskNotice is the note Claude Code hands the agent when a background
+// task ends. It arrives as though the user had typed it, XML and all; it is
+// shown as a quiet notice saying what finished.
+var (
+	claudeTaskNotice  = regexp.MustCompile(`^\s*<task-notification>`)
+	claudeTaskSummary = regexp.MustCompile(`(?s)<summary>(.*?)</summary>`)
+)
+
+// taskNotice is the line to show for a background task's note, and whether
+// the text was one.
+func taskNotice(body string) (string, bool) {
+	if !claudeTaskNotice.MatchString(body) {
+		return "", false
+	}
+	if m := claudeTaskSummary.FindStringSubmatch(body); m != nil {
+		if summary := strings.Join(strings.Fields(m[1]), " "); summary != "" {
+			return summary, true
+		}
+	}
+	return "A background task finished", true
+}
+
 // claudeRecord is the subset of a transcript line we rely on.
 type claudeRecord struct {
 	Type        string         `json:"type"`
@@ -130,6 +152,12 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 		if body == "" || claudeCommandWrapper.MatchString(body) {
 			return nil
 		}
+		if notice, ok := taskNotice(body); ok && role == protocol.RoleUser {
+			return []protocol.Message{{
+				ID: uuid, SessionID: p.sessionID, Role: protocol.RoleSystem, Ts: ts,
+				Text: notice, IsSidechain: rec.IsSidechain,
+			}}
+		}
 		return []protocol.Message{{
 			ID: uuid, SessionID: p.sessionID, Role: role, Ts: ts,
 			Text: body, IsSidechain: rec.IsSidechain,
@@ -147,6 +175,13 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 		case "text":
 			body := strings.TrimSpace(block.Text)
 			if body == "" || claudeCommandWrapper.MatchString(body) {
+				continue
+			}
+			if notice, ok := taskNotice(body); ok && role == protocol.RoleUser {
+				out = append(out, protocol.Message{
+					ID: fmt.Sprintf("%s:%d", uuid, i), SessionID: p.sessionID,
+					Role: protocol.RoleSystem, Ts: ts, Text: notice, IsSidechain: rec.IsSidechain,
+				})
 				continue
 			}
 			out = append(out, protocol.Message{

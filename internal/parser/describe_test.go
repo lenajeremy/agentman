@@ -40,3 +40,14 @@ func TestDescribeToolSaysWhatAStepDid(t *testing.T) {
 		}
 	}
 }
+
+// Claude Code's note that a background task ended arrives as the user's
+// words, XML and all; it reads as a quiet notice of what finished.
+func TestABackgroundTaskNoteIsANotice(t *testing.T) {
+	p := NewClaudeParser("claude:s")
+	line := `{"type":"user","uuid":"u1","timestamp":"2026-10-24T20:00:00Z","message":{"role":"user","content":"<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command \"Rebuild the app\" completed (exit code 0)</summary>\n</task-notification>"}}`
+	msgs := p.Parse(line, 0)
+	if len(msgs) != 1 || msgs[0].Role != "system" || msgs[0].Text != `Background command "Rebuild the app" completed (exit code 0)` {
+		t.Fatalf("got %+v", msgs)
+	}
+}
