@@ -28,6 +28,8 @@ import { MessageMenu, type MessageMenuItem } from "../../components/MessageMenu"
 import { Toast } from "../../components/Toast";
 import { ContentColumn } from "../../components/ContentColumn";
 import { Markdown } from "../../components/Markdown";
+import { SentImages } from "../../components/SentImages";
+import { splitSentMessage } from "../../lib/sentimages";
 import { MotionPressable } from "../../components/MotionPressable";
 import { Pulse } from "../../components/Pulse";
 import { QuestionCard } from "../../components/QuestionCard";
@@ -1526,7 +1528,14 @@ function MessageRow({
   }
 
   if (message.role === "user") {
-    return <SentMessage text={message.text ?? ""} fresh={fresh} onCopied={onCopied} />;
+    return (
+      <SentMessage
+        sessionId={message.sessionId}
+        text={message.text ?? ""}
+        fresh={fresh}
+        onCopied={onCopied}
+      />
+    );
   }
 
   if (message.role === "system") {
@@ -1619,22 +1628,28 @@ function sentMessageActions(text: string, onCopied: () => void): MessageMenuItem
 }
 
 function SentMessage({
-  text,
+  sessionId,
+  text: message,
   fresh,
   onCopied,
 }: {
+  sessionId: string;
   text: string;
   fresh: boolean;
   onCopied(): void;
 }) {
   const styles = useStyles(makeStyles);
   const held = useHeldMessage();
+  // Images sent with it show as pictures, not as the paths the agent got.
+  const { images, text } = useMemo(() => splitSentMessage(message), [message]);
   return (
     <Appear enabled={fresh}>
+      {images.length > 0 && <SentImages sessionId={sessionId} paths={images} />}
       {/* The bubble itself is the target, so holding the space beside it does
           nothing. A plain Pressable rather than MotionPressable: a tap does
           nothing here, and shrinking on one would promise an action that is
           not there. */}
+      {text.length > 0 && (
       <Pressable
         ref={held.ref}
         onLongPress={held.open}
@@ -1650,6 +1665,7 @@ function SentMessage({
       >
         <Text style={styles.userText}>{text}</Text>
       </Pressable>
+      )}
       <MessageMenu
         anchor={held.anchor}
         items={sentMessageActions(text, onCopied)}

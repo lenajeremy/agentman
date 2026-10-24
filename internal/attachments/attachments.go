@@ -263,3 +263,11 @@ func sniff(data []byte) (string, bool) {
 	ext, ok := imageTypes[http.DetectContentType(head)]
 	return ext, ok
 }
+
+// Holds reports whether path is an image this store filed for the session:
+// the apps show a sent message's images by reading them back.
+func (s *Store) Holds(sessionID, path string) bool {
+	dir := filepath.Join(s.dir, sessionDir(sessionID)) + string(filepath.Separator)
+	clean := filepath.Clean(path)
+	return clean == path && strings.HasPrefix(clean, dir) && !strings.Contains(clean[len(dir):], string(filepath.Separator))
+}

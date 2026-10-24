@@ -2,12 +2,14 @@ package daemon
 
 import (
 	"context"
+	"encoding/base64"
 	"image"
 	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/lenajeremy/agentman/internal/attachments"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/source"
 )
@@ -223,5 +225,27 @@ func TestASeenFileIsFoundAfterARestart(t *testing.T) {
 	writePNG(t, unseen)
 	if event := agent.Handle(context.Background(), protocol.Request{Type: protocol.ReqReadSeenFile, SessionID: "claude:s1", Path: unseen}); event.Type != protocol.EvtError {
 		t.Fatalf("a file the session never opened was served: %+v", event)
+	}
+}
+
+// The images sent with a message can be read back by its session, and only
+// by its session, so the apps can show them in place of their paths.
+func TestASentImageCanBeReadBackByItsSession(t *testing.T) {
+	agent, _ := agentWithSource(t, &injectingSource{})
+	store := attachments.New(t.TempDir(), "", "")
+	agent.SetAttachments(store)
+	png, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+	path, err := store.SaveData("claude:s1", png)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func(session string) protocol.Event {
+		return agent.Handle(context.Background(), protocol.Request{Type: protocol.ReqReadSeenFile, SessionID: session, Path: path})
+	}
+	if event := read("claude:s1"); event.Type == protocol.EvtError {
+		t.Fatalf("its own session: %+v", event)
+	}
+	if event := read("claude:other"); event.Type != protocol.EvtError {
+		t.Fatalf("another session read it: %+v", event)
 	}
 }

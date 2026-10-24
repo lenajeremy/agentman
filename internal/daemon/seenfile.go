@@ -59,14 +59,14 @@ func (d *Daemon) openSeenFile(ctx context.Context, req protocol.Request) (*os.Fi
 	if path != req.Path || !filepath.IsAbs(path) {
 		return nil, nil, "that is not a path this session opened"
 	}
-	if !d.seen.allows(req.SessionID, path) {
+	if !d.seen.allows(req.SessionID, path) && !d.keptFor(req.SessionID, path) {
 		// What a session opened is learnt from its messages as they are read.
 		// Since this daemon started, nobody may have read them: an image
 		// Agentman looked at before a restart would be refused for good. Its
 		// recent messages are read once, the way opening it would.
 		d.learnSeen(ctx, req.SessionID)
 	}
-	if !d.seen.allows(req.SessionID, path) {
+	if !d.seen.allows(req.SessionID, path) && !d.keptFor(req.SessionID, path) {
 		return nil, nil, "that is not a path this session opened"
 	}
 	// Even so: a name the agent opened is not a promise about what is there
@@ -103,4 +103,14 @@ func (d *Daemon) learnSeen(ctx context.Context, sessionID string) {
 		return
 	}
 	d.seen.record(sessionID, page.Messages)
+}
+
+// keptFor reports whether path is an image the daemon filed for this
+// session's messages, which the apps show in place of its path.
+func (d *Daemon) keptFor(sessionID, path string) bool {
+	d.mu.Lock()
+	store := d.attachments
+	d.mu.Unlock()
+	kept, ok := store.(interface{ Holds(sessionID, path string) bool })
+	return ok && kept.Holds(sessionID, path)
 }
