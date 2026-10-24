@@ -772,8 +772,9 @@ struct EditorCommands: Commands {
             Button("New Terminal") { editor?.newTerminal() }
                 .keyboardShortcut("`", modifiers: [.control, .shift])
                 .disabled(editor == nil)
+            // Cmd-K clears from inside the terminal, as in Terminal; the
+            // shortcut in menus is the command palette's.
             Button("Clear Terminal") { editor?.activeTerminal?.clear() }
-                .keyboardShortcut("k", modifiers: .command)
                 .disabled(editor == nil)
             Divider()
             Button("Stop and Close Terminal") {

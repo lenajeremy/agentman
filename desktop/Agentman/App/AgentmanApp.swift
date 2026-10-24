@@ -4,6 +4,7 @@ import SwiftUI
 struct AgentmanApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var store = AgentsStore()
+    @Environment(\.openWindow) private var openWindow
 
     init() {
         Fonts.register()
@@ -26,6 +27,19 @@ struct AgentmanApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("New Agent") { store.selection = .newAgent }
                     .keyboardShortcut("n", modifiers: .command)
+            }
+            CommandMenu("Go") {
+                Button("Command Palette…") {
+                    openWindow(id: "main")
+                    store.showPalette = true
+                }
+                .keyboardShortcut("k", modifiers: .command)
+                Button("Agentman") { openWindow(id: "main"); store.selection = .manager }
+                    .keyboardShortcut("0", modifiers: [.command, .option])
+                Button("What Happened While I Was Away") {
+                    openWindow(id: "main")
+                    store.showAway(since: store.away.last?.since ?? Date().addingTimeInterval(-3600))
+                }
             }
         }
 

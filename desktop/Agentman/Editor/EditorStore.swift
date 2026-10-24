@@ -456,6 +456,16 @@ enum Fuzzy {
         let needle = Array(query.lowercased().filter { !$0.isWhitespace })
         guard !needle.isEmpty else { return 0 }
         let name = (path as NSString).lastPathComponent
+        // The letters as typed, together, beat the same letters scattered:
+        // "need" is the word in "Show Agents That Need You", not n…e…e…d.
+        let typed = query.lowercased().trimmingCharacters(in: .whitespaces)
+        for (candidate, base) in [(name, 40_000), (path, 30_000)] {
+            if let found = candidate.lowercased().range(of: typed) {
+                let start = found.lowerBound == candidate.startIndex
+                    || " /._-".contains(candidate[candidate.index(before: found.lowerBound)])
+                return base + (start ? 5_000 : 0) - path.count
+            }
+        }
         if let inName = match(needle, name) {
             return 10_000 + inName * 10 - path.count
         }

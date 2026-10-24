@@ -27,7 +27,7 @@ struct TerminalPanel: View {
                         .controlSize(.small)
                 }
                 iconButton("plus", help: "New terminal (⌃⇧`)") { store.newTerminal() }
-                iconButton("eraser", help: "Clear (⌘K)") { store.activeTerminal?.clear() }
+                iconButton("eraser", help: "Clear (⌘K in the terminal)") { store.activeTerminal?.clear() }
                     .disabled(store.activeTerminal == nil)
                 iconButton("trash", help: "Stop this shell and close it") {
                     if let session = store.activeTerminal { store.closeTerminal(session) }

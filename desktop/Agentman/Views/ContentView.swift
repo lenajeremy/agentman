@@ -41,6 +41,11 @@ struct ContentView: View {
             NoteSuggestionPopup()
         }
         .animation(.spring(duration: 0.3), value: store.manager.noteSuggestions.first?.id)
+        .overlay {
+            if store.showPalette {
+                CommandPalette()
+            }
+        }
         // What happened while the user was away, on their return.
         .overlay {
             if let digest = store.away.digest {

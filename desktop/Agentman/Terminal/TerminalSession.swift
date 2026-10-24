@@ -22,6 +22,7 @@ final class TerminalSession: Identifiable, @preconcurrency LocalProcessTerminalV
         title = number > 1 ? "\((shell as NSString).lastPathComponent) \(number)" : (shell as NSString).lastPathComponent
         view = AgentmanTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 240))
         view.processDelegate = self
+        view.onClear = { [weak self] in self?.clear() }
         start()
     }
 
@@ -109,6 +110,20 @@ final class AgentmanTerminalView: LocalProcessTerminalView {
     override func setFrameSize(_ newSize: NSSize) {
         guard newSize.width >= 40, newSize.height >= 20 else { return }
         super.setFrameSize(newSize)
+    }
+
+    /// Cmd-K clears the screen and scrollback while the terminal has the
+    /// keyboard, as it does in Terminal.
+    var onClear: (() -> Void)?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if window?.firstResponder === self,
+           event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+           event.charactersIgnoringModifiers == "k", let onClear {
+            onClear()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 
     override func viewDidChangeEffectiveAppearance() {

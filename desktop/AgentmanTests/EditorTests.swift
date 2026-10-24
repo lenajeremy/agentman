@@ -98,4 +98,13 @@ final class EditorTests: XCTestCase {
         XCTAssertFalse(environment.contains { $0.hasPrefix("TMUX=") })
         XCTAssertTrue(FileManager.default.isExecutableFile(atPath: TerminalSession.shell))
     }
+
+    func testLettersTogetherBeatLettersScattered() {
+        let titles = ["Open mac in the Editor", "Show Agents That Need You", "Open intro-to-hacking in the Editor"]
+        let best = titles.compactMap { title in Fuzzy.score("need", title).map { (title, $0) } }.max { $0.1 < $1.1 }
+        XCTAssertEqual(best?.0, "Show Agents That Need You")
+        let files = ["src/snapper.ts", "src/app.ts", "docs/apple.md"]
+        let first = files.compactMap { path in Fuzzy.score("app", path).map { (path, $0) } }.max { $0.1 < $1.1 }
+        XCTAssertEqual(first?.0, "src/app.ts")
+    }
 }

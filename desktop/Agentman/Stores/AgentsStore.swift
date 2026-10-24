@@ -69,6 +69,8 @@ final class AgentsStore {
     var lightbox: Lightbox?
     /// The session being renamed in the sidebar, if one is.
     var renaming: String?
+    /// The command palette, over the main window.
+    var showPalette = false
     /// Unsent messages, by session, kept across launches.
     private(set) var drafts: [String: String] = (UserDefaults.standard.dictionary(forKey: "drafts") as? [String: String]) ?? [:]
 
