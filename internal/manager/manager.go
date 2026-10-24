@@ -43,6 +43,8 @@ type Config struct {
 	// ProcessTree reads the process table, to tell which agent is asking.
 	// Tests replace it.
 	ProcessTree func(context.Context) (*tmux.ProcessTree, error)
+	// Now is the clock schedules run on. Tests replace it.
+	Now func() time.Time
 }
 
 type Manager struct {
@@ -56,6 +58,8 @@ type Manager struct {
 	briefs       *briefStore
 	knowledge    *knowledge.Store
 	keys         *keyStore
+	schedules    *scheduleStore
+	now          func() time.Time
 
 	mu       sync.Mutex
 	settings protocol.ManagerSettings
@@ -68,6 +72,9 @@ type Manager struct {
 	// notes are what happened outside a reply, for the model to read with
 	// the user's next message. Guarded by mu.
 	notes []string
+	// wakeups are turns Agentman's own schedules started, waiting for the
+	// reply being written. Guarded by mu.
+	wakeups []wakeup
 
 	briefMu     sync.Mutex
 	briefDue    map[string]time.Time
@@ -106,6 +113,8 @@ func New(cfg Config) (*Manager, error) {
 		briefs:       loadBriefs(cfg.Dir),
 		knowledge:    cfg.Knowledge,
 		keys:         loadKeys(cfg.Dir),
+		schedules:    loadSchedules(cfg.Dir),
+		now:          cfg.Now,
 		settings:     loadSettings(filepath.Join(cfg.Dir, "settings.json")),
 		briefDue:     map[string]time.Time{},
 		lastBriefAt:  map[string]time.Time{},
@@ -119,6 +128,9 @@ func New(cfg Config) (*Manager, error) {
 	}
 	if m.processTree == nil {
 		m.processTree = tmux.SnapshotProcessTree
+	}
+	if m.now == nil {
+		m.now = time.Now
 	}
 	if m.knowledge == nil {
 		m.knowledge = knowledge.Open(filepath.Join(cfg.Dir, "knowledge"))
@@ -135,9 +147,11 @@ func New(cfg Config) (*Manager, error) {
 	return m, nil
 }
 
-// Run writes briefs and keeps the cards current until ctx ends.
+// Run writes briefs, keeps the cards current and fires what Agentman
+// scheduled until ctx ends.
 func (m *Manager) Run(ctx context.Context) {
 	go m.watchSessions(ctx)
+	go m.runSchedules(ctx)
 	m.runBriefs(ctx)
 }
 
@@ -150,7 +164,8 @@ func (m *Manager) Handles(kind protocol.RequestType) bool {
 		protocol.ReqKnowledgeList, protocol.ReqKnowledgeRead, protocol.ReqKnowledgeWrite, protocol.ReqKnowledgeDelete,
 		protocol.ReqKeysList, protocol.ReqKeySet, protocol.ReqKeyDelete,
 		protocol.ReqAgentKnowledgeSearch, protocol.ReqAgentKnowledgeRead, protocol.ReqAgentKeys,
-		protocol.ReqAgentRequestKey, protocol.ReqAgentTell:
+		protocol.ReqAgentRequestKey, protocol.ReqAgentTell,
+		protocol.ReqManagerSchedules, protocol.ReqManagerScheduleCancel:
 		return true
 	}
 	return false
@@ -198,6 +213,15 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 	case protocol.ReqAgentKnowledgeSearch, protocol.ReqAgentKnowledgeRead, protocol.ReqAgentKeys,
 		protocol.ReqAgentRequestKey, protocol.ReqAgentTell:
 		return m.handleAgent(ctx, req)
+	case protocol.ReqManagerSchedules:
+		return protocol.Event{Type: protocol.EvtManagerSchedules, Schedules: m.schedules.list()}
+	case protocol.ReqManagerScheduleCancel:
+		item, err := m.cancelSchedule(req.ScheduleID)
+		if err != nil {
+			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
+		}
+		m.note(fmt.Sprintf("The user cancelled your %s [%s]: %s", item.Kind, item.ID, scheduleLabel(item)))
+		return protocol.Event{Type: protocol.EvtManagerSchedules, Schedules: m.schedules.list()}
 	}
 	return protocol.Event{Type: protocol.EvtError, Error: "unknown manager request"}
 }
@@ -205,6 +229,7 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 // TurnComplete hears that an agent finished a turn.
 func (m *Manager) TurnComplete(session protocol.Session) {
 	m.scheduleBrief(session.ID, briefAfterTurn, briefTurnGap)
+	go m.watchEvent(session.ID, protocol.WatchTurnEnd, protocol.WatchIdle)
 }
 
 // NeedsAnswer hears that an agent is asking something. The daemon says so on
@@ -214,6 +239,7 @@ func (m *Manager) NeedsAnswer(session protocol.Session) {
 	if session.Question == nil {
 		return
 	}
+	go m.watchEvent(session.ID, protocol.WatchNeedsUser)
 	m.briefMu.Lock()
 	seen := m.asked[session.ID] == session.Question.ID
 	m.asked[session.ID] = session.Question.ID

@@ -30,6 +30,8 @@ func (m *Manager) runTurn(ctx context.Context, model Model, text string) {
 			m.stopTurn = nil
 		}
 		m.mu.Unlock()
+		// A reminder or watch that came due meanwhile takes its turn now.
+		m.startWakeup()
 	}()
 	m.setStatus("thinking", "")
 	settled := "idle"
@@ -78,7 +80,10 @@ func (m *Manager) runTurn(ctx context.Context, model Model, text string) {
 			m.addEntry(protocol.ManagerEntry{Role: "error", Text: "Couldn't save the conversation: " + err.Error()})
 			return
 		}
-		if final := strings.TrimSpace(replyText(reply)); final != "" {
+		if final := strings.TrimSpace(replyText(reply)); final == nothingToSay {
+			// A wake-up with nothing worth saying stays a quiet line.
+			m.addEntry(protocol.ManagerEntry{ID: entryID, Role: "activity", Text: "Nothing to report"})
+		} else if final != "" {
 			m.addEntry(protocol.ManagerEntry{ID: entryID, Role: "assistant", Text: final})
 		}
 

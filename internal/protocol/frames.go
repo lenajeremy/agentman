@@ -180,6 +180,8 @@ type Request struct {
 	ClientID string `json:"clientId,omitempty"`
 	// CardID names the card on ReqManagerCardReply and ReqManagerCardDismiss.
 	CardID string `json:"cardId,omitempty"`
+	// ScheduleID names the schedule on ReqManagerScheduleCancel.
+	ScheduleID string `json:"scheduleId,omitempty"`
 	// Note and Key are saved by ReqKnowledgeWrite and ReqKeySet.
 	Note *Note `json:"note,omitempty"`
 	Key  *Key  `json:"key,omitempty"`
@@ -319,6 +321,8 @@ type Event struct {
 	Notes []Note `json:"notes,omitempty"`
 	Note  *Note  `json:"note,omitempty"`
 	Keys  []Key  `json:"keys,omitempty"`
+	// Schedules answers ReqManagerSchedules.
+	Schedules []ManagerSchedule `json:"schedules,omitempty"`
 
 	Error string `json:"error,omitempty"`
 }

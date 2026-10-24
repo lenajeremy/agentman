@@ -28,6 +28,10 @@ const (
 	// agent. ReqManagerCardDismiss puts a card away unanswered.
 	ReqManagerCardReply   RequestType = "manager_card_reply"
 	ReqManagerCardDismiss RequestType = "manager_card_dismiss"
+	// ReqManagerSchedules lists what Agentman has scheduled for itself;
+	// ReqManagerScheduleCancel cancels the one named by ScheduleID.
+	ReqManagerSchedules      RequestType = "manager_schedules"
+	ReqManagerScheduleCancel RequestType = "manager_schedule_cancel"
 )
 
 const (
@@ -45,15 +49,63 @@ const (
 	// EvtManagerBrief is an agent's brief, new or updated; on
 	// ReqManagerBriefs, Briefs holds them all.
 	EvtManagerBrief EventType = "manager_brief"
+	// EvtManagerSchedules is everything Agentman has scheduled, in
+	// Schedules, whenever that changes.
+	EvtManagerSchedules EventType = "manager_schedules"
 )
+
+// Schedule kinds.
+const (
+	// ScheduleReminder wakes Agentman at a time, once or on a repeat, with
+	// a message it left itself.
+	ScheduleReminder = "reminder"
+	// ScheduleWatch wakes Agentman when an agent reaches a state, with
+	// what happened, or when it gives up waiting.
+	ScheduleWatch = "watch"
+)
+
+// What a watch waits for.
+const (
+	WatchTurnEnd   = "turn_end"
+	WatchNeedsUser = "needs_user"
+	WatchIdle      = "idle"
+	WatchEnded     = "ended"
+)
+
+// ManagerSchedule is something Agentman scheduled for itself: a reminder,
+// or a watch on an agent whose result comes back to it.
+type ManagerSchedule struct {
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	// Text is what Agentman will be told: the reminder it left itself, or
+	// why it is watching.
+	Text string `json:"text"`
+	// Due is when a reminder next fires, or when a watch gives up, in
+	// milliseconds.
+	Due int64 `json:"due"`
+	// Every is a repeating reminder's interval, in seconds.
+	Every int `json:"every,omitempty"`
+	// Times is how many times a repeat fires in all; Until is when it stops,
+	// in milliseconds. Fired is how many times it has.
+	Times int   `json:"times,omitempty"`
+	Until int64 `json:"until,omitempty"`
+	Fired int   `json:"fired,omitempty"`
+	// SessionID, AgentName and Until are a watch's agent and what it waits
+	// for.
+	SessionID string `json:"sessionId,omitempty"`
+	AgentName string `json:"agentName,omitempty"`
+	Condition string `json:"condition,omitempty"`
+	CreatedAt int64  `json:"createdAt"`
+}
 
 // ManagerEntry is one entry in the conversation with Agentman.
 type ManagerEntry struct {
 	ID string `json:"id"`
 	// Role is who it is from: "user", "assistant", "activity" (something
 	// Agentman did, such as reading an agent), "brief" (news from an agent),
-	// "agent" (an agent telling Agentman something, through am mcp), "card"
-	// or "error".
+	// "agent" (an agent telling Agentman something, through am mcp), "card",
+	// "scheduled" (one of Agentman's own reminders or watches waking it) or
+	// "error".
 	Role string `json:"role"`
 	Text string `json:"text"`
 	Ts   int64  `json:"ts"`

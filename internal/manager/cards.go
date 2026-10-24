@@ -364,6 +364,7 @@ func (m *Manager) reconcile(ctx context.Context, sessions []protocol.Session) {
 		m.lastState[s.ID] = s.State
 	}
 	m.cardMu.Unlock()
+	m.watchSessionList(sessions)
 
 	// An agent waiting on the user got going again: if the user wrote to it
 	// since the card went up, they have answered it themselves.
