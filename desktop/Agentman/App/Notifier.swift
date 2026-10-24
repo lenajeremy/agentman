@@ -56,6 +56,23 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    /// Tells the user an agent finished a turn, or is waiting on them.
+    func agent(title: String, body: String, sessionId: String, id: String) {
+        let content = UNMutableNotificationContent()
+        content.threadIdentifier = "agent-" + sessionId
+        content.sound = .default
+        content.title = title
+        content.body = String(Self.plain(body).prefix(400))
+        if let encoded = sessionId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) {
+            content.userInfo = ["link": "agentman://agent/\(encoded)"]
+        }
+        let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
+        Task {
+            guard await allowed() else { return }
+            try? await center.add(request)
+        }
+    }
+
     /// Takes back the notification for a card that no longer needs the user.
     func withdraw(_ card: ManagerCard) {
         center.removeDeliveredNotifications(withIdentifiers: [card.id])

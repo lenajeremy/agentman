@@ -14,7 +14,10 @@ struct AgentmanApp: App {
         Window("Agentman", id: "main") {
             ContentView()
                 .environment(store)
-                .task { store.start() }
+                .task {
+                    Appearance.apply(UserDefaults.standard.string(forKey: "appearance") ?? "system")
+                    store.start()
+                }
         }
         .defaultSize(width: 1180, height: 760)
         .windowToolbarStyle(.unified(showsTitle: true))

@@ -30,6 +30,8 @@ struct SettingsView: View {
                     SettingsPageView(title: "Permissions") { PermissionsPage(draft: $draft) }
                 case .personality:
                     SettingsPageView(title: "Personality") { PersonalityPage(draft: $draft) }
+                case .notifications:
+                    SettingsPageView(title: "Notifications") { NotificationsPage() }
                 case .knowledge:
                     KnowledgeSettings()
                 case .keys:
@@ -53,13 +55,14 @@ struct SettingsView: View {
 }
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general, permissions, personality, knowledge, keys
+    case general, notifications, permissions, personality, knowledge, keys
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .general: "General"
+        case .notifications: "Notifications"
         case .permissions: "Permissions"
         case .personality: "Personality"
         case .knowledge: "Knowledge"
@@ -70,6 +73,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: "gearshape"
+        case .notifications: "bell.badge"
         case .permissions: "checkmark.shield"
         case .personality: "text.bubble"
         case .knowledge: "book"
@@ -204,6 +208,8 @@ private struct GeneralPage: View {
             }
         }
 
+        AppearanceSection()
+
         if let binding = Binding($draft) {
             SettingsSection(title: "Models") {
                 SettingsRow(title: "Conversation", detail: "Answers you and acts on your agents.") {
@@ -229,6 +235,11 @@ private struct GeneralPage: View {
                 }
             }
         }
+        about
+    }
+
+    @ViewBuilder private var about: some View {
+        AboutSection()
     }
 
     private func modelPicker(_ selection: Binding<String>) -> some View {
@@ -381,5 +392,92 @@ private struct SaveBar: View {
         .padding(.vertical, 12)
         .background(.bar)
         .overlay(alignment: .top) { Divider() }
+    }
+}
+
+/// Light, dark, or as the Mac is set.
+private struct AppearanceSection: View {
+    @AppStorage("appearance") private var appearance = "system"
+
+    var body: some View {
+        SettingsSection(title: "Appearance") {
+            SettingsRow(title: "Look", divider: false) {
+                Picker("", selection: $appearance) {
+                    Text("Match the Mac").tag("system")
+                    Text("Light").tag("light")
+                    Text("Dark").tag("dark")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+            }
+        }
+        .onChange(of: appearance) { _, now in Appearance.apply(now) }
+    }
+}
+
+enum Appearance {
+    @MainActor static func apply(_ choice: String) {
+        switch choice {
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        default: NSApp.appearance = nil
+        }
+    }
+}
+
+/// Which app and which am serve, and whether a newer one is out.
+private struct AboutSection: View {
+    @Environment(AgentsStore.self) private var store
+    @State private var copied = false
+
+    var body: some View {
+        let app = Bundle.main.infoDictionary
+        let version = (app?["CFBundleShortVersionString"] as? String) ?? "?"
+        let build = (app?["CFBundleVersion"] as? String) ?? "?"
+        SettingsSection(title: "About") {
+            SettingsRow(title: "Agentman for Mac") {
+                Text("\(version) (\(build))").font(TextStyle.caption).foregroundStyle(Palette.muted)
+            }
+            SettingsRow(title: "am serve", detail: updateDetail, divider: false) {
+                HStack(spacing: 8) {
+                    Text(store.daemonInfo?.version ?? "Not connected")
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.muted)
+                    if let upgrade = store.daemonInfo?.upgrade, (store.daemonInfo?.behind ?? 0) > 0 {
+                        Button(copied ? "Copied" : "Copy upgrade command") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(upgrade, forType: .string)
+                            copied = true
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var updateDetail: String? {
+        guard let info = store.daemonInfo else { return nil }
+        if let latest = info.latest, (info.behind ?? 0) > 0 {
+            return "\(latest) is out. Run \(info.upgrade ?? "the upgrade") in a terminal."
+        }
+        return info.latest == nil ? nil : "Up to date."
+    }
+}
+
+/// When the Mac speaks up about agents.
+private struct NotificationsPage: View {
+    @AppStorage("notifyFinished") private var finished = true
+    @AppStorage("notifyNeedsYou") private var needsYou = true
+
+    var body: some View {
+        SettingsSection(title: "Agents", footer: "Never for the thread you're looking at. With an Anthropic key set, Agentman's cards tell you when an agent needs you instead.") {
+            SettingsRow(title: "An agent finishes", detail: "When it ends a turn, with what it said last.") {
+                Toggle("", isOn: $finished).toggleStyle(.switch).labelsHidden()
+            }
+            SettingsRow(title: "An agent needs you", detail: "When it waits on an approval or a question.", divider: false) {
+                Toggle("", isOn: $needsYou).toggleStyle(.switch).labelsHidden()
+            }
+        }
     }
 }

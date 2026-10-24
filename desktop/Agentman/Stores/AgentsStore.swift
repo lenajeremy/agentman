@@ -450,9 +450,22 @@ final class AgentsStore {
             if let info = event.daemon {
                 daemonInfo = info
             }
+        case "turn_complete":
+            guard let id = event.sessionId, Self.notifies("notifyFinished"), !looking(at: id) else { return }
+            let name = self.session(id)?.name ?? event.sessionName ?? "An agent"
+            notifier.agent(title: "\(name) finished", body: event.preview ?? "Its turn is done.",
+                           sessionId: id, id: "finished-\(id)-\(Date().timeIntervalSince1970)")
         case "session_update":
             guard let session = event.session else { return }
             if let index = sessions.firstIndex(where: { $0.id == session.id }) {
+                // Waiting on the user now, and not before: say so, unless
+                // Agentman's card already does.
+                let before = sessions[index]
+                if session.question != nil, before.question?.id != session.question?.id,
+                   Self.notifies("notifyNeedsYou"), manager.settings?.keySet != true, !looking(at: session.id) {
+                    notifier.agent(title: "\(session.name) needs you", body: session.question?.title ?? "It's waiting on you.",
+                                   sessionId: session.id, id: "needs-\(session.id)-\(session.question?.id ?? "")")
+                }
                 sessions[index] = session
             } else {
                 sessions.append(session)
@@ -561,6 +574,16 @@ final class AgentsStore {
     }
 
     // MARK: - Helpers
+
+    /// Whether the user is looking at that agent's thread right now.
+    private func looking(at sessionId: String) -> Bool {
+        appActive && selection == .agent(sessionId)
+    }
+
+    /// A notification setting, on unless the user switched it off.
+    nonisolated static func notifies(_ key: String) -> Bool {
+        UserDefaults.standard.object(forKey: key) as? Bool ?? true
+    }
 
     /// A conversation with new messages folded in, and those that were new.
     /// Live messages and history pages overlap, and both carry stable IDs. A
