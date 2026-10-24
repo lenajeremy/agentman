@@ -103,8 +103,24 @@ struct AgentThreadView: View {
             .frame(maxWidth: 820)
             .frame(maxWidth: .infinity)
         }
-        .navigationTitle(session.name)
+        // The title renames the session: click it, then Rename.
+        .navigationTitle(Binding(
+            get: { session.name },
+            set: { name in
+                let new = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !new.isEmpty, new != session.name else { return }
+                Task { await store.rename(session.id, to: new) }
+            }
+        ))
         .navigationSubtitle(subtitle)
+        .toolbarTitleMenu {
+            RenameButton()
+            if let own = session.originalName {
+                Button("Use the agent's own name, “\(own)”") {
+                    Task { await store.rename(session.id, to: "") }
+                }
+            }
+        }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 StateChip(state: session.state)

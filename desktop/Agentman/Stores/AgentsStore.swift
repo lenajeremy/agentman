@@ -47,6 +47,8 @@ final class AgentsStore {
     private var resignedAt: Date?
     /// An image open full window, over everything.
     var lightbox: Lightbox?
+    /// The session being renamed in the sidebar, if one is.
+    var renaming: String?
 
     private let client: DaemonClient
     private var cursors: [String: String] = [:]
@@ -188,6 +190,22 @@ final class AgentsStore {
         request.optionKeys = keys
         request.clientId = "mac-answer-\(UUID().uuidString)"
         return await perform(request, for: sessionId)
+    }
+
+    /// Gives a session a name of the user's, or its own back when name is
+    /// empty. Returns the problem, if any. Every app hears the new name.
+    @discardableResult
+    func rename(_ sessionId: String, to name: String) async -> String? {
+        var request = DaemonRequest(.renameSession, sessionId: sessionId)
+        request.text = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            let reply = try await client.request(request)
+            if reply.type == "error" { return reply.error ?? "Couldn't rename it." }
+            apply(reply)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
     }
 
     /// Has the agent read the messages it is holding now, rather than when

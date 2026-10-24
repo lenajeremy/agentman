@@ -486,7 +486,7 @@ private struct ManagerCardView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
                 AgentMark(kind: session?.kind ?? "", size: 18)
-                Text(card.agentName)
+                Text(session?.name ?? card.agentName)
                     .font(TextStyle.bodyMedium)
                     .foregroundStyle(Palette.text)
                 Circle().fill(Palette.needsYou).frame(width: 6, height: 6)
@@ -542,7 +542,7 @@ private struct ManagerCardView: View {
                 }
             } else {
                 HStack(alignment: .bottom, spacing: 8) {
-                    TextField("Reply to \(card.agentName)", text: $reply, axis: .vertical)
+                    TextField("Reply to \(store.session(card.sessionId)?.name ?? card.agentName)", text: $reply, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(TextStyle.body)
                         .lineLimit(1...5)
@@ -557,7 +557,7 @@ private struct ManagerCardView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busy)
-                    .help("Send to \(card.agentName)")
+                    .help("Send to \(store.session(card.sessionId)?.name ?? card.agentName)")
                 }
                 .padding(.leading, 12)
                 .padding(.trailing, 6)
@@ -612,7 +612,7 @@ private struct CardReceipt: View {
             Image(systemName: "checkmark")
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(Palette.ok)
-            Text("\(card.agentName) · \(card.outcome ?? "Answered")")
+            Text("\(store.session(card.sessionId)?.name ?? card.agentName) · \(card.outcome ?? "Answered")")
                 .lineLimit(1)
             if store.session(card.sessionId) != nil {
                 Button("Open") { store.selection = .agent(card.sessionId) }

@@ -16,6 +16,14 @@ struct Sidebar: View {
                     ForEach(group.sessions) { session in
                         AgentRow(session: session)
                             .tag(SidebarItem.agent(session.id))
+                            .contextMenu {
+                                Button("Rename…") { store.renaming = session.id }
+                                if let own = session.originalName {
+                                    Button("Use the agent's own name, “\(own)”") {
+                                        Task { await store.rename(session.id, to: "") }
+                                    }
+                                }
+                            }
                     }
                 } header: {
                     Text(group.name)
@@ -113,16 +121,22 @@ struct AgentmanBadge: View {
 }
 
 struct AgentRow: View {
+    @Environment(AgentsStore.self) private var store
     let session: Session
 
     var body: some View {
         HStack(spacing: 9) {
             AgentMark(kind: session.kind, size: 15)
             VStack(alignment: .leading, spacing: 1) {
-                Text(session.name)
-                    .font(Fonts.sans(13.5))
-                    .foregroundStyle(Palette.text)
-                    .lineLimit(1)
+                if store.renaming == session.id {
+                    RenameField(session: session)
+                } else {
+                    Text(session.name)
+                        .font(Fonts.sans(13.5))
+                        .foregroundStyle(Palette.text)
+                        .lineLimit(1)
+                        .help(session.originalName.map { "Renamed from “\($0)”" } ?? session.name)
+                }
                 Text(detail)
                     .font(Fonts.sans(11.5))
                     .foregroundStyle(session.state == .waitingInput ? Palette.needsYouText : Palette.muted)
@@ -210,5 +224,41 @@ enum Relative {
         case ..<86_400: return "\(seconds / 3600)h"
         default: return "\(seconds / 86_400)d"
         }
+    }
+}
+
+/// A session's name, being edited where it shows: Return keeps it, Escape
+/// or clicking away leaves it as it was.
+private struct RenameField: View {
+    @Environment(AgentsStore.self) private var store
+    let session: Session
+    @State private var name = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("Name", text: $name)
+            .textFieldStyle(.plain)
+            .font(Fonts.sans(13.5))
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Palette.working.opacity(0.6)))
+            .focused($focused)
+            .onSubmit(save)
+            .onExitCommand { store.renaming = nil }
+            .onChange(of: focused) { _, now in
+                if !now, store.renaming == session.id { store.renaming = nil }
+            }
+            .onAppear {
+                name = session.name
+                focused = true
+            }
+    }
+
+    private func save() {
+        let new = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        store.renaming = nil
+        guard new != session.name else { return }
+        Task { await store.rename(session.id, to: new) }
     }
 }

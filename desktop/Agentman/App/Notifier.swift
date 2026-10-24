@@ -26,7 +26,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         var link = "agentman://home/conversation"
         if let card = entry.card {
             identifier = card.id
-            content.title = "\(card.agentName) needs you"
+            content.title = "\(agentName ?? card.agentName) needs you"
             content.body = [card.title, card.detail].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
             if card.suggested != nil {
                 content.subtitle = "Agentman marked its pick for you to confirm"

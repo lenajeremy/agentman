@@ -47,6 +47,9 @@ struct ContentView: View {
             if let link = environment["AGENTMAN_OPEN"], let url = URL(string: link) {
                 open(url)
             }
+            if let session = environment["AGENTMAN_RENAMING"] {
+                store.renaming = session
+            }
             if let path = environment["AGENTMAN_LIGHTBOX"], let image = NSImage(contentsOfFile: path) {
                 store.lightbox = Lightbox(image: image, title: (path as NSString).lastPathComponent)
             }

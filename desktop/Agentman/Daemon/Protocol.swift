@@ -36,6 +36,7 @@ enum RequestType: String, Codable, Sendable {
     case sendQueued = "send_queued"
     case answerQuestion = "answer_question"
     case readSeenFile = "read_seen_file"
+    case renameSession = "rename_session"
     case managerSend = "manager_send"
     case managerHistory = "manager_history"
     case managerStop = "manager_stop"
@@ -326,7 +327,10 @@ enum SessionState: String, Codable, Sendable {
 struct Session: Codable, Sendable, Identifiable, Hashable {
     var id: String
     var kind: String
+    /// What it is called: the user's name for it when they gave one.
     var name: String
+    /// The agent's own name, when the user renamed it.
+    var originalName: String?
     var cwd: String
     var state: SessionState
     /// How the daemon can deliver a message: "tmux", "api", "hook" or "none".
