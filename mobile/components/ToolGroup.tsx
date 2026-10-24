@@ -107,10 +107,9 @@ const makeStyles = (c: Palette) =>
       borderRadius: 7,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: c.fill,
     },
     tileRunning: { backgroundColor: c.workingWash },
-    line: { flex: 1, fontFamily: font.sans, fontSize: size.label, color: c.text, lineHeight: 19 },
+    line: { flex: 1, fontFamily: font.sans, fontSize: size.caption, color: c.textSecondary, lineHeight: 19 },
     failed: { color: c.errorText },
     steps: { paddingLeft: space.lg, paddingTop: 2, gap: 2 },
   });

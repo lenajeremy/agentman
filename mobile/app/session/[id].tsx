@@ -1534,6 +1534,9 @@ function MessageRow({
   }
 
   if (message.role === "user") {
+    if (isCompactionSummary(message.text ?? "")) {
+      return <FoldedSummary text={message.text ?? ""} fresh={fresh} />;
+    }
     return (
       <SentMessage
         sessionId={message.sessionId}
@@ -1631,6 +1634,35 @@ function sentMessageActions(text: string, onCopied: () => void): MessageMenuItem
       onPress: () => void Share.share({ message: text }).catch(() => {}),
     },
   ];
+}
+
+/** The summary Claude Code writes when it compacts a conversation, which
+ *  arrives as a message from the user. */
+function isCompactionSummary(text: string): boolean {
+  return text.startsWith("This session is being continued from a previous conversation");
+}
+
+/** Claude's summary of a compacted conversation: one quiet line, opened to
+ *  read it. It is the agent's note to itself, not something the user said. */
+function FoldedSummary({ text, fresh }: { text: string; fresh: boolean }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const [open, setOpen] = useState(false);
+  return (
+    <Appear enabled={fresh}>
+      <Pressable
+        onPress={() => setOpen((value) => !value)}
+        style={styles.summaryHeader}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+      >
+        <Feather name="align-left" size={13} color={color.muted} />
+        <Text style={styles.summaryLabel}>Summary of the earlier conversation</Text>
+        <Feather name={open ? "chevron-down" : "chevron-right"} size={13} color={color.faint} />
+      </Pressable>
+      {open ? <Text style={styles.summaryText}>{text}</Text> : null}
+    </Appear>
+  );
 }
 
 function SentMessage({
@@ -1914,9 +1946,8 @@ const makeStyles = (c: Palette) =>
       color: c.onAccent,
     },
     title: {
-      fontFamily: font.monoMedium,
-      fontSize: 15,
-      letterSpacing: -0.4,
+      fontFamily: font.sansMedium,
+      fontSize: 16,
       color: c.text,
     },
     subtitleRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
@@ -2047,6 +2078,15 @@ const makeStyles = (c: Palette) =>
       fontSize: size.body,
       color: c.text,
       lineHeight: 21,
+    },
+    summaryHeader: { flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 4 },
+    summaryLabel: { fontFamily: font.sans, fontSize: size.caption, color: c.muted },
+    summaryText: {
+      fontFamily: font.sans,
+      fontSize: size.caption,
+      lineHeight: 19,
+      color: c.muted,
+      marginTop: 6,
     },
     // The message in the list while its lifted copy is showing.
     heldSource: { opacity: 0 },

@@ -14,8 +14,6 @@
     "announce:ios": "node scripts/announce.mjs"
   },
   "dependencies": {
-    "@expo-google-fonts/geist": "^0.4.2",
-    "@expo-google-fonts/geist-mono": "^0.4.3",
     "@expo/vector-icons": "^15.1.1",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.27",

@@ -466,13 +466,14 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: space.xs,
     },
 
+    // No ground of its own: the icon says what kind of step it was, and a
+    // tile behind every one made a run of steps read as a stack of buttons.
     tile: {
       width: TILE,
       height: TILE,
       borderRadius: 7,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: c.fill,
     },
     tileRunning: { backgroundColor: c.workingWash },
     tileFailed: { backgroundColor: c.errorWash },

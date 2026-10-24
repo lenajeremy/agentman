@@ -113,8 +113,8 @@ const dark: Palette = {
 export const palettes: Record<"light" | "dark", Palette> = { light, dark };
 
 /**
- * Geist for everything a person wrote or reads as interface; Geist Mono for
- * machine-authored text. Paths, session ids, shell commands and agent names
+ * Google Sans for everything a person wrote or reads as interface; Google
+ * Sans Code for machine-authored text, as on the Mac. Paths, session ids, shell commands and agent names
  * are strings a program produced, and setting them in mono says so at a
  * glance.
  *
@@ -122,13 +122,13 @@ export const palettes: Record<"light" | "dark", Palette> = { light, dark };
  * fontStyle: "italic", so emphasis set that way rendered upright.
  */
 export const font = {
-  sans: "Geist_400Regular",
-  sansItalic: "Geist_400Regular_Italic",
-  sansMedium: "Geist_500Medium",
-  sansBold: "Geist_600SemiBold",
-  sansBoldItalic: "Geist_600SemiBold_Italic",
-  mono: "GeistMono_400Regular",
-  monoMedium: "GeistMono_500Medium",
+  sans: "GoogleSans-Regular",
+  sansItalic: "GoogleSans-Italic",
+  sansMedium: "GoogleSans-Medium",
+  sansBold: "GoogleSans-SemiBold",
+  sansBoldItalic: "GoogleSans-SemiBoldItalic",
+  mono: "GoogleSansCode-Regular",
+  monoMedium: "GoogleSansCode-Medium",
 } as const;
 
 export const size = {

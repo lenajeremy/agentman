@@ -33,11 +33,11 @@ import {
   font,
   Palette,
   radius,
-  shortPath,
   size,
   space,
   stateStyle,
 } from "../lib/theme";
+import { folderName, modelLabel } from "../lib/session-view";
 
 /** The states a chip can narrow the list to. */
 type StateFilter = Session["state"];
@@ -208,7 +208,7 @@ export default function Agents() {
             </View>
           </ContentColumn>
         )}
-        renderItem={({ item: session }) => (
+        renderItem={({ item: session, index, section }) => (
           <ContentColumn style={styles.gutter}>
             <SwipeToDismiss
               enabled={canDismiss(session)}
@@ -218,7 +218,11 @@ export default function Agents() {
               }}
               accessibilityLabel={`${session.name}, ${stateStyle(effectiveSessionState(session), color).label}`}
             >
-              <AgentRow session={session} />
+              <AgentRow
+                session={session}
+                first={index === 0}
+                last={index === section.data.length - 1}
+              />
             </SwipeToDismiss>
           </ContentColumn>
         )}
@@ -355,7 +359,16 @@ function groupByState(
     .sort((a, b) => a.rank - b.rank);
 }
 
-function AgentRow({ session }: { session: Session }) {
+function AgentRow({
+  session,
+  first = true,
+  last = true,
+}: {
+  session: Session;
+  /** Where the row sits in its section: a section reads as one card. */
+  first?: boolean;
+  last?: boolean;
+}) {
   const store = useStore();
   const router = useRouter();
   const styles = useStyles(makeStyles);
@@ -413,7 +426,14 @@ function AgentRow({ session }: { session: Session }) {
   return (
     <MotionPressable
       onPress={open}
-      style={[styles.card, styles.row, needsYou && styles.rowNeedsYou, ended && styles.rowEnded]}
+      style={[
+        styles.groupRow,
+        first && styles.groupFirst,
+        last ? styles.groupLast : styles.groupDivider,
+        styles.row,
+        needsYou && styles.rowNeedsYou,
+        ended && styles.rowEnded,
+      ]}
       pressedScale={0.985}
       accessibilityRole="button"
       accessibilityLabel={`${session.name}, ${stateStyle(displayState, color).label}`}
@@ -429,7 +449,7 @@ function AgentRow({ session }: { session: Session }) {
           ended && styles.avatarEnded,
         ]}
       >
-        <AgentIcon kind={session.kind} size={22} />
+        <AgentIcon kind={session.kind} size={20} />
         {displayState !== "idle" && displayState !== "ended" ? (
           <View style={styles.avatarPulse}>
             <Pulse state={displayState} size={7} />
@@ -438,8 +458,8 @@ function AgentRow({ session }: { session: Session }) {
       </View>
       <View style={styles.rowBody}>
         <View style={styles.rowTop}>
-          {/* Session names are machine-generated, so they are set in mono —
-              the same signal used for paths, ids, and commands. */}
+          {/* A name people read, and often gave: set like the rest of what a
+              person reads, not like a path. */}
           <Text
             style={[styles.name, ended && styles.nameEnded]}
             numberOfLines={1}
@@ -460,22 +480,16 @@ function AgentRow({ session }: { session: Session }) {
               is the fact that does vary once a folder holds five CLIs. */}
           {store.folderFilter ? (
             <Text style={styles.meta} numberOfLines={1}>
-              {session.model ? `${agent.name} · ${session.model}` : agent.name}
+              {session.model ? `${agent.name} · ${modelLabel(session.model)}` : agent.name}
             </Text>
           ) : (
-            <>
-              <Text style={styles.meta} numberOfLines={1}>
-                {session.model ?? agent.name}
-                {" · "}
-              </Text>
-              <Text
-                style={[styles.meta, styles.metaPath]}
-                numberOfLines={1}
-                ellipsizeMode="head"
-              >
-                {shortPath(session.cwd)}
-              </Text>
-            </>
+            <Text style={styles.meta} numberOfLines={1}>
+              {session.model ? modelLabel(session.model) : agent.name}
+              {" · "}
+              {/* The project, by its folder's name: the part of a path that
+                  says which one this is. */}
+              {folderName(session.cwd)}
+            </Text>
           )}
         </View>
         {session.servers?.length ? (
@@ -579,7 +593,9 @@ function FilterBar({
       keyboardShouldPersistTaps="handled"
     >
       <FolderFilter />
-      {chips.map((chip) => {
+      {chips
+        .filter((chip) => chip.value > 0 || store.stateFilter === chip.key)
+        .map((chip) => {
         const on = store.stateFilter === chip.key;
         return (
           <MotionPressable
@@ -882,7 +898,7 @@ const makeStyles = (c: Palette) =>
     },
     askName: {
       flex: 1,
-      fontFamily: font.mono,
+      fontFamily: font.sansMedium,
       fontSize: size.caption,
       color: c.textSecondary,
     },
@@ -895,9 +911,30 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: 14,
     },
     rowNeedsYou: { borderColor: c.needsYouEdge },
+    groupRow: {
+      backgroundColor: c.surface,
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderColor: c.line,
+    },
+    groupFirst: {
+      borderTopWidth: 1,
+      borderTopLeftRadius: radius.xl,
+      borderTopRightRadius: radius.xl,
+    },
+    groupLast: {
+      borderBottomWidth: 1,
+      borderBottomLeftRadius: radius.xl,
+      borderBottomRightRadius: radius.xl,
+      marginBottom: ROW_GAP,
+    },
+    groupDivider: {
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.line,
+    },
     avatar: {
-      width: 40,
-      height: 40,
+      width: 36,
+      height: 36,
       borderRadius: radius.md,
       alignItems: "center",
       justifyContent: "center",
@@ -914,8 +951,8 @@ const makeStyles = (c: Palette) =>
     rowTop: { flexDirection: "row", alignItems: "baseline", gap: space.sm },
     name: {
       flex: 1,
-      fontFamily: font.monoMedium,
-      fontSize: 14.5,
+      fontFamily: font.sansMedium,
+      fontSize: size.body,
       color: c.text,
     },
     age: { fontFamily: font.sans, fontSize: size.label, color: c.faint },
@@ -923,7 +960,7 @@ const makeStyles = (c: Palette) =>
     // The model holds its width and the path gives way from its front: a
     // path's last segment is the one that says which project this is.
     metaPath: { flexShrink: 1 },
-    meta: { fontFamily: font.mono, fontSize: 12, color: c.muted },
+    meta: { fontFamily: font.sans, fontSize: size.caption, color: c.muted },
     needsYouNote: {
       fontFamily: font.sansMedium,
       fontSize: size.caption,

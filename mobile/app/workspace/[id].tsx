@@ -407,7 +407,7 @@ export default function WorkspaceScreen() {
                   <View style={styles.searchField}>
                     {/* The native placeholder rendered in the wrong face — tracked
                         out, as though it had fallen back to the mono font — while
-                        every other Text in the app resolved Geist correctly. Drawing
+                        every other Text in the app resolved the app font correctly. Drawing
                         it as a Text makes it match the rest by construction. */}
                     {filter.length === 0 ? (
                       <Text
