@@ -165,7 +165,7 @@ func Attach(name string) error {
 	if err != nil {
 		return ErrNotInstalled
 	}
-	args := append([]string{"tmux"}, socketArgs()...)
+	args := append([]string{"tmux"}, globalArgs()...)
 	args = append(args, "attach-session", "-t", name)
 	return syscallExec(binary, args, os.Environ())
 }
@@ -468,13 +468,19 @@ func (p *ProcessTree) OwnsPID(panePID, pid int) bool {
 // only ever reach the named socket. See tmuxtest.Isolate.
 const SocketEnv = "AGENTMAN_TMUX_SOCKET"
 
-// socketArgs are the global flags that pin a command to SocketEnv's server,
-// or nothing when it is unset.
-func socketArgs() []string {
+// globalArgs are the flags every tmux command this package runs carries.
+//
+// -u makes tmux write UTF-8 whatever the locale. Without it, a daemon started
+// with no LANG (by launchd, systemd or brew services) gets every tab in a
+// format string back as "_": session listings then split into one field,
+// every pane is skipped, and no agent can be typed into, all without an
+// error. -S pins the command to SocketEnv's server when that is set.
+func globalArgs() []string {
+	args := []string{"-u"}
 	if socket := os.Getenv(SocketEnv); socket != "" {
-		return []string{"-S", socket}
+		args = append(args, "-S", socket)
 	}
-	return nil
+	return args
 }
 
 func run(ctx context.Context, args ...string) (string, error) {
@@ -501,7 +507,7 @@ func run(ctx context.Context, args ...string) (string, error) {
 func runOutput(ctx context.Context, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "tmux", append(socketArgs(), args...)...).Output()
+	out, err := exec.CommandContext(ctx, "tmux", append(globalArgs(), args...)...).Output()
 	return string(out), err
 }
 
