@@ -25,4 +25,30 @@ extension AgentsStore {
         guard let result = reply.workspace else { throw WorkspaceError(message: "That couldn't be read.") }
         return result
     }
+
+    /// The documents a session's agent wrote, newest first.
+    func artifacts(_ session: String) async throws -> [Artifact] {
+        let reply = try await client.request(DaemonRequest(.listArtifacts, sessionId: session))
+        if reply.type == "error" { throw WorkspaceError(message: reply.error ?? "They couldn't be listed.") }
+        return (reply.artifacts ?? []).sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// Approves a document, or asks for changes to it, with a comment.
+    /// Returns the problem, if any.
+    func review(_ session: String, artifact: String, approve: Bool, comment: String) async -> String? {
+        var request = DaemonRequest(.reviewArtifact, sessionId: session)
+        request.path = artifact
+        request.approve = approve
+        request.text = comment
+        request.clientId = "mac-review-\(UUID().uuidString)"
+        do {
+            let reply = try await client.request(request)
+            if reply.type == "error" || reply.status == .failed {
+                return (reply.error ?? "It couldn't be sent.").replacingOccurrences(of: "^(daemon|source): ", with: "", options: .regularExpression)
+            }
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
 }

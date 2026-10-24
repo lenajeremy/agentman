@@ -22,6 +22,16 @@ struct AgentThreadView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let waiting = session.artifactsToReview, waiting > 0 {
+                ReviewBar(count: waiting, agent: AgentName.of(session.kind)) {
+                    filesTab = .plans
+                    showFiles = true
+                }
+                .padding(.horizontal, 36)
+                .padding(.top, 10)
+                .frame(maxWidth: 820)
+                .frame(maxWidth: .infinity)
+            }
             if changed > 0 {
                 ChangedBar(count: changed) {
                     filesTab = .changes
@@ -374,6 +384,36 @@ private struct ResumeBar: View {
         .padding(14)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.line))
+    }
+}
+
+/// A plan waiting for the user's review, over the thread.
+private struct ReviewBar: View {
+    let count: Int
+    let agent: String
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 8) {
+                Image(systemName: "list.bullet.clipboard")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.needsYouText)
+                Text(count == 1 ? "\(agent) wants you to review a plan" : "\(agent) wants you to review \(count) documents")
+                    .font(TextStyle.captionMedium)
+                    .foregroundStyle(Palette.text)
+                Spacer()
+                Text("Review")
+                    .font(TextStyle.captionMedium)
+                    .foregroundStyle(Palette.needsYouText)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Palette.needsYouWash, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.needsYouEdge))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

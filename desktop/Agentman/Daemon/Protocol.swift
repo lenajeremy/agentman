@@ -52,6 +52,9 @@ enum RequestType: String, Codable, Sendable {
     case directorySessions = "directory_sessions"
     case resumeSession = "resume_session"
     case endSession = "end_session"
+    case listArtifacts = "list_artifacts"
+    case readArtifact = "read_artifact"
+    case reviewArtifact = "review_artifact"
     case toolsTitle = "tools_title"
     case managerSend = "manager_send"
     case managerHistory = "manager_history"
@@ -102,6 +105,8 @@ struct DaemonRequest: Codable, Sendable {
     var commit: String?
     /// The branch list_commits reads; absent for the one checked out.
     var ref: String?
+    /// Which way a review_artifact goes: approved, or changes asked for.
+    var approve: Bool?
 
     init(_ type: RequestType, sessionId: String? = nil) {
         self.type = type
@@ -125,6 +130,8 @@ struct DaemonEvent: Codable, Sendable {
     var sessions: [Session]?
     /// Folders agents have run in, on "folders".
     var folders: [Folder]?
+    /// The documents a session's agent wrote, on "artifacts".
+    var artifacts: [Artifact]?
     var session: Session?
     var messages: [Message]?
     var page: Page?
@@ -231,6 +238,22 @@ struct WorkspaceResult: Codable, Sendable {
     var branch: String?
     var commit: WorkspaceCommit?
     var branches: [WorkspaceBranch]?
+}
+
+/// A document an agent wrote for the user: a plan, a task list, a
+/// walkthrough, a screenshot.
+struct Artifact: Codable, Sendable, Hashable, Identifiable {
+    var name: String
+    /// "plan", "task", "walkthrough", "spec", "image", "video" or "file".
+    var kind: String
+    var title: String?
+    var summary: String?
+    var updatedAt: Int64
+    var size: Int64
+    var mime: String?
+    /// The agent asked the user to approve it.
+    var review: Bool?
+    var id: String { name }
 }
 
 /// A folder agents have run in, with how many there and how many running.
@@ -433,6 +456,10 @@ struct Session: Codable, Sendable, Identifiable, Hashable {
     /// What a model switch touches: "session" alone, or the "default" for
     /// new sessions too, which is confirmed first. Absent: no switching.
     var modelScope: String?
+    /// How many documents the agent wrote for the user, and how many of
+    /// them wait for their review.
+    var artifacts: Int?
+    var artifactsToReview: Int?
     var contextPercent: Int?
     var question: Question?
     var queued: [String]?
@@ -441,7 +468,8 @@ struct Session: Codable, Sendable, Identifiable, Hashable {
         lhs.id == rhs.id && lhs.state == rhs.state && lhs.name == rhs.name &&
             lhs.lastActivityAt == rhs.lastActivityAt && lhs.question?.id == rhs.question?.id &&
             lhs.model == rhs.model && lhs.queued == rhs.queued && lhs.mode == rhs.mode &&
-            lhs.modes == rhs.modes && lhs.models == rhs.models && lhs.originalName == rhs.originalName
+            lhs.modes == rhs.modes && lhs.models == rhs.models && lhs.originalName == rhs.originalName &&
+            lhs.artifacts == rhs.artifacts && lhs.artifactsToReview == rhs.artifactsToReview
     }
 
     func hash(into hasher: inout Hasher) { hasher.combine(id) }

@@ -19,7 +19,9 @@ struct WorkspacePanel: View {
                     .id(route)
             } else {
                 Picker("", selection: $tab) {
-                    ForEach(WorkspaceTab.allCases) { Text($0.title).tag($0) }
+                    ForEach(WorkspaceTab.allCases.filter { $0 != .plans || (session.artifacts ?? 0) > 0 || tab == .plans }) {
+                        Text($0.title).tag($0)
+                    }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -30,6 +32,7 @@ struct WorkspacePanel: View {
                 case .changes: ChangesList(session: session, open: push)
                 case .files: FileList(session: session, path: "", open: push)
                 case .history: HistoryList(session: session, open: push)
+                case .plans: ArtifactList(session: session, open: push)
                 }
             }
         }
@@ -83,29 +86,33 @@ struct WorkspacePanel: View {
             CommitFiles(session: session, commit: commit, open: push)
         case .commitDiff(let hash, let path):
             DiffLoader(session: session, path: path, commit: hash)
+        case .artifact(let artifact):
+            ArtifactView(session: session, artifact: artifact)
         }
     }
 }
 
 enum WorkspaceTab: String, CaseIterable, Identifiable {
-    case changes, files, history
+    case changes, files, history, plans
     var id: String { rawValue }
     var title: String {
         switch self {
         case .changes: "Changes"
         case .files: "Files"
         case .history: "History"
+        case .plans: "Plans"
         }
     }
 }
 
 enum WorkspaceRoute: Hashable {
-    case diff(String), file(String), folder(String), commit(WorkspaceCommit), commitDiff(String, String)
+    case diff(String), file(String), folder(String), commit(WorkspaceCommit), commitDiff(String, String), artifact(Artifact)
 
     var title: String {
         switch self {
         case .diff(let path), .file(let path), .folder(let path), .commitDiff(_, let path): path
         case .commit(let commit): commit.subject
+        case .artifact(let artifact): artifact.title ?? artifact.name
         }
     }
 }
@@ -704,5 +711,150 @@ private struct FileBar: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
+    }
+}
+
+// MARK: - Plans
+
+private struct ArtifactList: View {
+    @Environment(AgentsStore.self) private var store
+    let session: Session
+    let open: (WorkspaceRoute) -> Void
+
+    var body: some View {
+        Loaded(load: { try await store.artifacts(session.id) }) { artifacts in
+            if artifacts.isEmpty {
+                EmptyNote(text: "This agent hasn't written any plans or documents.")
+            } else {
+                List(artifacts) { artifact in
+                    Button { open(.artifact(artifact)) } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: Self.symbol(artifact.kind))
+                                .font(.system(size: 13))
+                                .foregroundStyle(Palette.working)
+                                .frame(width: 18)
+                                .padding(.top, 1)
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    Text(artifact.title ?? artifact.name)
+                                        .font(TextStyle.captionMedium)
+                                        .foregroundStyle(Palette.text)
+                                        .lineLimit(1)
+                                    if artifact.review == true {
+                                        Text("Needs your review")
+                                            .font(TextStyle.caption)
+                                            .foregroundStyle(Palette.needsYouText)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 1)
+                                            .background(Palette.needsYouWash, in: Capsule())
+                                    }
+                                }
+                                if let summary = artifact.summary, !summary.isEmpty {
+                                    Text(summary)
+                                        .font(TextStyle.caption)
+                                        .foregroundStyle(Palette.muted)
+                                        .lineLimit(2)
+                                }
+                                Text(Date(timeIntervalSince1970: TimeInterval(artifact.updatedAt) / 1000), style: .relative)
+                                    .font(TextStyle.caption)
+                                    .foregroundStyle(Palette.faint)
+                            }
+                        }
+                        .padding(.vertical, 5)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+            }
+        }
+    }
+
+    static func symbol(_ kind: String) -> String {
+        switch kind {
+        case "plan": "list.bullet.clipboard"
+        case "task": "checklist"
+        case "walkthrough": "figure.walk"
+        case "spec": "doc.richtext"
+        case "image": "photo"
+        case "video": "film"
+        default: "doc"
+        }
+    }
+}
+
+/// A plan or document as it reads, with Approve and Ask for changes when
+/// the agent asked for the user's review.
+private struct ArtifactView: View {
+    @Environment(AgentsStore.self) private var store
+    let session: Session
+    let artifact: Artifact
+    @State private var comment = ""
+    @State private var busy = false
+    @State private var outcome: String?
+    @State private var problem: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Loaded(load: { try await store.workspace(.readArtifact, session: session.id, path: artifact.name) }) { result in
+                if let image = result.image, let data = Data(base64Encoded: image), let picture = NSImage(data: data) {
+                    ScrollView {
+                        Image(nsImage: picture).resizable().scaledToFit().padding(16)
+                    }
+                } else {
+                    ScrollView {
+                        MarkdownView(result.text ?? "")
+                            .textSelection(.enabled)
+                            .padding(20)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            if artifact.review == true {
+                Divider()
+                review
+            }
+        }
+    }
+
+    private var review: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let outcome {
+                Label(outcome, systemImage: "checkmark.circle")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.ok)
+            } else {
+                Text("\(AgentName.of(session.kind)) asked for your review")
+                    .font(TextStyle.captionMedium)
+                    .foregroundStyle(Palette.textSecondary)
+                TextField("What should change? (for Ask for changes)", text: $comment, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1...4)
+                    .font(TextStyle.caption)
+                HStack {
+                    if let problem {
+                        Text(problem).font(TextStyle.caption).foregroundStyle(Palette.errorText)
+                    }
+                    Spacer()
+                    Button("Ask for changes") { send(approve: false) }
+                        .disabled(busy || comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Approve") { send(approve: true) }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(busy)
+                }
+            }
+        }
+        .padding(14)
+    }
+
+    private func send(approve: Bool) {
+        busy = true
+        problem = nil
+        Task {
+            problem = await store.review(session.id, artifact: artifact.name, approve: approve, comment: comment)
+            busy = false
+            if problem == nil { outcome = approve ? "Approved" : "Sent your changes" }
+        }
     }
 }

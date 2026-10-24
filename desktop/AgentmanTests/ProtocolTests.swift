@@ -94,4 +94,11 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(card.note?.tier, "shared")
         XCTAssertTrue(card.isOpen)
     }
+
+    func testAnAgentsDocumentsDecode() throws {
+        let json = #"{"type":"artifacts","sessionId":"antigravity:a","artifacts":[{"name":"implementation_plan.md","kind":"plan","title":"Plan","summary":"Add a login page","updatedAt":1792000000000,"size":2048,"review":true}]}"#
+        let event = try JSONDecoder().decode(DaemonEvent.self, from: Data(json.utf8))
+        XCTAssertEqual(event.artifacts?.first?.kind, "plan")
+        XCTAssertEqual(event.artifacts?.first?.review, true)
+    }
 }
