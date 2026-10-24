@@ -98,6 +98,7 @@ struct AgentThreadView: View {
                 Composer(
                     text: $draft,
                     attachments: session.canReceive ? $attachments : nil,
+                    session: session,
                     placeholder: placeholder,
                     enabled: session.canReceive && !sending && session.question == nil,
                     onDropTargeted: { dropping = $0 },
@@ -262,6 +263,39 @@ private struct ThreadTitle: View {
         editing = false
         guard !new.isEmpty, new != session.name else { return }
         Task { await store.rename(session.id, to: new) }
+    }
+}
+
+/// What a step ran and what came of it: its command, then its output, in a
+/// box that scrolls when long.
+private struct StepDetail: View {
+    let command: String?
+    let output: String?
+    var failed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let command, !command.isEmpty {
+                Text(command)
+                    .font(Fonts.mono(11.5))
+                    .foregroundStyle(Palette.textSecondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let output = output?.trimmingCharacters(in: .whitespacesAndNewlines), !output.isEmpty, output != "[image]" {
+                ScrollView {
+                    Text(output)
+                        .font(Fonts.mono(11))
+                        .foregroundStyle(failed ? Palette.errorText : Palette.muted)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                }
+                .frame(maxHeight: 220)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(Palette.fill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+        }
     }
 }
 
@@ -597,12 +631,8 @@ private struct ToolCallRow: View {
                 }
                 .buttonStyle(.plain)
                 .help(showRaw ? "Hide the command" : "Show the command")
-                if showRaw, let raw = call.tool?.summary, !raw.isEmpty {
-                    Text(raw)
-                        .font(Fonts.mono(11.5))
-                        .foregroundStyle(Palette.muted)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+                if showRaw {
+                    StepDetail(command: call.tool?.summary, output: call.text, failed: call.tool?.status == "error")
                         .padding(.leading, 19)
                 }
             }
@@ -789,25 +819,49 @@ private struct QueuedBubble: View {
 /// line; it grows to ten lines. With attachments, images can be attached
 /// with the button, pasted or dropped, and wait above the words until sent.
 struct Composer: View {
+    @Environment(AgentsStore.self) private var store
     @Binding var text: String
     /// Nil for an agent that can't be messaged, so nothing offers images.
     var attachments: Binding<[Attachment]>?
+    /// The agent being written to, for its mode and model.
+    var session: Session? = nil
     var placeholder: String
     var enabled: Bool
     var onDropTargeted: ((Bool) -> Void)? = nil
     var onSend: () -> Void
     @State private var focused = false
+    @State private var confirming: String?
 
     private var canSend: Bool {
         enabled && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !(attachments?.wrappedValue.isEmpty ?? true))
     }
 
+    /// What the agent can be switched to, when it offers anything. A model
+    /// only with a scope: the agent has to say what a switch touches.
+    private var modes: [String] { session?.modes ?? [] }
+    private var models: [String] { session?.modelScope == nil ? [] : (session?.models ?? []) }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             if let attachments, !attachments.wrappedValue.isEmpty {
                 AttachmentStrip(attachments: attachments)
+                    .padding(.leading, 4)
             }
-            HStack(alignment: .bottom, spacing: 10) {
+            MessageField(
+                text: $text,
+                placeholder: placeholder,
+                enabled: enabled,
+                focused: $focused,
+                onSubmit: { if canSend { onSend() } },
+                onImages: attachments == nil ? nil : { add($0) },
+                onDropTargeted: onDropTargeted
+            )
+            .opacity(enabled ? 1 : 0.6)
+            .padding(.horizontal, 6)
+            .padding(.top, 4)
+            // The things to do with a message, under it: attach on the left,
+            // what the agent runs as, then send on the right.
+            HStack(spacing: 6) {
                 if let attachments {
                     Button(action: attach) {
                         Image(systemName: "plus")
@@ -820,29 +874,86 @@ struct Composer: View {
                     .disabled(!enabled || attachments.wrappedValue.count >= Attachments.maxCount)
                     .help("Attach images (or paste or drop them)")
                 }
-                MessageField(
-                    text: $text,
-                    placeholder: placeholder,
-                    enabled: enabled,
-                    focused: $focused,
-                    onSubmit: { if canSend { onSend() } },
-                    onImages: attachments == nil ? nil : { add($0) },
-                    onDropTargeted: onDropTargeted
-                )
-                .opacity(enabled ? 1 : 0.6)
-                .padding(.vertical, 6)
+                if !modes.isEmpty, let session {
+                    switchMenu(values: modes, current: session.mode, label: SessionLabels.mode, help: "Switch the agent's mode") { value in
+                        Task { await apply(model: false, value) }
+                    }
+                }
+                Spacer(minLength: 8)
+                if !models.isEmpty, let session {
+                    switchMenu(values: models, current: session.model, label: SessionLabels.model, help: "Switch the agent's model") { value in
+                        if session.modelScope == "default" {
+                            confirming = value
+                        } else {
+                            Task { await apply(model: true, value) }
+                        }
+                    }
+                }
                 sendButton
             }
         }
-        .padding(.leading, attachments == nil ? 16 : 10)
-        .padding(.trailing, 8)
+        .padding(.horizontal, 8)
         .padding(.vertical, 8)
+        .confirmationDialog(
+            confirming.map { "Switch to \(SessionLabels.model($0))?" } ?? "",
+            isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } })
+        ) {
+            Button("Switch") {
+                if let value = confirming { Task { await apply(model: true, value) } }
+                confirming = nil
+            }
+            Button("Cancel", role: .cancel) { confirming = nil }
+        } message: {
+            if let value = confirming, let session {
+                Text("\(SessionLabels.model(value)) also becomes the default model for new \(AgentName.of(session.kind)) sessions on your Mac.")
+            }
+        }
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(focused ? Palette.fillStrong : Palette.line, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+    }
+
+    private func switchMenu(values: [String], current: String?, label: @escaping (String) -> String,
+                            help: String, choose: @escaping (String) -> Void) -> some View {
+        Menu {
+            ForEach(values, id: \.self) { value in
+                Button {
+                    if value != current { choose(value) }
+                } label: {
+                    if value == current {
+                        Label(label(value), systemImage: "checkmark")
+                    } else {
+                        Text(label(value))
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(current.map(label) ?? "Choose")
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .font(TextStyle.caption)
+            .foregroundStyle(Palette.textSecondary)
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(Palette.fill, in: Capsule())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(!enabled)
+        .help(help)
+    }
+
+    private func apply(model: Bool, _ value: String) async {
+        guard let session else { return }
+        let problem = await store.switchSession(session.id, model: model, to: value)
+        store.actionError[session.id] = problem
     }
 
     private func add(_ found: [Attachment]) {

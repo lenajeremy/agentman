@@ -37,6 +37,8 @@ enum RequestType: String, Codable, Sendable {
     case answerQuestion = "answer_question"
     case readSeenFile = "read_seen_file"
     case renameSession = "rename_session"
+    case setMode = "set_mode"
+    case setModel = "set_model"
     case toolsTitle = "tools_title"
     case managerSend = "manager_send"
     case managerHistory = "manager_history"
@@ -344,6 +346,12 @@ struct Session: Codable, Sendable, Identifiable, Hashable {
     var lastActivityAt: Int64?
     var model: String?
     var mode: String?
+    /// The modes and models it can be switched to, in the agent's own names.
+    var modes: [String]?
+    var models: [String]?
+    /// What a model switch touches: "session" alone, or the "default" for
+    /// new sessions too, which is confirmed first. Absent: no switching.
+    var modelScope: String?
     var contextPercent: Int?
     var question: Question?
     var queued: [String]?
@@ -351,7 +359,8 @@ struct Session: Codable, Sendable, Identifiable, Hashable {
     static func == (lhs: Session, rhs: Session) -> Bool {
         lhs.id == rhs.id && lhs.state == rhs.state && lhs.name == rhs.name &&
             lhs.lastActivityAt == rhs.lastActivityAt && lhs.question?.id == rhs.question?.id &&
-            lhs.model == rhs.model && lhs.queued == rhs.queued
+            lhs.model == rhs.model && lhs.queued == rhs.queued && lhs.mode == rhs.mode &&
+            lhs.modes == rhs.modes && lhs.models == rhs.models && lhs.originalName == rhs.originalName
     }
 
     func hash(into hasher: inout Hasher) { hasher.combine(id) }

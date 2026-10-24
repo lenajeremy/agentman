@@ -220,6 +220,26 @@ final class AgentsStore {
         "\(calls.first?.id ?? "")|\(calls.last?.id ?? "")|\(calls.count)"
     }
 
+    /// Switches a session's mode or model to one it offers. Returns the
+    /// problem, if any, in words about the switch.
+    func switchSession(_ sessionId: String, model: Bool, to value: String) async -> String? {
+        var request = DaemonRequest(model ? .setModel : .setMode, sessionId: sessionId)
+        request.text = value
+        request.clientId = "mac-switch-\(UUID().uuidString)"
+        let kind = model ? "model" : "mode"
+        let label = model ? SessionLabels.model(value) : SessionLabels.mode(value)
+        do {
+            let reply = try await client.request(request)
+            if reply.type == "error" || reply.status == .failed {
+                let reason = (reply.error ?? "").replacingOccurrences(of: "^(daemon|source): ", with: "", options: .regularExpression)
+                return "Couldn't switch the \(kind) to \(label)\(reason.isEmpty ? "." : ": " + reason)"
+            }
+            return nil
+        } catch {
+            return "Couldn't switch the \(kind) to \(label): \(error.localizedDescription)"
+        }
+    }
+
     /// Gives a session a name of the user's, or its own back when name is
     /// empty. Returns the problem, if any. Every app hears the new name.
     @discardableResult
