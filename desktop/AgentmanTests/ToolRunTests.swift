@@ -16,7 +16,7 @@ final class ToolRunTests: XCTestCase {
         let shapes = items.map { item -> String in
             switch item {
             case .message(let m): "message \(m.id)"
-            case .tools(let calls): "tools \(calls.map(\.id).joined())"
+            case .tools(let calls, _): "tools \(calls.map(\.id).joined())"
             case .image(let m, _): "image \(m.id)"
             }
         }
@@ -57,5 +57,17 @@ final class ToolRunTests: XCTestCase {
         XCTAssertNil(ImageThumbnail.imagePath(in: "/tmp/notes.md"))
         XCTAssertEqual(ImageThumbnail.imagePath(in: "Looked at /a/b c.jpeg"), nil, "a path with a space is not guessed at")
         XCTAssertEqual(ImageThumbnail.imagePath(in: "open /a/b/c.jpeg now"), "/a/b/c.jpeg")
+    }
+
+    func testARunIsToldByItsStepsUntilAgentmanTitlesIt() {
+        func step(_ id: String, _ title: String) -> Message {
+            Message(id: id, sessionId: "s", role: .tool, ts: 1, text: nil,
+                    tool: ToolCall(name: "Bash", summary: "x", status: "ok", title: title), isSidechain: nil)
+        }
+        XCTAssertEqual(ToolRun.fromSteps([step("1", "Rebuilt the daemon"), step("2", "Paired the phone")]),
+                       "Rebuilt the daemon, then paired the phone")
+        XCTAssertEqual(ToolRun.fromSteps([step("1", "Rebuilt the daemon"), step("2", "Paired the phone"), step("3", "Took a screenshot")]),
+                       "Rebuilt the daemon, paired the phone and 1 more step")
+        XCTAssertNil(ToolRun.fromSteps([message("1", .tool, tool: "Bash", summary: "ls")]))
     }
 }

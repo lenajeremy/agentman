@@ -197,4 +197,5 @@ type toolOutcome struct {
 type toolCall struct {
 	name    string
 	summary string
+	title   string
 }

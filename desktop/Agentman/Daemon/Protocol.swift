@@ -37,6 +37,7 @@ enum RequestType: String, Codable, Sendable {
     case answerQuestion = "answer_question"
     case readSeenFile = "read_seen_file"
     case renameSession = "rename_session"
+    case toolsTitle = "tools_title"
     case managerSend = "manager_send"
     case managerHistory = "manager_history"
     case managerStop = "manager_stop"
@@ -76,6 +77,8 @@ struct DaemonRequest: Codable, Sendable {
     var key: Key?
     var scheduleId: String?
     var images: [InlineImage]?
+    /// The tool calls a tools_title request is about.
+    var steps: [ToolCall]?
     /// A note's tier, on the knowledge requests.
     var kind: String?
 
@@ -391,6 +394,9 @@ struct ToolCall: Codable, Sendable, Hashable {
     var summary: String?
     /// "running", "ok" or "error".
     var status: String?
+    /// What the step did, in plain words ("Ran the Go tests"); summary is
+    /// the raw command or path behind it.
+    var title: String? = nil
 }
 
 struct Message: Codable, Sendable, Identifiable, Hashable {

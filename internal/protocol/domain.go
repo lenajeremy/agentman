@@ -326,6 +326,10 @@ type Tool struct {
 	Name    string     `json:"name"`
 	Summary string     `json:"summary,omitempty"`
 	Status  ToolStatus `json:"status,omitempty"`
+	// Title says in plain words what the step did ("Ran the Go tests",
+	// "Edited tools.go"), for the apps to show first; Summary is the raw
+	// command or path behind it.
+	Title string `json:"title,omitempty"`
 }
 
 // Message is one normalized entry in a session's feed.

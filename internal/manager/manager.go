@@ -56,6 +56,7 @@ type Manager struct {
 	processTree  func(context.Context) (*tmux.ProcessTree, error)
 	conversation *conversation
 	briefs       *briefStore
+	titles       *titleStore
 	knowledge    *knowledge.Store
 	keys         *keyStore
 	schedules    *scheduleStore
@@ -111,6 +112,7 @@ func New(cfg Config) (*Manager, error) {
 		processTree:  cfg.ProcessTree,
 		conversation: conversation,
 		briefs:       loadBriefs(cfg.Dir),
+		titles:       loadTitles(titlesPath(cfg.Dir)),
 		knowledge:    cfg.Knowledge,
 		keys:         loadKeys(cfg.Dir),
 		schedules:    loadSchedules(cfg.Dir),
@@ -165,7 +167,8 @@ func (m *Manager) Handles(kind protocol.RequestType) bool {
 		protocol.ReqKeysList, protocol.ReqKeySet, protocol.ReqKeyDelete,
 		protocol.ReqAgentKnowledgeSearch, protocol.ReqAgentKnowledgeRead, protocol.ReqAgentKeys,
 		protocol.ReqAgentRequestKey, protocol.ReqAgentTell,
-		protocol.ReqManagerSchedules, protocol.ReqManagerScheduleCancel, protocol.ReqManagerImage:
+		protocol.ReqManagerSchedules, protocol.ReqManagerScheduleCancel, protocol.ReqManagerImage,
+		protocol.ReqToolsTitle:
 		return true
 	}
 	return false
@@ -178,6 +181,8 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 		return m.send(ctx, req.Text, req.Images...)
 	case protocol.ReqManagerImage:
 		return m.readImage(req.Path)
+	case protocol.ReqToolsTitle:
+		return m.toolsTitle(ctx, req)
 	case protocol.ReqManagerHistory:
 		limit := req.Limit
 		if limit <= 0 || limit > 200 {

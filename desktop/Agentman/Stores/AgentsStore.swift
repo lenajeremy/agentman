@@ -49,6 +49,9 @@ final class AgentsStore {
     var lightbox: Lightbox?
     /// The session being renamed in the sidebar, if one is.
     var renaming: String?
+    /// Agentman's titles for runs of tool calls, by the run's first and last
+    /// call; empty when there is none to be had.
+    var toolTitles: [String: String] = [:]
 
     private let client: DaemonClient
     private var cursors: [String: String] = [:]
@@ -192,6 +195,26 @@ final class AgentsStore {
         request.optionKeys = keys
         request.clientId = "mac-answer-\(UUID().uuidString)"
         return await perform(request, for: sessionId)
+    }
+
+    /// Asks Agentman for a plain line saying what a finished run of tool
+    /// calls did and why, once per run.
+    func titleTools(_ calls: [Message], said: String) async {
+        guard calls.count > 1, let first = calls.first else { return }
+        let key = Self.toolRunKey(calls)
+        guard toolTitles[key] == nil else { return }
+        toolTitles[key] = ""
+        var request = DaemonRequest(.toolsTitle, sessionId: first.sessionId)
+        request.text = said
+        request.steps = calls.compactMap(\.tool)
+        if let reply = try? await client.request(request), reply.type == "tools_title",
+           let title = reply.preview, !title.isEmpty {
+            toolTitles[key] = title
+        }
+    }
+
+    nonisolated static func toolRunKey(_ calls: [Message]) -> String {
+        "\(calls.first?.id ?? "")|\(calls.last?.id ?? "")|\(calls.count)"
     }
 
     /// Gives a session a name of the user's, or its own back when name is

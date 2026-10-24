@@ -164,7 +164,12 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 				name = "tool"
 			}
 			summary := summarizeToolInput(name, block.Input)
-			p.toolCalls.set(id, toolCall{name: name, summary: summary})
+			// The agent's own words for the step, when it gave them.
+			title := ""
+			if own := toolDescription(block.Input); own != "" {
+				title = DescribeTool(name, summary, own)
+			}
+			p.toolCalls.set(id, toolCall{name: name, summary: summary, title: title})
 			delete(p.awaiting, id)
 
 			msg := protocol.Message{
@@ -173,6 +178,7 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 					Name:    name,
 					Summary: summary,
 					Status:  protocol.ToolRunning,
+					Title:   title,
 				},
 				IsSidechain: rec.IsSidechain,
 			}
@@ -207,7 +213,7 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 					Role: protocol.RoleTool, Ts: ts, Text: outcome.preview,
 					// Carry the summary through: this row replaces the running
 					// one by id, so omitting it erases the command.
-					Tool:        &protocol.Tool{Name: call.name, Summary: call.summary, Status: status},
+					Tool:        &protocol.Tool{Name: call.name, Summary: call.summary, Status: status, Title: call.title},
 					IsSidechain: rec.IsSidechain,
 				})
 			}
@@ -307,6 +313,18 @@ func flattenClaudeResult(raw json.RawMessage) string {
 // summarizeToolInput reduces a tool invocation to the one detail a human
 // scanning a feed wants: the command, the path, the pattern. Falls back to
 // compact JSON so an unknown tool still shows something useful.
+// toolDescription is what the agent said a call is for: Claude Code gives
+// every command a description, and a task one too.
+func toolDescription(raw json.RawMessage) string {
+	var input struct {
+		Description string `json:"description"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &input) != nil {
+		return ""
+	}
+	return strings.TrimSpace(input.Description)
+}
+
 func summarizeToolInput(name string, raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""

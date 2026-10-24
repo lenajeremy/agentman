@@ -158,6 +158,10 @@ const (
 	// name in Text, everywhere it shows; an empty Text gives it back the
 	// agent's own name. The session's ID never changes.
 	ReqRenameSession RequestType = "rename_session"
+	// ReqToolsTitle asks Agentman for a plain line saying what a run of tool
+	// calls did and why. Steps are the run's calls, with their titles; Text
+	// is what the agent said just before them.
+	ReqToolsTitle RequestType = "tools_title"
 )
 
 // Request is anything the app asks of the daemon.
@@ -188,6 +192,8 @@ type Request struct {
 	ScheduleID string `json:"scheduleId,omitempty"`
 	// Images are sent with a message to Agentman on ReqManagerSend.
 	Images []InlineImage `json:"images,omitempty"`
+	// Steps are the tool calls a tools_title request is about.
+	Steps []Tool `json:"steps,omitempty"`
 	// Note and Key are saved by ReqKnowledgeWrite and ReqKeySet.
 	Note *Note `json:"note,omitempty"`
 	Key  *Key  `json:"key,omitempty"`
@@ -235,8 +241,10 @@ const (
 	EvtSessionGone   EventType = "session_gone"
 	EvtMessages      EventType = "messages"
 	EvtPage          EventType = "page"
-	EvtTurnComplete  EventType = "turn_complete"
-	EvtSendResult    EventType = "send_result"
+	// EvtToolsTitle answers tools_title: the run's title is in Preview.
+	EvtToolsTitle   EventType = "tools_title"
+	EvtTurnComplete EventType = "turn_complete"
+	EvtSendResult   EventType = "send_result"
 	// EvtServerOpened answers ReqOpenServer with the server's link.
 	EvtServerOpened EventType = "server_opened"
 	// EvtServerStopped answers ReqStopServer once the process is gone.

@@ -34,8 +34,8 @@ struct AgentThreadView: View {
                             case .message(let message):
                                 MessageRow(message: message)
                                     .id(item.id)
-                            case .tools(let calls):
-                                ToolRun(calls: calls)
+                            case .tools(let calls, let said):
+                                ToolRun(calls: calls, said: said)
                                     .id(item.id)
                             case .image(let call, let path):
                                 ImageThumbnail(sessionId: session.id, path: path,
@@ -437,7 +437,8 @@ private struct FoldedText: View {
 /// line each.
 enum ThreadItem: Identifiable {
     case message(Message)
-    case tools([Message])
+    /// A run of tool calls, with what the agent said just before it.
+    case tools([Message], said: String)
     /// An image the agent read, shown as a thumbnail rather than its path.
     case image(Message, path: String)
 
@@ -445,16 +446,17 @@ enum ThreadItem: Identifiable {
     var id: String {
         switch self {
         case .message(let message), .image(let message, _): message.id
-        case .tools(let calls): calls.last?.id ?? ""
+        case .tools(let calls, _): calls.last?.id ?? ""
         }
     }
 
     static func items(from messages: [Message]) -> [ThreadItem] {
         var items: [ThreadItem] = []
         var run: [Message] = []
+        var said = ""
         func flush() {
             if !run.isEmpty {
-                items.append(.tools(run))
+                items.append(.tools(run, said: said))
                 run = []
             }
         }
@@ -467,6 +469,7 @@ enum ThreadItem: Identifiable {
                 run.append(message)
             } else {
                 flush()
+                if message.role == .assistant { said = message.text ?? "" }
                 items.append(.message(message))
             }
         }
@@ -478,7 +481,9 @@ enum ThreadItem: Identifiable {
 /// A run of tool calls as one quiet line: what was done, in counts, or what
 /// is running now. Opened, one tidy row a call.
 struct ToolRun: View {
+    @Environment(AgentsStore.self) private var store
     let calls: [Message]
+    var said = ""
     @State private var open = false
 
     var body: some View {
@@ -518,7 +523,14 @@ struct ToolRun: View {
             }
         }
         .opacity(calls.allSatisfy { $0.isSidechain == true } ? 0.6 : 1)
+        // Once the run has finished, Agentman says what it did and why.
+        .task(id: finished ? AgentsStore.toolRunKey(calls) : "") {
+            guard finished, calls.count > 1 else { return }
+            await store.titleTools(calls, said: said)
+        }
     }
+
+    private var finished: Bool { !calls.contains { $0.tool?.status == "running" } }
 
     private var failures: Int { calls.filter { $0.tool?.status == "error" }.count }
 
@@ -531,12 +543,18 @@ struct ToolRun: View {
         }
     }
 
-    /// "Ran 3 commands, read 2 files and edited a file", or what is running.
+    /// What the run did: Agentman's line for it when there is one, its
+    /// steps' own words until then, or what is running now.
     private var summary: String {
         if let running = calls.last, running.tool?.status == "running" {
+            if let title = running.tool?.title, !title.isEmpty { return title + "…" }
             let kind = ToolKind(running.tool?.name)
             return "\(kind.verb) \(ToolKind.tidy(running.tool?.summary ?? running.text ?? ""))…"
         }
+        if let title = store.toolTitles[AgentsStore.toolRunKey(calls)], !title.isEmpty {
+            return title
+        }
+        if let words = ToolRun.fromSteps(calls) { return words }
         var counts: [ToolKind: Int] = [:]
         var order: [ToolKind] = []
         for call in calls {
@@ -556,14 +574,83 @@ struct ToolRun: View {
     }
 }
 
-/// One tool call in a line: what it did, then its target, cut in the middle
-/// when long.
+extension ToolRun {
+    /// A run told by its steps' own words: "Rebuilt the daemon, then paired
+    /// the phone", or the first two and how many more. Nil when the steps
+    /// have no words of their own.
+    static func fromSteps(_ calls: [Message]) -> String? {
+        let titles = calls.compactMap { $0.tool?.title }.filter { !$0.isEmpty }
+        guard titles.count == calls.count, let first = titles.first else { return nil }
+        func lower(_ s: String) -> String { s.prefix(1).lowercased() + s.dropFirst() }
+        switch titles.count {
+        case 1: return first
+        case 2: return "\(first), then \(lower(titles[1]))"
+        default:
+            let more = titles.count - 2
+            return "\(first), \(lower(titles[1])) and \(more) more step\(more == 1 ? "" : "s")"
+        }
+    }
+}
+
+/// One tool call in a line: what it did in plain words, with the raw
+/// command or path a click away.
 private struct ToolCallRow: View {
     let call: Message
+    @State private var showRaw = false
 
     var body: some View {
+        if let title = call.tool?.title, !title.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.12)) { showRaw.toggle() }
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        statusIcon
+                        Text(title)
+                            .font(TextStyle.caption)
+                            .foregroundStyle(Palette.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(showRaw ? "Hide the command" : "Show the command")
+                if showRaw, let raw = call.tool?.summary, !raw.isEmpty {
+                    Text(raw)
+                        .font(Fonts.mono(11.5))
+                        .foregroundStyle(Palette.muted)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, 19)
+                }
+            }
+            .opacity(call.isSidechain == true ? 0.6 : 1)
+        } else {
+            rawRow
+        }
+    }
+
+    @ViewBuilder private var statusIcon: some View {
         let kind = ToolKind(call.tool?.name)
-        HStack(alignment: .firstTextBaseline, spacing: 7) {
+        Group {
+            switch call.tool?.status {
+            case "running":
+                ProgressView().controlSize(.mini).frame(width: 11, height: 11)
+            case "error":
+                Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.error)
+            default:
+                Image(systemName: kind.icon).foregroundStyle(Palette.faint)
+            }
+        }
+        .font(.system(size: 10, weight: .medium))
+        .frame(width: 12)
+    }
+
+    /// A call from a daemon too old to describe it: its verb and target.
+    private var rawRow: some View {
+        let kind = ToolKind(call.tool?.name)
+        return HStack(alignment: .firstTextBaseline, spacing: 7) {
             Group {
                 switch call.tool?.status {
                 case "running":

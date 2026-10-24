@@ -1084,6 +1084,7 @@ func (d *Daemon) HandleFrom(
 			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
 		}
 		d.seen.record(req.SessionID, page.Messages)
+		describeTools(page.Messages)
 		event := protocol.Event{Type: protocol.EvtPage, Page: &page}
 		return fitMessageEvent(event)
 
@@ -1667,6 +1668,7 @@ func (d *Daemon) startFollow(subscriberID, sessionID string) error {
 				return
 			case batch := <-messages:
 				d.seen.record(sessionID, batch)
+				describeTools(batch)
 				for len(batch) > 0 {
 					take := min(len(batch), maxPageMessages)
 					event := protocol.Event{

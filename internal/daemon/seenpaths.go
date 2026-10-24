@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"github.com/lenajeremy/agentman/internal/parser"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -179,4 +180,19 @@ func toolFilePath(summary string) string {
 		return ""
 	}
 	return first
+}
+
+// describeTools gives every tool call a plain title the apps show first:
+// the agent's own when it wrote one, otherwise what its name and command
+// say it did.
+func describeTools(messages []protocol.Message) {
+	for i := range messages {
+		tool := messages[i].Tool
+		if tool == nil || tool.Title != "" {
+			continue
+		}
+		described := *tool
+		described.Title = parser.DescribeTool(tool.Name, tool.Summary, "")
+		messages[i].Tool = &described
+	}
 }
