@@ -16,12 +16,19 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     MACOSX_DEPLOYMENT_TARGET: "15.0"
+packages:
+  # Parses agents' markdown, GitHub tables included (Design/MarkdownView.swift).
+  Markdown:
+    url: https://github.com/swiftlang/swift-markdown
+    from: 0.9.0
 targets:
   Agentman:
     type: application
     platform: macOS
     sources:
       - path: Agentman
+    dependencies:
+      - package: Markdown
     info:
       path: Agentman/Info.plist
       properties:

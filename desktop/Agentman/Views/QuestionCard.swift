@@ -30,7 +30,7 @@ struct QuestionCard: View {
                     .background(Palette.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             if !question.prompt.isEmpty {
-                Text(Markdown.inline(question.prompt))
+                Text(inlineMarkdown(question.prompt))
                     .font(TextStyle.body)
                     .foregroundStyle(Palette.textSecondary)
             }

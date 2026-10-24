@@ -184,12 +184,7 @@ struct MessageRow: View {
                     .background(Palette.fill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
         case .assistant:
-            Text(Markdown.inline(message.text ?? ""))
-                .font(TextStyle.body)
-                .foregroundStyle(Palette.text)
-                .lineSpacing(3)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            MarkdownView(message.text ?? "")
                 .opacity(message.isSidechain == true ? 0.6 : 1)
         case .tool:
             ToolRow(tool: message.tool, fallback: message.text)
@@ -300,18 +295,5 @@ struct Composer: View {
                 .strokeBorder(Palette.line, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
-    }
-}
-
-/// Agents write markdown. Inline syntax (bold, italics, code, links) is
-/// rendered; block syntax keeps its line breaks, which reads well enough
-/// until the full renderer the phone uses is ported.
-enum Markdown {
-    static func inline(_ text: String) -> AttributedString {
-        let options = AttributedString.MarkdownParsingOptions(
-            interpretedSyntax: .inlineOnlyPreservingWhitespace,
-            failurePolicy: .returnPartiallyParsedIfPossible
-        )
-        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
     }
 }
