@@ -61,7 +61,7 @@ function SentImage({ sessionId, path }: { sessionId: string; path: string }) {
     return (
       <View style={styles.gone}>
         <Feather name="image" size={13} color={color.muted} />
-        <Text style={styles.goneText}>Image no longer kept</Text>
+        <Text style={styles.goneText}>Sent image</Text>
       </View>
     );
   }
