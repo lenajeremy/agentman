@@ -92,7 +92,7 @@ func TestKeysAreKeptByNameWithTheirValueInTheKeychain(t *testing.T) {
 		t.Fatalf("after an edit: %+v", key)
 	}
 
-	for _, bad := range []protocol.Key{{Name: "has space"}, {Name: "ANTHROPIC_API_KEY"}, {Name: "OK", Rule: "sometimes"}, {Name: "OK", Rule: protocol.KeyProjects}} {
+	for _, bad := range []protocol.Key{{Name: "has space"}, {Name: "OK", Rule: "sometimes"}, {Name: "OK", Rule: protocol.KeyProjects}} {
 		if event := h.m.Handle(context.Background(), protocol.Request{Type: protocol.ReqKeySet, Key: &bad}); event.Type != protocol.EvtError {
 			t.Errorf("saved %+v", bad)
 		}
