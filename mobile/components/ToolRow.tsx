@@ -377,13 +377,16 @@ export function ToolRow({
   const summary = tool.summary ?? "";
   const output = message.text ?? "";
   const failed = tool.status === "error";
+  // What the step did in plain words, when the Mac says; the raw command
+  // then waits behind a tap.
+  const title = tool.title ?? "";
 
   // The command only earns its own block when the header could not show it:
   // repeating a short path under itself is noise, and for a path the header
   // already shows the part worth reading.
-  const showCommand =
-    !isPath(summary) &&
-    (summary.includes("\n") || summary.length > INLINE_COMMAND);
+  const showCommand = title
+    ? summary.length > 0
+    : !isPath(summary) && (summary.includes("\n") || summary.length > INLINE_COMMAND);
   // Reading an image produces no text worth showing — the parsers render it as
   // "[image]" — so without this the row is the one place in the app that names
   // a picture and then refuses to show it.
@@ -402,17 +405,25 @@ export function ToolRow({
         style={styles.header}
         pressedScale={0.995}
         accessibilityRole={canOpen ? "button" : "text"}
-        accessibilityLabel={`${tool.name} ${summary}`}
+        accessibilityLabel={title || `${tool.name} ${summary}`}
         accessibilityState={{ expanded }}
       >
         <StatusTile status={tool.status} name={tool.name} />
-        <Text style={[styles.name, failed && styles.nameFailed]}>
-          {tool.name}
-        </Text>
-        {summary ? (
-          <Target summary={summary} />
+        {title ? (
+          <Text style={[styles.title, failed && styles.nameFailed]} numberOfLines={2}>
+            {title}
+          </Text>
         ) : (
-          <View style={styles.spacer} />
+          <>
+            <Text style={[styles.name, failed && styles.nameFailed]}>
+              {tool.name}
+            </Text>
+            {summary ? (
+              <Target summary={summary} />
+            ) : (
+              <View style={styles.spacer} />
+            )}
+          </>
         )}
         {canOpen ? <Chevron expanded={expanded} /> : null}
       </MotionPressable>
@@ -455,13 +466,14 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: space.xs,
     },
 
+    // No ground of its own: the icon says what kind of step it was, and a
+    // tile behind every one made a run of steps read as a stack of buttons.
     tile: {
       width: TILE,
       height: TILE,
       borderRadius: 7,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: c.fill,
     },
     tileRunning: { backgroundColor: c.workingWash },
     tileFailed: { backgroundColor: c.errorWash },
@@ -493,6 +505,12 @@ const makeStyles = (c: Palette) =>
       color: c.muted,
     },
     nameFailed: { color: c.errorText },
+    title: {
+      flex: 1,
+      fontFamily: font.sans,
+      fontSize: size.label,
+      color: c.textSecondary,
+    },
     spacer: { flex: 1 },
     // flex lets a long target truncate instead of pushing the chevron off.
     target: {

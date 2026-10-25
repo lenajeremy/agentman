@@ -210,3 +210,18 @@ func TestRevealDecidesOnThePaneAsItIsNow(t *testing.T) {
 		t.Errorf("a key was pressed on a question that was already gone: %q", typed)
 	}
 }
+
+// A daemon started without a locale (by launchd, systemd or brew services)
+// still sees its panes. Without -u, tmux wrote the tab between a listing's
+// fields as "_", every line failed to split, and every agent fell back to the
+// queue without an error.
+func TestPanesAreListedWithoutALocale(t *testing.T) {
+	requireTmux(t)
+	for _, key := range []string{"LC_ALL", "LC_CTYPE", "LANG"} {
+		t.Setenv(key, "")
+	}
+	name := launchIdle(t, "localetest")
+	if !listed(t, context.Background(), name) {
+		t.Fatal("with no locale, a running session was not listed")
+	}
+}

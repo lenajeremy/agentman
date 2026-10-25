@@ -18,7 +18,14 @@ export function mergeRetainedMessages(
   if (limit <= 0) return { messages: [], limited: existing.length + incoming.length > 0 };
   const byId = new Map<string, Message>();
   for (const message of existing) byId.set(message.id, message);
-  for (const message of incoming) byId.set(message.id, message);
+  for (const message of incoming) {
+    // A later copy replaces the earlier one, which is how a running tool call
+    // arrives finished. Never the reverse: a history page read before the
+    // result was written must not set a finished call running again.
+    const known = byId.get(message.id);
+    if (known?.tool && known.tool.status !== "running" && message.tool?.status === "running") continue;
+    byId.set(message.id, message);
+  }
   const ordered = Array.from(byId.values()).sort((a, b) => {
     if (a.ts !== b.ts) return a.ts - b.ts;
     return a.id < b.id ? -1 : 1;

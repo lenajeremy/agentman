@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -25,8 +26,11 @@ import (
 	"github.com/lenajeremy/agentman/internal/attachments"
 	"github.com/lenajeremy/agentman/internal/daemon"
 	"github.com/lenajeremy/agentman/internal/hook"
+	"github.com/lenajeremy/agentman/internal/knowledge"
+	"github.com/lenajeremy/agentman/internal/manager"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/relay"
+	"github.com/lenajeremy/agentman/internal/secrets"
 	"github.com/lenajeremy/agentman/internal/servers"
 	"github.com/lenajeremy/agentman/internal/source"
 	"github.com/lenajeremy/agentman/internal/update"
@@ -259,7 +263,34 @@ func runServe(ctx context.Context, args []string) error {
 		fmt.Printf("%s\n", dim("relay      disabled — this daemon is not reachable from your phone"))
 	}
 
-	agent := daemon.New(registry, multiSink{sinks: sinks})
+	// Apps on this Mac, Agentman for Mac first, reach the daemon over a socket
+	// in the config directory: no relay in between, and only this user can
+	// open it. A second daemon on the same config leaves the socket alone.
+	var local *daemon.LocalServer
+	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
+		local = daemon.NewLocalServer(filepath.Join(dir, "am.sock"))
+		if err := local.Listen(); err != nil {
+			fmt.Printf("%s\n", dim("app        "+err.Error()))
+			local = nil
+		} else {
+			sinks = append(sinks, local)
+			fmt.Printf("%s\n", dim("app        listening on "+collapseHome(local.Path())))
+		}
+	}
+
+	sink := multiSink{sinks: sinks}
+	agent := daemon.New(registry, sink)
+	// The user's names for sessions, before the first sweep names them.
+	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
+		agent.SetNamesFile(filepath.Join(dir, "names.json"))
+	}
+	if local != nil {
+		go func() {
+			if err := local.Serve(ctx, agent.HandleFrom, agent.DisconnectSubscriber); err != nil {
+				fmt.Fprintf(os.Stderr, "am: %v\n", err)
+			}
+		}()
+	}
 	if client != nil {
 		client.OnDeviceDisconnected = agent.DisconnectSubscriber
 	}
@@ -280,6 +311,30 @@ func runServe(ctx context.Context, args []string) error {
 		go updates.Run(ctx, update.Every)
 	}
 
+	// Agentman, the manager agent: one conversation, here in the daemon, that
+	// reads every agent for the user. It runs on the user's own Claude API
+	// key, set from Agentman for Mac and kept in the Keychain.
+	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
+		boss, err := manager.New(manager.Config{
+			Dir:       filepath.Join(dir, "manager"),
+			Secrets:   secrets.Default(dir),
+			Agents:    managerAgents{daemon: agent},
+			Knowledge: knowledge.Open(filepath.Join(dir, "knowledge")),
+			Emit:      func(event protocol.Event) { _ = sink.Send(event) },
+		})
+		if err != nil {
+			fmt.Printf("%s\n", dim("agentman   "+err.Error()))
+		} else {
+			agent.SetManager(boss)
+			go boss.Run(ctx)
+			state := "ready"
+			if settings := boss.Handle(ctx, protocol.Request{Type: protocol.ReqManagerSettings}); settings.ManagerSettings == nil || !settings.ManagerSettings.KeySet {
+				state = "waiting for an API key (set it in Agentman for Mac)"
+			}
+			fmt.Printf("%s\n", dim("agentman   "+state))
+		}
+	}
+
 	// Servers agents start are found either way; sharing one as a preview
 	// link needs the relay.
 	var sharer daemon.ServerSharer
@@ -290,9 +345,10 @@ func runServe(ctx context.Context, args []string) error {
 	ignoreHookPort(watcher)
 	agent.SetServers(watcher, sharer)
 
-	// Images a phone sends arrive through the relay and are written here, so a
-	// daemon without one simply cannot receive them.
-	if relayURL != "" {
+	// Images sent with a message are written here: a phone's arrive through
+	// the relay, the Mac app's with the message itself, so a daemon without a
+	// relay still keeps the Mac's.
+	{
 		if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
 			store := attachments.New(dir, relayURL, cfg.Token)
 			agent.SetAttachments(store)

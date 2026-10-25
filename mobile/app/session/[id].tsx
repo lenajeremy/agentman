@@ -28,6 +28,10 @@ import { MessageMenu, type MessageMenuItem } from "../../components/MessageMenu"
 import { Toast } from "../../components/Toast";
 import { ContentColumn } from "../../components/ContentColumn";
 import { Markdown } from "../../components/Markdown";
+import { SentImages } from "../../components/SentImages";
+import { ToolGroup } from "../../components/ToolGroup";
+import { groupTools } from "../../lib/toolgroups";
+import { splitSentMessage } from "../../lib/sentimages";
 import { MotionPressable } from "../../components/MotionPressable";
 import { Pulse } from "../../components/Pulse";
 import { QuestionCard } from "../../components/QuestionCard";
@@ -67,6 +71,7 @@ import {
 
 type Row =
   | { kind: "message"; message: Message }
+  | { kind: "tools"; key: string; calls: Message[]; said: string }
   | { kind: "pending"; pending: PendingSend }
   // A message the agent is holding until its current step ends, sent from
   // the phone or typed at the Mac.
@@ -250,9 +255,8 @@ export default function SessionScreen() {
     const chronological: Row[] = [
       // Filtered here rather than drawn as nothing: an empty cell still takes
       // the list's gap, and a withdrawn preview would leave a hole.
-      ...messages
-        .filter(showsInFeed)
-        .map((message) => ({ kind: "message" as const, message })),
+      // Calls in a row read as one line saying what was done.
+      ...groupTools(messages.filter(showsInFeed)),
       ...sent,
       ...waiting,
     ];
@@ -891,7 +895,9 @@ export default function SessionScreen() {
           keyExtractor={(row) =>
             row.kind === "message"
               ? row.message.id
-              : row.kind === "pending"
+              : row.kind === "tools"
+                ? row.key
+                : row.kind === "pending"
                 ? row.pending.clientId
                 : row.key
           }
@@ -906,6 +912,8 @@ export default function SessionScreen() {
                 }
                 onCopied={showCopied}
               />
+            ) : item.kind === "tools" ? (
+              <ToolGroup calls={item.calls} said={item.said} cwd={session?.cwd ?? ""} />
             ) : item.kind === "pending" ? (
               <PendingRow
                 pending={item.pending}
@@ -1526,7 +1534,17 @@ function MessageRow({
   }
 
   if (message.role === "user") {
-    return <SentMessage text={message.text ?? ""} fresh={fresh} onCopied={onCopied} />;
+    if (isCompactionSummary(message.text ?? "")) {
+      return <FoldedSummary text={message.text ?? ""} fresh={fresh} />;
+    }
+    return (
+      <SentMessage
+        sessionId={message.sessionId}
+        text={message.text ?? ""}
+        fresh={fresh}
+        onCopied={onCopied}
+      />
+    );
   }
 
   if (message.role === "system") {
@@ -1618,23 +1636,58 @@ function sentMessageActions(text: string, onCopied: () => void): MessageMenuItem
   ];
 }
 
+/** The summary Claude Code writes when it compacts a conversation, which
+ *  arrives as a message from the user. */
+function isCompactionSummary(text: string): boolean {
+  return text.startsWith("This session is being continued from a previous conversation");
+}
+
+/** Claude's summary of a compacted conversation: one quiet line, opened to
+ *  read it. It is the agent's note to itself, not something the user said. */
+function FoldedSummary({ text, fresh }: { text: string; fresh: boolean }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const [open, setOpen] = useState(false);
+  return (
+    <Appear enabled={fresh}>
+      <Pressable
+        onPress={() => setOpen((value) => !value)}
+        style={styles.summaryHeader}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+      >
+        <Feather name="align-left" size={13} color={color.muted} />
+        <Text style={styles.summaryLabel}>Summary of the earlier conversation</Text>
+        <Feather name={open ? "chevron-down" : "chevron-right"} size={13} color={color.faint} />
+      </Pressable>
+      {open ? <Text style={styles.summaryText}>{text}</Text> : null}
+    </Appear>
+  );
+}
+
 function SentMessage({
-  text,
+  sessionId,
+  text: message,
   fresh,
   onCopied,
 }: {
+  sessionId: string;
   text: string;
   fresh: boolean;
   onCopied(): void;
 }) {
   const styles = useStyles(makeStyles);
   const held = useHeldMessage();
+  // Images sent with it show as pictures, not as the paths the agent got.
+  const { images, text } = useMemo(() => splitSentMessage(message), [message]);
   return (
     <Appear enabled={fresh}>
+      {images.length > 0 && <SentImages sessionId={sessionId} paths={images} />}
       {/* The bubble itself is the target, so holding the space beside it does
           nothing. A plain Pressable rather than MotionPressable: a tap does
           nothing here, and shrinking on one would promise an action that is
           not there. */}
+      {text.length > 0 && (
       <Pressable
         ref={held.ref}
         onLongPress={held.open}
@@ -1650,6 +1703,7 @@ function SentMessage({
       >
         <Text style={styles.userText}>{text}</Text>
       </Pressable>
+      )}
       <MessageMenu
         anchor={held.anchor}
         items={sentMessageActions(text, onCopied)}
@@ -1892,9 +1946,8 @@ const makeStyles = (c: Palette) =>
       color: c.onAccent,
     },
     title: {
-      fontFamily: font.monoMedium,
-      fontSize: 15,
-      letterSpacing: -0.4,
+      fontFamily: font.sansMedium,
+      fontSize: 16,
       color: c.text,
     },
     subtitleRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
@@ -2025,6 +2078,15 @@ const makeStyles = (c: Palette) =>
       fontSize: size.body,
       color: c.text,
       lineHeight: 21,
+    },
+    summaryHeader: { flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 4 },
+    summaryLabel: { fontFamily: font.sans, fontSize: size.caption, color: c.muted },
+    summaryText: {
+      fontFamily: font.sans,
+      fontSize: size.caption,
+      lineHeight: 19,
+      color: c.muted,
+      marginTop: 6,
     },
     // The message in the list while its lifted copy is showing.
     heldSource: { opacity: 0 },

@@ -1,17 +1,10 @@
-import {
-  Geist_400Regular,
-  Geist_400Regular_Italic,
-  Geist_500Medium,
-  Geist_600SemiBold,
-  Geist_600SemiBold_Italic,
-  useFonts,
-} from "@expo-google-fonts/geist";
-import { GeistMono_400Regular, GeistMono_500Medium } from "@expo-google-fonts/geist-mono";
+import { useFonts } from "expo-font";
 import * as Notifications from "expo-notifications";
 import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
-import { Platform, View } from "react-native";
+import Constants from "expo-constants";
+import { Platform, Settings, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -61,15 +54,33 @@ function NotificationNavigation() {
   return null;
 }
 
+/**
+ * For screenshots and tests in the simulator, where nothing can be tapped
+ * from outside: started with `-AGENTMAN_OPEN <route>`, the app opens that
+ * route, such as a pairing link or a session. Never on a real phone.
+ */
+function SimulatorLaunch() {
+  const router = useRouter();
+  useEffect(() => {
+    if (Platform.OS !== "ios" || Constants.isDevice) return;
+    const route = Settings.get("AGENTMAN_OPEN");
+    if (typeof route !== "string" || !route.startsWith("/")) return;
+    const timer = setTimeout(() => router.push(route as never), 600);
+    return () => clearTimeout(timer);
+  }, [router]);
+  return null;
+}
+
 export default function RootLayout() {
+  // Google Sans and Google Sans Code, bundled: the same faces as the Mac.
   const [fontsLoaded] = useFonts({
-    Geist_400Regular,
-    Geist_400Regular_Italic,
-    Geist_500Medium,
-    Geist_600SemiBold,
-    Geist_600SemiBold_Italic,
-    GeistMono_400Regular,
-    GeistMono_500Medium,
+    "GoogleSans-Regular": require("../assets/fonts/GoogleSans-Regular.ttf"),
+    "GoogleSans-Italic": require("../assets/fonts/GoogleSans-Italic.ttf"),
+    "GoogleSans-Medium": require("../assets/fonts/GoogleSans-Medium.ttf"),
+    "GoogleSans-SemiBold": require("../assets/fonts/GoogleSans-SemiBold.ttf"),
+    "GoogleSans-SemiBoldItalic": require("../assets/fonts/GoogleSans-SemiBoldItalic.ttf"),
+    "GoogleSansCode-Regular": require("../assets/fonts/GoogleSansCode-Regular.ttf"),
+    "GoogleSansCode-Medium": require("../assets/fonts/GoogleSansCode-Medium.ttf"),
   });
 
   useEffect(() => {
@@ -116,6 +127,7 @@ function ThemedApp({ fontsLoaded }: { fontsLoaded: boolean }) {
         <StoreProvider>
           <UpdatesProvider>
             <NotificationNavigation />
+            <SimulatorLaunch />
             <StatusBar style={scheme === "dark" ? "light" : "dark"} />
             <Stack
               screenOptions={{

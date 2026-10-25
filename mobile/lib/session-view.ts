@@ -88,3 +88,14 @@ export function modelLabel(model: string): string {
   if (raw === "auto") return "Auto";
   return raw;
 }
+
+/**
+ * A project by its folder's name, "portfolio" for ~/Documents/portfolio:
+ * the part of a path that says which project it is.
+ */
+export function folderName(cwd: string): string {
+  const parts = cwd.replace(/\/+$/, "").split("/").filter(Boolean);
+  if (parts.length === 0) return "/";
+  if (parts.length === 2 && parts[0] === "Users") return "~";
+  return parts[parts.length - 1];
+}

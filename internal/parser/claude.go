@@ -14,6 +14,28 @@ import (
 var claudeCommandWrapper = regexp.MustCompile(
 	`^\s*<(command-name|command-message|command-args|local-command-stdout|user-prompt-submit-hook)`)
 
+// claudeTaskNotice is the note Claude Code hands the agent when a background
+// task ends. It arrives as though the user had typed it, XML and all; it is
+// shown as a quiet notice saying what finished.
+var (
+	claudeTaskNotice  = regexp.MustCompile(`^\s*<task-notification>`)
+	claudeTaskSummary = regexp.MustCompile(`(?s)<summary>(.*?)</summary>`)
+)
+
+// taskNotice is the line to show for a background task's note, and whether
+// the text was one.
+func taskNotice(body string) (string, bool) {
+	if !claudeTaskNotice.MatchString(body) {
+		return "", false
+	}
+	if m := claudeTaskSummary.FindStringSubmatch(body); m != nil {
+		if summary := strings.Join(strings.Fields(m[1]), " "); summary != "" {
+			return summary, true
+		}
+	}
+	return "A background task finished", true
+}
+
 // claudeRecord is the subset of a transcript line we rely on.
 type claudeRecord struct {
 	Type        string         `json:"type"`
@@ -130,6 +152,12 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 		if body == "" || claudeCommandWrapper.MatchString(body) {
 			return nil
 		}
+		if notice, ok := taskNotice(body); ok && role == protocol.RoleUser {
+			return []protocol.Message{{
+				ID: uuid, SessionID: p.sessionID, Role: protocol.RoleSystem, Ts: ts,
+				Text: notice, IsSidechain: rec.IsSidechain,
+			}}
+		}
 		return []protocol.Message{{
 			ID: uuid, SessionID: p.sessionID, Role: role, Ts: ts,
 			Text: body, IsSidechain: rec.IsSidechain,
@@ -149,6 +177,13 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 			if body == "" || claudeCommandWrapper.MatchString(body) {
 				continue
 			}
+			if notice, ok := taskNotice(body); ok && role == protocol.RoleUser {
+				out = append(out, protocol.Message{
+					ID: fmt.Sprintf("%s:%d", uuid, i), SessionID: p.sessionID,
+					Role: protocol.RoleSystem, Ts: ts, Text: notice, IsSidechain: rec.IsSidechain,
+				})
+				continue
+			}
 			out = append(out, protocol.Message{
 				ID: fmt.Sprintf("%s:%d", uuid, i), SessionID: p.sessionID,
 				Role: role, Ts: ts, Text: body, IsSidechain: rec.IsSidechain,
@@ -164,7 +199,12 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 				name = "tool"
 			}
 			summary := summarizeToolInput(name, block.Input)
-			p.toolCalls.set(id, toolCall{name: name, summary: summary})
+			// The agent's own words for the step, when it gave them.
+			title := ""
+			if own := toolDescription(block.Input); own != "" {
+				title = DescribeTool(name, summary, own)
+			}
+			p.toolCalls.set(id, toolCall{name: name, summary: summary, title: title})
 			delete(p.awaiting, id)
 
 			msg := protocol.Message{
@@ -173,6 +213,7 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 					Name:    name,
 					Summary: summary,
 					Status:  protocol.ToolRunning,
+					Title:   title,
 				},
 				IsSidechain: rec.IsSidechain,
 			}
@@ -207,7 +248,7 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 					Role: protocol.RoleTool, Ts: ts, Text: outcome.preview,
 					// Carry the summary through: this row replaces the running
 					// one by id, so omitting it erases the command.
-					Tool:        &protocol.Tool{Name: call.name, Summary: call.summary, Status: status},
+					Tool:        &protocol.Tool{Name: call.name, Summary: call.summary, Status: status, Title: call.title},
 					IsSidechain: rec.IsSidechain,
 				})
 			}
@@ -307,6 +348,18 @@ func flattenClaudeResult(raw json.RawMessage) string {
 // summarizeToolInput reduces a tool invocation to the one detail a human
 // scanning a feed wants: the command, the path, the pattern. Falls back to
 // compact JSON so an unknown tool still shows something useful.
+// toolDescription is what the agent said a call is for: Claude Code gives
+// every command a description, and a task one too.
+func toolDescription(raw json.RawMessage) string {
+	var input struct {
+		Description string `json:"description"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &input) != nil {
+		return ""
+	}
+	return strings.TrimSpace(input.Description)
+}
+
 func summarizeToolInput(name string, raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""

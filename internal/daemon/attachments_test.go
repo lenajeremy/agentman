@@ -2,11 +2,15 @@ package daemon
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/lenajeremy/agentman/internal/attachments"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/source"
 )
@@ -43,6 +47,14 @@ func (f *fakeStore) Save(_ context.Context, _, uploadID string) (string, error) 
 		return "", f.err
 	}
 	return f.paths[uploadID], nil
+}
+
+func (f *fakeStore) SaveData(_ string, data []byte) (string, error) {
+	f.saved = append(f.saved, string(data))
+	if f.err != nil {
+		return "", f.err
+	}
+	return "/tmp/inline-" + string(data) + ".png", nil
 }
 
 func agentWithSource(t *testing.T, src source.Source) (*Daemon, *recordingSink) {
@@ -158,5 +170,76 @@ func TestAMessageWithNeitherTextNorImagesIsStillRefused(t *testing.T) {
 	})
 	if event.Status != protocol.StatusFailed {
 		t.Fatalf("send: %+v", event)
+	}
+}
+
+// The Mac app sends its images with the message; they reach the agent as the
+// phone's do, as paths before the text.
+func TestImagesFromTheMacReachTheAgent(t *testing.T) {
+	src := &injectingSource{}
+	agent, _ := agentWithSource(t, src)
+	store := &fakeStore{}
+	agent.SetAttachments(store)
+
+	event := agent.Handle(context.Background(), protocol.Request{
+		Type: protocol.ReqSendMessage, SessionID: "claude:s1", ClientID: "c1", Text: "why is this cut off?",
+		Images: []protocol.InlineImage{
+			{MIME: "image/png", Data: base64.StdEncoding.EncodeToString([]byte("one"))},
+			{MIME: "image/png", Data: base64.StdEncoding.EncodeToString([]byte("two"))},
+		},
+	})
+	if event.Status != protocol.StatusDelivered {
+		t.Fatalf("send: %+v", event)
+	}
+	if got, want := src.injected(), "/tmp/inline-one.png /tmp/inline-two.png why is this cut off?"; got != want {
+		t.Errorf("typed %q, want %q", got, want)
+	}
+
+	// An image alone is a message too.
+	event = agent.Handle(context.Background(), protocol.Request{
+		Type: protocol.ReqSendMessage, SessionID: "claude:s1", ClientID: "c2",
+		Images: []protocol.InlineImage{{MIME: "image/png", Data: base64.StdEncoding.EncodeToString([]byte("three"))}},
+	})
+	if event.Status != protocol.StatusDelivered || src.injected() != "/tmp/inline-three.png" {
+		t.Fatalf("image alone: %+v, typed %q", event, src.injected())
+	}
+}
+
+func TestMoreThanFourImagesFromTheMacAreRefused(t *testing.T) {
+	src := &injectingSource{}
+	agent, _ := agentWithSource(t, src)
+	agent.SetAttachments(&fakeStore{})
+	images := make([]protocol.InlineImage, 5)
+	for i := range images {
+		images[i] = protocol.InlineImage{MIME: "image/png", Data: base64.StdEncoding.EncodeToString([]byte("x"))}
+	}
+	event := agent.Handle(context.Background(), protocol.Request{
+		Type: protocol.ReqSendMessage, SessionID: "claude:s1", ClientID: "c1", Images: images,
+	})
+	if event.Type != protocol.EvtError && event.Status != protocol.StatusFailed {
+		t.Fatalf("five images were accepted: %+v", event)
+	}
+	if src.injected() != "" {
+		t.Errorf("typed %q", src.injected())
+	}
+}
+
+// The real store keeps only what is an image, under a name of its own.
+func TestTheStoreFilesOnlyImages(t *testing.T) {
+	dir := t.TempDir()
+	store := attachments.New(dir, "", "")
+	png, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+	path, err := store.SaveData("claude:s1", png)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(path, filepath.Join(dir, "images")) || filepath.Ext(path) != ".png" {
+		t.Errorf("saved at %s", path)
+	}
+	if data, _ := os.ReadFile(path); len(data) != len(png) {
+		t.Errorf("wrote %d bytes", len(data))
+	}
+	if _, err := store.SaveData("claude:s1", []byte("#!/bin/sh\necho hi")); err == nil {
+		t.Error("a script was filed as an image")
 	}
 }

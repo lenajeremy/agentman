@@ -154,6 +154,14 @@ const (
 	// history without checking it out: the working tree, the index and HEAD
 	// stay as the agent left them.
 	ReqListBranches RequestType = "list_branches"
+	// ReqRenameSession gives the session named by SessionID the display
+	// name in Text, everywhere it shows; an empty Text gives it back the
+	// agent's own name. The session's ID never changes.
+	ReqRenameSession RequestType = "rename_session"
+	// ReqToolsTitle asks Agentman for a plain line saying what a run of tool
+	// calls did and why. Steps are the run's calls, with their titles; Text
+	// is what the agent said just before them.
+	ReqToolsTitle RequestType = "tools_title"
 )
 
 // Request is anything the app asks of the daemon.
@@ -178,6 +186,17 @@ type Request struct {
 	// ClientID is echoed on SendResult so the app can settle its optimistic
 	// message bubble.
 	ClientID string `json:"clientId,omitempty"`
+	// CardID names the card on ReqManagerCardReply and ReqManagerCardDismiss.
+	CardID string `json:"cardId,omitempty"`
+	// ScheduleID names the schedule on ReqManagerScheduleCancel.
+	ScheduleID string `json:"scheduleId,omitempty"`
+	// Images are sent with a message to Agentman on ReqManagerSend.
+	Images []InlineImage `json:"images,omitempty"`
+	// Steps are the tool calls a tools_title request is about.
+	Steps []Tool `json:"steps,omitempty"`
+	// Note and Key are saved by ReqKnowledgeWrite and ReqKeySet.
+	Note *Note `json:"note,omitempty"`
+	Key  *Key  `json:"key,omitempty"`
 	// PushToken carries an Expo push token on ReqRegisterPush.
 	PushToken string `json:"pushToken,omitempty"`
 	// Notify carries that phone's choice of alerts on ReqRegisterPush. Absent
@@ -207,6 +226,8 @@ type Request struct {
 	// Ref is the branch ReqListCommits reads, in full — refs/heads/… or
 	// refs/remotes/… — as ReqListBranches reported it. Empty reads HEAD.
 	Ref string `json:"ref,omitempty"`
+	// Manager is the settings on ReqManagerSetSettings.
+	Manager *ManagerSettings `json:"manager,omitempty"`
 }
 
 /* ----------------------------- daemon → app ------------------------------ */
@@ -220,8 +241,10 @@ const (
 	EvtSessionGone   EventType = "session_gone"
 	EvtMessages      EventType = "messages"
 	EvtPage          EventType = "page"
-	EvtTurnComplete  EventType = "turn_complete"
-	EvtSendResult    EventType = "send_result"
+	// EvtToolsTitle answers tools_title: the run's title is in Preview.
+	EvtToolsTitle   EventType = "tools_title"
+	EvtTurnComplete EventType = "turn_complete"
+	EvtSendResult   EventType = "send_result"
 	// EvtServerOpened answers ReqOpenServer with the server's link.
 	EvtServerOpened EventType = "server_opened"
 	// EvtServerStopped answers ReqStopServer once the process is gone.
@@ -296,6 +319,25 @@ type Event struct {
 	// Daemon rides on EvtSessions: which agentman this Mac runs, and what is
 	// newer. A phone too old to know the field ignores it.
 	Daemon *DaemonInfo `json:"daemon,omitempty"`
+
+	// Agentman, the manager (manager.go).
+	Entry           *ManagerEntry    `json:"entry,omitempty"`
+	Entries         []ManagerEntry   `json:"entries,omitempty"`
+	EntryID         string           `json:"entryId,omitempty"`
+	Delta           string           `json:"delta,omitempty"`
+	ManagerStatus   *ManagerStatus   `json:"managerStatus,omitempty"`
+	ManagerSettings *ManagerSettings `json:"managerSettings,omitempty"`
+	Brief           *Brief           `json:"brief,omitempty"`
+	Briefs          []Brief          `json:"briefs,omitempty"`
+	Permission      *PermissionCheck `json:"permission,omitempty"`
+	// More says older manager entries remain, on EvtManagerHistory.
+	More bool `json:"more,omitempty"`
+	// Notes, Note and Keys answer the knowledge and key requests.
+	Notes []Note `json:"notes,omitempty"`
+	Note  *Note  `json:"note,omitempty"`
+	Keys  []Key  `json:"keys,omitempty"`
+	// Schedules answers ReqManagerSchedules.
+	Schedules []ManagerSchedule `json:"schedules,omitempty"`
 
 	Error string `json:"error,omitempty"`
 }

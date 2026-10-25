@@ -101,15 +101,21 @@ type BackwardOptions struct {
 	ChunkSize int
 	// Unsettled, when set, reports whether the lines mapped so far have left
 	// something only an earlier line can finish — a tool result whose call is
-	// further back. A page that has reached Want keeps reading while it does,
-	// up to UnsettledScanBytes more and half as many messages again, so the
-	// call settles on this page instead of opening the next one as still
-	// running. The bound keeps a page inside what the app accepts (100).
+	// further back. A page that has reached Want, or used its byte budget,
+	// keeps reading while it does, up to UnsettledBytes more and half as many
+	// messages again, so the call settles on this page instead of opening the
+	// next one as running for good. The message bound keeps a page inside
+	// what the app accepts (100).
 	Unsettled func() bool
+	// UnsettledBytes overrides UnsettledScanBytes. Mainly useful for tests.
+	UnsettledBytes int64
 }
 
-// UnsettledScanBytes bounds how far past a full page Unsettled may extend it.
-const UnsettledScanBytes = 256 << 10
+// UnsettledScanBytes bounds how far past a page's limits Unsettled may
+// extend it. Generous, because the lines between a call and its result are
+// the results themselves: a screenshot an agent read is stored whole, a few
+// megabytes of base64, and four read at once must still find their call.
+const UnsettledScanBytes = 24 << 20
 
 // BackwardResult is one page of scrollback.
 type BackwardResult struct {
@@ -192,6 +198,17 @@ func CollectBackwardContext(ctx context.Context, path string, opts BackwardOptio
 	found := make([]protocol.Message, 0, opts.Want)
 	cursor := NoCursor
 	var scanned int64
+	settleBytes := opts.UnsettledBytes
+	if settleBytes <= 0 {
+		settleBytes = UnsettledScanBytes
+	}
+	// readingOn reports whether a page past one of its limits, reached when
+	// `since` bytes had been scanned, should keep looking for the call a
+	// result it holds belongs to.
+	readingOn := func(since int64) bool {
+		return opts.Unsettled != nil && opts.Unsettled() &&
+			len(found) < opts.Want+max(opts.Want/2, 1) && scanned-since < settleBytes
+	}
 	// full reports whether the page may stop: it has Want messages and nothing
 	// unsettled, or it has run out of room to keep looking.
 	fullAt := int64(-1)
@@ -202,8 +219,13 @@ func CollectBackwardContext(ctx context.Context, path string, opts BackwardOptio
 		if fullAt < 0 {
 			fullAt = scanned
 		}
-		return opts.Unsettled == nil || !opts.Unsettled() ||
-			len(found) >= opts.Want+max(opts.Want/2, 1) || scanned-fullAt >= UnsettledScanBytes
+		return !readingOn(fullAt)
+	}
+	// outOfBytes reports whether the byte budget ends the page. A result
+	// alone can spend it, and stopping there opens the next page with its
+	// call still running, so an unsettled page reads on a while.
+	outOfBytes := func() bool {
+		return scanned >= maxScan && !readingOn(maxScan)
 	}
 
 	// Fragments hold one line that crosses chunk boundaries. They are retained
@@ -285,7 +307,7 @@ func CollectBackwardContext(ctx context.Context, path string, opts BackwardOptio
 			fragmentBytes = 0
 			end = newline
 
-			if full() || scanned >= maxScan {
+			if full() || outOfBytes() {
 				return finishBackward(found, cursor, scanned, cursor > 0), nil
 			}
 		}
@@ -307,7 +329,7 @@ func CollectBackwardContext(ctx context.Context, path string, opts BackwardOptio
 		// Once at least one complete line has established a safe continuation
 		// cursor, do not keep reading an earlier partial line merely to fill the
 		// page. The next request resumes from cursor without skipping it.
-		if scanned >= maxScan && cursor > 0 {
+		if outOfBytes() && cursor > 0 {
 			return finishBackward(found, cursor, scanned, true), nil
 		}
 

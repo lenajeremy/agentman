@@ -84,7 +84,9 @@ type Transport interface {
 // Daemon wires discovery, hooks, and subscriptions together.
 type Daemon struct {
 	registry *source.Registry
-	sink     Transport
+	// names is the user's names for sessions, applied as they are found.
+	names *sessionNames
+	sink  Transport
 
 	mu sync.Mutex
 	// sessions is the last discovered list, kept so hook events can be matched
@@ -93,6 +95,9 @@ type Daemon struct {
 	// daemonInfo says which agentman this is and what is newer. See
 	// SetDaemonInfo.
 	daemonInfo func() *protocol.DaemonInfo
+	// manager is Agentman, the manager agent, when am serve runs one. See
+	// SetManager.
+	manager ManagerHook
 	// turns gives hook and polling completions one shared generation to claim.
 	// Unlike a time window, it permits two real short turns to notify while
 	// still making duplicate hook/poll reports for one turn idempotent.
@@ -217,7 +222,10 @@ func New(registry *source.Registry, sink Transport) *Daemon {
 // where it landed on disk. An interface so a daemon without a relay simply has
 // none, and so tests need no network.
 type AttachmentStore interface {
+	// Save collects a phone's upload from the relay.
 	Save(ctx context.Context, sessionID, uploadID string) (string, error)
+	// SaveData files an image that came with the message itself.
+	SaveData(sessionID string, data []byte) (string, error)
 }
 
 // SetAttachments installs the store images are collected into.
@@ -318,6 +326,9 @@ func (d *Daemon) suppressTurnAlert(sessionID string, now time.Time) string {
 // alertTurnComplete pushes a finished turn. The preview only travels when the
 // user has opted in, since it leaves the machine.
 func (d *Daemon) alertTurnComplete(event protocol.Event) {
+	// Agentman hears every finished turn, whether or not a phone is set up
+	// for push.
+	d.managerTurnComplete(event.SessionID)
 	d.mu.Lock()
 	sender := d.push
 	d.mu.Unlock()
@@ -344,6 +355,7 @@ func (d *Daemon) alertNeedsAnswer(session protocol.Session) {
 	if session.Question == nil {
 		return
 	}
+	d.managerNeedsAnswer(session)
 	d.mu.Lock()
 	previous, seen := d.pushedQuestions[session.ID]
 	if seen && previous == session.Question.ID {
@@ -429,6 +441,9 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 	current := make(map[string]protocol.Session, len(found))
 	for _, session := range found {
 		session = d.applyHookStateLocked(session, time.Now())
+		// The user's name for it, before anything sees it: alerts, apps,
+		// Agentman.
+		session = d.names.apply(session)
 		session.Servers = d.serverLists[session.ID]
 		current[session.ID] = session
 		before, existed := previous[session.ID]
@@ -473,6 +488,9 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 		if _, still := current[id]; !still {
 			gone = append(gone, id)
 		}
+	}
+	if len(changed)+len(gone) > 0 {
+		defer d.managerSessionsChanged()
 	}
 	bulk := len(changed)+len(gone) > maxIncrementalSessionEvents
 	if bulk {
@@ -930,6 +948,11 @@ func (d *Daemon) HandleFrom(
 	subscriberID string,
 	req protocol.Request,
 ) protocol.Event {
+	// The manager's requests are about the conversation with it, not about a
+	// session, so they skip the session checks below.
+	if manager := d.managerHook(); manager != nil && manager.Handles(req.Type) {
+		return manager.Handle(ctx, req)
+	}
 	if err := validateRequest(req); err != nil {
 		if req.Type == protocol.ReqSendMessage || req.Type == protocol.ReqAnswer ||
 			req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqReviewArtifact ||
@@ -956,6 +979,19 @@ func (d *Daemon) HandleFrom(
 			}
 		}
 		attachmentPaths = saved
+	}
+	// The Mac app sends its images with the message rather than through the
+	// relay; they are filed the same way and reach the agent the same way.
+	if req.Type == protocol.ReqSendMessage && len(req.Images) > 0 {
+		saved, saveErr := d.saveInlineImages(req.SessionID, req.Images)
+		if saveErr != nil {
+			return protocol.Event{
+				Type: protocol.EvtSendResult, SessionID: req.SessionID,
+				ClientID: req.ClientID, Status: protocol.StatusFailed,
+				Error: saveErr.Error(),
+			}
+		}
+		attachmentPaths = append(attachmentPaths, saved...)
 	}
 	if requestMutatesSession(req.Type) {
 		lock := d.actionLock(req.SessionID)
@@ -1048,6 +1084,7 @@ func (d *Daemon) HandleFrom(
 			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
 		}
 		d.seen.record(req.SessionID, page.Messages)
+		describeTools(page.Messages)
 		event := protocol.Event{Type: protocol.EvtPage, Page: &page}
 		return fitMessageEvent(event)
 
@@ -1171,11 +1208,14 @@ func (d *Daemon) HandleFrom(
 		protocol.ReqListBranches:
 		return d.history(ctx, req)
 
+	case protocol.ReqRenameSession:
+		return d.renameSession(req)
+
 	case protocol.ReqReadSeenFile:
-		return d.readSeenFile(req)
+		return d.readSeenFile(ctx, req)
 
 	case protocol.ReqReadSeenFileChunk:
-		return d.readSeenFileChunk(req)
+		return d.readSeenFileChunk(ctx, req)
 
 	case protocol.ReqListArtifacts:
 		return d.listArtifacts(ctx, req)
@@ -1274,7 +1314,8 @@ func validateRequest(req protocol.Request) error {
 		req.Type == protocol.ReqReviewArtifact ||
 		req.Type == protocol.ReqSetMode || req.Type == protocol.ReqSetModel ||
 		req.Type == protocol.ReqListCommits || req.Type == protocol.ReqCommitFiles ||
-		req.Type == protocol.ReqCommitDiff || req.Type == protocol.ReqListBranches
+		req.Type == protocol.ReqCommitDiff || req.Type == protocol.ReqListBranches ||
+		req.Type == protocol.ReqRenameSession
 	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
 		return fmt.Errorf("daemon: invalid session id")
 	}
@@ -1356,10 +1397,10 @@ func validateRequest(req protocol.Request) error {
 		return nil
 	case protocol.ReqSendMessage:
 		// A message that is only images is a real message: "look at this".
-		if strings.TrimSpace(req.Text) == "" && len(req.UploadIDs) == 0 {
+		if strings.TrimSpace(req.Text) == "" && len(req.UploadIDs) == 0 && len(req.Images) == 0 {
 			return fmt.Errorf("daemon: refusing to send an empty message")
 		}
-		if len(req.UploadIDs) > maxUploadIDs {
+		if len(req.UploadIDs)+len(req.Images) > maxUploadIDs {
 			return fmt.Errorf("daemon: too many images on one message")
 		}
 		for _, id := range req.UploadIDs {
@@ -1392,6 +1433,11 @@ func validateRequest(req protocol.Request) error {
 		}
 		return nil
 	case protocol.ReqListArtifacts:
+		return nil
+	case protocol.ReqRenameSession:
+		if len(req.Text) > 4*maxSessionName {
+			return fmt.Errorf("daemon: that name is too long")
+		}
 		return nil
 	case protocol.ReqReadArtifact, protocol.ReqReviewArtifact:
 		if !validArtifactName(req.Path) {
@@ -1622,6 +1668,7 @@ func (d *Daemon) startFollow(subscriberID, sessionID string) error {
 				return
 			case batch := <-messages:
 				d.seen.record(sessionID, batch)
+				describeTools(batch)
 				for len(batch) > 0 {
 					take := min(len(batch), maxPageMessages)
 					event := protocol.Event{

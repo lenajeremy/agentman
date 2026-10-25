@@ -48,6 +48,8 @@ Usage:
   am answer <session-id> <key> Answer a pending choice shown by an agent
   am install-hooks            Register agentman's hooks with your agents
   am uninstall-hooks          Remove them again
+  am mcp install              Give your agents Agentman's tools (notes, keys)
+  am mcp uninstall            Take them out again
   am doctor                   Check that everything is wired up correctly
   am version                  Print the version
 
@@ -117,6 +119,9 @@ func main() {
 		err = runInterrupt(ctx, args)
 	case "answer":
 		err = runAnswer(ctx, args)
+	case "mcp":
+		// Started by the agent CLIs, which talk to it over stdin and stdout.
+		err = runMCP(ctx, args)
 	case "doctor":
 		err = runDoctor(ctx, args)
 	case "version", "--version", "-v":
