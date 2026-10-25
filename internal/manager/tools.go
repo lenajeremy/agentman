@@ -361,6 +361,11 @@ func (m *Manager) runTool(ctx context.Context, name string, rawInput []byte) too
 			return toolResult{text: "The input was not valid JSON.", isError: true}
 		}
 	}
+	if pausingTools[name] && isAutonomous(ctx) {
+		if cards := m.pausingCards(); len(cards) > 0 {
+			return pausedResult(cards)
+		}
+	}
 	for _, def := range toolDefs {
 		if def.name == name {
 			return def.run(ctx, m, input)

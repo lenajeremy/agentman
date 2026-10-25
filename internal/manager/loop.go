@@ -29,9 +29,15 @@ type turnInput struct {
 	images []anthropic.BetaContentBlockParamUnion
 	// imageNames are the kept images' names, in the order of images.
 	imageNames []string
+	// autonomous is a turn Agentman started itself, from a reminder or a
+	// watch: it can't push past a card the user hasn't answered.
+	autonomous bool
 }
 
 func (m *Manager) runTurn(ctx context.Context, model Model, input turnInput) {
+	if input.autonomous {
+		ctx = withAutonomous(ctx)
+	}
 	defer func() {
 		m.mu.Lock()
 		if m.stopTurn != nil {

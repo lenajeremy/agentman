@@ -482,7 +482,7 @@ func (m *Manager) startWakeup() {
 	m.mu.Unlock()
 
 	m.addEntry(protocol.ManagerEntry{Role: "scheduled", Text: w.entry, Tool: w.tool})
-	go m.runTurn(turnCtx, model, turnInput{text: w.prompt})
+	go m.runTurn(turnCtx, model, turnInput{text: m.withPauseNote(w.prompt), autonomous: true})
 }
 
 func conditionText(condition string) string {
