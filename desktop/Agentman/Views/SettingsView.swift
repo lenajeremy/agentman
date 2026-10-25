@@ -10,15 +10,18 @@ struct SettingsView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            List(selection: Binding(get: { page }, set: { page = $0 ?? "general" })) {
+            // The pages, with the same quiet highlight as the main window's
+            // sidebar rather than the accent-coloured one a List draws.
+            VStack(spacing: 2) {
                 ForEach(SettingsPage.allCases) { item in
-                    Label(item.title, systemImage: item.icon)
-                        .font(TextStyle.body)
-                        .tag(item.rawValue)
+                    SettingsTab(page: item, selected: page == item.rawValue) { page = item.rawValue }
                 }
+                Spacer(minLength: 0)
             }
-            .listStyle(.sidebar)
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
             .frame(width: 200)
+            .background(SidebarMaterial().ignoresSafeArea())
 
             Divider()
 
@@ -51,6 +54,43 @@ struct SettingsView: View {
         .onChange(of: store.manager.settings) { _, settings in
             if draft == nil { draft = settings }
         }
+    }
+}
+
+/// One page in the settings' sidebar.
+private struct SettingsTab: View {
+    let page: SettingsPage
+    let selected: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: page.icon)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(selected ? Palette.text : Palette.muted)
+                    .frame(width: 18)
+                Text(page.title)
+                    .font(TextStyle.body)
+                    .foregroundStyle(Palette.text)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.primary.opacity(selected ? 0.10 : hovering ? 0.05 : 0))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(selected ? 0.10 : 0))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

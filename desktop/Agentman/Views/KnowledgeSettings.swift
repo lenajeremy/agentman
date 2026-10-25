@@ -43,14 +43,24 @@ struct KnowledgeSettings: View {
                     }
                     .padding(6)
                 }
-                .frame(width: 210)
+                .frame(width: 190)
                 .background(Palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
                 .overlay {
                     if manager.notes.isEmpty {
-                        Text("No notes yet")
-                            .font(TextStyle.caption)
-                            .foregroundStyle(Palette.muted)
+                        VStack(spacing: 6) {
+                            Image(systemName: "book")
+                                .font(.system(size: 18))
+                                .foregroundStyle(Palette.faint)
+                            Text("No notes yet")
+                                .font(TextStyle.captionMedium)
+                                .foregroundStyle(Palette.textSecondary)
+                            Text("Notes you write, or save from Agentman's suggestions, show here.")
+                                .font(TextStyle.caption)
+                                .foregroundStyle(Palette.muted)
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(18)
                     }
                 }
 
@@ -61,7 +71,13 @@ struct KnowledgeSettings: View {
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 26)
-        .task { await manager.loadNotes() }
+        .task {
+            await manager.loadNotes()
+            // For screenshots and tests: a note open at launch, by name.
+            if let name = ProcessInfo.processInfo.environment["AGENTMAN_NOTE"] {
+                selection = manager.notes.first(where: { $0.name == name })?.id
+            }
+        }
         .onChange(of: selection) { _, id in
             guard let id, let note = manager.notes.first(where: { $0.id == id }) else { return }
             Task {
@@ -73,39 +89,76 @@ struct KnowledgeSettings: View {
         }
     }
 
+    /// The note: its title, who reads it, then its words on the card itself,
+    /// the way a notes app has them.
     private var editor: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            TextField("Title", text: $draft.title)
+        VStack(alignment: .leading, spacing: 0) {
+            TextField("Title", text: $draft.title, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(TextStyle.title)
-            HStack(spacing: 12) {
-                Picker("", selection: $draft.tier) {
-                    Text("Shared with agents").tag("shared")
-                    Text("Private to Agentman").tag("private")
+                .font(Fonts.sans(18, .medium))
+                .lineLimit(1...3)
+                .padding(.bottom, 10)
+            HStack(spacing: 10) {
+                Menu {
+                    Picker("Who reads it", selection: $draft.tier) {
+                        Label("Shared with agents", systemImage: "person.2").tag("shared")
+                        Label("Private to Agentman", systemImage: "lock").tag("private")
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: draft.tier == "shared" ? "person.2" : "lock")
+                            .font(.system(size: 10, weight: .medium))
+                        Text(draft.tier == "shared" ? "Shared" : "Private")
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 7, weight: .bold))
+                            .foregroundStyle(Palette.faint)
+                    }
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.textSecondary)
+                    .padding(.horizontal, 9)
+                    .frame(height: 24)
+                    .background(Palette.fill, in: Capsule())
                 }
-                .labelsHidden()
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
                 .fixedSize()
+                .help(draft.tier == "shared"
+                    ? "Any agent can read it through Agentman" : "Only Agentman reads it; agents get what it tells them")
                 if draft.tier == "shared" {
                     Toggle("In project instructions", isOn: $draft.always)
                         .toggleStyle(.checkbox)
-                        .fixedSize()
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.textSecondary)
                         .help("Agentman writes it into CLAUDE.md or AGENTS.md when you ask it to update an agent's instructions.")
                 }
                 Spacer(minLength: 0)
             }
-            .font(TextStyle.caption)
+            .padding(.bottom, 12)
+            Divider()
             TextEditor(text: $draft.body)
                 .font(TextStyle.body)
                 .scrollContentBackground(.hidden)
-                .padding(8)
-                .background(Palette.paper, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            HStack {
+                .padding(.horizontal, -5)
+                .padding(.top, 10)
+                .overlay(alignment: .topLeading) {
+                    if draft.body.isEmpty {
+                        Text("Write the note: how you like things done, or what agents should know.")
+                            .font(TextStyle.body)
+                            .foregroundStyle(Palette.faint)
+                            .padding(.top, 10)
+                            .allowsHitTesting(false)
+                    }
+                }
+            HStack(spacing: 10) {
                 if let problem {
                     Text(problem)
                         .font(TextStyle.caption)
                         .foregroundStyle(Palette.errorText)
+                        .lineLimit(2)
                 }
-                Spacer()
+                Spacer(minLength: 0)
                 if let original = draft.original {
                     Button("Delete", role: .destructive) {
                         Task {
@@ -122,8 +175,9 @@ struct KnowledgeSettings: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(saving || draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
             }
+            .padding(.top, 10)
         }
-        .padding(16)
+        .padding(18)
     }
 
     private func save() {
@@ -152,9 +206,10 @@ private struct NoteRow: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(note.title)
-                    .font(TextStyle.bodyMedium)
+                    .font(Fonts.sans(13, .medium))
                     .foregroundStyle(Palette.text)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
                 HStack(spacing: 4) {
                     Image(systemName: note.tier == "shared" ? "person.2" : "lock")
                     Text(note.tier == "shared" ? "Shared" : "Private")
@@ -166,9 +221,16 @@ private struct NoteRow: View {
                 .foregroundStyle(Palette.muted)
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(selected ? Palette.fill : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.primary.opacity(selected ? 0.08 : 0))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(selected ? 0.08 : 0))
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
