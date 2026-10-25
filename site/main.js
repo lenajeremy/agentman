@@ -156,6 +156,7 @@
       ".workspace-copy", ".workspace-art", ".workspace-card", ".how .caps", ".how .h2",
       ".steps .step", ".moment li", ".moment .h2", ".start .h2", ".platform", ".setup-step",
       ".names > span", ".moment .phones .iphone-x", ".workspace-art .iphone-x", ".grid .tile", ".band .h2", ".band p", ".band-art",
+      ".mac-stage", ".am-item", ".mac-note",
     ];
     const reveal = new IntersectionObserver((entries) => {
       for (const entry of entries) {
