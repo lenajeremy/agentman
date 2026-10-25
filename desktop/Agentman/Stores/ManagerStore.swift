@@ -140,6 +140,16 @@ final class ManagerStore {
         client.send(DaemonRequest(.managerStop))
     }
 
+    /// Starts a new conversation. The one before is archived on the Mac, the
+    /// cards still waiting carry over, and Agentman keeps what lasts of it in
+    /// its private notes. Returns the problem, if any.
+    func reset() async -> String? {
+        guard let reply = try? await client.request(DaemonRequest(.managerReset)) else { return "Couldn't reach am serve." }
+        if reply.type == "error" { return reply.error }
+        await reload()
+        return nil
+    }
+
     func loadOlder() async {
         guard hasOlder, let first = entries.first else { return }
         var request = DaemonRequest(.managerHistory)
@@ -347,6 +357,9 @@ final class ManagerStore {
             if let status = event.managerStatus { self.status = status }
         case "keys":
             if let keys = event.keys { self.keys = keys }
+        case "manager_reset":
+            // A new conversation, started here or on the phone.
+            Task { await reload() }
         case "manager_schedules":
             schedules = event.schedules ?? []
         case "manager_brief":

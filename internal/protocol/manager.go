@@ -22,6 +22,10 @@ const (
 	ReqManagerOpenCards RequestType = "manager_open_cards"
 	// ReqManagerStop cuts short the reply Agentman is writing.
 	ReqManagerStop RequestType = "manager_stop"
+	// ReqManagerReset starts a new conversation with Agentman. The one before
+	// is archived, the cards still waiting carry over, and Agentman keeps
+	// what lasts of it in its private notes. Answered with EvtManagerReset.
+	ReqManagerReset RequestType = "manager_reset"
 	// ReqManagerSettings reads the settings; ReqManagerSetSettings replaces
 	// them with Request.Manager.
 	ReqManagerSettings    RequestType = "manager_settings"
@@ -68,6 +72,9 @@ const (
 	EvtManagerSchedules EventType = "manager_schedules"
 	// EvtManagerPermission answers ReqManagerCheckPermission, in Permission.
 	EvtManagerPermission EventType = "manager_permission"
+	// EvtManagerReset says a new conversation started: apps read the
+	// conversation again.
+	EvtManagerReset EventType = "manager_reset"
 )
 
 // Schedule kinds.
@@ -120,8 +127,9 @@ type ManagerEntry struct {
 	// Role is who it is from: "user", "assistant", "activity" (something
 	// Agentman did, such as reading an agent), "brief" (news from an agent),
 	// "agent" (an agent telling Agentman something, through am mcp), "card",
-	// "scheduled" (one of Agentman's own reminders or watches waking it) or
-	// "error".
+	// "scheduled" (one of Agentman's own reminders or watches waking it),
+	// "compacted" (the conversation before it was summarised, for the model;
+	// apps show a divider) or "error".
 	Role string `json:"role"`
 	Text string `json:"text"`
 	Ts   int64  `json:"ts"`

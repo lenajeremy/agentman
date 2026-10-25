@@ -189,11 +189,32 @@ func init() {
 			run:        runDeleteNote,
 		},
 		{
+			name: "save_private_note",
+			description: "Keep one of your own private notes, your memory across conversations: a lasting fact or a " +
+				"preference of the user's worth knowing next time. Only you read these. Saved at once, no approval needed. " +
+				"Give the name of a note you already keep to update it rather than writing a second one.",
+			properties: map[string]any{
+				"title": map[string]any{"type": "string", "description": "In a line."},
+				"body":  map[string]any{"type": "string", "description": "The note, in Markdown, short."},
+				"name":  map[string]any{"type": "string", "description": "An existing private note's name, to update it."},
+			},
+			required: []string{"title", "body"},
+			run:      runSavePrivateNote,
+		},
+		{
+			name: "delete_private_note",
+			description: "Delete one of your own private notes, by name, when it is wrong or no longer true. " +
+				"For the user's shared notes, use delete_note, and only when they ask.",
+			properties: map[string]any{"name": map[string]any{"type": "string"}},
+			required:   []string{"name"},
+			run:        runDeletePrivateNote,
+		},
+		{
 			name: "suggest_note",
-			description: "Suggest a note for the user to keep: a lasting preference, a convention, or a fact about a project " +
-				"worth remembering, whether they asked you to remember it or you noticed it yourself. It appears to them " +
-				"as a card to approve, edit or dismiss; nothing is saved unless they approve it. Shared notes can be read " +
-				"by every agent; private ones only by you. Suggest sparingly: one clear, lasting thing per note.",
+			description: "Suggest a shared note, which every agent can read: a convention, or a fact about a project, " +
+				"worth all the user's agents knowing, whether they asked for it or you noticed it yourself. It appears to " +
+				"them as a card to approve, edit or dismiss; nothing is saved unless they approve it. For your own memory, " +
+				"use save_private_note instead. Suggest sparingly: one clear, lasting thing per note.",
 			properties: map[string]any{
 				"title":  map[string]any{"type": "string", "description": "In a line."},
 				"body":   map[string]any{"type": "string", "description": "The note, in Markdown, short."},
