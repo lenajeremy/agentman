@@ -32,11 +32,16 @@ type turnInput struct {
 	// autonomous is a turn Agentman started itself, from a reminder or a
 	// watch: it can't push past a card the user hasn't answered.
 	autonomous bool
+	// reply is the card the user replied on, when the turn answers it.
+	reply *cardReply
 }
 
 func (m *Manager) runTurn(ctx context.Context, model Model, input turnInput) {
 	if input.autonomous {
 		ctx = withAutonomous(ctx)
+	}
+	if input.reply != nil {
+		ctx = withCardReply(ctx, *input.reply)
 	}
 	defer func() {
 		m.mu.Lock()

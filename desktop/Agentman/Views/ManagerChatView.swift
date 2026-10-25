@@ -602,12 +602,12 @@ private struct ManagerCardView: View {
             }
 
             if let question = card.question {
-                QuestionChoices(question: question, suggested: card.suggested) { answer in
+                QuestionChoices(question: question, suggested: card.suggested, typedPrompt: "Or reply to Agentman") { answer in
                     await send(answer)
                 }
             } else {
                 HStack(alignment: .bottom, spacing: 8) {
-                    TextField("Reply to \(store.session(card.sessionId)?.name ?? card.agentName)", text: $reply, axis: .vertical)
+                    TextField("Reply to Agentman about \(store.session(card.sessionId)?.name ?? card.agentName)", text: $reply, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(TextStyle.body)
                         .lineLimit(1...5)
@@ -622,7 +622,7 @@ private struct ManagerCardView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busy)
-                    .help("Send to \(store.session(card.sessionId)?.name ?? card.agentName)")
+                    .help("Agentman acts on it and passes on what \(store.session(card.sessionId)?.name ?? card.agentName) needs")
                 }
                 .padding(.leading, 12)
                 .padding(.trailing, 6)

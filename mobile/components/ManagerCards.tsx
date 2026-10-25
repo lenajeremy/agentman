@@ -91,6 +91,7 @@ function OpenCard({ card }: { card: ManagerCard }) {
             disabled={busy}
             submissionStatus={busy ? "sending" : undefined}
             submissionError={problem ?? undefined}
+            customPlaceholder="Or reply to Agentman…"
           />
         ) : (
           <View style={styles.replyField}>
@@ -98,14 +99,14 @@ function OpenCard({ card }: { card: ManagerCard }) {
               style={styles.replyInput}
               value={reply}
               onChangeText={setReply}
-              placeholder={`Reply to ${name}`}
+              placeholder={`Reply to Agentman about ${name}`}
               placeholderTextColor={color.faint}
               multiline
               editable={!busy}
             />
             <MotionPressable onPress={sendReply} disabled={busy || !reply.trim()}
               style={[styles.replySend, (busy || !reply.trim()) && styles.replySendOff]}
-              accessibilityRole="button" accessibilityLabel={`Send to ${name}`}>
+              accessibilityRole="button" accessibilityLabel={`Send to Agentman, which passes it on to ${name}`}>
               {busy ? <ActivityIndicator size="small" color={color.onAccent} /> : (
                 <Feather name="arrow-up" size={16} color={reply.trim() ? color.onAccent : color.faint} />
               )}

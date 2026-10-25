@@ -48,6 +48,7 @@ export function QuestionCard({
   disabled = false,
   submissionStatus,
   submissionError,
+  customPlaceholder = "Write another answer…",
 }: {
   question: Question;
   onAnswer: (answer: QuestionAnswer) => void;
@@ -60,6 +61,8 @@ export function QuestionCard({
   /** Result of the answer command currently associated with this question. */
   submissionStatus?: "sending" | SendStatus;
   submissionError?: string;
+  /** The typed answer's box, which in Agentman's chat is for Agentman. */
+  customPlaceholder?: string;
 }) {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
@@ -351,7 +354,7 @@ export function QuestionCard({
               setCustom(value);
               if (!question.multiple && value.trim()) setSelected([]);
             }}
-            placeholder="Write another answer…"
+            placeholder={customPlaceholder}
             placeholderTextColor={color.faint}
             multiline
             accessibilityLabel="Custom answer"

@@ -667,7 +667,9 @@ func runAnswerQuestion(ctx context.Context, m *Manager, input map[string]any) to
 	// Approving is for the rules to decide, not the model: only what the
 	// user let Agentman approve, or a no, goes straight to the agent.
 	d := classify(session, q, policyOf(m.currentSettings()))
-	safe := key != "" && ((d.auto && key == d.optionKey) || isDenial(q.Options, key))
+	// A turn acting on the user's own reply to this question's card has
+	// their OK for it.
+	safe := repliedTo(ctx, session.ID, q.ID) || key != "" && ((d.auto && key == d.optionKey) || isDenial(q.Options, key))
 	m.cardMu.Lock()
 	defer m.cardMu.Unlock()
 	if !safe {
