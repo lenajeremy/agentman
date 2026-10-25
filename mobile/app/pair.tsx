@@ -24,7 +24,7 @@ import { PairIllustration } from "../components/Illustrations";
 import { MotionPressable } from "../components/MotionPressable";
 import { useStyles, useTheme } from "../lib/appearance";
 import { pair, pairWithToken } from "../lib/client";
-import { DEFAULT_RELAY } from "../lib/pairing";
+import { CODE_SCREEN_RELAY, DEFAULT_RELAY } from "../lib/pairing";
 import { PRIVACY_POLICY_URL } from "../lib/privacy";
 import { SETUP_GUIDE_URL, SETUP_STEPS } from "../lib/setup-guide";
 import { useStore } from "../lib/store";
@@ -41,7 +41,7 @@ export default function Pair() {
     relay?: string | string[];
     token?: string | string[];
   }>();
-  const [relayUrl, setRelayUrl] = useState(DEFAULT_RELAY);
+  const [relayUrl, setRelayUrl] = useState(CODE_SCREEN_RELAY);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
