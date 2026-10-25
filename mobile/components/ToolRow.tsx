@@ -30,6 +30,8 @@ const OUTPUT_LINES = 12;
 const INLINE_COMMAND = 56;
 /** A fixed-width column for the tile keeps every name on the same left edge. */
 const TILE = 22;
+/** One line of a row's words, which the tile and the chevron sit level with. */
+const LINE = 20;
 
 /**
  * What kind of tool ran and how it ended, in one fixed-size tile.
@@ -484,11 +486,13 @@ const makeStyles = (c: Palette) =>
       borderColor: c.toolCardEdge,
       backgroundColor: c.toolCard,
     },
+    // The same room above and below the words however many lines they run
+    // to, and the tile level with the first.
     header: {
       flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      minHeight: 28,
+      alignItems: "flex-start",
+      gap: 8,
+      paddingVertical: 5,
       borderRadius: radius.sm,
       paddingHorizontal: space.xs,
     },
@@ -497,7 +501,7 @@ const makeStyles = (c: Palette) =>
     // tile behind every one made a run of steps read as a stack of buttons.
     tile: {
       width: TILE,
-      height: TILE,
+      height: LINE,
       borderRadius: 7,
       alignItems: "center",
       justifyContent: "center",
@@ -529,6 +533,7 @@ const makeStyles = (c: Palette) =>
       minWidth: 46,
       fontFamily: font.mono,
       fontSize: size.label,
+      lineHeight: LINE,
       color: c.muted,
     },
     nameFailed: { color: c.errorText },
@@ -536,6 +541,7 @@ const makeStyles = (c: Palette) =>
       flex: 1,
       fontFamily: font.sans,
       fontSize: size.label,
+      lineHeight: LINE,
       color: c.textSecondary,
     },
     spacer: { flex: 1 },
@@ -544,13 +550,14 @@ const makeStyles = (c: Palette) =>
       flex: 1,
       fontFamily: font.mono,
       fontSize: size.caption,
+      lineHeight: LINE,
       color: c.textSecondary,
     },
     targetDim: { color: c.faint },
-    chevron: { fontFamily: font.mono, fontSize: size.body, color: c.faint },
+    chevron: { fontFamily: font.mono, fontSize: size.body, lineHeight: LINE, color: c.faint },
 
     body: {
-      marginLeft: TILE + 10 + space.xs,
+      marginLeft: TILE + 8 + space.xs,
       marginTop: space.xs,
       gap: space.sm,
     },
