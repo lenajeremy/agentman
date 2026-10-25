@@ -40,6 +40,9 @@ type Config struct {
 	// Updates is whether the daemon asks GitHub for newer releases, so the
 	// phone can say when this Mac is behind. On unless switched off.
 	Updates update.Config `json:"updates,omitempty"`
+	// NoAgentTools records that the user took Agentman's tools out of their
+	// agents (am mcp uninstall), so am serve doesn't put them back.
+	NoAgentTools bool `json:"noAgentTools,omitempty"`
 }
 
 // ListenAddr returns the configured safe loopback listener or the default.

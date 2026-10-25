@@ -49,6 +49,12 @@ type Plan struct {
 	// precondition.
 	beforeExists bool
 	beforeDigest [sha256.Size]byte
+	// run applies a change made through the agent's own command rather
+	// than by writing its file (Claude Code's MCP servers).
+	run func() error
+	// mcpCommand is the program an MCP plan found Agentman's server
+	// registered with, empty when it found none.
+	mcpCommand string
 }
 
 // Plans computes the changes for every supported agent without applying them.
@@ -80,6 +86,9 @@ func (p Plan) Apply() error {
 	}
 	if !p.Changed {
 		return nil
+	}
+	if p.run != nil {
+		return p.run()
 	}
 	if err := os.MkdirAll(filepath.Dir(p.Path), 0o700); err != nil {
 		return err
