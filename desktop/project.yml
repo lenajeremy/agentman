@@ -13,8 +13,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.18.0"
+    CURRENT_PROJECT_VERSION: "18"
     MACOSX_DEPLOYMENT_TARGET: "15.0"
 packages:
   # Parses agents' markdown, GitHub tables included (Design/MarkdownView.swift).
@@ -41,6 +41,10 @@ targets:
       properties:
         CFBundleDisplayName: Agentman
         CFBundleName: Agentman
+        # From the build settings below, which XcodeGen would otherwise
+        # replace with 1.0 (1).
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.developer-tools
         NSHumanReadableCopyright: "Agentman is open source under the MIT license."
         # agentman://agent/<session id> opens that agent: what Agentman's
