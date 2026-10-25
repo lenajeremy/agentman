@@ -196,8 +196,13 @@ private struct EntryHero: View {
                     Text("Connecting…")
                 } else if manager.needsKey {
                     HStack(spacing: 4) {
-                        Text("Agentman runs on your Anthropic API key, kept in your Keychain.")
-                        Link("Get a key", destination: URL(string: "https://console.anthropic.com/settings/keys")!)
+                        if manager.provider == "gemini" {
+                            Text("Agentman runs on your Gemini API key, kept in your Keychain.")
+                            Link("Get a key", destination: URL(string: "https://aistudio.google.com/apikey")!)
+                        } else {
+                            Text("Agentman runs on your Anthropic API key, kept in your Keychain.")
+                            Link("Get a key", destination: URL(string: "https://console.anthropic.com/settings/keys")!)
+                        }
                     }
                 } else if !manager.openCards.isEmpty {
                     let count = manager.openCards.count
@@ -780,7 +785,8 @@ private struct KeyBox: View {
             HStack(spacing: 10) {
                 Image(systemName: "key")
                     .foregroundStyle(Palette.muted)
-                SecureField("Paste your Anthropic API key to start", text: $key)
+                SecureField(store.manager.provider == "gemini"
+                    ? "Paste your Gemini API key to start" : "Paste your Anthropic API key to start", text: $key)
                     .textFieldStyle(.plain)
                     .font(Fonts.sans(15))
                     .onSubmit(save)
@@ -814,7 +820,7 @@ private struct KeyBox: View {
         guard !value.isEmpty else { return }
         saving = true
         Task {
-            problem = await store.manager.setKey(value)
+            problem = await store.manager.setKey(value, provider: store.manager.provider)
             if problem == nil { key = "" }
             saving = false
         }

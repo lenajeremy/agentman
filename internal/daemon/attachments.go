@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -69,4 +72,30 @@ func (d *Daemon) saveInlineImages(sessionID string, images []protocol.InlineImag
 		paths = append(paths, path)
 	}
 	return paths, nil
+}
+
+// uploadedImages collects a phone's images for a message to Agentman and
+// returns their bytes. They are filed as an agent's are, read back, and the
+// files removed: Agentman keeps its own copies with the conversation.
+func (d *Daemon) uploadedImages(ctx context.Context, ids []string) ([]protocol.InlineImage, error) {
+	if len(ids) > maxUploadIDs {
+		return nil, fmt.Errorf("send at most %d images at a time", maxUploadIDs)
+	}
+	paths, err := d.saveAttachments(ctx, "agentman", ids)
+	if err != nil {
+		return nil, err
+	}
+	images := make([]protocol.InlineImage, 0, len(paths))
+	for _, path := range paths {
+		data, readErr := os.ReadFile(path)
+		_ = os.Remove(path)
+		if readErr != nil {
+			return nil, errors.New("an image wasn't readable")
+		}
+		images = append(images, protocol.InlineImage{
+			MIME: http.DetectContentType(data),
+			Data: base64.StdEncoding.EncodeToString(data),
+		})
+	}
+	return images, nil
 }

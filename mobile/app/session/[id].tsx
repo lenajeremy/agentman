@@ -30,7 +30,9 @@ import { ContentColumn } from "../../components/ContentColumn";
 import { Markdown } from "../../components/Markdown";
 import { SentImages } from "../../components/SentImages";
 import { ToolGroup } from "../../components/ToolGroup";
+import { ScrollToLatest, SCROLL_AWAY } from "../../components/ScrollToLatest";
 import { groupTools } from "../../lib/toolgroups";
+import { readImage } from "../../lib/imagepath";
 import { splitSentMessage } from "../../lib/sentimages";
 import { MotionPressable } from "../../components/MotionPressable";
 import { Pulse } from "../../components/Pulse";
@@ -94,6 +96,7 @@ export default function SessionScreen() {
   const { color } = useTheme();
   const { height: viewportHeight } = useWindowDimensions();
   const listRef = useRef<FlatList<Row>>(null);
+  const [scrolledAway, setScrolledAway] = useState(false);
   const [draft, setDraft] = useState("");
   const images = useAttachments(store.credentials);
   // The confirmation for a copy made from a message's menu. Held here rather
@@ -256,13 +259,16 @@ export default function SessionScreen() {
       // Filtered here rather than drawn as nothing: an empty cell still takes
       // the list's gap, and a withdrawn preview would leave a hole.
       // Calls in a row read as one line saying what was done.
-      ...groupTools(messages.filter(showsInFeed)),
+      // A call that read a picture stands alone, with the picture under it.
+      ...groupTools(messages.filter(showsInFeed), (message) =>
+        Boolean(message.tool && readImage(message.tool.name, message.tool.summary ?? "", session?.cwd ?? "")),
+      ),
       ...sent,
       ...waiting,
     ];
     // Reversed to feed an inverted list — see the FlatList below.
     return chronological.reverse();
-  }, [messages, store.pending, sessionId, queued]);
+  }, [messages, store.pending, sessionId, queued, session?.cwd]);
   // What a message waiting in the agent's queue says under it. Only Claude
   // queues; its label is the same whether the phone or the Mac sent it.
   const waitingLabel =
@@ -887,11 +893,18 @@ export default function SessionScreen() {
           Inverting also makes "load older" the natural end-of-list action,
           and it leaves the scroll position alone when the user has
           deliberately scrolled up to read. */}
+        <View style={styles.feed}>
         <FlatList
           style={styles.feed}
           ref={listRef}
           data={rows}
           inverted
+          // Inverted, so how far up the reader is counts from the latest.
+          onScroll={(event) => {
+            const away = event.nativeEvent.contentOffset.y > SCROLL_AWAY;
+            if (away !== scrolledAway) setScrolledAway(away);
+          }}
+          scrollEventThrottle={64}
           keyExtractor={(row) =>
             row.kind === "message"
               ? row.message.id
@@ -966,6 +979,11 @@ export default function SessionScreen() {
             )
           }
         />
+        <ScrollToLatest
+          visible={scrolledAway}
+          onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+        />
+        </View>
 
         {/* A blocked agent reads nothing else until this is answered, so the
             question takes the composer's place as a sheet docked to the
@@ -1528,7 +1546,7 @@ function MessageRow({
   if (message.role === "tool" && message.tool) {
     return (
       <Appear enabled={fresh}>
-        <ToolRow message={message} cwd={cwd} />
+        <ToolRow message={message} cwd={cwd} standalone />
       </Appear>
     );
   }
@@ -2075,9 +2093,9 @@ const makeStyles = (c: Palette) =>
     },
     userText: {
       fontFamily: font.sans,
-      fontSize: size.body,
+      fontSize: size.reading,
       color: c.text,
-      lineHeight: 21,
+      lineHeight: 23,
     },
     summaryHeader: { flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 4 },
     summaryLabel: { fontFamily: font.sans, fontSize: size.caption, color: c.muted },

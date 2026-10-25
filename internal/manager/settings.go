@@ -12,9 +12,49 @@ import (
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
 
-// The models Agentman can run on. Opus is the default for both the chat and
-// the briefs; the user picks others in Settings.
-var models = []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"}
+// The models Agentman can run on, on Claude or on Gemini. Opus is the default
+// for both the chat and the briefs; the user picks others in Settings.
+var models = []string{
+	"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1",
+	"gemini-4-argon", "gemini-3.8-flash", "gemini-3.1-pro-preview", "gemini-3.5-flash-lite",
+}
+
+// The engines a model runs on, and where each keeps its key.
+const (
+	providerAnthropic = "anthropic"
+	providerGemini    = "gemini"
+)
+
+var keyNames = map[string]string{providerAnthropic: keyName, providerGemini: "gemini-api-key"}
+
+var keyEnvironment = map[string][]string{
+	providerAnthropic: {"ANTHROPIC_API_KEY"},
+	providerGemini:    {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
+}
+
+// providerOf is the engine a model runs on.
+func providerOf(model string) string {
+	if strings.HasPrefix(model, "gemini-") {
+		return providerGemini
+	}
+	return providerAnthropic
+}
+
+// providerNamed reads an engine's name from a request; anything but Gemini
+// is the Anthropic key, as before there were two.
+func providerNamed(name string) string {
+	if name == providerGemini {
+		return providerGemini
+	}
+	return providerAnthropic
+}
+
+func providerName(provider string) string {
+	if provider == providerGemini {
+		return "Gemini"
+	}
+	return "Anthropic"
+}
 
 var efforts = []string{"low", "medium", "high", "xhigh", "max"}
 
@@ -67,7 +107,9 @@ func loadSettings(path string) protocol.ManagerSettings {
 }
 
 func saveSettings(path string, settings protocol.ManagerSettings) error {
-	settings.KeySet = false
+	// What the daemon reports about keys is worked out afresh, not kept.
+	settings.KeySet, settings.AnthropicKeySet, settings.GeminiKeySet = false, false, false
+	settings.Provider = ""
 	raw, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err

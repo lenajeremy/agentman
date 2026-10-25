@@ -16,12 +16,13 @@ import { useRouter } from "expo-router";
 import { useStyles, useTheme } from "../lib/appearance";
 import { parseDiff } from "../lib/diff";
 import { artifactRowName } from "../lib/artifacts";
-import { workspaceImage, type ImageTarget } from "../lib/imagepath";
+import { readImage, workspaceImage, type ImageTarget } from "../lib/imagepath";
 import { Message } from "../lib/protocol";
 import { font, Palette, radius, size, space } from "../lib/theme";
 import { toolIcon } from "../lib/tool-icon";
 import { MotionPressable } from "./MotionPressable";
 import { OutputViewer } from "./OutputViewer";
+import { SeenImage } from "./SeenImage";
 
 /** Output lines shown before the block asks to be opened fully. */
 const OUTPUT_LINES = 12;
@@ -29,6 +30,8 @@ const OUTPUT_LINES = 12;
 const INLINE_COMMAND = 56;
 /** A fixed-width column for the tile keeps every name on the same left edge. */
 const TILE = 22;
+/** One line of a row's words, which the tile and the chevron sit level with. */
+const LINE = 20;
 
 /**
  * What kind of tool ran and how it ended, in one fixed-size tile.
@@ -365,9 +368,13 @@ function ArtifactLink({ sessionId, name }: { sessionId: string; name: string }) 
 export function ToolRow({
   message,
   cwd = "",
+  standalone = false,
 }: {
   message: Message;
   cwd?: string;
+  /** On its own in the feed, it sits on the soft card a run of steps has;
+   *  inside a run, that run's card holds it. */
+  standalone?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const styles = useStyles(makeStyles);
@@ -393,9 +400,11 @@ export function ToolRow({
   const image = workspaceImage(tool.name, summary, cwd);
   const artifact = artifactRowName(tool.name, summary);
   const canOpen = Boolean(output) || showCommand || Boolean(image) || Boolean(artifact);
+  // A picture it read shows under the card, outside it, as on the Mac.
+  const picture = standalone ? readImage(tool.name, summary, cwd) : null;
 
-  return (
-    <View style={styles.row}>
+  const row = (
+    <View style={[styles.row, standalone && styles.card]}>
       <MotionPressable
         onPress={() => {
           if (!canOpen) return;
@@ -452,16 +461,38 @@ export function ToolRow({
       ) : null}
     </View>
   );
+  if (!picture) return row;
+  return (
+    <View style={styles.withPicture}>
+      {row}
+      <SeenImage sessionId={message.sessionId} target={picture} />
+    </View>
+  );
 }
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     row: { marginHorizontal: -space.xs },
+    withPicture: { gap: space.sm },
+    // The same soft card as on the Mac: a step greyer than the page, so the
+    // work stands apart from the conversation.
+    // With the header's own padding, its tile sits 8 in, as in a run's card.
+    card: {
+      marginHorizontal: 0,
+      paddingHorizontal: 8 - space.xs,
+      paddingVertical: space.xxs,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: c.toolCardEdge,
+      backgroundColor: c.toolCard,
+    },
+    // The same room above and below the words however many lines they run
+    // to, and the tile level with the first.
     header: {
       flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      minHeight: 30,
+      alignItems: "flex-start",
+      gap: 8,
+      paddingVertical: 5,
       borderRadius: radius.sm,
       paddingHorizontal: space.xs,
     },
@@ -470,7 +501,7 @@ const makeStyles = (c: Palette) =>
     // tile behind every one made a run of steps read as a stack of buttons.
     tile: {
       width: TILE,
-      height: TILE,
+      height: LINE,
       borderRadius: 7,
       alignItems: "center",
       justifyContent: "center",
@@ -502,6 +533,7 @@ const makeStyles = (c: Palette) =>
       minWidth: 46,
       fontFamily: font.mono,
       fontSize: size.label,
+      lineHeight: LINE,
       color: c.muted,
     },
     nameFailed: { color: c.errorText },
@@ -509,6 +541,7 @@ const makeStyles = (c: Palette) =>
       flex: 1,
       fontFamily: font.sans,
       fontSize: size.label,
+      lineHeight: LINE,
       color: c.textSecondary,
     },
     spacer: { flex: 1 },
@@ -517,13 +550,14 @@ const makeStyles = (c: Palette) =>
       flex: 1,
       fontFamily: font.mono,
       fontSize: size.caption,
+      lineHeight: LINE,
       color: c.textSecondary,
     },
     targetDim: { color: c.faint },
-    chevron: { fontFamily: font.mono, fontSize: size.body, color: c.faint },
+    chevron: { fontFamily: font.mono, fontSize: size.body, lineHeight: LINE, color: c.faint },
 
     body: {
-      marginLeft: TILE + 10 + space.xs,
+      marginLeft: TILE + 8 + space.xs,
       marginTop: space.xs,
       gap: space.sm,
     },
@@ -542,7 +576,7 @@ const makeStyles = (c: Palette) =>
     },
 
     output: {
-      backgroundColor: c.fill,
+      backgroundColor: c.toolWell,
       borderRadius: radius.md,
       padding: space.md,
       // Just enough to separate one line from the wrapped remains of the
@@ -569,7 +603,7 @@ const makeStyles = (c: Palette) =>
       paddingVertical: space.sm,
       paddingHorizontal: space.md,
       borderRadius: radius.md,
-      backgroundColor: c.fill,
+      backgroundColor: c.toolWell,
     },
     imageLinkText: {
       flex: 1,

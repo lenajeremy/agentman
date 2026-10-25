@@ -1,5 +1,6 @@
 import Feather from "@expo/vector-icons/Feather";
 import { useRouter } from "expo-router";
+import { useEffect } from "react";
 import { Alert, Linking, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -7,8 +8,11 @@ import { Appear } from "../components/Appear";
 import { BrandMark } from "../components/BrandMark";
 import { ContentColumn } from "../components/ContentColumn";
 import { MotionPressable } from "../components/MotionPressable";
+import { LinkRow } from "../components/SettingsKit";
 import { useStyles, useTheme } from "../lib/appearance";
 import { AppearancePreference } from "../lib/appearance-policy";
+import { useManager } from "../lib/manager";
+import { modelName } from "../lib/manager-models";
 import { NotifyPrefs } from "../lib/notification-prefs";
 import { PRIVACY_POLICY_URL } from "../lib/privacy";
 import { isPushActive, pushFailureReason } from "../lib/push";
@@ -25,6 +29,14 @@ const APPEARANCES: { value: AppearancePreference; label: string }[] = [
 
 export default function Settings() {
   const store = useStore();
+  const manager = useManager();
+  const { loadNotes, loadKeys } = manager;
+  // The counts beside Notes and Keys.
+  useEffect(() => {
+    if (!manager.supported) return;
+    void loadNotes();
+    void loadKeys();
+  }, [manager.supported, loadNotes, loadKeys]);
   const updates = useUpdates();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -121,6 +133,28 @@ export default function Settings() {
               </View>
             </MotionPressable>
           </Appear>
+
+          {manager.supported ? (
+            <Appear delay={18}>
+              <Text style={styles.sectionLabel}>Agentman</Text>
+              <View style={styles.card}>
+                <LinkRow icon="cpu" label="Models" value={manager.settings ? modelName(manager.settings.chatModel) : undefined}
+                  onPress={() => router.push("/agentman-settings/models")} />
+                <View style={styles.divider} />
+                <LinkRow icon="message-circle" label="Personality" onPress={() => router.push("/agentman-settings/personality")} />
+                <View style={styles.divider} />
+                <LinkRow icon="shield" label="Permissions"
+                  value={manager.settings ? (manager.settings.autoApprove ? "Approves low-risk" : "Asks every time") : undefined}
+                  onPress={() => router.push("/agentman-settings/permissions")} />
+                <View style={styles.divider} />
+                <LinkRow icon="book-open" label="Notes" value={manager.notes.length ? String(manager.notes.length) : undefined}
+                  onPress={() => router.push("/agentman-settings/notes")} />
+                <View style={styles.divider} />
+                <LinkRow icon="key" label="Keys" value={manager.keys.length ? String(manager.keys.length) : undefined}
+                  onPress={() => router.push("/agentman-settings/keys")} />
+              </View>
+            </Appear>
+          ) : null}
 
           <Appear delay={22}>
             <Text style={styles.sectionLabel}>Versions</Text>

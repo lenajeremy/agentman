@@ -10,6 +10,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ThemeProvider, useTheme } from "../lib/appearance";
 import { StoreProvider } from "../lib/store";
+import { ManagerProvider } from "../lib/manager";
 import { UpdatesProvider } from "../lib/updates-context";
 import { palettes } from "../lib/theme";
 
@@ -125,6 +126,7 @@ function ThemedApp({ fontsLoaded }: { fontsLoaded: boolean }) {
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: color.paper }}>
       <SafeAreaProvider>
         <StoreProvider>
+          <ManagerProvider>
           <UpdatesProvider>
             <NotificationNavigation />
             <SimulatorLaunch />
@@ -141,6 +143,7 @@ function ThemedApp({ fontsLoaded }: { fontsLoaded: boolean }) {
               <Stack.Screen name="update" options={{ presentation: "modal", animation: "default" }} />
             </Stack>
           </UpdatesProvider>
+          </ManagerProvider>
         </StoreProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

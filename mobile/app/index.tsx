@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Appear } from "../components/Appear";
 import { AgentIcon } from "../components/AgentIcon";
+import { AgentmanCard } from "../components/AgentmanCard";
 import { ContentColumn } from "../components/ContentColumn";
 import { EmptyIllustration } from "../components/Illustrations";
 import { MotionPressable } from "../components/MotionPressable";
@@ -166,6 +167,8 @@ export default function Agents() {
             <Text style={styles.title} accessibilityRole="header">
               Agents
             </Text>
+
+            <AgentmanCard />
 
             {!store.daemonOnline ? (
               incompatible ? (

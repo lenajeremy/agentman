@@ -243,3 +243,53 @@ func TestTheStoreFilesOnlyImages(t *testing.T) {
 		t.Error("a script was filed as an image")
 	}
 }
+
+// recordingManager keeps the last request Agentman was handed.
+type recordingManager struct{ req protocol.Request }
+
+func (m *recordingManager) Handles(kind protocol.RequestType) bool {
+	return kind == protocol.ReqManagerSend
+}
+func (m *recordingManager) Handle(_ context.Context, req protocol.Request) protocol.Event {
+	m.req = req
+	return protocol.Event{Type: protocol.EvtManagerEntry}
+}
+func (m *recordingManager) TurnComplete(protocol.Session)      {}
+func (m *recordingManager) NeedsAnswer(protocol.Session)       {}
+func (m *recordingManager) SessionsChanged([]protocol.Session) {}
+
+// A phone's images for Agentman come through the relay like an agent's, and
+// Agentman is handed their bytes, with no file left behind.
+func TestAPhonesImagesReachAgentmanAsBytes(t *testing.T) {
+	dir := t.TempDir()
+	png := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 32)...)
+	path := filepath.Join(dir, "shot.png")
+	if err := os.WriteFile(path, png, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agent, _ := agentWithSource(t, &injectingSource{})
+	agent.SetAttachments(&fakeStore{paths: map[string]string{"TICKET1": path}})
+	boss := &recordingManager{}
+	agent.SetManager(boss)
+
+	event := agent.Handle(context.Background(), protocol.Request{
+		Type: protocol.ReqManagerSend, Text: "what's on this screen?", UploadIDs: []string{"TICKET1"},
+	})
+	if event.Type == protocol.EvtError {
+		t.Fatalf("send failed: %s", event.Error)
+	}
+	if len(boss.req.Images) != 1 || boss.req.Images[0].MIME != "image/png" ||
+		boss.req.Images[0].Data != base64.StdEncoding.EncodeToString(png) || len(boss.req.UploadIDs) != 0 {
+		t.Fatalf("Agentman was handed %+v", boss.req)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("the collected image was left on disk")
+	}
+
+	too := agent.Handle(context.Background(), protocol.Request{
+		Type: protocol.ReqManagerSend, Text: "x", UploadIDs: []string{"a", "b", "c", "d", "e"},
+	})
+	if too.Type != protocol.EvtError || !strings.Contains(too.Error, "at most") {
+		t.Fatalf("five images were taken: %+v", too)
+	}
+}

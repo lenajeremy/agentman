@@ -27,6 +27,11 @@ const light = {
   fillStrong: "#E4E3DE",
   /** Hairlines and card edges. */
   line: "#E3E2DD",
+  /** A tool call's soft card, a step greyer than the page, as on the Mac;
+   *  its edge; and the well its output sits in. */
+  toolCard: "#EEEEEA",
+  toolCardEdge: "#E5E4DF",
+  toolWell: "#F8F8F5",
 
   text: "#0F1012",
   /** Body copy that should not compete with titles. */
@@ -79,6 +84,9 @@ const dark: Palette = {
   fill: "#202226",
   fillStrong: "#2C2E33",
   line: "#25272C",
+  toolCard: "#17181B",
+  toolCardEdge: "#212327",
+  toolWell: "#0F1012",
 
   text: "#F2F3F5",
   textSecondary: "#D2D4D9",
@@ -136,6 +144,9 @@ export const size = {
   label: 12,
   caption: 13,
   body: 15,
+  /** What a conversation says: a touch smaller than body, on a looser line,
+   *  for reading paragraphs rather than scanning rows. */
+  reading: 14.5,
   title: 17,
   heading: 22,
   display: 34,

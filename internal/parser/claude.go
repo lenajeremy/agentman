@@ -3,7 +3,9 @@ package parser
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -36,10 +38,22 @@ func taskNotice(body string) (string, bool) {
 	return "A background task finished", true
 }
 
+// Claude Code's own marks in a prompt pasted into it, as an image sent from
+// the Mac with a message of several lines is: the paste wrapped in
+// pasted_content tags, and a picture it took in replaced by "[Image #N]",
+// with the file it came from named in a record of its own that follows.
+var (
+	claudePasteOpen   = regexp.MustCompile(`<pasted_content[^>]*>\n?`)
+	claudePasteClose  = regexp.MustCompile(`\n?</pasted_content[^>]*>`)
+	claudeImageMark   = regexp.MustCompile(`\[Image #\d+\]`)
+	claudeImageSource = regexp.MustCompile(`\[Image: source: ([^\]\n]+)\]`)
+)
+
 // claudeRecord is the subset of a transcript line we rely on.
 type claudeRecord struct {
 	Type        string         `json:"type"`
 	UUID        string         `json:"uuid"`
+	PromptID    string         `json:"promptId"`
 	Timestamp   string         `json:"timestamp"`
 	IsMeta      bool           `json:"isMeta"`
 	IsSidechain bool           `json:"isSidechain"`
@@ -98,6 +112,12 @@ type ClaudeParser struct {
 	// backwards that call is still ahead, and a page that stops before it
 	// would hand it to a page whose parser never saw the result.
 	awaiting map[string]struct{}
+	// prompts holds a prompt whose pictures Claude Code replaced with
+	// "[Image #N]", by its promptId, until the record naming their files
+	// follows and it is emitted again with them. sources holds those files,
+	// met first when reading backwards.
+	prompts *boundedMap[[]protocol.Message]
+	sources *boundedMap[[]string]
 }
 
 // maxAwaitingCalls bounds awaiting for a parser that only ever meets results:
@@ -116,6 +136,8 @@ func NewClaudeParser(sessionID string) *ClaudeParser {
 		outcomes:  newBoundedMap[toolOutcome](2000),
 		toolCalls: newBoundedMap[toolCall](2000),
 		awaiting:  map[string]struct{}{},
+		prompts:   newBoundedMap[[]protocol.Message](64),
+		sources:   newBoundedMap[[]string](64),
 	}
 }
 
@@ -134,7 +156,10 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 	if rec.Type != "user" && rec.Type != "assistant" {
 		return nil
 	}
-	if rec.IsMeta || rec.Message == nil {
+	if rec.IsMeta {
+		return p.imageSources(rec)
+	}
+	if rec.Message == nil {
 		return nil
 	}
 
@@ -158,10 +183,10 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 				Text: notice, IsSidechain: rec.IsSidechain,
 			}}
 		}
-		return []protocol.Message{{
+		return p.tidyPrompt(rec.PromptID, []protocol.Message{{
 			ID: uuid, SessionID: p.sessionID, Role: role, Ts: ts,
 			Text: body, IsSidechain: rec.IsSidechain,
-		}}
+		}})
 	}
 
 	var blocks []claudeBlock
@@ -257,7 +282,132 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 			// signature payload, and not what a glance at a phone is for.
 		}
 	}
-	return out
+	return p.tidyPrompt(rec.PromptID, out)
+}
+
+// tidyPrompt takes Claude Code's marks out of what the user sent: a paste's
+// tags, and each "[Image #N]" put back as the file it was once that is
+// known. Images then lead the words, as the daemon types them, so the apps
+// show them as pictures.
+func (p *ClaudeParser) tidyPrompt(promptID string, msgs []protocol.Message) []protocol.Message {
+	marked := false
+	for i := range msgs {
+		if msgs[i].Role == protocol.RoleUser {
+			msgs[i].Text = unwrapPastes(msgs[i].Text)
+			marked = marked || claudeImageMark.MatchString(msgs[i].Text)
+		}
+	}
+	if marked && promptID != "" {
+		p.prompts.set(promptID, slices.Clone(msgs))
+		if sources, ok := p.sources.get(promptID); ok {
+			return withImageSources(msgs, sources)
+		}
+	}
+	return withImageSources(msgs, nil)
+}
+
+// imageSources reads the record naming the files behind a prompt's
+// "[Image #N]" marks. Reading forwards the prompt came first, and is emitted
+// again under the same ids with its pictures in place; reading backwards the
+// files are kept for the prompt still ahead.
+func (p *ClaudeParser) imageSources(rec claudeRecord) []protocol.Message {
+	if rec.Type != "user" || rec.PromptID == "" || rec.Message == nil {
+		return nil
+	}
+	var found []string
+	for _, m := range claudeImageSource.FindAllStringSubmatch(flattenClaudeResult(rec.Message.Content), -1) {
+		// A path with spaces would not survive as one word ahead of the
+		// text; its mark stays, and keeps the files after it in step.
+		path := strings.TrimSpace(m[1])
+		if !filepath.IsAbs(path) || strings.ContainsAny(path, " \t\r\n") {
+			path = ""
+		}
+		found = append(found, path)
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	prompt, seen := p.prompts.get(rec.PromptID)
+	known, _ := p.sources.get(rec.PromptID)
+	if seen {
+		known = append(slices.Clone(known), found...)
+	} else {
+		known = append(found, known...)
+	}
+	p.sources.set(rec.PromptID, known)
+	if !seen {
+		return nil
+	}
+	return withImageSources(slices.Clone(prompt), known)
+}
+
+// withImageSources puts sources in place of the user's "[Image #N]" marks,
+// in order, and brings the images a prompt starts with to its front.
+func withImageSources(msgs []protocol.Message, sources []string) []protocol.Message {
+	used := 0
+	for i := range msgs {
+		if msgs[i].Role != protocol.RoleUser {
+			continue
+		}
+		msgs[i].Text = claudeImageMark.ReplaceAllStringFunc(msgs[i].Text, func(mark string) string {
+			if used >= len(sources) {
+				return mark
+			}
+			used++
+			if sources[used-1] == "" {
+				return mark
+			}
+			return sources[used-1]
+		})
+		msgs[i].Text = leadingImagesFirst(msgs[i].Text)
+	}
+	return msgs
+}
+
+func unwrapPastes(text string) string {
+	if !strings.Contains(text, "pasted_content") {
+		return text
+	}
+	return strings.TrimSpace(claudePasteClose.ReplaceAllString(claudePasteOpen.ReplaceAllString(text, ""), ""))
+}
+
+// leadingImagesFirst puts the image paths a prompt starts with on one line,
+// a space apart, ahead of its words: the form the apps read pictures from,
+// whatever whitespace a paste left between them.
+func leadingImagesFirst(text string) string {
+	var paths []string
+	rest := text
+	for {
+		trimmed := strings.TrimLeft(rest, " \t\r\n")
+		end := strings.IndexAny(trimmed, " \t\r\n")
+		if end < 0 {
+			end = len(trimmed)
+		}
+		if !isImagePath(trimmed[:end]) {
+			break
+		}
+		paths = append(paths, trimmed[:end])
+		rest = trimmed[end:]
+	}
+	if len(paths) == 0 {
+		return text
+	}
+	words := strings.TrimSpace(rest)
+	if words == "" {
+		return strings.Join(paths, " ")
+	}
+	return strings.Join(paths, " ") + " " + words
+}
+
+func isImagePath(token string) bool {
+	if !filepath.IsAbs(token) {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(token)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
+		return true
+	}
+	return false
 }
 
 // claudeNoticeLevels are the levels at which Claude Code shows a system
@@ -309,6 +459,7 @@ func (p *ClaudeParser) takenMidTurn(rec claudeRecord, offset int64) []protocol.M
 	if text == "" || claudeCommandWrapper.MatchString(text) {
 		return nil
 	}
+	text = leadingImagesFirst(unwrapPastes(text))
 	id := rec.UUID
 	if id == "" {
 		id = fmt.Sprintf("o%d", offset)

@@ -951,6 +951,16 @@ func (d *Daemon) HandleFrom(
 	// The manager's requests are about the conversation with it, not about a
 	// session, so they skip the session checks below.
 	if manager := d.managerHook(); manager != nil && manager.Handles(req.Type) {
+		// A phone's images reach the relay ahead of the message, as they do
+		// for an agent; Agentman is handed their bytes, as the Mac sends them.
+		if req.Type == protocol.ReqManagerSend && len(req.UploadIDs) > 0 {
+			images, err := d.uploadedImages(ctx, req.UploadIDs)
+			if err != nil {
+				return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
+			}
+			req.Images = append(req.Images, images...)
+			req.UploadIDs = nil
+		}
 		return manager.Handle(ctx, req)
 	}
 	if err := validateRequest(req); err != nil {

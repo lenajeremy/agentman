@@ -192,8 +192,7 @@ struct AgentThreadView: View {
         .toolbar(removing: .title)
         .toolbar {
             if #available(macOS 26, *) {
-                // Plain text on the title bar, as the system title was, with
-                // the state at the far end.
+                // Plain text on the title bar, as the system title was.
                 ToolbarItem(placement: .navigation) {
                     ThreadTitle(session: session, subtitle: subtitle)
                 }
@@ -238,7 +237,6 @@ struct AgentThreadView: View {
                     .menuIndicator(.hidden)
                     .help("More")
                 }
-                StateChip(state: session.state)
                 if session.state == .busy, session.canReceive {
                     Button {
                         store.interrupt(session.id)
@@ -329,20 +327,26 @@ private struct ThreadTitle: View {
                         if !now { editing = false }
                     }
             } else {
-                Button(action: begin) {
-                    Text(session.name)
-                        .font(TextStyle.title)
-                        .foregroundStyle(Palette.text)
-                        .lineLimit(1)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(hovering ? Palette.fill : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .contentShape(Rectangle())
+                // The state rides beside the name, rather than at the end of
+                // the buttons.
+                HStack(spacing: 6) {
+                    Button(action: begin) {
+                        Text(session.name)
+                            .font(TextStyle.title)
+                            .foregroundStyle(Palette.text)
+                            .lineLimit(1)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(hovering ? Palette.fill : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { hovering = $0 }
+                    .help(session.originalName.map { "Click to rename · renamed from “\($0)”" } ?? "Click to rename")
+                    .accessibilityLabel("Rename \(session.name)")
+                    StateChip(state: session.state)
+                        .fixedSize()
                 }
-                .buttonStyle(.plain)
-                .onHover { hovering = $0 }
-                .help(session.originalName.map { "Click to rename · renamed from “\($0)”" } ?? "Click to rename")
-                .accessibilityLabel("Rename \(session.name)")
             }
             Text(subtitle)
                 .font(TextStyle.caption)
@@ -603,8 +607,8 @@ struct StateChip: View {
         Text(name)
             .font(TextStyle.label)
             .foregroundStyle(foreground)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2.5)
             .background(background, in: Capsule())
     }
 

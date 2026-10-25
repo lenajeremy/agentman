@@ -33,3 +33,14 @@ test("a run from an older Mac is told by what kinds of step it took", () => {
   const image: Message = { id: "4", sessionId: "s", role: "tool", ts: 1, tool: { name: "Read", summary: "/x/72v33m2m3pjbqp54.jpg", status: "ok" } };
   assert.equal(runCounts([image, named("5", "Bash"), named("6", "Bash")]), "Looked at an image and ran 2 commands");
 });
+
+test("a call that stands alone breaks the run around it", () => {
+  const image = (id: string): Message => ({
+    id, sessionId: "s", role: "tool", ts: 1, tool: { name: "Read", summary: "/tmp/shot.png", status: "ok" },
+  });
+  const items = groupTools([call("1"), call("2"), image("i"), call("3"), call("4")], (m) => m.tool?.name === "Read");
+  assert.deepEqual(
+    items.map((item) => (item.kind === "tools" ? `run ${item.calls.length}` : item.message.id)),
+    ["run 2", "i", "run 2"],
+  );
+});

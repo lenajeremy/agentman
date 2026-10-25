@@ -77,7 +77,7 @@ export function ToolGroup({ calls, said, cwd }: { calls: Message[]; said: string
           {line}
           {failures > 0 ? <Text style={styles.failed}>{` · ${failures} failed`}</Text> : null}
         </Text>
-        <Feather name={open ? "chevron-down" : "chevron-right"} size={14} color={color.faint} />
+        <Feather name={open ? "chevron-down" : "chevron-right"} size={14} color={color.faint} style={styles.chevron} />
       </MotionPressable>
       {open ? (
         <View style={styles.steps}>
@@ -92,24 +92,34 @@ export function ToolGroup({ calls, said, cwd }: { calls: Message[]; said: string
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
-    group: { marginHorizontal: -space.xs },
+    // The soft card a tool call sits on, as on the Mac.
+    group: {
+      paddingHorizontal: 8,
+      paddingVertical: space.xxs,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: c.toolCardEdge,
+      backgroundColor: c.toolCard,
+    },
+    // As a single call's row: even room around the words, the tile and the
+    // chevron level with the first line.
     header: {
       flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      minHeight: 32,
+      alignItems: "flex-start",
+      gap: 8,
+      paddingVertical: 5,
       borderRadius: radius.sm,
-      paddingHorizontal: space.xs,
     },
+    chevron: { marginTop: 3 },
     tile: {
       width: 22,
-      height: 22,
+      height: 20,
       borderRadius: 7,
       alignItems: "center",
       justifyContent: "center",
     },
     tileRunning: { backgroundColor: c.workingWash },
-    line: { flex: 1, fontFamily: font.sans, fontSize: size.caption, color: c.textSecondary, lineHeight: 19 },
+    line: { flex: 1, fontFamily: font.sans, fontSize: size.caption, color: c.textSecondary, lineHeight: 20 },
     failed: { color: c.errorText },
     steps: { paddingLeft: space.lg, paddingTop: 2, gap: 2 },
   });

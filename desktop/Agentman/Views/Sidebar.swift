@@ -1,34 +1,24 @@
 import SwiftUI
 
-/// Agentman first, then every agent, grouped by the folder it works in.
+/// Agentman first, pinned above every agent, which are grouped by the
+/// folder they work in.
 struct Sidebar: View {
     @Environment(AgentsStore.self) private var store
 
     var body: some View {
         @Bindable var store = store
-        List(selection: $store.selection) {
-            AgentmanRow()
-                .tag(SidebarItem.manager)
-                .padding(.vertical, 4)
-            Label {
-                Text("New agent")
-                    .font(Fonts.sans(13.5))
-                    .foregroundStyle(Palette.text)
-            } icon: {
-                Image(systemName: "square.and.pencil")
-                    .foregroundStyle(Palette.muted)
+        // No selection of the List's own: its highlight is the accent colour,
+        // loud beside everything else here. Rows draw a quieter one.
+        List {
+            if store.folderFilter != nil || store.stateFilter != nil {
+                ActiveFilters()
+                    .listRowSeparator(.hidden)
             }
-            .tag(SidebarItem.newAgent)
-            .padding(.vertical, 2)
-
-            SidebarFilters()
-                .listRowSeparator(.hidden)
 
             ForEach(store.groups) { group in
                 Section {
                     ForEach(group.sessions) { session in
-                        AgentRow(session: session)
-                            .tag(SidebarItem.agent(session.id))
+                        AgentButton(session: session)
                             .contextMenu {
                                 Button("Rename…") { store.renaming = session.id }
                                 if let own = session.originalName {
@@ -48,20 +38,36 @@ struct Sidebar: View {
             if store.folderFilter != nil, !store.earlierHere.isEmpty {
                 Section {
                     ForEach(store.earlierHere) { session in
-                        AgentRow(session: session)
-                            .tag(SidebarItem.agent(session.id))
+                        AgentButton(session: session)
                     }
                 } header: {
                     Text("Earlier here")
                         .font(TextStyle.label)
                         .foregroundStyle(Palette.faint)
                         .textCase(nil)
+                        .padding(.leading, SidebarMetrics.header)
                 }
             }
         }
         .listStyle(.sidebar)
+        .onMoveCommand(perform: move)
         .searchable(text: $store.search, placement: .sidebar, prompt: "Search agents")
+        // Agentman is where the user spends most of their time, so it stays
+        // in view above the agents, set apart from them.
+        .safeAreaInset(edge: .top, spacing: 0) { AgentmanCard() }
         .safeAreaInset(edge: .bottom) { ConnectionFooter() }
+        .toolbar {
+            ToolbarItemGroup {
+                FilterMenu()
+                Button {
+                    store.selection = .newAgent
+                } label: {
+                    Label("New Agent", systemImage: "square.and.pencil")
+                }
+                .help("Start a new agent (⌘N)")
+            }
+        }
+        .task { await store.loadFolders() }
         .overlay {
             if store.sessions.isEmpty, store.status == .connected {
                 ContentUnavailableView(
@@ -73,41 +79,149 @@ struct Sidebar: View {
             }
         }
     }
+
+    /// Up and down step through the agents, as they would a List's own
+    /// selection; up from the first opens Agentman.
+    private func move(_ direction: MoveCommandDirection) {
+        let ids = store.groups.flatMap(\.sessions).map(\.id)
+            + (store.folderFilter == nil ? [] : store.earlierHere.map(\.id))
+        guard !ids.isEmpty, direction == .up || direction == .down else { return }
+        guard case .agent(let current) = store.selection, let at = ids.firstIndex(of: current) else {
+            if direction == .down { store.selection = .agent(ids[0]) }
+            return
+        }
+        if direction == .down {
+            if at + 1 < ids.count { store.selection = .agent(ids[at + 1]) }
+        } else {
+            store.selection = at == 0 ? .manager : .agent(ids[at - 1])
+        }
+    }
 }
 
-/// The pinned row: the manager itself.
-private struct AgentmanRow: View {
+/// An agent in the list, opening its thread when clicked.
+private struct AgentButton: View {
     @Environment(AgentsStore.self) private var store
+    let session: Session
+    @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            AgentmanBadge(size: 28)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Agentman")
-                    .font(unread > 0 ? Fonts.sans(14, .bold) : TextStyle.bodyMedium)
-                    .foregroundStyle(Palette.text)
-                Text(summary)
-                    .font(TextStyle.caption)
-                    .foregroundStyle(store.needsYou.isEmpty ? Palette.muted : Palette.needsYouText)
-                    .lineLimit(1)
+        AgentRow(session: session)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture { store.selection = .agent(session.id) }
+            .onHover { hovering = $0 }
+            .listRowBackground(RowHighlight(selected: selected, hovering: hovering))
+            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAction { store.selection = .agent(session.id) }
+    }
+
+    private var selected: Bool { store.selection == .agent(session.id) }
+}
+
+/// Behind a row: grey with a hairline edge while it is open, fainter under
+/// the pointer, as Agentman's card is.
+private struct RowHighlight: View {
+    var selected: Bool
+    var hovering: Bool
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(Color.primary.opacity(selected ? 0.10 : hovering ? 0.05 : 0))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(selected ? 0.10 : 0))
+            )
+            .padding(.horizontal, SidebarMetrics.margin)
+            .padding(.vertical, 1)
+    }
+}
+
+/// Every row's mark sits in one column, so every name starts at the same
+/// edge, and Agentman's above them.
+private enum SidebarMetrics {
+    static let mark: CGFloat = 22
+    static let gap: CGFloat = 10
+    /// Inside the selection's highlight, so a row's contents keep clear of
+    /// its edges as they do of its top and bottom.
+    static let inset: CGFloat = 5
+    /// A section's title starts where the marks do.
+    static let header: CGFloat = 7
+    /// The list's highlight stops this far from the sidebar's sides, and
+    /// Agentman's card does too.
+    static let margin: CGFloat = 10
+}
+
+/// Agentman, pinned at the top: its mark, what it has to say, and anything
+/// new since the user last looked.
+private struct AgentmanCard: View {
+    @Environment(AgentsStore.self) private var store
+    @Environment(\.colorScheme) private var scheme
+    @State private var hovering = false
+
+    var body: some View {
+        Button {
+            store.selection = .manager
+        } label: {
+            HStack(spacing: 11) {
+                AgentmanBadge(size: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Agentman")
+                        .font(Fonts.sans(14.5, .medium))
+                        .foregroundStyle(Palette.text)
+                    Text(summary)
+                        .font(Fonts.sans(12))
+                        .foregroundStyle(attention ? Palette.needsYouText : Palette.muted)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                if unread > 0 {
+                    Text(unread > 99 ? "99+" : String(unread))
+                        .font(TextStyle.label)
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .frame(minWidth: 18, minHeight: 18)
+                        .background(Palette.working, in: Capsule())
+                        .accessibilityLabel("\(unread) new")
+                }
             }
-            Spacer(minLength: 4)
-            if unread > 0 {
-                Text(unread > 99 ? "99+" : String(unread))
-                    .font(TextStyle.label)
-                    .monospacedDigit()
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .frame(minWidth: 18, minHeight: 18)
-                    .background(Palette.working, in: Capsule())
-                    .accessibilityLabel("\(unread) new")
-            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 10)
+            .background(background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(selected ? 0.10 : 0.06))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .padding(.horizontal, SidebarMetrics.margin)
+        .padding(.top, 6)
+        .padding(.bottom, 8)
+        .help("Agentman (⌥⌘0)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var selected: Bool {
+        store.selection == .manager || store.selection == nil
+    }
+
+    /// Grey like a selected row when it is open; otherwise a card of its
+    /// own, white on a light sidebar, so it never passes for the selection.
+    private var background: Color {
+        if selected { return Color.primary.opacity(0.10) }
+        if scheme == .light { return hovering ? Color.white.opacity(0.75) : .white }
+        return Color.primary.opacity(hovering ? 0.07 : 0.045)
     }
 
     /// What arrived since the user last looked at the conversation.
     private var unread: Int {
         store.viewingManager ? 0 : store.manager.unread.count
+    }
+
+    private var attention: Bool {
+        store.manager.openCards.count > 0 || !store.needsYou.isEmpty
     }
 
     private var summary: String {
@@ -150,22 +264,37 @@ struct AgentRow: View {
     let session: Session
 
     var body: some View {
-        HStack(spacing: 9) {
-            AgentMark(kind: session.kind, size: 15)
-            VStack(alignment: .leading, spacing: 1) {
-                if store.renaming == session.id {
-                    RenameField(session: session)
-                } else {
-                    Text(session.name)
-                        .font(Fonts.sans(13.5))
-                        .foregroundStyle(Palette.text)
-                        .lineLimit(1)
-                        .help(session.originalName.map { "Renamed from “\($0)”" } ?? session.name)
+        HStack(spacing: SidebarMetrics.gap) {
+            AgentMark(kind: session.kind, size: 16)
+                .frame(width: SidebarMetrics.mark)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if store.renaming == session.id {
+                        RenameField(session: session)
+                    } else {
+                        Text(session.name)
+                            .font(Fonts.sans(13.5, session.state == .waitingInput ? .medium : .regular))
+                            .foregroundStyle(session.state == .ended ? Palette.muted : Palette.text)
+                            .lineLimit(1)
+                            .help(session.originalName.map { "Renamed from “\($0)”" } ?? session.name)
+                    }
+                    Spacer(minLength: 4)
+                    if let when = session.lastActivity {
+                        Text(Relative.short(when))
+                            .font(Fonts.sans(11))
+                            .monospacedDigit()
+                            .foregroundStyle(Palette.faint)
+                    }
                 }
-                Text(detail)
-                    .font(Fonts.sans(11.5))
-                    .foregroundStyle(session.state == .waitingInput ? Palette.needsYouText : Palette.muted)
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(Palette.dot(session.state))
+                        .frame(width: 6, height: 6)
+                    Text(detail)
+                        .font(Fonts.sans(11.5))
+                        .foregroundStyle(detailColor)
+                        .lineLimit(1)
+                }
                 if let servers = session.servers, !servers.isEmpty {
                     HStack(spacing: 4) {
                         Image(systemName: "globe")
@@ -178,13 +307,10 @@ struct AgentRow: View {
                     .help("Dev servers it is running")
                 }
             }
-            Spacer(minLength: 4)
-            Circle()
-                .fill(Palette.dot(session.state))
-                .frame(width: 6, height: 6)
-                .accessibilityLabel(stateName)
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 5)
+        .padding(.horizontal, SidebarMetrics.inset)
+        .accessibilityElement(children: .combine)
     }
 
     private var stateName: String {
@@ -201,8 +327,15 @@ struct AgentRow: View {
         if session.state == .waitingInput {
             return session.question?.title ?? session.question?.prompt ?? "Needs you"
         }
-        guard let when = session.lastActivity else { return stateName }
-        return "\(stateName) · \(Relative.short(when))"
+        return stateName
+    }
+
+    private var detailColor: Color {
+        switch session.state {
+        case .waitingInput: Palette.needsYouText
+        case .busy: Palette.workingText
+        default: Palette.muted
+        }
     }
 }
 
@@ -299,80 +432,87 @@ private struct RenameField: View {
     }
 }
 
-/// The folder the list shows, and its statuses to narrow it to: Needs you,
-/// Working, Idle, each only when something is in it.
-private struct SidebarFilters: View {
+/// One button for what the list shows: agents in one state, and in one
+/// folder, with how many are in each.
+private struct FilterMenu: View {
     @Environment(AgentsStore.self) private var store
 
     var body: some View {
         let counts = store.stateCounts
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                Menu {
-                    Button {
-                        store.folderFilter = nil
-                    } label: {
-                        if store.folderFilter == nil { Label("All folders", systemImage: "checkmark") } else { Text("All folders") }
-                    }
-                    Divider()
-                    ForEach(store.folders.prefix(15)) { folder in
-                        Button {
-                            store.folderFilter = folder.path
-                        } label: {
-                            let title = "\((folder.path as NSString).lastPathComponent)  ·  \(folder.agents)"
-                            if store.folderFilter == folder.path { Label(title, systemImage: "checkmark") } else { Text(title) }
-                        }
-                    }
-                } label: {
-                    chip(store.folderFilter.map { ($0 as NSString).lastPathComponent } ?? "All folders",
-                         icon: "folder", on: store.folderFilter != nil)
-                }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Show one folder, with the sessions that ended there")
-
-                stateChip(.waitingInput, "needs you", counts.needsYou, tint: Palette.needsYouText)
-                stateChip(.busy, "working", counts.working, tint: Palette.workingText)
-                stateChip(.idle, "idle", counts.idle, tint: Palette.muted)
+        Menu {
+            Section("Show") {
+                option("All agents", on: store.stateFilter == nil) { store.stateFilter = nil }
+                option("Needs you", count: counts.needsYou, on: store.stateFilter == .waitingInput) { store.stateFilter = .waitingInput }
+                option("Working", count: counts.working, on: store.stateFilter == .busy) { store.stateFilter = .busy }
+                option("Idle", count: counts.idle, on: store.stateFilter == .idle) { store.stateFilter = .idle }
             }
-            .padding(.vertical, 2)
+            Section("Folder") {
+                option("All folders", on: store.folderFilter == nil) { store.folderFilter = nil }
+                ForEach(store.folders.prefix(15)) { folder in
+                    option((folder.path as NSString).lastPathComponent, count: folder.agents,
+                           on: store.folderFilter == folder.path) { store.folderFilter = folder.path }
+                }
+            }
+        } label: {
+            Label("Filter", systemImage: "line.3.horizontal.decrease")
+                .foregroundStyle(filtering ? Palette.working : Palette.textSecondary)
         }
-        .task { await store.loadFolders() }
+        .menuIndicator(.hidden)
+        .help("Show agents in one state, or one folder with the sessions that ended there")
     }
 
-    @ViewBuilder private func stateChip(_ state: SessionState, _ label: String, _ count: Int, tint: Color) -> some View {
-        if count > 0 || store.stateFilter == state {
-            Button {
-                store.stateFilter = store.stateFilter == state ? nil : state
-            } label: {
-                HStack(spacing: 4) {
-                    Text("\(count)").foregroundStyle(store.stateFilter == state ? Palette.onInverse : tint)
-                    Text(label)
-                }
-                .font(TextStyle.caption)
-                .foregroundStyle(store.stateFilter == state ? Palette.onInverse : Palette.textSecondary)
-                .padding(.horizontal, 9)
-                .frame(height: 24)
-                .background(store.stateFilter == state ? Palette.inverse : Palette.fill, in: Capsule())
+    private var filtering: Bool { store.stateFilter != nil || store.folderFilter != nil }
+
+    @ViewBuilder
+    private func option(_ title: String, count: Int? = nil, on: Bool, action: @escaping () -> Void) -> some View {
+        let text = count.map { "\(title)  \($0)" } ?? title
+        Button(action: action) {
+            if on { Label(text, systemImage: "checkmark") } else { Text(text) }
+        }
+    }
+}
+
+/// What the list is narrowed to, above it, each undone with its ×.
+private struct ActiveFilters: View {
+    @Environment(AgentsStore.self) private var store
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let folder = store.folderFilter {
+                token((folder as NSString).lastPathComponent, icon: "folder") { store.folderFilter = nil }
             }
-            .buttonStyle(.plain)
-            .help(store.stateFilter == state ? "Show every agent" : "Show only these")
+            if let state = store.stateFilter {
+                token(name(state), icon: nil) { store.stateFilter = nil }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 2)
+        .padding(.horizontal, SidebarMetrics.inset)
+    }
+
+    private func name(_ state: SessionState) -> String {
+        switch state {
+        case .waitingInput: "Needs you"
+        case .busy: "Working"
+        default: "Idle"
         }
     }
 
-    private func chip(_ title: String, icon: String, on: Bool) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon).font(.system(size: 10, weight: .medium))
-            Text(title).lineLimit(1)
-            Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold)).foregroundStyle(Palette.faint)
+    private func token(_ title: String, icon: String?, clear: @escaping () -> Void) -> some View {
+        Button(action: clear) {
+            HStack(spacing: 5) {
+                if let icon { Image(systemName: icon).font(.system(size: 10, weight: .medium)) }
+                Text(title).lineLimit(1)
+                Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(Palette.workingText.opacity(0.7))
+            }
+            .font(TextStyle.caption)
+            .foregroundStyle(Palette.workingText)
+            .padding(.horizontal, 9)
+            .frame(height: 24)
+            .background(Palette.workingWash, in: Capsule())
         }
-        .font(TextStyle.caption)
-        .foregroundStyle(on ? Palette.workingText : Palette.textSecondary)
-        .padding(.horizontal, 9)
-        .frame(height: 24)
-        .background(on ? Palette.workingWash : Palette.fill, in: Capsule())
+        .buttonStyle(.plain)
+        .help("Show every agent again")
     }
 }
 
@@ -396,6 +536,7 @@ private struct FolderHeader: View {
                     .help("Notifications from this folder are muted")
             }
         }
+        .padding(.leading, SidebarMetrics.header)
         .help(folder)
         .contextMenu {
             Button(muted ? "Unmute Notifications" : "Mute Notifications") {

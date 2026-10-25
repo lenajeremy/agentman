@@ -77,6 +77,7 @@ import {
   Tool,
   Page,
   QuestionAnswer,
+  Request as DaemonRequest,
   SendStatus,
   Session,
   WorkspaceResult,
@@ -239,6 +240,12 @@ interface Store {
    *  Mac has seen the agent take the switch; rejects with the reason it did
    *  not. */
   switchSession(sessionId: string, kind: "mode" | "model", value: string): Promise<void>;
+  /** Ask the Mac something and resolve with its answer, or reject with why
+   *  it could not: offline, an error, or no answer in time. */
+  ask(request: DaemonRequest, timeoutMs?: number): Promise<DaemonEvent>;
+  /** Hear every event from the Mac, for state kept outside the store, such
+   *  as the conversation with Agentman. Returns the way to stop. */
+  listen(listener: (event: DaemonEvent) => void): () => void;
 }
 
 /** How long a tap on a server waits for the Mac to open its link. The daemon
@@ -264,6 +271,13 @@ interface TitleRequest {
 }
 
 interface LaunchRequest {
+  resolve(event: DaemonEvent): void;
+  reject(error: Error): void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+/** A question put to the Mac through ask(), waiting for its answer. */
+interface AskRequest {
   resolve(event: DaemonEvent): void;
   reject(error: Error): void;
   timer: ReturnType<typeof setTimeout>;
@@ -349,6 +363,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const workspaceRequests = useRef(new Map<string, WorkspaceRequest>());
   const titleRequests = useRef(new Map<string, TitleRequest>());
   const launchRequests = useRef(new Map<string, LaunchRequest>());
+  const askRequests = useRef(new Map<string, AskRequest>());
+  const listeners = useRef(new Set<(event: DaemonEvent) => void>());
+
+  const settleAskRequest = useCallback((replyTo: string, event?: DaemonEvent, problem?: string) => {
+    const request = askRequests.current.get(replyTo);
+    if (!request) return false;
+    askRequests.current.delete(replyTo);
+    clearTimeout(request.timer);
+    if (event && event.type !== "error") request.resolve(event);
+    else request.reject(new Error(event?.error || problem || "The Mac did not answer."));
+    return true;
+  }, []);
+
+  const clearAskRequests = useCallback(() => {
+    for (const [id, request] of askRequests.current) {
+      clearTimeout(request.timer);
+      askRequests.current.delete(id);
+      request.reject(new Error("The Mac connection changed."));
+    }
+  }, []);
 
   const settleLaunchRequest = useCallback((replyTo: string, event?: DaemonEvent) => {
     const request = launchRequests.current.get(replyTo);
@@ -498,6 +532,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const handleEvent = useCallback((event: DaemonEvent, replyTo?: string) => {
+    for (const listener of listeners.current) listener(event);
+    if (replyTo && settleAskRequest(replyTo, event)) return;
     switch (event.type) {
       case "sessions": {
         const list = event.sessions ?? [];
@@ -834,12 +870,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 		break;
 	  }
     }
-  }, [mergeSessionMessages, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, followReachable, rejectPushRegistration]);
+  }, [mergeSessionMessages, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, settleAskRequest, followReachable, rejectPushRegistration]);
 
   const attach = useCallback(
     (creds: Credentials) => {
       clearWorkspaceRequests();
       clearLaunchRequests();
+      clearAskRequests();
       clientRef.current?.close();
       const client = new Client(creds, {
         onEvent: handleEvent,
@@ -858,6 +895,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 ? "Your Mac is offline, so it cannot share this server."
                 : control.message,
             );
+          }
+          if (replyTo && (control.type === "daemon_offline" || control.type === "error")) {
+            settleAskRequest(replyTo, undefined, control.type === "daemon_offline"
+              ? "Your Mac is offline."
+              : control.message || "The relay rejected this request.");
           }
           if (replyTo && control.type === "error") {
             settleWorkspaceRequest(replyTo, undefined, control.message);
@@ -983,6 +1025,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return () => {
       clearWorkspaceRequests();
       clearLaunchRequests();
+      clearAskRequests();
       clientRef.current?.close();
     };
   }, [attach, clearWorkspaceRequests, clearLaunchRequests]);
@@ -1125,6 +1168,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       async signOut() {
         clearWorkspaceRequests();
         clearLaunchRequests();
+        clearAskRequests();
         clientRef.current?.close();
         clientRef.current = null;
         await clearCredentials();
@@ -1663,8 +1707,27 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           });
         });
       },
+
+      ask(request, timeoutMs = 20_000) {
+        return new Promise<DaemonEvent>((resolve, reject) => {
+          const id = clientRef.current?.send(request);
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => settleAskRequest(id), timeoutMs);
+          askRequests.current.set(id, { resolve, reject, timer });
+        });
+      },
+
+      listen(listener) {
+        listeners.current.add(listener);
+        return () => {
+          listeners.current.delete(listener);
+        };
+      },
     }),
-    [ready, credentials, connection, daemonOnline, daemonInfo, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, folderFilter, folderLoading, setFolderFilter, folderSessions, stateFilter, notifyPrefs, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, resumeSessionOnce, registerPushToken, clearLaunchRequests, clearWorkspaceRequests],
+    [ready, credentials, connection, daemonOnline, daemonInfo, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, folderFilter, folderLoading, setFolderFilter, folderSessions, stateFilter, notifyPrefs, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, resumeSessionOnce, registerPushToken, clearLaunchRequests, clearWorkspaceRequests, settleAskRequest],
   );
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;

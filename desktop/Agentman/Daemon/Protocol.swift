@@ -410,7 +410,29 @@ struct ManagerSettings: Codable, Sendable, Hashable {
     var rules: [PermissionRule]?
     var style: String
     var instructions: String
+    /// Whether the chat model's engine has its key, so Agentman can run.
     var keySet: Bool
+    /// The chat model's engine, "anthropic" or "gemini", and each engine's
+    /// key. Read only; absent from a daemon before Gemini.
+    var provider: String?
+    var anthropicKeySet: Bool?
+    var geminiKeySet: Bool?
+
+    /// The settings the user edits, without what the daemon reports, so a
+    /// key saved meanwhile is not taken for an unsaved change.
+    var editable: ManagerSettings {
+        var copy = self
+        copy.keySet = false
+        copy.provider = nil
+        copy.anthropicKeySet = nil
+        copy.geminiKeySet = nil
+        return copy
+    }
+
+    /// The engine a model runs on.
+    static func provider(of model: String) -> String {
+        model.hasPrefix("gemini-") ? "gemini" : "anthropic"
+    }
 }
 
 /// The kinds of low-risk request Agentman may answer by itself.

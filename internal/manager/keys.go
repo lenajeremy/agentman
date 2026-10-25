@@ -114,9 +114,6 @@ func (m *Manager) saveKey(ctx context.Context, next *protocol.Key, value string)
 	if !validKeyName.MatchString(key.Name) {
 		return protocol.Event{Type: protocol.EvtError, Error: "Name it the way it goes in .env: capitals, digits and _, like ELEVENLABS_API_KEY."}
 	}
-	if key.Name == "ANTHROPIC_API_KEY" {
-		return protocol.Event{Type: protocol.EvtError, Error: "Agentman's own key is set at the top of Settings, and isn't handed out."}
-	}
 	switch key.Rule {
 	case "":
 		key.Rule = protocol.KeyAuto
