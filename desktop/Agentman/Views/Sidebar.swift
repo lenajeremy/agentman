@@ -1,17 +1,13 @@
 import SwiftUI
 
-/// Agentman first, then every agent, grouped by the folder it works in.
+/// Agentman first, pinned above every agent, which are grouped by the
+/// folder they work in.
 struct Sidebar: View {
     @Environment(AgentsStore.self) private var store
 
     var body: some View {
         @Bindable var store = store
         List(selection: $store.selection) {
-            AgentmanRow()
-                .tag(SidebarItem.manager)
-            NewAgentRow()
-                .tag(SidebarItem.newAgent)
-
             if store.folderFilter != nil || store.stateFilter != nil {
                 ActiveFilters()
                     .listRowSeparator(.hidden)
@@ -55,10 +51,19 @@ struct Sidebar: View {
         }
         .listStyle(.sidebar)
         .searchable(text: $store.search, placement: .sidebar, prompt: "Search agents")
+        // Agentman is where the user spends most of their time, so it stays
+        // in view above the agents, set apart from them.
+        .safeAreaInset(edge: .top, spacing: 0) { AgentmanCard() }
         .safeAreaInset(edge: .bottom) { ConnectionFooter() }
         .toolbar {
-            ToolbarItem {
+            ToolbarItemGroup {
                 FilterMenu()
+                Button {
+                    store.selection = .newAgent
+                } label: {
+                    Label("New Agent", systemImage: "square.and.pencil")
+                }
+                .help("Start a new agent (⌘N)")
             }
         }
         .task { await store.loadFolders() }
@@ -76,7 +81,7 @@ struct Sidebar: View {
 }
 
 /// Every row's mark sits in one column, so every name starts at the same
-/// edge, Agentman's and New agent's included.
+/// edge, and Agentman's above them.
 private enum SidebarMetrics {
     static let mark: CGFloat = 22
     static let gap: CGFloat = 10
@@ -85,43 +90,82 @@ private enum SidebarMetrics {
     static let inset: CGFloat = 5
     /// A section's title starts where the marks do.
     static let header: CGFloat = 7
+    /// The list's highlight stops this far from the sidebar's sides, and
+    /// Agentman's card does too.
+    static let margin: CGFloat = 10
 }
 
-/// The pinned row: the manager itself.
-private struct AgentmanRow: View {
+/// Agentman, pinned at the top: its mark, what it has to say, and anything
+/// new since the user last looked.
+private struct AgentmanCard: View {
     @Environment(AgentsStore.self) private var store
+    @Environment(\.colorScheme) private var scheme
+    @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: SidebarMetrics.gap) {
-            AgentmanBadge(size: SidebarMetrics.mark)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Agentman")
-                    .font(Fonts.sans(13.5, unread > 0 ? .bold : .medium))
-                    .foregroundStyle(Palette.text)
-                Text(summary)
-                    .font(Fonts.sans(11.5))
-                    .foregroundStyle(store.needsYou.isEmpty ? Palette.muted : Palette.needsYouText)
-                    .lineLimit(1)
+        Button {
+            store.selection = .manager
+        } label: {
+            HStack(spacing: 11) {
+                AgentmanBadge(size: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Agentman")
+                        .font(Fonts.sans(14.5, .medium))
+                        .foregroundStyle(Palette.text)
+                    Text(summary)
+                        .font(Fonts.sans(12))
+                        .foregroundStyle(attention ? Palette.needsYouText : Palette.muted)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                if unread > 0 {
+                    Text(unread > 99 ? "99+" : String(unread))
+                        .font(TextStyle.label)
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .frame(minWidth: 18, minHeight: 18)
+                        .background(Palette.working, in: Capsule())
+                        .accessibilityLabel("\(unread) new")
+                }
             }
-            Spacer(minLength: 4)
-            if unread > 0 {
-                Text(unread > 99 ? "99+" : String(unread))
-                    .font(TextStyle.label)
-                    .monospacedDigit()
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .frame(minWidth: 18, minHeight: 18)
-                    .background(Palette.working, in: Capsule())
-                    .accessibilityLabel("\(unread) new")
-            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 10)
+            .background(background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(selected ? 0.10 : 0.06))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .padding(.vertical, 5)
-        .padding(.horizontal, SidebarMetrics.inset)
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .padding(.horizontal, SidebarMetrics.margin)
+        .padding(.top, 6)
+        .padding(.bottom, 8)
+        .help("Agentman (⌥⌘0)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var selected: Bool {
+        store.selection == .manager || store.selection == nil
+    }
+
+    /// Grey like a selected row when it is open; otherwise a card of its
+    /// own, white on a light sidebar, so it never passes for the selection.
+    private var background: Color {
+        if selected { return Color.primary.opacity(0.10) }
+        if scheme == .light { return hovering ? Color.white.opacity(0.75) : .white }
+        return Color.primary.opacity(hovering ? 0.07 : 0.045)
     }
 
     /// What arrived since the user last looked at the conversation.
     private var unread: Int {
         store.viewingManager ? 0 : store.manager.unread.count
+    }
+
+    private var attention: Bool {
+        store.manager.openCards.count > 0 || !store.needsYou.isEmpty
     }
 
     private var summary: String {
@@ -132,27 +176,6 @@ private struct AgentmanRow: View {
         if waiting > 0 { return waiting == 1 ? "1 agent needs you" : "\(waiting) agents need you" }
         if working > 0 { return working == 1 ? "1 agent working" : "\(working) agents working" }
         return "All quiet"
-    }
-}
-
-/// Starting an agent, under Agentman and in line with it.
-private struct NewAgentRow: View {
-    var body: some View {
-        HStack(spacing: SidebarMetrics.gap) {
-            Image(systemName: "square.and.pencil")
-                .font(.system(size: 13.5, weight: .medium))
-                .foregroundStyle(Palette.textSecondary)
-                .frame(width: SidebarMetrics.mark)
-            Text("New agent")
-                .font(Fonts.sans(13.5))
-                .foregroundStyle(Palette.text)
-            Spacer(minLength: 4)
-            Text("⌘N")
-                .font(TextStyle.label)
-                .foregroundStyle(Palette.faint)
-        }
-        .padding(.vertical, 3)
-        .padding(.horizontal, SidebarMetrics.inset)
     }
 }
 
