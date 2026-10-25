@@ -76,6 +76,8 @@ struct QuestionChoices: View {
     let question: Question
     /// The option Agentman would pick, marked for the user to confirm.
     var suggested: String?
+    /// The typed answer's box, which in Agentman's chat is for Agentman.
+    var typedPrompt = "Or type an answer"
     let answer: (QuestionReply) async -> Bool
     @State private var note = ""
     @State private var noting: QuestionOption?
@@ -94,7 +96,7 @@ struct QuestionChoices: View {
 
             if question.custom == true, question.multiple != true, noting == nil {
                 HStack {
-                    TextField("Or type an answer", text: $note)
+                    TextField(typedPrompt, text: $note)
                         .textFieldStyle(.roundedBorder)
                         .font(TextStyle.body)
                         .onSubmit { send(QuestionReply(text: note)) }

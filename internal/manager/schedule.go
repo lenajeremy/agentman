@@ -124,6 +124,11 @@ type wakeup struct {
 	entry  string
 	tool   string
 	prompt string
+	// user is a turn the user started by replying on a card: it is theirs,
+	// not one of Agentman's own, and its entry is already in the chat.
+	user bool
+	// reply is the card such a turn answers.
+	reply *cardReply
 }
 
 // remind schedules a reminder. at is when it first fires; every, times and
@@ -466,7 +471,11 @@ func (m *Manager) startWakeup() {
 
 	model, err := m.model(context.Background())
 	if err != nil {
-		m.addEntry(protocol.ManagerEntry{Role: "scheduled", Text: w.entry + " (not acted on: Agentman has no API key)", Tool: w.tool})
+		if w.user {
+			m.addEntry(protocol.ManagerEntry{Role: "error", Text: "Agentman couldn't act on your reply: it has no API key."})
+		} else {
+			m.addEntry(protocol.ManagerEntry{Role: "scheduled", Text: w.entry + " (not acted on: Agentman has no API key)", Tool: w.tool})
+		}
 		m.startWakeup()
 		return
 	}
@@ -481,6 +490,10 @@ func (m *Manager) startWakeup() {
 	m.stopTurn = cancel
 	m.mu.Unlock()
 
+	if w.user {
+		go m.runTurn(turnCtx, model, turnInput{text: w.prompt, reply: w.reply})
+		return
+	}
 	m.addEntry(protocol.ManagerEntry{Role: "scheduled", Text: w.entry, Tool: w.tool})
 	go m.runTurn(turnCtx, model, turnInput{text: m.withPauseNote(w.prompt), autonomous: true})
 }

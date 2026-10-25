@@ -220,27 +220,103 @@ func TestANeedsYouCardGoesWhenTheUserWritesToTheAgent(t *testing.T) {
 	}
 }
 
-// Replying on the card sends the reply to the agent.
-func TestReplyingOnACardMessagesTheAgent(t *testing.T) {
-	h := newHarness(t, &scriptedModel{}, true)
-	h.agents.answer = func(req protocol.Request) protocol.Event {
-		event := delivered(req)
-		event.Status = protocol.StatusQueued
-		return event
-	}
-	site := h.agents.Sessions()[0]
+// Words typed on a card go to Agentman, not the agent: the card is
+// answered, the reply joins the conversation, and Agentman acts on it with
+// the card in view, passing on what the agent needs.
+func TestATypedReplyOnACardGoesToAgentman(t *testing.T) {
+	model := &scriptedModel{replies: []string{
+		toolReply("t1", "send_to_agent", `{"agent":"site","text":"The user is away from their Mac. Hold off until they're back."}`),
+		textReply("Told site to hold off until you're back."),
+	}}
+	h := newHarness(t, model, true)
+	sessions := h.agents.Sessions()
+	sessions[0].Inject = protocol.InjectTmux
+	h.agents.setSessions(sessions)
+	h.agents.answer = delivered
 	h.m.cardMu.Lock()
-	h.m.postNeedsYouLocked(site, protocol.Brief{NeedsYou: "Which colour?"})
+	h.m.postNeedsYouLocked(h.agents.Sessions()[0], protocol.Brief{NeedsYou: "Step 1 is done; review it?"})
 	h.m.cardMu.Unlock()
 	card := h.m.conversation.openCards()[0].Card
 
-	reply := h.m.Handle(context.Background(), protocol.Request{Type: protocol.ReqManagerCardReply, CardID: card.ID, Text: "Blue"})
-	if reply.Type != protocol.EvtManagerEntry || !strings.HasPrefix(reply.Entry.Card.Outcome, "You replied: “Blue”") ||
-		!strings.Contains(reply.Entry.Card.Outcome, "when its turn ends") {
+	reply := h.m.Handle(context.Background(), protocol.Request{Type: protocol.ReqManagerCardReply, CardID: card.ID, Text: "Im away from my computer rn"})
+	if reply.Type != protocol.EvtManagerEntry || reply.Entry.Card.State != protocol.CardAnswered || reply.Entry.Card.Outcome != "You replied to Agentman" {
 		t.Fatalf("reply = %+v", reply)
 	}
-	if sent := h.agents.sent(protocol.ReqSendMessage); len(sent) != 1 || sent[0].Text != "Blue" || sent[0].SessionID != "claude:a" {
-		t.Fatalf("sent = %+v", sent)
+	h.waitIdle(t)
+	prompt := h.promptAt(t, 0)
+	if !strings.Contains(prompt, `<card-reply agent="site"`) || !strings.Contains(prompt, "Step 1 is done; review it?") ||
+		!strings.HasSuffix(prompt, "Im away from my computer rn") {
+		t.Fatalf("Agentman read: %s", prompt)
+	}
+	sent := h.agents.sent(protocol.ReqSendMessage)
+	if len(sent) != 1 || sent[0].Text != "The user is away from their Mac. Hold off until they're back." {
+		t.Fatalf("what reached the agent: %+v", sent)
+	}
+	var said bool
+	for _, entry := range h.entries() {
+		said = said || (entry.Role == "user" && entry.Text == "Im away from my computer rn")
+	}
+	if !said || len(h.m.conversation.openCards()) != 0 {
+		t.Fatalf("entries = %+v", h.entries())
+	}
+}
+
+// A typed answer on a question's card is the user's OK: Agentman answers
+// the question as they meant it, without putting up another card. A tapped
+// option still answers the agent at once.
+func TestATypedAnswerOnAQuestionLetsAgentmanAnswerIt(t *testing.T) {
+	model := &scriptedModel{replies: []string{
+		toolReply("t1", "answer_question", `{"agent":"api","option":"1"}`),
+		textReply("Approved the push for api."),
+	}}
+	h := newHarness(t, model, true)
+	h.agents.answer = delivered
+	h.m.takeQuestion(context.Background(), h.asking("q1", "git push origin main"))
+	card := h.m.conversation.openCards()[0].Card
+
+	h.m.Handle(context.Background(), protocol.Request{Type: protocol.ReqManagerCardReply, CardID: card.ID, AnswerText: "yes, go ahead and push"})
+	h.waitIdle(t)
+	if answers := h.agents.sent(protocol.ReqAnswer); len(answers) != 1 || answers[0].OptionKey != "1" || answers[0].QuestionID != "q1" {
+		t.Fatalf("answers = %+v", answers)
+	}
+	if open := h.m.conversation.openCards(); len(open) != 0 {
+		t.Fatalf("another card went up: %+v", open)
+	}
+
+	h.m.takeQuestion(context.Background(), h.asking("q2", "git push --tags"))
+	second := h.m.conversation.openCards()[0].Card
+	h.m.Handle(context.Background(), protocol.Request{Type: protocol.ReqManagerCardReply, CardID: second.ID, OptionKey: "3"})
+	if answers := h.agents.sent(protocol.ReqAnswer); len(answers) != 2 || answers[1].OptionKey != "3" || model.calls() != 2 {
+		t.Fatalf("a tapped option didn't go straight to the agent: %+v, %d model calls", answers, model.calls())
+	}
+}
+
+// While Agentman is replying, a card reply waits its turn, ahead of its
+// own reminders.
+func TestACardReplyWaitsForAgentmansReply(t *testing.T) {
+	model := &scriptedModel{replies: []string{textReply("I'll let site know when you're back.")}}
+	h := newHarness(t, model, true)
+	h.agents.answer = delivered
+	h.m.cardMu.Lock()
+	h.m.postNeedsYouLocked(h.agents.Sessions()[0], protocol.Brief{NeedsYou: "Review step 1?"})
+	h.m.cardMu.Unlock()
+	card := h.m.conversation.openCards()[0].Card
+	h.m.mu.Lock()
+	h.m.stopTurn = func() {}
+	h.m.wakeups = []wakeup{{entry: "Reminder: x", tool: "reminder", prompt: "<scheduled>x</scheduled>"}}
+	h.m.mu.Unlock()
+
+	h.m.Handle(context.Background(), protocol.Request{Type: protocol.ReqManagerCardReply, CardID: card.ID, Text: "later"})
+	if model.calls() != 0 || len(h.m.conversation.openCards()) != 0 {
+		t.Fatalf("the reply ran during another reply: %d calls", model.calls())
+	}
+	h.m.mu.Lock()
+	h.m.stopTurn = nil
+	h.m.mu.Unlock()
+	h.m.startWakeup()
+	h.waitCalls(t, 1)
+	if !strings.Contains(h.promptAt(t, 0), "<card-reply") {
+		t.Fatalf("the reminder went before the user's reply: %s", h.promptAt(t, 0))
 	}
 }
 

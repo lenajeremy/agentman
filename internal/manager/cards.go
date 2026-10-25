@@ -220,14 +220,19 @@ func (m *Manager) replyToCard(ctx context.Context, req protocol.Request) protoco
 		m.settleCardLocked(entry, "The agent ended")
 		return protocol.Event{Type: protocol.EvtError, Error: card.AgentName + " has ended."}
 	}
+	if card.Kind == protocol.CardQuestion && (session.Question == nil || session.Question.ID != card.QuestionID) {
+		m.settleCardLocked(entry, "Answered in the agent")
+		return protocol.Event{Type: protocol.EvtError, Error: "That was already answered in " + card.AgentName + "."}
+	}
+	// Words typed on a card are for Agentman, which passes on what the
+	// agent needs; a tapped option still answers the agent at once.
+	if text := typedReply(card, req); text != "" {
+		return m.replyThroughAgentmanLocked(ctx, entry, text)
+	}
 
 	var outcome string
 	switch card.Kind {
 	case protocol.CardQuestion:
-		if session.Question == nil || session.Question.ID != card.QuestionID {
-			m.settleCardLocked(entry, "Answered in the agent")
-			return protocol.Event{Type: protocol.EvtError, Error: "That was already answered in " + card.AgentName + "."}
-		}
 		answer := protocol.Request{QuestionID: card.QuestionID, OptionKey: req.OptionKey, OptionKeys: req.OptionKeys, AnswerText: req.AnswerText}
 		if err := m.answer(ctx, card.SessionID, answer); err != nil {
 			return protocol.Event{Type: protocol.EvtError, Error: "Couldn't answer " + card.AgentName + ": " + err.Error()}
@@ -240,18 +245,7 @@ func (m *Manager) replyToCard(ctx context.Context, req protocol.Request) protoco
 		}
 		outcome = result
 	case protocol.CardNeedsYou:
-		text := strings.TrimSpace(req.Text)
-		if text == "" {
-			return protocol.Event{Type: protocol.EvtError, Error: "Write a reply first."}
-		}
-		status, err := m.sendTo(ctx, session, text)
-		if err != nil {
-			return protocol.Event{Type: protocol.EvtError, Error: "Couldn't reach " + card.AgentName + ": " + err.Error()}
-		}
-		outcome = "You replied: “" + clip(text, 120) + "”"
-		if status == protocol.StatusQueued {
-			outcome += " It reaches the agent when its turn ends."
-		}
+		return protocol.Event{Type: protocol.EvtError, Error: "Write a reply first."}
 	default:
 		return protocol.Event{Type: protocol.EvtError, Error: "That card can't be answered."}
 	}
