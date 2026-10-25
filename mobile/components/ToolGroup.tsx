@@ -94,8 +94,8 @@ const makeStyles = (c: Palette) =>
   StyleSheet.create({
     // The soft card a tool call sits on, as on the Mac.
     group: {
-      paddingHorizontal: 10,
-      paddingVertical: space.xs,
+      paddingHorizontal: 8,
+      paddingVertical: space.xxs,
       borderRadius: radius.md,
       borderWidth: 1,
       borderColor: c.toolCardEdge,
@@ -105,7 +105,7 @@ const makeStyles = (c: Palette) =>
       flexDirection: "row",
       alignItems: "center",
       gap: 10,
-      minHeight: 32,
+      minHeight: 28,
       borderRadius: radius.sm,
     },
     tile: {

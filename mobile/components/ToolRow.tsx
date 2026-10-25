@@ -474,11 +474,11 @@ const makeStyles = (c: Palette) =>
     withPicture: { gap: space.sm },
     // The same soft card as on the Mac: a step greyer than the page, so the
     // work stands apart from the conversation.
-    // With the header's own padding, its tile sits 10 in, as in a run's card.
+    // With the header's own padding, its tile sits 8 in, as in a run's card.
     card: {
       marginHorizontal: 0,
-      paddingHorizontal: 10 - space.xs,
-      paddingVertical: space.xs,
+      paddingHorizontal: 8 - space.xs,
+      paddingVertical: space.xxs,
       borderRadius: radius.md,
       borderWidth: 1,
       borderColor: c.toolCardEdge,
@@ -488,7 +488,7 @@ const makeStyles = (c: Palette) =>
       flexDirection: "row",
       alignItems: "center",
       gap: 10,
-      minHeight: 30,
+      minHeight: 28,
       borderRadius: radius.sm,
       paddingHorizontal: space.xs,
     },
