@@ -33,9 +33,12 @@ func runSuggestNote(_ context.Context, m *Manager, input map[string]any) toolRes
 	if utf8.RuneCountInString(title) > maxNoteTitle || utf8.RuneCountInString(body) > maxNoteBody {
 		return toolResult{text: "Keep a note short: a title in a line and a body of a few paragraphs at most.", isError: true}
 	}
-	if tier != knowledge.Private {
-		tier = knowledge.Shared
+	// A private note is Agentman's own, kept without asking; only a shared
+	// one, which every agent reads, waits for the user.
+	if tier == knowledge.Private {
+		return runSavePrivateNote(context.Background(), m, input)
 	}
+	tier = knowledge.Shared
 
 	m.cardMu.Lock()
 	defer m.cardMu.Unlock()

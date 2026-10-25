@@ -4,6 +4,7 @@ import SwiftUI
 /// doing, read what happened, and be told when something needs you.
 struct ManagerChatView: View {
     @Environment(AgentsStore.self) private var store
+    @State private var confirmNewChat = false
     @State private var draft = ""
     @State private var attachments: [Attachment] = []
     @State private var sending = false
@@ -129,6 +130,24 @@ struct ManagerChatView: View {
                     SchedulesButton()
                 }
             }
+            if !manager.entries.isEmpty {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        confirmNewChat = true
+                    } label: {
+                        Label("New Chat", systemImage: "plus.bubble")
+                    }
+                    .help("Start a new conversation with Agentman")
+                }
+            }
+        }
+        .confirmationDialog("Start a new chat?", isPresented: $confirmNewChat) {
+            Button("New Chat") {
+                Task { manager.problem = await manager.reset() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This conversation is set aside, and Agentman keeps what matters from it in its private notes. Cards still waiting stay.")
         }
     }
 
@@ -320,6 +339,8 @@ private struct ChatItemView: View {
                 Label(entry.text, systemImage: "exclamationmark.circle")
                     .font(TextStyle.caption)
                     .foregroundStyle(Palette.errorText)
+            case "compacted":
+                CompactedDivider(text: entry.text)
             default:
                 Text(entry.text)
                     .font(TextStyle.caption)
@@ -952,5 +973,23 @@ private struct SchedulesList: View {
             }
         }
         return text
+    }
+}
+
+/// Where the conversation was compacted: before it, the model now has a
+/// summary; the conversation itself is shown as it was.
+private struct CompactedDivider: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Rectangle().fill(Palette.line).frame(height: 1)
+            Text(text)
+                .font(TextStyle.caption)
+                .foregroundStyle(Palette.faint)
+                .fixedSize()
+            Rectangle().fill(Palette.line).frame(height: 1)
+        }
+        .help("Agentman summarised the conversation before this point, to keep it quick and inexpensive.")
     }
 }

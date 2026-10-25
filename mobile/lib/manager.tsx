@@ -58,6 +58,9 @@ export interface Manager {
   dismiss(card: ManagerCard): Promise<string | null>;
   /** Switches the model Agentman's conversation runs on. */
   setChatModel(model: string): Promise<string | null>;
+  /** Starts a new conversation; the one before is archived on the Mac, and
+   *  Agentman keeps what lasts of it in its private notes. */
+  reset(): Promise<string | null>;
   /** Saves Agentman's settings whole. Returns the problem, if any. */
   saveSettings(next: ManagerSettings): Promise<string | null>;
   /** What Agentman would do with a request, under the settings as saved. */
@@ -115,6 +118,8 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
   const [lastRead, setLastRead] = useState(Number.MAX_SAFE_INTEGER);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
+  // A new conversation, started here or on the Mac, is read afresh.
+  const reloadRef = useRef<() => Promise<void>>(async () => {});
 
   // The first launch starts with nothing unread, not the whole history.
   useEffect(() => {
@@ -157,6 +162,9 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
       case "keys":
         if (event.keys) setKeys(event.keys);
         break;
+      case "manager_reset":
+        void reloadRef.current();
+        break;
       case "manager_brief": {
         const updates = [...(event.briefs ?? []), ...(event.brief ? [event.brief] : [])];
         if (updates.length > 0) {
@@ -195,6 +203,8 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
     if (briefReply.status === "fulfilled") apply(briefReply.value);
     if (scheduleReply.status === "fulfilled") setSchedules(scheduleReply.value.schedules ?? []);
   }, [store, apply]);
+
+  reloadRef.current = reload;
 
   // Everything afresh whenever the Mac comes within reach.
   const reachable = store.connection === "online" && store.daemonOnline;
@@ -279,6 +289,14 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
     },
     dismiss(card) {
       return perform({ type: "manager_card_dismiss", cardId: card.id });
+    },
+    async reset() {
+      try {
+        await store.ask({ type: "manager_reset" });
+        return null;
+      } catch (reason) {
+        return message(reason);
+      }
     },
     setChatModel(model) {
       if (!settings) return Promise.resolve("Agentman's settings haven't arrived yet.");

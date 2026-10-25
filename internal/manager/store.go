@@ -7,7 +7,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 
@@ -216,4 +219,84 @@ func interruptedResults(ids []string) anthropic.BetaMessageParam {
 		blocks = append(blocks, anthropic.NewBetaToolResultBlock(id, "Not run: the user stopped this reply.", true))
 	}
 	return anthropic.NewBetaUserMessage(blocks...)
+}
+
+// maxArchives bounds the archived conversations kept beside the current one.
+const maxArchives = 5
+
+// archive moves a conversation file aside under the time it ended, and
+// trims the oldest archives of that kind.
+func archive(path string) error {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	base := strings.TrimSuffix(path, ".jsonl")
+	if err := os.Rename(path, base+"-"+time.Now().Format("20060102-150405")+".jsonl"); err != nil {
+		return err
+	}
+	old, _ := filepath.Glob(base + "-*.jsonl")
+	sort.Strings(old)
+	for len(old) > maxArchives {
+		_ = os.Remove(old[0])
+		old = old[1:]
+	}
+	return nil
+}
+
+// writeLines writes values to path whole, in place of what was there.
+func writeLines[T any](path string, values []T) error {
+	var b strings.Builder
+	for _, value := range values {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return err
+		}
+		b.Write(raw)
+		b.WriteByte('\n')
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// replaceHistory puts history in place of the model's history, after a
+// compaction. The history before is archived.
+func (c *conversation) replaceHistory(history []anthropic.BetaMessageParam) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := archive(c.historyPath); err != nil {
+		return err
+	}
+	if err := writeLines(c.historyPath, history); err != nil {
+		return err
+	}
+	c.history = append([]anthropic.BetaMessageParam(nil), history...)
+	return nil
+}
+
+// reset starts a new conversation: the history and the entries are
+// archived, and the entries start again with the cards still open.
+func (c *conversation) reset() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var open []protocol.ManagerEntry
+	for _, entry := range c.entries {
+		if entry.Card != nil && entry.Card.State == protocol.CardOpen {
+			open = append(open, entry)
+		}
+	}
+	if err := archive(c.historyPath); err != nil {
+		return err
+	}
+	if err := archive(c.entriesPath); err != nil {
+		return err
+	}
+	if err := writeLines(c.entriesPath, open); err != nil {
+		return err
+	}
+	c.history = nil
+	c.entries = open
+	return nil
 }

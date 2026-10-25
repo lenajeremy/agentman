@@ -62,6 +62,7 @@ enum RequestType: String, Codable, Sendable {
     case managerSend = "manager_send"
     case managerHistory = "manager_history"
     case managerStop = "manager_stop"
+    case managerReset = "manager_reset"
     case managerSettings = "manager_settings"
     case managerSetSettings = "manager_set_settings"
     case managerSetKey = "manager_set_key"

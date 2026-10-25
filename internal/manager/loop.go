@@ -43,11 +43,22 @@ func (m *Manager) runTurn(ctx context.Context, model Model, input turnInput) {
 	m.setStatus("thinking", "")
 	settled := "idle"
 	defer func() { m.setStatus(settled, "") }()
+	// A conversation grown too large is summarised before it is sent again;
+	// one that grew large in this turn, in the background after it.
+	m.compactIfNeeded(ctx, model)
+	defer func() {
+		if m.historyTokens() >= compactAt {
+			go m.compactIfNeeded(context.Background(), model)
+		}
+	}()
 
 	// What happened since the user last wrote, such as requests Agentman
 	// approved and cards it put up, goes first, so the model knows.
 	// Then the user's images, then their words.
 	var blocks []anthropic.BetaContentBlockParamUnion
+	if start := m.freshStart(); start != "" {
+		blocks = append(blocks, anthropic.NewBetaTextBlock(start))
+	}
 	if notes := m.takeNotes(); notes != "" {
 		blocks = append(blocks, anthropic.NewBetaTextBlock(notes))
 	}
@@ -88,6 +99,7 @@ func (m *Manager) runTurn(ctx context.Context, model Model, input turnInput) {
 			settled = "error"
 			return
 		}
+		m.notePromptTokens(reply)
 		if err := m.conversation.appendHistory(reply.ToParam()); err != nil {
 			m.addEntry(protocol.ManagerEntry{Role: "error", Text: "Couldn't save the conversation: " + err.Error()})
 			return

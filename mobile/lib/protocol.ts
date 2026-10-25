@@ -229,6 +229,7 @@ export type RequestType =
   | "manager_send"
   | "manager_history"
   | "manager_stop"
+  | "manager_reset"
   | "manager_image"
   | "manager_briefs"
   | "manager_card_reply"
@@ -323,6 +324,7 @@ export type EventType =
   | "manager_schedules"
   | "manager_settings"
   | "manager_permission"
+  | "manager_reset"
   | "knowledge"
   | "keys";
 
@@ -714,7 +716,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     "session_ended", "artifacts", "tools_title",
     "manager_entry", "manager_delta", "manager_history", "manager_status",
     "manager_brief", "manager_schedules", "manager_settings",
-    "manager_permission", "knowledge", "keys",
+    "manager_permission", "manager_reset", "knowledge", "keys",
   ] as const)) return null;
 
   switch (value.type) {

@@ -3,6 +3,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -83,6 +84,21 @@ export default function AgentmanScreen() {
   }, [focused, entries, markRead]);
 
   const reachable = store.connection === "online" && store.daemonOnline;
+  const confirmNewChat = () => {
+    Alert.alert(
+      "Start a new chat?",
+      "This conversation is set aside, and Agentman keeps what matters from it in its private notes. Cards still waiting stay.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "New chat",
+          onPress: () => {
+            void manager.reset().then((problem) => problem && images.setError(problem));
+          },
+        },
+      ],
+    );
+  };
   const canSend = reachable && !manager.needsKey && !sending &&
     (draft.trim().length > 0 || images.attachments.length > 0);
 
@@ -119,6 +135,12 @@ export default function AgentmanScreen() {
             {!reachable ? "Waiting for your Mac" : manager.thinking ? "Thinking…" : "Manages your agents"}
           </Text>
         </View>
+        {manager.entries.length > 0 ? (
+          <MotionPressable onPress={confirmNewChat} style={styles.headerIcon} hitSlop={8}
+            accessibilityRole="button" accessibilityLabel="New chat">
+            <Feather name="edit" size={17} color={color.textSecondary} />
+          </MotionPressable>
+        ) : null}
         {manager.schedules.length > 0 ? (
           <MotionPressable onPress={() => setSchedulesOpen((open) => !open)} style={styles.headerButton}
             accessibilityRole="button" accessibilityLabel={`${manager.schedules.length} scheduled`}>
@@ -288,6 +310,14 @@ function EntryRow({ entry }: { entry: ManagerEntry }) {
         <View style={styles.quietLine}>
           <Feather name="clock" size={12} color={color.faint} />
           <Text style={styles.quietText}>{entry.text}</Text>
+        </View>
+      );
+    case "compacted":
+      return (
+        <View style={styles.divider} accessibilityLabel={entry.text}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerText}>{entry.text}</Text>
+          <View style={styles.dividerLine} />
         </View>
       );
     case "error":
@@ -493,6 +523,10 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.fill,
     },
     headerButtonText: { fontFamily: font.sansMedium, fontSize: size.label, color: c.textSecondary },
+    headerIcon: { width: 36, height: 36, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", backgroundColor: c.fill },
+    divider: { flexDirection: "row", alignItems: "center", gap: space.sm },
+    dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: c.line },
+    dividerText: { fontFamily: font.sans, fontSize: size.label, color: c.faint },
     feed: { flex: 1 },
     list: { paddingHorizontal: space.lg, paddingVertical: space.lg, gap: space.lg },
     thinking: { paddingVertical: space.xs },

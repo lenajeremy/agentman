@@ -73,6 +73,14 @@ type Manager struct {
 	engineKeys map[string]bool
 	// keySet is whether the chat model's engine has its key.
 	keySet bool
+	// promptTokens is how large the last request to the model was; zero
+	// after a restart or a compaction, until the next one.
+	promptTokens int
+	// compactMu keeps a compaction, a new chat and the start of a turn from
+	// reading and replacing the history at once.
+	compactMu sync.Mutex
+	// fresh marks a new conversation whose first turn is still to come.
+	fresh  bool
 	status protocol.ManagerStatus
 	// stopTurn cancels the reply being written, if there is one.
 	stopTurn context.CancelFunc
@@ -164,7 +172,7 @@ func (m *Manager) Run(ctx context.Context) {
 // Handles reports the requests that are the manager's.
 func (m *Manager) Handles(kind protocol.RequestType) bool {
 	switch kind {
-	case protocol.ReqManagerSend, protocol.ReqManagerHistory, protocol.ReqManagerStop,
+	case protocol.ReqManagerSend, protocol.ReqManagerHistory, protocol.ReqManagerStop, protocol.ReqManagerReset,
 		protocol.ReqManagerSettings, protocol.ReqManagerSetSettings, protocol.ReqManagerSetKey,
 		protocol.ReqManagerBriefs, protocol.ReqManagerCardReply, protocol.ReqManagerCardDismiss,
 		protocol.ReqKnowledgeList, protocol.ReqKnowledgeRead, protocol.ReqKnowledgeWrite, protocol.ReqKnowledgeDelete,
@@ -206,6 +214,8 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 		}
 		m.mu.Unlock()
 		return m.statusEvent()
+	case protocol.ReqManagerReset:
+		return m.reset(ctx)
 	case protocol.ReqManagerSettings:
 		return m.settingsEvent()
 	case protocol.ReqManagerSetSettings:
