@@ -30,6 +30,7 @@ import { ContentColumn } from "../../components/ContentColumn";
 import { Markdown } from "../../components/Markdown";
 import { SentImages } from "../../components/SentImages";
 import { ToolGroup } from "../../components/ToolGroup";
+import { ScrollToLatest, SCROLL_AWAY } from "../../components/ScrollToLatest";
 import { groupTools } from "../../lib/toolgroups";
 import { readImage } from "../../lib/imagepath";
 import { splitSentMessage } from "../../lib/sentimages";
@@ -95,6 +96,7 @@ export default function SessionScreen() {
   const { color } = useTheme();
   const { height: viewportHeight } = useWindowDimensions();
   const listRef = useRef<FlatList<Row>>(null);
+  const [scrolledAway, setScrolledAway] = useState(false);
   const [draft, setDraft] = useState("");
   const images = useAttachments(store.credentials);
   // The confirmation for a copy made from a message's menu. Held here rather
@@ -891,11 +893,18 @@ export default function SessionScreen() {
           Inverting also makes "load older" the natural end-of-list action,
           and it leaves the scroll position alone when the user has
           deliberately scrolled up to read. */}
+        <View style={styles.feed}>
         <FlatList
           style={styles.feed}
           ref={listRef}
           data={rows}
           inverted
+          // Inverted, so how far up the reader is counts from the latest.
+          onScroll={(event) => {
+            const away = event.nativeEvent.contentOffset.y > SCROLL_AWAY;
+            if (away !== scrolledAway) setScrolledAway(away);
+          }}
+          scrollEventThrottle={64}
           keyExtractor={(row) =>
             row.kind === "message"
               ? row.message.id
@@ -970,6 +979,11 @@ export default function SessionScreen() {
             )
           }
         />
+        <ScrollToLatest
+          visible={scrolledAway}
+          onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+        />
+        </View>
 
         {/* A blocked agent reads nothing else until this is answered, so the
             question takes the composer's place as a sheet docked to the
