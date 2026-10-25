@@ -18,8 +18,9 @@ daemon used by the mobile app.
 | `am opencode [args...]` | Start OpenCode with a discoverable local HTTP API. |
 | `am kiro [args...]` | Start Kiro CLI in managed tmux. Arguments go to `kiro-cli chat`. |
 | `am antigravity [args...]` | Start Antigravity CLI (`agy`) in managed tmux. `am agy` is the same command. |
-| `am install-hooks` | Install Agentman's Claude Code, Codex and Cursor Agent CLI hooks. With `-kiro`, only Kiro's opt-in agent (see Hooks). |
-| `am uninstall-hooks` | Remove only Agentman's hook entries. |
+| `am install-hooks` | Install Agentman's Claude Code, Codex and Cursor Agent CLI hooks, and give every installed agent Agentman's tools. With `-kiro`, only Kiro's opt-in agent (see Hooks). |
+| `am uninstall-hooks` | Remove only Agentman's hook entries, and Agentman's tools (see Agentman's tools for agents). |
+| `am mcp install` / `am mcp uninstall` | Give every installed agent Agentman's tools, or take them out for good. |
 | `am doctor` | Check hooks, daemon health, agent discovery, and transcript parsing. |
 | `am version` | Print the installed version. |
 
@@ -162,6 +163,36 @@ entry to `~/.gemini/config/hooks.json`: agy's `Stop` hook for turn completion
 and its `PreInvocation` hook for turn start, never `PreToolUse`. Other
 entries in that file are left as they are, and events from Antigravity's IDE,
 which reads the same file, are ignored.
+
+### Agentman's tools for agents
+
+`am mcp` is an MCP server agents start over stdio. It gives them the user's
+shared notes (`search_notes`, `read_note`), the keys Agentman keeps
+(`list_keys`, `request_key`, which writes into the project's `.env` or asks
+the user first), and `tell_agentman`. Each call reaches `am serve` over its
+local socket.
+
+`am install-hooks` and `am mcp install` register it, as a server named
+`agentman`, with every agent that is installed:
+
+| Agent | Where |
+| --- | --- |
+| Claude Code | user scope, through `claude mcp add` |
+| Codex | `[mcp_servers.agentman]` in `~/.codex/config.toml` |
+| Cursor | `mcpServers` in `~/.cursor/mcp.json` |
+| OpenCode | `mcp` in `~/.config/opencode/opencode.json` |
+| Kiro | `mcpServers` in `~/.kiro/settings/mcp.json` |
+| Antigravity | `mcpServers` in `~/.gemini/config/mcp_config.json` |
+
+Files are backed up and written the way hooks are, a linked config is written
+where the link points, and one that isn't plain JSON (an `opencode.jsonc` with
+comments, say) is left alone. Once Agentman is set up, `am serve` also gives
+the tools to any agent that lacks them, or whose registration names an `am`
+that no longer exists, so agents have them out of the box. `am mcp uninstall`
+(or `am uninstall-hooks`) takes them out and stops `am serve` from putting
+them back; `am mcp install` undoes that. `am doctor` lists each agent's
+registration. Agents read MCP servers when a session starts, so sessions
+already open get the tools when they are restarted.
 
 ### Kiro (opt-in)
 

@@ -306,7 +306,7 @@ func (m *Manager) send(ctx context.Context, text string, images ...protocol.Inli
 		return protocol.Event{Type: protocol.EvtError, Error: "Couldn't send that: " + err.Error()}
 	}
 	entry := m.addEntry(protocol.ManagerEntry{ID: entryID, Role: "user", Text: text, Images: names})
-	go m.runTurn(turnCtx, model, turnInput{text: text, images: blocks})
+	go m.runTurn(turnCtx, model, turnInput{text: text, images: blocks, imageNames: names})
 	return protocol.Event{Type: protocol.EvtManagerEntry, Entry: &entry}
 }
 

@@ -202,6 +202,21 @@ func runInstallHooks(ctx context.Context, args []string, remove bool) error {
 		}
 	}
 
+	// Agentman's tools for agents (am mcp) go in and out with the hooks.
+	if !*kiro {
+		if mcpBinary, err := stableBinary(); err == nil {
+			if mcpPlans, err := (hook.Installer{Binary: mcpBinary}).MCPPlans(remove); err == nil && len(mcpPlans) > 0 {
+				fmt.Printf("\n%s\n", dim("Agentman's tools for agents (am mcp)"))
+				failures += applyMCPPlans(mcpPlans, remove, *dryRun)
+			}
+		}
+		if !*dryRun {
+			if err := rememberAgentTools(!remove); err != nil {
+				return err
+			}
+		}
+	}
+
 	if failures > 0 {
 		return fmt.Errorf("%d agent(s) could not be configured", failures)
 	}
@@ -288,6 +303,24 @@ func runDoctor(ctx context.Context, args []string) error {
 	// Kiro's hooks are opt-in, so their absence is not a problem to report.
 	if hook.KiroAgentInstalled(home) {
 		check(true, "kiro hooks", "opt-in agent in "+collapseHome(hook.KiroAgentPath(home)))
+	}
+	// Agentman's tools are for Agentman's users, so a missing one is a
+	// suggestion, not a problem.
+	if mcpBinary, err := stableBinary(); err == nil {
+		mcpPlans, _ := hook.Installer{Binary: mcpBinary}.MCPPlans(false)
+		for _, plan := range mcpPlans {
+			label := string(plan.Kind) + " tools"
+			switch {
+			case plan.Err != nil:
+				warn(label, plan.Err.Error())
+			case !plan.Changed:
+				check(true, label, "am mcp in "+collapseHome(plan.Path))
+			case plan.MCPRegistered():
+				warn(label, "am mcp from another am — `am mcp install` points it here")
+			default:
+				warn(label, "Agentman's tools not given — run `am mcp install`")
+			}
+		}
 	}
 
 	// Registered is not the same as working. A syntactically valid config can

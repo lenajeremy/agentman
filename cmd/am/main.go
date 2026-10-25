@@ -46,10 +46,10 @@ Usage:
   am send <session-id> <text> Send a message to a running session
   am interrupt <session-id>   Stop the active turn in a managed session
   am answer <session-id> <key> Answer a pending choice shown by an agent
-  am install-hooks            Register agentman's hooks with your agents
+  am install-hooks            Register agentman's hooks and tools with your agents
   am uninstall-hooks          Remove them again
   am mcp install              Give your agents Agentman's tools (notes, keys)
-  am mcp uninstall            Take them out again
+  am mcp uninstall            Take them out again, for good
   am doctor                   Check that everything is wired up correctly
   am version                  Print the version
 

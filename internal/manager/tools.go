@@ -125,10 +125,16 @@ func init() {
 			name: "send_to_agent",
 			description: "Send one agent a message, as its user, when the user asks you to. It is typed into the agent, " +
 				"or queued until its current turn ends if it can only be reached between turns. " +
+				"Images the user sent you, such as a screenshot meant for the agent, go with it when you name them. " +
 				"The user sees exactly what you sent.",
 			properties: map[string]any{
 				"agent": agentProperty,
 				"text":  map[string]any{"type": "string", "description": "The message, written as the user would write it to the agent."},
+				"images": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Images the user sent you to pass on, by the names given with their message.",
+				},
 			},
 			required: []string{"agent", "text"},
 			run:      runSendToAgent,
@@ -598,7 +604,11 @@ func runSendToAgent(ctx context.Context, m *Manager, input map[string]any) toolR
 	if session.Inject == "" || session.Inject == protocol.InjectNone {
 		return toolResult{text: session.Name + " can't be messaged from here; the user has to open it.", isError: true}
 	}
-	status, err := m.sendTo(ctx, session, text)
+	images, err := m.forwardImages(stringList(input["images"]))
+	if err != nil {
+		return toolResult{text: err.Error(), isError: true}
+	}
+	status, err := m.sendTo(ctx, session, text, images...)
 	if err != nil {
 		return toolResult{text: "Couldn't send it: " + err.Error(), isError: true}
 	}
@@ -606,9 +616,17 @@ func runSendToAgent(ctx context.Context, m *Manager, input map[string]any) toolR
 	if status == protocol.StatusQueued {
 		result = "Queued: " + session.Name + " reads it when its current turn ends."
 	}
+	sent := session.Name
+	switch len(images) {
+	case 0:
+	case 1:
+		sent += " an image"
+	default:
+		sent += fmt.Sprintf(" %d images", len(images))
+	}
 	return toolResult{
 		text:      result,
-		activity:  fmt.Sprintf("Sent %s: “%s”", session.Name, clip(text, 120)),
+		activity:  fmt.Sprintf("Sent %s: “%s”", sent, clip(text, 120)),
 		sessionID: session.ID,
 	}
 }
@@ -1128,4 +1146,16 @@ func clip(text string, limit int) string {
 		cut--
 	}
 	return text[:cut] + "…"
+}
+
+// stringList reads a tool's list of strings, skipping anything else.
+func stringList(value any) []string {
+	items, _ := value.([]any)
+	list := make([]string, 0, len(items))
+	for _, item := range items {
+		if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+			list = append(list, strings.TrimSpace(text))
+		}
+	}
+	return list
 }

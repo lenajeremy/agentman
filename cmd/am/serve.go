@@ -330,6 +330,9 @@ func runServe(ctx context.Context, args []string) error {
 			state := "ready"
 			if settings := boss.Handle(ctx, protocol.Request{Type: protocol.ReqManagerSettings}); settings.ManagerSettings == nil || !settings.ManagerSettings.KeySet {
 				state = "waiting for an API key (set it in Agentman for Mac)"
+			} else {
+				// Agents get Agentman's tools out of the box once it is set up.
+				go giveAgentsTools(cfg)
 			}
 			fmt.Printf("%s\n", dim("agentman   "+state))
 		}

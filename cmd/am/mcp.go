@@ -25,8 +25,9 @@ import (
 // local socket, so an agent reads the user's shared notes, asks for a key,
 // or tells Agentman something, without the user in between.
 //
-// am mcp install registers it with Claude Code, Codex and Cursor;
-// am mcp uninstall takes it out again.
+// am install-hooks and am mcp install register it with every agent that is
+// installed, and am serve with any that lack it once Agentman is set up;
+// am mcp uninstall takes it out again, for good.
 
 // mcpInstructions is what the agent is told about the server when it
 // connects.
@@ -312,8 +313,8 @@ func runMCP(ctx context.Context, args []string) error {
 	return serveMCP(ctx, os.Stdin, os.Stdout, socketCall(path), cwd, os.Getpid())
 }
 
-// runMCPInstall registers am mcp with the agent CLIs that are installed,
-// or takes it out again.
+// runMCPInstall registers am mcp with every agent that is installed, or
+// takes it out again. Taking it out also keeps am serve from putting it back.
 func runMCPInstall(args []string, remove bool) error {
 	fs := flag.NewFlagSet("mcp install", flag.ContinueOnError)
 	dryRun := fs.Bool("dry-run", false, "show what would change without changing it")
@@ -324,76 +325,96 @@ func runMCPInstall(args []string, remove bool) error {
 	if err != nil {
 		return err
 	}
-	home, err := os.UserHomeDir()
+	plans, err := hook.Installer{Binary: binary}.MCPPlans(remove)
 	if err != nil {
 		return err
 	}
-	did := false
-	if claude, err := exec.LookPath("claude"); err == nil {
-		did = true
-		steps := [][]string{{"mcp", "remove", "--scope", "user", "agentman"}}
-		if !remove {
-			steps = append(steps, []string{"mcp", "add", "--scope", "user", "agentman", "--", binary, "mcp"})
-		}
-		for i, step := range steps {
-			if *dryRun {
-				fmt.Printf("would run: claude %s\n", strings.Join(step, " "))
-				continue
-			}
-			out, err := exec.Command(claude, step...).CombinedOutput()
-			// Removing one that isn't there fails, and that's fine.
-			if err != nil && i > 0 {
-				return fmt.Errorf("claude %s: %v: %s", strings.Join(step, " "), err, strings.TrimSpace(string(out)))
-			}
-		}
-		if !*dryRun {
-			fmt.Println(doneLine(remove, "Claude Code"))
-		}
+	if len(plans) == 0 {
+		fmt.Println("No Claude Code, Codex, Cursor, OpenCode, Kiro or Antigravity found to register with.")
 	}
-	codexConfig := filepath.Join(home, ".codex", "config.toml")
-	if _, err := os.Stat(filepath.Dir(codexConfig)); err == nil {
-		did = true
-		if err := editFile(codexConfig, *dryRun, func(text string) string {
-			return codexWithAgentman(text, binary, remove)
-		}); err != nil {
+	failures := applyMCPPlans(plans, remove, *dryRun)
+	if !*dryRun {
+		if err := rememberAgentTools(!remove); err != nil {
 			return err
 		}
-		if !*dryRun {
-			fmt.Println(doneLine(remove, "Codex"))
-		}
 	}
-	cursorConfig := filepath.Join(home, ".cursor", "mcp.json")
-	if _, err := os.Stat(filepath.Dir(cursorConfig)); err == nil {
-		did = true
-		var editErr error
-		if err := editFile(cursorConfig, *dryRun, func(text string) string {
-			next, err := cursorWithAgentman(text, binary, remove)
-			if err != nil {
-				editErr = err
-				return text
-			}
-			return next
-		}); err != nil {
-			return err
-		}
-		if editErr != nil {
-			return fmt.Errorf("%s: %w", cursorConfig, editErr)
-		}
-		if !*dryRun {
-			fmt.Println(doneLine(remove, "Cursor"))
-		}
-	}
-	if !did {
-		fmt.Println("No Claude Code, Codex or Cursor found to register with.")
+	if failures > 0 {
+		return fmt.Errorf("%d agent(s) could not be configured", failures)
 	}
 	return nil
 }
 
-func doneLine(remove bool, agent string) string {
-	if remove {
-		return "Took Agentman's tools out of " + agent + "."
+// applyMCPPlans applies Agentman's MCP registrations, a line for each agent
+// in install-hooks' style, and returns how many failed.
+func applyMCPPlans(plans []hook.Plan, remove, dryRun bool) int {
+	failures := 0
+	for _, plan := range plans {
+		where := collapseHome(plan.Path)
+		switch {
+		case plan.Err != nil:
+			failures++
+			fmt.Printf("  ✗ %-8s %s\n", plan.Kind, plan.Err)
+		case !plan.Changed && remove:
+			fmt.Printf("  ✓ %-8s no Agentman tools to remove\n", plan.Kind)
+		case !plan.Changed:
+			fmt.Printf("  ✓ %-8s already has Agentman's tools %s\n", plan.Kind, dim(where))
+		case dryRun && remove:
+			fmt.Printf("  · %-8s would remove Agentman's tools from %s\n", plan.Kind, where)
+		case dryRun:
+			fmt.Printf("  · %-8s would add Agentman's tools to %s\n", plan.Kind, where)
+		default:
+			if err := plan.Apply(); err != nil {
+				failures++
+				fmt.Printf("  ✗ %-8s %v\n", plan.Kind, err)
+				continue
+			}
+			if remove {
+				fmt.Printf("  ✓ %-8s removed Agentman's tools from %s\n", plan.Kind, where)
+			} else {
+				fmt.Printf("  ✓ %-8s added Agentman's tools (am mcp) to %s\n", plan.Kind, where)
+			}
+		}
 	}
-	return "Gave " + agent + " Agentman's tools. New sessions have them."
+	return failures
+}
+
+// rememberAgentTools keeps the user's choice: am serve gives agents
+// Agentman's tools unless they were taken out.
+func rememberAgentTools(on bool) error {
+	cfg, err := hook.LoadConfig("")
+	if err != nil || cfg.NoAgentTools == !on {
+		return err
+	}
+	cfg.NoAgentTools = !on
+	return hook.SaveConfig("", cfg)
+}
+
+// giveAgentsTools registers am mcp, when am serve starts, with each agent
+// that doesn't have it, or has it pointing at an am that is gone. One that
+// names another am that still works is left alone: am mcp install is how
+// the user picks which.
+func giveAgentsTools(cfg hook.Config) {
+	if cfg.NoAgentTools {
+		return
+	}
+	binary, err := stableBinary()
+	if err != nil {
+		return
+	}
+	plans, err := hook.Installer{Binary: binary}.MCPPlans(false)
+	if err != nil {
+		return
+	}
+	for _, plan := range plans {
+		if plan.Err != nil || !plan.Changed || plan.MCPRegistered() {
+			continue
+		}
+		if err := plan.Apply(); err != nil {
+			fmt.Printf("%s %s\n", stamp(), dim(fmt.Sprintf("agentman   couldn't give %s Agentman's tools: %v", plan.Kind, err)))
+			continue
+		}
+		fmt.Printf("%s %s\n", stamp(), dim(fmt.Sprintf("agentman   gave %s Agentman's tools (am mcp); new sessions have them", plan.Kind)))
+	}
 }
 
 // stableBinary is the am to register: the one on PATH when it is this
@@ -412,83 +433,4 @@ func stableBinary() (string, error) {
 		}
 	}
 	return self, nil
-}
-
-// editFile rewrites a config file with change, keeping its mode, or prints
-// what would change.
-func editFile(path string, dryRun bool, change func(string) string) error {
-	current, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	next := change(string(current))
-	if next == string(current) {
-		return nil
-	}
-	if dryRun {
-		fmt.Printf("would write %s:\n%s\n", path, next)
-		return nil
-	}
-	mode := os.FileMode(0o644)
-	if info, err := os.Stat(path); err == nil {
-		mode = info.Mode().Perm()
-	}
-	return os.WriteFile(path, []byte(next), mode)
-}
-
-const codexTable = "[mcp_servers.agentman]"
-
-// codexWithAgentman is Codex's config.toml with Agentman's server table
-// in or out; everything else in the file stays as it was.
-func codexWithAgentman(text, binary string, remove bool) string {
-	lines := strings.Split(text, "\n")
-	var kept []string
-	inside := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[") {
-			inside = trimmed == codexTable || strings.HasPrefix(trimmed, "[mcp_servers.agentman.")
-		}
-		if !inside {
-			kept = append(kept, line)
-		}
-	}
-	text = strings.TrimRight(strings.Join(kept, "\n"), "\n")
-	if remove {
-		if text == "" {
-			return ""
-		}
-		return text + "\n"
-	}
-	quoted, _ := json.Marshal(binary)
-	table := codexTable + "\ncommand = " + string(quoted) + "\nargs = [\"mcp\"]\n"
-	if text == "" {
-		return table
-	}
-	return text + "\n\n" + table
-}
-
-// cursorWithAgentman is Cursor's mcp.json with Agentman's server in or out.
-func cursorWithAgentman(text, binary string, remove bool) (string, error) {
-	config := map[string]any{}
-	if strings.TrimSpace(text) != "" {
-		if err := json.Unmarshal([]byte(text), &config); err != nil {
-			return "", fmt.Errorf("not valid JSON, so left alone: %w", err)
-		}
-	}
-	servers, _ := config["mcpServers"].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
-	if remove {
-		delete(servers, "agentman")
-	} else {
-		servers["agentman"] = map[string]any{"command": binary, "args": []string{"mcp"}}
-	}
-	config["mcpServers"] = servers
-	raw, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(raw) + "\n", nil
 }
