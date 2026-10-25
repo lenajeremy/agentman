@@ -102,8 +102,16 @@ func TestAKeyIsSentByName(t *testing.T) {
 
 func TestSendQueuedRefusesSessionsAgentmanDidNotStart(t *testing.T) {
 	for _, name := range []string{"", "work", Prefix} {
-		if err := SendQueued(context.Background(), name); err == nil {
+		if err := SendQueued(context.Background(), name, "C-x", "C-s"); err == nil {
 			t.Errorf("SendQueued(%q) pressed keys in a session Agentman did not start", name)
+		}
+	}
+}
+
+func TestSendQueuedPressesOnlySendNowKeys(t *testing.T) {
+	for _, keys := range [][]string{{}, {"C-c"}, {"C-d"}, {"C-z"}, {"Enter"}, {"q"}, {"M-m", "M-m", "M-m"}, {"C-x", "Escape"}} {
+		if err := SendQueued(context.Background(), Prefix+"claude-1-a", keys...); err == nil {
+			t.Errorf("SendQueued pressed %q", keys)
 		}
 	}
 }

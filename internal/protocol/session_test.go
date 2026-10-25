@@ -184,6 +184,8 @@ func TestSameAsCoversEveryField(t *testing.T) {
 			field.SetString(field.String() + "-changed")
 		case reflect.Int, reflect.Int64:
 			field.SetInt(field.Int() + 1)
+		case reflect.Bool:
+			field.SetBool(!field.Bool())
 		case reflect.Pointer:
 			field.Set(reflect.Zero(field.Type()))
 		case reflect.Slice:

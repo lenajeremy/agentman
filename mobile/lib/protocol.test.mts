@@ -473,3 +473,12 @@ test("accepts a session's queued messages and refuses a malformed list", () => {
       JSON.stringify(bad).slice(0, 40));
   }
 });
+
+test("accepts the rows of waiting messages and whether Send now works", () => {
+  const session = { ...baseSession, kind: "opencode", queued: ["later"], queuedMessageIds: ["msg_u2:prt_3"], canSendQueued: false };
+  assert.ok(decodeDaemonEvent({ type: "session_update", session }));
+  for (const bad of [{ queuedMessageIds: [3] }, { queuedMessageIds: [""] }, { canSendQueued: "yes" }]) {
+    assert.equal(decodeDaemonEvent({ type: "session_update", session: { ...baseSession, ...bad } }), null,
+      JSON.stringify(bad));
+  }
+});

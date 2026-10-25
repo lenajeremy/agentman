@@ -97,6 +97,20 @@ type codexParsedCmd struct {
 	Cmd  string `json:"cmd"`
 }
 
+// CodexUserText is the text of the user message a rollout line records, as
+// the feed shows it, or "" for any other line. A message Codex reads in the
+// middle of a turn is written only when it reads it, so this is how the
+// daemon tells that a message it sent has arrived.
+func CodexUserText(line string) string {
+	var rec codexRecord
+	if !decode(line, &rec) || rec.Type != "event_msg" || rec.Payload == nil ||
+		rec.Payload.Type != "item_completed" || rec.Payload.Item == nil ||
+		rec.Payload.Item.Type != "UserMessage" {
+		return ""
+	}
+	return collectCodexText(rec.Payload.Item.Content)
+}
+
 // Parse implements Parser.
 func (p *CodexParser) Parse(line string, offset int64) []protocol.Message {
 	var rec codexRecord

@@ -112,6 +112,13 @@ export interface Session {
    *  leaves this list when it is read, and arrives as an ordinary message.
    *  Absent from daemons that predate it, and for agents without a queue. */
   queued?: string[];
+  /** The feed rows of those messages, for an agent that writes a message to
+   *  its history as soon as it is sent and reads it later (OpenCode): shown as
+   *  waiting rather than as read. */
+  queuedMessageIds?: string[];
+  /** The Mac can press the agent's key that sends its waiting messages now.
+   *  Absent from daemons before 0.18, which offered Send now for Claude only. */
+  canSendQueued?: boolean;
 }
 
 /** A local web server an agent started, which the phone can open. */
@@ -1026,7 +1033,10 @@ function isSession(value: unknown): value is Session {
     (value.question === undefined || isQuestion(value.question)) &&
     (value.servers === undefined || boundedArray(value.servers, 64, isServer)) &&
     (value.queued === undefined ||
-      boundedArray(value.queued, MAX_QUEUED, (text): text is string => boundedString(text, 64 * 1024, true)));
+      boundedArray(value.queued, MAX_QUEUED, (text): text is string => boundedString(text, 64 * 1024, true))) &&
+    (value.queuedMessageIds === undefined ||
+      boundedArray(value.queuedMessageIds, MAX_QUEUED * 8, (id): id is string => boundedString(id, 512, true))) &&
+    (value.canSendQueued === undefined || typeof value.canSendQueued === "boolean");
 }
 
 /** More waiting messages than anyone types ahead of an agent; past it the

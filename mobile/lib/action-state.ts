@@ -115,11 +115,11 @@ export function reconcileCursorSendEchoes<T extends PendingSendLike>(
 }
 
 /**
- * Hand a message sent while Claude was working over to Claude's own queue.
+ * Hand a message sent while an agent was working over to its own queue.
  *
- * Claude Code holds such a message until its current step ends, so the
- * transcript has nothing to show for it yet, and the phone used to drop the
- * bubble the moment the keys were typed. A message sent while it works is
+ * An agent that holds such a message (see holdsMessages) has nothing in its
+ * transcript to show for it yet, and the phone used to drop the bubble the
+ * moment the Mac delivered it. A message sent while it works is
  * kept instead (see `retainUntilTranscript`), until one of these:
  *
  * - The Mac lists it in `session.queued`. The queued row shows it from then
@@ -137,10 +137,19 @@ export function settleQueuedEchoes<T extends PendingSendLike>(
   return pending.filter((item) => {
     if (!item.retainUntilTranscript || item.status !== "delivered") return true;
     const session = byId.get(item.sessionId);
-    if (!session || session.kind !== "claude") return true;
+    if (!session || !holdsMessages(session.kind)) return true;
     if (isQueued(session, item.text)) return false;
     return session.state === "busy" || session.state === "waiting_input";
   });
+}
+
+/**
+ * Agents that hold a message sent while they work and read it later: Claude
+ * and Antigravity until the turn ends, Codex and OpenCode until the step under
+ * way does. The Mac reports what each is holding as `session.queued`.
+ */
+export function holdsMessages(kind: string): boolean {
+  return kind === "claude" || kind === "antigravity" || kind === "codex" || kind === "opencode";
 }
 
 /** Whether the Mac lists this text among the session's waiting messages. The

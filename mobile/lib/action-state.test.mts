@@ -11,6 +11,7 @@ import {
   reconcileAgentActions,
   settleQueuedEchoes,
   isQueued,
+  holdsMessages,
   upsertAgentAction,
   type PendingAgentAction,
 } from "./action-state.ts";
@@ -263,4 +264,17 @@ test("Send now stays in progress until Claude has nothing left waiting", () => {
   // A failure is kept so it can be said, until the next attempt replaces it.
   assert.equal(reconcileAgentActions([{ ...action, status: "failed" }], [session()]).length, 1);
   assert.equal(reconcileAgentActions([action], []).length, 0);
+});
+
+test("every agent that holds messages hands its echo over the same way", () => {
+  for (const kind of ["claude", "antigravity", "codex", "opencode"] as const) {
+    assert.equal(holdsMessages(kind), true, kind);
+    const id = `${kind}:s1`;
+    const sent = [{ clientId: "q", sessionId: id, text: "later", status: "delivered" as const, retainUntilTranscript: true }];
+    assert.equal(settleQueuedEchoes(sent, [session({ id, kind })]).length, 1, `${kind} while working`);
+    assert.equal(settleQueuedEchoes(sent, [session({ id, kind, queued: ["later"] })]).length, 0, `${kind} once queued`);
+    assert.equal(settleQueuedEchoes(sent, [session({ id, kind, state: "idle" })]).length, 0, `${kind} once idle`);
+  }
+  // Cursor keeps its own rule: the transcript settles it, not the queue.
+  assert.equal(holdsMessages("cursor-cli"), false);
 });

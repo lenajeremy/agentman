@@ -23,6 +23,7 @@ import {
   applyPendingSendResult,
   reconcileCursorSendEchoes,
   settleQueuedEchoes,
+  holdsMessages,
   clearQueuedForSessionTransitions,
   clearQueuedForTurn,
   questionIdentity,
@@ -1294,12 +1295,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const draftScope = credentials ? draftNamespace(credentials) : undefined;
         // Kept past the Mac's acknowledgement when the agent will not show the
         // message straight away: Cursor's transcript lags its terminal, and
-        // Claude holds a message sent while it works until its step ends.
+        // the agents in holdsMessages keep one sent while they work for later.
         const retainUntilTranscript = sessionsRef.current.some(
           (session) =>
             session.id === sessionId &&
             (session.kind === "cursor-cli" ||
-              (session.kind === "claude" &&
+              (holdsMessages(session.kind) &&
                 (session.state === "busy" || session.state === "waiting_input"))),
         );
         const knownUserMessageIds = retainUntilTranscript

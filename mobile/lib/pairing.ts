@@ -7,13 +7,25 @@
  * shell where pointing a camera at the screen is not an option.
  */
 /**
- * The relay a pairing uses when its QR code does not name one.
+ * The relay a pairing uses when its QR code or link does not name one.
  *
  * Must match DefaultRelay in the daemon: the daemon omits the address when it
  * is this one, so a mismatch here would send a scanned pairing somewhere the
- * daemon is not.
+ * daemon is not. For the same reason it never follows the development relay
+ * below: a code without an address always means this one.
  */
 export const DEFAULT_RELAY = "https://agentman-production.up.railway.app";
+
+/**
+ * The relay the code screen starts with. A development bundle (Expo Go, a dev
+ * build) can start it on the dev stack's relay instead — scripts/dev-relay.sh
+ * publishes one — by setting EXPO_PUBLIC_DEFAULT_RELAY when Metro starts, so
+ * testing needs only the code. A release bundle ignores it: __DEV__ is false
+ * there, whatever the environment held when it was built.
+ */
+const developmentRelay =
+  typeof __DEV__ !== "undefined" && __DEV__ ? process.env.EXPO_PUBLIC_DEFAULT_RELAY?.trim() : undefined;
+export const CODE_SCREEN_RELAY = developmentRelay || DEFAULT_RELAY;
 
 export interface ScannedPairing {
   relayUrl: string;

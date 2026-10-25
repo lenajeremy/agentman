@@ -246,6 +246,7 @@ export default function SessionScreen() {
   }, []);
 
   const queued = session?.queued;
+  const queuedRows = session?.queuedMessageIds;
   const rows = useMemo<Row[]>(() => {
     const sent = store.pending
       .filter((p) => p.sessionId === sessionId)
@@ -255,12 +256,15 @@ export default function SessionScreen() {
       key: `queued:${index}:${text}`,
       text,
     }));
+    // An agent that saves a message before reading it (OpenCode) has it in
+    // the feed already; it is drawn below as waiting instead, until read.
+    const waitingIds = new Set(queuedRows ?? []);
     const chronological: Row[] = [
       // Filtered here rather than drawn as nothing: an empty cell still takes
       // the list's gap, and a withdrawn preview would leave a hole.
       // Calls in a row read as one line saying what was done.
       // A call that read a picture stands alone, with the picture under it.
-      ...groupTools(messages.filter(showsInFeed), (message) =>
+      ...groupTools(messages.filter((message) => showsInFeed(message) && !waitingIds.has(message.id)), (message) =>
         Boolean(message.tool && readImage(message.tool.name, message.tool.summary ?? "", session?.cwd ?? "")),
       ),
       ...sent,
@@ -268,18 +272,16 @@ export default function SessionScreen() {
     ];
     // Reversed to feed an inverted list — see the FlatList below.
     return chronological.reverse();
-  }, [messages, store.pending, sessionId, queued, session?.cwd]);
-  // What a message waiting in the agent's queue says under it. Only Claude
-  // queues; its label is the same whether the phone or the Mac sent it.
-  const waitingLabel =
-    session?.kind === "claude" && (session.state === "busy" || session.state === "waiting_input")
-      ? session.state === "busy"
-        ? "Pending · Claude is working"
-        : "Pending · Claude reads it once you answer"
-      : undefined;
-  // Ctrl-X Ctrl-S has to be pressed in the agent's own terminal, which the
-  // Mac can only do for a Claude it runs in tmux.
-  const canSendNow = session?.kind === "claude" && session.inject === "tmux";
+  }, [messages, store.pending, sessionId, queued, queuedRows, session?.cwd]);
+  // What a message waiting in the agent's queue says under it, the same
+  // whether the phone or the Mac sent it.
+  const waitingLabel = session ? pendingLabel(session.kind, session.state) : undefined;
+  // The agent's send-now key has to be pressed in its own terminal, which
+  // the Mac says it can do. Daemons before 0.18 said nothing and offered it
+  // for Claude in tmux only.
+  const canSendNow = Boolean(
+    session?.canSendQueued || (session?.kind === "claude" && session.inject === "tmux"),
+  );
   const sendNowAction = store.actions.find(
     (action) => action.sessionId === sessionId && action.kind === "send_queued",
   );
@@ -1732,6 +1734,21 @@ function SentMessage({
       </MessageMenu>
     </Appear>
   );
+}
+
+/**
+ * What a message an agent is holding says under it. Claude and Antigravity
+ * hold one until the turn ends; Codex and OpenCode only until the step under
+ * way does, which the words say, so a wait of seconds isn't read as minutes.
+ */
+function pendingLabel(kind: string, state: string): string | undefined {
+  const name = { claude: "Claude", antigravity: "Antigravity", codex: "Codex", opencode: "OpenCode" }[kind];
+  if (!name) return undefined;
+  if (state === "waiting_input") return `Pending · ${name} reads it once you answer`;
+  if (state !== "busy") return undefined;
+  return kind === "codex" || kind === "opencode"
+    ? `Pending · ${name} reads it after this step`
+    : `Pending · ${name} is working`;
 }
 
 function PendingRow({

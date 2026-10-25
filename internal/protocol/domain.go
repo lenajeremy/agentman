@@ -129,6 +129,14 @@ type Session struct {
 	// all. Each one leaves this list when the agent takes it, and arrives in
 	// the conversation as an ordinary user message.
 	Queued []string `json:"queued,omitempty"`
+	// QueuedMessageIDs are the feed rows of those messages, for an agent that
+	// writes a message to its history the moment it is sent and reads it
+	// later (OpenCode). The phone shows those rows as waiting rather than as
+	// read. Empty where waiting messages are not in the feed yet.
+	QueuedMessageIDs []string `json:"queuedMessageIds,omitempty"`
+	// CanSendQueued says send_queued would work now: the agent offers a key
+	// that sends what it is holding at once, and the Mac can press it.
+	CanSendQueued bool `json:"canSendQueued,omitempty"`
 
 	// AgentPID is the agent's own process, when the adapter knows it. It
 	// never leaves the machine: it is only how the daemon tells which
@@ -224,7 +232,8 @@ func (s Session) SameAs(other Session) bool {
 		s.ModelScope == other.ModelScope &&
 		s.AgentPID == other.AgentPID &&
 		s.Question.sameAs(other.Question) && SameServers(s.Servers, other.Servers) &&
-		slices.Equal(s.Queued, other.Queued)
+		slices.Equal(s.Queued, other.Queued) && slices.Equal(s.QueuedMessageIDs, other.QueuedMessageIDs) &&
+		s.CanSendQueued == other.CanSendQueued
 }
 
 // SameServers reports whether two server lists are identical, in order.
