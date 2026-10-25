@@ -9,20 +9,13 @@ struct Sidebar: View {
         List(selection: $store.selection) {
             AgentmanRow()
                 .tag(SidebarItem.manager)
-                .padding(.vertical, 4)
-            Label {
-                Text("New agent")
-                    .font(Fonts.sans(13.5))
-                    .foregroundStyle(Palette.text)
-            } icon: {
-                Image(systemName: "square.and.pencil")
-                    .foregroundStyle(Palette.muted)
-            }
-            .tag(SidebarItem.newAgent)
-            .padding(.vertical, 2)
+            NewAgentRow()
+                .tag(SidebarItem.newAgent)
 
-            SidebarFilters()
-                .listRowSeparator(.hidden)
+            if store.folderFilter != nil || store.stateFilter != nil {
+                ActiveFilters()
+                    .listRowSeparator(.hidden)
+            }
 
             ForEach(store.groups) { group in
                 Section {
@@ -56,12 +49,19 @@ struct Sidebar: View {
                         .font(TextStyle.label)
                         .foregroundStyle(Palette.faint)
                         .textCase(nil)
+                        .padding(.leading, SidebarMetrics.header)
                 }
             }
         }
         .listStyle(.sidebar)
         .searchable(text: $store.search, placement: .sidebar, prompt: "Search agents")
         .safeAreaInset(edge: .bottom) { ConnectionFooter() }
+        .toolbar {
+            ToolbarItem {
+                FilterMenu()
+            }
+        }
+        .task { await store.loadFolders() }
         .overlay {
             if store.sessions.isEmpty, store.status == .connected {
                 ContentUnavailableView(
@@ -75,19 +75,31 @@ struct Sidebar: View {
     }
 }
 
+/// Every row's mark sits in one column, so every name starts at the same
+/// edge, Agentman's and New agent's included.
+private enum SidebarMetrics {
+    static let mark: CGFloat = 22
+    static let gap: CGFloat = 10
+    /// Inside the selection's highlight, so a row's contents keep clear of
+    /// its edges as they do of its top and bottom.
+    static let inset: CGFloat = 5
+    /// A section's title starts where the marks do.
+    static let header: CGFloat = 7
+}
+
 /// The pinned row: the manager itself.
 private struct AgentmanRow: View {
     @Environment(AgentsStore.self) private var store
 
     var body: some View {
-        HStack(spacing: 10) {
-            AgentmanBadge(size: 28)
+        HStack(spacing: SidebarMetrics.gap) {
+            AgentmanBadge(size: SidebarMetrics.mark)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Agentman")
-                    .font(unread > 0 ? Fonts.sans(14, .bold) : TextStyle.bodyMedium)
+                    .font(Fonts.sans(13.5, unread > 0 ? .bold : .medium))
                     .foregroundStyle(Palette.text)
                 Text(summary)
-                    .font(TextStyle.caption)
+                    .font(Fonts.sans(11.5))
                     .foregroundStyle(store.needsYou.isEmpty ? Palette.muted : Palette.needsYouText)
                     .lineLimit(1)
             }
@@ -103,6 +115,8 @@ private struct AgentmanRow: View {
                     .accessibilityLabel("\(unread) new")
             }
         }
+        .padding(.vertical, 5)
+        .padding(.horizontal, SidebarMetrics.inset)
     }
 
     /// What arrived since the user last looked at the conversation.
@@ -118,6 +132,27 @@ private struct AgentmanRow: View {
         if waiting > 0 { return waiting == 1 ? "1 agent needs you" : "\(waiting) agents need you" }
         if working > 0 { return working == 1 ? "1 agent working" : "\(working) agents working" }
         return "All quiet"
+    }
+}
+
+/// Starting an agent, under Agentman and in line with it.
+private struct NewAgentRow: View {
+    var body: some View {
+        HStack(spacing: SidebarMetrics.gap) {
+            Image(systemName: "square.and.pencil")
+                .font(.system(size: 13.5, weight: .medium))
+                .foregroundStyle(Palette.textSecondary)
+                .frame(width: SidebarMetrics.mark)
+            Text("New agent")
+                .font(Fonts.sans(13.5))
+                .foregroundStyle(Palette.text)
+            Spacer(minLength: 4)
+            Text("⌘N")
+                .font(TextStyle.label)
+                .foregroundStyle(Palette.faint)
+        }
+        .padding(.vertical, 3)
+        .padding(.horizontal, SidebarMetrics.inset)
     }
 }
 
@@ -150,22 +185,38 @@ struct AgentRow: View {
     let session: Session
 
     var body: some View {
-        HStack(spacing: 9) {
-            AgentMark(kind: session.kind, size: 15)
-            VStack(alignment: .leading, spacing: 1) {
-                if store.renaming == session.id {
-                    RenameField(session: session)
-                } else {
-                    Text(session.name)
-                        .font(Fonts.sans(13.5))
-                        .foregroundStyle(Palette.text)
-                        .lineLimit(1)
-                        .help(session.originalName.map { "Renamed from “\($0)”" } ?? session.name)
+        HStack(alignment: .top, spacing: SidebarMetrics.gap) {
+            // Level with the name, however many lines follow it.
+            AgentMark(kind: session.kind, size: 16)
+                .frame(width: SidebarMetrics.mark, height: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if store.renaming == session.id {
+                        RenameField(session: session)
+                    } else {
+                        Text(session.name)
+                            .font(Fonts.sans(13.5, session.state == .waitingInput ? .medium : .regular))
+                            .foregroundStyle(session.state == .ended ? Palette.muted : Palette.text)
+                            .lineLimit(1)
+                            .help(session.originalName.map { "Renamed from “\($0)”" } ?? session.name)
+                    }
+                    Spacer(minLength: 4)
+                    if let when = session.lastActivity {
+                        Text(Relative.short(when))
+                            .font(Fonts.sans(11))
+                            .monospacedDigit()
+                            .foregroundStyle(Palette.faint)
+                    }
                 }
-                Text(detail)
-                    .font(Fonts.sans(11.5))
-                    .foregroundStyle(session.state == .waitingInput ? Palette.needsYouText : Palette.muted)
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(Palette.dot(session.state))
+                        .frame(width: 6, height: 6)
+                    Text(detail)
+                        .font(Fonts.sans(11.5))
+                        .foregroundStyle(detailColor)
+                        .lineLimit(1)
+                }
                 if let servers = session.servers, !servers.isEmpty {
                     HStack(spacing: 4) {
                         Image(systemName: "globe")
@@ -178,13 +229,10 @@ struct AgentRow: View {
                     .help("Dev servers it is running")
                 }
             }
-            Spacer(minLength: 4)
-            Circle()
-                .fill(Palette.dot(session.state))
-                .frame(width: 6, height: 6)
-                .accessibilityLabel(stateName)
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 5)
+        .padding(.horizontal, SidebarMetrics.inset)
+        .accessibilityElement(children: .combine)
     }
 
     private var stateName: String {
@@ -201,8 +249,15 @@ struct AgentRow: View {
         if session.state == .waitingInput {
             return session.question?.title ?? session.question?.prompt ?? "Needs you"
         }
-        guard let when = session.lastActivity else { return stateName }
-        return "\(stateName) · \(Relative.short(when))"
+        return stateName
+    }
+
+    private var detailColor: Color {
+        switch session.state {
+        case .waitingInput: Palette.needsYouText
+        case .busy: Palette.workingText
+        default: Palette.muted
+        }
     }
 }
 
@@ -299,80 +354,87 @@ private struct RenameField: View {
     }
 }
 
-/// The folder the list shows, and its statuses to narrow it to: Needs you,
-/// Working, Idle, each only when something is in it.
-private struct SidebarFilters: View {
+/// One button for what the list shows: agents in one state, and in one
+/// folder, with how many are in each.
+private struct FilterMenu: View {
     @Environment(AgentsStore.self) private var store
 
     var body: some View {
         let counts = store.stateCounts
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                Menu {
-                    Button {
-                        store.folderFilter = nil
-                    } label: {
-                        if store.folderFilter == nil { Label("All folders", systemImage: "checkmark") } else { Text("All folders") }
-                    }
-                    Divider()
-                    ForEach(store.folders.prefix(15)) { folder in
-                        Button {
-                            store.folderFilter = folder.path
-                        } label: {
-                            let title = "\((folder.path as NSString).lastPathComponent)  ·  \(folder.agents)"
-                            if store.folderFilter == folder.path { Label(title, systemImage: "checkmark") } else { Text(title) }
-                        }
-                    }
-                } label: {
-                    chip(store.folderFilter.map { ($0 as NSString).lastPathComponent } ?? "All folders",
-                         icon: "folder", on: store.folderFilter != nil)
-                }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Show one folder, with the sessions that ended there")
-
-                stateChip(.waitingInput, "needs you", counts.needsYou, tint: Palette.needsYouText)
-                stateChip(.busy, "working", counts.working, tint: Palette.workingText)
-                stateChip(.idle, "idle", counts.idle, tint: Palette.muted)
+        Menu {
+            Section("Show") {
+                option("All agents", on: store.stateFilter == nil) { store.stateFilter = nil }
+                option("Needs you", count: counts.needsYou, on: store.stateFilter == .waitingInput) { store.stateFilter = .waitingInput }
+                option("Working", count: counts.working, on: store.stateFilter == .busy) { store.stateFilter = .busy }
+                option("Idle", count: counts.idle, on: store.stateFilter == .idle) { store.stateFilter = .idle }
             }
-            .padding(.vertical, 2)
+            Section("Folder") {
+                option("All folders", on: store.folderFilter == nil) { store.folderFilter = nil }
+                ForEach(store.folders.prefix(15)) { folder in
+                    option((folder.path as NSString).lastPathComponent, count: folder.agents,
+                           on: store.folderFilter == folder.path) { store.folderFilter = folder.path }
+                }
+            }
+        } label: {
+            Label("Filter", systemImage: "line.3.horizontal.decrease")
+                .foregroundStyle(filtering ? Palette.working : Palette.textSecondary)
         }
-        .task { await store.loadFolders() }
+        .menuIndicator(.hidden)
+        .help("Show agents in one state, or one folder with the sessions that ended there")
     }
 
-    @ViewBuilder private func stateChip(_ state: SessionState, _ label: String, _ count: Int, tint: Color) -> some View {
-        if count > 0 || store.stateFilter == state {
-            Button {
-                store.stateFilter = store.stateFilter == state ? nil : state
-            } label: {
-                HStack(spacing: 4) {
-                    Text("\(count)").foregroundStyle(store.stateFilter == state ? Palette.onInverse : tint)
-                    Text(label)
-                }
-                .font(TextStyle.caption)
-                .foregroundStyle(store.stateFilter == state ? Palette.onInverse : Palette.textSecondary)
-                .padding(.horizontal, 9)
-                .frame(height: 24)
-                .background(store.stateFilter == state ? Palette.inverse : Palette.fill, in: Capsule())
+    private var filtering: Bool { store.stateFilter != nil || store.folderFilter != nil }
+
+    @ViewBuilder
+    private func option(_ title: String, count: Int? = nil, on: Bool, action: @escaping () -> Void) -> some View {
+        let text = count.map { "\(title)  \($0)" } ?? title
+        Button(action: action) {
+            if on { Label(text, systemImage: "checkmark") } else { Text(text) }
+        }
+    }
+}
+
+/// What the list is narrowed to, above it, each undone with its ×.
+private struct ActiveFilters: View {
+    @Environment(AgentsStore.self) private var store
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let folder = store.folderFilter {
+                token((folder as NSString).lastPathComponent, icon: "folder") { store.folderFilter = nil }
             }
-            .buttonStyle(.plain)
-            .help(store.stateFilter == state ? "Show every agent" : "Show only these")
+            if let state = store.stateFilter {
+                token(name(state), icon: nil) { store.stateFilter = nil }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 2)
+        .padding(.horizontal, SidebarMetrics.inset)
+    }
+
+    private func name(_ state: SessionState) -> String {
+        switch state {
+        case .waitingInput: "Needs you"
+        case .busy: "Working"
+        default: "Idle"
         }
     }
 
-    private func chip(_ title: String, icon: String, on: Bool) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon).font(.system(size: 10, weight: .medium))
-            Text(title).lineLimit(1)
-            Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold)).foregroundStyle(Palette.faint)
+    private func token(_ title: String, icon: String?, clear: @escaping () -> Void) -> some View {
+        Button(action: clear) {
+            HStack(spacing: 5) {
+                if let icon { Image(systemName: icon).font(.system(size: 10, weight: .medium)) }
+                Text(title).lineLimit(1)
+                Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(Palette.workingText.opacity(0.7))
+            }
+            .font(TextStyle.caption)
+            .foregroundStyle(Palette.workingText)
+            .padding(.horizontal, 9)
+            .frame(height: 24)
+            .background(Palette.workingWash, in: Capsule())
         }
-        .font(TextStyle.caption)
-        .foregroundStyle(on ? Palette.workingText : Palette.textSecondary)
-        .padding(.horizontal, 9)
-        .frame(height: 24)
-        .background(on ? Palette.workingWash : Palette.fill, in: Capsule())
+        .buttonStyle(.plain)
+        .help("Show every agent again")
     }
 }
 
@@ -396,6 +458,7 @@ private struct FolderHeader: View {
                     .help("Notifications from this folder are muted")
             }
         }
+        .padding(.leading, SidebarMetrics.header)
         .help(folder)
         .contextMenu {
             Button(muted ? "Unmute Notifications" : "Mute Notifications") {

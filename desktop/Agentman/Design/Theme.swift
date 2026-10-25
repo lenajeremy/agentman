@@ -125,10 +125,12 @@ struct AgentMark: View {
     var size: CGFloat = 18
 
     var body: some View {
-        if NSImage(named: "Agent-\(kind)") != nil {
+        if let image = NSImage(named: "Agent-\(kind)") {
+            // A one-colour mark takes the text colour, so it shows on a dark
+            // sidebar as well as a light one.
             Image("Agent-\(kind)")
                 .resizable()
-                .renderingMode(nil)
+                .renderingMode(image.isTemplate ? .template : .original)
                 .interpolation(.high)
                 .scaledToFit()
                 .foregroundStyle(Palette.text)
