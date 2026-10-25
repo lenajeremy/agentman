@@ -507,7 +507,7 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: 14,
       paddingVertical: 10,
     },
-    bubbleText: { fontFamily: font.sans, fontSize: size.body, lineHeight: 22, color: c.text },
+    bubbleText: { fontFamily: font.sans, fontSize: size.reading, lineHeight: 23, color: c.text },
     keptRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: space.sm },
     kept: {
       width: 110,
@@ -545,7 +545,7 @@ const makeStyles = (c: Palette) =>
     },
     briefHead: { flexDirection: "row", alignItems: "center", gap: space.sm },
     briefName: { flex: 1, fontFamily: font.sansMedium, fontSize: size.body, color: c.text },
-    briefText: { fontFamily: font.sans, fontSize: size.body, lineHeight: 22, color: c.textSecondary },
+    briefText: { fontFamily: font.sans, fontSize: size.reading, lineHeight: 23, color: c.textSecondary },
     briefNeeds: { fontFamily: font.sans, fontSize: size.caption, color: c.needsYouText },
 
     quietLine: { flexDirection: "row", alignItems: "center", gap: 6 },

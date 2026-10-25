@@ -144,6 +144,9 @@ export const size = {
   label: 12,
   caption: 13,
   body: 15,
+  /** What a conversation says: a touch smaller than body, on a looser line,
+   *  for reading paragraphs rather than scanning rows. */
+  reading: 14.5,
   title: 17,
   heading: 22,
   display: 34,

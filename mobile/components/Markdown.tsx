@@ -430,14 +430,17 @@ function renderInline(content: Inline[], styles: Styles, setting = PLAIN): React
   });
 }
 
+/** The line a paragraph sits on: a list marker and a task box keep to it. */
+const READING_LINE = 24;
+
 function makeStyles(c: Palette) {
   return StyleSheet.create({
     body: { gap: space.sm },
     text: {
       fontFamily: font.sans,
-      fontSize: size.body,
+      fontSize: size.reading,
       color: c.text,
-      lineHeight: 23,
+      lineHeight: READING_LINE,
     },
     heading: { fontFamily: font.sansBold, marginTop: space.xs, letterSpacing: -0.2 },
     heading1: { fontSize: size.title },
@@ -526,9 +529,9 @@ function makeStyles(c: Palette) {
       fontFamily: font.mono,
       fontSize: size.caption,
       color: c.faint,
-      lineHeight: 23,
+      lineHeight: READING_LINE,
     },
-    taskBox: { minWidth: 16, height: 23, justifyContent: "center" },
+    taskBox: { minWidth: 16, height: READING_LINE, justifyContent: "center" },
     listBody: { flex: 1, gap: space.sm },
     // A table is the one block with a natural width the screen cannot always
     // give it, so it scrolls sideways inside its own container rather than

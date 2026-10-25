@@ -2093,9 +2093,9 @@ const makeStyles = (c: Palette) =>
     },
     userText: {
       fontFamily: font.sans,
-      fontSize: size.body,
+      fontSize: size.reading,
       color: c.text,
-      lineHeight: 21,
+      lineHeight: 23,
     },
     summaryHeader: { flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 4 },
     summaryLabel: { fontFamily: font.sans, fontSize: size.caption, color: c.muted },
