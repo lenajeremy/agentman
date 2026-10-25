@@ -14,6 +14,11 @@ const allowedAdvisories = new Set([
   // @expo/code-signing-certificates, for expo-updates code signing, which this
   // app does not use. 1.4.0 is the latest release.
   "https://github.com/advisories/GHSA-86w9-cpqp-85rv",
+  // zod <4.6.6: an array schema without a length limit collects an issue per
+  // failing element, so a huge array exhausts memory. Reached only through
+  // @expo/cli, which validates the project's own config at build time and
+  // still requires zod ^3.25.76 in its latest release; 3.x has no fix.
+  "https://github.com/advisories/GHSA-mrhx-c7xc-m3w5",
 ]);
 
 const audit = spawnSync("npm", ["audit", "--omit=dev", "--json"], {
