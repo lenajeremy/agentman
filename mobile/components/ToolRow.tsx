@@ -16,12 +16,13 @@ import { useRouter } from "expo-router";
 import { useStyles, useTheme } from "../lib/appearance";
 import { parseDiff } from "../lib/diff";
 import { artifactRowName } from "../lib/artifacts";
-import { workspaceImage, type ImageTarget } from "../lib/imagepath";
+import { readImage, workspaceImage, type ImageTarget } from "../lib/imagepath";
 import { Message } from "../lib/protocol";
 import { font, Palette, radius, size, space } from "../lib/theme";
 import { toolIcon } from "../lib/tool-icon";
 import { MotionPressable } from "./MotionPressable";
 import { OutputViewer } from "./OutputViewer";
+import { SeenImage } from "./SeenImage";
 
 /** Output lines shown before the block asks to be opened fully. */
 const OUTPUT_LINES = 12;
@@ -365,9 +366,13 @@ function ArtifactLink({ sessionId, name }: { sessionId: string; name: string }) 
 export function ToolRow({
   message,
   cwd = "",
+  standalone = false,
 }: {
   message: Message;
   cwd?: string;
+  /** On its own in the feed, it sits on the soft card a run of steps has;
+   *  inside a run, that run's card holds it. */
+  standalone?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const styles = useStyles(makeStyles);
@@ -393,9 +398,11 @@ export function ToolRow({
   const image = workspaceImage(tool.name, summary, cwd);
   const artifact = artifactRowName(tool.name, summary);
   const canOpen = Boolean(output) || showCommand || Boolean(image) || Boolean(artifact);
+  // A picture it read shows under the card, outside it, as on the Mac.
+  const picture = standalone ? readImage(tool.name, summary, cwd) : null;
 
-  return (
-    <View style={styles.row}>
+  const row = (
+    <View style={[styles.row, standalone && styles.card]}>
       <MotionPressable
         onPress={() => {
           if (!canOpen) return;
@@ -452,11 +459,31 @@ export function ToolRow({
       ) : null}
     </View>
   );
+  if (!picture) return row;
+  return (
+    <View style={styles.withPicture}>
+      {row}
+      <SeenImage sessionId={message.sessionId} target={picture} />
+    </View>
+  );
 }
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     row: { marginHorizontal: -space.xs },
+    withPicture: { gap: space.sm },
+    // The same soft card as on the Mac: a step greyer than the page, so the
+    // work stands apart from the conversation.
+    // With the header's own padding, its tile sits 10 in, as in a run's card.
+    card: {
+      marginHorizontal: 0,
+      paddingHorizontal: 10 - space.xs,
+      paddingVertical: space.xs,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: c.toolCardEdge,
+      backgroundColor: c.toolCard,
+    },
     header: {
       flexDirection: "row",
       alignItems: "center",
@@ -542,7 +569,7 @@ const makeStyles = (c: Palette) =>
     },
 
     output: {
-      backgroundColor: c.fill,
+      backgroundColor: c.toolWell,
       borderRadius: radius.md,
       padding: space.md,
       // Just enough to separate one line from the wrapped remains of the
@@ -569,7 +596,7 @@ const makeStyles = (c: Palette) =>
       paddingVertical: space.sm,
       paddingHorizontal: space.md,
       borderRadius: radius.md,
-      backgroundColor: c.fill,
+      backgroundColor: c.toolWell,
     },
     imageLinkText: {
       flex: 1,

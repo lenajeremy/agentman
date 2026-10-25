@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { workspaceImage } from "./imagepath.ts";
+import { readImage, workspaceImage } from "./imagepath.ts";
 
 const CWD = "/Users/mac/Desktop/agentman";
 
@@ -139,4 +139,12 @@ test("Codex's View image row opens the picture it looked at", () => {
   });
   // The raw URL Codex records is not a path, so it must never become a link.
   assert.equal(workspaceImage("View image", "file:///private/tmp/remediation-landing.png", CWD), null);
+});
+
+test("only a read shows its picture under the call", () => {
+  assert.deepEqual(readImage("Read", "/tmp/shots/home.png", CWD), { path: "/tmp/shots/home.png", request: "read_seen_file" });
+  assert.equal(readImage("Write", `${CWD}/out.png`, CWD), null);
+  assert.equal(readImage("Edit", `${CWD}/out.png`, CWD), null);
+  assert.equal(readImage("Read", `${CWD}/notes.md`, CWD), null);
+  assert.equal(readImage("Bash", "open shot.png", CWD), null);
 });

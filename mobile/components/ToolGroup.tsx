@@ -92,14 +92,21 @@ export function ToolGroup({ calls, said, cwd }: { calls: Message[]; said: string
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
-    group: { marginHorizontal: -space.xs },
+    // The soft card a tool call sits on, as on the Mac.
+    group: {
+      paddingHorizontal: 10,
+      paddingVertical: space.xs,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: c.toolCardEdge,
+      backgroundColor: c.toolCard,
+    },
     header: {
       flexDirection: "row",
       alignItems: "center",
       gap: 10,
       minHeight: 32,
       borderRadius: radius.sm,
-      paddingHorizontal: space.xs,
     },
     tile: {
       width: 22,

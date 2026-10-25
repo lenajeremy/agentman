@@ -9,7 +9,12 @@ export type FeedItem =
   | { kind: "message"; message: Message }
   | { kind: "tools"; key: string; calls: Message[]; said: string };
 
-export function groupTools(messages: readonly Message[]): FeedItem[] {
+export function groupTools(
+  messages: readonly Message[],
+  /** A call shown on its own, breaking any run: one that read a picture,
+   *  which is shown under it. */
+  standsAlone: (message: Message) => boolean = () => false,
+): FeedItem[] {
   const items: FeedItem[] = [];
   let run: Message[] = [];
   let said = "";
@@ -19,6 +24,11 @@ export function groupTools(messages: readonly Message[]): FeedItem[] {
     run = [];
   };
   for (const message of messages) {
+    if (message.role === "tool" && message.tool && standsAlone(message)) {
+      flush();
+      items.push({ kind: "message", message });
+      continue;
+    }
     if (message.role === "tool" && message.tool) {
       run.push(message);
       continue;

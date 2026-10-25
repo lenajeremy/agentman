@@ -80,3 +80,14 @@ export function workspaceImage(name: string, summary: string, cwd: string): Imag
   if (rel.split("/").some((part) => part === "..")) return null;
   return { path: rel, request: "read_file" };
 }
+
+/** Tools that read a file, as opposed to writing or editing one. */
+const READ_TOOLS = /^(read|read_file|view|cat|notebookread)$/i;
+
+/**
+ * The picture a tool call read, when it read one. It is shown under the
+ * call, as on the Mac, rather than a tap away.
+ */
+export function readImage(name: string, summary: string, cwd: string): ImageTarget | null {
+  return READ_TOOLS.test(name) ? workspaceImage(name, summary, cwd) : null;
+}

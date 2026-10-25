@@ -31,6 +31,7 @@ import { Markdown } from "../../components/Markdown";
 import { SentImages } from "../../components/SentImages";
 import { ToolGroup } from "../../components/ToolGroup";
 import { groupTools } from "../../lib/toolgroups";
+import { readImage } from "../../lib/imagepath";
 import { splitSentMessage } from "../../lib/sentimages";
 import { MotionPressable } from "../../components/MotionPressable";
 import { Pulse } from "../../components/Pulse";
@@ -256,13 +257,16 @@ export default function SessionScreen() {
       // Filtered here rather than drawn as nothing: an empty cell still takes
       // the list's gap, and a withdrawn preview would leave a hole.
       // Calls in a row read as one line saying what was done.
-      ...groupTools(messages.filter(showsInFeed)),
+      // A call that read a picture stands alone, with the picture under it.
+      ...groupTools(messages.filter(showsInFeed), (message) =>
+        Boolean(message.tool && readImage(message.tool.name, message.tool.summary ?? "", session?.cwd ?? "")),
+      ),
       ...sent,
       ...waiting,
     ];
     // Reversed to feed an inverted list — see the FlatList below.
     return chronological.reverse();
-  }, [messages, store.pending, sessionId, queued]);
+  }, [messages, store.pending, sessionId, queued, session?.cwd]);
   // What a message waiting in the agent's queue says under it. Only Claude
   // queues; its label is the same whether the phone or the Mac sent it.
   const waitingLabel =
@@ -1528,7 +1532,7 @@ function MessageRow({
   if (message.role === "tool" && message.tool) {
     return (
       <Appear enabled={fresh}>
-        <ToolRow message={message} cwd={cwd} />
+        <ToolRow message={message} cwd={cwd} standalone />
       </Appear>
     );
   }
