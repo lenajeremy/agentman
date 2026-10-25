@@ -218,7 +218,17 @@ export type RequestType =
   | "list_commits"
   | "commit_files"
   | "commit_diff"
-  | "list_branches";
+  | "list_branches"
+  | "manager_send"
+  | "manager_history"
+  | "manager_stop"
+  | "manager_image"
+  | "manager_briefs"
+  | "manager_card_reply"
+  | "manager_card_dismiss"
+  | "manager_schedules"
+  | "manager_schedule_cancel"
+  | "manager_settings";
 
 export interface Request {
   type: RequestType;
@@ -256,6 +266,12 @@ export interface Request {
   /** The branch list_commits reads, in full, as list_branches reported it.
    *  Absent reads whatever is checked out. */
   ref?: string;
+  /** The card a manager_card_reply or manager_card_dismiss is about. */
+  cardId?: string;
+  /** A suggested note as the user edited it, on manager_card_reply. */
+  note?: Note;
+  /** The reminder or watch manager_schedule_cancel cancels. */
+  scheduleId?: string;
 }
 
 export type EventType =
@@ -276,7 +292,14 @@ export type EventType =
   | "folders"
   | "directory_sessions"
   | "session_ended"
-  | "artifacts";
+  | "artifacts"
+  | "manager_entry"
+  | "manager_delta"
+  | "manager_history"
+  | "manager_status"
+  | "manager_brief"
+  | "manager_schedules"
+  | "manager_settings";
 
 export interface WorkspaceEntry { name: string; directory: boolean; size?: number }
 export interface WorkspaceChange {
@@ -394,6 +417,132 @@ export interface DaemonEvent {
   artifacts?: Artifact[];
   /** Rides on "sessions": which agentman the Mac runs, and what is newer. */
   daemon?: DaemonInfo;
+  /** One entry in Agentman's conversation, new or finished, on
+   *  "manager_entry". */
+  entry?: ManagerEntry;
+  /** A page of the conversation, oldest first, on "manager_history"; `more`
+   *  says older entries remain. */
+  entries?: ManagerEntry[];
+  more?: boolean;
+  /** More text for the entry named by entryId, on "manager_delta". */
+  entryId?: string;
+  delta?: string;
+  /** What Agentman is doing, on "manager_status". */
+  managerStatus?: ManagerStatus;
+  /** An agent's brief, or all of them, on "manager_brief". */
+  brief?: Brief;
+  briefs?: Brief[];
+  /** Everything Agentman has scheduled, on "manager_schedules". */
+  schedules?: ManagerSchedule[];
+  /** How Agentman works, on "manager_settings". */
+  managerSettings?: ManagerSettings;
+}
+
+/** How Agentman works, as the user set it on the Mac or here. */
+export interface ManagerSettings {
+  chatModel: string;
+  briefModel: string;
+  effort: string;
+  briefs: boolean;
+  autoApprove: boolean;
+  approve?: { reads: boolean; edits: boolean; commands: boolean; continue: boolean };
+  rules?: { action: string; kind: string; pattern: string; folder?: string }[];
+  style: string;
+  instructions: string;
+  /** Whether an API key is stored on the Mac. Read only. */
+  keySet: boolean;
+}
+
+/** One of the user's notes, as Agentman keeps them. */
+export interface Note {
+  name: string;
+  /** "shared" (agents read it through Agentman) or "private" (only Agentman). */
+  tier: string;
+  title: string;
+  always?: boolean;
+  body?: string;
+  updatedAt: number;
+}
+
+/**
+ * A decision Agentman put in front of the user: an agent's question with its
+ * options, an agent's need answered in words, a key it asked for, or a note
+ * Agentman suggests keeping.
+ */
+export interface ManagerCard {
+  id: string;
+  kind: "question" | "needs_you" | "key" | "note" | string;
+  /** "open", "answered" (here), "settled" (elsewhere) or "dismissed". */
+  state: string;
+  sessionId: string;
+  agentName: string;
+  title: string;
+  detail?: string;
+  /** Why Agentman did not answer it itself. */
+  reason?: string;
+  /** Agentman's latest brief on the agent. */
+  context?: string;
+  questionId?: string;
+  options?: QuestionOption[];
+  multiple?: boolean;
+  custom?: boolean;
+  keyName?: string;
+  /** The option Agentman would pick, waiting for the user's OK. */
+  suggested?: string;
+  /** How it was settled: "You chose Yes". */
+  outcome?: string;
+  note?: Note;
+}
+
+/** One entry in the conversation with Agentman. */
+export interface ManagerEntry {
+  id: string;
+  /** "user", "assistant", "activity", "brief", "agent", "card", "scheduled"
+   *  or "error". */
+  role: string;
+  text: string;
+  ts: number;
+  /** The agent an activity or brief is about. */
+  sessionId?: string;
+  /** What an activity did, such as "read_messages". */
+  tool?: string;
+  /** An assistant entry still being written; deltas fill it. */
+  streaming?: boolean;
+  /** An image an activity looked at. */
+  path?: string;
+  /** The images a user's message came with, kept beside the conversation. */
+  images?: string[];
+  card?: ManagerCard;
+}
+
+export interface ManagerStatus {
+  /** "idle", "thinking", "needs_key" or "error". */
+  state: string;
+  error?: string;
+  keySet: boolean;
+}
+
+/** Agentman's living summary of one agent. */
+export interface Brief {
+  sessionId: string;
+  name: string;
+  summary: string;
+  needsYou?: string;
+  updatedAt: number;
+}
+
+/** A reminder Agentman left itself, or a watch on an agent. */
+export interface ManagerSchedule {
+  id: string;
+  kind: "reminder" | "watch" | string;
+  text: string;
+  /** When a reminder next fires, or a watch gives up, epoch milliseconds. */
+  due: number;
+  /** A repeating reminder's interval, in seconds. */
+  every?: number;
+  agentName?: string;
+  condition?: string;
+  createdAt: number;
 }
 
 /** The agentman running on the Mac. */
@@ -507,6 +656,8 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     "turn_complete", "send_result", "server_opened", "server_stopped", "error", "workspace",
     "directories", "session_started", "folders", "directory_sessions",
     "session_ended", "artifacts", "tools_title",
+    "manager_entry", "manager_delta", "manager_history", "manager_status",
+    "manager_brief", "manager_schedules", "manager_settings",
   ] as const)) return null;
 
   switch (value.type) {
@@ -538,6 +689,44 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     case "tools_title":
       if (!optionalBoundedString(value.preview, 4096)) return null;
       break;
+    case "manager_entry":
+      if (!isManagerEntry(value.entry)) return null;
+      break;
+    case "manager_delta":
+      if (!boundedString(value.entryId, 512, true) || !boundedString(value.delta, 512 * 1024)) return null;
+      break;
+    case "manager_history":
+      // An entry the app cannot read is left out, not the whole page.
+      value.entries ??= [];
+      if (!Array.isArray(value.entries) || value.entries.length > 5_000) return null;
+      value.entries = value.entries.filter(isManagerEntry);
+      if (value.more !== undefined && typeof value.more !== "boolean") delete value.more;
+      break;
+    case "manager_status":
+      if (!isRecord(value.managerStatus) || !boundedString(value.managerStatus.state, 64, true)) return null;
+      if (!optionalBoundedString(value.managerStatus.error, 64 * 1024)) delete value.managerStatus.error;
+      value.managerStatus.keySet = value.managerStatus.keySet === true;
+      break;
+    case "manager_brief":
+      if (value.brief !== undefined && !isBrief(value.brief)) delete value.brief;
+      if (value.briefs !== undefined) {
+        if (!Array.isArray(value.briefs) || value.briefs.length > 10_000) return null;
+        value.briefs = value.briefs.filter(isBrief);
+      }
+      break;
+    case "manager_settings":
+      if (!isRecord(value.managerSettings)) return null;
+      value.managerSettings.keySet = value.managerSettings.keySet === true;
+      if (value.managerStatus !== undefined &&
+          (!isRecord(value.managerStatus) || !boundedString(value.managerStatus.state, 64, true))) {
+        delete value.managerStatus;
+      }
+      break;
+    case "manager_schedules":
+      value.schedules ??= [];
+      if (!Array.isArray(value.schedules) || value.schedules.length > 1_000) return null;
+      value.schedules = value.schedules.filter(isSchedule);
+      break;
     case "turn_complete":
       if (!boundedString(value.sessionId, 512, true) ||
           !optionalBoundedString(value.sessionName, 4096) ||
@@ -562,6 +751,8 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
           (value.port !== undefined && !isPort(value.port))) return null;
       break;
     case "workspace":
+      // An image kept with Agentman's conversation belongs to no session.
+      if (isRecord(value.workspace) && value.workspace.sessionId === undefined) value.workspace.sessionId = "agentman";
       if (!isWorkspaceResult(value.workspace)) return null;
       break;
     case "directories":
@@ -837,6 +1028,58 @@ function isQuestion(value: unknown): value is Question {
     optionalBoundedString(option.preview, 256 * 1024) &&
     (option.selected === undefined || typeof option.selected === "boolean") &&
     (option.checked === undefined || typeof option.checked === "boolean"));
+}
+
+function isNote(value: unknown): value is Note {
+  return isRecord(value) && boundedString(value.name, 512) && boundedString(value.tier, 64, true) &&
+    boundedString(value.title, 4096) && optionalBoundedString(value.body, 256 * 1024) &&
+    (value.always === undefined || typeof value.always === "boolean");
+}
+
+function isManagerCard(value: unknown): value is ManagerCard {
+  if (!isRecord(value) || !boundedString(value.id, 512, true) || !boundedString(value.kind, 64, true) ||
+      !boundedString(value.state, 64, true) || !boundedString(value.title, 64 * 1024)) return false;
+  value.sessionId ??= "";
+  value.agentName ??= "";
+  if (!boundedString(value.sessionId, 512) || !boundedString(value.agentName, 4096)) return false;
+  for (const key of ["detail", "reason", "context", "questionId", "keyName", "suggested", "outcome"] as const) {
+    if (!optionalBoundedString(value[key], 256 * 1024)) delete value[key];
+  }
+  // A part the app cannot read is dropped, not the card with it.
+  if (value.note !== undefined && !isNote(value.note)) delete value.note;
+  if (value.options !== undefined && !isQuestion({ id: "card", prompt: "", options: value.options })) delete value.options;
+  if (value.multiple !== undefined && typeof value.multiple !== "boolean") delete value.multiple;
+  if (value.custom !== undefined && typeof value.custom !== "boolean") delete value.custom;
+  return true;
+}
+
+function isManagerEntry(value: unknown): value is ManagerEntry {
+  if (!isRecord(value) || !boundedString(value.id, 512, true) || !boundedString(value.role, 64, true) ||
+      !finiteNumber(value.ts) || !optionalBoundedString(value.text, 512 * 1024)) return false;
+  value.text ??= "";
+  for (const key of ["sessionId", "tool", "path"] as const) {
+    if (!optionalBoundedString(value[key], 4096)) delete value[key];
+  }
+  if (value.streaming !== undefined && typeof value.streaming !== "boolean") delete value.streaming;
+  if (value.images !== undefined &&
+      !boundedArray(value.images, 16, (name): name is string => boundedString(name, 512, true))) delete value.images;
+  if (value.card !== undefined && !isManagerCard(value.card)) return false;
+  return true;
+}
+
+function isBrief(value: unknown): value is Brief {
+  if (!isRecord(value) || !boundedString(value.sessionId, 512, true) || !boundedString(value.name, 4096) ||
+      !boundedString(value.summary, 64 * 1024)) return false;
+  if (!optionalBoundedString(value.needsYou, 64 * 1024)) delete value.needsYou;
+  if (!finiteNumber(value.updatedAt)) value.updatedAt = 0;
+  return true;
+}
+
+function isSchedule(value: unknown): value is ManagerSchedule {
+  return isRecord(value) && boundedString(value.id, 512, true) && boundedString(value.kind, 64, true) &&
+    boundedString(value.text, 64 * 1024) && finiteNumber(value.due) &&
+    optionalBoundedString(value.agentName, 4096) && optionalBoundedString(value.condition, 64) &&
+    (value.every === undefined || finiteNumber(value.every));
 }
 
 function isMessage(value: unknown): value is Message {
