@@ -229,7 +229,15 @@ export type RequestType =
   | "manager_schedules"
   | "manager_schedule_cancel"
   | "manager_settings"
-  | "manager_set_settings";
+  | "manager_set_settings"
+  | "manager_check_permission"
+  | "knowledge_list"
+  | "knowledge_read"
+  | "knowledge_write"
+  | "knowledge_delete"
+  | "keys_list"
+  | "key_set"
+  | "key_delete";
 
 export interface Request {
   type: RequestType;
@@ -258,8 +266,10 @@ export interface Request {
   uploadIds?: string[];
   /** The tool calls a tools_title request is about. */
   steps?: Tool[];
-  /** Agent to launch; path is relative to the Mac user's home directory. */
-  kind?: AgentKind;
+  /** Agent to launch, where path is relative to the Mac user's home; or a
+   *  note's tier on knowledge_read, or a request's kind on
+   *  manager_check_permission. */
+  kind?: AgentKind | (string & {});
   /** The verdict on review_artifact; `text` carries the comment. */
   approve?: boolean;
   /** A full commit hash, as list_commits reported it. */
@@ -275,6 +285,8 @@ export interface Request {
   scheduleId?: string;
   /** Agentman's settings, whole, on manager_set_settings. */
   manager?: ManagerSettings;
+  /** A key's details on key_set; its value is never sent from the phone. */
+  key?: Key;
 }
 
 export type EventType =
@@ -302,7 +314,10 @@ export type EventType =
   | "manager_status"
   | "manager_brief"
   | "manager_schedules"
-  | "manager_settings";
+  | "manager_settings"
+  | "manager_permission"
+  | "knowledge"
+  | "keys";
 
 export interface WorkspaceEntry { name: string; directory: boolean; size?: number }
 export interface WorkspaceChange {
@@ -439,6 +454,33 @@ export interface DaemonEvent {
   schedules?: ManagerSchedule[];
   /** How Agentman works, on "manager_settings". */
   managerSettings?: ManagerSettings;
+  /** What Agentman would do with a request, on "manager_permission". */
+  permission?: PermissionCheck;
+  /** The user's notes without bodies, or one note whole, on "knowledge". */
+  notes?: Note[];
+  note?: Note;
+  /** The keys Agentman hands out, names only, on "keys". */
+  keys?: Key[];
+}
+
+/** A key Agentman can hand an agent: the environment variable it becomes,
+ *  and who gets it. Its value stays in the Mac's Keychain. */
+export interface Key {
+  name: string;
+  description?: string;
+  /** "auto" (any agent), "projects" (agents in the listed folders) or "ask". */
+  rule: string;
+  projects?: string[];
+  /** Whether a value is stored. Read only. */
+  set?: boolean;
+  updatedAt?: number;
+}
+
+/** What Agentman would do with one request. */
+export interface PermissionCheck {
+  auto: boolean;
+  summary: string;
+  reason?: string;
 }
 
 /** How Agentman works, as the user set it on the Mac or here. */
@@ -665,6 +707,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     "session_ended", "artifacts", "tools_title",
     "manager_entry", "manager_delta", "manager_history", "manager_status",
     "manager_brief", "manager_schedules", "manager_settings",
+    "manager_permission", "knowledge", "keys",
   ] as const)) return null;
 
   switch (value.type) {
@@ -728,6 +771,23 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
           (!isRecord(value.managerStatus) || !boundedString(value.managerStatus.state, 64, true))) {
         delete value.managerStatus;
       }
+      break;
+    case "manager_permission":
+      if (!isRecord(value.permission) || typeof value.permission.auto !== "boolean" ||
+          !boundedString(value.permission.summary, 64 * 1024) ||
+          !optionalBoundedString(value.permission.reason, 64 * 1024)) return null;
+      break;
+    case "knowledge":
+      if (value.notes !== undefined) {
+        if (!Array.isArray(value.notes) || value.notes.length > 10_000) return null;
+        value.notes = value.notes.filter(isNote);
+      }
+      if (value.note !== undefined && !isNote(value.note)) delete value.note;
+      break;
+    case "keys":
+      value.keys ??= [];
+      if (!Array.isArray(value.keys) || value.keys.length > 1_000) return null;
+      value.keys = value.keys.filter(isKey);
       break;
     case "manager_schedules":
       value.schedules ??= [];
@@ -1041,6 +1101,14 @@ function isNote(value: unknown): value is Note {
   return isRecord(value) && boundedString(value.name, 512) && boundedString(value.tier, 64, true) &&
     boundedString(value.title, 4096) && optionalBoundedString(value.body, 256 * 1024) &&
     (value.always === undefined || typeof value.always === "boolean");
+}
+
+function isKey(value: unknown): value is Key {
+  return isRecord(value) && boundedString(value.name, 256, true) && boundedString(value.rule, 64, true) &&
+    optionalBoundedString(value.description, 4096) &&
+    (value.set === undefined || typeof value.set === "boolean") &&
+    (value.projects === undefined ||
+      boundedArray(value.projects, 256, (project): project is string => boundedString(project, 4096, true)));
 }
 
 function isManagerCard(value: unknown): value is ManagerCard {

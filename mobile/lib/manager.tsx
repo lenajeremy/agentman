@@ -11,6 +11,8 @@ import {
 import type {
   Brief,
   DaemonEvent,
+  Key,
+  PermissionCheck,
   ManagerCard,
   ManagerEntry,
   ManagerSchedule,
@@ -56,6 +58,24 @@ export interface Manager {
   dismiss(card: ManagerCard): Promise<string | null>;
   /** Switches the model Agentman's conversation runs on. */
   setChatModel(model: string): Promise<string | null>;
+  /** Saves Agentman's settings whole. Returns the problem, if any. */
+  saveSettings(next: ManagerSettings): Promise<string | null>;
+  /** What Agentman would do with a request, under the settings as saved. */
+  checkPermission(kind: string, target: string, folder: string): Promise<PermissionCheck | string>;
+  /** The user's notes, without bodies, newest first. */
+  notes: Note[];
+  loadNotes(): Promise<void>;
+  /** One note whole. */
+  readNote(name: string, tier: string): Promise<Note | null>;
+  /** Saves a note and returns it as saved, or the problem. */
+  writeNote(note: Note): Promise<Note | string>;
+  deleteNote(note: Note): Promise<string | null>;
+  /** The keys Agentman hands out, names only. */
+  keys: Key[];
+  loadKeys(): Promise<void>;
+  /** Saves a key's name, description and rule; its value is set on the Mac. */
+  saveKeyDetails(key: Key): Promise<string | null>;
+  deleteKey(name: string): Promise<string | null>;
   cancelSchedule(schedule: ManagerSchedule): Promise<string | null>;
   /** The user has seen everything so far. */
   markRead(): void;
@@ -87,6 +107,8 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
   const [briefs, setBriefs] = useState<Record<string, Brief>>({});
   const [schedules, setSchedules] = useState<ManagerSchedule[]>([]);
   const [settings, setSettings] = useState<ManagerSettings | null>(null);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [keys, setKeys] = useState<Key[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [supported, setSupported] = useState(true);
   const [problem, setProblem] = useState<string | null>(null);
@@ -128,6 +150,12 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
       case "manager_settings":
         if (event.managerSettings) setSettings(event.managerSettings);
         if (event.managerStatus) setStatus(event.managerStatus);
+        break;
+      case "knowledge":
+        if (event.notes) setNotes(event.notes);
+        break;
+      case "keys":
+        if (event.keys) setKeys(event.keys);
         break;
       case "manager_brief": {
         const updates = [...(event.briefs ?? []), ...(event.brief ? [event.brief] : [])];
@@ -256,6 +284,59 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
       if (!settings) return Promise.resolve("Agentman's settings haven't arrived yet.");
       return perform({ type: "manager_set_settings", manager: { ...settings, chatModel: model } });
     },
+    saveSettings(next) {
+      return perform({ type: "manager_set_settings", manager: next });
+    },
+    async checkPermission(kind, target, folder) {
+      try {
+        const reply = await store.ask({ type: "manager_check_permission", kind, text: target, path: folder });
+        return reply.permission ?? "No answer from Agentman.";
+      } catch (reason) {
+        return message(reason);
+      }
+    },
+    notes,
+    async loadNotes() {
+      try {
+        apply(await store.ask({ type: "knowledge_list" }));
+      } catch {
+        // The list keeps what it had.
+      }
+    },
+    async readNote(name, tier) {
+      try {
+        return (await store.ask({ type: "knowledge_read", path: name, kind: tier })).note ?? null;
+      } catch {
+        return null;
+      }
+    },
+    async writeNote(note) {
+      try {
+        const reply = await store.ask({ type: "knowledge_write", note });
+        if (!reply.note) return "Couldn't save the note.";
+        void store.ask({ type: "knowledge_list" }).then(apply).catch(() => {});
+        return reply.note;
+      } catch (reason) {
+        return message(reason);
+      }
+    },
+    deleteNote(note) {
+      return perform({ type: "knowledge_delete", path: note.name, kind: note.tier });
+    },
+    keys,
+    async loadKeys() {
+      try {
+        apply(await store.ask({ type: "keys_list" }));
+      } catch {
+        // The list keeps what it had.
+      }
+    },
+    saveKeyDetails(key) {
+      return perform({ type: "key_set", key });
+    },
+    deleteKey(name) {
+      return perform({ type: "key_delete", path: name });
+    },
     async cancelSchedule(schedule) {
       try {
         const reply = await store.ask({ type: "manager_schedule_cancel", scheduleId: schedule.id });
@@ -280,7 +361,7 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
         return null;
       }
     },
-  }), [entries, hasOlder, status, briefs, schedules, settings, loaded, supported, problem, lastRead, reload, perform, markRead, store]);
+  }), [entries, hasOlder, status, briefs, schedules, settings, notes, keys, loaded, supported, problem, lastRead, reload, perform, markRead, store]);
 
   return <ManagerContext.Provider value={value}>{children}</ManagerContext.Provider>;
 }
