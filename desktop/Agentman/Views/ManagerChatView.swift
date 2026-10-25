@@ -9,6 +9,11 @@ struct ManagerChatView: View {
     @State private var attachments: [Attachment] = []
     @State private var sending = false
     @State private var dropping = false
+    /// Whether the conversation is scrolled to its end, so new messages
+    /// follow on; scrolled up, nothing moves what the user is reading.
+    @State private var atEnd = true
+    /// Bumped when the user sends, which always brings them to the end.
+    @State private var followRequest = 0
 
     private var manager: ManagerStore { store.manager }
 
@@ -28,7 +33,13 @@ struct ManagerChatView: View {
                         LazyVStack(alignment: .leading, spacing: 28) {
                             if manager.hasOlder, !manager.entries.isEmpty {
                                 Button("Earlier messages") {
-                                    Task { await manager.loadOlder() }
+                                    // Older messages arrive above, and what
+                                    // was at the top stays in view.
+                                    let first = ChatItem.items(from: manager.entries).first?.id
+                                    Task {
+                                        await manager.loadOlder()
+                                        if let first { proxy.scrollTo(first, anchor: .top) }
+                                    }
                                 }
                                 .buttonStyle(.link)
                                 .font(TextStyle.caption)
@@ -68,10 +79,24 @@ struct ManagerChatView: View {
                         .frame(maxWidth: 780)
                         .frame(maxWidth: .infinity)
                     }
-                    .defaultScrollAnchor(.bottom)
+                    .modifier(FollowsEnd(atEnd: $atEnd))
                     .modifier(TopFade())
+                    .overlay(alignment: .bottom) {
+                        if !atEnd, !entry {
+                            JumpToLatest {
+                                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("end", anchor: .bottom) }
+                            }
+                        }
+                    }
+                    .animation(.easeOut(duration: 0.15), value: atEnd)
                     .onChange(of: scrollKey) { _, _ in
-                        guard !entry else { return }
+                        guard !entry, atEnd else { return }
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            proxy.scrollTo("end", anchor: .bottom)
+                        }
+                    }
+                    .onChange(of: followRequest) { _, _ in
+                        atEnd = true
                         withAnimation(.easeOut(duration: 0.18)) {
                             proxy.scrollTo("end", anchor: .bottom)
                         }
@@ -160,6 +185,7 @@ struct ManagerChatView: View {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty || !attachments.isEmpty, !sending else { return }
         sending = true
+        followRequest += 1
         let images = attachments
         Task {
             if await manager.send(message, images: images) {

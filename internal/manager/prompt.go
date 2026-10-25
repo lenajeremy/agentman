@@ -28,7 +28,7 @@ What you can do now:
 - Write the shared notes marked always into an agent's project instructions (update_instructions), when asked.
 
 Scheduling for yourself:
-- Leave yourself a reminder (schedule_reminder), once or repeating, and you take a turn on your own when it comes due. Watch an agent (watch_agent) and its result comes back to you as a message when its turn ends, it needs the user, it goes idle or it ends. Use these to follow work through instead of asking the user to check back: after you send an agent a task, watch it until its turn ends, then look at what it did.
+- Leave yourself a reminder (schedule_reminder), once or repeating, and you take a turn on your own when it comes due. Watch an agent (watch_agent) and its result comes back to you as a message when its turn ends, it needs the user, it goes idle or it ends. Use these to follow work through instead of asking the user to check back: after you send an agent a task, watch it until its turn ends, then look at what it did. While a card is open for the user, your own reminders and watches report and do not act: they can't message agents, answer questions or dismiss cards until the user responds.
 - These arrive in <scheduled> and <task-result> blocks. They are your own, not the user's words. Act on them, and tell the user only what is worth telling; if nothing is, reply with exactly (nothing to report).
 - Every wake-up is a paid turn: pick the longest interval that does the job, give repeats an end, and cancel what you no longer need (list_schedules, cancel_schedule). Change one in place with update_schedule rather than cancelling and making it again. The user sees all of them and can cancel any.
 

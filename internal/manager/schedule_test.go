@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthropics/anthropic-sdk-go"
+
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
 
@@ -49,6 +51,30 @@ func (h *harness) lastPrompt(t *testing.T) string {
 	for _, block := range messages[len(messages)-1].Content {
 		if block.OfText != nil {
 			b.WriteString(block.OfText.Text)
+		}
+	}
+	return b.String()
+}
+
+// promptAt is the text of the last user message in the model's request i.
+func (h *harness) promptAt(t *testing.T, i int) string {
+	t.Helper()
+	messages := h.model.request(i).Messages
+	var b strings.Builder
+	for _, block := range messages[len(messages)-1].Content {
+		if block.OfText != nil {
+			b.WriteString(block.OfText.Text)
+		}
+	}
+	return b.String()
+}
+
+// toolResultText is what a tool result says.
+func toolResultText(result *anthropic.BetaToolResultBlockParam) string {
+	var b strings.Builder
+	for _, part := range result.Content {
+		if part.OfText != nil {
+			b.WriteString(part.OfText.Text)
 		}
 	}
 	return b.String()
@@ -310,5 +336,86 @@ func TestSchedulesChangeInPlace(t *testing.T) {
 	timeout := 2 * maxWatch
 	if _, err := h.m.updateSchedule(watched.ID, scheduleChange{timeout: &timeout}); err == nil {
 		t.Fatal("a watch was given more than a day")
+	}
+}
+
+// While a card waits for the user, a turn from Agentman's own reminder or
+// watch can't push past it: messaging an agent, answering its question and
+// taking the card away are refused, and the wake-up is told why. The user's
+// own messages still can.
+func TestAnOpenCardPausesWhatAgentmanDoesOnItsOwn(t *testing.T) {
+	model := &scriptedModel{replies: []string{
+		toolReply("t1", "send_to_agent", `{"agent":"site","text":"start step 2"}`),
+		toolReply("t2", "dismiss_card", `{"card":"c1","reason":"moving on"}`),
+		toolReply("t3", "answer_question", `{"agent":"api","option":"1"}`),
+		textReply("api-migrations is waiting on you; I've left everything as it is."),
+		toolReply("t4", "send_to_agent", `{"agent":"site","text":"start step 2"}`),
+		textReply("Sent."),
+	}}
+	h := newHarness(t, model, true)
+	sessions := h.agents.Sessions()
+	sessions[0].Inject = protocol.InjectTmux
+	h.agents.setSessions(sessions)
+	h.agents.answer = delivered
+	h.m.takeQuestion(context.Background(), h.asking("q1", "git push origin main"))
+	open := h.m.conversation.openCards()
+	if len(open) != 1 {
+		t.Fatalf("open cards: %+v", open)
+	}
+	card := open[0].Card
+
+	h.m.wake(wakeup{entry: "Watch: site finished its turn", tool: "watch",
+		prompt: "<task-result kind=\"watch\">\nsite finished its turn.\n</task-result>"})
+	h.waitIdle(t)
+	if !strings.Contains(h.promptAt(t, 0), "the flow is paused until they respond") {
+		t.Fatalf("the wake-up wasn't told about the card: %s", h.promptAt(t, 0))
+	}
+	if !strings.HasSuffix(strings.TrimSpace(h.promptAt(t, 0)), "</task-result>") {
+		t.Errorf("the note landed outside the tag: %s", h.promptAt(t, 0))
+	}
+	if sent := h.agents.sent(protocol.ReqSendMessage); len(sent) != 0 {
+		t.Fatalf("a wake-up messaged an agent past the card: %+v", sent)
+	}
+	if answers := h.agents.sent(protocol.ReqAnswer); len(answers) != 0 {
+		t.Fatalf("a wake-up answered past the card: %+v", answers)
+	}
+	if len(h.m.conversation.openCards()) != 1 {
+		t.Fatal("a wake-up took the user's card away")
+	}
+	for i := 1; i <= 3; i++ {
+		results := model.request(i).Messages
+		last := results[len(results)-1].Content[0].OfToolResult
+		if last == nil || !last.IsError.Value || !strings.Contains(toolResultText(last), "Paused: a card is open for the user") ||
+			!strings.Contains(toolResultText(last), card.AgentName) {
+			t.Errorf("tool %d wasn't refused with the card named: %+v", i, last)
+		}
+	}
+
+	// The user can still send it on.
+	h.m.send(context.Background(), "go ahead and start step 2 on site")
+	h.waitIdle(t)
+	if sent := h.agents.sent(protocol.ReqSendMessage); len(sent) != 1 || sent[0].Text != "start step 2" {
+		t.Fatalf("the user's own request was held back: %+v", sent)
+	}
+}
+
+// Without a card in the way, a wake-up acts as before.
+func TestAWakeUpActsWhenNoCardIsOpen(t *testing.T) {
+	model := &scriptedModel{replies: []string{
+		toolReply("t1", "send_to_agent", `{"agent":"site","text":"start step 2"}`),
+		textReply("Sent site step 2."),
+	}}
+	h := newHarness(t, model, true)
+	sessions := h.agents.Sessions()
+	sessions[0].Inject = protocol.InjectTmux
+	h.agents.setSessions(sessions)
+	h.agents.answer = delivered
+	h.m.wake(wakeup{entry: "Watch: site finished its turn", tool: "watch", prompt: "<task-result>\nsite finished.\n</task-result>"})
+	h.waitIdle(t)
+	if strings.Contains(h.promptAt(t, 0), "paused") {
+		t.Errorf("the wake-up was told of a pause with no card open: %s", h.promptAt(t, 0))
+	}
+	if sent := h.agents.sent(protocol.ReqSendMessage); len(sent) != 1 {
+		t.Fatalf("sent = %+v", sent)
 	}
 }
