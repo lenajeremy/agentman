@@ -7,7 +7,9 @@ struct Sidebar: View {
 
     var body: some View {
         @Bindable var store = store
-        List(selection: $store.selection) {
+        // No selection of the List's own: its highlight is the accent colour,
+        // loud beside everything else here. Rows draw a quieter one.
+        List {
             if store.folderFilter != nil || store.stateFilter != nil {
                 ActiveFilters()
                     .listRowSeparator(.hidden)
@@ -16,8 +18,7 @@ struct Sidebar: View {
             ForEach(store.groups) { group in
                 Section {
                     ForEach(group.sessions) { session in
-                        AgentRow(session: session)
-                            .tag(SidebarItem.agent(session.id))
+                        AgentButton(session: session)
                             .contextMenu {
                                 Button("Rename…") { store.renaming = session.id }
                                 if let own = session.originalName {
@@ -37,8 +38,7 @@ struct Sidebar: View {
             if store.folderFilter != nil, !store.earlierHere.isEmpty {
                 Section {
                     ForEach(store.earlierHere) { session in
-                        AgentRow(session: session)
-                            .tag(SidebarItem.agent(session.id))
+                        AgentButton(session: session)
                     }
                 } header: {
                     Text("Earlier here")
@@ -50,6 +50,7 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .onMoveCommand(perform: move)
         .searchable(text: $store.search, placement: .sidebar, prompt: "Search agents")
         // Agentman is where the user spends most of their time, so it stays
         // in view above the agents, set apart from them.
@@ -77,6 +78,61 @@ struct Sidebar: View {
                 .padding(.top, 120)
             }
         }
+    }
+
+    /// Up and down step through the agents, as they would a List's own
+    /// selection; up from the first opens Agentman.
+    private func move(_ direction: MoveCommandDirection) {
+        let ids = store.groups.flatMap(\.sessions).map(\.id)
+            + (store.folderFilter == nil ? [] : store.earlierHere.map(\.id))
+        guard !ids.isEmpty, direction == .up || direction == .down else { return }
+        guard case .agent(let current) = store.selection, let at = ids.firstIndex(of: current) else {
+            if direction == .down { store.selection = .agent(ids[0]) }
+            return
+        }
+        if direction == .down {
+            if at + 1 < ids.count { store.selection = .agent(ids[at + 1]) }
+        } else {
+            store.selection = at == 0 ? .manager : .agent(ids[at - 1])
+        }
+    }
+}
+
+/// An agent in the list, opening its thread when clicked.
+private struct AgentButton: View {
+    @Environment(AgentsStore.self) private var store
+    let session: Session
+    @State private var hovering = false
+
+    var body: some View {
+        AgentRow(session: session)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture { store.selection = .agent(session.id) }
+            .onHover { hovering = $0 }
+            .listRowBackground(RowHighlight(selected: selected, hovering: hovering))
+            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAction { store.selection = .agent(session.id) }
+    }
+
+    private var selected: Bool { store.selection == .agent(session.id) }
+}
+
+/// Behind a row: grey with a hairline edge while it is open, fainter under
+/// the pointer, as Agentman's card is.
+private struct RowHighlight: View {
+    var selected: Bool
+    var hovering: Bool
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(Color.primary.opacity(selected ? 0.10 : hovering ? 0.05 : 0))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(selected ? 0.10 : 0))
+            )
+            .padding(.horizontal, SidebarMetrics.margin)
+            .padding(.vertical, 1)
     }
 }
 
@@ -208,10 +264,9 @@ struct AgentRow: View {
     let session: Session
 
     var body: some View {
-        HStack(alignment: .top, spacing: SidebarMetrics.gap) {
-            // Level with the name, however many lines follow it.
+        HStack(spacing: SidebarMetrics.gap) {
             AgentMark(kind: session.kind, size: 16)
-                .frame(width: SidebarMetrics.mark, height: 18)
+                .frame(width: SidebarMetrics.mark)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     if store.renaming == session.id {
