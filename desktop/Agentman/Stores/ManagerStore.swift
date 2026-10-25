@@ -85,6 +85,10 @@ final class ManagerStore {
 
     var thinking: Bool { status.state == "thinking" }
     var needsKey: Bool { settings.map { !$0.keySet } ?? (status.state == "needs_key") }
+    /// The engine Agentman's conversation runs on.
+    var provider: String {
+        settings?.provider ?? settings.map { ManagerSettings.provider(of: $0.chatModel) } ?? "anthropic"
+    }
 
     /// Loads everything afresh: on connecting, and after a reconnect.
     func reload() async {
@@ -166,11 +170,12 @@ final class ManagerStore {
         return try? await client.request(request).permission
     }
 
-    /// Stores the API key in the Mac's Keychain, through the daemon, or
-    /// removes it when key is empty. The key is never sent back.
-    func setKey(_ key: String) async -> String? {
+    /// Stores an engine's API key in the Mac's Keychain, through the daemon,
+    /// or removes it when key is empty. The key is never sent back.
+    func setKey(_ key: String, provider: String = "anthropic") async -> String? {
         var request = DaemonRequest(.managerSetKey)
         request.text = key
+        request.kind = provider == "gemini" ? "gemini" : nil
         guard let reply = try? await client.request(request) else { return "Couldn't reach am serve." }
         if reply.type == "error" { return reply.error }
         apply(reply)

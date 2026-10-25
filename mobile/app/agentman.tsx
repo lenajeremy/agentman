@@ -1,6 +1,6 @@
 import Feather from "@expo/vector-icons/Feather";
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -20,11 +20,14 @@ import { BrandMark } from "../components/BrandMark";
 import { ManagerCardView } from "../components/ManagerCards";
 import { Markdown } from "../components/Markdown";
 import { MotionPressable } from "../components/MotionPressable";
+import { Popover, type PopoverItem } from "../components/Popover";
+import { ScrollToLatest, SCROLL_AWAY } from "../components/ScrollToLatest";
 import { SeenImage } from "../components/SeenImage";
 import { Thinking } from "../components/Thinking";
 import { useStyles, useTheme } from "../lib/appearance";
 import { useManager } from "../lib/manager";
 import { chatItems, type ChatItem } from "../lib/manager-feed";
+import { MANAGER_MODELS, modelName } from "../lib/manager-models";
 import type { ManagerEntry, ManagerSchedule } from "../lib/protocol";
 import { useStore } from "../lib/store";
 import { font, Palette, radius, size, space } from "../lib/theme";
@@ -46,6 +49,24 @@ export default function AgentmanScreen() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [schedulesOpen, setSchedulesOpen] = useState(false);
+  const [modelMenu, setModelMenu] = useState(false);
+  const listRef = useRef<FlatList<ChatItem>>(null);
+  const [scrolledAway, setScrolledAway] = useState(false);
+  const [composerHeight, setComposerHeight] = useState(0);
+  const settings = manager.settings;
+  const modelItems: PopoverItem[] = MANAGER_MODELS.map((model) => {
+    const keyed = model.provider === "gemini" ? settings?.geminiKeySet : (settings?.anthropicKeySet ?? settings?.keySet);
+    return {
+      key: model.id,
+      label: model.name,
+      checked: settings?.chatModel === model.id,
+      disabled: keyed === false,
+      detail: keyed === false ? "No key" : undefined,
+      onPress: () => {
+        void manager.setChatModel(model.id).then((problem) => problem && images.setError(problem));
+      },
+    };
+  });
 
   // Newest first, for a list that opens on the latest and stays there.
   const rows = useMemo(() => chatItems(manager.entries).reverse(), [manager.entries]);
@@ -109,10 +130,17 @@ export default function AgentmanScreen() {
 
       {schedulesOpen ? <Schedules onClose={() => setSchedulesOpen(false)} /> : null}
 
+      <View style={styles.feed}>
       <FlatList
+        ref={listRef}
         style={styles.feed}
         data={rows}
         inverted
+        onScroll={(event) => {
+          const away = event.nativeEvent.contentOffset.y > SCROLL_AWAY;
+          if (away !== scrolledAway) setScrolledAway(away);
+        }}
+        scrollEventThrottle={64}
         keyExtractor={(item) => item.key}
         renderItem={({ item }) => <Row item={item} />}
         contentContainerStyle={styles.list}
@@ -141,16 +169,32 @@ export default function AgentmanScreen() {
           </View>
         }
       />
+      <ScrollToLatest
+        visible={scrolledAway}
+        onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+      />
+      </View>
 
-      <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, space.sm) }]}>
+      <View
+        style={[styles.composer, { paddingBottom: Math.max(insets.bottom, space.sm) }]}
+        onLayout={(event) => setComposerHeight(event.nativeEvent.layout.height)}
+      >
         {manager.problem ? <Text style={styles.problem}>{manager.problem}</Text> : null}
         {images.error ? <Text style={styles.problem}>{images.error}</Text> : null}
         {manager.needsKey ? (
           <View style={styles.notice}>
             <Feather name="key" size={14} color={color.muted} />
-            <Text style={styles.noticeText}>
-              Agentman runs on your Anthropic API key. Add it in Agentman on your Mac; it never leaves the Mac.
-            </Text>
+            <View style={styles.noticeBody}>
+              <Text style={styles.noticeText}>
+                {settings?.provider === "gemini" ? "This model runs on your Gemini API key" : "This model runs on your Anthropic API key"}.
+                Add it in Agentman on your Mac; it never leaves the Mac.
+              </Text>
+              {settings ? (
+                <MotionPressable onPress={() => setModelMenu(true)} hitSlop={8} accessibilityRole="button">
+                  <Text style={styles.noticeAction}>Switch model</Text>
+                </MotionPressable>
+              ) : null}
+            </View>
           </View>
         ) : (
           <View style={[styles.field, images.attachments.length > 0 && styles.fieldWithImages]}>
@@ -170,6 +214,13 @@ export default function AgentmanScreen() {
                 <Feather name="plus" size={20} color={reachable ? color.textSecondary : color.faint} />
               </MotionPressable>
               <View style={styles.toolbarGap} />
+              {settings ? (
+                <MotionPressable onPress={() => setModelMenu(true)} style={styles.modelButton} hitSlop={6}
+                  accessibilityRole="button" accessibilityLabel={`Model ${modelName(settings.chatModel)}. Switch model`}>
+                  <Text style={styles.modelText} numberOfLines={1}>{modelName(settings.chatModel)}</Text>
+                  <Feather name="chevron-down" size={13} color={color.muted} />
+                </MotionPressable>
+              ) : null}
               {manager.thinking ? (
                 <MotionPressable onPress={manager.stop} style={styles.send}
                   accessibilityRole="button" accessibilityLabel="Stop Agentman">
@@ -190,6 +241,16 @@ export default function AgentmanScreen() {
           </View>
         )}
       </View>
+      {modelMenu ? (
+        <Popover
+          visible
+          onDismiss={() => setModelMenu(false)}
+          bottom={composerHeight + space.xs}
+          align="right"
+          title="Agentman runs on"
+          items={modelItems}
+        />
+      ) : null}
     </KeyboardAvoidingView>
   );
 }
@@ -517,7 +578,9 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.lg,
       backgroundColor: c.fill,
     },
-    noticeText: { flex: 1, fontFamily: font.sans, fontSize: size.caption, lineHeight: 19, color: c.textSecondary },
+    noticeBody: { flex: 1, gap: space.xs },
+    noticeText: { fontFamily: font.sans, fontSize: size.caption, lineHeight: 19, color: c.textSecondary },
+    noticeAction: { fontFamily: font.sansMedium, fontSize: size.caption, color: c.working },
     field: {
       backgroundColor: c.surface,
       borderRadius: radius.xxl,
@@ -539,6 +602,16 @@ const makeStyles = (c: Palette) =>
       color: c.text,
     },
     toolbar: { flexDirection: "row", alignItems: "center", gap: space.xs },
+    modelButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+      height: 32,
+      maxWidth: 200,
+      paddingHorizontal: 10,
+      borderRadius: radius.pill,
+    },
+    modelText: { flexShrink: 1, fontFamily: font.sansMedium, fontSize: 13, color: c.muted },
     toolbarGap: { flex: 1 },
     attach: { width: 34, height: 34, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
     send: {

@@ -54,6 +54,8 @@ export interface Manager {
   saveNote(card: ManagerCard, edited?: Note): Promise<string | null>;
   /** Puts a card away unanswered. */
   dismiss(card: ManagerCard): Promise<string | null>;
+  /** Switches the model Agentman's conversation runs on. */
+  setChatModel(model: string): Promise<string | null>;
   cancelSchedule(schedule: ManagerSchedule): Promise<string | null>;
   /** The user has seen everything so far. */
   markRead(): void;
@@ -249,6 +251,10 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
     },
     dismiss(card) {
       return perform({ type: "manager_card_dismiss", cardId: card.id });
+    },
+    setChatModel(model) {
+      if (!settings) return Promise.resolve("Agentman's settings haven't arrived yet.");
+      return perform({ type: "manager_set_settings", manager: { ...settings, chatModel: model } });
     },
     async cancelSchedule(schedule) {
       try {

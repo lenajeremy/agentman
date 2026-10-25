@@ -164,6 +164,8 @@ type harness struct {
 func newHarness(t *testing.T, model *scriptedModel, withKey bool) *harness {
 	t.Helper()
 	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
 	h := &harness{
 		model: model,
 		agents: &fakeAgents{sessions: []protocol.Session{

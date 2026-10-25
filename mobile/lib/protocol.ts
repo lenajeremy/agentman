@@ -228,7 +228,8 @@ export type RequestType =
   | "manager_card_dismiss"
   | "manager_schedules"
   | "manager_schedule_cancel"
-  | "manager_settings";
+  | "manager_settings"
+  | "manager_set_settings";
 
 export interface Request {
   type: RequestType;
@@ -272,6 +273,8 @@ export interface Request {
   note?: Note;
   /** The reminder or watch manager_schedule_cancel cancels. */
   scheduleId?: string;
+  /** Agentman's settings, whole, on manager_set_settings. */
+  manager?: ManagerSettings;
 }
 
 export type EventType =
@@ -449,8 +452,12 @@ export interface ManagerSettings {
   rules?: { action: string; kind: string; pattern: string; folder?: string }[];
   style: string;
   instructions: string;
-  /** Whether an API key is stored on the Mac. Read only. */
+  /** Whether the chat model's engine has its key on the Mac. Read only. */
   keySet: boolean;
+  /** The chat model's engine, and each engine's key. Read only. */
+  provider?: string;
+  anthropicKeySet?: boolean;
+  geminiKeySet?: boolean;
 }
 
 /** One of the user's notes, as Agentman keeps them. */

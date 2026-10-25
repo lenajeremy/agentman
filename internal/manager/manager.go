@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthropics/anthropic-sdk-go"
+
 	"github.com/lenajeremy/agentman/internal/knowledge"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/secrets"
@@ -38,7 +40,8 @@ type Config struct {
 	Knowledge *knowledge.Store
 	// Emit sends an event to every connected app.
 	Emit func(protocol.Event)
-	// NewModel makes a model client from an API key. Tests replace it.
+	// NewModel makes a model client from an API key, for every engine.
+	// Tests replace it; otherwise each engine makes its own.
 	NewModel func(apiKey string) Model
 	// ProcessTree reads the process table, to tell which agent is asking.
 	// Tests replace it.
@@ -64,9 +67,13 @@ type Manager struct {
 
 	mu       sync.Mutex
 	settings protocol.ManagerSettings
-	client   Model
-	keySet   bool
-	status   protocol.ManagerStatus
+	// clients are the engines' clients, made from their keys when first
+	// needed; engineKeys says which engines have a key.
+	clients    map[string]Model
+	engineKeys map[string]bool
+	// keySet is whether the chat model's engine has its key.
+	keySet bool
+	status protocol.ManagerStatus
 	// stopTurn cancels the reply being written, if there is one.
 	stopTurn context.CancelFunc
 
@@ -125,9 +132,7 @@ func New(cfg Config) (*Manager, error) {
 
 		sessionsChanged: make(chan struct{}, 1),
 	}
-	if m.newModel == nil {
-		m.newModel = newClaudeModel
-	}
+
 	if m.processTree == nil {
 		m.processTree = tmux.SnapshotProcessTree
 	}
@@ -140,8 +145,7 @@ func New(cfg Config) (*Manager, error) {
 	if m.emitEvent == nil {
 		m.emitEvent = func(protocol.Event) {}
 	}
-	_, keyErr := m.apiKey(context.Background())
-	m.keySet = keyErr == nil
+	m.refreshKeys(context.Background())
 	m.status = protocol.ManagerStatus{State: "idle", KeySet: m.keySet}
 	if !m.keySet {
 		m.status.State = "needs_key"
@@ -207,7 +211,7 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 	case protocol.ReqManagerSetSettings:
 		return m.setSettings(req.Manager)
 	case protocol.ReqManagerSetKey:
-		return m.setKey(ctx, req.Text)
+		return m.setKey(ctx, providerNamed(string(req.Kind)), req.Text)
 	case protocol.ReqManagerBriefs:
 		return protocol.Event{Type: protocol.EvtManagerBrief, Briefs: m.briefs.all()}
 	case protocol.ReqManagerCardReply:
@@ -269,7 +273,7 @@ func (m *Manager) send(ctx context.Context, text string, images ...protocol.Inli
 	model, err := m.model(ctx)
 	if err != nil {
 		m.setStatus("needs_key", "")
-		return protocol.Event{Type: protocol.EvtError, Error: "Add your Anthropic API key in Settings first."}
+		return protocol.Event{Type: protocol.EvtError, Error: "Add your " + providerName(providerOf(m.currentSettings().ChatModel)) + " API key in Settings first."}
 	}
 	m.mu.Lock()
 	if m.stopTurn != nil {
@@ -318,6 +322,9 @@ func (m *Manager) currentSettings() protocol.ManagerSettings {
 	defer m.mu.Unlock()
 	settings := m.settings
 	settings.KeySet = m.keySet
+	settings.Provider = providerOf(settings.ChatModel)
+	settings.AnthropicKeySet = m.engineKeys[providerAnthropic]
+	settings.GeminiKeySet = m.engineKeys[providerGemini]
 	return settings
 }
 
@@ -346,46 +353,57 @@ func (m *Manager) setSettings(next *protocol.ManagerSettings) protocol.Event {
 	m.settings = *next
 	m.settings.KeySet = false
 	m.mu.Unlock()
+	// A chat model on the other engine may change whether Agentman can run.
+	m.refreshKeys(context.Background())
+	if m.active() {
+		m.setStatus("idle", "")
+	} else {
+		m.setStatus("needs_key", "")
+	}
 	event := m.settingsEvent()
 	m.emit(event)
 	return event
 }
 
-func (m *Manager) setKey(ctx context.Context, key string) protocol.Event {
+func (m *Manager) setKey(ctx context.Context, provider, key string) protocol.Event {
 	key = strings.TrimSpace(key)
+	name := keyNames[provider]
 	var err error
 	if key == "" {
-		err = m.secrets.Delete(ctx, keyName)
+		err = m.secrets.Delete(ctx, name)
 	} else if strings.ContainsAny(key, " \t") {
 		return protocol.Event{Type: protocol.EvtError, Error: "That doesn't look like an API key."}
 	} else {
-		err = m.secrets.Set(ctx, keyName, key)
+		err = m.secrets.Set(ctx, name, key)
 	}
 	if err != nil {
 		return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
 	}
 	m.mu.Lock()
-	m.client = nil
-	m.keySet = key != ""
+	delete(m.clients, provider)
 	m.mu.Unlock()
-	if key == "" {
-		m.setStatus("needs_key", "")
-	} else {
+	m.refreshKeys(ctx)
+	if m.active() {
 		m.setStatus("idle", "")
+	} else {
+		m.setStatus("needs_key", "")
 	}
 	event := m.settingsEvent()
 	m.emit(event)
 	return event
 }
 
-// apiKey is the stored key, or ANTHROPIC_API_KEY for a daemon run without one.
-func (m *Manager) apiKey(ctx context.Context) (string, error) {
-	key, err := m.secrets.Get(ctx, keyName)
+// apiKey is an engine's stored key, or its environment variable for a
+// daemon run without one.
+func (m *Manager) apiKey(ctx context.Context, provider string) (string, error) {
+	key, err := m.secrets.Get(ctx, keyNames[provider])
 	if err == nil && key != "" {
 		return key, nil
 	}
-	if env := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); env != "" {
-		return env, nil
+	for _, name := range keyEnvironment[provider] {
+		if env := strings.TrimSpace(os.Getenv(name)); env != "" {
+			return env, nil
+		}
 	}
 	if err == nil {
 		err = secrets.ErrNotFound
@@ -393,22 +411,66 @@ func (m *Manager) apiKey(ctx context.Context) (string, error) {
 	return "", err
 }
 
-// model is the model client, made from the key the first time it is needed.
-func (m *Manager) model(ctx context.Context) (Model, error) {
+// refreshKeys notes which engines have a key, and whether the chat model's
+// does.
+func (m *Manager) refreshKeys(ctx context.Context) {
+	found := map[string]bool{}
+	for _, provider := range []string{providerAnthropic, providerGemini} {
+		_, err := m.apiKey(ctx, provider)
+		found[provider] = err == nil
+	}
 	m.mu.Lock()
-	client := m.client
+	m.engineKeys = found
+	m.keySet = found[providerOf(m.settings.ChatModel)]
+	m.mu.Unlock()
+}
+
+// model is the client Agentman's requests go through: it hands each one to
+// the engine its model runs on. It fails when the chat model's engine has
+// no key, since then Agentman cannot reply at all.
+func (m *Manager) model(ctx context.Context) (Model, error) {
+	if _, err := m.apiKey(ctx, providerOf(m.currentSettings().ChatModel)); err != nil {
+		return nil, err
+	}
+	return engineRouter{m}, nil
+}
+
+// engineRouter sends a request to the engine its model runs on.
+type engineRouter struct{ m *Manager }
+
+func (r engineRouter) Stream(ctx context.Context, params anthropic.BetaMessageNewParams, onText func(string)) (*anthropic.BetaMessage, error) {
+	client, err := r.m.client(ctx, providerOf(string(params.Model)))
+	if err != nil {
+		return nil, err
+	}
+	return client.Stream(ctx, params, onText)
+}
+
+// client is one engine's client, made from its key the first time.
+func (m *Manager) client(ctx context.Context, provider string) (Model, error) {
+	m.mu.Lock()
+	client := m.clients[provider]
 	m.mu.Unlock()
 	if client != nil {
 		return client, nil
 	}
-	key, err := m.apiKey(ctx)
+	key, err := m.apiKey(ctx, provider)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("add your %s API key in Settings", providerName(provider))
 	}
-	client = m.newModel(key)
+	switch {
+	case m.newModel != nil:
+		client = m.newModel(key)
+	case provider == providerGemini:
+		client = newGeminiModel(key)
+	default:
+		client = newClaudeModel(key)
+	}
 	m.mu.Lock()
-	m.client = client
-	m.keySet = true
+	if m.clients == nil {
+		m.clients = map[string]Model{}
+	}
+	m.clients[provider] = client
 	m.mu.Unlock()
 	return client, nil
 }

@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -54,6 +55,10 @@ func (m *claudeModel) Stream(
 
 // describeAPIError turns an API failure into a line the user can act on.
 func describeAPIError(err error) string {
+	var gemini *geminiError
+	if errors.As(err, &gemini) {
+		return describeGeminiError(gemini)
+	}
 	var apiErr *anthropic.Error
 	if errors.As(err, &apiErr) {
 		switch apiErr.StatusCode {
@@ -76,5 +81,26 @@ func describeAPIError(err error) string {
 	if errors.Is(err, context.Canceled) {
 		return "Stopped."
 	}
-	return "Couldn't reach the Claude API: " + err.Error()
+	return "Couldn't reach the API: " + err.Error()
+}
+
+// describeGeminiError is describeAPIError for the Gemini API.
+func describeGeminiError(err *geminiError) string {
+	switch err.Status {
+	case 400:
+		if strings.Contains(err.Message, "API key") {
+			return "The Gemini API key was rejected. Check it in Settings."
+		}
+		return "The Gemini API refused the request (" + err.Message + ")."
+	case 401, 403:
+		return "The Gemini API key was rejected, or isn't allowed this model. Check it in Settings."
+	case 404:
+		return "That Gemini model isn't available to this API key."
+	case 429:
+		return "The Gemini API is rate limiting this key, or its quota is used up. Try again in a moment."
+	}
+	if err.Status >= 500 {
+		return "The Gemini API had a problem. Try again."
+	}
+	return "The Gemini API refused the request (" + err.Message + ")."
 }

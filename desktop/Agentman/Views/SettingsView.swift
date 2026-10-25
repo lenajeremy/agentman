@@ -40,7 +40,7 @@ struct SettingsView: View {
                 case .keys:
                     KeysSettings()
                 }
-                if let draft, draft != store.manager.settings,
+                if let draft, draft.editable != store.manager.settings?.editable,
                    [SettingsPage.general, .permissions, .personality].contains(SettingsPage(rawValue: page) ?? .general) {
                     SaveBar(draft: $draft)
                 }
@@ -212,6 +212,10 @@ private enum Choices {
         ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
         ("claude-haiku-5-5", "Claude Haiku 5.5"),
         ("claude-fable-5-1", "Claude Fable 5.1"),
+        ("gemini-4-argon", "Gemini 4 Argon"),
+        ("gemini-3.8-flash", "Gemini 3.8 Flash"),
+        ("gemini-3.1-pro-preview", "Gemini 3.1 Pro (preview)"),
+        ("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite"),
     ]
     static let efforts = ["low", "medium", "high", "xhigh", "max"]
     static let defaultStyle = "Calm and concise. Lead with what matters, in as few words as it takes. " +
@@ -219,39 +223,20 @@ private enum Choices {
         "When nothing needs the user, say so in one line."
 }
 
-/// The key Agentman runs on, and the models it uses.
+/// The keys Agentman runs on, and the models it uses.
 private struct GeneralPage: View {
     @Environment(AgentsStore.self) private var store
     @Binding var draft: ManagerSettings?
-    @State private var key = ""
-    @State private var message: String?
 
     var body: some View {
-        let keySet = store.manager.settings?.keySet == true
-        SettingsSection(title: "Anthropic API key", footer: message ?? "Kept in your Mac's Keychain and only ever sent to Anthropic.") {
-            SettingsRow(title: keySet ? "Saved in your Keychain" : "Not set yet",
-                        detail: keySet ? "Paste a new key below to replace it." : "Agentman needs one to read your agents.") {
-                if keySet {
-                    Button("Remove", role: .destructive) { saveKey("") }
-                }
-            }
-            SettingsRow(title: "Key", divider: false) {
-                HStack(spacing: 8) {
-                    SecureField("", text: $key, prompt: Text("sk-ant-…"))
-                        .textFieldStyle(.roundedBorder)
-                        .font(TextStyle.code)
-                        .frame(width: 240)
-                        .onSubmit { saveKey(key) }
-                    Button("Save") { saveKey(key) }
-                        .disabled(key.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
-        }
+        let settings = store.manager.settings
+        KeySection(provider: "anthropic", saved: settings?.anthropicKeySet ?? settings?.keySet == true)
+        KeySection(provider: "gemini", saved: settings?.geminiKeySet == true)
 
         AppearanceSection()
 
         if let binding = Binding($draft) {
-            SettingsSection(title: "Models") {
+            SettingsSection(title: "Models", footer: missingKeyNote(binding.wrappedValue)) {
                 SettingsRow(title: "Conversation", detail: "Answers you and acts on your agents.") {
                     modelPicker(binding.chatModel)
                 }
@@ -282,17 +267,68 @@ private struct GeneralPage: View {
         AboutSection()
     }
 
+    /// A model on an engine without its key cannot run; say so under the
+    /// pickers rather than when the first reply fails.
+    private func missingKeyNote(_ draft: ManagerSettings) -> String? {
+        let settings = store.manager.settings
+        let keys = ["anthropic": settings?.anthropicKeySet ?? settings?.keySet == true,
+                    "gemini": settings?.geminiKeySet == true]
+        let missing = Set([draft.chatModel, draft.briefModel].map(ManagerSettings.provider(of:))).filter { keys[$0] != true }
+        guard let engine = missing.sorted().first else { return nil }
+        return "Add your \(engine == "gemini" ? "Gemini" : "Anthropic") API key above to use these models."
+    }
+
     private func modelPicker(_ selection: Binding<String>) -> some View {
         Picker("", selection: selection) {
-            ForEach(Choices.models, id: \.id) { Text($0.name).tag($0.id) }
+            Section("Claude") {
+                ForEach(Choices.models.filter { !$0.id.hasPrefix("gemini-") }, id: \.id) { Text($0.name).tag($0.id) }
+            }
+            Section("Gemini") {
+                ForEach(Choices.models.filter { $0.id.hasPrefix("gemini-") }, id: \.id) { Text($0.name).tag($0.id) }
+            }
         }
         .labelsHidden()
         .fixedSize()
     }
+}
 
-    private func saveKey(_ value: String) {
+/// One engine's API key: whether it is saved, and a field to save one.
+private struct KeySection: View {
+    @Environment(AgentsStore.self) private var store
+    let provider: String
+    let saved: Bool
+    @State private var key = ""
+    @State private var message: String?
+
+    private var gemini: Bool { provider == "gemini" }
+
+    var body: some View {
+        SettingsSection(title: gemini ? "Gemini API key" : "Anthropic API key",
+                        footer: message ?? "Kept in your Mac's Keychain and only ever sent to \(gemini ? "Google" : "Anthropic").") {
+            SettingsRow(title: saved ? "Saved in your Keychain" : "Not set yet",
+                        detail: saved ? "Paste a new key below to replace it."
+                            : gemini ? "For running Agentman on Gemini models." : "For running Agentman on Claude models.") {
+                if saved {
+                    Button("Remove", role: .destructive) { save("") }
+                }
+            }
+            SettingsRow(title: "Key", divider: false) {
+                HStack(spacing: 8) {
+                    SecureField("", text: $key, prompt: Text(gemini ? "Gemini API key" : "sk-ant-…"))
+                        .textFieldStyle(.roundedBorder)
+                        .font(TextStyle.code)
+                        .frame(width: 240)
+                        .onSubmit { save(key) }
+                    Button("Save") { save(key) }
+                        .disabled(key.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+    }
+
+    private func save(_ value: String) {
         Task {
-            if let problem = await store.manager.setKey(value.trimmingCharacters(in: .whitespaces)) {
+            if let problem = await store.manager.setKey(value.trimmingCharacters(in: .whitespaces), provider: provider) {
                 message = problem
             } else {
                 key = ""

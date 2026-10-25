@@ -21,10 +21,13 @@ import (
 // A small, fast model writes them; each is asked for once and kept.
 
 const (
-	titleModel    = "claude-haiku-5-5"
-	maxTitles     = 2000
-	maxTitleSteps = 40
-	titleParallel = 2
+	// titleModel writes them on Claude; geminiTitleModel when Agentman runs
+	// on Gemini.
+	titleModel       = "claude-haiku-5-5"
+	geminiTitleModel = "gemini-3.5-flash-lite"
+	maxTitles        = 2000
+	maxTitleSteps    = 40
+	titleParallel    = 2
 )
 
 const titlePrompt = `You title a run of steps an AI coding agent just took, for the person ` +
@@ -146,7 +149,7 @@ func (m *Manager) toolsTitle(ctx context.Context, req protocol.Request) protocol
 		return protocol.Event{Type: protocol.EvtError, Error: "cancelled"}
 	}
 	params := anthropic.BetaMessageNewParams{
-		Model:     anthropic.Model(titleModel),
+		Model:     anthropic.Model(titleModelFor(m.currentSettings().ChatModel)),
 		MaxTokens: 100,
 		System:    []anthropic.BetaTextBlockParam{{Text: titlePrompt}},
 		Messages:  []anthropic.BetaMessageParam{anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(titleInput(req.Text, steps)))},
@@ -205,3 +208,12 @@ func cleanTitle(text string) string {
 }
 
 func titlesPath(dir string) string { return filepath.Join(dir, "titles.json") }
+
+// titleModelFor is the small model on the engine the chat runs on, so titles
+// need no second key.
+func titleModelFor(chatModel string) string {
+	if providerOf(chatModel) == providerGemini {
+		return geminiTitleModel
+	}
+	return titleModel
+}

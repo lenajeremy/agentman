@@ -26,8 +26,9 @@ const (
 	// them with Request.Manager.
 	ReqManagerSettings    RequestType = "manager_settings"
 	ReqManagerSetSettings RequestType = "manager_set_settings"
-	// ReqManagerSetKey stores the Anthropic API key in Text, in the Keychain.
-	// Empty Text removes it. The key is never sent back to any app.
+	// ReqManagerSetKey stores an API key in Text, in the Keychain: the
+	// Anthropic key, or the Gemini key when Kind is "gemini". Empty Text
+	// removes it. A key is never sent back to any app.
 	ReqManagerSetKey RequestType = "manager_set_key"
 	// ReqManagerBriefs lists the latest brief for every agent.
 	ReqManagerBriefs RequestType = "manager_briefs"
@@ -240,8 +241,14 @@ type ManagerSettings struct {
 	// know or do. Both go into its prompt.
 	Style        string `json:"style"`
 	Instructions string `json:"instructions"`
-	// KeySet reports whether an API key is stored. Read only.
+	// KeySet reports whether the chat model's engine has its API key, so
+	// Agentman can run. Read only.
 	KeySet bool `json:"keySet"`
+	// Provider is the chat model's engine, "anthropic" or "gemini"; the two
+	// below report each engine's key. Read only.
+	Provider        string `json:"provider,omitempty"`
+	AnthropicKeySet bool   `json:"anthropicKeySet"`
+	GeminiKeySet    bool   `json:"geminiKeySet"`
 }
 
 // ManagerStatus is what Agentman is doing.
