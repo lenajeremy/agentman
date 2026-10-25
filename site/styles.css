@@ -236,6 +236,8 @@ section { scroll-margin-top: 24px; }
 .st.work { background: var(--cobalt-50); color: var(--cobalt-700); }
 .st.needs { background: var(--tang-50); color: var(--tang-700); }
 .srow.ask .st.needs { background: #fff; }
+/* .ask is also the phone scene's question card; a session row keeps its own shape. */
+.window .srow.ask { display: flex; gap: 10px; padding: 9px 10px; border-radius: 12px; box-shadow: none; }
 
 /* Step 2: the relay. */
 .scene-relay { flex-direction: column; gap: 30px; }
@@ -308,6 +310,8 @@ section { scroll-margin-top: 24px; }
 
 /* Get started */
 .start { margin-top: 130px; background: var(--cobalt-900); color: #fff; padding: 96px 0 100px; text-align: center; }
+/* Two full-bleed bands meet; paper between them reads as a gap. */
+.band + .start { margin-top: 0; }
 .start .h2 { font-size: 56px; }
 .start .sub { margin-top: 12px; font-size: 18px; color: #B9C1F2; }
 .platforms { margin: 44px auto 0; display: grid; grid-template-columns: repeat(4, 150px); gap: 14px; justify-content: center; }
@@ -796,4 +800,144 @@ section { scroll-margin-top: 24px; }
 @media (prefers-reduced-motion: no-preference) {
   .then-steps li { transition: background .2s ease, transform .4s var(--spring); }
   .then-steps li:hover { background: rgba(255,255,255,.13); transform: translateY(-3px); }
+}
+
+/* ---------- Product menu, the overview, and the Mac and iPhone pages ---------- */
+.menu { position: relative; }
+.menu-button { display: inline-flex; align-items: center; gap: 4px; font-size: 14.5px; color: inherit; }
+.menu-button .icon { width: 14px; height: 14px; transition: transform .2s ease; }
+.menu-panel { position: absolute; top: calc(100% + 10px); left: -14px; z-index: 30; display: none; width: 280px; padding: 6px; border-radius: 16px; background: var(--white); border: 1px solid var(--line); box-shadow: 0 24px 48px -20px rgba(15,16,18,.25); }
+.menu-panel::before { content: ""; position: absolute; inset: -12px 0 auto; height: 12px; }
+.menu.open .menu-panel { display: grid; }
+.menu.open .menu-button .icon { transform: rotate(180deg); }
+@media (hover: hover) { .menu:hover .menu-panel { display: grid; } }
+.menu-panel a { display: grid; gap: 2px; padding: 10px 12px; border-radius: 10px; background: none; }
+.menu-panel a:hover, .menu-panel a[aria-current="page"] { background: var(--fill); }
+.menu-panel b { font-weight: 600; font-size: 14.5px; }
+.menu-panel span { color: var(--muted); font-size: 13px; }
+
+.caps .beta, .workspace-kicker .beta { margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--tang-50); color: var(--tang-700); letter-spacing: .6px; font: 500 11px var(--mono); vertical-align: 1px; }
+.mini-panel .logo-claude, .m-card .logo-claude { color: #D97757; }
+
+/* Real captures of the Mac app keep their own rounded corners; a shadow
+   sets them on the page. */
+.mac-shot { width: 100%; height: auto; filter: drop-shadow(0 40px 60px rgba(17,26,85,.22)) drop-shadow(0 8px 18px rgba(15,16,18,.12)); }
+.hero-shot { position: relative; margin: 8px auto 64px; padding: 0 72px 0 0; max-width: 1080px; }
+.hero-shot .iphone-x { position: absolute; right: 0; bottom: -56px; width: 236px; }
+
+.meet { padding-top: 120px; }
+.brief-art { background: #E7EBFF; }
+.watch-art { background: #FFF0E8; }
+.reach-art { background: #E9F0E8; }
+.mini-phone { position: absolute; left: 50%; top: 22px; width: 190px; translate: -50% 0; }
+.brief-art .arow:first-child { border-top: 0; }
+.m-act { display: flex; align-items: center; gap: 8px; padding: 7px 10px; margin-bottom: 8px; border-radius: 9px; background: #EEEDE9; border: 1px solid var(--line); color: var(--ink-2); font-size: 12px; }
+.m-act .icon { width: 13px; height: 13px; color: var(--muted); }
+.m-card { display: grid; gap: 9px; padding: 12px 14px; border-radius: 12px; background: var(--white); border: 1px solid var(--tang-100); }
+.m-card .who { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.m-card .who > svg { width: 15px; height: 15px; }
+.m-card .needs { display: flex; align-items: center; gap: 6px; color: var(--tang-700); font-weight: 500; font-size: 12px; }
+.m-card .needs::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--tang); }
+.m-card code { display: block; padding: 7px 10px; border-radius: 8px; background: var(--fill); font: 12px var(--mono); }
+.m-card .opts { display: flex; gap: 7px; }
+.m-card .opts span { padding: 5px 13px; border-radius: 999px; border: 1px solid var(--line); font-weight: 500; font-size: 12px; }
+.m-card .opts .yes { background: var(--ink); border-color: var(--ink); color: #fff; }
+
+.products-section { padding: 120px 0 0; }
+/* The two cards share their rows, so headings, buttons and previews line
+   up across them whatever each card's copy runs to. */
+.products { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto 1fr; column-gap: 20px; margin-top: 44px; }
+.product { display: grid; grid-row: span 2; grid-template-rows: subgrid; row-gap: 0; overflow: hidden; border-radius: 24px; background: var(--white); border: 1px solid var(--line); }
+.product-copy { display: flex; flex-direction: column; padding: 36px 36px 28px; }
+.product-copy .workspace-kicker { display: flex; align-items: center; height: 20px; }
+.product-copy h3 { margin: 14px 0 0; font-size: 30px; font-weight: 500; line-height: 1.15; letter-spacing: -.9px; text-wrap: balance; }
+.product-copy p { max-width: 440px; margin: 12px 0 0; color: var(--muted); font-size: 16px; line-height: 1.55; }
+.product-copy .cta { margin-top: auto; padding-top: 24px; }
+.product-art { position: relative; min-height: 320px; overflow: hidden; }
+.product-art.mac-art { background: #E8E8E4; padding: 34px 0 0 34px; }
+.product-art.mac-art img { width: 125%; max-width: none; height: auto; border-radius: 12px 0 0 0; box-shadow: 0 24px 48px -24px rgba(15,16,18,.35); }
+.product-art.ios-art { background: var(--cobalt-50); }
+.product-art.ios-art .iphone-x { position: absolute; left: 50%; top: 34px; width: 250px; translate: -50% 0; }
+
+.product-hero { max-width: 860px; margin: 0 auto; padding: 84px 0 48px; text-align: center; }
+.product-hero h1 { margin: 16px 0 0; font-size: 64px; line-height: 1.04; letter-spacing: -2.6px; font-weight: 500; text-wrap: balance; }
+.product-hero p { max-width: 640px; margin: 22px auto 0; color: var(--muted); font-size: 19px; line-height: 1.55; text-wrap: pretty; }
+.product-hero .cta { justify-content: center; margin-top: 30px; }
+.shot-stage { max-width: 1100px; margin: 0 auto; padding: 0 0 20px; }
+.mac-section { padding-top: 90px; }
+.shot-art { min-height: 0; padding: 34px; }
+.shot-art img { width: 100%; height: auto; border-radius: 12px; box-shadow: 0 26px 50px -26px rgba(15,16,18,.4); }
+.editor-art { background: #E8E8E4; }
+.palette-art { background: linear-gradient(160deg, #DADFFB, #EEF1FF 60%); }
+
+/* The three small Mac panels in the cards, drawn from the app's own words. */
+.mini-panel { position: absolute; inset: 22px 20px auto; display: grid; gap: 4px; padding: 10px 14px; border-radius: 12px; background: var(--white); border: 1px solid var(--line); box-shadow: 0 18px 30px -22px rgba(15,16,18,.35); font-size: 12.5px; text-align: left; }
+.watch-art .mini-panel { padding: 12px; background: none; border: 0; box-shadow: none; }
+.rules-art { background: #E9F0E8; }
+.quiet-art { background: #EFEDF8; }
+.away-art { background: #FFF0E8; }
+.rule { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.rule code { display: block; font: 12px var(--mono); }
+.rule small { display: block; color: var(--muted); font-size: 11px; }
+.badge { flex: none; width: 74px; padding: 3px 0; border-radius: 999px; text-align: center; font-size: 11px; font-weight: 600; }
+.badge.allow { background: #E5F5EE; color: #0B7A4C; }
+.badge.ask { background: var(--tang-50); color: var(--tang-700); }
+.qrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.qrow:last-child, .rule:last-child { border-bottom: 0; }
+.qrow .times b { font-weight: 500; padding: 2px 7px; border-radius: 6px; background: var(--fill); }
+.sw { flex: none; position: relative; width: 32px; height: 19px; border-radius: 999px; background: var(--fill-2); }
+.sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(15,16,18,.25); }
+.sw.on { background: var(--cobalt); }
+.sw.on::after { left: 15px; }
+.away-title { font-size: 15px; font-weight: 600; letter-spacing: -.2px; }
+.away-sub { color: var(--muted); font-size: 11px; line-height: 1.45; margin-bottom: 4px; }
+.arow { display: flex; gap: 9px; padding: 6px 0; border-top: 1px solid var(--line); }
+.away-art .mini-panel { inset: 14px 16px auto; gap: 2px; }
+.arow > svg { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+.arow span { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+.arow b { display: block; color: var(--ink); font-size: 12px; font-weight: 600; }
+.arow em { margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: var(--tang-50); color: var(--tang-700); font-style: normal; font-size: 10px; }
+
+/* Agentman on the iPhone: two phones, one over the other. */
+.duo-art { margin-top: 48px; background: var(--cobalt-50); min-height: 600px; padding: 0; }
+.duo { position: relative; width: 100%; max-width: 640px; height: 600px; margin: 0 auto; }
+.duo .iphone-x { position: absolute; width: 284px; }
+.duo .back { left: 6%; top: 52px; transform: rotate(-4deg); }
+.duo .front { right: 6%; top: 18px; transform: rotate(3deg); }
+
+/* The download bands at the foot of the product pages. */
+.download-cta { margin-top: 30px; display: flex; justify-content: center; }
+.then-note { max-width: 640px; margin: 18px auto 0; color: #B9C1F2; font-size: 14px; line-height: 1.6; }
+.then-note code { font: 500 13px var(--mono); color: #fff; }
+.then-note a { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
+.then .command { margin-top: 16px; }
+
+@media (max-width: 900px) {
+  .hero-shot { padding-right: 40px; }
+  .hero-shot .iphone-x { width: 160px; bottom: -36px; }
+  .products { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; row-gap: 20px; }
+  .product { grid-row: auto; grid-template-rows: auto 1fr; }
+  .product-hero h1 { font-size: 52px; letter-spacing: -2px; }
+  .duo { height: 500px; }
+}
+@media (max-width: 640px) {
+  .hero-shot { padding-right: 24px; }
+  .hero-shot .iphone-x { width: 112px; bottom: -24px; }
+  .meet, .products-section { padding-top: 80px; }
+  .product-copy { padding: 26px 22px 22px; }
+  .product-copy h3 { font-size: 26px; }
+  .product-art { min-height: 280px; }
+  .product-hero { padding: 48px 0 32px; }
+  .product-hero h1 { font-size: 40px; letter-spacing: -1.4px; }
+  .product-hero p { font-size: 17px; }
+  .shot-art { padding: 14px; }
+  .duo { height: 430px; }
+  .duo .iphone-x { width: 190px; }
+  .duo .back { left: 2%; }
+  .duo .front { right: 2%; }
+  .duo-art { min-height: 450px; }
+  .mini-panel { inset: 16px 12px auto; }
+  .menu-panel { left: -60px; width: 260px; }
+  /* The hero holds the same button, right below. */
+  .nav-cta { display: none; }
 }

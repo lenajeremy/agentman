@@ -156,6 +156,7 @@
       ".workspace-copy", ".workspace-art", ".workspace-card", ".how .caps", ".how .h2",
       ".steps .step", ".moment li", ".moment .h2", ".start .h2", ".platform", ".setup-step",
       ".names > span", ".moment .phones .iphone-x", ".workspace-art .iphone-x", ".grid .tile", ".band .h2", ".band p", ".band-art",
+      ".hero-shot", ".shot-stage", ".product", ".product-hero h1", ".product-hero p",
     ];
     const reveal = new IntersectionObserver((entries) => {
       for (const entry of entries) {
@@ -180,6 +181,21 @@
       });
     }
   }
+
+  // The Product menu opens on a click or a tap as well as on hover, and
+  // closes on Escape or a click anywhere else.
+  document.querySelectorAll("[data-menu]").forEach((menu) => {
+    const button = menu.querySelector(".menu-button");
+    const set = (open) => {
+      menu.classList.toggle("open", open);
+      button.setAttribute("aria-expanded", String(open));
+    };
+    button.addEventListener("click", () => set(!menu.classList.contains("open")));
+    document.addEventListener("click", (event) => { if (!menu.contains(event.target)) set(false); });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && menu.classList.contains("open")) { set(false); button.focus(); }
+    });
+  });
 
   // The stats count up the first time they are seen.
   const counters = document.querySelectorAll("[data-count]");

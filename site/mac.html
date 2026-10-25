@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agentman for Mac — every agent, one window</title>
+  <meta name="description" content="Every coding agent on your Mac in one window, with Agentman watching them, an editor and terminal beside every thread, and ⌘K for everything.">
+  <meta name="theme-color" content="#F5F5F2">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Agentman for Mac — every agent, one window">
+  <meta property="og:description" content="Every coding agent on your Mac in one window, with Agentman watching them, an editor and terminal beside every thread, and ⌘K for everything.">
+  <meta property="og:image" content="/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon.png" sizes="48x48" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="preload" href="/fonts/geist-sans-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/geist-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <!-- The mark: a ">" prompt with a notification waiting on it. -->
+    <symbol id="mark" viewBox="0 -6 122 122">
+      <rect x="0" y="16" width="100" height="100" rx="30" fill="#0F1012"/>
+      <path d="M38 47.25 L62 66 L38 84.75" fill="none" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="100" cy="16" r="17" fill="#FF6A2B" stroke="#F5F5F2" stroke-width="8"/>
+    </symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.2-3.1-.1-.4-.5-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.6.2 2.8.1 3.2.8.8 1.2 1.9 1.2 3.1 0 4.7-2.8 5.7-5.5 6 .4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5z"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="3"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+    <!-- Agent and tool logos: Claude, OpenAI, OpenCode, Kiro and Antigravity from LobeHub Icons (MIT),
+         Cursor from Simple Icons (CC0);
+         the rest from Simple Icons (CC0). Marks belong to their owners and are
+         used only to name the tools Agentman works with. -->
+    <symbol id="l-claude" viewBox="0 0 24 24"><title>Claude</title><path fill="currentColor" d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z"/></symbol>
+    <symbol id="l-openai" viewBox="0 0 24 24"><title>OpenAI</title><path fill="currentColor" fill-rule="evenodd" d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z"/></symbol>
+  </svg>
+
+  <div class="announce">Agentman is open source under the MIT license. <a href="https://github.com/lenajeremy/agentman">Star it on GitHub</a></div>
+
+  <div class="wrap">
+    <nav class="nav" aria-label="Main">
+      <div class="nav-group">
+        <a class="logo" href="/" aria-label="Agentman home"><svg aria-hidden="true"><use href="#mark"/></svg>agentman</a>
+        <div class="menu" data-menu>
+          <button class="menu-button" type="button" aria-expanded="false" aria-controls="product-menu">Product<svg class="icon" aria-hidden="true"><use href="#i-down"/></svg></button>
+          <div class="menu-panel" id="product-menu">
+            <a href="/"><b>Overview</b><span>Every agent in one calm place</span></a>
+            <a href="/mac" aria-current="page"><b>Mac</b><span>Every agent, one window</span></a>
+            <a href="/ios"><b>iPhone</b><span>Your agents, in your pocket</span></a>
+          </div>
+        </div>
+        <a class="hide-md" href="/#how">How it works</a>
+        <a class="hide-md" href="https://github.com/lenajeremy/agentman#readme">Docs</a>
+      </div>
+      <div class="nav-group">
+        <a class="stars hide-sm" href="https://github.com/lenajeremy/agentman"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub<span class="count" data-stars></span></a>
+        <a class="btn small nav-cta" href="https://github.com/lenajeremy/agentman/releases/download/v0.18.0/Agentman.dmg" data-mac-download>Download for Mac</a>
+      </div>
+    </nav>
+
+    <header class="product-hero">
+      <div class="caps">Agentman for Mac <span class="beta">Beta</span></div>
+      <h1>Every agent, one window.</h1>
+      <p>All your coding agents across every folder, with Agentman watching them for you.</p>
+      <div class="cta"><a class="btn" href="https://github.com/lenajeremy/agentman/releases/download/v0.18.0/Agentman.dmg" data-mac-download>Download for Mac <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a><a class="text-link" href="#download">Install the CLI</a></div>
+    </header>
+
+    <div class="shot-stage">
+      <img class="mac-shot" src="/media/mac-agentman.webp" alt="Agentman for Mac: five agents grouped by folder in the sidebar, and Agentman's conversation, where it has summed up what they did, approved a test run and holds a git push for the user to decide" width="2000" height="1281" decoding="async">
+    </div>
+
+    <section class="workspace mac-section" aria-label="What the Mac app does">
+      <div class="workspace-feature">
+        <div class="workspace-copy"><span class="workspace-kicker">Editor and terminal</span><h3>Step in without switching apps.</h3><p>Fix a line or run the tests right beside the agent's thread.</p></div>
+        <div class="workspace-art shot-art editor-art"><img src="/media/mac-editor.webp" alt="The built-in editor on a project: the file tree marks two changed files, one is open, and the tests pass in the terminal underneath" width="1800" height="1159" loading="lazy" decoding="async"></div>
+      </div>
+
+      <div class="workspace-feature reverse">
+        <div class="workspace-copy"><span class="workspace-kicker">⌘K</span><h3>Anything, from the keyboard.</h3><p>Jump to whatever needs you, or start something new.</p></div>
+        <div class="workspace-art shot-art palette-art"><img src="/media/mac-palette.webp" alt="The command palette over an agent's thread, offering to open the agent, rename it, open a terminal or its folder in the editor, or ask Agentman" width="1240" height="640" loading="lazy" decoding="async"></div>
+      </div>
+
+      <div class="workspace-more">
+        <article class="workspace-card">
+          <div class="mini-art rules-art" role="img" aria-label="Three rules: npm run commands are always fine, a git push always waits, and anything touching .env always waits"><div class="mini-panel" aria-hidden="true">
+            <div class="rule"><span class="badge allow">Allow</span><span><code>npm run *</code><small>Commands · everywhere</small></span></div>
+            <div class="rule"><span class="badge ask">Always ask</span><span><code>git push *</code><small>Commands · everywhere</small></span></div>
+            <div class="rule"><span class="badge ask">Always ask</span><span><code>*.env</code><small>Anything · everywhere</small></span></div>
+          </div></div>
+          <h3>Decide once</h3><p>Say what's always fine and what always waits for you.</p>
+        </article>
+        <article class="workspace-card">
+          <div class="mini-art quiet-art" role="img" aria-label="Quiet hours from 22:00 to 08:00, still letting through an agent that needs the user"><div class="mini-panel" aria-hidden="true">
+            <div class="qrow"><span>Use quiet hours</span><i class="sw on"></i></div>
+            <div class="qrow"><span>From</span><span class="times"><b>22:00</b> to <b>08:00</b></span></div>
+            <div class="qrow"><span>Still tell me when an agent needs me</span><i class="sw on"></i></div>
+          </div></div>
+          <h3>Quiet when you are</h3><p>At night, only what truly needs you gets through.</p>
+        </article>
+        <article class="workspace-card">
+          <div class="mini-art away-art" role="img" aria-label="While you were away: three agents worked and one needs the user"><div class="mini-panel" aria-hidden="true">
+            <b class="away-title">While you were away</b>
+            <small class="away-sub">2 h 10 min away · 3 agents worked · 1 needs you</small>
+            <div class="arow"><svg class="logo-claude"><use href="#l-claude"/></svg><span><b>checkout-flow</b>Finished the Apple Pay sheet.</span></div>
+            <div class="arow"><svg><use href="#l-openai"/></svg><span><b>docs-refresh</b>Published 14 endpoint pages.</span></div>
+            <div class="arow"><svg class="logo-claude"><use href="#l-claude"/></svg><span><b>api-migrations <em>Needs you</em></b>Wants to push to main.</span></div>
+          </div></div>
+          <h3>Catch up in seconds</h3><p>Who worked, what got done, and what's waiting.</p>
+        </article>
+      </div>
+    </section>
+  </div>
+
+  <section class="start" id="download" aria-labelledby="download-title">
+    <div class="wrap">
+      <h2 class="h2" id="download-title">Get Agentman for Mac</h2>
+      <div class="sub">Beta · macOS 15 or later</div>
+      <div class="download-cta"><a class="btn light" href="https://github.com/lenajeremy/agentman/releases/download/v0.18.0/Agentman.dmg" data-mac-download>Download for Mac <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a></div>
+      <div class="then">
+        <div class="then-title">The app works with the Agentman CLI</div>
+        <div class="command"><code><span class="pr">$</span>brew install lenajeremy/agentman/agentman</code><button class="copy" data-copy="brew install lenajeremy/agentman/agentman"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+        <p class="then-note">Then run <code>am install-hooks</code> once and <code>am serve</code>, and the app finds every agent. <a href="/start">Full setup guide</a></p>
+      </div>
+    </div>
+  </section>
+
+  <div class="wrap">
+    <footer class="footer">
+      <div class="fcols">
+        <div class="about"><a class="logo" href="/"><svg aria-hidden="true"><use href="#mark"/></svg>agentman</a><p>All your coding agents in one calm place, on your Mac and your phone.</p></div>
+        <div><h4>Product</h4><a href="/">Overview</a><a href="/mac">Mac app</a><a href="/ios">iPhone app</a><a href="/#how">How it works</a><a href="/#get-started">Get started</a></div>
+        <div><h4>Developers</h4><a href="https://github.com/lenajeremy/agentman#readme">Docs</a><a href="https://github.com/lenajeremy/agentman#cli-reference">CLI reference</a><a href="https://github.com/lenajeremy/agentman#self-hosting-the-relay">Self-hosting</a><a href="https://github.com/lenajeremy/agentman#security-model">Security model</a></div>
+        <div><h4>Project</h4><a href="https://github.com/lenajeremy/agentman">GitHub</a><a href="https://github.com/lenajeremy/agentman/issues">Issues</a><a href="https://github.com/lenajeremy/agentman/releases">Releases</a><a href="/privacy">Privacy policy</a><a href="https://github.com/lenajeremy/agentman/blob/main/LICENSE">MIT license</a></div>
+      </div>
+      <div class="fbottom">
+        <span class="relay-status" data-relay><i></i><span>Public relay</span></span>
+        <span class="chips"><span>macOS</span><span>Linux</span><span>iOS</span><span>Android</span></span>
+        <span>© 2026 Agentman</span>
+      </div>
+    </footer>
+  </div>
+
+  <script src="/main.js" defer></script>
+</body>
+</html>

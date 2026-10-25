@@ -4,6 +4,13 @@
   "outputDirectory": "site",
   "cleanUrls": true,
   "ignoreCommand": "git diff --quiet HEAD^ HEAD -- site vercel.json",
+  "redirects": [
+    {
+      "source": "/iphone",
+      "destination": "/ios",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     {
       "source": "/install",
