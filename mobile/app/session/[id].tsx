@@ -30,7 +30,7 @@ import { ContentColumn } from "../../components/ContentColumn";
 import { Markdown } from "../../components/Markdown";
 import { SentImages } from "../../components/SentImages";
 import { ToolGroup } from "../../components/ToolGroup";
-import { ScrollToLatest, SCROLL_AWAY } from "../../components/ScrollToLatest";
+import { KEEP_READING, ScrollToLatest, SCROLL_AWAY } from "../../components/ScrollToLatest";
 import { groupTools } from "../../lib/toolgroups";
 import { readImage } from "../../lib/imagepath";
 import { splitSentMessage } from "../../lib/sentimages";
@@ -387,8 +387,8 @@ export default function SessionScreen() {
 
     setSubmittedClientId(store.sendMessage(sessionId, text, uploadIds));
     images.clear();
-    // No scroll call needed: an inverted list is already anchored to the
-    // newest row, so the sent message appears in place.
+    // Sending always comes back to the latest, wherever the reader was.
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
   }, [draft, canSend, awaitingSend, sessionId, store, images, sendingImages]);
 
   const requestInterrupt = useCallback(() => {
@@ -892,15 +892,16 @@ export default function SessionScreen() {
           there as more arrive. Opening a long session at its beginning means
           scrolling through hours of history to find out what just happened,
           which is the opposite of what someone checking their phone wants.
-          Inverting also makes "load older" the natural end-of-list action,
-          and it leaves the scroll position alone when the user has
-          deliberately scrolled up to read. */}
+          Inverting also makes "load older" the natural end-of-list action.
+          KEEP_READING leaves the reader where they are when they have
+          scrolled up, as messages arrive below them. */}
         <View style={styles.feed}>
         <FlatList
           style={styles.feed}
           ref={listRef}
           data={rows}
           inverted
+          maintainVisibleContentPosition={KEEP_READING}
           // Inverted, so how far up the reader is counts from the latest.
           onScroll={(event) => {
             const away = event.nativeEvent.contentOffset.y > SCROLL_AWAY;

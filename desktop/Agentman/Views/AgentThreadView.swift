@@ -9,6 +9,11 @@ struct AgentThreadView: View {
     @State private var attachments: [Attachment] = []
     @State private var dropping = false
     @State private var sending = false
+    /// Whether the thread is scrolled to its end, so new messages follow
+    /// on; scrolled up, nothing moves what the user is reading.
+    @State private var atEnd = true
+    /// Bumped when the user sends, which always brings them to the end.
+    @State private var followRequest = 0
     @State private var showFiles = false
     @Environment(\.openWindow) private var openWindow
     @State private var confirmEnd = false
@@ -48,7 +53,13 @@ struct AgentThreadView: View {
                     LazyVStack(alignment: .leading, spacing: 24) {
                         if store.hasMore[session.id] == true {
                             Button {
-                                Task { await store.loadOlder(session.id) }
+                                // Older messages arrive above, and what was
+                                // at the top stays in view.
+                                let first = ThreadItem.items(from: store.messages[session.id] ?? []).first?.id
+                                Task {
+                                    await store.loadOlder(session.id)
+                                    if let first { proxy.scrollTo(first, anchor: .top) }
+                                }
                             } label: {
                                 Text(store.loadingOlder.contains(session.id) ? "Loading…" : "Load earlier messages")
                                     .font(TextStyle.caption)
@@ -93,22 +104,36 @@ struct AgentThreadView: View {
                     .frame(maxWidth: 820)
                     .frame(maxWidth: .infinity)
                 }
-                .defaultScrollAnchor(.bottom)
+                .modifier(FollowsEnd(atEnd: $atEnd))
                 .modifier(TopFade())
                 .overlay {
                     if isEmpty { EmptyThread(session: session) }
                 }
+                .overlay(alignment: .bottom) {
+                    if !atEnd, !isEmpty {
+                        JumpToLatest {
+                            withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("end", anchor: .bottom) }
+                        }
+                    }
+                }
+                .animation(.easeOut(duration: 0.15), value: atEnd)
                 .overlay {
                     if dropping { DropTarget(label: "Drop images for \(session.name)") }
                 }
                 .onChange(of: store.messages[session.id]?.last?.id) { _, last in
-                    guard let last else { return }
+                    guard last != nil, atEnd else { return }
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo("end", anchor: .bottom)
                     }
                 }
                 .onChange(of: session.question?.id) { _, id in
-                    guard id != nil else { return }
+                    guard id != nil, atEnd else { return }
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo("end", anchor: .bottom)
+                    }
+                }
+                .onChange(of: followRequest) { _, _ in
+                    atEnd = true
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo("end", anchor: .bottom)
                     }
@@ -286,6 +311,7 @@ struct AgentThreadView: View {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { return }
         sending = true
+        followRequest += 1
         let images = Attachments.encoded(attachments)
         Task {
             if await store.send(text, images: images, to: session.id) {

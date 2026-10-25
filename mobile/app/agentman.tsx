@@ -22,7 +22,7 @@ import { ManagerCardView } from "../components/ManagerCards";
 import { Markdown } from "../components/Markdown";
 import { MotionPressable } from "../components/MotionPressable";
 import { Popover, type PopoverItem } from "../components/Popover";
-import { ScrollToLatest, SCROLL_AWAY } from "../components/ScrollToLatest";
+import { KEEP_READING, ScrollToLatest, SCROLL_AWAY } from "../components/ScrollToLatest";
 import { SeenImage } from "../components/SeenImage";
 import { Thinking } from "../components/Thinking";
 import { useStyles, useTheme } from "../lib/appearance";
@@ -105,6 +105,8 @@ export default function AgentmanScreen() {
   const send = async () => {
     if (!canSend) return;
     setSending(true);
+    // Sending always comes back to the latest, wherever the reader was.
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
     try {
       const uploadIds = await images.upload();
       if (await manager.send(draft.trim(), uploadIds)) {
@@ -158,6 +160,7 @@ export default function AgentmanScreen() {
         style={styles.feed}
         data={rows}
         inverted
+        maintainVisibleContentPosition={KEEP_READING}
         onScroll={(event) => {
           const away = event.nativeEvent.contentOffset.y > SCROLL_AWAY;
           if (away !== scrolledAway) setScrolledAway(away);

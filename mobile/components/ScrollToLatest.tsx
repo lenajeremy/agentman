@@ -11,6 +11,13 @@ import { MotionPressable } from "./MotionPressable";
 export const SCROLL_AWAY = 250;
 
 /**
+ * For a conversation's inverted list: what the reader is looking at stays
+ * put as messages arrive or a reply streams in, and the list only follows
+ * the latest when they are within a line or two of it already.
+ */
+export const KEEP_READING = { minIndexForVisible: 0, autoscrollToTopThreshold: 80 };
+
+/**
  * The way back to the latest message, for someone reading further up: a
  * small round button over the foot of the conversation, as chat apps have.
  */
