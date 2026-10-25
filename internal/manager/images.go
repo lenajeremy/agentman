@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
 
@@ -16,7 +17,8 @@ import (
 
 // Images the user sends Agentman: each is checked, kept beside the
 // conversation in images/, so the apps can show it again after a restart,
-// and goes to the model as an image block with the message.
+// and goes to the model as an image block with the message, named so
+// Agentman can forward it to an agent.
 
 const (
 	maxImagesPerMessage = 4
@@ -80,6 +82,33 @@ func (m *Manager) keepImages(entryID string, images []protocol.InlineImage) ([]s
 		}})
 	}
 	return names, blocks, nil
+}
+
+// forwardImages reads kept images back, by the names their message gave
+// them, for send_to_agent to pass on.
+func (m *Manager) forwardImages(names []string) ([]protocol.InlineImage, error) {
+	if len(names) > maxImagesPerMessage {
+		return nil, fmt.Errorf("send at most %d images at a time", maxImagesPerMessage)
+	}
+	images := make([]protocol.InlineImage, 0, len(names))
+	for _, name := range names {
+		if !validImageName.MatchString(name) {
+			return nil, fmt.Errorf("%q isn't one of the user's images; use a name given with their message", name)
+		}
+		data, err := os.ReadFile(filepath.Join(m.dir, "images", name))
+		if err != nil {
+			return nil, fmt.Errorf("%s is no longer kept", name)
+		}
+		images = append(images, protocol.InlineImage{MIME: http.DetectContentType(data), Data: base64.StdEncoding.EncodeToString(data)})
+	}
+	return images, nil
+}
+
+// imageLabel names a message's images for the model, which sees only their
+// pixels, so it can pass them on.
+func imageLabel(names []string) string {
+	return fmt.Sprintf("[The user's images with this message: %s. To pass them to an agent, name them in send_to_agent's images.]",
+		strings.Join(names, ", "))
 }
 
 // readImage is a kept image, for an app to show.

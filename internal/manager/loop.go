@@ -27,6 +27,8 @@ var toolsOnce = sync.OnceValue(apiTools)
 type turnInput struct {
 	text   string
 	images []anthropic.BetaContentBlockParamUnion
+	// imageNames are the kept images' names, in the order of images.
+	imageNames []string
 }
 
 func (m *Manager) runTurn(ctx context.Context, model Model, input turnInput) {
@@ -63,6 +65,9 @@ func (m *Manager) runTurn(ctx context.Context, model Model, input turnInput) {
 		blocks = append(blocks, anthropic.NewBetaTextBlock(notes))
 	}
 	blocks = append(blocks, input.images...)
+	if len(input.imageNames) > 0 {
+		blocks = append(blocks, anthropic.NewBetaTextBlock(imageLabel(input.imageNames)))
+	}
 	if input.text != "" {
 		blocks = append(blocks, anthropic.NewBetaTextBlock(input.text))
 	}

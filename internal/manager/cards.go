@@ -424,12 +424,12 @@ func (m *Manager) session(id string) (protocol.Session, bool) {
 
 // sendTo sends text to an agent as its user, and says whether it was typed
 // in or queued for its next turn end.
-func (m *Manager) sendTo(ctx context.Context, session protocol.Session, text string) (protocol.SendStatus, error) {
+func (m *Manager) sendTo(ctx context.Context, session protocol.Session, text string, images ...protocol.InlineImage) (protocol.SendStatus, error) {
 	if session.Question != nil {
 		return "", errors.New(session.Name + " is asking a question; answer that first")
 	}
 	event := m.agents.Request(ctx, protocol.Request{
-		Type: protocol.ReqSendMessage, SessionID: session.ID, Text: text, ClientID: "agentman-" + newID(),
+		Type: protocol.ReqSendMessage, SessionID: session.ID, Text: text, Images: images, ClientID: "agentman-" + newID(),
 	})
 	if event.Type == protocol.EvtError || event.Status == protocol.StatusFailed {
 		message := strings.TrimPrefix(event.Error, "daemon: ")

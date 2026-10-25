@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
@@ -23,8 +24,8 @@ func pngImage(t *testing.T) protocol.InlineImage {
 	return protocol.InlineImage{MIME: "image/jpeg", Data: base64.StdEncoding.EncodeToString(buf.Bytes())}
 }
 
-// An image sent with a message reaches the model, before the words, and is
-// kept so the apps can show it again.
+// An image sent with a message reaches the model, before the words and
+// named, and is kept so the apps can show it again.
 func TestImagesReachTheModelAndAreKept(t *testing.T) {
 	model := &scriptedModel{replies: []string{textReply("A blank 4 by 3 image.")}}
 	h := newHarness(t, model, true)
@@ -36,8 +37,11 @@ func TestImagesReachTheModelAndAreKept(t *testing.T) {
 
 	messages := model.request(0).Messages
 	content := messages[len(messages)-1].Content
-	if len(content) != 2 || content[0].OfImage == nil || content[1].OfText == nil || content[1].OfText.Text != "what is this?" {
+	if len(content) != 3 || content[0].OfImage == nil || content[2].OfText == nil || content[2].OfText.Text != "what is this?" {
 		t.Fatalf("content = %+v", content)
+	}
+	if label := content[1].OfText; label == nil || !strings.Contains(label.Text, reply.Entry.Images[0]) {
+		t.Fatalf("the image wasn't named for the model: %+v", content[1])
 	}
 	if media := content[0].OfImage.Source.OfBase64.MediaType; media != "image/png" {
 		t.Fatalf("media type = %s, want what the bytes are", media)
@@ -73,7 +77,7 @@ func TestAnImageAloneIsAMessage(t *testing.T) {
 	}
 	h.waitIdle(t)
 	content := model.request(0).Messages[0].Content
-	if len(content) != 1 || content[0].OfImage == nil {
+	if len(content) != 2 || content[0].OfImage == nil {
 		t.Fatalf("content = %+v", content)
 	}
 }
@@ -102,5 +106,49 @@ func TestImagesThatArentAreRefused(t *testing.T) {
 		if h.m.Handle(context.Background(), protocol.Request{Type: protocol.ReqManagerImage, Path: name}).Type != protocol.EvtError {
 			t.Errorf("read %q", name)
 		}
+	}
+}
+
+// An image the user sends Agentman for an agent goes on to the agent with
+// the message, and only the user's own images can.
+func TestAgentmanForwardsTheUsersImages(t *testing.T) {
+	model := &scriptedModel{replies: []string{textReply("Which agent should see it?")}}
+	h := newHarness(t, model, true)
+	sessions := h.agents.Sessions()
+	sessions[0].Inject = protocol.InjectTmux
+	h.agents.setSessions(sessions)
+	h.agents.answer = delivered
+	shot := pngImage(t)
+	reply := h.m.send(context.Background(), "this is how the page looks", shot)
+	h.waitIdle(t)
+	name := reply.Entry.Images[0]
+
+	model.mu.Lock()
+	model.replies = append(model.replies,
+		toolReply("t1", "send_to_agent", `{"agent":"site","text":"the header overlaps the nav here","images":["`+name+`"]}`),
+		textReply("Sent."))
+	model.mu.Unlock()
+	h.m.send(context.Background(), "send it to site")
+	h.waitIdle(t)
+	sent := h.agents.sent(protocol.ReqSendMessage)
+	if len(sent) != 1 || len(sent[0].Images) != 1 || sent[0].Images[0].Data != shot.Data || sent[0].Images[0].MIME != "image/png" {
+		t.Fatalf("sent = %+v", sent)
+	}
+	var shown bool
+	for _, entry := range h.entries() {
+		shown = shown || (entry.Role == "activity" && entry.Text == "Sent site an image: “the header overlaps the nav here”")
+	}
+	if !shown {
+		t.Fatalf("what was sent wasn't shown: %+v", h.entries())
+	}
+
+	for _, other := range []string{"../settings.json", "/etc/passwd", "m-1-abcdef-0.png", "keys.json"} {
+		input := `{"agent":"site","text":"look","images":["` + other + `"]}`
+		if result := h.m.runTool(context.Background(), "send_to_agent", []byte(input)); !result.isError {
+			t.Errorf("%q was sent to the agent", other)
+		}
+	}
+	if n := len(h.agents.sent(protocol.ReqSendMessage)); n != 1 {
+		t.Errorf("%d messages reached the agent", n)
 	}
 }
