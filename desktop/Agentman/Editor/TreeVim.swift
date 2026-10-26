@@ -56,6 +56,18 @@ extension EditorStore {
         let key = event.charactersIgnoringModifiers ?? ""
         let pending = treeKeys
         treeKeys = ""
+        // Asked whether to trash: y or Return does, n or Escape doesn't,
+        // and nothing else happens until one of them is pressed.
+        if !trashing.isEmpty {
+            if flags.isSubset(of: .shift) {
+                if key == "y" || event.keyCode == 36 || event.keyCode == 76 {
+                    problem = trashConfirmed()
+                } else if key == "n" || event.keyCode == 53 {
+                    trashing = []
+                }
+            }
+            return true
+        }
         if flags == .control {
             if key == "w" {
                 treeKeys = "<C-w>"
@@ -244,6 +256,7 @@ extension EditorStore {
         return nil
     }
 
+    /// d: asks at the foot of the tree, to answer with y or n.
     func askToTrash() {
         trashing = treeTargets.compactMap(treeEntry)
     }
@@ -448,6 +461,66 @@ struct TreeCreateBar: View {
     }
 }
 
+/// d in the tree: what goes to the Trash, at the foot of the tree, asked
+/// as nvim-tree asks: y or Return moves it, n or Escape keeps it. The
+/// buttons do the same for the pointer.
+struct TreeTrashBar: View {
+    @Bindable var store: EditorStore
+
+    var body: some View {
+        let items = store.trashing
+        VStack(alignment: .leading, spacing: 8) {
+            Text(items.count == 1 ? "Move \(items[0].name) to the Trash?" : "Move \(items.count) items to the Trash?")
+                .font(Fonts.sans(12.5, .medium))
+                .foregroundStyle(Palette.text)
+                .lineLimit(2)
+                .truncationMode(.middle)
+            if items.count > 1 {
+                Text(items.prefix(4).map(\.name).joined(separator: ", ") + (items.count > 4 ? " and \(items.count - 4) more" : ""))
+                    .font(Fonts.sans(11))
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(2)
+            }
+            HStack(spacing: 6) {
+                answer("y", "Move to Trash", destructive: true) {
+                    store.problem = store.trashConfirmed()
+                    store.focusTree()
+                }
+                answer("n", "Cancel", destructive: false) {
+                    store.trashing = []
+                    store.focusTree()
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.errorWash)
+        .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 1) }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func answer(_ key: String, _ title: String, destructive: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Text(key)
+                    .font(Fonts.mono(10.5, .semibold))
+                    .foregroundStyle(destructive ? Palette.errorText : Palette.muted)
+                    .frame(width: 15, height: 15)
+                    .background(Palette.surface, in: RoundedRectangle(cornerRadius: 3.5, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 3.5, style: .continuous).strokeBorder(Palette.line))
+                Text(title)
+                    .font(Fonts.sans(11.5, destructive ? .medium : .regular))
+                    .foregroundStyle(destructive ? Palette.errorText : Palette.textSecondary)
+            }
+            .padding(.horizontal, 6)
+            .frame(height: 24)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+}
+
 /// r in the tree: the row's name, editable where it is. Return renames,
 /// Escape or clicking away leaves it.
 struct TreeRenameField: View {
@@ -507,7 +580,7 @@ struct TreeKeysSheet: View {
         ("Files", [
             ("a", "New file; end with / for a folder"),
             ("r", "Rename"),
-            ("d", "Move to the Trash"),
+            ("d", "Move to the Trash (y to confirm)"),
             ("y  c", "Copy"),
             ("x", "Cut, to move"),
             ("p", "Paste into the folder"),

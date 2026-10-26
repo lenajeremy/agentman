@@ -170,10 +170,21 @@ final class EditorPanelTests: XCTestCase {
         XCTAssertEqual(store.treeTargets, ["a.ts", "b.ts"], "the marks, not the cursor")
         _ = store.handleTreeKey(key("d"))
         XCTAssertEqual(store.trashing.map(\.path), ["a.ts", "b.ts"], "d asks first")
-        store.trashing = []
+        // While it asks, other keys do nothing, and n keeps the files.
+        XCTAssertTrue(store.handleTreeKey(key("j")))
+        XCTAssertEqual(store.selection, "c.ts")
+        XCTAssertTrue(store.handleTreeKey(key("n")))
+        XCTAssertTrue(store.trashing.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("a.ts").path))
         XCTAssertTrue(store.handleTreeKey(key("\u{1b}", code: 53)))
         XCTAssertTrue(store.marked.isEmpty)
         XCTAssertFalse(store.handleTreeKey(key("\u{1b}", code: 53)), "nothing left to clear")
+        // y answers yes. (To a file that isn't there, so the test never
+        // puts anything in the real Trash: it says why it couldn't.)
+        store.trashing = [FileEntry(path: "gone.ts", name: "gone.ts", isDirectory: false)]
+        XCTAssertTrue(store.handleTreeKey(key("y")))
+        XCTAssertTrue(store.trashing.isEmpty)
+        XCTAssertNotNil(store.problem)
     }
 
     func testAMakesFilesAndFolders() throws {

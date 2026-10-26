@@ -194,18 +194,6 @@ struct EditorWindow: View {
         } message: {
             Text("Your changes are lost if you don't save them.")
         }
-        .confirmationDialog(
-            store.trashing.count == 1 ? "Move \(store.trashing[0].name) to the Trash?" : "Move \(store.trashing.count) items to the Trash?",
-            isPresented: Binding(get: { !store.trashing.isEmpty }, set: { if !$0 { store.trashing = [] } })
-        ) {
-            Button("Move to Trash", role: .destructive) {
-                store.problem = store.trashConfirmed()
-                if store.treeView?.window != nil { store.focusTree() }
-            }
-            Button("Cancel", role: .cancel) { store.trashing = [] }
-        } message: {
-            Text(store.trashing.count > 1 ? "You can put them back from the Trash." : "You can put it back from the Trash.")
-        }
         .alert(naming?.title ?? "", isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {
             TextField("Name", text: Binding(get: { naming?.name ?? "" }, set: { naming?.name = $0 }))
             Button(naming?.action ?? "OK") {
@@ -311,7 +299,9 @@ private struct FileTree: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if let folder = store.creatingIn {
+            if !store.trashing.isEmpty {
+                TreeTrashBar(store: store)
+            } else if let folder = store.creatingIn {
                 TreeCreateBar(store: store, folder: folder)
                     .id(folder)
             }
@@ -363,7 +353,10 @@ private struct FileTree: View {
             Button("Copy Path") { Clipboard.copy(store.root.appendingPathComponent(entry.path).path) }
             Button("Copy Relative Path") { Clipboard.copy(entry.path) }
             Divider()
-            Button("Move to Trash…", role: .destructive) { store.trashing = [entry] }
+            Button("Move to Trash…", role: .destructive) {
+                store.trashing = [entry]
+                store.focusTree()
+            }
         }
     }
 }
