@@ -56,6 +56,7 @@ import {
   DEFAULT_NOTIFY_PREFS,
   NOTIFY_PREFS_KEY,
   NotifyPrefs,
+  agentSpeaks,
   parseNotifyPrefs,
   shouldAlertOnPhone,
 } from "./notification-prefs";
@@ -223,6 +224,9 @@ interface Store {
   /** Close the pane a session runs in. The transcript survives, so it stays
    *  in its folder's history and can be resumed again. */
   endSession(sessionId: string): Promise<void>;
+  /** Hear from this agent itself, or not, on every device, even while
+   *  Agentman speaks for the agents. Returns the problem, if any. */
+  setAgentAlerts(sessionId: string, on: boolean): Promise<string | null>;
   startSession(
     kind: "claude" | "codex" | "cursor-cli" | "opencode" | "kiro" | "antigravity",
     path: string,
@@ -303,8 +307,11 @@ function clearSettledDrafts(before: PendingSend[], after: PendingSend[]): void {
   }
 }
 
-function notifyQuestion(session: Session, prefs: NotifyPrefs) {
+function notifyQuestion(session: Session, prefs: NotifyPrefs, agentmanOn: boolean) {
   if (Platform.OS === "web") return;
+  // While Agentman is on, its card is what tells you, unless you asked to
+  // hear from this agent too.
+  if (!agentSpeaks(prefs, { agentmanOn, asked: session.alerts === true })) return;
   // Once the Mac has a push token it sends these itself, and it can reach a
   // suspended app that this cannot. Scheduling here too would double every
   // alert. And nothing while the app is open.
@@ -333,6 +340,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [daemonOnline, setDaemonOnline] = useState(false);
   const [daemonInfo, setDaemonInfo] = useState<DaemonInfo | null>(null);
+  // Whether Agentman is on, for alerts raised outside a render.
+  const agentmanOnRef = useRef(false);
   const [lastSeenAt, setLastSeenAt] = useState<number | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
@@ -539,6 +548,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       case "sessions": {
         const list = event.sessions ?? [];
         setDaemonInfo(event.daemon ?? null);
+        agentmanOnRef.current = event.daemon?.agentman === true;
         const previous = sessionsRef.current;
         const liveIds = new Set(list.map((session) => session.id));
         const removedIds = sessionsToForget(
@@ -570,7 +580,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
         const alerts = reconcileQuestionAlerts(announcedQuestions.current, list);
         announcedQuestions.current = alerts.announced;
-        for (const session of alerts.newlyPending) notifyQuestion(session, notifyPrefsRef.current);
+        for (const session of alerts.newlyPending) notifyQuestion(session, notifyPrefsRef.current, agentmanOnRef.current);
         setPending((current) => {
           const next = settleQueuedEchoes(
             clearQueuedForSessionTransitions(current, previous, list),
@@ -601,7 +611,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!updated) break;
         const alert = updateQuestionAlerts(announcedQuestions.current, updated);
         announcedQuestions.current = alert.announced;
-        if (alert.newlyPending) notifyQuestion(alert.newlyPending, notifyPrefsRef.current);
+        if (alert.newlyPending) notifyQuestion(alert.newlyPending, notifyPrefsRef.current, agentmanOnRef.current);
         const previous = sessionsRef.current;
         const currentIndex = previous.findIndex((session) => session.id === updated.id);
         const next = currentIndex < 0
@@ -772,7 +782,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           shouldAlertOnPhone("finished", notifyPrefsRef.current, {
             appActive: AppState.currentState === "active",
             pushActive: isPushActive(),
-          })
+          }) &&
+          agentSpeaks(notifyPrefsRef.current, { agentmanOn: agentmanOnRef.current, asked: current?.alerts === true })
         ) {
           void Notifications.scheduleNotificationAsync({
             content: {
@@ -1598,6 +1609,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
           launchRequests.current.set(id, {
             resolve: () => resolve(), reject, timer,
+          });
+        });
+      },
+
+      setAgentAlerts(sessionId, on) {
+        // The answer is the session as changed, which every app also hears.
+        return new Promise<string | null>((resolve) => {
+          const id = clientRef.current?.send({ type: "set_agent_alerts", sessionId, alerts: on });
+          if (!id) {
+            resolve("Not connected to your Mac right now.");
+            return;
+          }
+          const timer = setTimeout(() => settleAskRequest(id), 20_000);
+          askRequests.current.set(id, {
+            resolve: (reply) => resolve(reply.type === "error" ? reply.error || "Couldn't change that." : null),
+            reject: (error) => resolve(error.message),
+            timer,
           });
         });
       },

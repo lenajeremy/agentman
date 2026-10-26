@@ -62,6 +62,11 @@ type Token struct {
 	// existed reads as "everything on", which is what those phones received.
 	MuteFinished bool `json:"muteFinished,omitempty"`
 	MuteNeedsYou bool `json:"muteNeedsYou,omitempty"`
+	// MuteAgentman is a mute for the same reason. Agents is a wish instead:
+	// each agent's own alerts while Agentman is on are only for phones that
+	// asked for them.
+	MuteAgentman bool `json:"muteAgentman,omitempty"`
+	Agents       bool `json:"agents,omitempty"`
 }
 
 // Kind is what an alert is about, which is what a phone chooses by.
@@ -72,13 +77,24 @@ const (
 	KindFinished Kind = "finished"
 	// KindNeedsYou: an agent is blocked on an approval or a question.
 	KindNeedsYou Kind = "needs_you"
+	// KindAgentman: Agentman has something to say, such as a reply, a brief
+	// or word from an agent.
+	KindAgentman Kind = "agentman"
 )
 
 // Prefs is one phone's choice of alerts.
 type Prefs struct {
 	Finished bool
 	NeedsYou bool
+	Agentman bool
+	// Agents takes each agent's own alerts even while Agentman is on and
+	// speaks for them. Off unless asked for.
+	Agents bool
 }
+
+// DefaultPrefs is what a phone gets until it chooses: everything but each
+// agent's own alerts while Agentman speaks for them.
+var DefaultPrefs = Prefs{Finished: true, NeedsYou: true, Agentman: true}
 
 // wants reports whether a phone with these preferences takes this kind.
 func (p Prefs) wants(kind Kind) bool {
@@ -87,6 +103,8 @@ func (p Prefs) wants(kind Kind) bool {
 		return p.Finished
 	case KindNeedsYou:
 		return p.NeedsYou
+	case KindAgentman:
+		return p.Agentman
 	}
 	return true
 }
@@ -104,7 +122,7 @@ const (
 // sound is the file a push of this kind asks the phone to play.
 func (k Kind) sound() string {
 	switch k {
-	case KindFinished:
+	case KindFinished, KindAgentman:
 		return SoundFinished
 	case KindNeedsYou:
 		return SoundNeedsYou
@@ -145,7 +163,10 @@ func NewStore(dir string) *Store {
 		if ValidToken(token.Value) && token.LastSeen > cutoff {
 			s.tokens[token.Value] = device{
 				lastSeen: token.LastSeen,
-				prefs:    Prefs{Finished: !token.MuteFinished, NeedsYou: !token.MuteNeedsYou},
+				prefs: Prefs{
+					Finished: !token.MuteFinished, NeedsYou: !token.MuteNeedsYou,
+					Agentman: !token.MuteAgentman, Agents: token.Agents,
+				},
 			}
 		}
 	}
@@ -169,17 +190,16 @@ func ValidToken(value string) bool {
 }
 
 // Register records a device, refreshing it if already known, with its choice
-// of alerts. A nil choice keeps the one already recorded, or turns everything
-// on for a phone seen for the first time: that is an app from before the
-// choice existed, and it has always been sent everything. Returns whether the
-// device is new.
+// of alerts. A nil choice keeps the one already recorded, or gives a phone
+// seen for the first time the defaults: that is an app from before the
+// choice existed. Returns whether the device is new.
 func (s *Store) Register(value string, prefs *Prefs) (bool, error) {
 	if !ValidToken(value) {
 		return false, fmt.Errorf("push: not an Expo push token")
 	}
 	s.mu.Lock()
 	previous, existed := s.tokens[value]
-	next := device{lastSeen: time.Now().UnixMilli(), prefs: Prefs{Finished: true, NeedsYou: true}}
+	next := device{lastSeen: time.Now().UnixMilli(), prefs: DefaultPrefs}
 	if existed {
 		next.prefs = previous.prefs
 	}
@@ -218,13 +238,24 @@ func (s *Store) Tokens() []string {
 
 // TokensFor returns the devices that want this kind of alert.
 func (s *Store) TokensFor(kind Kind) []string {
+	return s.tokensFor(Alert{Kind: kind})
+}
+
+// tokensFor returns the devices that take this alert: those that want its
+// kind and, for an agent's own alert that Agentman covers, those that asked
+// for every agent too.
+func (s *Store) tokensFor(alert Alert) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]string, 0, len(s.tokens))
 	for token, device := range s.tokens {
-		if device.prefs.wants(kind) {
-			out = append(out, token)
+		if alert.Kind != "" && !device.prefs.wants(alert.Kind) {
+			continue
 		}
+		if alert.Covered && !device.prefs.Agents {
+			continue
+		}
+		out = append(out, token)
 	}
 	return out
 }
@@ -248,6 +279,8 @@ func (s *Store) save() error {
 			LastSeen:     device.lastSeen,
 			MuteFinished: !device.prefs.Finished,
 			MuteNeedsYou: !device.prefs.NeedsYou,
+			MuteAgentman: !device.prefs.Agentman,
+			Agents:       device.prefs.Agents,
 		})
 	}
 	s.mu.Unlock()
@@ -266,6 +299,13 @@ type Alert struct {
 	Body  string
 	// SessionID lets the app open the right screen when the alert is tapped.
 	SessionID string
+	// Agentman marks an alert from Agentman, which opens its conversation
+	// rather than the agent's.
+	Agentman bool
+	// Covered marks an agent's own alert while Agentman is on and speaks
+	// for the agents, for an agent the user hasn't asked to hear from
+	// itself. Only phones that asked for every agent too take it.
+	Covered bool
 }
 
 // Sender posts alerts to Expo.
@@ -312,10 +352,7 @@ func (s *Sender) Send(ctx context.Context, alert Alert) error {
 	if s == nil || s.Store == nil {
 		return nil
 	}
-	tokens := s.Store.Tokens()
-	if alert.Kind != "" {
-		tokens = s.Store.TokensFor(alert.Kind)
-	}
+	tokens := s.Store.tokensFor(alert)
 	if len(tokens) == 0 {
 		return nil
 	}
@@ -325,8 +362,14 @@ func (s *Sender) Send(ctx context.Context, alert Alert) error {
 		message := expoMessage{
 			To: token, Title: alert.Title, Body: alert.Body, Sound: alert.Kind.sound(),
 		}
-		if alert.SessionID != "" {
-			message.Data = map[string]any{"sessionId": alert.SessionID}
+		if alert.SessionID != "" || alert.Agentman {
+			message.Data = map[string]any{}
+			if alert.SessionID != "" {
+				message.Data["sessionId"] = alert.SessionID
+			}
+			if alert.Agentman {
+				message.Data["agentman"] = true
+			}
 		}
 		messages = append(messages, message)
 	}

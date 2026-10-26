@@ -37,6 +37,7 @@ enum RequestType: String, Codable, Sendable {
     case answerQuestion = "answer_question"
     case readSeenFile = "read_seen_file"
     case renameSession = "rename_session"
+    case setAgentAlerts = "set_agent_alerts"
     case setMode = "set_mode"
     case setModel = "set_model"
     case listFiles = "list_files"
@@ -120,6 +121,8 @@ struct DaemonRequest: Codable, Sendable {
     var port: Int?
     /// A change to the editor's language servers, on lsp_set and lsp_remove.
     var language: LanguageChange?
+    /// An agent's own alerts on or off, on set_agent_alerts.
+    var alerts: Bool?
 
     init(_ type: RequestType, sessionId: String? = nil) {
         self.type = type
@@ -567,6 +570,9 @@ struct Session: Codable, Sendable, Identifiable, Hashable {
     var name: String
     /// The agent's own name, when the user renamed it.
     var originalName: String?
+    /// The user asked to hear from this agent itself, even while Agentman
+    /// speaks for the agents.
+    var alerts: Bool?
     var cwd: String
     var state: SessionState
     /// How the daemon can deliver a message: "tmux", "api", "hook" or "none".
@@ -672,4 +678,6 @@ struct DaemonInfo: Codable, Sendable, Hashable {
     var latest: String?
     var behind: Int?
     var upgrade: String?
+    /// Agentman is on, and speaks for the agents.
+    var agentman: Bool?
 }

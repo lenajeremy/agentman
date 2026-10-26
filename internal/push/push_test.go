@@ -177,6 +177,47 @@ func TestATokenFileFromBeforeTheChoiceKeepsEveryAlert(t *testing.T) {
 	}
 }
 
+// Agentman's word and each agent's own alerts while Agentman is on are
+// choices of their own, kept across a restart. An old file reads as Agentman
+// on and the agents left to it.
+func TestAgentmanAndEveryAgentAreChoicesThatLast(t *testing.T) {
+	const quiet = "ExponentPushToken[qqqqqqqqqqqqqqqqqqqqqq]"
+	const every = "ExponentPushToken[eeeeeeeeeeeeeeeeeeeeee]"
+	dir := t.TempDir()
+	store := NewStore(dir)
+	if _, err := store.Register(quiet, &Prefs{Finished: true, NeedsYou: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Register(every, &Prefs{Finished: true, NeedsYou: true, Agentman: true, Agents: true}); err != nil {
+		t.Fatal(err)
+	}
+	check := func(label string, s *Store) {
+		t.Helper()
+		if got := sorted(s.TokensFor(KindAgentman)); len(got) != 1 || got[0] != every {
+			t.Errorf("%s: Agentman goes to %v, want only the phone that kept it", label, got)
+		}
+		covered := sorted(s.tokensFor(Alert{Kind: KindFinished, Covered: true}))
+		if len(covered) != 1 || covered[0] != every {
+			t.Errorf("%s: an agent's alert Agentman covers goes to %v, want only the phone that asked for every agent", label, covered)
+		}
+		if got := s.tokensFor(Alert{Kind: KindFinished}); len(got) != 2 {
+			t.Errorf("%s: an agent's alert with Agentman off goes to %v, want both", label, got)
+		}
+	}
+	check("live", store)
+	check("after a restart", NewStore(dir))
+
+	old := t.TempDir()
+	raw, _ := json.Marshal([]map[string]any{{"value": goodToken, "lastSeen": time.Now().UnixMilli()}})
+	if err := os.WriteFile(filepath.Join(old, "push.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	legacy := NewStore(old)
+	if len(legacy.TokensFor(KindAgentman)) != 1 || len(legacy.tokensFor(Alert{Kind: KindFinished, Covered: true})) != 0 {
+		t.Error("an old token file didn't read as Agentman on and the agents left to it")
+	}
+}
+
 // Send asks Expo only for the phones that want the alert, and calls nothing
 // when none does.
 func TestSendSkipsPhonesThatTurnedTheKindOff(t *testing.T) {

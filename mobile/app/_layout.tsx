@@ -40,8 +40,12 @@ function NotificationNavigation() {
       const identifier = response.notification.request.identifier;
       if (handled.has(identifier)) return;
       handled.add(identifier);
-      const sessionId = response.notification.request.content.data?.sessionId;
-      if (typeof sessionId === "string" && sessionId) {
+      const data = response.notification.request.content.data;
+      const sessionId = data?.sessionId;
+      // Agentman's word, cards included, is in its conversation.
+      if (data?.agentman === true) {
+        router.push("/agentman");
+      } else if (typeof sessionId === "string" && sessionId) {
         router.push(`/session/${encodeURIComponent(sessionId)}`);
       }
       void Notifications.clearLastNotificationResponseAsync().catch(() => {});

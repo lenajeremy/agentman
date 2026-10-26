@@ -86,7 +86,10 @@ type Daemon struct {
 	registry *source.Registry
 	// names is the user's names for sessions, applied as they are found.
 	names *sessionNames
-	sink  Transport
+	// agentAlerts is the agents the user asked to hear from directly while
+	// Agentman is on.
+	agentAlerts *agentAlerts
+	sink        Transport
 
 	mu sync.Mutex
 	// sessions is the last discovered list, kept so hook events can be matched
@@ -105,6 +108,9 @@ type Daemon struct {
 	// lastAlert is when each session last produced a completion notification,
 	// so a burst of short turns becomes one.
 	lastAlert map[string]time.Time
+	// lastAgentmanAlert is when Agentman last had word pushed, other than a
+	// card, so a run of briefs is one alert.
+	lastAgentmanAlert time.Time
 	// hookStates prevent the next stale discovery snapshot from immediately
 	// undoing a state transition delivered by an agent hook.
 	hookStates map[string]hookState
@@ -270,7 +276,7 @@ func (d *Daemon) SetPush(sender *push.Sender) {
 //
 // Fired in the background: the callers are a discovery sweep and a hook
 // callback, and neither can afford to wait on a third-party HTTP request.
-func (d *Daemon) alert(kind push.Kind, title, body, sessionID string) {
+func (d *Daemon) alert(alert push.Alert) {
 	d.mu.Lock()
 	sender := d.push
 	d.mu.Unlock()
@@ -280,7 +286,7 @@ func (d *Daemon) alert(kind push.Kind, title, body, sessionID string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		_ = sender.Send(ctx, push.Alert{Kind: kind, Title: title, Body: body, SessionID: sessionID})
+		_ = sender.Send(ctx, alert)
 	}()
 }
 
@@ -346,7 +352,10 @@ func (d *Daemon) alertTurnComplete(event protocol.Event) {
 	if body == "" {
 		body = "Finished its turn."
 	}
-	d.alert(push.KindFinished, name, body, event.SessionID)
+	// While Agentman is on, it speaks for the agents: this reaches only the
+	// phones that asked to hear from every agent, or from this one.
+	d.alert(push.Alert{Kind: push.KindFinished, Title: name, Body: body, SessionID: event.SessionID,
+		Covered: d.covered(event.SessionID)})
 }
 
 // alertNeedsAnswer pushes a session that has become blocked on a decision, once
@@ -376,7 +385,9 @@ func (d *Daemon) alertNeedsAnswer(session protocol.Session) {
 	if body == "" {
 		body = "Waiting on you to choose."
 	}
-	d.alert(push.KindNeedsYou, name+" needs your answer", body, session.ID)
+	// Agentman puts a card up for it, which is what rings while it is on.
+	d.alert(push.Alert{Kind: push.KindNeedsYou, Title: name + " needs your answer", Body: body, SessionID: session.ID,
+		Covered: d.covered(session.ID)})
 }
 
 // Run drives discovery and hook handling until ctx is cancelled.
@@ -444,6 +455,7 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 		// The user's name for it, before anything sees it: alerts, apps,
 		// Agentman.
 		session = d.names.apply(session)
+		session.Alerts = d.agentAlerts.has(session.ID)
 		session.Servers = d.serverLists[session.ID]
 		current[session.ID] = session
 		before, existed := previous[session.ID]
@@ -1119,8 +1131,15 @@ func (d *Daemon) HandleFrom(
 			}
 		}
 		var prefs *push.Prefs
-		if req.Notify != nil {
-			prefs = &push.Prefs{Finished: req.Notify.Finished, NeedsYou: req.Notify.NeedsYou}
+		if notify := req.Notify; notify != nil {
+			prefs = &push.Prefs{Finished: notify.Finished, NeedsYou: notify.NeedsYou,
+				Agentman: push.DefaultPrefs.Agentman, Agents: push.DefaultPrefs.Agents}
+			if notify.Agentman != nil {
+				prefs.Agentman = *notify.Agentman
+			}
+			if notify.Agents != nil {
+				prefs.Agents = *notify.Agents
+			}
 		}
 		if _, err := sender.Store.Register(req.PushToken, prefs); err != nil {
 			return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
@@ -1220,6 +1239,9 @@ func (d *Daemon) HandleFrom(
 
 	case protocol.ReqRenameSession:
 		return d.renameSession(req)
+
+	case protocol.ReqSetAgentAlerts:
+		return d.setAgentAlerts(req)
 
 	case protocol.ReqReadSeenFile:
 		return d.readSeenFile(ctx, req)
@@ -1325,7 +1347,7 @@ func validateRequest(req protocol.Request) error {
 		req.Type == protocol.ReqSetMode || req.Type == protocol.ReqSetModel ||
 		req.Type == protocol.ReqListCommits || req.Type == protocol.ReqCommitFiles ||
 		req.Type == protocol.ReqCommitDiff || req.Type == protocol.ReqListBranches ||
-		req.Type == protocol.ReqRenameSession
+		req.Type == protocol.ReqRenameSession || req.Type == protocol.ReqSetAgentAlerts
 	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
 		return fmt.Errorf("daemon: invalid session id")
 	}
@@ -1447,6 +1469,11 @@ func validateRequest(req protocol.Request) error {
 	case protocol.ReqRenameSession:
 		if len(req.Text) > 4*maxSessionName {
 			return fmt.Errorf("daemon: that name is too long")
+		}
+		return nil
+	case protocol.ReqSetAgentAlerts:
+		if req.Alerts == nil {
+			return fmt.Errorf("daemon: say whether to turn the agent's alerts on or off")
 		}
 		return nil
 	case protocol.ReqReadArtifact, protocol.ReqReviewArtifact:

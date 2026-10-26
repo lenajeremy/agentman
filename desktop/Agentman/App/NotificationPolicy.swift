@@ -1,7 +1,7 @@
 import Foundation
 
 /// When the Mac speaks up, as set in Settings > Notifications: which kinds,
-/// not from muted folders, and only what is urgent in quiet hours.
+/// who from, not from muted folders, and only what is urgent in quiet hours.
 enum NotificationPolicy {
     enum Kind {
         /// An agent finished a turn.
@@ -25,6 +25,9 @@ enum NotificationPolicy {
         static let quietStart = "quietStart"
         static let quietEnd = "quietEnd"
         static let quietLetsNeedsYou = "quietLetsNeedsYou"
+        /// Each agent's own notifications while Agentman is on. Off unless
+        /// switched on.
+        static let everyAgent = "notifyEveryAgent"
     }
 
     /// Minutes after midnight quiet hours start and end, by default.
@@ -48,6 +51,14 @@ enum NotificationPolicy {
             return kind == .needsYou && flag(Key.quietLetsNeedsYou, defaults)
         }
         return true
+    }
+
+    /// Whether an agent notifies for itself. While Agentman is on, it hears
+    /// every agent and tells the user what matters, so it is the one voice:
+    /// an agent speaks only when the user asked to hear from it, or from
+    /// every agent. Off, every agent speaks for itself.
+    static func agentSpeaks(agentmanOn: Bool, asked: Bool, defaults: UserDefaults = .standard) -> Bool {
+        !agentmanOn || asked || defaults.bool(forKey: Key.everyAgent)
     }
 
     static func sound(defaults: UserDefaults = .standard) -> Bool { flag(Key.sound, defaults) }

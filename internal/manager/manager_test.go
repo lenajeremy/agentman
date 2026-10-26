@@ -159,6 +159,7 @@ type harness struct {
 
 	mu     sync.Mutex
 	events []protocol.Event
+	news   []protocol.ManagerEntry
 }
 
 func newHarness(t *testing.T, model *scriptedModel, withKey bool) *harness {
@@ -193,11 +194,22 @@ func (h *harness) newManager(t *testing.T) *Manager {
 			h.mu.Unlock()
 		},
 		NewModel: func(string) Model { return h.model },
+		News: func(entry protocol.ManagerEntry) {
+			h.mu.Lock()
+			h.news = append(h.news, entry)
+			h.mu.Unlock()
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return m
+}
+
+func (h *harness) told() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return roles(h.news)
 }
 
 func (h *harness) entries() []protocol.ManagerEntry {
@@ -269,6 +281,39 @@ func TestAReplyStreamsToTheAppsAndIsKept(t *testing.T) {
 	}
 	if got := len(again.conversation.messages()); got != 2 {
 		t.Fatalf("after a restart the model's history has %d messages, want 2", got)
+	}
+}
+
+// Agentman is news on its own account: briefs, word from agents and cards go
+// to the phones, and so does a reply the user may have left behind. A quick
+// answer to someone still there doesn't, nor what the user said themselves.
+func TestAgentmanSaysWhatIsNewsOnItsOwn(t *testing.T) {
+	h := newHarness(t, &scriptedModel{replies: []string{textReply("Both are fine."), textReply("Still fine.")}}, true)
+	if !h.m.On() {
+		t.Fatal("Agentman with its key isn't on")
+	}
+	h.m.Handle(context.Background(), protocol.Request{Type: protocol.ReqManagerSend, Text: "how is everyone?"})
+	h.waitIdle(t)
+	if told := h.told(); len(told) != 0 {
+		t.Fatalf("a quick reply to the user was news: %v", told)
+	}
+
+	defer func(was time.Duration) { replyNewsAfter = was }(replyNewsAfter)
+	replyNewsAfter = 0
+	h.m.Handle(context.Background(), protocol.Request{Type: protocol.ReqManagerSend, Text: "and now?"})
+	h.waitIdle(t)
+
+	h.m.addEntry(protocol.ManagerEntry{Role: "brief", Text: "site finished.", SessionID: "claude:a"})
+	h.m.addEntry(protocol.ManagerEntry{Role: "agent", Text: "Deployed.", SessionID: "claude:a"})
+	h.m.addEntry(protocol.ManagerEntry{Role: "activity", Text: "Read site"})
+	h.m.addEntry(protocol.ManagerEntry{Role: "card", Card: &protocol.ManagerCard{ID: "c1", State: protocol.CardOpen}})
+	h.m.addEntry(protocol.ManagerEntry{Role: "card", Card: &protocol.ManagerCard{ID: "c2", State: protocol.CardAnswered}})
+	if told := h.told(); !slices.Equal(told, []string{"assistant", "brief", "agent", "card"}) {
+		t.Fatalf("news = %v, want the long reply, the brief, the agent's word and the open card", told)
+	}
+
+	if newHarness(t, &scriptedModel{}, false).m.On() {
+		t.Error("Agentman without a key is on")
 	}
 }
 

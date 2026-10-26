@@ -860,18 +860,20 @@ private struct NotificationsPage: View {
     @AppStorage(NotificationPolicy.Key.quietStart) private var quietStart = NotificationPolicy.defaultQuietStart
     @AppStorage(NotificationPolicy.Key.quietEnd) private var quietEnd = NotificationPolicy.defaultQuietEnd
     @AppStorage(NotificationPolicy.Key.quietLetsNeedsYou) private var quietLetsNeedsYou = true
+    @AppStorage(NotificationPolicy.Key.everyAgent) private var everyAgent = false
     @State private var muted: [String] = NotificationPolicy.mutedFolders()
     @AppStorage("awaySummary") private var awaySummary = true
     @AppStorage("awayMinutes") private var awayMinutes = 15.0
 
     var body: some View {
-        SettingsSection(title: "Agents", footer: "Never for the thread you're looking at. With an Anthropic key set, Agentman's cards tell you when an agent needs you instead.") {
-            toggle("An agent finishes", "When it ends a turn, with what it said last.", $finished)
-            toggle("An agent needs you", "When it waits on an approval or a question.", $needsYou, divider: false)
-        }
         SettingsSection(title: "Agentman") {
             toggle("Agentman's messages", "Its replies and briefs while you're elsewhere.", $agentman)
             toggle("Note suggestions", "Quietly, when it suggests something worth remembering.", $notes, divider: false)
+        }
+        SettingsSection(title: "Agents", footer: "Never for the thread you're looking at. While Agentman is on, it tells you what matters from your agents, so they only notify you themselves when you ask: here for all of them, or one at a time from an agent's menu in the sidebar.") {
+            toggle("An agent finishes", "When it ends a turn, with what it said last.", $finished)
+            toggle("An agent needs you", "When it waits on an approval or a question.", $needsYou)
+            toggle("Every agent, while Agentman is on", "Hear from each agent itself too, not only through Agentman.", $everyAgent, divider: false)
         }
         SettingsSection(title: "Quiet hours", footer: "Nothing else comes through in quiet hours; it's all in Agentman when you look.") {
             toggle("Use quiet hours", nil, $quiet)

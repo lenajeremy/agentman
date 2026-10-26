@@ -26,6 +26,15 @@ struct Sidebar: View {
                                         Task { await store.rename(session.id, to: "") }
                                     }
                                 }
+                                // Agentman speaks for the agents while it is on;
+                                // this one can speak for itself as well.
+                                if store.manager.on {
+                                    Divider()
+                                    Toggle("Notify Me About This Agent", isOn: Binding(
+                                        get: { session.alerts == true },
+                                        set: { on in Task { await store.setAlerts(session.id, on) } }
+                                    ))
+                                }
                             }
                     }
                 } header: {

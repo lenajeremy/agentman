@@ -158,6 +158,11 @@ const (
 	// name in Text, everywhere it shows; an empty Text gives it back the
 	// agent's own name. The session's ID never changes.
 	ReqRenameSession RequestType = "rename_session"
+	// ReqSetAgentAlerts turns the session named by SessionID's own alerts on
+	// or off, as Alerts says: while Agentman is on, the user hears from that
+	// agent itself as well as through Agentman. Answered with
+	// EvtSessionUpdate.
+	ReqSetAgentAlerts RequestType = "set_agent_alerts"
 	// ReqToolsTitle asks Agentman for a plain line saying what a run of tool
 	// calls did and why. Steps are the run's calls, with their titles; Text
 	// is what the agent said just before them.
@@ -204,8 +209,10 @@ type Request struct {
 	PushToken string `json:"pushToken,omitempty"`
 	// Notify carries that phone's choice of alerts on ReqRegisterPush. Absent
 	// from an app that predates the choice, which keeps whatever the phone
-	// last chose, or both kinds for a phone that never chose.
+	// last chose, or the defaults for a phone that never chose.
 	Notify *NotifyPrefs `json:"notify,omitempty"`
+	// Alerts is the choice on ReqSetAgentAlerts.
+	Alerts *bool `json:"alerts,omitempty"`
 	// Port names the server on ReqOpenServer and ReqCloseServer.
 	Port int `json:"port,omitempty"`
 	// Path is relative to the session's working directory for workspace reads,
@@ -364,6 +371,10 @@ type DaemonInfo struct {
 	Upgrade string `json:"upgrade,omitempty"`
 	// Changelog links to every release's notes.
 	Changelog string `json:"changelog,omitempty"`
+	// Agentman is set while Agentman is on: it has its key, hears every
+	// agent, and tells the user what matters, so the agents' own alerts stay
+	// off unless the user asked for them.
+	Agentman bool `json:"agentman,omitempty"`
 }
 
 // ReleaseNote is one release this Mac is missing.
@@ -535,4 +546,10 @@ type NotifyPrefs struct {
 	Finished bool `json:"finished"`
 	// NeedsYou: an agent is blocked on an approval or a question.
 	NeedsYou bool `json:"needsYou"`
+	// Agentman: Agentman has something to say. Absent from apps that
+	// predate it, which get it.
+	Agentman *bool `json:"agentman,omitempty"`
+	// Agents: each agent's own alerts even while Agentman is on and speaks
+	// for them. Absent means no.
+	Agents *bool `json:"agents,omitempty"`
 }

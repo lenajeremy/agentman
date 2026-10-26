@@ -80,6 +80,9 @@ export interface Session {
   kind: AgentKind;
   nativeId: string;
   name: string;
+  /** You asked to hear from this agent itself, even while Agentman speaks
+   *  for the agents. */
+  alerts?: boolean;
   cwd: string;
   state: SessionState;
   inject: InjectMode;
@@ -199,6 +202,7 @@ export type RequestType =
   | "send_queued"
   | "answer_question"
   | "register_push"
+  | "set_agent_alerts"
   | "open_server"
   | "close_server"
   | "stop_server"
@@ -259,7 +263,9 @@ export interface Request {
   /** Expo push token on register_push. */
   pushToken?: string;
   /** Which alerts this phone wants pushed, on register_push. */
-  notify?: { finished: boolean; needsYou: boolean };
+  notify?: { finished: boolean; needsYou: boolean; agentman: boolean; agents: boolean };
+  /** An agent's own alerts on or off, on set_agent_alerts. */
+  alerts?: boolean;
   /** Chooses an option on answer_question. */
   optionKey?: string;
   optionKeys?: string[];
@@ -617,6 +623,8 @@ export interface DaemonInfo {
   upgrade?: string;
   /** Where every release's notes can be read. */
   changelog?: string;
+  /** Agentman is on: it hears every agent and speaks for them. */
+  agentman?: boolean;
 }
 
 export interface ReleaseNote {

@@ -26,6 +26,17 @@ final class NotificationPolicyTests: XCTestCase {
         XCTAssertTrue(NotificationPolicy.allows(.needsYou, defaults: defaults))
     }
 
+    // While Agentman is on it is the one voice: an agent speaks for itself
+    // only when the user asked to hear from it, or from every agent. Off,
+    // every agent speaks as it always has.
+    func testWhileAgentmanIsOnAgentsSpeakOnlyWhenAskedTo() {
+        XCTAssertFalse(NotificationPolicy.agentSpeaks(agentmanOn: true, asked: false, defaults: defaults))
+        XCTAssertTrue(NotificationPolicy.agentSpeaks(agentmanOn: true, asked: true, defaults: defaults))
+        XCTAssertTrue(NotificationPolicy.agentSpeaks(agentmanOn: false, asked: false, defaults: defaults))
+        defaults.set(true, forKey: NotificationPolicy.Key.everyAgent)
+        XCTAssertTrue(NotificationPolicy.agentSpeaks(agentmanOn: true, asked: false, defaults: defaults))
+    }
+
     func testAMutedFolderKeepsItsAgentsAndThoseBelowQuiet() {
         NotificationPolicy.setMuted("/work/app", true, defaults: defaults)
         XCTAssertFalse(NotificationPolicy.allows(.finished, folder: "/work/app", defaults: defaults))
