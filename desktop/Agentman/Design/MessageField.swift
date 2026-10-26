@@ -22,6 +22,8 @@ struct MessageField: NSViewRepresentable {
     /// Whether images are being dragged over the box, to show where they
     /// will land.
     var onDropTargeted: ((Bool) -> Void)?
+    /// The editor's files, for `@`, in an editor's agent panel.
+    var mentions: FileMentions?
 
     static let lineSpacing: CGFloat = 3
 
@@ -64,6 +66,7 @@ struct MessageField: NSViewRepresentable {
         update(textView)
         if textView.string != text {
             textView.string = text
+            textView.styleMentions()
             textView.needsDisplay = true
         }
         // Focus follows the binding when it is set from outside, never
@@ -91,6 +94,8 @@ struct MessageField: NSViewRepresentable {
         textView.onSubmit = onSubmit
         textView.onImages = onImages
         textView.onDropTargeted = onDropTargeted
+        textView.mentions = mentions
+        mentions?.textView = textView
     }
 
     /// As tall as its lines, from one to `maxLines`. Measured on the text
@@ -132,10 +137,39 @@ struct MessageField: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView else { return }
             parent.text = textView.string
+            textView.styleMentions()
+            followMention()
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            followMention()
+        }
+
+        /// Opens or closes the files for `@` as the caret moves.
+        private func followMention() {
+            guard let textView, let mentions = parent.mentions else { return }
+            let selection = textView.selectedRange()
+            if selection.length == 0, !textView.hasMarkedText() {
+                mentions.update(text: textView.string, caret: selection.location)
+            } else {
+                mentions.dismiss()
+            }
+        }
+
+        /// Backspace or Delete at a file chip takes the whole chip.
+        func textView(_ textView: NSTextView, shouldChangeTextIn range: NSRange, replacementString: String?) -> Bool {
+            guard let mentions = parent.mentions, replacementString?.isEmpty == true, range.length <= 1 else { return true }
+            for chip in mentions.chips(in: textView.string)
+            where NSIntersectionRange(chip.range, range).length > 0 && chip.range != range {
+                textView.insertText("", replacementRange: chip.range)
+                return false
+            }
+            return true
         }
 
         func focusChanged(_ now: Bool) {
             lastFocused = now
+            if !now { parent.mentions?.dismiss() }
             // Not while SwiftUI is updating the view that reported it.
             DispatchQueue.main.async { [parent] in
                 if parent.focused != now { parent.focused = now }
@@ -178,6 +212,7 @@ final class MessageTextView: NSTextView {
     var onImages: (([Attachment]) -> Void)?
     var onDropTargeted: ((Bool) -> Void)?
     var focusChanged: (Bool) -> Void = { _ in }
+    var mentions: FileMentions?
     /// Focus asked for before the box was in a window, given when it is.
     private var wantsFocus = false
 
@@ -200,6 +235,16 @@ final class MessageTextView: NSTextView {
     // MARK: Keys
 
     override func keyDown(with event: NSEvent) {
+        // The files for `@`: arrows move, Return or Tab picks, Escape closes.
+        if let mentions, mentions.isOpen, !hasMarkedText() {
+            switch event.keyCode {
+            case 125: return mentions.move(1)
+            case 126: return mentions.move(-1)
+            case 36, 76, 48: return mentions.choose()
+            case 53: return mentions.dismiss()
+            default: break
+            }
+        }
         let isReturn = event.keyCode == 36 || event.keyCode == 76
         guard isReturn, !hasMarkedText() else { return super.keyDown(with: event) }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -309,6 +354,37 @@ final class MessageTextView: NSTextView {
     override func didChangeText() {
         super.didChangeText()
         needsDisplay = true
+    }
+
+    // MARK: File chips
+
+    /// The `@path` of each file named in the text, in the brand colour;
+    /// drawBackground puts the chip behind it. Layout attributes only: the
+    /// text stays plain.
+    func styleMentions() {
+        guard let layoutManager else { return }
+        let all = NSRange(location: 0, length: (string as NSString).length)
+        layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: all)
+        guard let mentions else { return }
+        for chip in mentions.chips(in: string) {
+            layoutManager.addTemporaryAttribute(.foregroundColor, value: NSColor(Palette.workingText), forCharacterRange: chip.range)
+        }
+        needsDisplay = true
+    }
+
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in: rect)
+        guard let mentions, let layoutManager, let textContainer, string.contains("@") else { return }
+        NSColor(Palette.working).withAlphaComponent(0.13).setFill()
+        let origin = textContainerOrigin
+        for chip in mentions.chips(in: string) {
+            let glyphs = layoutManager.glyphRange(forCharacterRange: chip.range, actualCharacterRange: nil)
+            layoutManager.enumerateEnclosingRects(forGlyphRange: glyphs, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+                                                  in: textContainer) { box, _ in
+                let chipBox = box.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -3, dy: 0.5)
+                NSBezierPath(roundedRect: chipBox, xRadius: 5, yRadius: 5).fill()
+            }
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {

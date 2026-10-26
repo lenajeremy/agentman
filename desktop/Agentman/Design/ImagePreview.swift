@@ -6,12 +6,22 @@ struct Lightbox: Identifiable {
     let id = UUID()
     let image: NSImage
     let title: String
+    /// The window it opens over: an editor's folder for its agent panel,
+    /// nil for Agentman's own window.
+    var place: String?
+}
+
+extension EnvironmentValues {
+    /// Which window an image opened here should show over: an editor's
+    /// folder in its agent panel, nil in Agentman's window.
+    @Entry var lightboxPlace: String?
 }
 
 /// An image an agent or Agentman read, as a short label and a thumbnail.
 /// Clicking the thumbnail opens it full window.
 struct ImageThumbnail: View {
     @Environment(AgentsStore.self) private var store
+    @Environment(\.lightboxPlace) private var lightboxPlace
     let sessionId: String
     let path: String
     let label: String
@@ -60,7 +70,7 @@ struct ImageThumbnail: View {
     @ViewBuilder private var picture: some View {
         if let image {
             Button {
-                store.lightbox = Lightbox(image: image, title: label)
+                store.lightbox = Lightbox(image: image, title: label, place: lightboxPlace)
             } label: {
                 Image(nsImage: image)
                     .resizable()
@@ -152,6 +162,7 @@ struct SentImages: View {
 
 private struct SentImage: View {
     @Environment(AgentsStore.self) private var store
+    @Environment(\.lightboxPlace) private var lightboxPlace
     let name: String
     @State private var image: NSImage?
 
@@ -159,7 +170,7 @@ private struct SentImage: View {
         Group {
             if let image {
                 Button {
-                    store.lightbox = Lightbox(image: image, title: "Sent to Agentman")
+                    store.lightbox = Lightbox(image: image, title: "Sent to Agentman", place: lightboxPlace)
                 } label: {
                     Image(nsImage: image)
                         .resizable()
@@ -278,6 +289,7 @@ struct SentFiles: View {
 
 private struct SentFile: View {
     @Environment(AgentsStore.self) private var store
+    @Environment(\.lightboxPlace) private var lightboxPlace
     let path: String
     @State private var image: NSImage?
     @State private var missing = false
@@ -286,7 +298,7 @@ private struct SentFile: View {
         Group {
             if let image {
                 Button {
-                    store.lightbox = Lightbox(image: image, title: (path as NSString).lastPathComponent)
+                    store.lightbox = Lightbox(image: image, title: (path as NSString).lastPathComponent, place: lightboxPlace)
                 } label: {
                     Image(nsImage: image)
                         .resizable()

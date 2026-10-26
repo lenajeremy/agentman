@@ -25,6 +25,7 @@ import {
   toPosition,
   toRange,
 } from './convert'
+import { languageFor } from './syntax'
 
 /** What the page around the client does for it. */
 export interface Host {
@@ -472,7 +473,7 @@ async function preview(uris: string[]) {
       if (parsed.scheme !== 'file') return
       const text = await host.read(parsed.fsPath)
       if (text === null || modelFor(uri)) return
-      previews.add(monaco.editor.createModel(text, undefined, parsed))
+      previews.add(monaco.editor.createModel(text, languageFor(parsed), parsed))
     }),
   )
 }

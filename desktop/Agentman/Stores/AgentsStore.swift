@@ -91,7 +91,12 @@ final class AgentsStore {
 
     let client: DaemonClient
     private var cursors: [String: String] = [:]
-    private var followed: String?
+    /// The agents whose threads are showing, in the main window or an
+    /// editor's panel: each one subscribed to once, however many show it.
+    private var following: [String: Int] = [:]
+    /// What the editors' agent panels show: agents by id, and Agentman.
+    private var inPanels: [String: Int] = [:]
+    private static let agentmanPanel = "agentman"
     private var started = false
 
     init(client: DaemonClient = DaemonClient()) {
@@ -486,8 +491,8 @@ final class AgentsStore {
             seeManagerIfShown()
             refreshBadge()
             // A reconnect starts the daemon's side afresh: follow again.
-            if let followed {
-                follow(followed)
+            for id in following.keys {
+                follow(id)
             }
         }
     }
@@ -567,7 +572,7 @@ final class AgentsStore {
     // MARK: - Agentman's news
 
     /// Whether the user is looking at the conversation with Agentman.
-    var viewingManager: Bool { selection == .manager && appActive }
+    var viewingManager: Bool { (selection == .manager || inPanels[Self.agentmanPanel] != nil) && appActive }
 
     /// News from Agentman: seen at once if the user is looking, a
     /// notification if not.
@@ -596,16 +601,46 @@ final class AgentsStore {
         guard old != selection else { return }
         seeManagerIfShown()
         if case .agent(let id) = old {
-            client.send(DaemonRequest(.unsubscribe, sessionId: id))
-            followed = nil
+            unwatch(id)
         }
         if case .agent(let id) = selection {
-            follow(id)
+            watch(id)
         }
     }
 
+    /// Starts following an agent's conversation live, the first time any
+    /// view shows it.
+    func watch(_ sessionId: String) {
+        following[sessionId, default: 0] += 1
+        if following[sessionId] == 1 { follow(sessionId) }
+    }
+
+    /// Stops following it once no view shows it any more.
+    func unwatch(_ sessionId: String) {
+        guard let count = following[sessionId] else { return }
+        if count > 1 {
+            following[sessionId] = count - 1
+        } else {
+            following[sessionId] = nil
+            client.send(DaemonRequest(.unsubscribe, sessionId: sessionId))
+        }
+    }
+
+    /// An editor's agent panel shows an agent's thread, or Agentman with
+    /// nil: what it shows counts as looked at, as in the main window.
+    func showInPanel(_ sessionId: String?) {
+        let key = sessionId ?? Self.agentmanPanel
+        inPanels[key, default: 0] += 1
+        if let sessionId { watch(sessionId) } else { seeManagerIfShown() }
+    }
+
+    func hideFromPanel(_ sessionId: String?) {
+        let key = sessionId ?? Self.agentmanPanel
+        if let count = inPanels[key] { inPanels[key] = count > 1 ? count - 1 : nil }
+        if let sessionId { unwatch(sessionId) }
+    }
+
     private func follow(_ sessionId: String) {
-        followed = sessionId
         client.send(DaemonRequest(.subscribe, sessionId: sessionId))
         Task {
             var request = DaemonRequest(.fetchMessages, sessionId: sessionId)
@@ -656,7 +691,7 @@ final class AgentsStore {
 
     /// Whether the user is looking at that agent's thread right now.
     private func looking(at sessionId: String) -> Bool {
-        appActive && selection == .agent(sessionId)
+        appActive && (selection == .agent(sessionId) || inPanels[sessionId] != nil)
     }
 
 

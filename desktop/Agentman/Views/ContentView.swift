@@ -54,7 +54,7 @@ struct ContentView: View {
         }
         .animation(.easeOut(duration: 0.2), value: store.away.digest?.id)
         .overlay {
-            if let box = store.lightbox {
+            if let box = store.lightbox, box.place == nil {
                 LightboxView(box: box)
             }
         }

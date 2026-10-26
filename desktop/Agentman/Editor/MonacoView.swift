@@ -15,6 +15,8 @@ struct MonacoView: NSViewRepresentable {
     var tabs: [Tab]
     var activeID: UUID?
     var fontSize: Double
+    /// Vim's keys in the editor, as the setting says.
+    var vim = false
 
     struct Tab: Equatable {
         let id: UUID
@@ -48,7 +50,7 @@ struct MonacoView: NSViewRepresentable {
     }
 
     func updateNSView(_ host: MonacoHost, context: Context) {
-        host.controller?.sync(tabs: tabs, activeID: activeID, fontSize: fontSize)
+        host.controller?.sync(tabs: tabs, activeID: activeID, fontSize: fontSize, vim: vim)
     }
 
     static func dismantleNSView(_ host: MonacoHost, coordinator: ()) {
@@ -98,7 +100,8 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageH
     private var opened: [UUID: MonacoView.Tab] = [:]
     private var shown: UUID?
     private var fontSize = 0.0
-    private var wanted: (tabs: [MonacoView.Tab], activeID: UUID?, fontSize: Double) = ([], nil, 13)
+    private var vim: Bool?
+    private var wanted: (tabs: [MonacoView.Tab], activeID: UUID?, fontSize: Double, vim: Bool) = ([], nil, 13, false)
     private var release: Task<Void, Never>?
     /// Finding am serve's language servers, until it answers.
     private var languages: Task<Void, Never>?
@@ -233,12 +236,16 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageH
 
     // MARK: - Keeping the page in step
 
-    func sync(tabs: [MonacoView.Tab], activeID: UUID?, fontSize: Double) {
-        wanted = (tabs, activeID, fontSize)
+    func sync(tabs: [MonacoView.Tab], activeID: UUID?, fontSize: Double, vim: Bool) {
+        wanted = (tabs, activeID, fontSize, vim)
         guard ready, let store else { return }
         if fontSize != self.fontSize {
             self.fontSize = fontSize
             call("agentman.configure({ fontSize })", ["fontSize": fontSize])
+        }
+        if vim != self.vim {
+            self.vim = vim
+            call("agentman.configure({ vim })", ["vim": vim])
         }
         let ids = Set(tabs.map(\.id))
         for id in opened.keys where !ids.contains(id) {
@@ -312,6 +319,13 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageH
 
     // MARK: - Commands
 
+    /// Gives the editor the keyboard, as Vim's Ctrl-W l does.
+    func focus() {
+        guard ready else { return }
+        webView.window?.makeFirstResponder(webView)
+        call("agentman.focus()")
+    }
+
     /// Runs one of Monaco's actions in the file in front.
     func run(_ action: String) {
         guard ready else { return }
@@ -334,8 +348,9 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageH
             opened = [:]
             shown = nil
             fontSize = 0
+            vim = nil
             sendTheme()
-            sync(tabs: wanted.tabs, activeID: wanted.activeID, fontSize: wanted.fontSize)
+            sync(tabs: wanted.tabs, activeID: wanted.activeID, fontSize: wanted.fontSize, vim: wanted.vim)
             connectLanguages()
         case "changes":
             guard let document = document(body["id"]), let gen = body["gen"] as? Int,
@@ -376,6 +391,19 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageH
             // Go to Definition, into another file.
             guard let path = body["path"] as? String else { return }
             store?.open(fileAt: URL(fileURLWithPath: path))
+        case "vim":
+            // The mode, or none once Vim is off.
+            store?.vimMode = body["mode"] as? String
+            store?.vimKeys = ""
+        case "vimKeys":
+            store?.vimKeys = body["keys"] as? String ?? ""
+        case "command":
+            guard let name = body["name"] as? String else { return }
+            store?.vimCommand(name, path: body["path"] as? String)
+        case "clipboard":
+            // A Vim yank, on the Mac's clipboard too.
+            guard let text = body["text"] as? String else { return }
+            Clipboard.copy(text)
         case "lspClosed":
             // am serve went away, or restarted: find it again.
             connectLanguages(after: .seconds(2))
@@ -654,42 +682,36 @@ enum EditorTheme {
                 "peekViewResult.matchHighlightBackground": hex(Palette.needsYou, 0.3),
                 "peekViewResult.selectionBackground": hex(Palette.working, 0.14),
             ]
-            let tokens: [String: String] = [
-                "keyword": hex(Palette.codeKeyword),
-                "metatag": hex(Palette.codeKeyword),
-                "string": hex(Palette.codeString),
-                "regexp": hex(Palette.codeString),
-                "attribute.value": hex(Palette.codeString),
-                "number": hex(Palette.codeNumber),
-                "attribute.name": hex(Palette.codeNumber),
+            // What each piece of code is, by role (editor-web/src/roles.ts):
+            // keywords and built-in types violet, types blue, functions gold,
+            // properties and keys cyan, strings green, numbers orange.
+            let syntax: [String: String] = [
+                "text": hex(Palette.text),
                 "comment": hex(Palette.codeComment),
+                "string": hex(Palette.codeString),
+                "string.escape": hex(Palette.codeNumber),
+                "regexp": hex(Palette.codeString),
+                "number": hex(Palette.codeNumber),
+                "constant": hex(Palette.codeKeyword),
+                "keyword": hex(Palette.codeKeyword),
+                "operator": hex(Palette.text),
                 "type": hex(Palette.codeType),
-                "annotation": hex(Palette.codeType),
-                "tag": hex(Palette.codeType),
-                "predefined": hex(Palette.codeType),
-                // What the language server says a name is: kinds of type in
-                // the type colour; functions, variables and the rest stay text.
-                "class": hex(Palette.codeType),
-                "interface": hex(Palette.codeType),
-                "struct": hex(Palette.codeType),
-                "enum": hex(Palette.codeType),
-                "typeParameter": hex(Palette.codeType),
-                "decorator": hex(Palette.codeType),
-                "enumMember": hex(Palette.codeNumber),
-                "macro": hex(Palette.codeKeyword),
-                // Monaco's own theme would colour these; the palette keeps
-                // them text. true, false and nil stay keywords.
-                "variable": hex(Palette.text),
-                "variable.readonly.defaultLibrary": hex(Palette.codeKeyword),
-                "parameter": hex(Palette.text),
-                "property": hex(Palette.text),
-                "namespace": hex(Palette.text),
-                "function": hex(Palette.text),
-                "method": hex(Palette.text),
-                "event": hex(Palette.text),
-                "label": hex(Palette.text),
+                "type.primitive": hex(Palette.codeKeyword),
+                "function": hex(Palette.codeFunction),
+                "property": hex(Palette.codeProperty),
+                "tag": hex(Palette.codeKeyword),
+                "delimiter.tag": hex(Palette.faint),
+                "heading": hex(Palette.codeKeyword),
+                "markup.bold": hex(Palette.text),
+                "markup.italic": hex(Palette.text),
+                "markup.strike": hex(Palette.muted),
+                "link": hex(Palette.codeType),
+                "diff.inserted": hex(Palette.codeString),
+                "diff.deleted": hex(Palette.errorText),
+                "diff.changed": hex(Palette.codeNumber),
+                "invalid": hex(Palette.errorText),
             ]
-            theme = ["dark": dark, "colors": colors, "tokens": tokens]
+            theme = ["dark": dark, "colors": colors, "syntax": syntax]
         }
         return theme
     }

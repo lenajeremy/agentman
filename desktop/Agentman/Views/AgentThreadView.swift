@@ -4,7 +4,11 @@ import SwiftUI
 /// to answer when it has one.
 struct AgentThreadView: View {
     @Environment(AgentsStore.self) private var store
+    @Environment(\.fileMentions) private var mentions
     let session: Session
+    /// In an editor's agent panel: narrow, with no toolbar or title of its
+    /// own, as the panel has its own header.
+    var inPanel = false
     @State private var draft = ""
     @State private var attachments: [Attachment] = []
     @State private var dropping = false
@@ -27,13 +31,102 @@ struct AgentThreadView: View {
     private var canSendNow: Bool { session.kind == "claude" && session.inject == "tmux" }
 
     var body: some View {
+        if inPanel {
+            thread
+        } else {
+            thread
+            .confirmationDialog("End this session?", isPresented: $confirmEnd) {
+                Button("End session") {
+                    Task { store.actionError[session.id] = await store.end(session.id) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Its terminal closes. The conversation is kept, and you can resume it from its folder.")
+            }
+            .inspector(isPresented: $showFiles) {
+                WorkspacePanel(session: session, tab: $filesTab)
+                    .inspectorColumnWidth(min: 320, ideal: 480, max: 1100)
+            }
+            .onAppear {
+                // For screenshots and tests: the files panel open on a tab.
+                if let tab = ProcessInfo.processInfo.environment["AGENTMAN_FILES"].flatMap(WorkspaceTab.init(rawValue:)) {
+                    filesTab = tab
+                    showFiles = true
+                }
+            }
+            // The window keeps the name; the toolbar shows ThreadTitle instead,
+            // which renames the session when clicked.
+            .navigationTitle(session.name)
+            .toolbar(removing: .title)
+            .toolbar {
+                if #available(macOS 26, *) {
+                    // Plain text on the title bar, as the system title was.
+                    ToolbarItem(placement: .navigation) {
+                        ThreadTitle(session: session, subtitle: subtitle)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                    ToolbarSpacer(.flexible)
+                } else {
+                    ToolbarItem(placement: .navigation) {
+                        ThreadTitle(session: session, subtitle: subtitle)
+                    }
+                }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    if let servers = session.servers, !servers.isEmpty {
+                        ServersMenu(session: session, servers: servers)
+                    }
+                    if FileManager.default.fileExists(atPath: session.cwd) {
+                        Button {
+                            EditorOpener.open(folder: session.cwd, with: openWindow)
+                        } label: {
+                            Label("Open in Editor", systemImage: "chevron.left.forwardslash.chevron.right")
+                        }
+                        .help("Open \((session.cwd as NSString).lastPathComponent) in the editor")
+                        Button {
+                            EditorOpener.openTerminal(folder: session.cwd, with: openWindow)
+                        } label: {
+                            Label("Open Terminal", systemImage: "terminal")
+                        }
+                        .help("A terminal in \((session.cwd as NSString).lastPathComponent)")
+                    }
+                    Button {
+                        showFiles.toggle()
+                    } label: {
+                        Label("Files", systemImage: "sidebar.right")
+                    }
+                    .help(showFiles ? "Hide files" : "Files, changes and history")
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
+                    if Self.endable(session) {
+                        Menu {
+                            Button("End session…") { confirmEnd = true }
+                        } label: {
+                            Label("More", systemImage: "ellipsis")
+                        }
+                        .menuIndicator(.hidden)
+                        .help("More")
+                    }
+                    if session.state == .busy, session.canReceive {
+                        Button {
+                            store.interrupt(session.id)
+                        } label: {
+                            Label("Stop", systemImage: "stop.fill")
+                        }
+                        .help("Stop the agent's current turn")
+                    }
+                }
+            }
+        }
+    }
+
+    /// The conversation and the box under it, in the window or a panel.
+    private var thread: some View {
         VStack(spacing: 0) {
             if let waiting = session.artifactsToReview, waiting > 0 {
                 ReviewBar(count: waiting, agent: AgentName.of(session.kind)) {
                     filesTab = .plans
                     showFiles = true
                 }
-                .padding(.horizontal, 36)
+                .padding(.horizontal, gutter)
                 .padding(.top, 10)
                 .frame(maxWidth: 820)
                 .frame(maxWidth: .infinity)
@@ -43,7 +136,7 @@ struct AgentThreadView: View {
                     filesTab = .changes
                     showFiles = true
                 }
-                .padding(.horizontal, 36)
+                .padding(.horizontal, gutter)
                 .padding(.top, 10)
                 .frame(maxWidth: 820)
                 .frame(maxWidth: .infinity)
@@ -87,7 +180,7 @@ struct AgentThreadView: View {
                         // keeps room above the composer.
                         Color.clear.frame(height: 1).id("end")
                     }
-                    .padding(.horizontal, 36)
+                    .padding(.horizontal, gutter)
                     .padding(.top, 24)
                     .padding(.bottom, 6)
                     .frame(maxWidth: 820)
@@ -156,34 +249,15 @@ struct AgentThreadView: View {
                 )
                 }
             }
-            .padding(.horizontal, 36)
+            .padding(.horizontal, gutter)
             .padding(.top, 4)
             .padding(.bottom, 22)
             .frame(maxWidth: 820)
             .frame(maxWidth: .infinity)
         }
-        .confirmationDialog("End this session?", isPresented: $confirmEnd) {
-            Button("End session") {
-                Task { store.actionError[session.id] = await store.end(session.id) }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Its terminal closes. The conversation is kept, and you can resume it from its folder.")
-        }
-        .inspector(isPresented: $showFiles) {
-            WorkspacePanel(session: session, tab: $filesTab)
-                .inspectorColumnWidth(min: 320, ideal: 480, max: 1100)
-        }
         // An unsent draft waits for the user's return, as on the phone.
         .onAppear { draft = store.drafts[session.id] ?? "" }
         .onChange(of: draft) { _, now in store.saveDraft(now, for: session.id) }
-        .onAppear {
-            // For screenshots and tests: the files panel open on a tab.
-            if let tab = ProcessInfo.processInfo.environment["AGENTMAN_FILES"].flatMap(WorkspaceTab.init(rawValue:)) {
-                filesTab = tab
-                showFiles = true
-            }
-        }
         // The count is read when the thread opens and after each turn.
         .task(id: session.state == .busy) {
             guard session.state != .busy else { return }
@@ -200,68 +274,10 @@ struct AgentThreadView: View {
             }
             return true
         }
-        // The window keeps the name; the toolbar shows ThreadTitle instead,
-        // which renames the session when clicked.
-        .navigationTitle(session.name)
-        .toolbar(removing: .title)
-        .toolbar {
-            if #available(macOS 26, *) {
-                // Plain text on the title bar, as the system title was.
-                ToolbarItem(placement: .navigation) {
-                    ThreadTitle(session: session, subtitle: subtitle)
-                }
-                .sharedBackgroundVisibility(.hidden)
-                ToolbarSpacer(.flexible)
-            } else {
-                ToolbarItem(placement: .navigation) {
-                    ThreadTitle(session: session, subtitle: subtitle)
-                }
-            }
-            ToolbarItemGroup(placement: .primaryAction) {
-                if let servers = session.servers, !servers.isEmpty {
-                    ServersMenu(session: session, servers: servers)
-                }
-                if FileManager.default.fileExists(atPath: session.cwd) {
-                    Button {
-                        EditorOpener.open(folder: session.cwd, with: openWindow)
-                    } label: {
-                        Label("Open in Editor", systemImage: "chevron.left.forwardslash.chevron.right")
-                    }
-                    .help("Open \((session.cwd as NSString).lastPathComponent) in the editor")
-                    Button {
-                        EditorOpener.openTerminal(folder: session.cwd, with: openWindow)
-                    } label: {
-                        Label("Open Terminal", systemImage: "terminal")
-                    }
-                    .help("A terminal in \((session.cwd as NSString).lastPathComponent)")
-                }
-                Button {
-                    showFiles.toggle()
-                } label: {
-                    Label("Files", systemImage: "sidebar.right")
-                }
-                .help(showFiles ? "Hide files" : "Files, changes and history")
-                .keyboardShortcut("e", modifiers: [.command, .shift])
-                if Self.endable(session) {
-                    Menu {
-                        Button("End session…") { confirmEnd = true }
-                    } label: {
-                        Label("More", systemImage: "ellipsis")
-                    }
-                    .menuIndicator(.hidden)
-                    .help("More")
-                }
-                if session.state == .busy, session.canReceive {
-                    Button {
-                        store.interrupt(session.id)
-                    } label: {
-                        Label("Stop", systemImage: "stop.fill")
-                    }
-                    .help("Stop the agent's current turn")
-                }
-            }
-        }
     }
+
+    /// The space at either side of the conversation: less in a panel.
+    private var gutter: CGFloat { inPanel ? 14 : 36 }
 
     private static let resumableKinds: Set<String> = ["claude", "codex", "cursor-cli", "kiro", "antigravity"]
 
@@ -297,8 +313,10 @@ struct AgentThreadView: View {
     }
 
     private func send() {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        var text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { return }
+        // Files named with @ in the editor, by a path the agent can open.
+        if let mentions { text = mentions.resolve(text, folder: session.cwd) }
         sending = true
         followRequest += 1
         let images = Attachments.encoded(attachments)
@@ -1137,6 +1155,7 @@ private struct QueuedBubble: View {
 /// with the button, pasted or dropped, and wait above the words until sent.
 struct Composer: View {
     @Environment(AgentsStore.self) private var store
+    @Environment(\.fileMentions) private var mentions
     @Binding var text: String
     /// Nil for an agent that can't be messaged, so nothing offers images.
     var attachments: Binding<[Attachment]>?
@@ -1171,7 +1190,8 @@ struct Composer: View {
                 focused: $focused,
                 onSubmit: { if canSend { onSend() } },
                 onImages: attachments == nil ? nil : { add($0) },
-                onDropTargeted: onDropTargeted
+                onDropTargeted: onDropTargeted,
+                mentions: mentions
             )
             .opacity(enabled ? 1 : 0.6)
             .padding(.horizontal, 6)
@@ -1237,6 +1257,16 @@ struct Composer: View {
                 .strokeBorder(focused ? Palette.fillStrong : Palette.line, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+        // The files for `@`, just above the box.
+        .overlay(alignment: .top) {
+            if let mentions, mentions.isOpen {
+                // Hung from the box's top edge, rising from it.
+                MentionList(mentions: mentions)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 6)
+                    .frame(height: 0, alignment: .bottom)
+            }
+        }
     }
 
     private func switchMenu(values: [String], current: String?, label: @escaping (String) -> String,

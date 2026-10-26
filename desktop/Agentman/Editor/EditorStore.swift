@@ -74,6 +74,44 @@ final class EditorStore {
     private(set) var branch: String?
     private(set) var isRepository = false
     var quickOpen = false
+    /// Vim's mode in the editor while Vim is on ("normal", "insert",
+    /// "visual", "visual line", "visual block", "replace"), and the keys of
+    /// a command not finished yet.
+    var vimMode: String?
+    var vimKeys = ""
+    /// The agent panel at the window's right, open as it was last left.
+    var showAgentPanel = UserDefaults.standard.bool(forKey: "agentPanelOpen") {
+        didSet { UserDefaults.standard.set(showAgentPanel, forKey: "agentPanelOpen") }
+    }
+    /// What the panel shows: nil until it first opens, when it picks the
+    /// agent working on the folder.
+    var panelRoute: PanelRoute?
+    /// The folder's files for `@` in the panel's message box.
+    @ObservationIgnored private(set) var mentions: FileMentions!
+
+    // The tree's Vim keys (TreeVim.swift).
+    /// Files and folders marked with Space or v, for one action on all.
+    var marked: Set<String> = []
+    /// What y, c or x took, for p to put somewhere.
+    var treeClipboard: TreeClipboard?
+    /// The folder a new file or folder goes in, while a asks its name.
+    var creatingIn: String?
+    /// The row being renamed in place, after r.
+    var renamingInTree: String?
+    /// What / filters the tree to; nil when not filtering.
+    var treeFilter: String?
+    /// The tree's keys, after ?.
+    var showTreeKeys = false
+    /// What a key just did, said for a moment in the status bar.
+    private(set) var notice: String?
+    /// Files and folders waiting for the user to confirm the Trash.
+    var trashing: [FileEntry] = []
+    /// Keys typed toward a command of more than one: g, then g or y.
+    @ObservationIgnored var treeKeys = ""
+    /// Set while a key moves the tree's selection, so moving over a file
+    /// doesn't open it.
+    @ObservationIgnored var movingInTree = false
+    @ObservationIgnored private var noticeTask: Task<Void, Never>?
     /// The shells in the terminal panel; they run on while the panel is
     /// hidden or the window closed, until the app quits.
     private(set) var terminals: [TerminalSession] = []
@@ -87,6 +125,8 @@ final class EditorStore {
     private(set) var allFiles: [String] = []
     @ObservationIgnored private var allFilesAt: Date?
     @ObservationIgnored weak var window: NSWindow?
+    /// The tree's own view, for giving it the keyboard.
+    @ObservationIgnored weak var treeView: NSOutlineView?
     /// The page the files are edited in, kept while the window is closed,
     /// for a while, so each tab's undo and scroll are there when it opens.
     @ObservationIgnored var monaco: MonacoController?
@@ -96,6 +136,17 @@ final class EditorStore {
     init(root: URL) {
         self.root = root
         children[""] = Self.list("", in: root)
+        mentions = FileMentions(
+            root: root,
+            files: { [weak self] in self?.allFiles ?? [] },
+            suggested: { [weak self] in
+                guard let self else { return [] }
+                let open = documents.filter { !$0.readOnly && $0.kind == .text }
+                let front = active.flatMap { $0.readOnly ? nil : $0.path }
+                return (front.map { [$0] } ?? []) + open.map(\.path) + marks.filter { $0.value != .deleted }.keys.sorted()
+            },
+            load: { [weak self] in await self?.loadAllFiles() }
+        )
     }
 
     var name: String { root.lastPathComponent }
@@ -212,6 +263,66 @@ final class EditorStore {
         for document in documents where document.isDirty { document.save() }
     }
 
+    /// Vim's `:` commands that are the editor's: `:w`, `:q`, `:wq`, `:q!`,
+    /// `:wa`, `:qa`, `:e path` and `:Ex`.
+    func vimCommand(_ name: String, path: String? = nil) {
+        switch name {
+        case "save":
+            saveActive()
+        case "close":
+            if let active { requestClose(active) }
+        case "discard":
+            if let active { close(active) }
+        case "saveClose":
+            if let active, !active.isDirty || active.save() { close(active) }
+        case "saveAll":
+            saveAll()
+        case "closeAll":
+            closeSaved()
+            if let dirty = documents.first(where: \.isDirty) { activeID = dirty.id; requestClose(dirty) }
+        case "saveCloseAll":
+            saveAll()
+            closeSaved()
+        case "open":
+            guard let path, !path.isEmpty else { quickOpen = true; return }
+            let url = path.hasPrefix("/") ? URL(fileURLWithPath: path)
+                : path.hasPrefix("~") ? URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+                : root.appendingPathComponent(path)
+            if FileManager.default.fileExists(atPath: url.path) {
+                open(fileAt: url)
+            } else {
+                problem = "There's no file at \(path)."
+            }
+        case "goToFile":
+            quickOpen = true
+        case "tree":
+            focusTree()
+        default:
+            break
+        }
+    }
+
+    // MARK: - Focus
+
+    /// Puts the keyboard in the file tree, at the file in front, as Vim's
+    /// Ctrl-W h does.
+    func focusTree() {
+        guard let window, let tree = treeView, tree.window === window else { return }
+        if selection == nil || !(entryExists(selection!)) {
+            selection = active.flatMap { $0.readOnly ? nil : $0.path } ?? entries(in: "").first?.path
+        }
+        window.makeFirstResponder(tree)
+    }
+
+    /// Puts the keyboard back in the editor.
+    func focusEditor() {
+        monaco?.focus()
+    }
+
+    private func entryExists(_ path: String) -> Bool {
+        entries(in: (path as NSString).deletingLastPathComponent).contains { $0.path == path }
+    }
+
     // MARK: - Terminal
 
     var activeTerminal: TerminalSession? { terminals.first { $0.id == activeTerminalID } }
@@ -292,13 +403,24 @@ final class EditorStore {
         return nil
     }
 
-    private func childPath(_ folder: String, _ name: String) -> String? {
+    /// Says what just happened in the status bar, for a moment.
+    func flash(_ text: String) {
+        notice = text
+        noticeTask?.cancel()
+        noticeTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2.5))
+            guard !Task.isCancelled else { return }
+            self?.notice = nil
+        }
+    }
+
+    func childPath(_ folder: String, _ name: String) -> String? {
         let name = name.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains(":") else { return nil }
         return folder.isEmpty ? name : folder + "/" + name
     }
 
-    private func relist(_ folder: String) {
+    func relist(_ folder: String) {
         children[folder] = Self.list(folder, in: root)
     }
 

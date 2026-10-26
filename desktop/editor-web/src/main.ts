@@ -8,6 +8,8 @@
 
 import * as monaco from 'monaco-core'
 import * as lsp from './lsp'
+import * as syntax from './syntax'
+import * as vim from './vim'
 
 declare const WORKER_SOURCE: string
 
@@ -23,11 +25,12 @@ interface Doc {
   readOnly?: boolean
 }
 
-/** Colours from the app's palette, for the appearance in use. */
+/** Colours from the app's palette, for the appearance in use: the editor's,
+ * and the code's by role. */
 interface Theme {
   dark: boolean
   colors: Record<string, string>
-  tokens: Record<string, string>
+  syntax: syntax.Syntax
 }
 
 interface Open {
@@ -62,6 +65,9 @@ const workerURL = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: 'text/ja
 ;(self as unknown as { MonacoEnvironment: monaco.Environment }).MonacoEnvironment = {
   getWorker: () => new Worker(workerURL),
 }
+
+syntax.install((message) => post({ type: 'log', message }))
+vim.setup({ post })
 
 const docs = new Map<string, Open>()
 let active: string | null = null
@@ -144,13 +150,38 @@ function isAppKey(e: KeyboardEvent): boolean {
   if (e.ctrlKey && !e.metaKey) return key === '`' || e.code === 'Backquote'
   if (!e.metaKey || e.ctrlKey) return false
   if (e.shiftKey && !e.altKey) return key === 'e'
-  return ['s', 'p', 'k', 'n', 'o', 'w', ',', '=', '+', '-', '0'].includes(key)
+  return ['s', 'p', 'k', 'n', 'o', 'w', 'l', ',', '=', '+', '-', '0'].includes(key)
+}
+
+/** Set after Ctrl-W in Vim's normal mode: the next key says where to go. */
+let windowKey = false
+
+/** Vim's Ctrl-W h and l: the file tree on the left, the editor on the right. */
+function vimWindowKey(e: KeyboardEvent): boolean {
+  if (!vim.isOn() || vim.mode === 'insert' || (e.target as HTMLElement | null)?.closest?.('#vim')) return false
+  if (windowKey) {
+    windowKey = false
+    if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) {
+      windowKey = true
+      return false
+    }
+    if (e.key === 'h' || e.key === 'H' || e.key === 'ArrowLeft') post({ type: 'command', name: 'tree' })
+    return true
+  }
+  if (e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'w') {
+    windowKey = true
+    return true
+  }
+  return false
 }
 
 window.addEventListener(
   'keydown',
   (e) => {
-    if (isAppKey(e)) {
+    if (vimWindowKey(e)) {
+      e.stopImmediatePropagation()
+      e.preventDefault()
+    } else if (isAppKey(e)) {
       e.stopImmediatePropagation()
     } else if (e.key === 'F1') {
       // Monaco's own command list: the app's ⌘K has these commands.
@@ -239,19 +270,28 @@ function revealPending(model: monaco.editor.ITextModel) {
 }
 
 const agentman = {
-  configure(settings: { theme?: Theme; fontSize?: number }) {
+  configure(settings: { theme?: Theme; fontSize?: number; vim?: boolean }) {
     if (settings.theme) {
-      const { dark, colors, tokens } = settings.theme
+      const { dark, colors } = settings.theme
       monaco.editor.defineTheme('agentman', {
         base: dark ? 'vs-dark' : 'vs',
         inherit: true,
-        rules: Object.entries(tokens).map(([token, foreground]) => ({ token, foreground: foreground.replace('#', '') })),
+        rules: syntax.rules(settings.theme.syntax),
         colors,
       })
       monaco.editor.setTheme('agentman')
       document.body.style.background = colors['editor.background'] ?? ''
+      // The Vim command line, in the editor's colours.
+      document.body.style.setProperty('--widget', colors['editorWidget.background'] ?? '')
+      document.body.style.setProperty('--widget-border', colors['editorWidget.border'] ?? '')
+      document.body.style.setProperty('--text', colors['editor.foreground'] ?? '')
+      document.body.style.setProperty('--faint', colors['editorLineNumber.foreground'] ?? '')
     }
-    if (settings.fontSize) editor.updateOptions({ fontSize: settings.fontSize })
+    if (settings.fontSize) {
+      editor.updateOptions({ fontSize: settings.fontSize })
+      document.body.style.setProperty('--font-size', `${settings.fontSize}px`)
+    }
+    if (settings.vim !== undefined) vim.setVim(editor, settings.vim)
   },
 
   /** Opens a file's model; answers with its length, which is shorter than
@@ -264,7 +304,7 @@ const agentman = {
       lsp.forgetPreview(preview)
       preview.dispose()
     }
-    const model = monaco.editor.createModel(doc.text, undefined, uri)
+    const model = monaco.editor.createModel(doc.text, syntax.languageFor(uri), uri)
     model.updateOptions({
       tabSize: doc.tabSize,
       indentSize: doc.tabSize,
