@@ -244,7 +244,9 @@ func TestGoplsIsBuiltWithGoInstall(t *testing.T) {
 }
 
 func TestGoSupportWithoutGoSaysSo(t *testing.T) {
-	tools, _ := fakeTools(t, nil)
+	// Only an empty folder: CI machines have go in /usr/bin.
+	tools := &Tools{}
+	tools.use([]string{t.TempDir()})
 	in := &Installer{Dir: t.TempDir(), Tools: tools}
 	server := &Server{ID: "gopls", Name: "gopls", Language: "Go", Install: &Install{Version: "v1", GoPackage: "golang.org/x/tools/gopls"}}
 	if _, err := in.Install(context.Background(), server, func(string) {}); err == nil || !strings.Contains(err.Error(), "needs Go") {
