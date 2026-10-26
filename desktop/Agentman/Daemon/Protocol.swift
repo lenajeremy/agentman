@@ -86,6 +86,7 @@ enum RequestType: String, Codable, Sendable {
     case lspStatus = "lsp_status"
     case lspSet = "lsp_set"
     case lspRemove = "lsp_remove"
+    case sessionTerminal = "session_terminal"
 }
 
 struct DaemonRequest: Codable, Sendable {
@@ -187,6 +188,8 @@ struct DaemonEvent: Codable, Sendable {
 
     /// Where the editor's language servers are, on "lsp_endpoint".
     var lsp: LSPEndpoint?
+    /// How to show an agent's terminal, on "session_terminal".
+    var terminal: SessionTerminal?
     /// The editor's language servers, on "lsp_status".
     var languages: LanguagesState?
 }
@@ -218,6 +221,13 @@ struct LanguageChange: Codable, Sendable, Equatable {
     var path: String?
     var disabled: Bool?
     var noDownloads: Bool?
+}
+
+/// An agent's terminal: the tmux session it runs in, and the command that
+/// attaches a terminal to it.
+struct SessionTerminal: Codable, Sendable, Equatable {
+    var name: String
+    var argv: [String]
 }
 
 /// The language servers' WebSocket on loopback, and the token it wants.

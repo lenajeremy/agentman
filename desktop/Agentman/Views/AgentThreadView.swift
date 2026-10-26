@@ -82,12 +82,20 @@ struct AgentThreadView: View {
                             Label("Open in Editor", systemImage: "chevron.left.forwardslash.chevron.right")
                         }
                         .help("Open \((session.cwd as NSString).lastPathComponent) in the editor")
+                        // An agent Agentman runs in tmux shows its own live
+                        // terminal; any other, a shell in its folder.
                         Button {
-                            EditorOpener.openTerminal(folder: session.cwd, with: openWindow)
+                            if session.inject == "tmux" {
+                                showAgentTerminal()
+                            } else {
+                                EditorOpener.openTerminal(folder: session.cwd, with: openWindow)
+                            }
                         } label: {
-                            Label("Open Terminal", systemImage: "terminal")
+                            Label(session.inject == "tmux" ? "Agent's Terminal" : "Open Terminal", systemImage: "terminal")
                         }
-                        .help("A terminal in \((session.cwd as NSString).lastPathComponent)")
+                        .help(session.inject == "tmux"
+                              ? "\(session.name)'s own terminal, live. Closing it leaves the agent running."
+                              : "A terminal in \((session.cwd as NSString).lastPathComponent)")
                     }
                     Button {
                         showFiles.toggle()
@@ -273,6 +281,18 @@ struct AgentThreadView: View {
                 attachments.append(contentsOf: found.prefix(max(0, Attachments.maxCount - attachments.count)))
             }
             return true
+        }
+    }
+
+    /// Opens the agent's own terminal in its folder's editor.
+    private func showAgentTerminal() {
+        Task {
+            switch await store.terminal(for: session.id) {
+            case .success(let terminal):
+                EditorOpener.openAgentTerminal(folder: session.cwd, terminal: terminal, title: session.name, with: openWindow)
+            case .failure(let problem):
+                store.actionError[session.id] = problem.message
+            }
         }
     }
 

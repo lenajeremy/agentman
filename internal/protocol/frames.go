@@ -350,6 +350,10 @@ type Event struct {
 	Keys  []Key  `json:"keys,omitempty"`
 	// LSP answers ReqLSPEndpoint, on the local socket only.
 	LSP *LSPEndpoint `json:"lsp,omitempty"`
+	// Tmux answers ReqAgentsTmux, and Terminal ReqSessionTerminal, on the
+	// local socket only.
+	Tmux     *AgentsTmux      `json:"tmux,omitempty"`
+	Terminal *SessionTerminal `json:"terminal,omitempty"`
 	// Languages answers the editor's language server requests.
 	Languages *LanguagesState `json:"languages,omitempty"`
 	// Schedules answers ReqManagerSchedules.

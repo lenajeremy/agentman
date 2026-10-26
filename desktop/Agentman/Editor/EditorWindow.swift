@@ -23,6 +23,15 @@ enum EditorOpener {
         openWindow(id: "editor", value: store.root.path)
     }
 
+    /// Opens an agent's folder in the editor with the agent's own live
+    /// terminal in front.
+    @MainActor
+    static func openAgentTerminal(folder: String, terminal: SessionTerminal, title: String, with openWindow: OpenWindowAction) {
+        let store = EditorRegistry.shared.store(for: folder)
+        store.showAgentTerminal(terminal, title: title)
+        openWindow(id: "editor", value: store.root.path)
+    }
+
     @MainActor
     static func chooseFolder() -> String? {
         let panel = NSOpenPanel()

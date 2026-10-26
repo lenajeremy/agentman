@@ -18,7 +18,7 @@ func TestOnlyTheLocalSocketHandsOutTheLanguageServers(t *testing.T) {
 		passed = append(passed, req.Type)
 		return protocol.Event{Type: protocol.EvtError, Error: "unknown request"}
 	}
-	local := appRequests(daemon, languages, t.TempDir())
+	local := appRequests(daemon, languages, t.TempDir(), noPane)
 
 	reply := local(context.Background(), "local:1", protocol.Request{Type: protocol.ReqLSPEndpoint})
 	if reply.Type != protocol.EvtLSPEndpoint || reply.LSP == nil || reply.LSP.Token == "" ||
@@ -47,7 +47,7 @@ func TestLanguageSettingsAreSavedAndTakeEffect(t *testing.T) {
 	}
 	languages := lsp.NewHost(languageOptions(cfg, home))
 	defer languages.Close()
-	local := appRequests(func(context.Context, string, protocol.Request) protocol.Event { return protocol.Event{} }, languages, home)
+	local := appRequests(func(context.Context, string, protocol.Request) protocol.Event { return protocol.Event{} }, languages, home, noPane)
 	ask := func(req protocol.Request) protocol.Event {
 		return local(context.Background(), "local:1", req)
 	}
@@ -83,3 +83,5 @@ func TestLanguageSettingsAreSavedAndTakeEffect(t *testing.T) {
 		t.Error("an unknown server was changed")
 	}
 }
+
+func noPane(string) (string, bool) { return "", false }

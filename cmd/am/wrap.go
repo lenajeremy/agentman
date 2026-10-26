@@ -75,18 +75,77 @@ func runWrap(ctx context.Context, agent string, args []string) error {
 	name := tmux.NewName(agent)
 	command := append(append([]string{binary}, prefix...), args...)
 
-	if err := tmux.Launch(ctx, name, cwd, command); err != nil {
+	// The agent runs on Agentman's own tmux server, which am serve starts:
+	// started from here instead, it would belong to this terminal, and
+	// quitting the terminal app could end every agent on it.
+	note := ownServer(ctx)
+	if err := tmux.Launch(ctx, name, cwd, command, agentEnv(os.Environ())...); err != nil {
 		return err
 	}
 
 	// The agent needs a moment to register itself before the daemon can match
 	// it; attaching immediately is fine, this is only for the message below.
 	time.Sleep(150 * time.Millisecond)
-	fmt.Fprintf(os.Stderr, "%s\n", dim("agentman: reachable from your phone (tmux "+name+")"))
+	fmt.Fprintf(os.Stderr, "%s\n", dim("agentman: reachable from your phone; keeps running if you close this window (am attach brings it back)"))
+	if note != "" {
+		fmt.Fprintf(os.Stderr, "%s\n", dim("agentman: "+note))
+	}
 
 	// Replace this process with the tmux client so the user gets tmux's own
 	// terminal handling — signals, resizes, and scrollback all behave normally.
-	return tmux.Attach(name)
+	return tmux.Attach(ctx, name)
+}
+
+// ownServer asks am serve to start the agents' tmux server, or starts it
+// here when am serve isn't running. It returns what the user should know
+// about where the agent runs, if anything.
+func ownServer(ctx context.Context) string {
+	path, err := socketPath()
+	if err == nil {
+		ask, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		event, err := socketCall(path)(ask, protocol.Request{Type: protocol.ReqAgentsTmux})
+		if err == nil && event.Tmux != nil {
+			if event.Tmux.Service {
+				return ""
+			}
+			return "am serve was started from a terminal; am service install keeps agents running even after you quit every terminal app"
+		}
+	}
+	if err := tmux.EnsureServer(ctx); err != nil {
+		return err.Error()
+	}
+	return "am serve isn't running, so this agent belongs to this terminal app; am service install keeps agents running on their own"
+}
+
+// agentEnv is the environment an agent started from a terminal gets: the
+// shell's own, as a command typed there would, but not what describes this
+// terminal, since the agent runs in tmux, which sets those itself.
+func agentEnv(environ []string) []string {
+	var env []string
+	for _, entry := range environ {
+		name, _, ok := strings.Cut(entry, "=")
+		if !ok || name == "" || terminalVariable(name) {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return env
+}
+
+func terminalVariable(name string) bool {
+	switch name {
+	case "TERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "TERM_SESSION_ID", "TERMINFO", "COLORFGBG",
+		"TMUX", "TMUX_PANE", "PWD", "OLDPWD", "SHLVL", "_", "WINDOWID",
+		"LC_TERMINAL", "LC_TERMINAL_VERSION", "__CFBundleIdentifier", "SECURITYSESSIONID":
+		return true
+	}
+	for _, prefix := range []string{"GHOSTTY_", "ITERM_", "KITTY_", "WEZTERM_", "ALACRITTY_", "VSCODE_", "WARP_"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // kiroResumes reports whether arguments to `kiro-cli chat` reopen a session.

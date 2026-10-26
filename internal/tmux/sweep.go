@@ -120,6 +120,27 @@ func captureAll(ctx context.Context, sessions []Session) map[string]string {
 	if len(sessions) == 0 {
 		return nil
 	}
+	// One run per server: a run reaches one.
+	byServer := map[string][]Session{}
+	var order []string
+	for _, session := range sessions {
+		key := strings.Join(serverOf(session.Name), " ")
+		if _, seen := byServer[key]; !seen {
+			order = append(order, key)
+		}
+		byServer[key] = append(byServer[key], session)
+	}
+	panes := make(map[string]string, len(sessions))
+	for _, key := range order {
+		for name, pane := range captureOn(ctx, serverOf(byServer[key][0].Name), byServer[key]) {
+			panes[name] = pane
+		}
+	}
+	return panes
+}
+
+// captureOn captures the panes of sessions that all run on one server.
+func captureOn(ctx context.Context, server server, sessions []Session) map[string]string {
 	var nonce [8]byte
 	_, _ = rand.Read(nonce[:])
 	marker := func(index int) string {
@@ -132,7 +153,7 @@ func captureAll(ctx context.Context, sessions []Session) map[string]string {
 		}
 		args = append(args, "capture-pane", "-t", session.Name, "-p", ";", "display-message", "-p", marker(index))
 	}
-	out, _ := runOutput(ctx, args...)
+	out, _ := runOutputOn(ctx, server, args...)
 	panes := make(map[string]string, len(sessions))
 	for index, session := range sessions {
 		end := strings.Index(out, marker(index)+"\n")

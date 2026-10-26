@@ -9,11 +9,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/source"
+	"github.com/lenajeremy/agentman/internal/tmux"
 	"github.com/lenajeremy/agentman/internal/update"
 )
 
@@ -277,6 +279,18 @@ func runDoctor(ctx context.Context, args []string) error {
 		warn("discovery", discoverErr.Error())
 	}
 	check(true, "sessions found", fmt.Sprintf("%d running", len(sessions)))
+	// Agents outlive terminals only on their own tmux server, run by am serve
+	// as a login service.
+	if runtime.GOOS == "darwin" {
+		if serviceLoaded() {
+			check(true, "background service", "am serve starts at login; agents outlive terminals")
+		} else {
+			warn("background service", "not installed: quitting a terminal app can end agents (am service install)")
+		}
+	}
+	if pid := tmux.ServerPID(ctx); pid > 0 {
+		check(true, "agents' tmux server", fmt.Sprintf("%s (pid %d)", collapseHome(tmux.SocketPath()), pid))
+	}
 
 	fmt.Println("\nHooks")
 	cfg, err := hook.LoadConfig("")

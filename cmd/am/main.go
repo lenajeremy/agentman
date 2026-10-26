@@ -34,10 +34,14 @@ Usage:
   am history <session-id>     Print a session's recent messages
   am watch [session-id]       Follow sessions live (all, or one in detail)
   am serve                    Run the daemon (hooks + relay connection)
+  am service install          Run the daemon in the background from login, so
+                              agents keep running when you quit a terminal
+  am service status|restart|uninstall
   am pair                     Print a pairing code for your phone
   am expose <port>            Share a local port as a public link
   am servers                  List the web servers your agents have started
   am claude [args...]         Start Claude Code so you can message it later
+  am attach [name|number]     Show a running agent's terminal again
   am codex [args...]          Start Codex so you can message it later
   am opencode [args...]       Start OpenCode so you can message it later
   am cursor [args...]         Start Cursor Agent CLI so you can message it later
@@ -127,6 +131,10 @@ func main() {
 		err = runMCP(ctx, args)
 	case "lsp":
 		err = runLSP(ctx, args)
+	case "service":
+		err = runService(ctx, args)
+	case "attach":
+		err = runAttach(ctx, args)
 	case "doctor":
 		err = runDoctor(ctx, args)
 	case "version", "--version", "-v":

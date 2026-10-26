@@ -338,6 +338,19 @@ final class EditorStore {
         if !showTerminal { showTerminal = true }
     }
 
+    /// Shows an agent's live terminal in the panel, in its own tab, or
+    /// brings the tab back if it is already there.
+    func showAgentTerminal(_ terminal: SessionTerminal, title: String) {
+        if let open = terminals.first(where: { $0.command == terminal.argv && !$0.exited }) {
+            activeTerminalID = open.id
+        } else {
+            let session = TerminalSession(folder: root, number: terminals.count + 1, command: terminal.argv, title: title)
+            terminals.append(session)
+            activeTerminalID = session.id
+        }
+        if !showTerminal { showTerminal = true }
+    }
+
     func closeTerminal(_ session: TerminalSession) {
         session.terminate()
         guard let index = terminals.firstIndex(where: { $0.id == session.id }) else { return }

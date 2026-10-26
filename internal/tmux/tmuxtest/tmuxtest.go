@@ -68,7 +68,9 @@ func Isolate() (func(), error) {
 	return func() {
 		// Never kill-server, not even here: end each session on this socket by
 		// its exact name, and the server exits on its own once the last one is
-		// gone.
+		// gone. EnsureServer told it to stay up when empty, which it is told
+		// to stop doing first.
+		_ = exec.Command("tmux", "-S", socket, "set-option", "-s", "exit-empty", "on").Run()
 		out, _ := exec.Command("tmux", "-S", socket, "list-sessions", "-F", "#{session_name}").Output()
 		for _, name := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			if name != "" {

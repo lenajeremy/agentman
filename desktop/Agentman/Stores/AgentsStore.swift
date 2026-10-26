@@ -381,6 +381,18 @@ final class AgentsStore {
 
     /// Closes the pane a session runs in. Its conversation is kept, and it
     /// can be resumed. Returns the problem, if any.
+    /// How to show an agent's live terminal, or why it can't be.
+    func terminal(for sessionId: String) async -> Result<SessionTerminal, TerminalProblem> {
+        do {
+            let reply = try await client.request(DaemonRequest(.sessionTerminal, sessionId: sessionId))
+            if let terminal = reply.terminal { return .success(terminal) }
+            let problem = reply.error ?? "Its terminal can't be shown."
+            return .failure(TerminalProblem(message: problem.replacingOccurrences(of: "^daemon: ", with: "", options: .regularExpression)))
+        } catch {
+            return .failure(TerminalProblem(message: error.localizedDescription))
+        }
+    }
+
     func end(_ sessionId: String) async -> String? {
         do {
             let reply = try await client.request(DaemonRequest(.endSession, sessionId: sessionId))
@@ -731,4 +743,9 @@ final class AgentsStore {
         let name = (cwd as NSString).lastPathComponent
         return name.isEmpty ? cwd : name
     }
+}
+
+/// Why an agent's terminal can't be shown.
+struct TerminalProblem: Error {
+    let message: String
 }

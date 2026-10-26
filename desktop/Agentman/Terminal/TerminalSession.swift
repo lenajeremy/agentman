@@ -15,11 +15,15 @@ final class TerminalSession: Identifiable, @preconcurrency LocalProcessTerminalV
     /// The shell's exit code once it has ended.
     private(set) var exitCode: Int32?
     private(set) var exited = false
+    /// What runs instead of a plain shell: an agent's terminal, attached to
+    /// the tmux session it runs in. Closing this leaves the agent running.
+    let command: [String]?
 
-    init(folder: URL, number: Int) {
+    init(folder: URL, number: Int, command: [String]? = nil, title: String? = nil) {
         self.folder = folder
+        self.command = command
         let shell = Self.shell
-        title = number > 1 ? "\((shell as NSString).lastPathComponent) \(number)" : (shell as NSString).lastPathComponent
+        self.title = title ?? (number > 1 ? "\((shell as NSString).lastPathComponent) \(number)" : (shell as NSString).lastPathComponent)
         view = AgentmanTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 240))
         view.processDelegate = self
         view.onClear = { [weak self] in self?.clear() }
@@ -51,10 +55,17 @@ final class TerminalSession: Identifiable, @preconcurrency LocalProcessTerminalV
         exited = false
         exitCode = nil
         let shell = Self.shell
-        // A leading dash makes it a login shell, as Terminal starts one.
-        view.startProcess(executable: shell, args: [], environment: Self.environment,
+        // A leading dash makes it a login shell, as Terminal starts one. A
+        // command runs in one too, so it is found on the user's own PATH.
+        let args = command.map { ["-c", "exec " + $0.map(Self.quoted).joined(separator: " ")] } ?? []
+        view.startProcess(executable: shell, args: args, environment: Self.environment,
                           execName: "-" + (shell as NSString).lastPathComponent,
                           currentDirectory: folder.path)
+    }
+
+    /// A word as a shell reads it back unchanged.
+    nonisolated static func quoted(_ word: String) -> String {
+        "'" + word.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     /// A fresh shell in place of one that ended.

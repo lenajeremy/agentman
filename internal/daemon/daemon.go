@@ -1763,6 +1763,12 @@ func (d *Daemon) stopFollowAll(sessionID string, keepWaiting bool) {
 }
 
 // DisconnectSubscriber releases every follow owned by one app connection.
+// PaneFor reports the tmux session a session's agent runs in, if Agentman
+// started it in one.
+func (d *Daemon) PaneFor(sessionID string) (string, bool) {
+	return d.registry.PaneFor(sessionID)
+}
+
 func (d *Daemon) DisconnectSubscriber(subscriberID string) {
 	if subscriberID == "" {
 		return
