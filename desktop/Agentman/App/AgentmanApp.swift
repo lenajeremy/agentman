@@ -6,7 +6,15 @@ struct AgentmanApp: App {
     @State private var store = AgentsStore()
     @Environment(\.openWindow) private var openWindow
 
+    /// Unit tests run inside the app, as its host, and get none of it: no
+    /// window, no daemon, no editor on the user's folders, and nothing
+    /// restored from the user's own copy of the app.
+    static let underTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
     init() {
+        if Self.underTests {
+            UserDefaults.standard.register(defaults: ["ApplePersistenceIgnoreState": true])
+        }
         Fonts.register()
     }
 
@@ -14,13 +22,16 @@ struct AgentmanApp: App {
         // One window, not a group: links (agentman://agent/…) open in it
         // rather than in a new window each time.
         Window("Agentman", id: "main") {
-            ContentView()
-                .environment(store)
-                .task {
-                    Appearance.apply(UserDefaults.standard.string(forKey: "appearance") ?? "system")
-                    store.start()
-                }
+            if !Self.underTests {
+                ContentView()
+                    .environment(store)
+                    .task {
+                        Appearance.apply(UserDefaults.standard.string(forKey: "appearance") ?? "system")
+                        store.start()
+                    }
+            }
         }
+        .defaultLaunchBehavior(Self.underTests ? .suppressed : .automatic)
         .defaultSize(width: 1180, height: 760)
         .windowToolbarStyle(.unified(showsTitle: true))
         .commands {
@@ -46,7 +57,7 @@ struct AgentmanApp: App {
         // The editor: one window per folder, coming back as it was after a
         // relaunch.
         WindowGroup("Editor", id: "editor", for: String.self) { $folder in
-            if let folder {
+            if let folder, !Self.underTests {
                 EditorWindow(folder: folder, client: store.client)
             }
         }
