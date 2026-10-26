@@ -336,6 +336,8 @@ type Event struct {
 	Notes []Note `json:"notes,omitempty"`
 	Note  *Note  `json:"note,omitempty"`
 	Keys  []Key  `json:"keys,omitempty"`
+	// LSP answers ReqLSPEndpoint, on the local socket only.
+	LSP *LSPEndpoint `json:"lsp,omitempty"`
 	// Schedules answers ReqManagerSchedules.
 	Schedules []ManagerSchedule `json:"schedules,omitempty"`
 

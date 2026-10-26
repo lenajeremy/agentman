@@ -7,6 +7,7 @@
 // webkit.messageHandlers.editor.
 
 import * as monaco from 'monaco-core'
+import * as lsp from './lsp'
 
 declare const WORKER_SOURCE: string
 
@@ -33,6 +34,7 @@ interface Open {
   model: monaco.editor.ITextModel
   gen: number
   view: monaco.editor.ICodeEditorViewState | null
+  readOnly: boolean
 }
 
 const swift = (window as unknown as { webkit?: { messageHandlers?: { editor?: { postMessage(body: unknown): void } } } })
@@ -40,6 +42,18 @@ const swift = (window as unknown as { webkit?: { messageHandlers?: { editor?: { 
 
 function post(message: Record<string, unknown>) {
   swift?.postMessage(message)
+}
+
+const asker = (window as unknown as { webkit?: { messageHandlers?: { editorAsk?: { postMessage(body: unknown): Promise<unknown> } } } })
+  .webkit?.messageHandlers?.editorAsk
+
+/** Asks Swift something and waits for the answer. */
+async function ask<T>(message: Record<string, unknown>): Promise<T | null> {
+  try {
+    return ((await asker?.postMessage(message)) as T) ?? null
+  } catch {
+    return null
+  }
 }
 
 // Monaco's helper worker (diffs, links) starts from a blob: getWorker must
@@ -79,6 +93,35 @@ const editor = monaco.editor.create(document.getElementById('editor')!, {
 })
 
 editor.onDidChangeCursorPosition(() => reportCursor())
+
+function tabOf(model: monaco.editor.ITextModel): string | undefined {
+  for (const [id, open] of docs) if (open.model === model) return id
+  return undefined
+}
+
+lsp.setup({
+  post,
+  read: (path) => ask<string>({ type: 'read', path }),
+  open: (path) => post({ type: 'open', path }),
+  editElsewhere: async (files) => (await ask<boolean>({ type: 'edit', files })) === true,
+  tabOf,
+})
+
+// Go to Definition into another file: Swift opens its tab, and the range
+// is revealed when it comes to the front.
+monaco.editor.registerEditorOpener({
+  openCodeEditor(_source, resource, selectionOrPosition) {
+    if (resource.scheme !== 'file') return false
+    if (selectionOrPosition) {
+      const range = 'startLineNumber' in selectionOrPosition
+        ? selectionOrPosition
+        : monaco.Range.fromPositions(selectionOrPosition)
+      lsp.reveal.set(resource.toString(), range)
+    }
+    post({ type: 'open', path: resource.fsPath })
+    return true
+  },
+})
 
 function reportCursor() {
   const position = editor.getPosition()
@@ -185,6 +228,14 @@ function eol(text: string) {
   return text.includes('\r\n') ? monaco.editor.EndOfLineSequence.CRLF : monaco.editor.EndOfLineSequence.LF
 }
 
+function revealPending(model: monaco.editor.ITextModel) {
+  const range = lsp.reveal.get(model.uri.toString())
+  if (!range) return
+  lsp.reveal.delete(model.uri.toString())
+  editor.setSelection(monaco.Range.lift(range).collapseToStart())
+  editor.revealRangeInCenter(range, monaco.editor.ScrollType.Immediate)
+}
+
 const agentman = {
   configure(settings: { theme?: Theme; fontSize?: number }) {
     if (settings.theme) {
@@ -206,7 +257,11 @@ const agentman = {
   open(doc: Doc): number {
     agentman.close(doc.id)
     const uri = monaco.Uri.parse(doc.uri)
-    monaco.editor.getModel(uri)?.dispose()
+    const preview = monaco.editor.getModel(uri)
+    if (preview) {
+      lsp.forgetPreview(preview)
+      preview.dispose()
+    }
     const model = monaco.editor.createModel(doc.text, undefined, uri)
     model.updateOptions({
       tabSize: doc.tabSize,
@@ -215,7 +270,7 @@ const agentman = {
       // Brackets in the text's colour: calmer, and the colours stay for meaning.
       bracketColorizationOptions: { enabled: false, independentColorPoolPerBracketType: false },
     })
-    const open: Open = { model, gen: doc.gen, view: null }
+    const open: Open = { model, gen: doc.gen, view: null, readOnly: !!doc.readOnly }
     docs.set(doc.id, open)
     model.onDidChangeContent((e) => {
       if (quiet) return
@@ -226,6 +281,7 @@ const agentman = {
         .map((c) => ({ offset: c.rangeOffset, length: c.rangeLength, text: c.text }))
       post({ type: 'changes', id: doc.id, gen: open.gen, changes, length: model.getValueLength() })
     })
+    void lsp.attach(model)
     return model.getValueLength()
   },
 
@@ -236,6 +292,7 @@ const agentman = {
       editor.setModel(null)
       active = null
     }
+    lsp.detach(open.model)
     open.model.dispose()
     docs.delete(id)
   },
@@ -248,7 +305,7 @@ const agentman = {
     const view = wasActive ? editor.saveViewState() : open.view
     const text = open.model.getValue()
     const options = open.model.getOptions()
-    agentman.open({ id, uri, text, tabSize: options.tabSize, insertSpaces: options.insertSpaces, gen: open.gen })
+    agentman.open({ id, uri, text, tabSize: options.tabSize, insertSpaces: options.insertSpaces, gen: open.gen, readOnly: open.readOnly })
     const reopened = docs.get(id)!
     reopened.view = view
     if (wasActive) agentman.show(id, false)
@@ -275,10 +332,6 @@ const agentman = {
     docs.get(id)?.model.updateOptions({ tabSize, indentSize: tabSize, insertSpaces })
   },
 
-  setReadOnly(readOnly: boolean) {
-    editor.updateOptions({ readOnly, domReadOnly: readOnly })
-  },
-
   /** Brings a tab's model to the front, where it was left. */
   show(id: string | null, focus = true) {
     if (active === id) {
@@ -290,11 +343,33 @@ const agentman = {
     const next = id ? docs.get(id) : undefined
     active = next ? id : null
     editor.setModel(next?.model ?? null)
+    // A file from outside the folder is shown, not edited.
+    editor.updateOptions({ readOnly: next?.readOnly ?? false, domReadOnly: next?.readOnly ?? false })
     if (next?.view) editor.restoreViewState(next.view)
     if (next) {
+      revealPending(next.model)
       if (focus) editor.focus()
       reportCursor()
     }
+  },
+
+  /** Where the language servers are, from Swift, once am serve says. */
+  connect(url: string, token: string, folder: string) {
+    lsp.connect(url, token, folder)
+  },
+
+  filesChanged(changes: { path: string; type: number }[]) {
+    lsp.filesChanged(changes)
+  },
+
+  saved(id: string) {
+    const open = docs.get(id)
+    if (open) lsp.saved(open.model)
+  },
+
+  restartLanguage(id: string) {
+    const open = docs.get(id)
+    if (open) lsp.restart(open.model)
   },
 
   focus() {
@@ -303,6 +378,13 @@ const agentman = {
 
   text(id: string): string | null {
     return docs.get(id)?.model.getValue() ?? null
+  },
+
+  /** Shows a range in the file in front, as Go to Definition does. */
+  reveal(id: string, line: number, column: number) {
+    if (active !== id) return
+    editor.setPosition({ lineNumber: line, column })
+    editor.revealPositionInCenter({ lineNumber: line, column })
   },
 
   run(action: string) {

@@ -21,6 +21,8 @@ struct MonacoView: NSViewRepresentable {
         let path: String
         let revision: Int
         let indent: String
+        let readOnly: Bool
+        let saves: Int
 
         @MainActor
         init(_ document: EditorDocument) {
@@ -28,6 +30,8 @@ struct MonacoView: NSViewRepresentable {
             path = document.path
             revision = document.revision
             indent = document.indent
+            readOnly = document.readOnly
+            saves = document.saves
         }
     }
 
@@ -86,7 +90,7 @@ final class MonacoHost: NSView {
 
 /// The page, and the conversation with it.
 @MainActor
-final class MonacoController: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
+final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageHandlerWithReply, WKNavigationDelegate, WKUIDelegate {
     let webView: EditorWebView
     private weak var store: EditorStore?
     private var ready = false
@@ -96,6 +100,9 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKNavigationDele
     private var fontSize = 0.0
     private var wanted: (tabs: [MonacoView.Tab], activeID: UUID?, fontSize: Double) = ([], nil, 13)
     private var release: Task<Void, Never>?
+    /// Finding am serve's language servers, until it answers.
+    private var languages: Task<Void, Never>?
+    private var watcher: FolderWatcher?
 
     /// How long the page stays after its window closes.
     static let keep: Duration = .seconds(600)
@@ -110,6 +117,7 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKNavigationDele
         webView = EditorWebView(frame: .zero, configuration: configuration)
         super.init()
         content.add(WeakMessageHandler(self), name: "editor")
+        content.addScriptMessageHandler(WeakMessageHandler(self), contentWorld: .page, name: "editorAsk")
         webView.navigationDelegate = self
         webView.uiDelegate = self
         // The window's surface shows until the page has its colours.
@@ -128,6 +136,46 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKNavigationDele
     private func load() {
         ready = false
         webView.load(URLRequest(url: URL(string: "\(EditorScheme.scheme)://app/index.html")!))
+    }
+
+    deinit {
+        languages?.cancel()
+    }
+
+    // MARK: - Language servers
+
+    /// Asks am serve where the language servers are, and keeps asking while
+    /// it isn't running: the editor works without them, and picks them up
+    /// when it starts.
+    private func connectLanguages(after delay: Duration = .zero) {
+        languages?.cancel()
+        languages = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            while !Task.isCancelled {
+                guard let self, let client = self.store?.client, let root = self.store?.root else { return }
+                if let reply = try? await client.request(DaemonRequest(.lspEndpoint), timeout: 10), let endpoint = reply.lsp {
+                    guard !Task.isCancelled, self.ready else { return }
+                    self.call("agentman.connect(url, token, folder)", ["url": endpoint.url, "token": endpoint.token, "folder": root.path])
+                    self.watch(root)
+                    return
+                }
+                try? await Task.sleep(for: .seconds(10))
+            }
+        }
+    }
+
+    private func watch(_ folder: URL) {
+        guard watcher == nil else { return }
+        watcher = FolderWatcher(folder: folder) { [weak self] changes in
+            guard let self, self.ready else { return }
+            self.call("agentman.filesChanged(changes)", ["changes": changes.map { ["path": $0.path, "type": $0.type] }])
+        }
+    }
+
+    /// Starts a language server that stopped, for the status bar.
+    func restartLanguage(for document: EditorDocument) {
+        guard ready else { return }
+        call("agentman.restartLanguage(id)", ["id": document.id.uuidString])
     }
 
     // MARK: - Where the page sits
@@ -149,13 +197,18 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKNavigationDele
         place()
     }
 
-    /// The page sits in the newest place whose window is open. With none
-    /// left, its window has closed: the page goes after a while, unless the
-    /// window opens again. Every tab's text is in Swift, so nothing unsaved
-    /// goes with it; only undo does.
+    /// The page sits in the folder's own window when it has one (a second
+    /// window macOS restores for the folder is about to close, and a web
+    /// view moved out of a closed window may not draw again), else in the
+    /// newest place whose window is open. With none left, its window has
+    /// closed: the page goes after a while, unless the window opens again.
+    /// Every tab's text is in Swift, so nothing unsaved goes with it; only
+    /// undo does.
     func place() {
         hosts.removeAll { $0.host == nil }
-        guard let host = hosts.last(where: { $0.host?.isOpen == true })?.host else {
+        let own = store?.window
+        let candidates = hosts.compactMap(\.host).filter(\.isOpen)
+        guard let host = candidates.last(where: { own != nil && $0.window === own }) ?? candidates.last else {
             if release == nil { releaseLater() }
             return
         }
@@ -209,10 +262,14 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKNavigationDele
                     call("agentman.setOptions(id, tabSize, insertSpaces)",
                          ["id": tab.id.uuidString, "tabSize": Self.tabSize(tab.indent), "insertSpaces": tab.indent != "\t"])
                 }
+                if was.saves != tab.saves {
+                    call("agentman.saved(id)", ["id": tab.id.uuidString])
+                }
             } else {
                 let doc: [String: Any] = [
                     "id": tab.id.uuidString, "uri": document.url.absoluteString, "text": document.text,
                     "tabSize": Self.tabSize(tab.indent), "insertSpaces": tab.indent != "\t", "gen": tab.revision,
+                    "readOnly": tab.readOnly,
                 ]
                 call("return agentman.open(doc)", ["doc": doc]) { [weak self] length in
                     self?.check(document, length: length, revision: tab.revision)
@@ -279,6 +336,7 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKNavigationDele
             fontSize = 0
             sendTheme()
             sync(tabs: wanted.tabs, activeID: wanted.activeID, fontSize: wanted.fontSize)
+            connectLanguages()
         case "changes":
             guard let document = document(body["id"]), let gen = body["gen"] as? Int,
                   let raw = body["changes"] as? [[String: Any]], let length = body["length"] as? Int
@@ -304,11 +362,83 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKNavigationDele
             else { return }
             // After this message returns: the menu tracks the mouse until it closes.
             DispatchQueue.main.async { [weak self] in self?.showMenu(items, at: NSPoint(x: x, y: y)) }
+        case "language":
+            guard let document = document(body["id"]), let name = body["name"] as? String,
+                  let state = body["state"] as? String else { return }
+            let status = LanguageStatus(name: name, language: body["language"] as? String ?? "", state: state,
+                                        detail: body["detail"] as? String ?? "")
+            if document.language != status { document.language = status }
+        case "problems":
+            guard let document = document(body["id"]) else { return }
+            let problems = Problems(errors: body["errors"] as? Int ?? 0, warnings: body["warnings"] as? Int ?? 0)
+            if document.problems != problems { document.problems = problems }
+        case "open":
+            // Go to Definition, into another file.
+            guard let path = body["path"] as? String else { return }
+            store?.open(fileAt: URL(fileURLWithPath: path))
+        case "lspClosed":
+            // am serve went away, or restarted: find it again.
+            connectLanguages(after: .seconds(2))
         case "log":
             Self.log.error("page: \(String(describing: body["message"] ?? ""), privacy: .public)")
         default:
             break
         }
+    }
+
+    /// What the page asks and waits for: a file's text to preview, or edits
+    /// to files that aren't open.
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage,
+                               replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
+        guard let body = message.body as? [String: Any], let type = body["type"] as? String else {
+            return replyHandler(nil, nil)
+        }
+        switch type {
+        case "read":
+            guard let path = body["path"] as? String else { return replyHandler(nil, nil) }
+            replyHandler(read(path), nil)
+        case "edit":
+            guard let files = body["files"] as? [[String: Any]] else { return replyHandler(false, nil) }
+            replyHandler(edit(files), nil)
+        default:
+            replyHandler(nil, nil)
+        }
+    }
+
+    /// A file's text, as the editor has it when it's open, else from disk.
+    private func read(_ path: String) -> String? {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        if let open = store?.documents.first(where: { $0.url.standardizedFileURL == url && $0.kind == .text }) {
+            return open.text
+        }
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int,
+              size <= EditorDocument.maxBytes, let data = try? Data(contentsOf: url)
+        else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// Edits from a language server to files in the folder that aren't open,
+    /// a rename's say: they open in tabs behind, unsaved, for the user to save.
+    private func edit(_ files: [[String: Any]]) -> Bool {
+        guard let store else { return false }
+        var targets: [(EditorDocument, [EditorDocument.LineEdit])] = []
+        for file in files {
+            guard let path = file["path"] as? String, let inside = store.relativePath(of: URL(fileURLWithPath: path)),
+                  let raw = file["edits"] as? [[String: Any]]
+            else { return false }
+            let edits = raw.compactMap { edit -> EditorDocument.LineEdit? in
+                guard let range = edit["range"] as? [String: Any], let start = range["start"] as? [String: Any],
+                      let end = range["end"] as? [String: Any], let text = edit["newText"] as? String,
+                      let startLine = start["line"] as? Int, let startCharacter = start["character"] as? Int,
+                      let endLine = end["line"] as? Int, let endCharacter = end["character"] as? Int
+                else { return nil }
+                return EditorDocument.LineEdit(startLine: startLine, startCharacter: startCharacter,
+                                               endLine: endLine, endCharacter: endCharacter, text: text)
+            }
+            guard edits.count == raw.count else { return false }
+            targets.append((store.openInBackground(inside), edits))
+        }
+        return targets.allSatisfy { $0.0.apply($0.1) }
     }
 
     private func document(_ id: Any?) -> EditorDocument? {
@@ -398,15 +528,21 @@ final class EditorWebView: WKWebView {
 }
 
 /// WebKit keeps its message handlers; this keeps the controller free to go.
-private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
-    private weak var target: WKScriptMessageHandler?
+private final class WeakMessageHandler: NSObject, WKScriptMessageHandler, WKScriptMessageHandlerWithReply {
+    private weak var target: MonacoController?
 
-    init(_ target: WKScriptMessageHandler) {
+    init(_ target: MonacoController) {
         self.target = target
     }
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         target?.userContentController(controller, didReceive: message)
+    }
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage,
+                               replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
+        guard let target else { return replyHandler(nil, nil) }
+        target.userContentController(controller, didReceive: message, replyHandler: replyHandler)
     }
 }
 

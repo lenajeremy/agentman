@@ -80,6 +80,7 @@ enum RequestType: String, Codable, Sendable {
     case keysList = "keys_list"
     case keySet = "key_set"
     case keyDelete = "key_delete"
+    case lspEndpoint = "lsp_endpoint"
 }
 
 struct DaemonRequest: Codable, Sendable {
@@ -172,6 +173,15 @@ struct DaemonEvent: Codable, Sendable {
     var notes: [Note]?
     var note: Note?
     var keys: [Key]?
+
+    /// Where the editor's language servers are, on "lsp_endpoint".
+    var lsp: LSPEndpoint?
+}
+
+/// The language servers' WebSocket on loopback, and the token it wants.
+struct LSPEndpoint: Codable, Sendable, Equatable {
+    var url: String
+    var token: String
 }
 
 /// An image sent with a message: its type and its bytes, in base64.

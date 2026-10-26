@@ -27,6 +27,7 @@ import (
 	"github.com/lenajeremy/agentman/internal/daemon"
 	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/knowledge"
+	"github.com/lenajeremy/agentman/internal/lsp"
 	"github.com/lenajeremy/agentman/internal/manager"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/relay"
@@ -284,9 +285,13 @@ func runServe(ctx context.Context, args []string) error {
 	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
 		agent.SetNamesFile(filepath.Join(dir, "names.json"))
 	}
+	// Language servers for the editor in Agentman for Mac: started on first
+	// use, stopped when idle, and all stopped with am serve.
+	languages := lsp.NewHost(lsp.Options{})
+	defer languages.Close()
 	if local != nil {
 		go func() {
-			if err := local.Serve(ctx, agent.HandleFrom, agent.DisconnectSubscriber); err != nil {
+			if err := local.Serve(ctx, appRequests(agent.HandleFrom, languages), agent.DisconnectSubscriber); err != nil {
 				fmt.Fprintf(os.Stderr, "am: %v\n", err)
 			}
 		}()

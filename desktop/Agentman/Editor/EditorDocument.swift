@@ -9,8 +9,12 @@ final class EditorDocument: Identifiable {
     enum Kind: Equatable { case text, image, binary, tooLarge, missing }
 
     nonisolated let id = UUID()
-    /// The file's path inside the folder.
+    /// The file's path inside the folder; for a file from outside it, opened
+    /// by Go to Definition, its path from /.
     private(set) var path: String
+    /// A file from outside the folder (a dependency, the standard library):
+    /// shown, never edited.
+    let readOnly: Bool
     private(set) var url: URL
     private(set) var kind: Kind = .text
     /// The text as edited; the text view writes it on every change.
@@ -30,6 +34,13 @@ final class EditorDocument: Identifiable {
     private(set) var crlf = false
     private(set) var image: NSImage?
     var problem: String?
+    /// Bumped by each save, so the editor's page can tell the language
+    /// server.
+    private(set) var saves = 0
+    /// How the file's language server is doing, from the editor's page.
+    var language: LanguageStatus?
+    /// The language server's errors and warnings in the file.
+    var problems = Problems()
     /// Each file keeps its own undo history, apart from the others.
     @ObservationIgnored let undo = UndoManager()
 
@@ -39,8 +50,9 @@ final class EditorDocument: Identifiable {
     var isDirty: Bool { kind == .text && text != saved }
     var name: String { url.lastPathComponent }
 
-    init(root: URL, path: String) {
+    init(root: URL, path: String, readOnly: Bool = false) {
         self.path = path
+        self.readOnly = readOnly
         url = root.appendingPathComponent(path)
         load()
     }
@@ -89,7 +101,7 @@ final class EditorDocument: Identifiable {
     /// to the file rather than over the link.
     @discardableResult
     func save() -> Bool {
-        guard kind == .text else { return false }
+        guard kind == .text, !readOnly else { return false }
         let target = url.resolvingSymlinksInPath()
         let permissions = (try? FileManager.default.attributesOfItem(atPath: target.path))?[.posixPermissions]
         do {
@@ -102,6 +114,7 @@ final class EditorDocument: Identifiable {
             changedOnDisk = false
             deletedOnDisk = false
             problem = nil
+            saves += 1
             return true
         } catch {
             problem = "Couldn't save \(name): \(error.localizedDescription)"
@@ -134,6 +147,42 @@ final class EditorDocument: Identifiable {
         guard edited.utf16.count == length else { return false }
         text = edited
         return true
+    }
+
+    /// A language server's edit, in lines and UTF-16 characters from 0.
+    struct LineEdit: Equatable {
+        var startLine: Int
+        var startCharacter: Int
+        var endLine: Int
+        var endCharacter: Int
+        var text: String
+    }
+
+    /// Applies a language server's edits to a file that isn't in front, as
+    /// a rename across files does; it is then unsaved, for the user to look
+    /// over and save.
+    @discardableResult
+    func apply(_ edits: [LineEdit]) -> Bool {
+        guard kind == .text, !readOnly else { return false }
+        let units = Array(text.utf16)
+        var starts = [0]
+        for (index, unit) in units.enumerated() where unit == 10 { starts.append(index + 1) }
+        func offset(_ line: Int, _ character: Int) -> Int? {
+            guard line >= 0, character >= 0, line < starts.count else { return nil }
+            var end = line + 1 < starts.count ? starts[line + 1] - 1 : units.count
+            if end > starts[line], units[end - 1] == 13, line + 1 < starts.count { end -= 1 }
+            return min(starts[line] + character, end)
+        }
+        var changes: [(index: Int, change: Change)] = []
+        for (index, edit) in edits.enumerated() {
+            guard let start = offset(edit.startLine, edit.startCharacter), let end = offset(edit.endLine, edit.endCharacter), end >= start
+            else { return false }
+            changes.append((index, Change(offset: start, length: end - start, text: edit.text)))
+        }
+        // Last first; edits at the same place go in the order given.
+        changes.sort { $0.change.offset != $1.change.offset ? $0.change.offset > $1.change.offset : $0.index > $1.index }
+        let length = changes.reduce(units.count) { $0 + $1.change.text.utf16.count - $1.change.length }
+        return apply(changes.map(\.change), expecting: length)
     }
 
     /// The editor's whole text, when its edits and this copy fell apart, or
@@ -249,4 +298,18 @@ final class EditorDocument: Identifiable {
             return "Plain Text"
         }
     }
+}
+
+/// A language server's state, as the status bar shows it.
+struct LanguageStatus: Equatable {
+    var name: String
+    var language: String
+    /// starting, ready, restarting, failed or stopped.
+    var state: String
+    var detail: String
+}
+
+struct Problems: Equatable {
+    var errors = 0
+    var warnings = 0
 }

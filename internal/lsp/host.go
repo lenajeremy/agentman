@@ -1,0 +1,310 @@
+package lsp
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
+	"fmt"
+	"net"
+	"net/http"
+	"os/exec"
+	"slices"
+	"sort"
+	"sync"
+	"time"
+)
+
+// Origin is where the editor's page comes from; the endpoint answers it
+// alone.
+const Origin = "agentman-editor://app"
+
+// Options shape a Host; the zero value is am serve's.
+type Options struct {
+	// Idle is how long a server nobody uses stays running. Ten minutes.
+	Idle time.Duration
+	// MaxServers is how many may run at once before idle ones make room.
+	MaxServers int
+	// Servers replaces the catalog, for tests.
+	Servers []*Server
+	// Find replaces looking for a server's command, for tests.
+	Find func(*Server) string
+}
+
+// Host runs the language servers for every editor window on this Mac.
+type Host struct {
+	tools        Tools
+	idleAfter    time.Duration
+	maxServers   int
+	servers      []*Server
+	findCommand  func(*Server) string
+	startTimeout time.Duration
+	backoff      func(tries int) time.Duration
+
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	mu       sync.Mutex
+	sessions map[string]*Session
+	listener net.Listener
+	url      string
+	token    string
+	closed   bool
+}
+
+// NewHost returns a host. Nothing runs until the editor asks for the
+// endpoint.
+func NewHost(opts Options) *Host {
+	h := &Host{
+		idleAfter:    opts.Idle,
+		maxServers:   opts.MaxServers,
+		servers:      opts.Servers,
+		findCommand:  opts.Find,
+		startTimeout: time.Minute,
+		backoff:      func(tries int) time.Duration { return time.Duration(tries*tries) * time.Second },
+		sessions:     map[string]*Session{},
+	}
+	if h.idleAfter == 0 {
+		h.idleAfter = 10 * time.Minute
+	}
+	if h.maxServers == 0 {
+		h.maxServers = 6
+	}
+	if h.servers == nil {
+		h.servers = catalog
+	}
+	h.ctx, h.cancel = context.WithCancel(context.Background())
+	return h
+}
+
+// Endpoint is where the editor's page connects, and the token it must
+// bring. The listener starts on the first call, on loopback only.
+func (h *Host) Endpoint() (url, token string, err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return "", "", fmt.Errorf("lsp: am serve is stopping")
+	}
+	if h.listener != nil {
+		return h.url, h.token, nil
+	}
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return "", "", err
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", "", err
+	}
+	h.listener = listener
+	h.token = hex.EncodeToString(secret)
+	h.url = "ws://" + listener.Addr().String() + "/lsp"
+	server := &http.Server{Handler: http.HandlerFunc(h.serveHTTP), ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = server.Serve(listener) }()
+	go func() {
+		<-h.ctx.Done()
+		_ = server.Close()
+	}()
+	go h.sweep()
+	return h.url, h.token, nil
+}
+
+// allowed says whether a connection may use the endpoint: the token, and
+// the editor page's origin, so a web page in a browser can't, even on this
+// Mac.
+func (h *Host) allowed(r *http.Request) bool {
+	h.mu.Lock()
+	token := h.token
+	h.mu.Unlock()
+	given := r.URL.Query().Get("token")
+	if token == "" || subtle.ConstantTimeCompare([]byte(given), []byte(token)) != 1 {
+		return false
+	}
+	return r.Header.Get("Origin") == Origin
+}
+
+// Close stops every server.
+func (h *Host) Close() {
+	h.mu.Lock()
+	h.closed = true
+	sessions := make([]*Session, 0, len(h.sessions))
+	for _, s := range h.sessions {
+		sessions = append(sessions, s)
+	}
+	h.sessions = map[string]*Session{}
+	h.mu.Unlock()
+	h.cancel()
+	var wg sync.WaitGroup
+	for _, s := range sessions {
+		wg.Go(s.stop)
+	}
+	wg.Wait()
+}
+
+// Statuses are the servers running now, for `am lsp status`.
+func (h *Host) Statuses() []Status {
+	h.mu.Lock()
+	sessions := make([]*Session, 0, len(h.sessions))
+	for _, s := range h.sessions {
+		sessions = append(sessions, s)
+	}
+	h.mu.Unlock()
+	statuses := make([]Status, 0, len(sessions))
+	for _, s := range sessions {
+		statuses = append(statuses, s.Status())
+	}
+	sort.Slice(statuses, func(i, j int) bool { return statuses[i].Session < statuses[j].Session })
+	return statuses
+}
+
+// serverFor is the server for an LSP language id, from this host's catalog.
+func (h *Host) serverFor(language string) *Server {
+	for _, server := range h.servers {
+		if slices.Contains(server.Languages, language) {
+			return server
+		}
+	}
+	return nil
+}
+
+// resolve finds or starts the session for a file, and attaches the window
+// to it. Without a server for the language it returns nil.
+func (h *Host) resolve(c *Client, file, folder, language string) *Session {
+	server := h.serverFor(language)
+	if server == nil || file == "" {
+		return nil
+	}
+	root := Root(file, folder, server.Markers)
+	key := server.ID + ":" + root
+	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return nil
+	}
+	s := h.sessions[key]
+	fresh := s == nil
+	var evict *Session
+	if fresh {
+		s = newSession(h, server, root)
+		h.sessions[key] = s
+		evict = h.evictLocked(s)
+	}
+	h.mu.Unlock()
+	if evict != nil {
+		go h.stopSession(evict)
+	}
+	s.attach(c)
+	if fresh {
+		go s.start()
+	}
+	return s
+}
+
+// evictLocked picks a server to make room for a new one: the one unused
+// longest, among those no window is using.
+func (h *Host) evictLocked(fresh *Session) *Session {
+	if len(h.sessions) <= h.maxServers {
+		return nil
+	}
+	var oldest *Session
+	for _, s := range h.sessions {
+		if s == fresh || !s.unused() {
+			continue
+		}
+		if oldest == nil || s.lastUse().Before(oldest.lastUse()) {
+			oldest = s
+		}
+	}
+	if oldest != nil {
+		delete(h.sessions, oldest.Key)
+	}
+	return oldest
+}
+
+func (h *Host) stopSession(s *Session) {
+	h.mu.Lock()
+	if h.sessions[s.Key] == s {
+		delete(h.sessions, s.Key)
+	}
+	h.mu.Unlock()
+	s.stop()
+}
+
+// sweep stops servers nobody has used for a while.
+func (h *Host) sweep() {
+	ticker := time.NewTicker(h.sweepEvery())
+	defer ticker.Stop()
+	for {
+		select {
+		case <-h.ctx.Done():
+			return
+		case now := <-ticker.C:
+			h.stopIdle(now)
+		}
+	}
+}
+
+func (h *Host) sweepEvery() time.Duration {
+	if every := h.idleAfter / 4; every < 30*time.Second {
+		return max(every, 10*time.Millisecond)
+	}
+	return 30 * time.Second
+}
+
+func (h *Host) stopIdle(now time.Time) {
+	h.mu.Lock()
+	var idle []*Session
+	for key, s := range h.sessions {
+		if s.idle(now, h.idleAfter) {
+			idle = append(idle, s)
+			delete(h.sessions, key)
+		}
+	}
+	h.mu.Unlock()
+	for _, s := range idle {
+		go s.stop()
+	}
+}
+
+// filesChanged passes files changed on disk to every server.
+func (h *Host) filesChanged(changes []FileChange) {
+	h.mu.Lock()
+	sessions := make([]*Session, 0, len(h.sessions))
+	for _, s := range h.sessions {
+		sessions = append(sessions, s)
+	}
+	h.mu.Unlock()
+	for _, s := range sessions {
+		s.filesChanged(changes)
+	}
+}
+
+// find is the command that runs a server, or "" when it isn't on the Mac.
+func (h *Host) find(server *Server) string {
+	if h.findCommand != nil {
+		return h.findCommand(server)
+	}
+	return server.find(&h.tools)
+}
+
+// spawn starts a server in its project's folder.
+func (h *Host) spawn(command string, args []string, root string) (*process, error) {
+	cmd := exec.Command(command, args...)
+	cmd.Dir = root
+	cmd.Env = h.tools.Env()
+	inGroup(cmd)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	stderr := &tail{}
+	cmd.Stderr = stderr
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return &process{cmd: cmd, stdin: stdin, stdout: stdout, stderr: stderr, done: make(chan struct{})}, nil
+}
