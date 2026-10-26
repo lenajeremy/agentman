@@ -212,6 +212,14 @@ struct EditorWindow: View {
         guard keyMonitor == nil else { return }
         let store = self.store
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // ⌘Z and ⇧⌘Z in the tree undo and redo its file changes, as in
+            // Finder, with Vim or without.
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
+            if event.window === store.window, let tree = store.treeView, store.window?.firstResponder === tree,
+               flags == .command || flags == [.command, .shift], event.charactersIgnoringModifiers?.lowercased() == "z" {
+                if flags.contains(.shift) { store.redoTreeChange() } else { store.undoTreeChange() }
+                return nil
+            }
             // Vim's keys in the tree, while it has the keyboard.
             if event.window === store.window, UserDefaults.standard.bool(forKey: "editorVim"),
                let tree = store.treeView, store.window?.firstResponder === tree,

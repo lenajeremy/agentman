@@ -275,6 +275,64 @@ final class EditorPanelTests: XCTestCase {
         }
     }
 
+    func testTreeChangesUndoAndRedo() throws {
+        continueAfterFailure = false
+        let root = try folder(["a.ts", "lib/c.ts"])
+        let store = EditorStore(root: root)
+        let exists = { (path: String) in FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path) }
+        // A new file, with the folders on its way: u takes it all away,
+        // Ctrl-R brings it back.
+        XCTAssertNil(store.createInTree("app/routes/home.tsx", in: ""))
+        XCTAssertTrue(store.handleTreeKey(key("u")))
+        XCTAssertFalse(exists("app"))
+        XCTAssertTrue(store.handleTreeKey(key("r", flags: .control)))
+        XCTAssertTrue(exists("app/routes/home.tsx"))
+        // A rename, with its open tab following.
+        store.open("a.ts")
+        XCTAssertNil(store.rename(try XCTUnwrap(store.treeEntry("a.ts")), to: "b.ts"))
+        store.undoTreeChange()
+        XCTAssertTrue(exists("a.ts"))
+        XCTAssertFalse(exists("b.ts"))
+        XCTAssertEqual(store.documents.first?.path, "a.ts")
+        store.redoTreeChange()
+        XCTAssertTrue(exists("b.ts"))
+        XCTAssertEqual(store.documents.first?.path, "b.ts")
+        // A move and a copy.
+        store.treeClipboard = TreeClipboard(paths: ["lib/c.ts"], cut: true)
+        store.selectInTree("b.ts")
+        XCTAssertNil(store.pasteInTree())
+        XCTAssertTrue(exists("c.ts"))
+        store.undoTreeChange()
+        XCTAssertTrue(exists("lib/c.ts"))
+        XCTAssertFalse(exists("c.ts"))
+        XCTAssertEqual(store.selection, "lib/c.ts", "undo puts the cursor on what came back")
+        store.treeClipboard = TreeClipboard(paths: ["b.ts"], cut: false)
+        store.selectInTree("b.ts")
+        XCTAssertNil(store.pasteInTree())
+        XCTAssertTrue(exists("b copy.ts"))
+        store.undoTreeChange()
+        XCTAssertFalse(exists("b copy.ts"))
+        // Redone, out of the Trash: undo of something made trashes it, and
+        // the test leaves nothing in the real one.
+        store.redoTreeChange()
+        XCTAssertTrue(exists("b copy.ts"))
+        // The Trash, and back: the file ends where it began.
+        store.selectInTree("b.ts")
+        _ = store.handleTreeKey(key("d"))
+        _ = store.handleTreeKey(key("y"))
+        XCTAssertFalse(exists("b.ts"))
+        store.undoTreeChange()
+        XCTAssertTrue(exists("b.ts"))
+        // A new change ends what could be redone; nothing left says so.
+        XCTAssertNil(store.createInTree("d.ts", in: ""))
+        store.redoTreeChange()
+        XCTAssertEqual(store.notice, "Nothing to redo")
+        store.undoTreeChange()
+        XCTAssertFalse(exists("d.ts"))
+        store.redoTreeChange()
+        XCTAssertTrue(exists("d.ts"))
+    }
+
     // MARK: - The editor's colours
 
     // Every role the editor page colours code by (editor-web/src/roles.ts)

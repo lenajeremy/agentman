@@ -111,6 +111,9 @@ final class EditorStore {
     /// Set while a key moves the tree's selection, so moving over a file
     /// doesn't open it.
     @ObservationIgnored var movingInTree = false
+    /// The tree's file changes, newest last, for undo and redo.
+    @ObservationIgnored var treeUndo: [TreeChange] = []
+    @ObservationIgnored var treeRedo: [TreeChange] = []
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
     /// The shells in the terminal panel; they run on while the panel is
     /// hidden or the window closed, until the app quits.
@@ -353,6 +356,7 @@ final class EditorStore {
         let url = root.appendingPathComponent(path)
         guard !FileManager.default.fileExists(atPath: url.path) else { return "\(name) is already there." }
         guard FileManager.default.createFile(atPath: url.path, contents: Data()) else { return "Couldn't create \(name)." }
+        record(TreeChange(steps: [.made(url)], label: "new \(name)"))
         relist(folder)
         open(path)
         return nil
@@ -365,6 +369,7 @@ final class EditorStore {
         } catch {
             return error.localizedDescription
         }
+        record(TreeChange(steps: [.made(root.appendingPathComponent(path))], label: "new \(name)"))
         relist(folder)
         setExpanded(path, true)
         selection = path
@@ -380,6 +385,8 @@ final class EditorStore {
         } catch {
             return error.localizedDescription
         }
+        record(TreeChange(steps: [.moved(from: root.appendingPathComponent(entry.path), to: root.appendingPathComponent(path))],
+                          label: "rename \(entry.name)"))
         for document in documents where document.path == entry.path || document.path.hasPrefix(entry.path + "/") {
             document.moved(to: path + document.path.dropFirst(entry.path.count), root: root)
         }
@@ -392,15 +399,25 @@ final class EditorStore {
     /// Moves a file or folder to the Trash, closing what was open from it.
     func trash(_ entry: FileEntry) -> String? {
         do {
-            try FileManager.default.trashItem(at: root.appendingPathComponent(entry.path), resultingItemURL: nil)
+            let step = try moveToTrash(entry)
+            record(TreeChange(steps: [step], label: "trash \(entry.name)"))
         } catch {
             return error.localizedDescription
         }
+        return nil
+    }
+
+    /// Moves one to the Trash, and says where it went, so undo can bring
+    /// it back.
+    func moveToTrash(_ entry: FileEntry) throws -> TreeStep {
+        let url = root.appendingPathComponent(entry.path)
+        var trashed: NSURL?
+        try FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
         for document in documents where document.path == entry.path || document.path.hasPrefix(entry.path + "/") {
             close(document)
         }
         relist((entry.path as NSString).deletingLastPathComponent)
-        return nil
+        return .moved(from: url, to: (trashed as URL?) ?? url)
     }
 
     /// Says what just happened in the status bar, for a moment.

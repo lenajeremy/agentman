@@ -1,6 +1,22 @@
 import AppKit
 import SwiftUI
 
+/// One thing a change in the tree did to the disk, enough to undo it.
+enum TreeStep: Equatable {
+    /// Moved or renamed, or put in the Trash.
+    case moved(from: URL, to: URL)
+    /// Made new: a file or folder made, or a copy pasted.
+    case made(URL)
+}
+
+/// A change in the tree, as undo and redo take it: everything one key or
+/// command did.
+struct TreeChange: Equatable {
+    var steps: [TreeStep]
+    /// What it was, for the status bar: "rename a.ts".
+    var label: String
+}
+
 /// What y, c or x took in the tree, for p to put down.
 struct TreeClipboard: Equatable {
     var paths: [String]
@@ -73,6 +89,10 @@ extension EditorStore {
                 treeKeys = "<C-w>"
                 return true
             }
+            if key == "r" {
+                redoTreeChange()
+                return true
+            }
             return false
         }
         guard flags.isSubset(of: .shift) else { return false }
@@ -110,6 +130,7 @@ extension EditorStore {
         case "p": problem = pasteInTree()
         case "Y": copyTreePaths(relative: true)
         case " ", "v": toggleMark()
+        case "u": undoTreeChange()
         case "?": showTreeKeys.toggle()
         default: return false
         }
@@ -227,6 +248,13 @@ extension EditorStore {
         let relative = ([folder].filter { !$0.isEmpty } + parts).joined(separator: "/")
         let url = root.appendingPathComponent(relative)
         guard !FileManager.default.fileExists(atPath: url.path) else { return "\(parts.joined(separator: "/")) is already there." }
+        // The first folder on the way that isn't there yet: undo takes it,
+        // and all that was made in it, away.
+        var made = url
+        while made.deletingLastPathComponent().path != root.path,
+              !FileManager.default.fileExists(atPath: made.deletingLastPathComponent().path) {
+            made = made.deletingLastPathComponent()
+        }
         do {
             if isFolder {
                 try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -237,6 +265,7 @@ extension EditorStore {
         } catch {
             return error.localizedDescription
         }
+        record(TreeChange(steps: [.made(made)], label: "new \(parts.last ?? name)"))
         // Every folder on the way is listed and open, so the new row shows.
         var opened = folder
         relist(folder)
@@ -266,8 +295,16 @@ extension EditorStore {
         let entries = trashing
         trashing = []
         var problems: [String] = []
+        var steps: [TreeStep] = []
         for entry in entries {
-            if let problem = trash(entry) { problems.append(problem) }
+            do {
+                steps.append(try moveToTrash(entry))
+            } catch {
+                problems.append(error.localizedDescription)
+            }
+        }
+        if !steps.isEmpty {
+            record(TreeChange(steps: steps, label: entries.count == 1 ? "trash \(entries[0].name)" : "trash \(entries.count) items"))
         }
         marked.subtract(entries.map(\.path))
         if problems.isEmpty, entries.count > 1 { flash("Moved \(entries.count) items to the Trash") }
@@ -296,6 +333,13 @@ extension EditorStore {
         let folder = targetFolder
         let manager = FileManager.default
         var landed: String?
+        var steps: [TreeStep] = []
+        defer {
+            let count = clipboard.paths.count
+            if !steps.isEmpty {
+                record(TreeChange(steps: steps, label: (clipboard.cut ? "move " : "paste ") + (count == 1 ? (clipboard.paths[0] as NSString).lastPathComponent : "\(count) items")))
+            }
+        }
         for path in clipboard.paths {
             let source = root.appendingPathComponent(path)
             guard manager.fileExists(atPath: source.path) else { continue }
@@ -312,6 +356,7 @@ extension EditorStore {
                 } catch {
                     return error.localizedDescription
                 }
+                steps.append(.moved(from: source, to: root.appendingPathComponent(destination)))
                 for document in documents where document.path == path || document.path.hasPrefix(path + "/") {
                     document.moved(to: destination + document.path.dropFirst(path.count), root: root)
                 }
@@ -328,6 +373,7 @@ extension EditorStore {
                 } catch {
                     return error.localizedDescription
                 }
+                steps.append(.made(root.appendingPathComponent(destination)))
                 landed = destination
             }
         }
@@ -365,6 +411,102 @@ extension EditorStore {
         let text = paths.map { relative ? $0 : root.appendingPathComponent($0).path }.joined(separator: "\n")
         Clipboard.copy(text)
         flash(paths.count == 1 ? "Copied \(relative ? "relative " : "")path" : "Copied \(paths.count) paths")
+    }
+}
+
+// MARK: - Undo
+
+extension EditorStore {
+    /// Keeps a change for undo; a new change ends what could be redone.
+    func record(_ change: TreeChange) {
+        treeUndo.append(change)
+        if treeUndo.count > 100 { treeUndo.removeFirst() }
+        treeRedo = []
+    }
+
+    /// u and ⌘Z in the tree: takes the last change back.
+    func undoTreeChange() {
+        guard let change = treeUndo.popLast() else { return flash("Nothing to undo") }
+        do {
+            treeRedo.append(try reverse(change))
+            flash("Undid \(change.label)")
+        } catch {
+            problem = "Couldn't undo \(change.label): \(error.localizedDescription)"
+        }
+    }
+
+    /// Ctrl-R and ⇧⌘Z in the tree: does it again.
+    func redoTreeChange() {
+        guard let change = treeRedo.popLast() else { return flash("Nothing to redo") }
+        do {
+            treeUndo.append(try reverse(change))
+            flash("Redid \(change.label)")
+        } catch {
+            problem = "Couldn't redo \(change.label): \(error.localizedDescription)"
+        }
+    }
+
+    /// Undoes a change's steps, last first, and returns what that did, which
+    /// undoes the undo: a move goes back where it came from; something made
+    /// goes to the Trash, from where a redo brings it back.
+    private func reverse(_ change: TreeChange) throws -> TreeChange {
+        let manager = FileManager.default
+        var done: [TreeStep] = []
+        var landed: URL?
+        for step in change.steps.reversed() {
+            switch step {
+            case .moved(let from, let to):
+                if let trash = manager.urls(for: .trashDirectory, in: .userDomainMask).first,
+                   from.standardizedFileURL.path.hasPrefix(trash.standardizedFileURL.path + "/") {
+                    // Back to the Trash, through the Trash itself, wherever
+                    // it puts it this time.
+                    var trashed: NSURL?
+                    try manager.trashItem(at: to, resultingItemURL: &trashed)
+                    let into = (trashed as URL?) ?? from
+                    followMove(from: to, to: into)
+                    done.append(.moved(from: to, to: into))
+                    continue
+                }
+                guard !manager.fileExists(atPath: from.path) else {
+                    throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: from.path])
+                }
+                try manager.createDirectory(at: from.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try manager.moveItem(at: to, to: from)
+                followMove(from: to, to: from)
+                done.append(.moved(from: to, to: from))
+                landed = from
+            case .made(let url):
+                var trashed: NSURL?
+                try manager.trashItem(at: url, resultingItemURL: &trashed)
+                let to = (trashed as URL?) ?? url
+                followMove(from: url, to: to)
+                done.append(.moved(from: url, to: to))
+            }
+        }
+        for folder in Array(children.keys) { relist(folder) }
+        if let landed, let path = relativePath(of: landed) {
+            var folder = (path as NSString).deletingLastPathComponent
+            while !folder.isEmpty {
+                setExpanded(folder, true)
+                folder = (folder as NSString).deletingLastPathComponent
+            }
+            selectInTree(path)
+        }
+        return TreeChange(steps: done, label: change.label)
+    }
+
+    /// Open tabs follow their files: to the new place in the folder, or
+    /// closed when they leave it.
+    private func followMove(from: URL, to: URL) {
+        guard let old = relativePath(of: from) else { return }
+        let new = relativePath(of: to)
+        for document in documents where document.path == old || document.path.hasPrefix(old + "/") {
+            if let new {
+                document.moved(to: new + document.path.dropFirst(old.count), root: root)
+            } else {
+                close(document)
+            }
+        }
     }
 }
 
@@ -585,6 +727,7 @@ struct TreeKeysSheet: View {
             ("x", "Cut, to move"),
             ("p", "Paste into the folder"),
             ("Y  gy", "Copy the relative, full path"),
+            ("u  ⌃R", "Undo, redo (⌘Z, ⇧⌘Z too)"),
             ("␣  v", "Mark, for several at once"),
             ("Esc", "Clear the filter, marks, clipboard"),
         ]),
