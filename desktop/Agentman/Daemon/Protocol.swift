@@ -80,6 +80,10 @@ enum RequestType: String, Codable, Sendable {
     case keysList = "keys_list"
     case keySet = "key_set"
     case keyDelete = "key_delete"
+    case lspEndpoint = "lsp_endpoint"
+    case lspStatus = "lsp_status"
+    case lspSet = "lsp_set"
+    case lspRemove = "lsp_remove"
 }
 
 struct DaemonRequest: Codable, Sendable {
@@ -114,6 +118,8 @@ struct DaemonRequest: Codable, Sendable {
     var approve: Bool?
     /// The server an open_server, close_server or stop_server is about.
     var port: Int?
+    /// A change to the editor's language servers, on lsp_set and lsp_remove.
+    var language: LanguageChange?
 
     init(_ type: RequestType, sessionId: String? = nil) {
         self.type = type
@@ -172,6 +178,46 @@ struct DaemonEvent: Codable, Sendable {
     var notes: [Note]?
     var note: Note?
     var keys: [Key]?
+
+    /// Where the editor's language servers are, on "lsp_endpoint".
+    var lsp: LSPEndpoint?
+    /// The editor's language servers, on "lsp_status".
+    var languages: LanguagesState?
+}
+
+/// The editor's language servers and where each comes from.
+struct LanguagesState: Codable, Sendable, Equatable {
+    var noDownloads: Bool
+    var servers: [LanguageServer]
+    /// The Node.js am downloaded, in bytes.
+    var nodeSize: Int64?
+}
+
+struct LanguageServer: Codable, Sendable, Equatable, Identifiable {
+    var id: String
+    var name: String
+    var language: String
+    /// yours, mac, downloaded, download, missing or off.
+    var source: String
+    var path: String?
+    var size: Int64?
+    var downloadSize: String?
+    var missing: String?
+    var running: [String]?
+}
+
+/// One change to the language servers' settings.
+struct LanguageChange: Codable, Sendable, Equatable {
+    var server: String?
+    var path: String?
+    var disabled: Bool?
+    var noDownloads: Bool?
+}
+
+/// The language servers' WebSocket on loopback, and the token it wants.
+struct LSPEndpoint: Codable, Sendable, Equatable {
+    var url: String
+    var token: String
 }
 
 /// An image sent with a message: its type and its bytes, in base64.

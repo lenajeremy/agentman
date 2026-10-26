@@ -47,7 +47,7 @@ struct AgentmanApp: App {
         // relaunch.
         WindowGroup("Editor", id: "editor", for: String.self) { $folder in
             if let folder {
-                EditorWindow(folder: folder)
+                EditorWindow(folder: folder, client: store.client)
             }
         }
         .defaultSize(width: 1180, height: 760)

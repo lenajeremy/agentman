@@ -107,4 +107,129 @@ final class EditorTests: XCTestCase {
         let first = files.compactMap { path in Fuzzy.score("app", path).map { (path, $0) } }.max { $0.1 < $1.1 }
         XCTAssertEqual(first?.0, "src/app.ts")
     }
+
+    // MARK: - Monaco's edits
+
+    @MainActor
+    private func document(_ text: String) throws -> EditorDocument {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: folder.appendingPathComponent("file.txt"))
+        return EditorDocument(root: folder, path: "file.txt")
+    }
+
+    @MainActor
+    func testMonacosEditsLandInUTF16Offsets() throws {
+        let document = try document("emoji 😀 here\nnext é\n")
+        // Last first, as Monaco sends them: after the emoji (two UTF-16
+        // units), then at the start.
+        let changes = [
+            EditorDocument.Change(offset: 8, length: 0, text: "!"),
+            EditorDocument.Change(offset: 0, length: 5, text: "smile"),
+        ]
+        XCTAssertTrue(document.apply(changes, expecting: 22))
+        XCTAssertEqual(document.text, "smile 😀! here\nnext é\n")
+        XCTAssertTrue(document.isDirty)
+    }
+
+    @MainActor
+    func testEditsThatDontFitLeaveTheTextAlone() throws {
+        let document = try document("short")
+        XCTAssertFalse(document.apply([.init(offset: 10, length: 1, text: "x")], expecting: 6))
+        XCTAssertFalse(document.apply([.init(offset: 0, length: 1, text: "x")], expecting: 99), "the page's length says they fell apart")
+        XCTAssertEqual(document.text, "short")
+        XCTAssertFalse(document.isDirty)
+    }
+
+    @MainActor
+    func testEvenedOutLineEndingsDontMakeAFileUnsaved() throws {
+        let document = try document("one\r\ntwo\nthree\r\n")
+        document.adopt("one\r\ntwo\r\nthree\r\n")
+        XCTAssertFalse(document.isDirty)
+        document.text += "four"
+        document.adopt("one\r\ntwo\r\nthree\r\nfour!")
+        XCTAssertTrue(document.isDirty, "edits stay unsaved")
+    }
+
+    @MainActor
+    func testALanguageServersEditsLandByLineAndCharacter() throws {
+        let document = try document("func a() {}\r\nfunc b() { a() }\n")
+        // A rename of a to c: both places, given first to last.
+        let edits = [
+            EditorDocument.LineEdit(startLine: 0, startCharacter: 5, endLine: 0, endCharacter: 6, text: "c"),
+            EditorDocument.LineEdit(startLine: 1, startCharacter: 11, endLine: 1, endCharacter: 12, text: "c"),
+        ]
+        XCTAssertTrue(document.apply(edits))
+        XCTAssertEqual(document.text, "func c() {}\r\nfunc b() { c() }\n")
+        // Past the end of a line means its end, before the line break.
+        XCTAssertTrue(document.apply([.init(startLine: 0, startCharacter: 99, endLine: 0, endCharacter: 99, text: " // c")]))
+        XCTAssertEqual(document.text, "func c() {} // c\r\nfunc b() { c() }\n")
+        // Two inserts at one place go in the order given.
+        XCTAssertTrue(document.apply([
+            .init(startLine: 2, startCharacter: 0, endLine: 2, endCharacter: 0, text: "x"),
+            .init(startLine: 2, startCharacter: 0, endLine: 2, endCharacter: 0, text: "y"),
+        ]))
+        XCTAssertTrue(document.text.hasSuffix("\nxy"))
+        XCTAssertFalse(document.apply([.init(startLine: 9, startCharacter: 0, endLine: 9, endCharacter: 0, text: "z")]), "no such line")
+    }
+
+    @MainActor
+    func testAFileFromOutsideTheFolderIsNeverChanged() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("dep.go")
+        try Data("package dep\n".utf8).write(to: file)
+        let document = EditorDocument(root: URL(fileURLWithPath: "/"), path: String(file.path.dropFirst()), readOnly: true)
+        XCTAssertEqual(document.url.standardizedFileURL, file.standardizedFileURL)
+        XCTAssertFalse(document.apply([.init(startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 0, text: "x")]))
+        document.text = "changed"
+        XCTAssertFalse(document.save())
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "package dep\n")
+    }
+
+    @MainActor
+    func testGoToDefinitionOpensFilesInsideAndOutsideTheFolder() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent("pkg"), withIntermediateDirectories: true)
+        try Data("package pkg\n".utf8).write(to: folder.appendingPathComponent("pkg/a.go"))
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".go")
+        try Data("package std\n".utf8).write(to: outside)
+        let store = EditorStore(root: folder)
+        store.open(fileAt: folder.appendingPathComponent("pkg/a.go"))
+        XCTAssertEqual(store.active?.path, "pkg/a.go")
+        XCTAssertEqual(store.active?.readOnly, false)
+        store.open(fileAt: outside)
+        XCTAssertEqual(store.active?.readOnly, true)
+        store.open(fileAt: outside)
+        XCTAssertEqual(store.documents.count, 2, "the same file opens once")
+    }
+
+    func testLanguageServersReadAsWhereEachComesFrom() throws {
+        let json = """
+        {"type":"lsp_status","languages":{"noDownloads":false,"nodeSize":196896101,"servers":[
+          {"id":"gopls","name":"gopls","language":"Go","source":"mac","path":"/Users/me/go/bin/gopls","downloadSize":"about 30 MB",
+           "running":["/Users/me/code/agentman"]},
+          {"id":"typescript","name":"TypeScript","language":"TypeScript","source":"downloaded","size":28345032},
+          {"id":"pyright","name":"Pyright","language":"Python","source":"download","downloadSize":"about 20 MB"},
+          {"id":"sourcekit-lsp","name":"SourceKit-LSP","language":"Swift","source":"missing","missing":"Swift support needs Xcode"},
+          {"id":"clangd","name":"clangd","language":"C","source":"off"}]}}
+        """
+        let event = try JSONDecoder().decode(DaemonEvent.self, from: Data(json.utf8))
+        let servers = try XCTUnwrap(event.languages?.servers)
+        XCTAssertEqual(event.languages?.nodeSize, 196896101)
+        XCTAssertEqual(LanguagesSettings.detail(servers[0]), "gopls · on this Mac · running for agentman")
+        XCTAssertTrue(LanguagesSettings.detail(servers[1]).hasPrefix("downloaded · 28"))
+        XCTAssertEqual(LanguagesSettings.detail(servers[2]), "Pyright · downloads when first needed, about 20 MB")
+        XCTAssertEqual(LanguagesSettings.detail(servers[3]), "SourceKit-LSP · Swift support needs Xcode")
+        XCTAssertEqual(LanguagesSettings.detail(servers[4]), "clangd · off")
+    }
+
+    func testALanguageChangeSaysOnlyWhatChanges() throws {
+        let off = try JSONSerialization.jsonObject(with: JSONEncoder().encode(LanguageChange(server: "pyright", disabled: true))) as? [String: Any]
+        XCTAssertEqual(off?.keys.sorted(), ["disabled", "server"])
+        // An empty path means the usual program; it must travel, not be left out.
+        let usual = try JSONSerialization.jsonObject(with: JSONEncoder().encode(LanguageChange(server: "gopls", path: ""))) as? [String: Any]
+        XCTAssertEqual(usual?["path"] as? String, "")
+        XCTAssertNil(usual?["disabled"])
+    }
 }

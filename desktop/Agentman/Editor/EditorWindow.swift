@@ -45,8 +45,10 @@ struct EditorWindow: View {
     @State private var keyMonitor: Any?
     @AppStorage("terminalHeight") private var terminalHeight = 260.0
 
-    init(folder: String) {
-        _store = State(initialValue: EditorRegistry.shared.store(for: folder))
+    init(folder: String, client: DaemonClient) {
+        let store = EditorRegistry.shared.store(for: folder)
+        store.client = client
+        _store = State(initialValue: store)
     }
 
     var body: some View {
@@ -113,7 +115,17 @@ struct EditorWindow: View {
             }
         }
         .focusedSceneValue(\.editorStore, store)
-        .background(WindowReader { store.window = $0 })
+        .background(WindowReader { window in
+            // One window per folder. macOS can restore a second one beside
+            // the first; it gives way, since both would show the same tabs
+            // and only one can hold the editor's page.
+            if let first = store.window, first !== window, first.isVisible {
+                window.close()
+            } else if store.window !== window {
+                store.window = window
+                store.monaco?.place()
+            }
+        })
         // Agents change files while the editor is open: the tree, git's
         // marks and the open files follow them.
         .task {
@@ -428,7 +440,9 @@ private struct PathBar: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            let parts = [store.name] + document.path.split(separator: "/").map(String.init)
+            let parts = document.readOnly
+                ? [(document.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath, document.name]
+                : [store.name] + document.path.split(separator: "/").map(String.init)
             ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
                 if index > 0 {
                     Image(systemName: "chevron.right")
@@ -441,6 +455,12 @@ private struct PathBar: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 12)
+            if document.readOnly {
+                Text("Read only")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.faint)
+                    .help("A file from outside the folder, opened to read")
+            }
             if document.isDirty {
                 Button("Revert") { document.revert() }
                     .buttonStyle(.plain)
@@ -507,11 +527,31 @@ private struct DiskBanner: View {
 
 // MARK: - The text
 
-/// Every open file's text view at once, only the one in front shown, so
-/// each keeps its scroll, selection and undo while another is in front.
+/// The open files' text: Monaco, with a model for each tab, or with
+/// `-legacyEditor YES` the text views from before it.
 private struct EditorPanes: View {
     let store: EditorStore
     @AppStorage("editorFontSize") private var fontSize = 13.0
+
+    var body: some View {
+        if MonacoView.legacy {
+            LegacyPanes(store: store, fontSize: fontSize)
+        } else {
+            MonacoView(
+                store: store,
+                tabs: store.documents.filter { $0.kind == .text }.map(MonacoView.Tab.init),
+                activeID: store.activeID,
+                fontSize: fontSize
+            )
+        }
+    }
+}
+
+/// Every open file's text view at once, only the one in front shown, so
+/// each keeps its scroll, selection and undo while another is in front.
+private struct LegacyPanes: View {
+    let store: EditorStore
+    let fontSize: Double
 
     var body: some View {
         ZStack {
@@ -665,12 +705,13 @@ private struct StatusBar: View {
             Spacer()
             if let document = store.active {
                 if document.kind == .text {
+                    ProblemCount(store: store, problems: document.problems)
                     Text(verbatim: "Ln \(document.line), Col \(document.column)")
                     Text(document.indent == "\t" ? "Tabs" : "Spaces: \(document.indent.count)")
                     Text("UTF-8")
                     Text(document.crlf ? "CRLF" : "LF")
                 }
-                Text(document.languageName)
+                LanguageLabel(store: store, document: document)
             }
         }
         .font(Fonts.sans(11))
@@ -679,6 +720,77 @@ private struct StatusBar: View {
         .frame(height: 24)
         .background(Palette.paper)
         .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 1) }
+    }
+}
+
+/// The language server's errors and warnings in the file; a click goes to
+/// the next one.
+private struct ProblemCount: View {
+    let store: EditorStore
+    let problems: Problems
+
+    var body: some View {
+        if problems.errors + problems.warnings > 0 {
+            Button {
+                store.monaco?.run("editor.action.marker.next")
+            } label: {
+                HStack(spacing: 8) {
+                    if problems.errors > 0 {
+                        Label("\(problems.errors)", systemImage: "xmark.circle")
+                            .foregroundStyle(Palette.errorText)
+                    }
+                    if problems.warnings > 0 {
+                        Label("\(problems.warnings)", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(Palette.needsYouText)
+                    }
+                }
+                .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(.plain)
+            .help("Go to the next problem (F8)")
+        }
+    }
+}
+
+/// The file's language, and how its language server is doing: starting,
+/// working, or why it isn't there, with a way to start it again.
+private struct LanguageLabel: View {
+    let store: EditorStore
+    let document: EditorDocument
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let status = document.language {
+                switch status.state {
+                case "installing", "starting", "restarting":
+                    ProgressView().controlSize(.mini)
+                    Text(status.detail.isEmpty ? "Starting \(status.name)…" : status.detail)
+                        .lineLimit(1)
+                case "failed":
+                    Button {
+                        store.monaco?.restartLanguage(for: document)
+                    } label: {
+                        Label(status.detail, systemImage: "exclamationmark.triangle")
+                            .labelStyle(.titleAndIcon)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: 360)
+                            .foregroundStyle(Palette.needsYouText)
+                    }
+                    .buttonStyle(.plain)
+                    .help("\(status.detail)\nClick to try again.")
+                default:
+                    if !status.detail.isEmpty {
+                        Text(status.detail).lineLimit(1).frame(maxWidth: 280)
+                    }
+                }
+            }
+            Text(document.languageName)
+                .help(document.language?.state == "ready" ? "\(document.language?.name ?? "") is running" : "")
+            if document.language?.state == "ready" {
+                Circle().fill(Palette.ok).frame(width: 5, height: 5)
+            }
+        }
     }
 }
 
@@ -757,7 +869,7 @@ struct EditorCommands: Commands {
                     EditorOpener.open(folder: folder, with: openWindow)
                 }
             }
-            .keyboardShortcut("o", modifiers: [.command, .shift])
+            .keyboardShortcut("o", modifiers: .command)
             Button("Go to File…") { editor?.quickOpen = true }
                 .keyboardShortcut("p", modifiers: .command)
                 .disabled(editor == nil)
@@ -783,11 +895,32 @@ struct EditorCommands: Commands {
             .disabled(editor == nil)
         }
         CommandMenu("Editor") {
-            Button("Comment Lines") { editorTextView?.toggleComment() }
+            // The language server's; Monaco has the same keys, so these work
+            // from the menu and from the keyboard alike.
+            Button("Go to Definition") { perform("editor.action.revealDefinition") { _ in } }
+                .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF12FunctionKey)!)), modifiers: [])
                 .disabled(editor == nil)
-            Button("Indent Lines") { editorTextView?.shiftLines(by: 1) }
+            Button("Find References") { perform("editor.action.goToReferences") { _ in } }
+                .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF12FunctionKey)!)), modifiers: .shift)
                 .disabled(editor == nil)
-            Button("Outdent Lines") { editorTextView?.shiftLines(by: -1) }
+            Button("Rename Symbol…") { perform("editor.action.rename") { _ in } }
+                .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF2FunctionKey)!)), modifiers: [])
+                .disabled(editor == nil)
+            Button("Format Document") { perform("editor.action.formatDocument") { _ in } }
+                .keyboardShortcut("f", modifiers: [.option, .shift])
+                .disabled(editor == nil)
+            Button("Go to Symbol…") { perform("editor.action.quickOutline") { _ in } }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+                .disabled(editor == nil)
+            Button("Next Problem") { perform("editor.action.marker.next") { _ in } }
+                .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF8FunctionKey)!)), modifiers: [])
+                .disabled(editor == nil)
+            Divider()
+            Button("Comment Lines") { perform("editor.action.commentLine") { $0.toggleComment() } }
+                .disabled(editor == nil)
+            Button("Indent Lines") { perform("editor.action.indentLines") { $0.shiftLines(by: 1) } }
+                .disabled(editor == nil)
+            Button("Outdent Lines") { perform("editor.action.outdentLines") { $0.shiftLines(by: -1) } }
                 .disabled(editor == nil)
             Divider()
             Button("Bigger Text") { adjustFont(1) }
@@ -802,9 +935,14 @@ struct EditorCommands: Commands {
         }
     }
 
-    /// The text view with the keyboard, in the editor in front.
-    @MainActor private var editorTextView: EditorTextView? {
-        editor?.window?.firstResponder as? EditorTextView
+    /// Runs a Monaco action in the editor in front, or with the text view
+    /// from before Monaco, what that does instead.
+    @MainActor private func perform(_ action: String, legacy: (EditorTextView) -> Void) {
+        if let monaco = editor?.monaco, !MonacoView.legacy {
+            monaco.run(action)
+        } else if let textView = editor?.window?.firstResponder as? EditorTextView {
+            legacy(textView)
+        }
     }
 
     @MainActor private func adjustFont(_ step: Double) {

@@ -197,6 +197,9 @@ type Request struct {
 	// Note and Key are saved by ReqKnowledgeWrite and ReqKeySet.
 	Note *Note `json:"note,omitempty"`
 	Key  *Key  `json:"key,omitempty"`
+	// Language is the change on ReqLSPSet, or names the server on
+	// ReqLSPRemove.
+	Language *LanguageChange `json:"language,omitempty"`
 	// PushToken carries an Expo push token on ReqRegisterPush.
 	PushToken string `json:"pushToken,omitempty"`
 	// Notify carries that phone's choice of alerts on ReqRegisterPush. Absent
@@ -336,6 +339,10 @@ type Event struct {
 	Notes []Note `json:"notes,omitempty"`
 	Note  *Note  `json:"note,omitempty"`
 	Keys  []Key  `json:"keys,omitempty"`
+	// LSP answers ReqLSPEndpoint, on the local socket only.
+	LSP *LSPEndpoint `json:"lsp,omitempty"`
+	// Languages answers the editor's language server requests.
+	Languages *LanguagesState `json:"languages,omitempty"`
 	// Schedules answers ReqManagerSchedules.
 	Schedules []ManagerSchedule `json:"schedules,omitempty"`
 

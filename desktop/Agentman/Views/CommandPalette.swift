@@ -127,7 +127,7 @@ struct CommandPalette: View {
         })
 
         commands.append(Command(item: PaletteItem(id: "open-folder", title: "Open a Folder in the Editor…",
-                                                  icon: "chevron.left.forwardslash.chevron.right", shortcut: "⇧⌘O")) {
+                                                  icon: "chevron.left.forwardslash.chevron.right", shortcut: "⌘O")) {
             if let folder = EditorOpener.chooseFolder() { EditorOpener.open(folder: folder, with: openWindow) }
         })
         for folder in store.folders.prefix(8) {

@@ -50,6 +50,9 @@ Usage:
   am uninstall-hooks          Remove them again
   am mcp install              Give your agents Agentman's tools (notes, keys)
   am mcp uninstall            Take them out again, for good
+  am lsp status               Which language servers the Mac app's editor can use
+  am lsp install <language>   Get a language's server now (go, typescript, python, rust)
+  am lsp clean                Remove the language servers am downloaded
   am doctor                   Check that everything is wired up correctly
   am version                  Print the version
 
@@ -122,6 +125,8 @@ func main() {
 	case "mcp":
 		// Started by the agent CLIs, which talk to it over stdin and stdout.
 		err = runMCP(ctx, args)
+	case "lsp":
+		err = runLSP(ctx, args)
 	case "doctor":
 		err = runDoctor(ctx, args)
 	case "version", "--version", "-v":

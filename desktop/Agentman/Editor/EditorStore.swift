@@ -87,6 +87,11 @@ final class EditorStore {
     private(set) var allFiles: [String] = []
     @ObservationIgnored private var allFilesAt: Date?
     @ObservationIgnored weak var window: NSWindow?
+    /// The page the files are edited in, kept while the window is closed,
+    /// for a while, so each tab's undo and scroll are there when it opens.
+    @ObservationIgnored var monaco: MonacoController?
+    /// am serve, where the language servers are.
+    @ObservationIgnored var client: DaemonClient?
 
     init(root: URL) {
         self.root = root
@@ -120,19 +125,46 @@ final class EditorStore {
 
     /// Opens a file in a tab, or brings its tab to the front.
     func open(_ path: String) {
-        if let document = documents.first(where: { $0.path == path }) {
+        activeID = openInBackground(path).id
+        reveal(path)
+    }
+
+    /// Opens a file in a tab behind the one in front, or finds its tab.
+    @discardableResult
+    func openInBackground(_ path: String) -> EditorDocument {
+        if let document = documents.first(where: { $0.path == path && !$0.readOnly }) { return document }
+        let document = EditorDocument(root: root, path: path)
+        documents.append(document)
+        if activeID == nil { activeID = document.id }
+        return document
+    }
+
+    /// Opens any file, as Go to Definition does: one in the folder as usual,
+    /// one from outside it (a dependency, the standard library) read-only.
+    func open(fileAt url: URL) {
+        let path = url.standardizedFileURL.path
+        if let inside = relativePath(of: url) {
+            open(inside)
+        } else if let document = documents.first(where: { $0.readOnly && $0.url.standardizedFileURL.path == path }) {
             activeID = document.id
         } else {
-            let document = EditorDocument(root: root, path: path)
+            let document = EditorDocument(root: URL(fileURLWithPath: "/"), path: String(path.drop { $0 == "/" }), readOnly: true)
             documents.append(document)
             activeID = document.id
         }
-        reveal(path)
+    }
+
+    /// A file's path inside the folder, or nil for one outside it.
+    func relativePath(of url: URL) -> String? {
+        let path = url.standardizedFileURL.path
+        let base = root.standardizedFileURL.path
+        guard path.hasPrefix(base + "/") else { return nil }
+        return String(path.dropFirst(base.count + 1))
     }
 
     func activate(_ document: EditorDocument) {
         activeID = document.id
-        reveal(document.path)
+        if !document.readOnly { reveal(document.path) }
     }
 
     /// Shows a file in the tree: its folders open, its row selected.

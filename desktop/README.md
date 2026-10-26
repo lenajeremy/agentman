@@ -24,6 +24,18 @@ open build/Build/Products/Debug/Agentman.app
 
 Run the tests with `xcodebuild … test` in place of `build`.
 
+The editor's text is [Monaco](https://github.com/microsoft/monaco-editor) in a
+web view. Its page is built from `editor-web/` into `Agentman/Resources/EditorWeb`
+before each build of the app, which needs [Node.js](https://nodejs.org) the
+first time and whenever `editor-web/` changes. `-legacyEditor YES` brings back
+the editor's text view from before Monaco.
+
+Errors, completions, hover and Go to Definition come from language servers
+that `am serve` runs on this Mac (`internal/lsp`): the page asks the daemon
+where they are over the socket (`lsp_endpoint`) and talks to them over a
+WebSocket on loopback. Servers start when a file of their language opens and
+stop when no window has used them for ten minutes.
+
 `am serve` must be running, version 0.18 or later (the first with the socket).
 
 ## Pointing it at another daemon
