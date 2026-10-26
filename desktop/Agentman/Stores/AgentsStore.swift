@@ -411,6 +411,27 @@ final class AgentsStore {
     /// Gives a session a name of the user's, or its own back when name is
     /// empty. Returns the problem, if any. Every app hears the new name.
     @discardableResult
+    /// Whether an agent notifies for itself, rather than through Agentman.
+    private func speaks(_ sessionId: String, as session: Session? = nil) -> Bool {
+        let session = session ?? self.session(sessionId)
+        return NotificationPolicy.agentSpeaks(agentmanOn: manager.on, asked: session?.alerts == true)
+    }
+
+    /// Turns an agent's own notifications on or off, on every device:
+    /// while Agentman is on, only the agents asked for speak for themselves.
+    func setAlerts(_ sessionId: String, _ on: Bool) async -> String? {
+        var request = DaemonRequest(.setAgentAlerts, sessionId: sessionId)
+        request.alerts = on
+        do {
+            let reply = try await client.request(request)
+            if reply.type == "error" { return reply.error ?? "Couldn't change that." }
+            apply(reply)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
     func rename(_ sessionId: String, to name: String) async -> String? {
         var request = DaemonRequest(.renameSession, sessionId: sessionId)
         request.text = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -484,7 +505,7 @@ final class AgentsStore {
             }
         case "turn_complete":
             if let id = event.sessionId { away.record(.finished(event.preview), sessionId: id) }
-            guard let id = event.sessionId, !looking(at: id),
+            guard let id = event.sessionId, !looking(at: id), speaks(id),
                   NotificationPolicy.allows(.finished, folder: self.session(id)?.cwd) else { return }
             let name = self.session(id)?.name ?? event.sessionName ?? "An agent"
             notifier.agent(title: "\(name) finished", body: event.preview ?? "Its turn is done.",
@@ -493,13 +514,13 @@ final class AgentsStore {
             guard let session = event.session else { return }
             if let index = sessions.firstIndex(where: { $0.id == session.id }) {
                 // Waiting on the user now, and not before: say so, unless
-                // Agentman's card already does.
+                // Agentman speaks for it with a card.
                 let before = sessions[index]
                 if session.question != nil, before.question?.id != session.question?.id {
                     away.record(.needsYou(session.question?.title), sessionId: session.id)
                 }
                 if session.question != nil, before.question?.id != session.question?.id,
-                   manager.settings?.keySet != true, !looking(at: session.id),
+                   speaks(session.id, as: session), !looking(at: session.id),
                    NotificationPolicy.allows(.needsYou, folder: session.cwd) {
                     notifier.agent(title: "\(session.name) needs you", body: session.question?.title ?? "It's waiting on you.",
                                    sessionId: session.id, id: "needs-\(session.id)-\(session.question?.id ?? "")")

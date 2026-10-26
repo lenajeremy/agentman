@@ -83,6 +83,8 @@ final class ManagerStore {
     }
 
     var thinking: Bool { status.state == "thinking" }
+    /// Agentman can run, having its key: it speaks for the agents.
+    var on: Bool { settings?.keySet ?? status.keySet }
     var needsKey: Bool { settings.map { !$0.keySet } ?? (status.state == "needs_key") }
     /// The engine Agentman's conversation runs on.
     var provider: String {
