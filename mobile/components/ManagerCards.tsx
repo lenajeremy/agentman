@@ -8,7 +8,7 @@ import { useManager } from "../lib/manager";
 import { cardIsOpen, cardQuestion } from "../lib/manager-feed";
 import type { ManagerCard, Note, QuestionAnswer } from "../lib/protocol";
 import { useStore } from "../lib/store";
-import { font, Palette, radius, size, space } from "../lib/theme";
+import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { AgentIcon } from "./AgentIcon";
 import { MotionPressable } from "./MotionPressable";
 import { QuestionCard } from "./QuestionCard";
@@ -232,11 +232,11 @@ const makeStyles = (c: Palette) =>
     needs: { flex: 1, fontFamily: font.sans, fontSize: size.caption, color: c.needsYouText },
     noteLabel: { color: c.workingText },
     tier: { fontFamily: font.sans, fontSize: size.label, color: c.faint },
-    title: { fontFamily: font.sans, fontSize: size.body, lineHeight: 22, color: c.text },
+    title: { fontFamily: font.sans, fontSize: size.body, lineHeight: scaled(22), color: c.text },
     code: { padding: space.md, borderRadius: radius.md, backgroundColor: c.toolWell },
-    codeText: { fontFamily: font.mono, fontSize: 12, lineHeight: 18, color: c.textSecondary },
+    codeText: { fontFamily: font.mono, fontSize: scaled(12), lineHeight: scaled(18), color: c.textSecondary },
     reason: { fontFamily: font.sans, fontSize: size.caption, color: c.needsYouText },
-    context: { fontFamily: font.sans, fontSize: size.caption, lineHeight: 18, color: c.muted },
+    context: { fontFamily: font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.muted },
     suggested: { fontFamily: font.sans, fontSize: size.caption, color: c.working },
     replyField: {
       flexDirection: "row",
@@ -269,7 +269,7 @@ const makeStyles = (c: Palette) =>
     problem: { fontFamily: font.sans, fontSize: size.label, color: c.errorText },
     receipt: { flexDirection: "row", alignItems: "center", gap: 6 },
     receiptText: { flex: 1, fontFamily: font.sans, fontSize: size.caption, color: c.muted },
-    noteBody: { fontFamily: font.sans, fontSize: size.caption, lineHeight: 19, color: c.textSecondary },
+    noteBody: { fontFamily: font.sans, fontSize: size.caption, lineHeight: scaled(19), color: c.textSecondary },
     noteTitleInput: {
       fontFamily: font.sansMedium,
       fontSize: size.body,
@@ -283,7 +283,7 @@ const makeStyles = (c: Palette) =>
       maxHeight: 220,
       fontFamily: font.sans,
       fontSize: size.caption,
-      lineHeight: 19,
+      lineHeight: scaled(19),
       color: c.text,
       textAlignVertical: "top",
     },

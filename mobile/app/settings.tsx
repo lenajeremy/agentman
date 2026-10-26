@@ -19,7 +19,7 @@ import { isPushActive, pushFailureReason } from "../lib/push";
 import { useStore } from "../lib/store";
 import { appSummary, macSummary } from "../lib/updates";
 import { useUpdates } from "../lib/updates-context";
-import { ago, font, Palette, radius, size, space } from "../lib/theme";
+import { ago, font, Palette, radius, size, space, scaled } from "../lib/theme";
 
 const APPEARANCES: { value: AppearancePreference; label: string }[] = [
   { value: "light", label: "Light" },
@@ -368,7 +368,7 @@ const makeStyles = (c: Palette) =>
       borderWidth: 1,
       borderColor: c.line,
     },
-    body: { fontFamily: font.sans, fontSize: size.caption, color: c.muted, lineHeight: 19 },
+    body: { fontFamily: font.sans, fontSize: size.caption, color: c.muted, lineHeight: scaled(19) },
 
     row: {
       minHeight: 56,
@@ -465,7 +465,7 @@ const makeStyles = (c: Palette) =>
       fontSize: size.label,
       color: c.faint,
       textAlign: "center",
-      lineHeight: 16,
+      lineHeight: scaled(16),
       marginTop: space.sm,
       paddingHorizontal: space.lg,
     },

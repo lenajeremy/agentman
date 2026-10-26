@@ -381,6 +381,54 @@ final class AgentsStore {
 
     /// Closes the pane a session runs in. Its conversation is kept, and it
     /// can be resumed. Returns the problem, if any.
+    // MARK: - Voice
+
+    /// What a recording says, written out by Celery through the daemon. The
+    /// recording goes in slices the relay would carry from a phone too.
+    func transcribe(_ wav: Data) async -> Result<String, VoiceProblem> {
+        let encoded = wav.base64EncodedString()
+        let size = 96_000
+        let parts = max(1, (encoded.count + size - 1) / size)
+        let id = UUID().uuidString
+        var start = encoded.startIndex
+        for part in 0..<parts {
+            let end = encoded.index(start, offsetBy: size, limitedBy: encoded.endIndex) ?? encoded.endIndex
+            var request = DaemonRequest(.transcribe)
+            request.voice = VoiceClip(id: id, part: part, parts: parts, mime: "audio/wav", data: String(encoded[start..<end]))
+            start = end
+            do {
+                // The last part waits for Celery.
+                let reply = try await client.request(request, timeout: part == parts - 1 ? 150 : 20)
+                if reply.type == "error" {
+                    return .failure(VoiceProblem(message: Self.daemonMessage(reply.error ?? "That couldn't be written out.")))
+                }
+                if let transcript = reply.transcript, transcript.done {
+                    return .success(transcript.text ?? "")
+                }
+            } catch {
+                return .failure(VoiceProblem(message: error.localizedDescription))
+            }
+        }
+        return .failure(VoiceProblem(message: "The recording didn't come back written out. Try again."))
+    }
+
+    /// Agentman's Celery account, or nil when the daemon can't say.
+    func voiceAccount(_ type: RequestType = .voiceAccount, _ step: VoiceSignIn? = nil) async -> Result<VoiceAccount, VoiceProblem> {
+        var request = DaemonRequest(type)
+        request.voiceSignIn = step
+        do {
+            let reply = try await client.request(request, timeout: 40)
+            if let account = reply.voiceAccount { return .success(account) }
+            return .failure(VoiceProblem(message: Self.daemonMessage(reply.error ?? "Celery didn't answer.")))
+        } catch {
+            return .failure(VoiceProblem(message: error.localizedDescription))
+        }
+    }
+
+    private static func daemonMessage(_ text: String) -> String {
+        text.replacingOccurrences(of: "^daemon: ", with: "", options: .regularExpression)
+    }
+
     /// How to show an agent's live terminal, or why it can't be.
     func terminal(for sessionId: String) async -> Result<SessionTerminal, TerminalProblem> {
         do {
@@ -747,5 +795,10 @@ final class AgentsStore {
 
 /// Why an agent's terminal can't be shown.
 struct TerminalProblem: Error {
+    let message: String
+}
+
+/// Why a voice prompt or a Celery sign-in didn't work, in words.
+struct VoiceProblem: Error {
     let message: String
 }

@@ -7,7 +7,7 @@ import { Divider, Field, Problem, Section, Segmented, SettingsPage, SwitchRow } 
 import { useStyles, useTheme } from "../../lib/appearance";
 import { useManager } from "../../lib/manager";
 import type { ManagerSettings, PermissionCheck } from "../../lib/protocol";
-import { font, Palette, radius, size, space } from "../../lib/theme";
+import { font, Palette, radius, size, space, scaled } from "../../lib/theme";
 
 type Rule = NonNullable<ManagerSettings["rules"]>[number];
 type Kinds = NonNullable<ManagerSettings["approve"]>;
@@ -218,7 +218,7 @@ const makeStyles = (c: Palette) =>
     primary: { height: 36, paddingHorizontal: space.lg, borderRadius: radius.pill, justifyContent: "center", backgroundColor: c.inverse },
     primaryText: { fontFamily: font.sansBold, fontSize: size.caption, color: c.onInverse },
     off: { opacity: 0.35 },
-    verdict: { fontFamily: font.sans, fontSize: size.caption, lineHeight: 19, paddingBottom: space.md },
+    verdict: { fontFamily: font.sans, fontSize: size.caption, lineHeight: scaled(19), paddingBottom: space.md },
     verdictAuto: { color: c.ok },
     verdictWait: { color: c.needsYouText },
   });

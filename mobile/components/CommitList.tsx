@@ -5,7 +5,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { useStyles, useTheme } from "../lib/appearance";
 import { clockTime, groupByDay, shortHash } from "../lib/commits";
 import { WorkspaceCommit } from "../lib/protocol";
-import { font, Palette, radius, size, space } from "../lib/theme";
+import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { MotionPressable } from "./MotionPressable";
 
 /**
@@ -145,8 +145,8 @@ const makeStyles = (c: Palette) =>
     subject: {
       color: c.text,
       fontFamily: font.sansMedium,
-      fontSize: 14.5,
-      lineHeight: 20,
+      fontSize: scaled(14.5),
+      lineHeight: scaled(20),
       letterSpacing: -0.1,
     },
     meta: { flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0 },
@@ -154,10 +154,10 @@ const makeStyles = (c: Palette) =>
       flexShrink: 1,
       color: c.muted,
       fontFamily: font.sans,
-      fontSize: 12,
+      fontSize: scaled(12),
     },
-    dot: { color: c.faint, fontFamily: font.sans, fontSize: 12 },
-    time: { color: c.faint, fontFamily: font.mono, fontSize: 11 },
+    dot: { color: c.faint, fontFamily: font.sans, fontSize: scaled(12) },
+    time: { color: c.faint, fontFamily: font.mono, fontSize: scaled(11) },
 
     // Stacked and right-aligned, so hashes and counts form two tidy columns
     // down the list however long each subject runs.
@@ -168,9 +168,9 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.sm - 2,
       backgroundColor: c.fill,
     },
-    hash: { color: c.muted, fontFamily: font.mono, fontSize: 11 },
+    hash: { color: c.muted, fontFamily: font.mono, fontSize: scaled(11) },
     counts: { flexDirection: "row", alignItems: "center", gap: 6 },
-    count: { fontFamily: font.monoMedium, fontSize: 11.5 },
+    count: { fontFamily: font.monoMedium, fontSize: scaled(11.5) },
     countLarge: { fontSize: size.caption },
     countAdded: { color: c.ok },
     countRemoved: { color: c.errorText },

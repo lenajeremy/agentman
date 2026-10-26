@@ -25,7 +25,7 @@ import {
   WorkspaceResult,
 } from "../../lib/protocol";
 import { useStore } from "../../lib/store";
-import { ago, font, Palette, radius, size, space } from "../../lib/theme";
+import { ago, font, Palette, radius, size, space, scaled } from "../../lib/theme";
 
 /** A directory listing is worth filtering long before it is worth paging. */
 const FILTER_FROM_ENTRIES = 8;
@@ -662,7 +662,7 @@ const makeStyles = (c: Palette) =>
     subtitle: {
       color: c.muted,
       fontFamily: font.mono,
-      fontSize: 11,
+      fontSize: scaled(11),
       marginTop: 1,
     },
     iconButton: {
@@ -699,7 +699,7 @@ const makeStyles = (c: Palette) =>
       paddingRight: space.lg,
     },
     crumbItem: { flexDirection: "row", alignItems: "center", gap: 3 },
-    crumb: { color: c.workingText, fontFamily: font.mono, fontSize: 12 },
+    crumb: { color: c.workingText, fontFamily: font.mono, fontSize: scaled(12) },
     crumbCurrent: { color: c.text, fontFamily: font.monoMedium },
 
     toolRow: { flexDirection: "row", gap: space.sm, marginTop: space.md },
@@ -721,7 +721,7 @@ const makeStyles = (c: Palette) =>
       flexShrink: 1,
       color: c.textSecondary,
       fontFamily: font.monoMedium,
-      fontSize: 12,
+      fontSize: scaled(12),
     },
     search: {
       flex: 1,
@@ -750,7 +750,7 @@ const makeStyles = (c: Palette) =>
       color: c.text,
       fontFamily: font.sans,
       fontSize: size.caption,
-      lineHeight: 18,
+      lineHeight: scaled(18),
       paddingVertical: 0,
       paddingHorizontal: 0,
       includeFontPadding: false,
@@ -776,9 +776,9 @@ const makeStyles = (c: Palette) =>
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: c.line,
     },
-    rowName: { flex: 1, color: c.text, fontFamily: font.mono, fontSize: 13 },
+    rowName: { flex: 1, color: c.text, fontFamily: font.mono, fontSize: scaled(13) },
     rowFolder: { fontFamily: font.monoMedium },
-    rowMeta: { color: c.faint, fontFamily: font.mono, fontSize: 11 },
+    rowMeta: { color: c.faint, fontFamily: font.mono, fontSize: scaled(11) },
 
     viewing: {
       flexDirection: "row",
@@ -791,7 +791,7 @@ const makeStyles = (c: Palette) =>
       flexShrink: 1,
       color: c.faint,
       fontFamily: font.sans,
-      fontSize: 11.5,
+      fontSize: scaled(11.5),
     },
     older: {
       flexDirection: "row",
@@ -830,8 +830,8 @@ const makeStyles = (c: Palette) =>
     note: {
       color: c.faint,
       fontFamily: font.sans,
-      fontSize: 11.5,
+      fontSize: scaled(11.5),
       marginTop: space.md,
-      lineHeight: 16,
+      lineHeight: scaled(16),
     },
   });

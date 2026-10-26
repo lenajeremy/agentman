@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 
 import { useStyles, useTheme } from "../lib/appearance";
 import { noticeOf } from "../lib/notices";
-import { font, Palette, size, space } from "../lib/theme";
+import { font, Palette, size, space, scaled } from "../lib/theme";
 
 /**
  * A system line in a thread, such as a background task ending, said the way
@@ -52,8 +52,8 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.toolCard,
     },
     tile: { width: 22, height: 20, alignItems: "center", justifyContent: "center" },
-    text: { flexShrink: 1, fontFamily: font.sans, fontSize: size.caption, lineHeight: 20, color: c.textSecondary },
-    outcomeText: { flexShrink: 0, marginLeft: -4, fontFamily: font.sans, fontSize: size.caption, lineHeight: 20 },
+    text: { flexShrink: 1, fontFamily: font.sans, fontSize: size.caption, lineHeight: scaled(20), color: c.textSecondary },
+    outcomeText: { flexShrink: 0, marginLeft: -4, fontFamily: font.sans, fontSize: size.caption, lineHeight: scaled(20) },
     outcome: { color: c.faint },
     failed: { color: c.errorText },
   });

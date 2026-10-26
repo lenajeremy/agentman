@@ -139,17 +139,29 @@ export const font = {
   monoMedium: "GoogleSansCode-Medium",
 } as const;
 
+/**
+ * Every text size in the app is this much larger than it is written: the
+ * user found the text too small to read comfortably. One number moves it all,
+ * the sizes below and every size written into a screen (through scaled).
+ */
+export const textScale = 1.1;
+
+/** A text size or line height as the app draws it, to the half point. */
+export function scaled(points: number): number {
+  return Math.round(points * textScale * 2) / 2;
+}
+
 export const size = {
   /** Section labels, counts. */
-  label: 12,
-  caption: 13,
-  body: 15,
+  label: scaled(12),
+  caption: scaled(13),
+  body: scaled(15),
   /** What a conversation says: a touch smaller than body, on a looser line,
    *  for reading paragraphs rather than scanning rows. */
-  reading: 14.5,
-  title: 17,
-  heading: 22,
-  display: 34,
+  reading: scaled(14.5),
+  title: scaled(17),
+  heading: scaled(22),
+  display: scaled(34),
 } as const;
 
 export const space = {

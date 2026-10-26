@@ -31,6 +31,10 @@ struct KeysSettings: View {
                     }
                 }
 
+                // Agentman's own sign-in for voice prompts, apart from the
+                // keys it hands to agents.
+                VoiceSection()
+
                 if manager.keys.isEmpty {
                     Text("No keys yet")
                         .font(TextStyle.caption)

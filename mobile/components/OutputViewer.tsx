@@ -4,7 +4,7 @@ import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from "rea
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { parseDiff } from "../lib/diff";
-import { font, radius, size, space } from "../lib/theme";
+import { font, radius, size, space, scaled } from "../lib/theme";
 
 /**
  * A terminal, not a themed surface.
@@ -183,7 +183,7 @@ const styles = StyleSheet.create({
   close: { width: 28, height: 28, alignItems: "center", justifyContent: "center" },
   title: { flex: 1 },
   titleText: { fontFamily: font.monoMedium, fontSize: size.caption, color: term.text },
-  titleMeta: { fontFamily: font.sans, fontSize: 11, color: term.dim, marginTop: 1 },
+  titleMeta: { fontFamily: font.sans, fontSize: scaled(11), color: term.dim, marginTop: 1 },
   toggle: {
     width: 30,
     height: 28,
@@ -201,12 +201,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: term.rule,
   },
-  commandLine: { fontFamily: font.mono, fontSize: 12.5, lineHeight: 19, color: term.text },
+  commandLine: { fontFamily: font.mono, fontSize: scaled(12.5), lineHeight: scaled(19), color: term.text },
   prompt: { color: term.prompt },
 
   scroll: { flex: 1 },
   scrollInner: { paddingTop: space.md },
   lines: { paddingHorizontal: space.lg },
   linesWrapped: { gap: 3 },
-  line: { fontFamily: font.mono, fontSize: 12.5, lineHeight: 19 },
+  line: { fontFamily: font.mono, fontSize: scaled(12.5), lineHeight: scaled(19) },
 });

@@ -5,7 +5,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { useStyles, useTheme } from "../lib/appearance";
 import type { Message } from "../lib/protocol";
 import { useStore } from "../lib/store";
-import { font, Palette, radius, size, space } from "../lib/theme";
+import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { runCounts, runFinished, toolRunKey } from "../lib/toolgroups";
 import { MotionPressable } from "./MotionPressable";
 import { ToolRow } from "./ToolRow";
@@ -125,7 +125,7 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
     },
     tileRunning: { backgroundColor: c.workingWash },
-    line: { flexShrink: 1, fontFamily: font.sans, fontSize: size.caption, color: c.textSecondary, lineHeight: 20 },
+    line: { flexShrink: 1, fontFamily: font.sans, fontSize: size.caption, color: c.textSecondary, lineHeight: scaled(20) },
     failed: { color: c.errorText },
     // Opened, the steps hang from a thin rule under the run's icon, as a
     // list of what it was made of.

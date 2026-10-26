@@ -21,7 +21,7 @@ import { MotionPressable } from "../../components/MotionPressable";
 import { useStyles, useTheme } from "../../lib/appearance";
 import { Server } from "../../lib/protocol";
 import { useStore } from "../../lib/store";
-import { agentLabel, font, Palette, radius, shortPath, size, space } from "../../lib/theme";
+import { agentLabel, font, Palette, radius, shortPath, size, space, scaled } from "../../lib/theme";
 
 /**
  * The web servers one agent has started.
@@ -327,7 +327,7 @@ const makeStyles = (c: Palette) =>
       marginTop: space.xs,
       marginBottom: space.lg,
     },
-    sessionName: { flex: 1, fontFamily: font.mono, fontSize: 12, color: c.muted },
+    sessionName: { flex: 1, fontFamily: font.mono, fontSize: scaled(12), color: c.muted },
 
     offline: {
       flexDirection: "row",
@@ -368,7 +368,7 @@ const makeStyles = (c: Palette) =>
     },
     cardBody: { flex: 1, gap: 3 },
     serverName: { fontFamily: font.sansMedium, fontSize: size.body, color: c.text },
-    serverMeta: { fontFamily: font.mono, fontSize: 12, color: c.muted },
+    serverMeta: { fontFamily: font.mono, fontSize: scaled(12), color: c.muted },
     openPill: {
       flexDirection: "row",
       alignItems: "center",
@@ -416,7 +416,7 @@ const makeStyles = (c: Palette) =>
       borderTopColor: c.line,
       backgroundColor: c.fill,
     },
-    link: { flex: 1, fontFamily: font.mono, fontSize: 12, color: c.textSecondary },
+    link: { flex: 1, fontFamily: font.mono, fontSize: scaled(12), color: c.textSecondary },
     linkAction: {
       width: 32,
       height: 32,
@@ -444,14 +444,14 @@ const makeStyles = (c: Palette) =>
     emptyBody: {
       fontFamily: font.sans,
       fontSize: size.caption,
-      lineHeight: 19,
+      lineHeight: scaled(19),
       color: c.muted,
       textAlign: "center",
     },
     footnote: {
       fontFamily: font.sans,
       fontSize: size.label,
-      lineHeight: 17,
+      lineHeight: scaled(17),
       color: c.faint,
       marginTop: space.lg,
       marginHorizontal: space.xxs,

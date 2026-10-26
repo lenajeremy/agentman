@@ -14,7 +14,7 @@ import { questionSnapshotIdentity } from "../lib/action-state";
 import { useStyles, useTheme } from "../lib/appearance";
 import { Question, QuestionAnswer, SendStatus } from "../lib/protocol";
 import { MAX_NOTE_CHARS, noteAnswer, submitAnswer, tapAnswer } from "../lib/question-answer";
-import { font, Palette, radius, size, space } from "../lib/theme";
+import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { MotionPressable } from "./MotionPressable";
 
 const AFFIRMATIVE = /^(yes|allow|approve|proceed)/i;
@@ -537,7 +537,7 @@ const makeStyles = (c: Palette) =>
     title: {
       fontFamily: font.sansBold,
       fontSize: size.heading,
-      lineHeight: 27,
+      lineHeight: scaled(27),
       letterSpacing: -0.5,
       color: c.text,
     },
@@ -552,7 +552,7 @@ const makeStyles = (c: Palette) =>
       fontFamily: font.mono,
       fontSize: size.caption,
       color: c.text,
-      lineHeight: 19,
+      lineHeight: scaled(19),
     },
     detailBox: {
       backgroundColor: c.fill,
@@ -563,13 +563,13 @@ const makeStyles = (c: Palette) =>
     prompt: {
       fontFamily: font.sans,
       fontSize: size.body,
-      lineHeight: 21,
+      lineHeight: scaled(21),
       color: c.textSecondary,
     },
     compactPrompt: {
       fontFamily: font.sans,
       fontSize: size.caption,
-      lineHeight: 18,
+      lineHeight: scaled(18),
       color: c.muted,
     },
 
@@ -630,7 +630,7 @@ const makeStyles = (c: Palette) =>
     optionDescription: {
       fontFamily: font.sans,
       fontSize: size.caption,
-      lineHeight: 18,
+      lineHeight: scaled(18),
       color: c.muted,
     },
     optionDescriptionPrimary: { color: c.onInverse, opacity: 0.72 },
@@ -648,7 +648,7 @@ const makeStyles = (c: Palette) =>
     previewText: {
       fontFamily: font.mono,
       fontSize: size.caption,
-      lineHeight: 19,
+      lineHeight: scaled(19),
       color: c.text,
     },
     checkMark: {
@@ -699,7 +699,7 @@ const makeStyles = (c: Palette) =>
       flex: 1,
       fontFamily: font.sans,
       fontSize: size.label,
-      lineHeight: 16,
+      lineHeight: scaled(16),
       color: c.muted,
     },
     noteSend: {
@@ -743,7 +743,7 @@ const makeStyles = (c: Palette) =>
       flex: 1,
       fontFamily: font.sans,
       fontSize: size.caption,
-      lineHeight: 18,
+      lineHeight: scaled(18),
       color: c.muted,
     },
     answerStatusTextFailed: { color: c.errorText },

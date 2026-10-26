@@ -32,7 +32,7 @@ import { pairWithToken } from "../lib/client";
 import { confirmPairingReplacement } from "../lib/confirm";
 import { parsePairingPayload } from "../lib/pairing";
 import { useStore } from "../lib/store";
-import { font, Palette, radius, size, space } from "../lib/theme";
+import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 
 /** Drawn over live camera video, which is dark whatever the theme. */
 const ON_CAMERA = "#FFFFFF";
@@ -260,7 +260,7 @@ const makeStyles = (c: Palette) =>
       maxWidth: 290,
       fontFamily: font.sansMedium,
       fontSize: size.caption,
-      lineHeight: 18,
+      lineHeight: scaled(18),
       textAlign: "center",
       color: ON_CAMERA,
       backgroundColor: c.cameraScrim,
@@ -318,7 +318,7 @@ const makeStyles = (c: Palette) =>
 
     title: {
       fontFamily: font.sansBold,
-      fontSize: 28,
+      fontSize: scaled(28),
       letterSpacing: -0.8,
       color: c.text,
       textAlign: "center",
@@ -327,7 +327,7 @@ const makeStyles = (c: Palette) =>
       fontFamily: font.sans,
       fontSize: size.body,
       color: c.muted,
-      lineHeight: 22,
+      lineHeight: scaled(22),
       textAlign: "center",
       marginTop: space.sm,
       maxWidth: 340,
@@ -343,7 +343,7 @@ const makeStyles = (c: Palette) =>
       fontFamily: font.sansMedium,
       fontSize: size.caption,
       color: "#FF9A9E",
-      lineHeight: 18,
+      lineHeight: scaled(18),
       textAlign: "center",
     },
 
@@ -356,7 +356,7 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
       marginTop: space.xl,
     },
-    buttonText: { fontFamily: font.sansBold, fontSize: 16, color: c.onInverse },
+    buttonText: { fontFamily: font.sansBold, fontSize: scaled(16), color: c.onInverse },
     secondaryButton: {
       paddingVertical: space.md,
       paddingHorizontal: space.lg,

@@ -1246,6 +1246,14 @@ struct Composer: View {
                         }
                     }
                 }
+                if attachments != nil {
+                    VoiceButton(enabled: enabled, onText: { spoken in
+                        text = text.adding(spoken: spoken)
+                        focused = true
+                    }, onProblem: { problem in
+                        if let id = session?.id { store.actionError[id] = problem }
+                    })
+                }
                 sendButton
             }
         }

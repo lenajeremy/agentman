@@ -676,7 +676,7 @@ private struct DiskBanner: View {
 /// `-legacyEditor YES` the text views from before it.
 private struct EditorPanes: View {
     let store: EditorStore
-    @AppStorage("editorFontSize") private var fontSize = 13.0
+    @AppStorage("editorFontSize") private var fontSize = 14.0
     @AppStorage("editorVim") private var vim = false
 
     var body: some View {
@@ -1155,7 +1155,7 @@ struct EditorCommands: Commands {
             Button("Smaller Text") { adjustFont(-1) }
                 .keyboardShortcut("-", modifiers: .command)
                 .disabled(editor == nil)
-            Button("Actual Size") { UserDefaults.standard.set(13.0, forKey: "editorFontSize") }
+            Button("Actual Size") { UserDefaults.standard.set(14.0, forKey: "editorFontSize") }
                 .keyboardShortcut("0", modifiers: .command)
                 .disabled(editor == nil)
         }
@@ -1172,7 +1172,7 @@ struct EditorCommands: Commands {
     }
 
     @MainActor private func adjustFont(_ step: Double) {
-        let now = UserDefaults.standard.object(forKey: "editorFontSize") as? Double ?? 13
+        let now = UserDefaults.standard.object(forKey: "editorFontSize") as? Double ?? 14
         UserDefaults.standard.set(min(max(now + step, 9), 28), forKey: "editorFontSize")
     }
 }

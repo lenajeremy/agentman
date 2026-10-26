@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 
 import { useStyles, useTheme } from "../lib/appearance";
 import { WorkspaceChange } from "../lib/protocol";
-import { font, Palette, radius, space } from "../lib/theme";
+import { font, Palette, radius, space, scaled } from "../lib/theme";
 import { FileBadge } from "./FileBadge";
 import { MotionPressable } from "./MotionPressable";
 
@@ -137,10 +137,10 @@ const makeStyles = (c: Palette) =>
     // lines would. The gap is small because the path is a continuation of the
     // name, not a separate field.
     identity: { flex: 1, minWidth: 0, gap: 1, justifyContent: "center" },
-    name: { color: c.text, fontFamily: font.mono, fontSize: 13 },
-    dir: { color: c.faint, fontFamily: font.mono, fontSize: 10.5 },
+    name: { color: c.text, fontFamily: font.mono, fontSize: scaled(13) },
+    dir: { color: c.faint, fontFamily: font.mono, fontSize: scaled(10.5) },
     counts: { flexDirection: "row", alignItems: "center", gap: 6 },
-    count: { fontFamily: font.monoMedium, fontSize: 11.5 },
+    count: { fontFamily: font.monoMedium, fontSize: scaled(11.5) },
     countAdded: { color: c.ok },
     // Amber, not blue: an edited file sits between wholly new and deleted, and
     // the palette's "working" blue already means an agent is running.

@@ -227,6 +227,10 @@ type Request struct {
 	// the daemon and handed to the agent as file paths. They are tickets, not
 	// filenames: nothing in them reaches the filesystem.
 	UploadIDs []string `json:"uploadIds,omitempty"`
+	// Voice is one part of a recording to write out, on "transcribe".
+	Voice *VoiceClip `json:"voice,omitempty"`
+	// VoiceSignIn is a step of signing in to Celery for voice prompts.
+	VoiceSignIn *VoiceSignIn `json:"voiceSignIn,omitempty"`
 	// Kind and Path select a local agent and a directory relative to home.
 	Kind Kind `json:"kind,omitempty"`
 	// Approve is the verdict on ReqReviewArtifact: true approves the
@@ -354,6 +358,10 @@ type Event struct {
 	// local socket only.
 	Tmux     *AgentsTmux      `json:"tmux,omitempty"`
 	Terminal *SessionTerminal `json:"terminal,omitempty"`
+	// Transcript answers ReqTranscribe.
+	Transcript *Transcript `json:"transcript,omitempty"`
+	// VoiceAccount answers the voice_* requests.
+	VoiceAccount *VoiceAccount `json:"voiceAccount,omitempty"`
 	// Languages answers the editor's language server requests.
 	Languages *LanguagesState `json:"languages,omitempty"`
 	// Schedules answers ReqManagerSchedules.

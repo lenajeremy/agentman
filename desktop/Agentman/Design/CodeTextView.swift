@@ -129,7 +129,7 @@ struct CodeTextView: NSViewRepresentable {
     }
 
     static func font(_ size: CGFloat) -> NSFont {
-        NSFont(descriptor: NSFontDescriptor(fontAttributes: [.family: "Google Sans Code"]), size: size)
+        NSFont(descriptor: NSFontDescriptor(fontAttributes: [.family: "Google Sans Code"]), size: size * Fonts.scale)
             ?? .monospacedSystemFont(ofSize: size, weight: .regular)
     }
 

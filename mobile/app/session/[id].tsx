@@ -42,6 +42,7 @@ import { Thinking } from "../../components/Thinking";
 import { ToolRow } from "../../components/ToolRow";
 import { AttachmentStrip } from "../../components/AttachmentStrip";
 import { Popover, type PopoverItem } from "../../components/Popover";
+import { VoiceButton } from "../../components/VoiceButton";
 import { type Frame } from "../../lib/message-menu";
 import { artifactsButtonLabel } from "../../lib/artifacts";
 import { canEnd, shouldResume } from "../../lib/resume";
@@ -60,6 +61,7 @@ import { Message } from "../../lib/protocol";
 import { sessionNeedsAnswer } from "../../lib/question-alerts";
 import { useStyles, useTheme } from "../../lib/appearance";
 import { PendingSend, useStore } from "../../lib/store";
+import { addSpoken } from "../../lib/voice";
 import {
   agentLabel,
   font,
@@ -70,6 +72,7 @@ import {
   size,
   space,
   stateStyle,
+  scaled,
 } from "../../lib/theme";
 
 type Row =
@@ -1148,6 +1151,11 @@ export default function SessionScreen() {
                       disabled={switchLocked}
                     />
                   ) : null}
+                  <VoiceButton
+                    disabled={!canSend || awaitingSend}
+                    onText={(spoken) => setDraft((current) => addSpoken(current, spoken))}
+                    onProblem={(message) => Alert.alert("Voice", message)}
+                  />
                   <MotionPressable
                     onPress={() => void submit()}
                     disabled={!canSend || awaitingSend || nothingToSend}
@@ -1909,8 +1917,8 @@ const makeStyles = (c: Palette) =>
     },
     serverDotText: {
       fontFamily: font.sansMedium,
-      fontSize: 9.5,
-      lineHeight: 12,
+      fontSize: scaled(9.5),
+      lineHeight: scaled(12),
       color: "#FFFFFF",
     },
     // The same badge as the server count, in the colour that asks for a tap:
@@ -1929,13 +1937,13 @@ const makeStyles = (c: Palette) =>
     },
     reviewBadgeText: {
       fontFamily: font.sansMedium,
-      fontSize: 9.5,
-      lineHeight: 12,
+      fontSize: scaled(9.5),
+      lineHeight: scaled(12),
       color: c.onAccent,
     },
     title: {
       fontFamily: font.sansMedium,
-      fontSize: 16,
+      fontSize: scaled(16),
       color: c.text,
     },
     subtitleRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
@@ -2003,7 +2011,7 @@ const makeStyles = (c: Palette) =>
       flex: 1,
       fontFamily: font.sans,
       fontSize: size.caption,
-      lineHeight: 18,
+      lineHeight: scaled(18),
       color: c.textSecondary,
     },
     connectionNote: { backgroundColor: c.errorWash },
@@ -2050,14 +2058,14 @@ const makeStyles = (c: Palette) =>
       fontFamily: font.sans,
       fontSize: size.reading,
       color: c.text,
-      lineHeight: 23,
+      lineHeight: scaled(23),
     },
     summaryHeader: { flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 4 },
     summaryLabel: { fontFamily: font.sans, fontSize: size.caption, color: c.muted },
     summaryText: {
       fontFamily: font.sans,
       fontSize: size.caption,
-      lineHeight: 19,
+      lineHeight: scaled(19),
       color: c.muted,
       marginTop: 6,
     },
@@ -2069,7 +2077,7 @@ const makeStyles = (c: Palette) =>
     sidechain: {
       alignSelf: "flex-start",
       fontFamily: font.sansBold,
-      fontSize: 11,
+      fontSize: scaled(11),
       color: c.muted,
       backgroundColor: c.fill,
       borderRadius: radius.pill,
@@ -2175,8 +2183,8 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.pill,
     },
     modelButtonPressed: { backgroundColor: c.fill },
-    modelText: { flexShrink: 1, fontFamily: font.sansMedium, fontSize: 13, color: c.muted },
-    contextText: { fontFamily: font.sans, fontSize: 12, color: c.faint, fontVariant: ["tabular-nums"] },
+    modelText: { flexShrink: 1, fontFamily: font.sansMedium, fontSize: scaled(13), color: c.muted },
+    contextText: { fontFamily: font.sans, fontSize: scaled(12), color: c.faint, fontVariant: ["tabular-nums"] },
     // A wrapper so the long press has something to land on: the gesture cannot
     // be attached to the TextInput itself without swallowing taps that should
     // place the caret.
