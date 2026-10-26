@@ -7,6 +7,8 @@ struct PaletteItem: Identifiable {
     var detail: String? = nil
     var icon: String = "doc"
     var tint: Color = Palette.muted
+    /// A file's own icon from the asset catalogue, shown instead of `icon`.
+    var fileIcon: String? = nil
     /// A shortcut shown at the row's end, such as "⌘P".
     var shortcut: String? = nil
 }
@@ -98,10 +100,18 @@ struct PaletteView: View {
 
     private func row(_ item: PaletteItem, selected: Bool) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: item.icon)
-                .font(.system(size: 12))
-                .foregroundStyle(item.tint)
-                .frame(width: 18)
+            Group {
+                if let fileIcon = item.fileIcon {
+                    Image(fileIcon)
+                        .resizable()
+                        .frame(width: 15, height: 15)
+                } else {
+                    Image(systemName: item.icon)
+                        .font(.system(size: 12))
+                        .foregroundStyle(item.tint)
+                }
+            }
+            .frame(width: 18)
             Text(item.title)
                 .font(Fonts.sans(13.5, .medium))
                 .foregroundStyle(Palette.text)

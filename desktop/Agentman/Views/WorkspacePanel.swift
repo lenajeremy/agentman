@@ -386,9 +386,7 @@ private struct FileList: View {
                         open(entry.directory ? .folder(child) : .file(child))
                     } label: {
                         HStack(spacing: 9) {
-                            Image(systemName: entry.directory ? "folder.fill" : FileIcon.symbol(entry.name))
-                                .font(.system(size: 12))
-                                .foregroundStyle(entry.directory ? Palette.working.opacity(0.8) : FileIcon.tint(entry.name))
+                            FileTypeIcon(name: entry.name, directory: entry.directory, size: 15)
                                 .frame(width: 16)
                             Text(entry.name)
                                 .font(TextStyle.caption)
@@ -419,6 +417,24 @@ private struct FileList: View {
 }
 
 enum FileIcon {
+    /// The theme's icon for a file or folder, as an asset name: by its exact
+    /// name first, then its longest extension ("d.ts" before "ts"), then the
+    /// theme's plain file or folder. See desktop/scripts/file-icons.py.
+    static func asset(_ name: String, directory: Bool = false, open: Bool = false) -> String {
+        let name = (name as NSString).lastPathComponent.lowercased()
+        if directory {
+            let icon = open ? FileIconMap.openFolderNames[name] ?? "folder-open" : FileIconMap.folderNames[name] ?? "folder"
+            return "FileIcon-" + icon
+        }
+        if let icon = FileIconMap.fileNames[name] { return "FileIcon-" + icon }
+        var rest = Substring(name)
+        while let dot = rest.firstIndex(of: ".") {
+            rest = rest[rest.index(after: dot)...]
+            if let icon = FileIconMap.extensions[String(rest)] { return "FileIcon-" + icon }
+        }
+        return "FileIcon-file"
+    }
+
     static func tint(_ name: String) -> Color {
         switch (name as NSString).pathExtension.lowercased() {
         case "swift": Color(red: 0.94, green: 0.45, blue: 0.24)
@@ -445,6 +461,23 @@ enum FileIcon {
         case "": "doc"
         default: "chevron.left.forwardslash.chevron.right"
         }
+    }
+}
+
+/// A file's or folder's icon from the theme, as the editor's file trees
+/// show them.
+struct FileTypeIcon: View {
+    let name: String
+    var directory = false
+    var open = false
+    var size: CGFloat = 14
+
+    var body: some View {
+        Image(FileIcon.asset(name, directory: directory, open: open))
+            .resizable()
+            .interpolation(.high)
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
     }
 }
 
@@ -654,9 +687,7 @@ private struct FileBar: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: FileIcon.symbol(path))
-                .font(.system(size: 11))
-                .foregroundStyle(FileIcon.tint(path))
+            FileTypeIcon(name: path, size: 14)
             let folder = (path as NSString).deletingLastPathComponent
             Text(folder.isEmpty ? (session.cwd as NSString).lastPathComponent : folder)
                 .font(TextStyle.caption)

@@ -313,9 +313,8 @@ private struct FileRow: View {
         let quiet = entry.name.hasPrefix(".") || EditorStore.quietFolders.contains(entry.name)
         let open = store.documents.first { $0.path == entry.path }
         HStack(spacing: 6) {
-            Image(systemName: entry.isDirectory ? "folder" : FileIcon.symbol(entry.name))
-                .font(.system(size: 11))
-                .foregroundStyle(entry.isDirectory ? Palette.muted : FileIcon.tint(entry.name))
+            FileTypeIcon(name: entry.name, directory: entry.isDirectory,
+                         open: entry.isDirectory && store.isExpanded(entry.path), size: 15)
                 .frame(width: 16)
             Text(entry.name)
                 .font(Fonts.sans(12.5))
@@ -372,9 +371,7 @@ private struct EditorTab: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            Image(systemName: FileIcon.symbol(document.name))
-                .font(.system(size: 10.5))
-                .foregroundStyle(FileIcon.tint(document.name))
+            FileTypeIcon(name: document.name, size: 13)
             Text(document.name)
                 .font(Fonts.sans(12.5, active ? .medium : .regular))
                 .foregroundStyle(active ? Palette.text : Palette.muted)
@@ -828,7 +825,8 @@ private struct GoToFile: View {
             let folder = (path as NSString).deletingLastPathComponent
             return PaletteItem(id: path, title: (path as NSString).lastPathComponent,
                                detail: folder.isEmpty ? nil : folder,
-                               icon: FileIcon.symbol(path), tint: FileIcon.tint(path))
+                               icon: FileIcon.symbol(path), tint: FileIcon.tint(path),
+                               fileIcon: FileIcon.asset(path))
         }
     }
 }
