@@ -34,6 +34,18 @@ const core = {
   },
 }
 
+// Paths into Monaco's own files, as monaco-vim and the borrowed language
+// settings name them; Monaco's package exports don't reach that far.
+const deep = {
+  name: 'monaco-deep',
+  setup(b) {
+    b.onResolve({ filter: /^monaco-editor\/esm\/vs\// }, ({ path }) => {
+      const file = join(here, 'node_modules', path)
+      return { path: file.endsWith('.js') ? file : `${file}.js` }
+    })
+  },
+}
+
 await rm(out, { recursive: true, force: true })
 await mkdir(out, { recursive: true })
 
@@ -62,7 +74,7 @@ await build({
   loader: { '.ttf': 'file' },
   assetNames: '[name]',
   define: { WORKER_SOURCE: JSON.stringify(worker.outputFiles[0].text) },
-  plugins: [core],
+  plugins: [core, deep],
   logLevel: 'warning',
 })
 

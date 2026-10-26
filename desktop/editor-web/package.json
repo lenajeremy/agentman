@@ -7,11 +7,16 @@
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "esbuild test/convert.test.ts --bundle --platform=node --format=esm --outfile=.test/convert.test.mjs --log-level=warning && node --test .test/convert.test.mjs"
+    "test": "esbuild test/convert.test.ts test/roles.test.ts --bundle --platform=node --format=esm --outdir=.test --splitting --log-level=warning && node --test .test/convert.test.js .test/roles.test.js"
   },
   "devDependencies": {
+    "@shikijs/core": "4.5.0",
+    "@shikijs/engine-javascript": "4.5.0",
+    "@shikijs/langs": "4.5.0",
+    "@shikijs/vscode-textmate": "10.1.0",
     "esbuild": "0.28.2",
     "monaco-editor": "0.57.0",
+    "monaco-vim": "0.4.4",
     "typescript": "5.9.3"
   }
 }

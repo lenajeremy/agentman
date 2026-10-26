@@ -66,6 +66,8 @@ enum Palette {
     static let codeNumber = Color(light: 0xB25A12, dark: 0xF2A867)
     static let codeComment = Color(light: 0x8A8D94, dark: 0x6E727B)
     static let codeType = Color(light: 0x1F5FB8, dark: 0x8DB8F5)
+    static let codeFunction = Color(light: 0x8A6100, dark: 0xE8D08A)
+    static let codeProperty = Color(light: 0x0E6F8A, dark: 0x86D1E3)
     // Diffs: a line added, a line removed, and where a hunk begins.
     static let diffAdd = Color(light: 0xE8F7EE, dark: 0x13281C)
     static let diffRemove = Color(light: 0xFDECEC, dark: 0x2C1517)

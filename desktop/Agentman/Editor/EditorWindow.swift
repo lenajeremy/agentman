@@ -39,11 +39,12 @@ enum EditorOpener {
 /// changed, the files open in tabs, and a status bar, in the manner of VS
 /// Code, Zed and the code views in v0 and AI Studio.
 struct EditorWindow: View {
+    @Environment(AgentsStore.self) private var agents
     @State private var store: EditorStore
     @State private var naming: Naming?
-    @State private var trashing: FileEntry?
     @State private var keyMonitor: Any?
     @AppStorage("terminalHeight") private var terminalHeight = 260.0
+    @AppStorage("agentPanelWidth") private var panelWidth = 400.0
 
     init(folder: String, client: DaemonClient) {
         let store = EditorRegistry.shared.store(for: folder)
@@ -53,43 +54,65 @@ struct EditorWindow: View {
 
     var body: some View {
         NavigationSplitView {
-            FileTree(store: store, naming: $naming, trashing: $trashing)
+            FileTree(store: store, naming: $naming)
                 .navigationSplitViewColumnWidth(min: 190, ideal: 250, max: 420)
         } detail: {
             VStack(spacing: 0) {
-                if !store.documents.isEmpty {
-                    TabStrip(store: store)
-                }
-                if let document = store.active {
-                    PathBar(store: store, document: document)
-                    DiskBanner(document: document, close: { store.close(document) })
-                }
-                ZStack {
-                    EditorPanes(store: store)
-                    if let document = store.active, document.kind != .text {
-                        NonTextView(document: document)
+                HStack(spacing: 0) {
+                    VStack(spacing: 0) {
+                        if !store.documents.isEmpty {
+                            TabStrip(store: store)
+                        }
+                        if let document = store.active {
+                            PathBar(store: store, document: document)
+                            DiskBanner(document: document, close: { store.close(document) })
+                        }
+                        ZStack {
+                            EditorPanes(store: store)
+                            if let document = store.active, document.kind != .text {
+                                NonTextView(document: document)
+                            }
+                            if store.active == nil {
+                                EditorEmpty(store: store)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        if store.showTerminal {
+                            PanelDivider(height: $terminalHeight, maximum: (store.window?.frame.height ?? 800) * 0.75)
+                                .padding(.vertical, -3)
+                                .zIndex(1)
+                            TerminalPanel(store: store)
+                                .frame(height: terminalHeight)
+                        }
                     }
-                    if store.active == nil {
-                        EditorEmpty(store: store)
+                    .frame(minWidth: 320)
+                    .overlay {
+                        if store.quickOpen {
+                            GoToFile(store: store)
+                        }
                     }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if store.showTerminal {
-                    PanelDivider(height: $terminalHeight, maximum: (store.window?.frame.height ?? 800) * 0.75)
-                        .padding(.vertical, -3)
-                        .zIndex(1)
-                    TerminalPanel(store: store)
-                        .frame(height: terminalHeight)
+                    // Agentman beside the code: the folder's agent, or any
+                    // other, and Agentman itself.
+                    if store.showAgentPanel {
+                        ColumnDivider(width: $panelWidth, maximum: (store.window?.frame.width ?? 1200) * 0.6)
+                            .zIndex(1)
+                        AgentPanel(editor: store)
+                            .frame(width: min(panelWidth, max((store.window?.frame.width ?? 1200) * 0.6, ColumnDivider.minimum)))
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
                 }
                 StatusBar(store: store)
             }
             .background(Palette.surface)
-            .overlay {
-                if store.quickOpen {
-                    GoToFile(store: store)
-                }
+            .animation(.easeOut(duration: 0.18), value: store.showAgentPanel)
+        }
+        // An image from the agent panel, full size over the editor.
+        .overlay {
+            if let box = agents.lightbox, box.place == store.root.path {
+                LightboxView(box: box)
             }
         }
+        .animation(.easeOut(duration: 0.15), value: agents.lightbox?.id)
         .navigationTitle(store.name)
         .navigationSubtitle(store.branch.map { "on \($0)" } ?? (store.root.path as NSString).abbreviatingWithTildeInPath)
         .toolbar {
@@ -112,6 +135,12 @@ struct EditorWindow: View {
                     Label("Show in Finder", systemImage: "folder")
                 }
                 .help("Show in Finder")
+                Button {
+                    store.showAgentPanel.toggle()
+                } label: {
+                    Label("Agentman", systemImage: store.showAgentPanel ? "bubble.left.and.text.bubble.right.fill" : "bubble.left.and.text.bubble.right")
+                }
+                .help(store.showAgentPanel ? "Hide Agentman (⌘L)" : "Agentman and your agents, beside the code (⌘L)")
             }
         }
         .focusedSceneValue(\.editorStore, store)
@@ -135,6 +164,17 @@ struct EditorWindow: View {
             }
         }
         .onAppear(perform: installKeys)
+        .onAppear {
+            // For screenshots and tests: the tree's keys, a filter, marks or
+            // the box for a new file.
+            guard let tree = ProcessInfo.processInfo.environment["AGENTMAN_TREE"] else { return }
+            for part in tree.split(separator: ";").map(String.init) {
+                if part == "keys" { store.showTreeKeys = true }
+                if part == "create" { store.creatingIn = "" }
+                if part.hasPrefix("filter:") { store.treeFilter = String(part.dropFirst(7)) }
+                if part.hasPrefix("mark:") { store.marked = Set(part.dropFirst(5).split(separator: ",").map(String.init)) }
+            }
+        }
         .onDisappear {
             if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
             keyMonitor = nil
@@ -154,18 +194,6 @@ struct EditorWindow: View {
         } message: {
             Text("Your changes are lost if you don't save them.")
         }
-        .confirmationDialog(
-            trashing.map { "Move \($0.name) to the Trash?" } ?? "",
-            isPresented: Binding(get: { trashing != nil }, set: { if !$0 { trashing = nil } })
-        ) {
-            Button("Move to Trash", role: .destructive) {
-                if let entry = trashing { store.problem = store.trash(entry) }
-                trashing = nil
-            }
-            Button("Cancel", role: .cancel) { trashing = nil }
-        } message: {
-            Text("You can put it back from the Trash.")
-        }
         .alert(naming?.title ?? "", isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {
             TextField("Name", text: Binding(get: { naming?.name ?? "" }, set: { naming?.name = $0 }))
             Button(naming?.action ?? "OK") {
@@ -184,6 +212,20 @@ struct EditorWindow: View {
         guard keyMonitor == nil else { return }
         let store = self.store
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // ⌘Z and ⇧⌘Z in the tree undo and redo its file changes, as in
+            // Finder, with Vim or without.
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
+            if event.window === store.window, let tree = store.treeView, store.window?.firstResponder === tree,
+               flags == .command || flags == [.command, .shift], event.charactersIgnoringModifiers?.lowercased() == "z" {
+                if flags.contains(.shift) { store.redoTreeChange() } else { store.undoTreeChange() }
+                return nil
+            }
+            // Vim's keys in the tree, while it has the keyboard.
+            if event.window === store.window, UserDefaults.standard.bool(forKey: "editorVim"),
+               let tree = store.treeView, store.window?.firstResponder === tree,
+               store.handleTreeKey(event) {
+                return nil
+            }
             guard event.window === store.window,
                   event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
                   event.charactersIgnoringModifiers == "w",
@@ -229,21 +271,65 @@ struct Naming {
 private struct FileTree: View {
     @Bindable var store: EditorStore
     @Binding var naming: Naming?
-    @Binding var trashing: FileEntry?
 
     var body: some View {
+        let filter = store.treeFilter?.trimmingCharacters(in: .whitespaces) ?? ""
         List(selection: $store.selection) {
-            Section {
-                FileTreeLevel(store: store, folder: "")
-            } header: {
-                Text(store.name.uppercased())
-                    .font(TextStyle.label)
-                    .foregroundStyle(Palette.faint)
+            if filter.isEmpty {
+                Section {
+                    FileTreeLevel(store: store, folder: "")
+                } header: {
+                    Text(store.name.uppercased())
+                        .font(TextStyle.label)
+                        .foregroundStyle(Palette.faint)
+                }
+            } else {
+                // What / found, as paths, best first.
+                Section {
+                    ForEach(store.treeMatches(filter), id: \.self) { path in
+                        FilterRow(store: store, path: path)
+                            .tag(path)
+                    }
+                } header: {
+                    Text("MATCHING “\(filter)”")
+                        .font(TextStyle.label)
+                        .foregroundStyle(Palette.faint)
+                        .lineLimit(1)
+                }
             }
         }
         .listStyle(.sidebar)
+        .background(SiblingReader<NSOutlineView> { store.treeView = $0 })
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if store.treeFilter != nil {
+                TreeFilterBar(store: store)
+                    .task { await store.loadAllFiles() }
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !store.trashing.isEmpty {
+                TreeTrashBar(store: store)
+            } else if let folder = store.creatingIn {
+                TreeCreateBar(store: store, folder: folder)
+                    .id(folder)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if store.showTreeKeys {
+                TreeKeysSheet { store.showTreeKeys = false }
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 10)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: store.showTreeKeys)
         .onChange(of: store.selection) { _, path in
-            guard let path, let entry = entry(path), !entry.isDirectory else { return }
+            // Moved to with the keys, a file is only pointed at.
+            if store.movingInTree {
+                store.movingInTree = false
+                return
+            }
+            guard let path, let entry = store.treeEntry(path), !entry.isDirectory else { return }
             if store.active?.path != path { store.open(path) }
         }
         .contextMenu(forSelectionType: String.self) { paths in
@@ -275,7 +361,10 @@ private struct FileTree: View {
             Button("Copy Path") { Clipboard.copy(store.root.appendingPathComponent(entry.path).path) }
             Button("Copy Relative Path") { Clipboard.copy(entry.path) }
             Divider()
-            Button("Move to Trash…", role: .destructive) { trashing = entry }
+            Button("Move to Trash…", role: .destructive) {
+                store.trashing = [entry]
+                store.focusTree()
+            }
         }
     }
 }
@@ -316,13 +405,23 @@ private struct FileRow: View {
             FileTypeIcon(name: entry.name, directory: entry.isDirectory,
                          open: entry.isDirectory && store.isExpanded(entry.path), size: 15)
                 .frame(width: 16)
-            Text(entry.name)
-                .font(Fonts.sans(12.5))
-                .foregroundStyle(mark?.tint ?? (quiet ? Palette.faint : Palette.text))
-                .strikethrough(mark == .deleted)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            if store.renamingInTree == entry.path {
+                TreeRenameField(store: store, entry: entry)
+            } else {
+                Text(entry.name)
+                    .font(Fonts.sans(12.5))
+                    .foregroundStyle(store.marked.contains(entry.path) ? Palette.workingText : mark?.tint ?? (quiet ? Palette.faint : Palette.text))
+                    .strikethrough(mark == .deleted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
             Spacer(minLength: 4)
+            if store.marked.contains(entry.path) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.working)
+                    .help("Marked: y, x and d act on every marked row")
+            }
             if open?.isDirty == true {
                 Circle().fill(Palette.textSecondary).frame(width: 6, height: 6)
                     .help("Unsaved changes")
@@ -336,6 +435,46 @@ private struct FileRow: View {
                     .help("Something inside changed")
             }
         }
+        // Cut with x: faded until p puts it somewhere.
+        .opacity(store.treeClipboard.map { $0.cut && $0.paths.contains(entry.path) } == true ? 0.45 : 1)
+    }
+}
+
+/// A file / found: its name, and the folder it is in.
+private struct FilterRow: View {
+    let store: EditorStore
+    let path: String
+
+    private var name: some View {
+        Text((path as NSString).lastPathComponent)
+            .font(Fonts.sans(12.5))
+            .foregroundStyle(store.marked.contains(path) ? Palette.workingText : Palette.text)
+            .lineLimit(1)
+    }
+
+    var body: some View {
+        let folder = (path as NSString).deletingLastPathComponent
+        HStack(spacing: 6) {
+            FileTypeIcon(name: (path as NSString).lastPathComponent, size: 15)
+                .frame(width: 16)
+            // The folder too when there is room for it, else the name alone.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) {
+                    name.fixedSize()
+                    if !folder.isEmpty {
+                        Text(folder)
+                            .font(Fonts.sans(11))
+                            .foregroundStyle(Palette.faint)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                            .frame(minWidth: 48, alignment: .leading)
+                    }
+                }
+                name
+            }
+            Spacer(minLength: 0)
+        }
+        .help(path)
     }
 }
 
@@ -529,6 +668,7 @@ private struct DiskBanner: View {
 private struct EditorPanes: View {
     let store: EditorStore
     @AppStorage("editorFontSize") private var fontSize = 13.0
+    @AppStorage("editorVim") private var vim = false
 
     var body: some View {
         if MonacoView.legacy {
@@ -538,7 +678,8 @@ private struct EditorPanes: View {
                 store: store,
                 tabs: store.documents.filter { $0.kind == .text }.map(MonacoView.Tab.init),
                 activeID: store.activeID,
-                fontSize: fontSize
+                fontSize: fontSize,
+                vim: vim
             )
         }
     }
@@ -692,6 +833,14 @@ private struct StatusBar: View {
 
     var body: some View {
         HStack(spacing: 14) {
+            if let mode = store.vimMode {
+                VimModeLabel(mode: mode, keys: store.vimKeys)
+            }
+            if let notice = store.notice {
+                Text(notice)
+                    .foregroundStyle(Palette.textSecondary)
+                    .transition(.opacity)
+            }
             if let branch = store.branch {
                 Label(branch, systemImage: "arrow.triangle.branch")
                     .labelStyle(.titleAndIcon)
@@ -717,6 +866,42 @@ private struct StatusBar: View {
         .frame(height: 24)
         .background(Palette.paper)
         .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 1) }
+    }
+}
+
+/// Vim's mode, as Vim shows it, tinted by kind: normal quiet, insert in the
+/// brand colour, visual in orange; then the keys of a command being typed.
+private struct VimModeLabel: View {
+    let mode: String
+    let keys: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(mode.uppercased())
+                .font(Fonts.mono(10, .semibold))
+                .tracking(0.6)
+                .foregroundStyle(tint)
+                .padding(.horizontal, 6)
+                .frame(height: 16)
+                .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            if !keys.isEmpty {
+                Text(keys)
+                    .font(Fonts.mono(11))
+                    .foregroundStyle(Palette.textSecondary)
+            }
+        }
+        .help("Vim mode. Turn Vim off in the Editor menu.")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Vim \(mode) mode")
+    }
+
+    private var tint: Color {
+        switch mode {
+        case "insert": Palette.workingText
+        case "replace": Palette.errorText
+        case _ where mode.hasPrefix("visual"): Palette.needsYouText
+        default: Palette.textSecondary
+        }
     }
 }
 
@@ -831,6 +1016,34 @@ private struct GoToFile: View {
     }
 }
 
+/// Finds the AppKit view a SwiftUI view beside it is drawn with, such as a
+/// List's outline view.
+struct SiblingReader<Found: NSView>: NSViewRepresentable {
+    let found: (Found) -> Void
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async {
+            var container = view.superview
+            while let current = container {
+                if let match = current.firstDescendant(Found.self) { return found(match) }
+                container = current.superview
+            }
+        }
+    }
+}
+
+extension NSView {
+    /// The first view of a kind inside this one, depth first.
+    func firstDescendant<T: NSView>(_ type: T.Type) -> T? {
+        for view in subviews {
+            if let match = view as? T ?? view.firstDescendant(type) { return match }
+        }
+        return nil
+    }
+}
+
 /// Hands the hosting window to a view that needs it.
 struct WindowReader: NSViewRepresentable {
     let found: (NSWindow) -> Void
@@ -848,6 +1061,7 @@ struct WindowReader: NSViewRepresentable {
 struct EditorCommands: Commands {
     @FocusedValue(\.editorStore) private var editor
     @Environment(\.openWindow) private var openWindow
+    @AppStorage("editorVim") private var vim = false
 
     var body: some Commands {
         CommandGroup(replacing: .saveItem) {
@@ -870,6 +1084,9 @@ struct EditorCommands: Commands {
             .keyboardShortcut("o", modifiers: .command)
             Button("Go to File…") { editor?.quickOpen = true }
                 .keyboardShortcut("p", modifiers: .command)
+                .disabled(editor == nil)
+            Button("Toggle Agent Panel") { editor?.showAgentPanel.toggle() }
+                .keyboardShortcut("l", modifiers: .command)
                 .disabled(editor == nil)
         }
         CommandMenu("Terminal") {
@@ -920,6 +1137,8 @@ struct EditorCommands: Commands {
                 .disabled(editor == nil)
             Button("Outdent Lines") { perform("editor.action.outdentLines") { $0.shiftLines(by: -1) } }
                 .disabled(editor == nil)
+            Divider()
+            Toggle("Vim Mode", isOn: $vim)
             Divider()
             Button("Bigger Text") { adjustFont(1) }
                 .keyboardShortcut("+", modifiers: .command)

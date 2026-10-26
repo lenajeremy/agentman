@@ -9,6 +9,17 @@
   @font-face { font-family: "Google Sans Code"; src: url("fonts/GoogleSansCode-Italic.ttf"); font-weight: 300 800; font-style: italic; }
   html, body, #editor { margin: 0; width: 100%; height: 100%; overflow: hidden; }
   body { -webkit-user-select: none; }
+  /* Vim's command line: a strip at the foot of the editor, there while it
+     has a prompt or something to say. */
+  #vim { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; box-sizing: border-box; height: 28px;
+         padding: 0 14px; display: flex !important; align-items: center; gap: 8px;
+         background: var(--widget); color: var(--text); border-top: 1px solid var(--widget-border);
+         font: var(--font-size, 13px) "Google Sans Code", ui-monospace, Menlo, monospace; white-space: pre;
+         transition: opacity 120ms ease, transform 120ms ease; }
+  #vim:not(.shown) { opacity: 0; transform: translateY(100%); pointer-events: none; }
+  #vim input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; padding: 0;
+               color: inherit; font: inherit; caret-color: var(--text); -webkit-user-select: text; }
+  #vim .vim-notification { color: var(--faint); }
 </style>
 </head>
 <body>

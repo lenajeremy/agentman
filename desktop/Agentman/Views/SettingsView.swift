@@ -238,6 +238,7 @@ private struct GeneralPage: View {
         KeySection(provider: "gemini", saved: settings?.geminiKeySet == true)
 
         AppearanceSection()
+        EditorSection()
 
         if let binding = Binding($draft) {
             SettingsSection(title: "Models", footer: missingKeyNote(binding.wrappedValue)) {
@@ -804,6 +805,21 @@ enum Appearance {
         case "light": NSApp.appearance = NSAppearance(named: .aqua)
         case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
         default: NSApp.appearance = nil
+        }
+    }
+}
+
+/// How the code editor takes keys.
+private struct EditorSection: View {
+    @AppStorage("editorVim") private var vim = false
+
+    var body: some View {
+        SettingsSection(title: "Editor") {
+            SettingsRow(title: "Vim mode",
+                        detail: "Vim's keys in the code editor and its file tree. Press ? in the tree to see its keys.",
+                        divider: false) {
+                Toggle("", isOn: $vim).toggleStyle(.switch).labelsHidden()
+            }
         }
     }
 }

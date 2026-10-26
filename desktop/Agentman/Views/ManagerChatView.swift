@@ -4,6 +4,10 @@ import SwiftUI
 /// doing, read what happened, and be told when something needs you.
 struct ManagerChatView: View {
     @Environment(AgentsStore.self) private var store
+    @Environment(\.fileMentions) private var mentions
+    /// In an editor's agent panel: narrow, with no toolbar of its own, as
+    /// the panel has its own header.
+    var inPanel = false
     @State private var confirmNewChat = false
     @State private var draft = ""
     @State private var attachments: [Attachment] = []
@@ -27,6 +31,46 @@ struct ManagerChatView: View {
     }
 
     var body: some View {
+        if inPanel {
+            conversation
+        } else {
+            conversation
+                .navigationTitle("")
+                .toolbar {
+                    if !manager.schedules.isEmpty {
+                        ToolbarItem(placement: .primaryAction) {
+                            SchedulesButton()
+                        }
+                    }
+                    if !manager.entries.isEmpty {
+                        ToolbarItem(placement: .primaryAction) {
+                            Button {
+                                confirmNewChat = true
+                            } label: {
+                                Label("New Chat", systemImage: "plus.bubble")
+                            }
+                            .help("Start a new conversation with Agentman")
+                        }
+                    }
+                }
+                .confirmationDialog("Start a new chat?", isPresented: $confirmNewChat) {
+                    Button("New Chat") {
+                        Task { manager.problem = await manager.reset() }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text(Self.newChatMessage)
+                }
+        }
+    }
+
+    static let newChatMessage = "This conversation is set aside, and Agentman keeps what matters from it in its private notes. Cards still waiting stay."
+
+    /// The space at either side of the conversation: less in a panel.
+    private var gutter: CGFloat { inPanel ? 14 : 36 }
+
+    /// The conversation and the box under it, in the window or a panel.
+    private var conversation: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
@@ -60,7 +104,7 @@ struct ManagerChatView: View {
                                 Color.clear.frame(height: 1).id("end")
                             }
                         }
-                        .padding(.horizontal, 36)
+                        .padding(.horizontal, gutter)
                         .padding(.top, entry ? 0 : 28)
                         .padding(.bottom, entry ? 0 : 6)
                         .frame(maxWidth: 780)
@@ -120,7 +164,7 @@ struct ManagerChatView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 36)
+                    .padding(.horizontal, gutter)
                     .padding(.top, 4)
                     .padding(.bottom, 22)
                     .frame(maxWidth: 780)
@@ -150,32 +194,6 @@ struct ManagerChatView: View {
                 draft = text.replacingOccurrences(of: "\\n", with: "\n")
             }
         }
-        .navigationTitle("")
-        .toolbar {
-            if !manager.schedules.isEmpty {
-                ToolbarItem(placement: .primaryAction) {
-                    SchedulesButton()
-                }
-            }
-            if !manager.entries.isEmpty {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        confirmNewChat = true
-                    } label: {
-                        Label("New Chat", systemImage: "plus.bubble")
-                    }
-                    .help("Start a new conversation with Agentman")
-                }
-            }
-        }
-        .confirmationDialog("Start a new chat?", isPresented: $confirmNewChat) {
-            Button("New Chat") {
-                Task { manager.problem = await manager.reset() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This conversation is set aside, and Agentman keeps what matters from it in its private notes. Cards still waiting stay.")
-        }
     }
 
     /// Changes whenever the conversation grows, so it can follow along.
@@ -184,8 +202,11 @@ struct ManagerChatView: View {
     }
 
     private func send(_ text: String) {
-        let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty || !attachments.isEmpty, !sending else { return }
+        // Files named with @ in the editor, by their full paths, for
+        // Agentman to pass on.
+        if let mentions { message = mentions.resolve(message, folder: nil) }
         sending = true
         followRequest += 1
         let images = attachments
@@ -781,6 +802,7 @@ private struct ThinkingDots: View {
 /// button, pasted or dropped, and wait above the words until sent. Return
 /// sends; Shift-Return starts a new line; the box grows to ten lines.
 private struct ManagerComposer: View {
+    @Environment(\.fileMentions) private var mentions
     @Binding var text: String
     var attachments: Binding<[Attachment]> = .constant([])
     var thinking: Bool
@@ -818,7 +840,8 @@ private struct ManagerComposer: View {
                     focused: $focused,
                     onSubmit: { if !thinking, canSend { onSend() } },
                     onImages: { add($0) },
-                    onDropTargeted: onDropTargeted
+                    onDropTargeted: onDropTargeted,
+                    mentions: mentions
                 )
                 .padding(.vertical, large ? 9 : 6)
 
@@ -851,6 +874,16 @@ private struct ManagerComposer: View {
                 .strokeBorder(focused ? Palette.fillStrong : Palette.line, lineWidth: 1)
         )
         .shadow(color: .black.opacity(large ? 0.06 : 0.04), radius: large ? 18 : 8, y: large ? 6 : 2)
+        // The files for `@`, just above the box.
+        .overlay(alignment: .top) {
+            if let mentions, mentions.isOpen {
+                // Hung from the box's top edge, rising from it.
+                MentionList(mentions: mentions)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 6)
+                    .frame(height: 0, alignment: .bottom)
+            }
+        }
         .onAppear { if large { focused = true } }
     }
 
