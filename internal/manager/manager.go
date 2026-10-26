@@ -180,7 +180,7 @@ func (m *Manager) Handles(kind protocol.RequestType) bool {
 	switch kind {
 	case protocol.ReqManagerSend, protocol.ReqManagerHistory, protocol.ReqManagerStop, protocol.ReqManagerReset,
 		protocol.ReqManagerSettings, protocol.ReqManagerSetSettings, protocol.ReqManagerSetKey,
-		protocol.ReqManagerBriefs, protocol.ReqManagerCardReply, protocol.ReqManagerCardDismiss,
+		protocol.ReqManagerBriefs, protocol.ReqManagerCardReply, protocol.ReqManagerCardDismiss, protocol.ReqManagerEntryClose,
 		protocol.ReqKnowledgeList, protocol.ReqKnowledgeRead, protocol.ReqKnowledgeWrite, protocol.ReqKnowledgeDelete,
 		protocol.ReqKeysList, protocol.ReqKeySet, protocol.ReqKeyDelete,
 		protocol.ReqAgentKnowledgeSearch, protocol.ReqAgentKnowledgeRead, protocol.ReqAgentKeys,
@@ -232,6 +232,8 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 		return protocol.Event{Type: protocol.EvtManagerBrief, Briefs: m.briefs.all()}
 	case protocol.ReqManagerCardReply:
 		return m.replyToCard(ctx, req)
+	case protocol.ReqManagerEntryClose:
+		return m.closeEntry(req.EntryID)
 	case protocol.ReqManagerCardDismiss:
 		return m.dismissCard(req.CardID)
 	case protocol.ReqKnowledgeList, protocol.ReqKnowledgeRead, protocol.ReqKnowledgeWrite, protocol.ReqKnowledgeDelete:
@@ -324,9 +326,12 @@ func (m *Manager) addEntry(entry protocol.ManagerEntry) protocol.ManagerEntry {
 	if entry.Ts == 0 {
 		entry.Ts = time.Now().UnixMilli()
 	}
+	// News is news once: a brief closed later, or a card answered, is the
+	// same entry again.
+	_, kept := m.conversation.entry(entry.ID)
 	_ = m.conversation.addEntry(entry)
 	m.emit(protocol.Event{Type: protocol.EvtManagerEntry, Entry: &entry})
-	if unasked(entry) {
+	if !kept && unasked(entry) {
 		m.tell(entry)
 	}
 	return entry

@@ -144,6 +144,18 @@ func (c *conversation) addEntry(entry protocol.ManagerEntry) error {
 	return appendLine(c.entriesPath, entry)
 }
 
+// entry is the entry with this ID, if it is still kept.
+func (c *conversation) entry(id string) (protocol.ManagerEntry, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i := len(c.entries) - 1; i >= 0; i-- {
+		if c.entries[i].ID == id {
+			return c.entries[i], true
+		}
+	}
+	return protocol.ManagerEntry{}, false
+}
+
 // page returns up to limit entries before the one with ID before, oldest
 // first, and whether older ones remain. Empty before reads from the end.
 func (c *conversation) page(before string, limit int) ([]protocol.ManagerEntry, bool) {

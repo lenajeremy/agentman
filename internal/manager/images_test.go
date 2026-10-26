@@ -55,6 +55,11 @@ func TestImagesReachTheModelAndAreKept(t *testing.T) {
 	if shown.Type != protocol.EvtWorkspace || shown.Workspace.MIME != "image/png" || shown.Workspace.Image == "" {
 		t.Fatalf("shown = %+v", shown)
 	}
+	// Phones up to 0.7.0 drop a picture with no session, which showed as a
+	// blank box.
+	if shown.Workspace.SessionID == "" {
+		t.Error("the picture names no owner, so phones up to 0.7.0 drop it")
+	}
 
 	// A restart keeps the entry's images, and the model's history keeps the
 	// image itself.

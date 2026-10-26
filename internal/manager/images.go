@@ -123,7 +123,10 @@ func (m *Manager) readImage(name string) protocol.Event {
 	if len(data) > maxImageReply {
 		return protocol.Event{Type: protocol.EvtError, Error: "that image is too large to show"}
 	}
+	// Agentman's own pictures belong to no agent, but the phone's 0.7.0 and
+	// earlier drop a picture whose session is empty, leaving a blank box: so
+	// this one names its owner.
 	return protocol.Event{Type: protocol.EvtWorkspace, Workspace: &protocol.WorkspaceResult{
-		Kind: "file", Path: name, Image: base64.StdEncoding.EncodeToString(data), MIME: http.DetectContentType(data),
+		Kind: "file", SessionID: "agentman", Path: name, Image: base64.StdEncoding.EncodeToString(data), MIME: http.DetectContentType(data),
 	}}
 }

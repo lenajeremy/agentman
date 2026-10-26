@@ -288,17 +288,46 @@ func (m *Manager) dismissCard(id string) protocol.Event {
 	if !ok {
 		return protocol.Event{Type: protocol.EvtError, Error: "That card has already been dealt with."}
 	}
+	closed := m.dismissCardLocked(entry)
+	return protocol.Event{Type: protocol.EvtManagerEntry, Entry: &closed}
+}
+
+// dismissCardLocked puts an open card away unanswered, and tells Agentman.
+func (m *Manager) dismissCardLocked(entry protocol.ManagerEntry) protocol.ManagerEntry {
 	if entry.Card.Kind == protocol.CardNote {
 		closed := m.closeCardLocked(entry, protocol.CardDismissed, "Not saved")
 		title := ""
 		if entry.Card.Note != nil {
 			title = entry.Card.Note.Title
 		}
-		m.note(fmt.Sprintf("The user dismissed the note you suggested, “%s” [card %s]. Nothing was saved; don't suggest it again.", title, id))
-		return protocol.Event{Type: protocol.EvtManagerEntry, Entry: &closed}
+		m.note(fmt.Sprintf("The user dismissed the note you suggested, “%s” [card %s]. Nothing was saved; don't suggest it again.", title, entry.Card.ID))
+		return closed
 	}
 	closed := m.closeCardLocked(entry, protocol.CardDismissed, "Put away")
-	m.note(fmt.Sprintf("The user put away the card about %s [card %s] without answering it here.", entry.Card.AgentName, id))
+	m.note(fmt.Sprintf("The user put away the card about %s [card %s] without answering it here.", entry.Card.AgentName, entry.Card.ID))
+	return closed
+}
+
+// closeEntry takes an entry out of the conversation in every app, as the user
+// closes it: a brief, word from an agent, a card. A card still open is put
+// away unanswered first, so the agent doesn't wait on one nobody can see.
+func (m *Manager) closeEntry(id string) protocol.Event {
+	m.cardMu.Lock()
+	defer m.cardMu.Unlock()
+	entry, ok := m.conversation.entry(id)
+	if !ok {
+		return protocol.Event{Type: protocol.EvtError, Error: "That is no longer in the conversation."}
+	}
+	switch entry.Role {
+	case "brief", "agent", "card":
+	default:
+		return protocol.Event{Type: protocol.EvtError, Error: "Only cards can be closed."}
+	}
+	if entry.Card != nil && entry.Card.State == protocol.CardOpen {
+		entry = m.dismissCardLocked(entry)
+	}
+	entry.Closed = true
+	closed := m.addEntry(entry)
 	return protocol.Event{Type: protocol.EvtManagerEntry, Entry: &closed}
 }
 
