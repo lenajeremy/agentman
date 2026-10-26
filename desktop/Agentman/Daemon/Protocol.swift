@@ -70,6 +70,7 @@ enum RequestType: String, Codable, Sendable {
     case managerBriefs = "manager_briefs"
     case managerCardReply = "manager_card_reply"
     case managerCardDismiss = "manager_card_dismiss"
+    case managerEntryClose = "manager_entry_close"
     case knowledgeList = "knowledge_list"
     case knowledgeRead = "knowledge_read"
     case knowledgeWrite = "knowledge_write"
@@ -101,6 +102,8 @@ struct DaemonRequest: Codable, Sendable {
     var path: String?
     var manager: ManagerSettings?
     var cardId: String?
+    /// The conversation entry a manager_entry_close takes out.
+    var entryId: String?
     var note: Note?
     var key: Key?
     var scheduleId: String?
@@ -395,6 +398,8 @@ struct ManagerEntry: Codable, Sendable, Identifiable, Hashable {
     var images: [String]?
     /// On a "card" entry: a decision only the user can make.
     var card: ManagerCard?
+    /// The user closed it, here or on the phone: it is left out.
+    var closed: Bool?
 }
 
 /// A decision Agentman put in front of the user: an agent's question, with

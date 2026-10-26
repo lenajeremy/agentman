@@ -46,6 +46,21 @@ final class ManagerStoreTests: XCTestCase {
         XCTAssertNil(store.entries.last?.streaming)
     }
 
+    // What the user closed is gone from the conversation, here and on the
+    // phone, and isn't unread news.
+    func testClosedEntriesAreLeftOut() {
+        var closed = entry("2", "brief", "site finished.", ts: 200)
+        closed.closed = true
+        let items = ChatItem.items(from: [entry("1", "user", "hi"), closed, entry("3", "assistant", "Done.")])
+        XCTAssertEqual(items.map(\.id), ["1", "3"])
+
+        let store = store()
+        var event = DaemonEvent(type: "manager_entry")
+        event.entry = closed
+        store.apply(event)
+        XCTAssertTrue(store.unread.isEmpty)
+    }
+
     func testActivitiesFoldIntoOneLineAndImagesStandAlone() {
         let items = ChatItem.items(from: [
             entry("1", "user", "check"),

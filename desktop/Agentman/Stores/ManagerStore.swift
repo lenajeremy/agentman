@@ -52,7 +52,7 @@ final class ManagerStore {
     /// What arrived since the user last looked: Agentman's replies, briefs,
     /// and cards still waiting on them.
     var unread: [ManagerEntry] {
-        entries.filter { $0.ts > lastRead && Self.isNews($0) }
+        entries.filter { $0.ts > lastRead && $0.closed != true && Self.isNews($0) }
     }
 
     /// Cards still waiting on the user.
@@ -224,6 +224,14 @@ final class ManagerStore {
     }
 
     /// Puts a card away unanswered.
+    /// Takes a brief, an agent's word or a card out of the conversation, in
+    /// every app. A card still asking is put away unanswered first.
+    func close(_ entry: ManagerEntry) async -> String? {
+        var request = DaemonRequest(.managerEntryClose)
+        request.entryId = entry.id
+        return await perform(request)
+    }
+
     func dismiss(_ card: ManagerCard) async -> String? {
         var request = DaemonRequest(.managerCardDismiss)
         request.cardId = card.id
