@@ -95,7 +95,8 @@ struct LanguagesSettings: View {
 
     /// Where a server comes from, in a few words.
     static func detail(_ server: LanguageServer) -> String {
-        var parts = [server.name]
+        // The title is already the language; a server named the same says nothing more.
+        var parts = server.name == server.language ? [] : [server.name]
         switch server.source {
         case "yours":
             parts.append("your own: " + ((server.path ?? "") as NSString).abbreviatingWithTildeInPath)

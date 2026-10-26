@@ -218,7 +218,7 @@ final class EditorTests: XCTestCase {
         let servers = try XCTUnwrap(event.languages?.servers)
         XCTAssertEqual(event.languages?.nodeSize, 196896101)
         XCTAssertEqual(LanguagesSettings.detail(servers[0]), "gopls · on this Mac · running for agentman")
-        XCTAssertTrue(LanguagesSettings.detail(servers[1]).hasPrefix("TypeScript · downloaded · 28"))
+        XCTAssertTrue(LanguagesSettings.detail(servers[1]).hasPrefix("downloaded · 28"))
         XCTAssertEqual(LanguagesSettings.detail(servers[2]), "Pyright · downloads when first needed, about 20 MB")
         XCTAssertEqual(LanguagesSettings.detail(servers[3]), "SourceKit-LSP · Swift support needs Xcode")
         XCTAssertEqual(LanguagesSettings.detail(servers[4]), "clangd · off")
