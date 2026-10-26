@@ -404,7 +404,7 @@ export function ToolRow({
   const picture = standalone ? readImage(tool.name, summary, cwd) : null;
 
   const row = (
-    <View style={[styles.row, standalone && styles.card]}>
+    <View style={[styles.row, standalone && (expanded ? styles.cardOpen : styles.card)]}>
       <MotionPressable
         onPress={() => {
           if (!canOpen) return;
@@ -419,7 +419,12 @@ export function ToolRow({
       >
         <StatusTile status={tool.status} name={tool.name} />
         {title ? (
-          <Text style={[styles.title, failed && styles.nameFailed]} numberOfLines={2}>
+          // A pill is one line, or it turns into a lozenge: the whole title
+          // shows once the step is opened into a card.
+          <Text
+            style={[styles.title, failed && styles.nameFailed]}
+            numberOfLines={standalone ? (expanded ? undefined : 1) : 2}
+          >
             {title}
           </Text>
         ) : (
@@ -474,16 +479,30 @@ const makeStyles = (c: Palette) =>
   StyleSheet.create({
     row: { marginHorizontal: -space.xs },
     withPicture: { gap: space.sm },
-    // The same soft card as on the Mac: a step greyer than the page, so the
-    // work stands apart from the conversation.
-    // With the header's own padding, its tile sits 8 in, as in a run's card.
+    // On its own in the feed, a step sits in a soft grey pill: the agent's
+    // prose runs full width, and the work it did is set apart from it at a
+    // glance. The pill holds its words rather than spanning the screen, and
+    // pills in a row sit closer to each other than to the prose around them.
     card: {
+      alignSelf: "flex-start",
+      maxWidth: "100%",
       marginHorizontal: 0,
-      paddingHorizontal: 8 - space.xs,
-      paddingVertical: space.xxs,
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: c.toolCardEdge,
+      marginVertical: -4,
+      paddingLeft: 4,
+      paddingRight: 10,
+      paddingVertical: 1,
+      borderRadius: 16,
+      backgroundColor: c.toolCard,
+    },
+    // Opened, it widens to the column to hold what the step did.
+    cardOpen: {
+      marginHorizontal: 0,
+      marginVertical: -4,
+      paddingLeft: 4,
+      paddingRight: 10,
+      paddingTop: 1,
+      paddingBottom: space.sm,
+      borderRadius: 16,
       backgroundColor: c.toolCard,
     },
     // The same room above and below the words however many lines they run
@@ -537,8 +556,10 @@ const makeStyles = (c: Palette) =>
       color: c.muted,
     },
     nameFailed: { color: c.errorText },
+    // Shrinks rather than fills, so the chevron follows the words instead
+    // of standing in a column down the screen's edge.
     title: {
-      flex: 1,
+      flexShrink: 1,
       fontFamily: font.sans,
       fontSize: size.label,
       lineHeight: LINE,

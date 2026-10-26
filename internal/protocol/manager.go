@@ -41,6 +41,11 @@ const (
 	// agent. ReqManagerCardDismiss puts a card away unanswered.
 	ReqManagerCardReply   RequestType = "manager_card_reply"
 	ReqManagerCardDismiss RequestType = "manager_card_dismiss"
+	// ReqManagerEntryClose takes the entry named by EntryID out of the
+	// conversation, in every app: a brief, word from an agent, or a card,
+	// which is put away unanswered first if it is still open. Answered with
+	// the entry, closed.
+	ReqManagerEntryClose RequestType = "manager_entry_close"
 	// ReqManagerSchedules lists what Agentman has scheduled for itself;
 	// ReqManagerScheduleCancel cancels the one named by ScheduleID.
 	ReqManagerSchedules      RequestType = "manager_schedules"
@@ -149,6 +154,9 @@ type ManagerEntry struct {
 	// put in front of them to answer on the spot. When it is settled, the
 	// entry comes again with the card's new state.
 	Card *ManagerCard `json:"card,omitempty"`
+	// Closed is set when the user closed the entry: apps leave it out of
+	// the conversation they show.
+	Closed bool `json:"closed,omitempty"`
 }
 
 // InlineImage is an image sent with a message: its type and its bytes, in

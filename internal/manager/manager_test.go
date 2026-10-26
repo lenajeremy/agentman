@@ -317,6 +317,45 @@ func TestAgentmanSaysWhatIsNewsOnItsOwn(t *testing.T) {
 	}
 }
 
+// The user closes what piles up: a brief goes from the conversation in every
+// app, a card still asking is put away unanswered first, and what the user
+// said themselves can't be closed. Closing is not news.
+func TestTheUserClosesCardsAndBriefs(t *testing.T) {
+	h := newHarness(t, &scriptedModel{}, true)
+	brief := h.m.addEntry(protocol.ManagerEntry{Role: "brief", Text: "site finished.", SessionID: "claude:a"})
+	card := h.m.addEntry(protocol.ManagerEntry{Role: "card", SessionID: "codex:b", Card: &protocol.ManagerCard{
+		ID: "c1", Kind: protocol.CardNeedsYou, State: protocol.CardOpen, AgentName: "api",
+	}})
+	said := h.m.addEntry(protocol.ManagerEntry{Role: "user", Text: "hi"})
+	told := len(h.told())
+
+	closed := h.m.Handle(context.Background(), protocol.Request{Type: protocol.ReqManagerEntryClose, EntryID: brief.ID})
+	if closed.Type != protocol.EvtManagerEntry || !closed.Entry.Closed || closed.Entry.Text != "site finished." {
+		t.Fatalf("closing a brief answered %+v", closed)
+	}
+	closed = h.m.Handle(context.Background(), protocol.Request{Type: protocol.ReqManagerEntryClose, EntryID: card.ID})
+	if !closed.Entry.Closed || closed.Entry.Card.State != protocol.CardDismissed {
+		t.Fatalf("closing an open card answered %+v", closed.Entry)
+	}
+	if refused := h.m.Handle(context.Background(), protocol.Request{Type: protocol.ReqManagerEntryClose, EntryID: said.ID}); refused.Type != protocol.EvtError {
+		t.Fatalf("the user's own words were closed: %+v", refused)
+	}
+	if len(h.told()) != told {
+		t.Errorf("closing was news: %v", h.told())
+	}
+
+	history := h.newManager(t).Handle(context.Background(), protocol.Request{Type: protocol.ReqManagerHistory})
+	closedAfter := 0
+	for _, entry := range history.Entries {
+		if entry.Closed {
+			closedAfter++
+		}
+	}
+	if closedAfter != 2 {
+		t.Errorf("after a restart %d entries are closed, want 2: %+v", closedAfter, history.Entries)
+	}
+}
+
 // Agentman reads agents through the daemon, the user sees what it did, and
 // the model gets the result back.
 func TestAgentmanChecksTheAgentsAndSaysWhatItDid(t *testing.T) {

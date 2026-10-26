@@ -60,3 +60,12 @@ test("a question card becomes the agent's question; a key card asks to give the 
   assert.equal(cardQuestion({ ...base, id: "c3", kind: "key", options })?.id, "c3");
   assert.equal(cardQuestion({ ...base, id: "c4", kind: "needs_you" }), null);
 });
+
+test("what the user closed is left out of the conversation and isn't unread", () => {
+  const closed = { ...entry("b1", "brief", "site finished."), closed: true };
+  assert.deepEqual(
+    chatItems([entry("u1", "user", "hi"), closed, entry("a1", "assistant", "Done.")]).map((item) => item.key),
+    ["u1", "a1"],
+  );
+  assert.equal(unreadCount([closed], 0), 0);
+});

@@ -306,8 +306,9 @@ enum ChatItem: Identifiable {
             }
         }
         for entry in entries {
-            // A card answered in the agent itself, or put away, is gone.
-            if entry.card?.isGone == true { continue }
+            // A card answered in the agent itself, or put away, is gone, as
+            // is anything the user closed.
+            if entry.card?.isGone == true || entry.closed == true { continue }
             if entry.role == "activity" {
                 if entry.path != nil {
                     flush()
@@ -326,6 +327,7 @@ enum ChatItem: Identifiable {
 }
 
 private struct ChatItemView: View {
+    @Environment(AgentsStore.self) private var store
     let item: ChatItem
 
     var body: some View {
@@ -354,6 +356,7 @@ private struct ChatItemView: View {
                 AssistantReply(entry: entry)
             case "brief", "agent":
                 BriefCard(entry: entry)
+                    .swipeToDismiss { await store.manager.close(entry) == nil }
             case "scheduled":
                 ScheduledLine(entry: entry)
             case "card":
@@ -363,11 +366,13 @@ private struct ChatItemView: View {
                             NoteSuggestionCard(card: card)
                         } else {
                             NoteReceipt(card: card)
+                                .modifier(ClosesOnHover(entry: entry))
                         }
                     } else if card.isOpen {
                         ManagerCardView(card: card)
                     } else {
                         CardReceipt(card: card)
+                            .modifier(ClosesOnHover(entry: entry))
                     }
                 }
             case "error":
@@ -538,11 +543,54 @@ private struct BriefCard: View {
                     .font(TextStyle.caption)
                     .foregroundStyle(Palette.muted)
             }
+            CloseButton(help: "Close (or swipe it aside)") {
+                Task { _ = await store.manager.close(entry) }
+            }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 16)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.line))
+    }
+}
+
+/// The small × that takes a card out of the conversation.
+private struct CloseButton: View {
+    var help: String
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Palette.muted)
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel("Close")
+    }
+}
+
+/// A one-line receipt that offers its × only under the pointer, so a run
+/// of them stays quiet.
+private struct ClosesOnHover: ViewModifier {
+    @Environment(AgentsStore.self) private var store
+    let entry: ManagerEntry
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        HStack(spacing: 6) {
+            content
+            CloseButton(help: "Close") {
+                Task { _ = await store.manager.close(entry) }
+            }
+            .opacity(hovering ? 1 : 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
     }
 }
 

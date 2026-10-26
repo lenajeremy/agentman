@@ -61,7 +61,7 @@ export function ToolGroup({ calls, said, cwd }: { calls: Message[]; said: string
     : title || runCounts(calls);
 
   return (
-    <View style={styles.group}>
+    <View style={[styles.group, open && styles.groupOpen]}>
       <MotionPressable
         onPress={() => setOpen((value) => !value)}
         style={styles.header}
@@ -73,7 +73,8 @@ export function ToolGroup({ calls, said, cwd }: { calls: Message[]; said: string
         <View style={[styles.tile, running && styles.tileRunning]}>
           <Feather name="layers" size={12} color={running ? color.working : color.muted} />
         </View>
-        <Text style={styles.line} numberOfLines={2}>
+        {/* One line while it is a pill; all of it once opened. */}
+        <Text style={styles.line} numberOfLines={open ? undefined : 1}>
           {line}
           {failures > 0 ? <Text style={styles.failed}>{` · ${failures} failed`}</Text> : null}
         </Text>
@@ -92,15 +93,19 @@ export function ToolGroup({ calls, said, cwd }: { calls: Message[]; said: string
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
-    // The soft card a tool call sits on, as on the Mac.
+    // The same soft grey pill as a single step: it holds its words, and
+    // widens to the column when opened to show the steps.
     group: {
-      paddingHorizontal: 8,
-      paddingVertical: space.xxs,
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: c.toolCardEdge,
+      alignSelf: "flex-start",
+      maxWidth: "100%",
+      marginVertical: -4,
+      paddingLeft: 4,
+      paddingRight: 10,
+      paddingVertical: 1,
+      borderRadius: 16,
       backgroundColor: c.toolCard,
     },
+    groupOpen: { alignSelf: "stretch", paddingBottom: space.sm },
     // As a single call's row: even room around the words, the tile and the
     // chevron level with the first line.
     header: {
@@ -108,9 +113,10 @@ const makeStyles = (c: Palette) =>
       alignItems: "flex-start",
       gap: 8,
       paddingVertical: 5,
+      paddingHorizontal: space.xs,
       borderRadius: radius.sm,
     },
-    chevron: { marginTop: 3 },
+    chevron: { marginTop: 3, marginLeft: -4 },
     tile: {
       width: 22,
       height: 20,
@@ -119,7 +125,17 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
     },
     tileRunning: { backgroundColor: c.workingWash },
-    line: { flex: 1, fontFamily: font.sans, fontSize: size.caption, color: c.textSecondary, lineHeight: 20 },
+    line: { flexShrink: 1, fontFamily: font.sans, fontSize: size.caption, color: c.textSecondary, lineHeight: 20 },
     failed: { color: c.errorText },
-    steps: { paddingLeft: space.lg, paddingTop: 2, gap: 2 },
+    // Opened, the steps hang from a thin rule under the run's icon, as a
+    // list of what it was made of.
+    steps: {
+      marginLeft: space.xs + 10,
+      paddingLeft: space.sm,
+      paddingTop: 2,
+      paddingBottom: 2,
+      gap: 2,
+      borderLeftWidth: 1,
+      borderLeftColor: c.line,
+    },
   });

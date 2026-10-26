@@ -28,6 +28,7 @@ import { MessageMenu, type MessageMenuItem } from "../../components/MessageMenu"
 import { Toast } from "../../components/Toast";
 import { ContentColumn } from "../../components/ContentColumn";
 import { Markdown } from "../../components/Markdown";
+import { NoticeRow } from "../../components/NoticeRow";
 import { SentImages } from "../../components/SentImages";
 import { ToolGroup } from "../../components/ToolGroup";
 import { KEEP_READING, ScrollToLatest, SCROLL_AWAY } from "../../components/ScrollToLatest";
@@ -650,15 +651,15 @@ export default function SessionScreen() {
     ? shownHeaderControls({
         mode: chip?.mode && chip.mode !== "mode" ? chip.mode : undefined,
         modePending: switching?.kind === "mode" ? switching.value : undefined,
-        onMode: modeChoices ? () => setSwitchMenu("mode") : undefined,
+        onMode: modeChoices ? () => openSwitchMenu("mode") : undefined,
         contextPercent: session.contextPercent,
       })
     : null;
-  const openModelMenu = () => {
+  const openSwitchMenu = (kind: SwitchKind) => {
     const open = () =>
       fieldRef.current?.measureInWindow((_x, y) => {
         setModelMenuBottom(viewportHeight - y + space.xs);
-        setSwitchMenu("model");
+        setSwitchMenu(kind);
       });
     // The text box drops when the keyboard goes, so it is measured after.
     if (Keyboard.isVisible()) {
@@ -796,14 +797,6 @@ export default function SessionScreen() {
             </MotionPressable>
           ) : null}
         </ContentColumn>
-        {/* Its own row, the full width of the screen: beside the buttons there
-            was room for two chips, and the third was cut off. The model is
-            not here: it sits by the text box, where it is chosen. */}
-        {session && headerControls ? (
-          <ContentColumn style={styles.controlsBar}>
-            <HeaderControls {...headerControls} disabled={switchLocked} />
-          </ContentColumn>
-        ) : null}
       </View>
 
       {session ? (
@@ -818,8 +811,8 @@ export default function SessionScreen() {
         <Popover
           visible
           onDismiss={() => setSwitchMenu(null)}
-          {...(switchMenu === "model" && modelMenuBottom !== null
-            ? { bottom: modelMenuBottom, align: "right" as const }
+          {...(modelMenuBottom !== null
+            ? { bottom: modelMenuBottom, align: switchMenu === "model" ? ("right" as const) : ("left" as const) }
             : { top: headerHeight, align: "left" as const })}
           title={switchTitle}
           items={switchItems}
@@ -1140,6 +1133,7 @@ export default function SessionScreen() {
                       />
                     )}
                   </MotionPressable>
+                  {session && headerControls ? <ModeControl {...headerControls} disabled={switchLocked} /> : null}
                   <View style={styles.toolbarGap} />
                   {/* Beside send, as in Claude's and ChatGPT's apps: the model
                     is part of what you are about to send, and choosing it
@@ -1150,7 +1144,7 @@ export default function SessionScreen() {
                         (switching?.kind === "model" ? switching.value : session?.model) ?? "",
                       )}
                       pending={switching?.kind === "model"}
-                      onPress={modelChoices ? openModelMenu : undefined}
+                      onPress={modelChoices ? () => openSwitchMenu("model") : undefined}
                       disabled={switchLocked}
                     />
                   ) : null}
@@ -1213,15 +1207,12 @@ function shownHeaderControls(props: HeaderControlsProps): HeaderControlsProps | 
 }
 
 /**
- * Which mode the agent is in and how full its context is: one row of chips
- * under the title, each with room for its whole name.
- *
- * They were squeezed onto the line with the folder, where at phone width
- * every one of them was cut short. A chip with a chevron opens the switcher
- * for that setting; one without is only a fact. The model used to lead this
- * row; it moved to the text box, beside the button that sends with it.
+ * Which mode the agent is in, and how full its context is, at the foot of the
+ * text box beside the model: quiet text, as the model is, so the header is
+ * one row and these sit with the message they shape. They used to be a row
+ * of chips under the title, which left the header two rows tall.
  */
-function HeaderControls({
+function ModeControl({
   mode,
   modePending,
   onMode,
@@ -1229,35 +1220,25 @@ function HeaderControls({
   disabled,
 }: HeaderControlsProps & { disabled?: boolean }) {
   const styles = useStyles(makeStyles);
-  const context =
-    contextPercent && contextPercent > 0 ? `${Math.min(100, Math.round(contextPercent))}% context` : undefined;
   const shownMode = modePending ?? mode;
+  const context = contextPercent && contextPercent > 0 ? Math.min(100, Math.round(contextPercent)) : undefined;
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      style={styles.controls}
-      contentContainerStyle={styles.controlsContent}
-    >
+    <>
       {shownMode || onMode ? (
-        <ControlChip
-          label={shownMode ? modeLabel(shownMode) : "Mode"}
+        <ModelButton
+          kind="Mode"
+          model={shownMode ? modeLabel(shownMode) : "Mode"}
           pending={Boolean(modePending)}
           onPress={onMode}
           disabled={disabled}
-          accessibilityLabel={
-            modePending
-              ? `Switching mode to ${modeLabel(modePending)}`
-              : `${shownMode ? `${modeLabel(shownMode)} mode` : "Mode"}${onMode ? ". Switch mode" : ""}`
-          }
         />
       ) : null}
-      {context ? (
-        <View style={[styles.control, styles.controlQuiet]} accessible accessibilityRole="text" accessibilityLabel={context}>
-          <Text style={[styles.controlText, styles.controlTextQuiet]}>{context}</Text>
-        </View>
+      {context !== undefined ? (
+        <Text style={styles.contextText} accessibilityLabel={`${context}% of its context used`}>
+          {`${context}%`}
+        </Text>
       ) : null}
-    </ScrollView>
+    </>
   );
 }
 
@@ -1274,11 +1255,14 @@ function ModelButton({
   pending,
   onPress,
   disabled,
+  kind = "Model",
 }: {
   model: string;
   pending: boolean;
   onPress?: () => void;
   disabled?: boolean;
+  /** What it switches, for VoiceOver. */
+  kind?: "Model" | "Mode";
 }) {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
@@ -1292,7 +1276,7 @@ function ModelButton({
   );
   if (!onPress) {
     return (
-      <View style={styles.modelButton} accessible accessibilityRole="text" accessibilityLabel={`Model ${model}`}>
+      <View style={styles.modelButton} accessible accessibilityRole="text" accessibilityLabel={`${kind} ${model}`}>
         {body}
       </View>
     );
@@ -1304,52 +1288,9 @@ function ModelButton({
       hitSlop={6}
       style={({ pressed }) => [styles.modelButton, pressed && styles.modelButtonPressed]}
       accessibilityRole="button"
-      accessibilityLabel={pending ? `Switching model to ${model}` : `Model ${model}. Switch model`}
-      accessibilityState={{ disabled, busy: pending }}
-    >
-      {body}
-    </Pressable>
-  );
-}
-
-function ControlChip({
-  label,
-  pending,
-  onPress,
-  disabled,
-  accessibilityLabel,
-}: {
-  label: string;
-  pending: boolean;
-  onPress?: () => void;
-  disabled?: boolean;
-  accessibilityLabel: string;
-}) {
-  const styles = useStyles(makeStyles);
-  const { color } = useTheme();
-  const body = (
-    <>
-      <Text style={[styles.controlText, pending && styles.switchPending]} numberOfLines={1}>
-        {pending ? `${label}…` : label}
-      </Text>
-      {onPress ? <Feather name="chevron-down" size={12} color={color.muted} /> : null}
-    </>
-  );
-  if (!onPress) {
-    return (
-      <View style={styles.control} accessible accessibilityRole="text" accessibilityLabel={accessibilityLabel}>
-        {body}
-      </View>
-    );
-  }
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      hitSlop={{ top: 8, bottom: 8 }}
-      style={({ pressed }) => [styles.control, pressed && styles.switchPressed]}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
+      accessibilityLabel={
+        pending ? `Switching ${kind.toLowerCase()} to ${model}` : `${kind} ${model}. Switch ${kind.toLowerCase()}`
+      }
       accessibilityState={{ disabled, busy: pending }}
     >
       {body}
@@ -1582,7 +1523,7 @@ function MessageRow({
   if (message.role === "system") {
     return (
       <Appear enabled={fresh}>
-        <Text style={styles.systemText}>{message.text}</Text>
+        <NoticeRow text={message.text ?? ""} />
       </Appear>
     );
   }
@@ -2012,22 +1953,7 @@ const makeStyles = (c: Palette) =>
     // name gives way first: the percentage is the part worth keeping whole.
     // Starts under the logo, past the screen edge and the back button, so
     // the logo, the title and the chips read as one block.
-    controlsBar: { paddingLeft: space.md + 30 + space.xs, paddingBottom: space.sm, marginTop: -2 },
-    controls: { flexGrow: 0 },
-    controlsContent: { flexDirection: "row", alignItems: "center", gap: 6, paddingRight: space.sm },
-    control: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 3,
-      height: 26,
-      paddingHorizontal: 10,
-      borderRadius: radius.pill,
-      backgroundColor: c.fill,
-    },
-    controlText: { fontFamily: font.sansMedium, fontSize: 12.5, color: c.text },
     // A fact, not a control: outlined rather than filled, and quieter.
-    controlQuiet: { backgroundColor: "transparent", borderWidth: 1, borderColor: c.line },
-    controlTextQuiet: { color: c.muted },
     switchPressed: { opacity: 0.6 },
     // On its way: the value being switched to, in the working colour.
     switchPending: { color: c.workingText },
@@ -2250,6 +2176,7 @@ const makeStyles = (c: Palette) =>
     },
     modelButtonPressed: { backgroundColor: c.fill },
     modelText: { flexShrink: 1, fontFamily: font.sansMedium, fontSize: 13, color: c.muted },
+    contextText: { fontFamily: font.sans, fontSize: 12, color: c.faint, fontVariant: ["tabular-nums"] },
     // A wrapper so the long press has something to land on: the gesture cannot
     // be attached to the TextInput itself without swallowing taps that should
     // place the caret.

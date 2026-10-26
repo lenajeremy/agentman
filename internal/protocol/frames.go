@@ -193,6 +193,8 @@ type Request struct {
 	ClientID string `json:"clientId,omitempty"`
 	// CardID names the card on ReqManagerCardReply and ReqManagerCardDismiss.
 	CardID string `json:"cardId,omitempty"`
+	// EntryID names the conversation entry on ReqManagerEntryClose.
+	EntryID string `json:"entryId,omitempty"`
 	// ScheduleID names the schedule on ReqManagerScheduleCancel.
 	ScheduleID string `json:"scheduleId,omitempty"`
 	// Images are sent with a message to Agentman on ReqManagerSend.
