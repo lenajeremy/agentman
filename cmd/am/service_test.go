@@ -76,6 +76,18 @@ func TestAgentsKeepTheShellsEnvironmentButNotTheTerminals(t *testing.T) {
 	}
 }
 
+// From another agent's shell, its environment would make the new agent its
+// child (no transcript, nothing for Agentman to follow): am serve's is used.
+func TestAgentsStartedFromAnotherAgentDontInheritItsSession(t *testing.T) {
+	env := agentEnv([]string{"PATH=/usr/bin", "CLAUDECODE=1", "CLAUDE_CODE_CHILD_SESSION=1", "CLAUDE_CODE_SESSION_ID=abc"})
+	if env != nil {
+		t.Fatalf("got %q, want none (am serve's environment)", env)
+	}
+	if env := agentEnv([]string{"PATH=/usr/bin", "CLAUDECODE="}); !slices.Equal(env, []string{"PATH=/usr/bin"}) {
+		t.Fatalf("an empty CLAUDECODE isn't a session: got %q", env)
+	}
+}
+
 func TestAttachPicksTheAgentMeant(t *testing.T) {
 	agents := attachable([]protocol.Session{
 		{ID: "aaa111", Name: "api-fix", Cwd: "/work/api", Inject: protocol.InjectTmux, State: protocol.StateBusy, LastActivityAt: 30},

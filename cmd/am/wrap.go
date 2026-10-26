@@ -121,11 +121,22 @@ func ownServer(ctx context.Context) string {
 // agentEnv is the environment an agent started from a terminal gets: the
 // shell's own, as a command typed there would, but not what describes this
 // terminal, since the agent runs in tmux, which sets those itself.
+//
+// Run from inside another agent's session (CLAUDECODE set: a shell Claude
+// Code started), the shell's environment is that session's, full of markers
+// that make the new agent its child: Claude then saves no transcript, and
+// Agentman can't follow it. The agent gets am serve's environment instead,
+// the login shell's, as if started from a fresh terminal.
 func agentEnv(environ []string) []string {
+	for _, entry := range environ {
+		if value, ok := strings.CutPrefix(entry, "CLAUDECODE="); ok && value != "" {
+			return nil
+		}
+	}
 	var env []string
 	for _, entry := range environ {
 		name, _, ok := strings.Cut(entry, "=")
-		if !ok || name == "" || terminalVariable(name) {
+		if !ok || name == "" || name == "CLAUDECODE" || terminalVariable(name) {
 			continue
 		}
 		env = append(env, entry)
