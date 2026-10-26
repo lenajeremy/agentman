@@ -4,3 +4,6 @@ build/
 DerivedData/
 Agentman/Info.plist
 build-shots/
+# The editor page, built from editor-web/ by editor-web/build.sh.
+Agentman/Resources/EditorWeb/
+editor-web/node_modules/

@@ -109,6 +109,42 @@ final class EditorDocument: Identifiable {
         }
     }
 
+    /// One edit from the editor: `length` UTF-16 units at `offset`, in the
+    /// text as it was, replaced by `text`.
+    struct Change: Equatable {
+        var offset: Int
+        var length: Int
+        var text: String
+    }
+
+    /// Takes the editor's edits, last first, as Monaco reports them. Returns
+    /// false, leaving the text as it was, when they don't fit it: then the
+    /// editor's copy has to be fetched whole.
+    @discardableResult
+    func apply(_ changes: [Change], expecting length: Int) -> Bool {
+        var edited = text
+        for change in changes {
+            let utf16 = edited.utf16
+            guard change.offset >= 0, change.length >= 0, change.offset + change.length <= utf16.count,
+                  let start = utf16.index(utf16.startIndex, offsetBy: change.offset, limitedBy: utf16.endIndex),
+                  let end = utf16.index(start, offsetBy: change.length, limitedBy: utf16.endIndex)
+            else { return false }
+            edited.replaceSubrange(start..<end, with: change.text)
+        }
+        guard edited.utf16.count == length else { return false }
+        text = edited
+        return true
+    }
+
+    /// The editor's whole text, when its edits and this copy fell apart, or
+    /// when it evened out a file's mixed line endings as it opened it. A file
+    /// without edits takes it as what's saved, so opening alone doesn't make
+    /// it unsaved; the next save writes it that way.
+    func adopt(_ shown: String) {
+        if text == saved { saved = shown }
+        text = shown
+    }
+
     /// Back to the text as last saved.
     func revert() {
         guard isDirty else { return }

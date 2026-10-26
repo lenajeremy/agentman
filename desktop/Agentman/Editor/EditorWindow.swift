@@ -113,7 +113,16 @@ struct EditorWindow: View {
             }
         }
         .focusedSceneValue(\.editorStore, store)
-        .background(WindowReader { store.window = $0 })
+        .background(WindowReader { window in
+            // One window per folder. macOS can restore a second one beside
+            // the first; it gives way, since both would show the same tabs
+            // and only one can hold the editor's page.
+            if let first = store.window, first !== window, first.isVisible {
+                window.close()
+            } else {
+                store.window = window
+            }
+        })
         // Agents change files while the editor is open: the tree, git's
         // marks and the open files follow them.
         .task {
@@ -507,11 +516,31 @@ private struct DiskBanner: View {
 
 // MARK: - The text
 
-/// Every open file's text view at once, only the one in front shown, so
-/// each keeps its scroll, selection and undo while another is in front.
+/// The open files' text: Monaco, with a model for each tab, or with
+/// `-legacyEditor YES` the text views from before it.
 private struct EditorPanes: View {
     let store: EditorStore
     @AppStorage("editorFontSize") private var fontSize = 13.0
+
+    var body: some View {
+        if MonacoView.legacy {
+            LegacyPanes(store: store, fontSize: fontSize)
+        } else {
+            MonacoView(
+                store: store,
+                tabs: store.documents.filter { $0.kind == .text }.map(MonacoView.Tab.init),
+                activeID: store.activeID,
+                fontSize: fontSize
+            )
+        }
+    }
+}
+
+/// Every open file's text view at once, only the one in front shown, so
+/// each keeps its scroll, selection and undo while another is in front.
+private struct LegacyPanes: View {
+    let store: EditorStore
+    let fontSize: Double
 
     var body: some View {
         ZStack {
@@ -783,11 +812,11 @@ struct EditorCommands: Commands {
             .disabled(editor == nil)
         }
         CommandMenu("Editor") {
-            Button("Comment Lines") { editorTextView?.toggleComment() }
+            Button("Comment Lines") { perform("editor.action.commentLine") { $0.toggleComment() } }
                 .disabled(editor == nil)
-            Button("Indent Lines") { editorTextView?.shiftLines(by: 1) }
+            Button("Indent Lines") { perform("editor.action.indentLines") { $0.shiftLines(by: 1) } }
                 .disabled(editor == nil)
-            Button("Outdent Lines") { editorTextView?.shiftLines(by: -1) }
+            Button("Outdent Lines") { perform("editor.action.outdentLines") { $0.shiftLines(by: -1) } }
                 .disabled(editor == nil)
             Divider()
             Button("Bigger Text") { adjustFont(1) }
@@ -802,9 +831,14 @@ struct EditorCommands: Commands {
         }
     }
 
-    /// The text view with the keyboard, in the editor in front.
-    @MainActor private var editorTextView: EditorTextView? {
-        editor?.window?.firstResponder as? EditorTextView
+    /// Runs a Monaco action in the editor in front, or with the text view
+    /// from before Monaco, what that does instead.
+    @MainActor private func perform(_ action: String, legacy: (EditorTextView) -> Void) {
+        if let monaco = editor?.monaco, !MonacoView.legacy {
+            monaco.run(action)
+        } else if let textView = editor?.window?.firstResponder as? EditorTextView {
+            legacy(textView)
+        }
     }
 
     @MainActor private func adjustFont(_ step: Double) {

@@ -107,4 +107,47 @@ final class EditorTests: XCTestCase {
         let first = files.compactMap { path in Fuzzy.score("app", path).map { (path, $0) } }.max { $0.1 < $1.1 }
         XCTAssertEqual(first?.0, "src/app.ts")
     }
+
+    // MARK: - Monaco's edits
+
+    @MainActor
+    private func document(_ text: String) throws -> EditorDocument {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: folder.appendingPathComponent("file.txt"))
+        return EditorDocument(root: folder, path: "file.txt")
+    }
+
+    @MainActor
+    func testMonacosEditsLandInUTF16Offsets() throws {
+        let document = try document("emoji 😀 here\nnext é\n")
+        // Last first, as Monaco sends them: after the emoji (two UTF-16
+        // units), then at the start.
+        let changes = [
+            EditorDocument.Change(offset: 8, length: 0, text: "!"),
+            EditorDocument.Change(offset: 0, length: 5, text: "smile"),
+        ]
+        XCTAssertTrue(document.apply(changes, expecting: 22))
+        XCTAssertEqual(document.text, "smile 😀! here\nnext é\n")
+        XCTAssertTrue(document.isDirty)
+    }
+
+    @MainActor
+    func testEditsThatDontFitLeaveTheTextAlone() throws {
+        let document = try document("short")
+        XCTAssertFalse(document.apply([.init(offset: 10, length: 1, text: "x")], expecting: 6))
+        XCTAssertFalse(document.apply([.init(offset: 0, length: 1, text: "x")], expecting: 99), "the page's length says they fell apart")
+        XCTAssertEqual(document.text, "short")
+        XCTAssertFalse(document.isDirty)
+    }
+
+    @MainActor
+    func testEvenedOutLineEndingsDontMakeAFileUnsaved() throws {
+        let document = try document("one\r\ntwo\nthree\r\n")
+        document.adopt("one\r\ntwo\r\nthree\r\n")
+        XCTAssertFalse(document.isDirty)
+        document.text += "four"
+        document.adopt("one\r\ntwo\r\nthree\r\nfour!")
+        XCTAssertTrue(document.isDirty, "edits stay unsaved")
+    }
 }

@@ -33,6 +33,21 @@ targets:
     platform: macOS
     sources:
       - path: Agentman
+        excludes:
+          - Resources/EditorWeb
+          - Resources/EditorWeb/**
+      # The editor page (Monaco), built from editor-web/ before each build and
+      # copied in as a folder, so its files keep their places.
+      - path: Agentman/Resources/EditorWeb
+        type: folder
+        buildPhase: resources
+        optional: true
+    preBuildScripts:
+      - name: Build the editor page
+        script: '"$SRCROOT/editor-web/build.sh"'
+        basedOnDependencyAnalysis: false
+        outputFiles:
+          - $(SRCROOT)/Agentman/Resources/EditorWeb/main.js
     dependencies:
       - package: Markdown
       - package: SwiftTerm
@@ -60,6 +75,8 @@ targets:
         # The app talks to `am serve` through ~/.agentman/am.sock, which a
         # sandboxed app cannot reach. It is distributed outside the App Store.
         ENABLE_APP_SANDBOX: NO
+        # The editor page's build reads node_modules and writes Resources.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_IDENTITY: "-"

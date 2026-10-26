@@ -87,6 +87,9 @@ final class EditorStore {
     private(set) var allFiles: [String] = []
     @ObservationIgnored private var allFilesAt: Date?
     @ObservationIgnored weak var window: NSWindow?
+    /// The page the files are edited in, kept while the window is closed,
+    /// for a while, so each tab's undo and scroll are there when it opens.
+    @ObservationIgnored var monaco: MonacoController?
 
     init(root: URL) {
         self.root = root

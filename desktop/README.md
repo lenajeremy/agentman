@@ -24,6 +24,12 @@ open build/Build/Products/Debug/Agentman.app
 
 Run the tests with `xcodebuild … test` in place of `build`.
 
+The editor's text is [Monaco](https://github.com/microsoft/monaco-editor) in a
+web view. Its page is built from `editor-web/` into `Agentman/Resources/EditorWeb`
+before each build of the app, which needs [Node.js](https://nodejs.org) the
+first time and whenever `editor-web/` changes. `-legacyEditor YES` brings back
+the editor's text view from before Monaco.
+
 `am serve` must be running, version 0.18 or later (the first with the socket).
 
 ## Pointing it at another daemon
