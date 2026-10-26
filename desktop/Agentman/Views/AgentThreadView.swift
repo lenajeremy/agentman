@@ -50,36 +50,25 @@ struct AgentThreadView: View {
             }
             ScrollViewReader { proxy in
                 ScrollView {
+                    let items = ThreadItem.items(from: store.messages[session.id] ?? [])
                     LazyVStack(alignment: .leading, spacing: 24) {
                         if store.hasMore[session.id] == true {
-                            Button {
-                                // Older messages arrive above, and what was
-                                // at the top stays in view.
-                                let first = ThreadItem.items(from: store.messages[session.id] ?? []).first?.id
-                                Task {
-                                    await store.loadOlder(session.id)
-                                    if let first { proxy.scrollTo(first, anchor: .top) }
-                                }
-                            } label: {
-                                Text(store.loadingOlder.contains(session.id) ? "Loading…" : "Load earlier messages")
-                                    .font(TextStyle.caption)
-                            }
-                            .buttonStyle(.link)
-                            .frame(maxWidth: .infinity)
+                            LoadingEarlier()
                         }
-                        ForEach(ThreadItem.items(from: store.messages[session.id] ?? [])) { item in
-                            switch item {
-                            case .message(let message):
-                                MessageRow(message: message)
-                                    .id(item.id)
-                            case .tools(let calls, let said):
-                                ToolRun(calls: calls, said: said)
-                                    .id(item.id)
-                            case .image(let call, let path):
-                                ImageThumbnail(sessionId: session.id, path: path,
-                                               label: "Read " + (path as NSString).lastPathComponent, carded: true)
-                                    .id(item.id)
+                        ForEach(items) { item in
+                            Group {
+                                switch item {
+                                case .message(let message):
+                                    MessageRow(message: message)
+                                case .tools(let calls, let said):
+                                    ToolRun(calls: calls, said: said)
+                                case .image(_, let path):
+                                    ImageThumbnail(sessionId: session.id, path: path,
+                                                   label: "Read " + (path as NSString).lastPathComponent, carded: true)
+                                }
                             }
+                            .id(item.id)
+                            .firstMessage(item.id, if: item.id == items.first?.id)
                         }
                         ForEach(Array((session.queued ?? []).enumerated()), id: \.offset) { _, text in
                             QueuedBubble(text: text, note: "Waiting for the agent to read it",
@@ -104,7 +93,7 @@ struct AgentThreadView: View {
                     .frame(maxWidth: 820)
                     .frame(maxWidth: .infinity)
                 }
-                .modifier(FollowsEnd(atEnd: $atEnd))
+                .modifier(FollowsEnd(atEnd: $atEnd, earlier: store.hasMore[session.id] == true ? { await store.loadOlder(session.id) } : nil))
                 .modifier(TopFade())
                 .overlay {
                     if isEmpty { EmptyThread(session: session) }

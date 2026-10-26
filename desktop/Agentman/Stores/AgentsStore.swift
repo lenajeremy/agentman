@@ -64,7 +64,6 @@ final class AgentsStore {
     /// What happened while the user was away, for the summary on their
     /// return.
     let away = AwayLog()
-    private var resignedAt: Date?
     /// An image open full window, over everything.
     var lightbox: Lightbox?
     /// The session being renamed in the sidebar, if one is.
@@ -118,18 +117,12 @@ final class AgentsStore {
             for await _ in center.notifications(named: NSApplication.didBecomeActiveNotification) {
                 appActive = true
                 cameBack()
-                // Back after a while away: Agentman starts fresh on its entry
-                // page, the conversation still above it.
-                if let away = resignedAt, Date().timeIntervalSince(away) > 30 * 60, !manager.thinking {
-                    manager.showEntry = true
-                }
                 seeManagerIfShown()
             }
         }
         Task {
             for await _ in center.notifications(named: NSApplication.didResignActiveNotification) {
                 appActive = false
-                resignedAt = Date()
                 away.left()
             }
         }
@@ -191,9 +184,8 @@ final class AgentsStore {
     }
 
     /// Opens what an agentman:// link names: agentman://agent/<session id>,
-    /// agentman://home for Agentman itself, or agentman://home/conversation
-    /// for its conversation rather than its entry page, as a notification
-    /// about a reply or a card does.
+    /// or agentman://home (and agentman://home/conversation, as notifications
+    /// about a reply or a card have it) for Agentman itself.
     func open(_ url: URL) {
         guard url.scheme == "agentman" else { return }
         switch url.host() {
@@ -206,9 +198,6 @@ final class AgentsStore {
             selection = .newAgent
         case "home":
             selection = .manager
-            if url.path().hasPrefix("/conversation") {
-                manager.showEntry = false
-            }
         default:
             break
         }
