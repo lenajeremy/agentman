@@ -21,6 +21,7 @@ daemon used by the mobile app.
 | `am install-hooks` | Install Agentman's Claude Code, Codex and Cursor Agent CLI hooks, and give every installed agent Agentman's tools. With `-kiro`, only Kiro's opt-in agent (see Hooks). |
 | `am uninstall-hooks` | Remove only Agentman's hook entries, and Agentman's tools (see Agentman's tools for agents). |
 | `am mcp install` / `am mcp uninstall` | Give every installed agent Agentman's tools, or take them out for good. |
+| `am lsp status` / `am lsp install <language>` / `am lsp clean` | The language servers the Mac app's editor uses (see Language servers). |
 | `am doctor` | Check hooks, daemon health, agent discovery, and transcript parsing. |
 | `am version` | Print the installed version. |
 
@@ -216,6 +217,47 @@ phone the moment a turn ends, with the reply as the preview. A file at that
 path that Agentman did not write is never replaced or removed.
 `am uninstall-hooks` removes the agent along with the other hooks;
 `am uninstall-hooks -kiro` removes only it.
+
+## Language servers
+
+The editor in Agentman for Mac gets errors, completions, hover and Go to
+Definition from language servers that `am serve` runs. A server starts when a
+file of its language opens, is shared by every window with a file in that
+project, and stops when no window has used it for ten minutes.
+
+| Language | Server | Where it comes from |
+|---|---|---|
+| Go | gopls | The Mac's own (PATH, Go's bin folder), else built with `go install`, which needs Go |
+| TypeScript, JavaScript | vtsls | Downloaded with npm, on the Mac's Node or one am downloads |
+| Python | Pyright | Downloaded with npm, like TypeScript's |
+| Rust | rust-analyzer | The Mac's own (rustup), else downloaded from its GitHub release |
+| Swift | SourceKit-LSP | Xcode or its command line tools only |
+| C, C++, Objective-C | clangd | Xcode or its command line tools only |
+
+Downloads go to `~/.agentman/lsp`, at versions pinned in each am release, and
+are checked against pinned checksums; npm runs no install scripts.
+
+- `am lsp status` shows where each server would come from.
+- `am lsp install <language>` gets one ahead of time: `go`, `typescript`,
+  `python` or `rust`.
+- `am lsp clean` removes what am downloaded; servers download again when
+  needed.
+
+In `~/.agentman/config.json`:
+
+```json
+{
+  "lsp": {
+    "noDownloads": false,
+    "idleMinutes": 10,
+    "maxServers": 6,
+    "servers": { "gopls": { "path": "/opt/homebrew/bin/gopls" }, "pyright": { "disabled": true } }
+  }
+}
+```
+
+`noDownloads` keeps am to the servers already on the Mac; `servers` gives one
+a program of your own, or turns it off. Restart `am serve` after changing it.
 
 ## Diagnostics
 

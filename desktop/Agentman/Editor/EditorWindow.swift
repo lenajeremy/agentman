@@ -762,7 +762,7 @@ private struct LanguageLabel: View {
         HStack(spacing: 6) {
             if let status = document.language {
                 switch status.state {
-                case "starting", "restarting":
+                case "installing", "starting", "restarting":
                     ProgressView().controlSize(.mini)
                     Text(status.detail.isEmpty ? "Starting \(status.name)…" : status.detail)
                         .lineLimit(1)

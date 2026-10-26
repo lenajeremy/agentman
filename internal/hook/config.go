@@ -43,6 +43,31 @@ type Config struct {
 	// NoAgentTools records that the user took Agentman's tools out of their
 	// agents (am mcp uninstall), so am serve doesn't put them back.
 	NoAgentTools bool `json:"noAgentTools,omitempty"`
+	// LSP shapes the language servers am runs for the editor in Agentman
+	// for Mac.
+	LSP LSPConfig `json:"lsp,omitzero"`
+}
+
+// LSPConfig shapes the editor's language servers (internal/lsp).
+type LSPConfig struct {
+	// NoDownloads keeps am from downloading servers; only the Mac's own
+	// run.
+	NoDownloads bool `json:"noDownloads,omitempty"`
+	// IdleMinutes is how long a server nobody uses keeps running; 10 when 0.
+	IdleMinutes int `json:"idleMinutes,omitempty"`
+	// MaxServers is how many run at once before idle ones make room; 6
+	// when 0.
+	MaxServers int `json:"maxServers,omitempty"`
+	// Servers give a server a program of the user's own, or turn it off,
+	// by its id: gopls, typescript, pyright, rust-analyzer, sourcekit-lsp,
+	// clangd.
+	Servers map[string]LSPServer `json:"servers,omitempty"`
+}
+
+// LSPServer is the user's say over one language server.
+type LSPServer struct {
+	Path     string `json:"path,omitempty"`
+	Disabled bool   `json:"disabled,omitempty"`
 }
 
 // ListenAddr returns the configured safe loopback listener or the default.

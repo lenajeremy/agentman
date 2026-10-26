@@ -287,7 +287,7 @@ func runServe(ctx context.Context, args []string) error {
 	}
 	// Language servers for the editor in Agentman for Mac: started on first
 	// use, stopped when idle, and all stopped with am serve.
-	languages := lsp.NewHost(lsp.Options{})
+	languages := lsp.NewHost(languageOptions(cfg, *configHome))
 	defer languages.Close()
 	if local != nil {
 		go func() {

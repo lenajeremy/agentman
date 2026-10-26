@@ -22,6 +22,7 @@ import (
 type State string
 
 const (
+	StateInstalling State = "installing"
 	StateStarting   State = "starting"
 	StateReady      State = "ready"
 	StateRestarting State = "restarting"
@@ -227,13 +228,25 @@ func (s *Session) lastUse() time.Time {
 
 // start runs the server and initializes it, telling windows how it goes.
 func (s *Session) start() {
-	s.setState(StateStarting, "Starting "+s.server.Name+"…")
-	command := s.host.find(s.server)
-	if command == "" {
-		s.setState(StateFailed, s.server.Missing)
-		return
+	launch, ok := s.host.locate(s.server)
+	if !ok {
+		if !s.host.canInstall(s.server) {
+			s.setState(StateFailed, s.server.Missing)
+			return
+		}
+		// The first file of a language: am gets its server, once.
+		s.setState(StateInstalling, "Getting "+s.server.Language+" support…")
+		var err error
+		launch, err = s.host.installer.Install(s.host.ctx, s.server, func(detail string) {
+			s.setState(StateInstalling, detail)
+		})
+		if err != nil {
+			s.setState(StateFailed, err.Error())
+			return
+		}
 	}
-	proc, err := s.host.spawn(command, s.server.Args, s.root)
+	s.setState(StateStarting, "Starting "+s.server.Name+"…")
+	proc, err := s.host.spawn(launch, s.root)
 	if err != nil {
 		s.setState(StateFailed, fmt.Sprintf("Couldn't start %s: %v", s.server.Name, err))
 		return

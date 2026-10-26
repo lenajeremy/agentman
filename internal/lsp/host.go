@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -25,9 +27,18 @@ type Options struct {
 	Idle time.Duration
 	// MaxServers is how many may run at once before idle ones make room.
 	MaxServers int
+	// Dir is where am puts the servers it downloads: ~/.agentman/lsp.
+	// Without it, only servers already on the Mac run.
+	Dir string
+	// NoDownloads keeps am from downloading servers.
+	NoDownloads bool
+	// Paths run a server from a program of the user's choosing, by id.
+	Paths map[string]string
+	// Disabled servers don't run, by id.
+	Disabled map[string]bool
 	// Servers replaces the catalog, for tests.
 	Servers []*Server
-	// Find replaces looking for a server's command, for tests.
+	// Find replaces looking for a server on the Mac, for tests.
 	Find func(*Server) string
 }
 
@@ -38,6 +49,10 @@ type Host struct {
 	maxServers   int
 	servers      []*Server
 	findCommand  func(*Server) string
+	installer    *Installer
+	noDownloads  bool
+	paths        map[string]string
+	disabled     map[string]bool
 	startTimeout time.Duration
 	backoff      func(tries int) time.Duration
 
@@ -60,6 +75,9 @@ func NewHost(opts Options) *Host {
 		maxServers:   opts.MaxServers,
 		servers:      opts.Servers,
 		findCommand:  opts.Find,
+		noDownloads:  opts.NoDownloads,
+		paths:        opts.Paths,
+		disabled:     opts.Disabled,
 		startTimeout: time.Minute,
 		backoff:      func(tries int) time.Duration { return time.Duration(tries*tries) * time.Second },
 		sessions:     map[string]*Session{},
@@ -72,6 +90,9 @@ func NewHost(opts Options) *Host {
 	}
 	if h.servers == nil {
 		h.servers = catalog
+	}
+	if opts.Dir != "" {
+		h.installer = &Installer{Dir: opts.Dir, Tools: &h.tools}
 	}
 	h.ctx, h.cancel = context.WithCancel(context.Background())
 	return h
@@ -171,7 +192,7 @@ func (h *Host) serverFor(language string) *Server {
 // to it. Without a server for the language it returns nil.
 func (h *Host) resolve(c *Client, file, folder, language string) *Session {
 	server := h.serverFor(language)
-	if server == nil || file == "" {
+	if server == nil || file == "" || h.disabled[server.ID] {
 		return nil
 	}
 	root := Root(file, folder, server.Markers)
@@ -279,19 +300,56 @@ func (h *Host) filesChanged(changes []FileChange) {
 	}
 }
 
-// find is the command that runs a server, or "" when it isn't on the Mac.
-func (h *Host) find(server *Server) string {
-	if h.findCommand != nil {
-		return h.findCommand(server)
+// locate is how to run a server without downloading it: the user's own
+// program for it, a copy on the Mac, or the one am downloaded before.
+func (h *Host) locate(server *Server) (Launch, bool) {
+	if path := h.paths[server.ID]; path != "" {
+		return Launch{Path: path, Args: server.Args}, true
 	}
-	return server.find(&h.tools)
+	found := ""
+	if h.findCommand != nil {
+		found = h.findCommand(server)
+	} else if server.find != nil {
+		found = server.find(&h.tools)
+	}
+	if found != "" {
+		return Launch{Path: found, Args: server.Args}, true
+	}
+	if h.installer != nil {
+		return h.installer.Installed(server)
+	}
+	return Launch{}, false
+}
+
+// Where says how a server would run, for am lsp status: from the user's own
+// program, a copy on the Mac, one am downloaded, or not yet ("").
+func (h *Host) Where(server *Server) (Launch, string) {
+	launch, ok := h.locate(server)
+	switch {
+	case !ok:
+		return Launch{}, ""
+	case h.paths[server.ID] != "":
+		return launch, "yours"
+	case h.installer != nil && strings.HasPrefix(launch.Args0OrPath(), h.installer.Dir+string(os.PathSeparator)):
+		return launch, "downloaded"
+	default:
+		return launch, "mac"
+	}
+}
+
+// Catalog is every server am knows how to run.
+func Catalog() []*Server { return catalog }
+
+// canInstall says whether am may download a server.
+func (h *Host) canInstall(server *Server) bool {
+	return server.Install != nil && h.installer != nil && !h.noDownloads
 }
 
 // spawn starts a server in its project's folder.
-func (h *Host) spawn(command string, args []string, root string) (*process, error) {
-	cmd := exec.Command(command, args...)
+func (h *Host) spawn(launch Launch, root string) (*process, error) {
+	cmd := exec.Command(launch.Path, launch.Args...)
 	cmd.Dir = root
-	cmd.Env = h.tools.Env()
+	cmd.Env = withPath(h.tools.Env(), launch.Dirs)
 	inGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -307,4 +365,20 @@ func (h *Host) spawn(command string, args []string, root string) (*process, erro
 		return nil, err
 	}
 	return &process{cmd: cmd, stdin: stdin, stdout: stdout, stderr: stderr, done: make(chan struct{})}, nil
+}
+
+// withPath puts folders at the front of an environment's PATH.
+func withPath(env, dirs []string) []string {
+	if len(dirs) == 0 {
+		return env
+	}
+	front := strings.Join(dirs, string(os.PathListSeparator))
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if rest, ok := strings.CutPrefix(kv, "PATH="); ok {
+			kv = "PATH=" + front + string(os.PathListSeparator) + rest
+		}
+		out = append(out, kv)
+	}
+	return out
 }
