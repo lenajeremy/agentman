@@ -17,12 +17,13 @@ struct ManagerChatView: View {
 
     private var manager: ManagerStore { store.manager }
 
+    private var entry: Bool { Self.showsEntry(manager) }
+
     /// The entry page: Agentman and one box, with nothing else competing.
-    /// Shown when the app opens, and whenever Agentman can't take a message
-    /// yet; writing to it moves on to the conversation, which sits above.
-    private var entry: Bool {
-        guard !manager.thinking else { return false }
-        return manager.entries.isEmpty || manager.showEntry || manager.needsKey || store.status != .connected
+    /// Only while there is no conversation; once there is one, it reads as
+    /// a conversation with its box below, never with the page under it.
+    static func showsEntry(_ manager: ManagerStore) -> Bool {
+        manager.entries.isEmpty && !manager.thinking
     }
 
     var body: some View {
@@ -30,40 +31,26 @@ struct ManagerChatView: View {
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
                     ScrollView {
+                        let items = ChatItem.items(from: manager.entries)
                         LazyVStack(alignment: .leading, spacing: 28) {
                             if manager.hasOlder, !manager.entries.isEmpty {
-                                Button("Earlier messages") {
-                                    // Older messages arrive above, and what
-                                    // was at the top stays in view.
-                                    let first = ChatItem.items(from: manager.entries).first?.id
-                                    Task {
-                                        await manager.loadOlder()
-                                        if let first { proxy.scrollTo(first, anchor: .top) }
-                                    }
-                                }
-                                .buttonStyle(.link)
-                                .font(TextStyle.caption)
-                                .frame(maxWidth: .infinity)
+                                LoadingEarlier()
                             }
-                            ForEach(ChatItem.items(from: manager.entries)) { item in
+                            ForEach(items) { item in
                                 ChatItemView(item: item)
                                     .id(item.id)
+                                    .firstMessage(item.id, if: item.id == items.first?.id)
                             }
                             if manager.thinking, manager.entries.last?.streaming != true {
                                 ThinkingRow()
                                     .id("thinking")
                             }
                             if entry {
-                                EntryHero(draft: $draft, attachments: $attachments, dropping: $dropping, sending: sending, send: { send(draft) }) {
-                                    manager.showEntry = false
-                                    if let first = manager.entries.first(where: { $0.card?.isOpen == true }) {
-                                        withAnimation(.easeOut(duration: 0.25)) {
-                                            proxy.scrollTo(first.id, anchor: .top)
-                                        }
-                                    }
+                                EntryHero(draft: $draft, attachments: $attachments, dropping: $dropping, sending: sending) {
+                                    send(draft)
                                 }
                                 // The whole visible height, the title bar's
-                                // too, so nothing earlier shows above it.
+                                // too, so it sits in the middle of the page.
                                 .frame(minHeight: geometry.size.height + geometry.safeAreaInsets.top)
                                 .id("entry")
                             } else {
@@ -79,7 +66,7 @@ struct ManagerChatView: View {
                         .frame(maxWidth: 780)
                         .frame(maxWidth: .infinity)
                     }
-                    .modifier(FollowsEnd(atEnd: $atEnd))
+                    .modifier(FollowsEnd(atEnd: $atEnd, earlier: manager.hasOlder ? { await manager.loadOlder() } : nil))
                     .modifier(TopFade())
                     .overlay(alignment: .bottom) {
                         if !atEnd, !entry {
@@ -89,8 +76,15 @@ struct ManagerChatView: View {
                         }
                     }
                     .animation(.easeOut(duration: 0.15), value: atEnd)
-                    .onChange(of: scrollKey) { _, _ in
+                    .onChange(of: scrollKey) { old, _ in
                         guard !entry, atEnd else { return }
+                        if old.hasPrefix("0-") {
+                            // The first page: its end is only laid out once
+                            // this update is done, and scrolling to it before
+                            // lands at the top.
+                            DispatchQueue.main.async { proxy.scrollTo("end", anchor: .bottom) }
+                            return
+                        }
                         withAnimation(.easeOut(duration: 0.18)) {
                             proxy.scrollTo("end", anchor: .bottom)
                         }
@@ -111,11 +105,19 @@ struct ManagerChatView: View {
                                 .foregroundStyle(Palette.errorText)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        ManagerComposer(text: $draft, attachments: $attachments, thinking: manager.thinking, sending: sending,
-                                        onDropTargeted: { dropping = $0 }) {
-                            send(draft)
-                        } onStop: {
-                            manager.stop()
+                        if store.status != .connected || manager.needsKey {
+                            // Agentman can't take a message yet: the box
+                            // says why, as on the entry page.
+                            ManagerBox(draft: $draft, attachments: $attachments, dropping: $dropping, sending: sending) {
+                                send(draft)
+                            }
+                        } else {
+                            ManagerComposer(text: $draft, attachments: $attachments, thinking: manager.thinking, sending: sending,
+                                            onDropTargeted: { dropping = $0 }) {
+                                send(draft)
+                            } onStop: {
+                                manager.stop()
+                            }
                         }
                     }
                     .padding(.horizontal, 36)
@@ -191,26 +193,22 @@ struct ManagerChatView: View {
             if await manager.send(message, images: images) {
                 draft = ""
                 attachments = []
-                manager.showEntry = false
             }
             sending = false
         }
     }
 }
 
-/// Agentman's name and the one box to talk to it: a message, its API key
-/// before it has one, or a note that am serve isn't running.
+/// Agentman's name and the one box to talk to it, while there is no
+/// conversation yet.
 private struct EntryHero: View {
-    @Environment(AgentsStore.self) private var store
     @Binding var draft: String
     @Binding var attachments: [Attachment]
     @Binding var dropping: Bool
     var sending: Bool
     var send: () -> Void
-    var showCards: () -> Void
 
     var body: some View {
-        let manager = store.manager
         VStack(spacing: 0) {
             Spacer(minLength: 48)
             VStack(spacing: 16) {
@@ -221,18 +219,41 @@ private struct EntryHero: View {
             }
             .padding(.bottom, 28)
 
+            ManagerBox(draft: $draft, attachments: $attachments, dropping: $dropping, sending: sending, large: true, send: send)
+                .frame(maxWidth: 620)
+
+            Spacer(minLength: 48)
+            Spacer(minLength: 24)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// The box to talk to Agentman: a message, its API key before it has one,
+/// or a note that am serve isn't running.
+private struct ManagerBox: View {
+    @Environment(AgentsStore.self) private var store
+    @Binding var draft: String
+    @Binding var attachments: [Attachment]
+    @Binding var dropping: Bool
+    var sending: Bool
+    var large = false
+    var send: () -> Void
+
+    var body: some View {
+        let manager = store.manager
+        VStack(spacing: 0) {
             Group {
                 if store.status != .connected {
-                    ManagerComposer(text: .constant(""), thinking: false, sending: true, large: true,
+                    ManagerComposer(text: .constant(""), thinking: false, sending: true, large: large,
                                     placeholder: "Waiting for am serve…", onSend: {}, onStop: {})
                 } else if manager.needsKey {
                     KeyBox()
                 } else {
-                    ManagerComposer(text: $draft, attachments: $attachments, thinking: false, sending: sending, large: true,
+                    ManagerComposer(text: $draft, attachments: $attachments, thinking: false, sending: sending, large: large,
                                     onDropTargeted: { dropping = $0 }, onSend: send, onStop: {})
                 }
             }
-            .frame(maxWidth: 620)
 
             Group {
                 if case .unavailable = store.status {
@@ -249,14 +270,6 @@ private struct EntryHero: View {
                             Link("Get a key", destination: URL(string: "https://console.anthropic.com/settings/keys")!)
                         }
                     }
-                } else if !manager.openCards.isEmpty {
-                    let count = manager.openCards.count
-                    Button(action: showCards) {
-                        Label(count == 1 ? "1 card is waiting for you" : "\(count) cards are waiting for you",
-                              systemImage: "arrow.up")
-                            .foregroundStyle(Palette.needsYouText)
-                    }
-                    .buttonStyle(.plain)
                 } else if let problem = manager.problem {
                     Text(problem).foregroundStyle(Palette.errorText)
                 }
@@ -265,11 +278,7 @@ private struct EntryHero: View {
             .foregroundStyle(Palette.muted)
             .padding(.top, 14)
             .frame(height: 34, alignment: .top)
-
-            Spacer(minLength: 48)
-            Spacer(minLength: 24)
         }
-        .frame(maxWidth: .infinity)
     }
 }
 

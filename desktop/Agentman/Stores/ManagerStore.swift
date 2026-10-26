@@ -22,10 +22,9 @@ final class ManagerStore {
     /// The last thing that went wrong talking to Agentman.
     var problem: String?
     private(set) var loaded = false
-    /// Whether Agentman opens on its entry page, just its name and a box,
-    /// rather than the conversation: when the app starts, and after the user
-    /// has been away a while. Writing to it moves on to the conversation.
-    var showEntry = true
+    /// Whether earlier messages are on their way, so the reader reaching the
+    /// top asks for them once.
+    private(set) var loadingOlder = false
     /// When the user last saw the conversation, in milliseconds. Kept across
     /// launches, so what arrived while the app was closed shows as new.
     private(set) var lastRead: Int64
@@ -151,7 +150,9 @@ final class ManagerStore {
     }
 
     func loadOlder() async {
-        guard hasOlder, let first = entries.first else { return }
+        guard hasOlder, !loadingOlder, let first = entries.first else { return }
+        loadingOlder = true
+        defer { loadingOlder = false }
         var request = DaemonRequest(.managerHistory)
         request.before = first.id
         request.limit = 80
