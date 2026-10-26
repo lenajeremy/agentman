@@ -69,7 +69,11 @@ type Session struct {
 	// OriginalName is the agent's own name for a session the user renamed;
 	// Name is then the user's. Empty when it was never renamed. A display
 	// name only: ID stays the agent's.
-	OriginalName   string     `json:"originalName,omitempty"`
+	OriginalName string `json:"originalName,omitempty"`
+	// Alerts is set when the user asked to hear from this agent itself.
+	// While Agentman is on it speaks for the agents, and their own alerts
+	// reach only the devices that asked for every agent, or for this one.
+	Alerts         bool       `json:"alerts,omitempty"`
 	Cwd            string     `json:"cwd"`
 	State          State      `json:"state"`
 	Inject         InjectMode `json:"inject"`
@@ -223,7 +227,8 @@ func (s Session) SameAs(other Session) bool {
 	// Field by field, because Servers makes the struct incomparable with !=.
 	// TestSameAsCoversEveryField fails if a new field is left out here.
 	return s.ID == other.ID && s.Kind == other.Kind && s.NativeID == other.NativeID &&
-		s.Name == other.Name && s.OriginalName == other.OriginalName && s.Cwd == other.Cwd && s.State == other.State &&
+		s.Name == other.Name && s.OriginalName == other.OriginalName && s.Alerts == other.Alerts &&
+		s.Cwd == other.Cwd && s.State == other.State &&
 		s.Inject == other.Inject && s.StartedAt == other.StartedAt &&
 		s.LastActivityAt == other.LastActivityAt && s.Model == other.Model &&
 		s.Mode == other.Mode && s.ContextPercent == other.ContextPercent &&

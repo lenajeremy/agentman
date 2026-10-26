@@ -281,9 +281,11 @@ func runServe(ctx context.Context, args []string) error {
 
 	sink := multiSink{sinks: sinks}
 	agent := daemon.New(registry, sink)
-	// The user's names for sessions, before the first sweep names them.
+	// The user's names for sessions, and the agents they asked to hear from
+	// while Agentman speaks for the rest, before the first sweep.
 	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
 		agent.SetNamesFile(filepath.Join(dir, "names.json"))
+		agent.SetAlertsFile(filepath.Join(dir, "alerts.json"))
 	}
 	// Language servers for the editor in Agentman for Mac: started on first
 	// use, stopped when idle, and all stopped with am serve.
@@ -325,7 +327,15 @@ func runServe(ctx context.Context, args []string) error {
 			Secrets:   secrets.Default(dir),
 			Agents:    managerAgents{daemon: agent},
 			Knowledge: knowledge.Open(filepath.Join(dir, "knowledge")),
-			Emit:      func(event protocol.Event) { _ = sink.Send(event) },
+			Emit: func(event protocol.Event) {
+				_ = sink.Send(event)
+				// Its key set or taken away turns Agentman on or off, which
+				// decides who notifies: the apps hear it with the sessions.
+				if event.Type == protocol.EvtManagerSettings {
+					agent.AnnounceDaemonInfo()
+				}
+			},
+			News: agent.AlertAgentman,
 		})
 		if err != nil {
 			fmt.Printf("%s\n", dim("agentman   "+err.Error()))

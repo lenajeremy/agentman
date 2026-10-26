@@ -17,6 +17,11 @@ import (
 // handful; anything near this is going in circles.
 const maxSteps = 16
 
+// replyNewsAfter is how long a reply to the user takes before it is news
+// worth telling them about wherever they are: under it, they had no time to
+// leave. The same bar as an agent's finished turn.
+var replyNewsAfter = 30 * time.Second
+
 var toolsOnce = sync.OnceValue(apiTools)
 
 // runTurn writes Agentman's reply to what the user said: it streams text to
@@ -56,6 +61,16 @@ func (m *Manager) runTurn(ctx context.Context, model Model, input turnInput) {
 	m.setStatus("thinking", "")
 	settled := "idle"
 	defer func() { m.setStatus(settled, "") }()
+	// The reply is news when the user may not be waiting on it: a turn
+	// Agentman started itself, or one long enough for them to have left.
+	started := time.Now()
+	var said *protocol.ManagerEntry
+	defer func() {
+		if said != nil && settled == "idle" && ctx.Err() == nil &&
+			(input.autonomous || time.Since(started) >= replyNewsAfter) {
+			m.tell(*said)
+		}
+	}()
 	// A conversation grown too large is summarised before it is sent again;
 	// one that grew large in this turn, in the background after it.
 	m.compactIfNeeded(ctx, model)
@@ -124,7 +139,8 @@ func (m *Manager) runTurn(ctx context.Context, model Model, input turnInput) {
 			// A wake-up with nothing worth saying stays a quiet line.
 			m.addEntry(protocol.ManagerEntry{ID: entryID, Role: "activity", Text: "Nothing to report"})
 		} else if final != "" {
-			m.addEntry(protocol.ManagerEntry{ID: entryID, Role: "assistant", Text: final})
+			entry := m.addEntry(protocol.ManagerEntry{ID: entryID, Role: "assistant", Text: final})
+			said = &entry
 		}
 
 		switch reply.StopReason {

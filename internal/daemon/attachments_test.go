@@ -257,6 +257,7 @@ func (m *recordingManager) Handle(_ context.Context, req protocol.Request) proto
 func (m *recordingManager) TurnComplete(protocol.Session)      {}
 func (m *recordingManager) NeedsAnswer(protocol.Session)       {}
 func (m *recordingManager) SessionsChanged([]protocol.Session) {}
+func (m *recordingManager) On() bool                           { return false }
 
 // A phone's images for Agentman come through the relay like an agent's, and
 // Agentman is handed their bytes, with no file left behind.

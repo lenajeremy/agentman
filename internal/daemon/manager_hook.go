@@ -23,6 +23,9 @@ type ManagerHook interface {
 	// that changed it, so Agentman can see a question answered elsewhere or
 	// an agent pick up again. It must not block either.
 	SessionsChanged(sessions []protocol.Session)
+	// On reports whether Agentman can run, having its key. While it can, it
+	// speaks for the agents, whose own alerts go only where asked for.
+	On() bool
 }
 
 // SetManager installs the manager. Without one, manager requests are

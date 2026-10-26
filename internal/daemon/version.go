@@ -18,7 +18,7 @@ func (d *Daemon) AnnounceDaemonInfo() {
 }
 
 // sessionsEvent is a session list as sent to the phone, with the daemon's
-// own details attached.
+// own details attached, Agentman's being on among them.
 func (d *Daemon) sessionsEvent(list []protocol.Session) protocol.Event {
 	event := protocol.Event{Type: protocol.EvtSessions, Sessions: list}
 	d.mu.Lock()
@@ -26,6 +26,14 @@ func (d *Daemon) sessionsEvent(list []protocol.Session) protocol.Event {
 	d.mu.Unlock()
 	if info != nil {
 		event.Daemon = info()
+	}
+	if d.agentmanOn() {
+		details := protocol.DaemonInfo{}
+		if event.Daemon != nil {
+			details = *event.Daemon
+		}
+		details.Agentman = true
+		event.Daemon = &details
 	}
 	return event
 }

@@ -40,6 +40,10 @@ type Config struct {
 	Knowledge *knowledge.Store
 	// Emit sends an event to every connected app.
 	Emit func(protocol.Event)
+	// News hears what Agentman tells the user without being asked in that
+	// moment: a brief, word from an agent, a card, or a reply to someone
+	// who may have left. The daemon pushes it to phones.
+	News func(protocol.ManagerEntry)
 	// NewModel makes a model client from an API key, for every engine.
 	// Tests replace it; otherwise each engine makes its own.
 	NewModel func(apiKey string) Model
@@ -55,6 +59,7 @@ type Manager struct {
 	secrets      secrets.Store
 	agents       Agents
 	emitEvent    func(protocol.Event)
+	news         func(protocol.ManagerEntry)
 	newModel     func(string) Model
 	processTree  func(context.Context) (*tmux.ProcessTree, error)
 	conversation *conversation
@@ -123,6 +128,7 @@ func New(cfg Config) (*Manager, error) {
 		secrets:      cfg.Secrets,
 		agents:       cfg.Agents,
 		emitEvent:    cfg.Emit,
+		news:         cfg.News,
 		newModel:     cfg.NewModel,
 		processTree:  cfg.ProcessTree,
 		conversation: conversation,
@@ -320,7 +326,38 @@ func (m *Manager) addEntry(entry protocol.ManagerEntry) protocol.ManagerEntry {
 	}
 	_ = m.conversation.addEntry(entry)
 	m.emit(protocol.Event{Type: protocol.EvtManagerEntry, Entry: &entry})
+	if unasked(entry) {
+		m.tell(entry)
+	}
 	return entry
+}
+
+// unasked reports whether an entry is Agentman speaking up on its own, which
+// is news wherever the user is: a brief, word from an agent, a card. Replies
+// are news only when the user may have left, which runTurn decides.
+func unasked(entry protocol.ManagerEntry) bool {
+	switch entry.Role {
+	case "brief", "agent":
+		return true
+	case "card":
+		return entry.Card != nil && entry.Card.State == protocol.CardOpen
+	}
+	return false
+}
+
+// tell passes news on to be pushed.
+func (m *Manager) tell(entry protocol.ManagerEntry) {
+	if m.news != nil {
+		m.news(entry)
+	}
+}
+
+// On reports whether Agentman can run, having its key. While it can, it
+// speaks for the agents.
+func (m *Manager) On() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.keySet
 }
 
 func (m *Manager) emit(event protocol.Event) {
