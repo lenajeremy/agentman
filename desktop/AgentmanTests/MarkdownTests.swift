@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import Agentman
 
@@ -43,5 +44,16 @@ final class MarkdownTests: XCTestCase {
         }
         XCTAssertEqual(String(text.characters), "Use am serve and see docs.")
         XCTAssertTrue(text.runs.contains { $0.link == URL(string: "https://agentman.dev") })
+    }
+
+    // A cell that wraps makes its row taller, so no line is cut off.
+    func testATableRowGrowsWithItsWrappedCell() {
+        func height(_ cell: String) -> CGFloat {
+            let table = "| Hover on | Before | Now |\n|---|---|---|\n| `put` | \(cell) | Signature only |\n"
+            return NSHostingView(rootView: MarkdownView(table).frame(width: 900)).fittingSize.height
+        }
+        let oneLine = height("Signature only")
+        let wrapped = height(String(repeating: "Same, plus the description ", count: 6))
+        XCTAssertGreaterThan(wrapped, oneLine + 40, "one line \(oneLine), wrapped \(wrapped)")
     }
 }

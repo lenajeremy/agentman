@@ -280,13 +280,32 @@ private struct TableBlock: View {
     }
 
     private func cellView(_ text: AttributedString, header: Bool) -> some View {
-        SwiftUI.Text(text)
-            .font(header ? TextStyle.bodyMedium : TextStyle.body)
-            .foregroundStyle(Palette.text)
-            .textSelection(.enabled)
-            .frame(maxWidth: cellWidth, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+        WrappedCell(maxWidth: cellWidth) {
+            SwiftUI.Text(text)
+                .font(header ? TextStyle.bodyMedium : TextStyle.body)
+                .foregroundStyle(Palette.text)
+                .textSelection(.enabled)
+        }
+        // Fills its column, so the header's band runs the whole row.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+}
+
+/// A cell as tall as its text wrapped at the width it is drawn at. The
+/// horizontal scroll view proposes no width, so `.frame(maxWidth:)` measured
+/// the row as one long line and a wrapped cell spilled over its neighbours.
+private struct WrappedCell: Layout {
+    let maxWidth: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let text = subviews.first else { return .zero }
+        let width = min(text.sizeThatFits(.unspecified).width, proposal.width ?? .infinity, maxWidth)
+        return CGSize(width: width, height: text.sizeThatFits(ProposedViewSize(width: width, height: nil)).height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: nil))
     }
 }
