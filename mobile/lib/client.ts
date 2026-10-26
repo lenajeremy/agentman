@@ -401,7 +401,10 @@ export class Client {
    * socket is not open. The store decides when to send it and whether the Mac
    * kept it: see lib/push-registration.ts.
    */
-  registerPush(token: string, notify?: { finished: boolean; needsYou: boolean }): string | null {
+  registerPush(
+    token: string,
+    notify?: { finished: boolean; needsYou: boolean; agentman: boolean; agents: boolean },
+  ): string | null {
     const id = newFrameId();
     return this.write(id, { type: "register_push", pushToken: token, ...(notify ? { notify } : {}) }) ? id : null;
   }

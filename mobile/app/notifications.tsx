@@ -9,7 +9,7 @@ import { Appear } from "../components/Appear";
 import { ContentColumn } from "../components/ContentColumn";
 import { MotionPressable } from "../components/MotionPressable";
 import { useStyles, useTheme } from "../lib/appearance";
-import { AlertKind } from "../lib/notification-prefs";
+import { NotifyChoice } from "../lib/notification-prefs";
 import { isPushActive, pushFailureReason } from "../lib/push";
 import { useStore } from "../lib/store";
 import { font, Palette, radius, size, space } from "../lib/theme";
@@ -19,11 +19,13 @@ type FeatherName = ComponentProps<typeof Feather>["name"];
 /**
  * Which alerts reach this phone.
  *
- * Two kinds, because they ask different things of you. "Needs you" is an
- * agent stopped until you answer; "Finished" is one done and waiting to be
- * looked at. Neither is ever shown while the app is open — that rule is not a
- * setting, because there is no reason to want a banner over the screen you
- * are already reading.
+ * Agentman's own, and the agents'. Two kinds from the agents, because they
+ * ask different things of you: "needs you" is an agent stopped until you
+ * answer, "finished" one done and waiting to be looked at. While Agentman is
+ * on it speaks for the agents, so they alert only when you ask: for every
+ * agent here, or one at a time from an agent's menu. None is ever shown
+ * while the app is open — that rule is not a setting, because there is no
+ * reason to want a banner over the screen you are already reading.
  */
 export default function NotificationSettings() {
   const store = useStore();
@@ -51,7 +53,8 @@ export default function NotificationSettings() {
     return () => subscription.remove();
   }, [readPermission]);
 
-  const set = (kind: AlertKind, value: boolean) => store.setNotifyPrefs({ ...prefs, [kind]: value });
+  const set = (choice: NotifyChoice, value: boolean) => store.setNotifyPrefs({ ...prefs, [choice]: value });
+  const agentmanOn = store.daemonInfo?.agentman === true;
 
   return (
     <View style={[styles.page, { paddingTop: insets.top }]}>
@@ -98,13 +101,25 @@ export default function NotificationSettings() {
           ) : null}
 
           <Appear delay={allowed === false ? 30 : 0}>
-            <Text style={styles.sectionLabel}>Notify me when</Text>
+            <Text style={styles.sectionLabel}>Agentman</Text>
+            <View style={styles.card}>
+              <ToggleRow
+                icon="message-circle"
+                tint={color.working}
+                label="Agentman has something to say"
+                detail="A reply you may have walked away from, a brief on an agent, or word an agent left for you."
+                value={prefs.agentman}
+                onChange={(value) => set("agentman", value)}
+              />
+            </View>
+
+            <Text style={styles.sectionLabel}>Your agents</Text>
             <View style={styles.card}>
               <ToggleRow
                 icon="alert-circle"
                 tint={color.needsYou}
                 label="An agent needs you"
-                detail="It’s waiting on an approval or a question, and can’t go on without you."
+                detail="It’s waiting on an approval or a question, and can’t go on without you. While Agentman is on, its card is what rings."
                 value={prefs.needsYou}
                 onChange={(value) => set("needsYou", value)}
               />
@@ -117,7 +132,21 @@ export default function NotificationSettings() {
                 value={prefs.finished}
                 onChange={(value) => set("finished", value)}
               />
+              <View style={styles.divider} />
+              <ToggleRow
+                icon="users"
+                tint={color.muted}
+                label="Hear from every agent"
+                detail="While Agentman is on, it tells you what matters from your agents. Turn this on to hear from each one itself too, or pick one from its menu."
+                value={prefs.agents}
+                onChange={(value) => set("agents", value)}
+              />
             </View>
+            <Text style={styles.footnote}>
+              {agentmanOn
+                ? "Agentman is on, so your agents only notify you themselves when you ask."
+                : "Agentman is off, so each agent notifies you itself."}
+            </Text>
             <Text style={styles.footnote}>
               {isPushActive()
                 ? "Your Mac sends these, so they reach you even when the app has been closed for a while."

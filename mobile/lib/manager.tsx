@@ -1,5 +1,12 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Notifications from "expo-notifications";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AppState, Platform } from "react-native";
+
+import { agentmanAlert, replyAlert, type AgentmanAlert } from "./agentman-alerts";
+import { ALERT_SOUND_FINISHED, ALERT_SOUND_NEEDS_YOU } from "./alert-sounds";
+import { shouldAlertOnPhone } from "./notification-prefs";
+import { isPushActive } from "./push";
 
 import {
   applyDelta,
@@ -118,6 +125,27 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
   const [lastRead, setLastRead] = useState(Number.MAX_SAFE_INTEGER);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  const prefsRef = useRef(store.notifyPrefs);
+  prefsRef.current = store.notifyPrefs;
+
+  // Away from the app and without push, the phone tells you itself what
+  // Agentman has to say. With push, the Mac sends these.
+  const raise = useCallback((alert: AgentmanAlert | null, sessionId?: string) => {
+    if (!alert || Platform.OS === "web") return;
+    const state = { appActive: AppState.currentState === "active", pushActive: isPushActive() };
+    if (!shouldAlertOnPhone(alert.kind, prefsRef.current, state)) return;
+    void Notifications.scheduleNotificationAsync({
+      content: {
+        title: alert.title,
+        body: alert.body,
+        sound: alert.kind === "needsYou" ? ALERT_SOUND_NEEDS_YOU : ALERT_SOUND_FINISHED,
+        data: { agentman: true, ...(sessionId ? { sessionId } : {}) },
+      },
+      trigger: null,
+    }).catch(() => {});
+  }, []);
   // A new conversation, started here or on the Mac, is read afresh.
   const reloadRef = useRef<() => Promise<void>>(async () => {});
 
@@ -137,6 +165,7 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
       case "manager_entry":
         if (event.entry) {
           const entry = event.entry;
+          if (!entriesRef.current.some((known) => known.id === entry.id)) raise(agentmanAlert(entry), entry.sessionId);
           setEntries((current) => upsertEntry(current, entry));
         }
         break;
@@ -147,7 +176,13 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
         }
         break;
       case "manager_status":
-        if (event.managerStatus) setStatus(event.managerStatus);
+        if (event.managerStatus) {
+          // One alert per reply, once it is done, with its last words.
+          if (statusRef.current.state === "thinking" && event.managerStatus.state !== "thinking") {
+            raise(replyAlert(entriesRef.current));
+          }
+          setStatus(event.managerStatus);
+        }
         break;
       case "manager_schedules":
         setSchedules(event.schedules ?? []);
@@ -177,7 +212,7 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
         break;
       }
     }
-  }, []);
+  }, [raise]);
 
   useEffect(() => store.listen(apply), [store, apply]);
 

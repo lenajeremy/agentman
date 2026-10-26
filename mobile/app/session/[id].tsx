@@ -510,6 +510,17 @@ export default function SessionScreen() {
           router.push(`/servers/${encodeURIComponent(session.id)}`),
       });
     }
+    // Agentman speaks for the agents while it is on; this one can speak for
+    // itself as well, on every device.
+    if (store.daemonInfo?.agentman === true) {
+      const alerts = session.alerts === true;
+      sessionMenuItems.push({
+        key: "alerts",
+        label: alerts ? "Stop notifying me about it" : "Notify me about this agent",
+        icon: alerts ? "bell-off" : "bell",
+        onPress: () => void store.setAgentAlerts(session.id, !alerts),
+      });
+    }
     if (session.state === "busy") {
       sessionMenuItems.push({
         key: "stop",
