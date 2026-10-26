@@ -22,6 +22,7 @@ import {
   severity,
   symbolKind,
   target,
+  toPosition,
   toRange,
 } from './convert'
 
@@ -84,6 +85,10 @@ const diagnostics = new Map<string, any[]>()
 /** Models made to preview another file (a reference, a definition). */
 const previews = new Set<monaco.editor.ITextModel>()
 const registered = new Set<string>()
+/** Each language's semantic token legend, from its server. */
+const legends = new Map<string, monaco.languages.SemanticTokensLegend>()
+const tokensChanged = new monaco.Emitter<void>()
+const hintsChanged = new monaco.Emitter<void>()
 
 export function setup(page: Host) {
   host = page
@@ -186,6 +191,8 @@ export async function attach(model: monaco.editor.ITextModel) {
   if (!listening.has(model)) {
     listening.set(model, model.onDidChangeContent((e) => attached.get(model)?.edited(model, e)))
   }
+  const legend = session.caps?.semanticTokensProvider?.legend
+  if (legend) legends.set(model.getLanguageId(), legend)
   session.open(model)
   session.report(model)
   showDiagnostics(model)
@@ -239,6 +246,19 @@ class Session {
   }
 
   statusChanged(status: Status, caps?: Capabilities) {
+    if (status.state === 'stopped') {
+      // Turned off, or given another program in Settings: its files open
+      // again with whatever serves them now, if anything.
+      sessions.delete(this.key)
+      this.lost()
+      const models = [...this.models]
+      this.models.clear()
+      for (const model of models) {
+        detach(model)
+        void attach(model)
+      }
+      return
+    }
     const wasReady = this.ready
     this.status = status
     if (status.state === 'ready') {
@@ -248,7 +268,12 @@ class Session {
       this.opened.clear()
       this.failAll(`${status.name} isn't ready`)
     }
-    if (this.ready && !wasReady) for (const model of this.models) this.open(model)
+    if (this.ready && !wasReady) {
+      const legend = this.caps?.semanticTokensProvider?.legend
+      if (legend) for (const model of this.models) legends.set(model.getLanguageId(), legend)
+      for (const model of this.models) this.open(model)
+      tokensChanged.fire()
+    }
     for (const model of this.models) this.report(model)
   }
 
@@ -344,6 +369,14 @@ class Session {
     }
     if (msg.id !== undefined && msg.id !== null) {
       void this.answer(msg)
+      return
+    }
+    if (msg.method === 'workspace/semanticTokens/refresh') {
+      tokensChanged.fire()
+      return
+    }
+    if (msg.method === 'workspace/inlayHint/refresh') {
+      hintsChanged.fire()
       return
     }
     if (msg.method === 'textDocument/publishDiagnostics') {
@@ -641,6 +674,41 @@ function ensureProviders(language: string) {
       if (result.defaultBehavior) return fallback!
       const range = toRange(result.range ?? result)
       return { range, text: result.placeholder ?? model.getValueInRange(range) }
+    },
+  })
+
+  // Colours from what the server knows a name is: types in the type colour,
+  // in languages whose words alone can't say.
+  L.registerDocumentSemanticTokensProvider(language, {
+    onDidChange: tokensChanged.event,
+    getLegend: () => legends.get(language) ?? { tokenTypes: [], tokenModifiers: [] },
+    async provideDocumentSemanticTokens(model, _lastResultId, token) {
+      const session = route(model, 'semanticTokensProvider')
+      const full = session?.caps?.semanticTokensProvider?.full
+      if (!session || !full) return null
+      const result = await session.cancellable<{ data: number[]; resultId?: string } | null>('textDocument/semanticTokens/full', { textDocument: doc(model) }, token)
+      return result ? { data: new Uint32Array(result.data), resultId: result.resultId } : null
+    },
+    releaseDocumentSemanticTokens() {},
+  })
+
+  // Parameter names and inferred types, shown while ⌃⌥ is held.
+  L.registerInlayHintsProvider(language, {
+    onDidChangeInlayHints: hintsChanged.event,
+    async provideInlayHints(model, range, token) {
+      const session = route(model, 'inlayHintProvider')
+      if (!session) return { hints: [], dispose() {} }
+      const result = await session.cancellable<any[] | null>('textDocument/inlayHint', { textDocument: doc(model), range: fromRange(range) }, token)
+      return {
+        hints: (result ?? []).map((h) => ({
+          position: toPosition(h.position),
+          label: typeof h.label === 'string' ? h.label : h.label.map((part: any) => ({ label: part.value })),
+          kind: h.kind,
+          paddingLeft: h.paddingLeft,
+          paddingRight: h.paddingRight,
+        })),
+        dispose() {},
+      }
     },
   })
 

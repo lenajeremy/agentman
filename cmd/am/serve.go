@@ -291,7 +291,7 @@ func runServe(ctx context.Context, args []string) error {
 	defer languages.Close()
 	if local != nil {
 		go func() {
-			if err := local.Serve(ctx, appRequests(agent.HandleFrom, languages), agent.DisconnectSubscriber); err != nil {
+			if err := local.Serve(ctx, appRequests(agent.HandleFrom, languages, *configHome), agent.DisconnectSubscriber); err != nil {
 				fmt.Fprintf(os.Stderr, "am: %v\n", err)
 			}
 		}()

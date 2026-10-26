@@ -278,6 +278,9 @@ func (s *Session) start() {
 		s.setState(StateFailed, fmt.Sprintf("%s stopped as it started%s", s.server.Name, proc.stderr.suffix()))
 		return
 	}
+	if s.server.Settings != nil {
+		_ = proc.notify("workspace/didChangeConfiguration", map[string]any{"settings": s.server.Settings})
+	}
 	s.mu.Lock()
 	s.caps = initialized.Capabilities
 	if len(s.caps) == 0 {
@@ -290,12 +293,13 @@ func (s *Session) start() {
 func (s *Session) initializeParams() map[string]any {
 	root := fileURI(s.root)
 	return map[string]any{
-		"processId":        os.Getpid(),
-		"clientInfo":       map[string]string{"name": "Agentman"},
-		"rootUri":          root,
-		"rootPath":         s.root,
-		"workspaceFolders": []map[string]string{{"uri": root, "name": filepath.Base(s.root)}},
-		"capabilities":     clientCapabilities,
+		"processId":             os.Getpid(),
+		"clientInfo":            map[string]string{"name": "Agentman"},
+		"rootUri":               root,
+		"rootPath":              s.root,
+		"workspaceFolders":      []map[string]string{{"uri": root, "name": filepath.Base(s.root)}},
+		"capabilities":          clientCapabilities,
+		"initializationOptions": s.server.Options,
 	}
 }
 
@@ -566,10 +570,16 @@ func (s *Session) answer(proc *process, msg message) {
 	switch msg.Method {
 	case "workspace/configuration":
 		var params struct {
-			Items []json.RawMessage `json:"items"`
+			Items []struct {
+				Section string `json:"section"`
+			} `json:"items"`
 		}
 		_ = json.Unmarshal(msg.Params, &params)
-		reply(make([]any, len(params.Items)))
+		values := make([]any, len(params.Items))
+		for i, item := range params.Items {
+			values[i] = s.server.setting(item.Section)
+		}
+		reply(values)
 	case "client/registerCapability":
 		s.register(msg.Params)
 		reply(nil)
@@ -578,6 +588,15 @@ func (s *Session) answer(proc *process, msg message) {
 		reply(nil)
 	case "window/workDoneProgress/create":
 		reply(nil)
+	case "workspace/semanticTokens/refresh", "workspace/inlayHint/refresh":
+		// Every window asks again; the server needn't know how many there are.
+		reply(nil)
+		s.mu.Lock()
+		clients := s.clientsLocked()
+		s.mu.Unlock()
+		for _, c := range clients {
+			c.sendRPC(s.Key, message{Method: msg.Method})
+		}
 	case "workspace/workspaceFolders":
 		reply([]map[string]string{{"uri": fileURI(s.root), "name": filepath.Base(s.root)}})
 	case "workspace/applyEdit", "window/showDocument", "window/showMessageRequest":
@@ -908,6 +927,8 @@ var clientCapabilities = map[string]any{
 		"workspaceFolders":       true,
 		"configuration":          true,
 		"executeCommand":         map[string]any{},
+		"semanticTokens":         map[string]any{"refreshSupport": true},
+		"inlayHint":              map[string]any{"refreshSupport": true},
 	},
 	"window": map[string]any{
 		"workDoneProgress": true,
@@ -953,11 +974,32 @@ var clientCapabilities = map[string]any{
 		},
 		"formatting":      map[string]any{},
 		"rangeFormatting": map[string]any{},
-		"rename":          map[string]any{"prepareSupport": true},
+		"semanticTokens": map[string]any{
+			"requests":                map[string]any{"full": true},
+			"tokenTypes":              semanticTokenTypes,
+			"tokenModifiers":          semanticTokenModifiers,
+			"formats":                 []string{"relative"},
+			"multilineTokenSupport":   false,
+			"overlappingTokenSupport": false,
+		},
+		"inlayHint": map[string]any{},
+		"rename":    map[string]any{"prepareSupport": true},
 		"publishDiagnostics": map[string]any{
 			"relatedInformation":     true,
 			"tagSupport":             map[string]any{"valueSet": []int{1, 2}},
 			"codeDescriptionSupport": true,
 		},
 	},
+}
+
+// The semantic token kinds the editor colours, as LSP names them.
+var semanticTokenTypes = []string{
+	"namespace", "type", "class", "enum", "interface", "struct", "typeParameter", "parameter", "variable",
+	"property", "enumMember", "event", "function", "method", "macro", "keyword", "modifier", "comment",
+	"string", "number", "regexp", "operator", "decorator",
+}
+
+var semanticTokenModifiers = []string{
+	"declaration", "definition", "readonly", "static", "deprecated", "abstract", "async", "modification",
+	"documentation", "defaultLibrary",
 }

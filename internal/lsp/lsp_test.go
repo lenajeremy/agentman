@@ -521,3 +521,88 @@ func TestRequestsBeforeTheServerIsReadyAreAnswered(t *testing.T) {
 		t.Errorf("answer = %s", f.Msg)
 	}
 }
+
+func TestServersAreAnsweredWithTheirSettings(t *testing.T) {
+	gopls := ServerFor("go")
+	if settings, _ := gopls.setting("gopls").(map[string]any); settings["semanticTokens"] != true {
+		t.Errorf("gopls isn't asked for semantic tokens: %v", settings)
+	}
+	typescript := ServerFor("typescript")
+	if got := typescript.setting("typescript.inlayHints.parameterNames.enabled"); got != "literals" {
+		t.Errorf("TypeScript's parameter hints = %v", got)
+	}
+	if got := typescript.setting("typescript.nothing.here"); got != nil {
+		t.Errorf("a missing section = %v", got)
+	}
+	if got := (&Server{}).setting(""); got != nil {
+		t.Errorf("no settings = %v", got)
+	}
+}
+
+func TestTurningAServerOffStopsItAndLetsItsWindowsGo(t *testing.T) {
+	h := newHarness(t, Options{})
+	root := project(t)
+	w := h.window()
+	session := w.resolve(1, filepath.Join(root, "a.fake"), root)
+	w.ready(session)
+	h.host.Configure(false, nil, map[string]bool{"fake": true})
+	w.until("stopped", func(f frame) bool { return f.T == "status" && f.Status.State == StateStopped })
+	w.send(frame{T: "resolve", ID: 2, File: filepath.Join(root, "a.fake"), Folder: root, Language: "fake"})
+	if f := w.until("resolved", func(f frame) bool { return f.T == "resolved" && f.ID == 2 }); f.Status != nil {
+		t.Error("a server turned off resolved")
+	}
+	eventually(t, "it shuts down", func() bool { return count(sent(root), "exit") == 1 })
+}
+
+func TestAnotherProgramForAServerStartsItAgain(t *testing.T) {
+	self, _ := os.Executable()
+	h := newHarness(t, Options{})
+	root := project(t)
+	w := h.window()
+	w.ready(w.resolve(1, filepath.Join(root, "a.fake"), root))
+	h.host.Configure(false, map[string]string{"fake": self}, nil)
+	w.until("stopped", func(f frame) bool { return f.T == "status" && f.Status.State == StateStopped })
+	w.ready(w.resolve(2, filepath.Join(root, "a.fake"), root))
+	if n := count(sent(root), "initialize "); n != 2 {
+		t.Errorf("initialized %d times", n)
+	}
+	if _, where := h.host.Where(fakeServerSpec); where != "yours" {
+		t.Errorf("runs from %q", where)
+	}
+}
+
+func TestTheReportSaysWhereEachServerComesFrom(t *testing.T) {
+	dir := t.TempDir()
+	found := &Server{ID: "found", Name: "Found", Languages: []string{"found"}}
+	downloadable := &Server{ID: "dl", Name: "DL", Languages: []string{"dl"}, Install: &Install{Version: "1", Release: map[string]Asset{}}}
+	downloaded := &Server{ID: "have", Name: "Have", Languages: []string{"have"}, Install: &Install{Version: "1", Release: map[string]Asset{}}}
+	missing := &Server{ID: "none", Name: "None", Languages: []string{"none"}}
+	off := &Server{ID: "off", Name: "Off", Languages: []string{"off"}}
+	os.MkdirAll(filepath.Join(dir, "have", "1"), 0o755)
+	os.WriteFile(filepath.Join(dir, "have", "1", "have"), make([]byte, 1000), 0o755)
+	os.WriteFile(filepath.Join(dir, "have", "1", okMarker), []byte("1\n"), 0o644)
+	host := NewHost(Options{Dir: dir, Servers: []*Server{found, downloadable, downloaded, missing, off},
+		Disabled: map[string]bool{"off": true},
+		Find: func(s *Server) string {
+			if s.ID == "found" {
+				return "/usr/bin/true"
+			}
+			return ""
+		}})
+	defer host.Close()
+	want := map[string]string{"found": "mac", "dl": "download", "have": "downloaded", "none": "missing", "off": "off"}
+	for _, item := range host.Report().Servers {
+		if item.Source != want[item.Server.ID] {
+			t.Errorf("%s: %s, want %s", item.Server.ID, item.Source, want[item.Server.ID])
+		}
+		if item.Server.ID == "have" && item.Size < 1000 {
+			t.Errorf("downloaded size = %d", item.Size)
+		}
+	}
+	if err := host.Remove("have"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "have")); err == nil {
+		t.Error("the download is still there")
+	}
+}

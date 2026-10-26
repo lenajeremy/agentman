@@ -89,6 +89,8 @@ const editor = monaco.editor.create(document.getElementById('editor')!, {
   guides: { indentation: true, bracketPairs: false },
   showFoldingControls: 'mouseover',
   wordBasedSuggestions: 'currentDocument',
+  'semanticHighlighting.enabled': true,
+  inlayHints: { enabled: 'offUnlessPressed' },
   theme: 'vs',
 })
 

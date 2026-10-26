@@ -257,7 +257,9 @@ In `~/.agentman/config.json`:
 ```
 
 `noDownloads` keeps am to the servers already on the Mac; `servers` gives one
-a program of your own, or turns it off. Restart `am serve` after changing it.
+a program of your own, or turns it off. Restart `am serve` after editing the
+file by hand; Settings › Languages in Agentman for Mac changes the same
+settings, and what's downloaded, without a restart.
 
 ## Diagnostics
 

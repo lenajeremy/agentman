@@ -39,6 +39,8 @@ struct SettingsView: View {
                     KnowledgeSettings()
                 case .keys:
                     KeysSettings()
+                case .languages:
+                    LanguagesSettings()
                 }
                 if let draft, draft.editable != store.manager.settings?.editable,
                    [SettingsPage.general, .permissions, .personality].contains(SettingsPage(rawValue: page) ?? .general) {
@@ -95,7 +97,7 @@ private struct SettingsTab: View {
 }
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general, notifications, permissions, personality, knowledge, keys
+    case general, notifications, permissions, personality, knowledge, keys, languages
 
     var id: String { rawValue }
 
@@ -107,6 +109,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .personality: "Personality"
         case .knowledge: "Knowledge"
         case .keys: "Keys"
+        case .languages: "Languages"
         }
     }
 
@@ -118,6 +121,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .personality: "text.bubble"
         case .knowledge: "book"
         case .keys: "key"
+        case .languages: "curlybraces"
         }
     }
 }

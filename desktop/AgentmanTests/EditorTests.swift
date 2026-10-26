@@ -203,4 +203,33 @@ final class EditorTests: XCTestCase {
         store.open(fileAt: outside)
         XCTAssertEqual(store.documents.count, 2, "the same file opens once")
     }
+
+    func testLanguageServersReadAsWhereEachComesFrom() throws {
+        let json = """
+        {"type":"lsp_status","languages":{"noDownloads":false,"nodeSize":196896101,"servers":[
+          {"id":"gopls","name":"gopls","language":"Go","source":"mac","path":"/Users/me/go/bin/gopls","downloadSize":"about 30 MB",
+           "running":["/Users/me/code/agentman"]},
+          {"id":"typescript","name":"TypeScript","language":"TypeScript","source":"downloaded","size":28345032},
+          {"id":"pyright","name":"Pyright","language":"Python","source":"download","downloadSize":"about 20 MB"},
+          {"id":"sourcekit-lsp","name":"SourceKit-LSP","language":"Swift","source":"missing","missing":"Swift support needs Xcode"},
+          {"id":"clangd","name":"clangd","language":"C","source":"off"}]}}
+        """
+        let event = try JSONDecoder().decode(DaemonEvent.self, from: Data(json.utf8))
+        let servers = try XCTUnwrap(event.languages?.servers)
+        XCTAssertEqual(event.languages?.nodeSize, 196896101)
+        XCTAssertEqual(LanguagesSettings.detail(servers[0]), "gopls · on this Mac · running for agentman")
+        XCTAssertTrue(LanguagesSettings.detail(servers[1]).hasPrefix("TypeScript · downloaded · 28"))
+        XCTAssertEqual(LanguagesSettings.detail(servers[2]), "Pyright · downloads when first needed, about 20 MB")
+        XCTAssertEqual(LanguagesSettings.detail(servers[3]), "SourceKit-LSP · Swift support needs Xcode")
+        XCTAssertEqual(LanguagesSettings.detail(servers[4]), "clangd · off")
+    }
+
+    func testALanguageChangeSaysOnlyWhatChanges() throws {
+        let off = try JSONSerialization.jsonObject(with: JSONEncoder().encode(LanguageChange(server: "pyright", disabled: true))) as? [String: Any]
+        XCTAssertEqual(off?.keys.sorted(), ["disabled", "server"])
+        // An empty path means the usual program; it must travel, not be left out.
+        let usual = try JSONSerialization.jsonObject(with: JSONEncoder().encode(LanguageChange(server: "gopls", path: ""))) as? [String: Any]
+        XCTAssertEqual(usual?["path"] as? String, "")
+        XCTAssertNil(usual?["disabled"])
+    }
 }

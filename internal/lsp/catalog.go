@@ -39,6 +39,10 @@ type Server struct {
 	Missing string
 	// Install is how am gets it, or nil when only the Mac can provide it.
 	Install *Install
+	// Options go with initialize; Settings answer the server's configuration
+	// requests, by section ("gopls", "typescript.inlayHints").
+	Options  map[string]any
+	Settings map[string]any
 	// find looks for a copy already on the Mac.
 	find func(t *Tools) string
 }
@@ -51,6 +55,8 @@ var catalog = []*Server{
 		Markers:   []string{"go.work", "go.mod"},
 		Missing:   "Go support needs gopls: go install golang.org/x/tools/gopls@latest",
 		Install:   &Install{Version: "v0.24.0", GoPackage: "golang.org/x/tools/gopls", Size: "about 30 MB"},
+		Options:   goplsSettings,
+		Settings:  map[string]any{"gopls": goplsSettings},
 		find:      func(t *Tools) string { return t.Look("gopls") },
 	},
 	{
@@ -60,6 +66,7 @@ var catalog = []*Server{
 		Args:      []string{"--stdio"},
 		Missing:   "TypeScript support needs a language server: npm install -g @vtsls/language-server",
 		Install:   &Install{Version: "0.3.0", NPM: "@vtsls/language-server", Bin: "vtsls", Size: "about 45 MB"},
+		Settings:  map[string]any{"typescript": typescriptSettings, "javascript": typescriptSettings},
 		find: func(t *Tools) string {
 			if path := t.Look("vtsls"); path != "" {
 				return path
@@ -115,6 +122,58 @@ var catalog = []*Server{
 			return t.Look("clangd")
 		},
 	},
+}
+
+// gopls sends semantic tokens and inlay hints only when asked.
+var goplsSettings = map[string]any{
+	"semanticTokens": true,
+	"hints": map[string]any{
+		"parameterNames":         true,
+		"assignVariableTypes":    true,
+		"rangeVariableTypes":     true,
+		"compositeLiteralFields": true,
+		"constantValues":         true,
+		"functionTypeParameters": true,
+	},
+}
+
+// TypeScript's hints: parameter names for literal arguments, and what a
+// function returns.
+var typescriptSettings = map[string]any{
+	"inlayHints": map[string]any{
+		"parameterNames":          map[string]any{"enabled": "literals"},
+		"functionLikeReturnTypes": map[string]any{"enabled": true},
+		"enumMemberValues":        map[string]any{"enabled": true},
+	},
+}
+
+// setting is one section of a server's settings, or nil.
+func (s *Server) setting(section string) any {
+	if section == "" {
+		if s.Settings == nil {
+			return nil
+		}
+		return s.Settings
+	}
+	var current any = s.Settings
+	for _, part := range strings.Split(section, ".") {
+		values, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current = values[part]
+	}
+	return current
+}
+
+// ServerByID is a server by its id ("gopls"), or nil.
+func ServerByID(id string) *Server {
+	for _, server := range catalog {
+		if server.ID == id {
+			return server
+		}
+	}
+	return nil
 }
 
 // ServerFor is the server for an LSP language id, or nil.

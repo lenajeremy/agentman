@@ -667,6 +667,27 @@ enum EditorTheme {
                 "annotation": hex(Palette.codeType),
                 "tag": hex(Palette.codeType),
                 "predefined": hex(Palette.codeType),
+                // What the language server says a name is: kinds of type in
+                // the type colour; functions, variables and the rest stay text.
+                "class": hex(Palette.codeType),
+                "interface": hex(Palette.codeType),
+                "struct": hex(Palette.codeType),
+                "enum": hex(Palette.codeType),
+                "typeParameter": hex(Palette.codeType),
+                "decorator": hex(Palette.codeType),
+                "enumMember": hex(Palette.codeNumber),
+                "macro": hex(Palette.codeKeyword),
+                // Monaco's own theme would colour these; the palette keeps
+                // them text. true, false and nil stay keywords.
+                "variable": hex(Palette.text),
+                "variable.readonly.defaultLibrary": hex(Palette.codeKeyword),
+                "parameter": hex(Palette.text),
+                "property": hex(Palette.text),
+                "namespace": hex(Palette.text),
+                "function": hex(Palette.text),
+                "method": hex(Palette.text),
+                "event": hex(Palette.text),
+                "label": hex(Palette.text),
             ]
             theme = ["dark": dark, "colors": colors, "tokens": tokens]
         }

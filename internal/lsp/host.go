@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -192,7 +193,7 @@ func (h *Host) serverFor(language string) *Server {
 // to it. Without a server for the language it returns nil.
 func (h *Host) resolve(c *Client, file, folder, language string) *Session {
 	server := h.serverFor(language)
-	if server == nil || file == "" || h.disabled[server.ID] {
+	if server == nil || file == "" || h.off(server) {
 		return nil
 	}
 	root := Root(file, folder, server.Markers)
@@ -303,7 +304,7 @@ func (h *Host) filesChanged(changes []FileChange) {
 // locate is how to run a server without downloading it: the user's own
 // program for it, a copy on the Mac, or the one am downloaded before.
 func (h *Host) locate(server *Server) (Launch, bool) {
-	if path := h.paths[server.ID]; path != "" {
+	if path := h.ownPath(server); path != "" {
 		return Launch{Path: path, Args: server.Args}, true
 	}
 	found := ""
@@ -328,7 +329,7 @@ func (h *Host) Where(server *Server) (Launch, string) {
 	switch {
 	case !ok:
 		return Launch{}, ""
-	case h.paths[server.ID] != "":
+	case h.ownPath(server) != "":
 		return launch, "yours"
 	case h.installer != nil && strings.HasPrefix(launch.Args0OrPath(), h.installer.Dir+string(os.PathSeparator)):
 		return launch, "downloaded"
@@ -342,7 +343,134 @@ func Catalog() []*Server { return catalog }
 
 // canInstall says whether am may download a server.
 func (h *Host) canInstall(server *Server) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	return server.Install != nil && h.installer != nil && !h.noDownloads
+}
+
+func (h *Host) ownPath(server *Server) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.paths[server.ID]
+}
+
+func (h *Host) off(server *Server) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.disabled[server.ID]
+}
+
+// Configure changes the settings while servers run. A server turned off or
+// given another program stops; windows using it open its files again,
+// with the new one, or none.
+func (h *Host) Configure(noDownloads bool, paths map[string]string, disabled map[string]bool) {
+	h.mu.Lock()
+	changed := map[string]bool{}
+	for _, server := range h.servers {
+		if paths[server.ID] != h.paths[server.ID] || disabled[server.ID] != h.disabled[server.ID] {
+			changed[server.ID] = true
+		}
+	}
+	h.noDownloads, h.paths, h.disabled = noDownloads, paths, disabled
+	var stopping []*Session
+	for key, s := range h.sessions {
+		if changed[s.server.ID] {
+			stopping = append(stopping, s)
+			delete(h.sessions, key)
+		}
+	}
+	h.mu.Unlock()
+	for _, s := range stopping {
+		go s.stop()
+	}
+}
+
+// Remove deletes what am downloaded for a server, or Node.js ("node"),
+// stopping what runs from it first.
+func (h *Host) Remove(id string) error {
+	if h.installer == nil {
+		return nil
+	}
+	h.mu.Lock()
+	var stopping []*Session
+	for key, s := range h.sessions {
+		npm := s.server.Install != nil && s.server.Install.NPM != ""
+		if s.server.ID == id || (id == "node" && npm) {
+			stopping = append(stopping, s)
+			delete(h.sessions, key)
+		}
+	}
+	h.mu.Unlock()
+	for _, s := range stopping {
+		s.stop()
+	}
+	return os.RemoveAll(filepath.Join(h.installer.Dir, id))
+}
+
+// Report is the servers and where each comes from, for Settings.
+type Report struct {
+	NoDownloads bool
+	Servers     []ServerReport
+	// NodeSize is the Node.js am downloaded, in bytes, or 0.
+	NodeSize int64
+}
+
+// ServerReport is one server, for Settings.
+type ServerReport struct {
+	Server *Server
+	// Source is "yours", "mac", "downloaded", "download", "missing" or "off".
+	Source  string
+	Path    string
+	Size    int64
+	Running []string
+}
+
+// Report says what the servers are now.
+func (h *Host) Report() Report {
+	h.mu.Lock()
+	report := Report{NoDownloads: h.noDownloads}
+	running := map[string][]string{}
+	for _, s := range h.sessions {
+		running[s.server.ID] = append(running[s.server.ID], s.root)
+	}
+	h.mu.Unlock()
+	for _, server := range h.servers {
+		item := ServerReport{Server: server, Running: running[server.ID]}
+		sort.Strings(item.Running)
+		launch, where := h.Where(server)
+		switch {
+		case h.off(server):
+			item.Source = "off"
+		case where != "":
+			item.Source, item.Path = where, launch.Args0OrPath()
+			if where == "downloaded" {
+				item.Size = folderSize(filepath.Join(h.installer.Dir, server.ID))
+			}
+		case h.canInstall(server):
+			item.Source = "download"
+		default:
+			item.Source = "missing"
+		}
+		report.Servers = append(report.Servers, item)
+	}
+	if h.installer != nil {
+		report.NodeSize = folderSize(filepath.Join(h.installer.Dir, "node"))
+	}
+	return report
+}
+
+// folderSize is what a folder's files take, in bytes.
+func folderSize(dir string) int64 {
+	var total int64
+	_ = filepath.WalkDir(dir, func(_ string, entry os.DirEntry, err error) error {
+		if err == nil && !entry.IsDir() {
+			if info, err := entry.Info(); err == nil {
+				total += info.Size()
+			}
+		}
+		return nil
+	})
+	return total
 }
 
 // spawn starts a server in its project's folder.
