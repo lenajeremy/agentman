@@ -63,6 +63,9 @@ export interface Manager {
   saveNote(card: ManagerCard, edited?: Note): Promise<string | null>;
   /** Puts a card away unanswered. */
   dismiss(card: ManagerCard): Promise<string | null>;
+  /** Takes a brief, an agent's word or a card out of the conversation, in
+   *  every app; a card still asking is put away unanswered first. */
+  close(entry: ManagerEntry): Promise<string | null>;
   /** Switches the model Agentman's conversation runs on. */
   setChatModel(model: string): Promise<string | null>;
   /** Starts a new conversation; the one before is archived on the Mac, and
@@ -324,6 +327,9 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
     },
     dismiss(card) {
       return perform({ type: "manager_card_dismiss", cardId: card.id });
+    },
+    close(entry) {
+      return perform({ type: "manager_entry_close", entryId: entry.id });
     },
     async reset() {
       try {

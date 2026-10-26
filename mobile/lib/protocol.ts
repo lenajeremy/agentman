@@ -238,6 +238,7 @@ export type RequestType =
   | "manager_briefs"
   | "manager_card_reply"
   | "manager_card_dismiss"
+  | "manager_entry_close"
   | "manager_schedules"
   | "manager_schedule_cancel"
   | "manager_settings"
@@ -293,6 +294,8 @@ export interface Request {
   ref?: string;
   /** The card a manager_card_reply or manager_card_dismiss is about. */
   cardId?: string;
+  /** The conversation entry a manager_entry_close takes out. */
+  entryId?: string;
   /** A suggested note as the user edited it, on manager_card_reply. */
   note?: Note;
   /** The reminder or watch manager_schedule_cancel cancels. */
@@ -577,6 +580,8 @@ export interface ManagerEntry {
   /** The images a user's message came with, kept beside the conversation. */
   images?: string[];
   card?: ManagerCard;
+  /** The user closed it, here or on the Mac: it is left out. */
+  closed?: boolean;
 }
 
 export interface ManagerStatus {
@@ -950,7 +955,8 @@ function isImageSource(value: unknown): value is ImageSource {
 function isWorkspaceResult(value: unknown): value is WorkspaceResult {
   if (!isRecord(value) ||
       !isOneOf(value.kind, ["directory", "file", "changes", "diff", "chunk", "artifact", "commits", "commit", "branches"] as const) ||
-      !boundedString(value.sessionId, 512, true) || !optionalBoundedString(value.path, 4096) ||
+      // Empty for Agentman's own pictures, which belong to no agent.
+      !boundedString(value.sessionId, 512) || !optionalBoundedString(value.path, 4096) ||
       !optionalBoundedString(value.text, 256 * 1024) ||
       !optionalBoundedString(value.image, 3 * 1024 * 1024) ||
       !optionalBoundedString(value.diff, 256 * 1024) ||
@@ -1156,6 +1162,7 @@ function isManagerEntry(value: unknown): value is ManagerEntry {
     if (!optionalBoundedString(value[key], 4096)) delete value[key];
   }
   if (value.streaming !== undefined && typeof value.streaming !== "boolean") delete value.streaming;
+  if (value.closed !== undefined && typeof value.closed !== "boolean") delete value.closed;
   if (value.images !== undefined &&
       !boundedArray(value.images, 16, (name): name is string => boundedString(name, 512, true))) delete value.images;
   if (value.card !== undefined && !isManagerCard(value.card)) return false;

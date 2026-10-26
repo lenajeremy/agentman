@@ -72,6 +72,17 @@ test("accepts bounded workspace views and rejects unsafe image payloads", () => 
   } }), null);
 });
 
+// A picture the user sent Agentman belongs to no agent, so its reply comes
+// with an empty session. Dropping it left a blank box where the image goes.
+test("accepts Agentman's own pictures, which belong to no agent", () => {
+  for (const sessionId of ["", "agentman"]) {
+    const event = decodeDaemonEvent({ type: "workspace", workspace: {
+      kind: "file", sessionId, path: "m-1793013198615-cff158-0.jpg", image: "/9j/4AAQ", mime: "image/jpeg",
+    } });
+    assert.equal(event?.workspace?.image, "/9j/4AAQ", JSON.stringify(sessionId));
+  }
+});
+
 test("accepts commit history and holds its hashes to the daemon's shape", () => {
   const hash = "50812ec".padEnd(40, "0");
   const commit = { hash, subject: "Show links", author: "Jeremiah", authoredAt: 1_790_856_000_000 };

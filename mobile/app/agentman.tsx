@@ -8,6 +8,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -22,6 +23,7 @@ import { ManagerCardView } from "../components/ManagerCards";
 import { Markdown } from "../components/Markdown";
 import { MotionPressable } from "../components/MotionPressable";
 import { Popover, type PopoverItem } from "../components/Popover";
+import { SwipeToDismiss } from "../components/SwipeToDismiss";
 import { KEEP_READING, ScrollToLatest, SCROLL_AWAY } from "../components/ScrollToLatest";
 import { SeenImage } from "../components/SeenImage";
 import { Thinking } from "../components/Thinking";
@@ -33,6 +35,8 @@ import type { ManagerEntry, ManagerSchedule } from "../lib/protocol";
 import { useStore } from "../lib/store";
 import { font, Palette, radius, size, space } from "../lib/theme";
 import { useAttachments } from "../lib/use-attachments";
+import { chooseImageSource } from "../lib/image-source-sheet";
+import { addPastedImagesListener, pasteTakesImages } from "../modules/image-paste";
 
 /**
  * The conversation with Agentman: the one place to ask what every agent is
@@ -54,6 +58,15 @@ export default function AgentmanScreen() {
   const listRef = useRef<FlatList<ChatItem>>(null);
   const [scrolledAway, setScrolledAway] = useState(false);
   const [composerHeight, setComposerHeight] = useState(0);
+  // Paste in the box takes an image while it is focused, as in an agent's
+  // thread: a paste goes to whichever box has focus.
+  const [inputFocused, setInputFocused] = useState(false);
+  const { addPasted } = images;
+  useEffect(() => {
+    if (!inputFocused) return;
+    const subscription = addPastedImagesListener((pasted) => void addPasted(pasted));
+    return () => subscription?.remove();
+  }, [inputFocused, addPasted]);
   const settings = manager.settings;
   const modelItems: PopoverItem[] = MANAGER_MODELS.map((model) => {
     const keyed = model.provider === "gemini" ? settings?.geminiKeySet : (settings?.anthropicKeySet ?? settings?.keySet);
@@ -224,19 +237,49 @@ export default function AgentmanScreen() {
         ) : (
           <View style={[styles.field, images.attachments.length > 0 && styles.fieldWithImages]}>
             <AttachmentStrip attachments={images.attachments} onRemove={images.remove} />
-            <TextInput
-              style={styles.input}
-              value={draft}
-              onChangeText={setDraft}
-              placeholder={reachable ? "Ask Agentman about your agents" : "Waiting for your Mac…"}
-              placeholderTextColor={color.faint}
-              multiline
-              editable={reachable}
-            />
+            {/* Where the box's own Paste can take an image (iOS and the web),
+              that is how a copied screenshot goes in; elsewhere a long press
+              pastes it. */}
+            <Pressable
+              onLongPress={
+                pasteTakesImages
+                  ? undefined
+                  : () => {
+                      if (images.clipboardReady && images.canAdd) void images.paste();
+                    }
+              }
+              delayLongPress={400}
+              accessibilityLabel={images.clipboardReady && !pasteTakesImages ? "Hold to paste the image on the clipboard" : undefined}
+            >
+              <TextInput
+                style={styles.input}
+                value={draft}
+                onChangeText={setDraft}
+                onFocus={() => setInputFocused(true)}
+                onBlur={() => setInputFocused(false)}
+                placeholder={reachable ? "Ask Agentman about your agents" : "Waiting for your Mac…"}
+                placeholderTextColor={color.faint}
+                multiline
+                editable={reachable}
+              />
+            </Pressable>
             <View style={styles.toolbar}>
-              <MotionPressable onPress={() => void images.pick()} style={styles.attach}
-                disabled={!reachable || !images.canAdd} accessibilityRole="button" accessibilityLabel="Add images">
-                <Feather name="plus" size={20} color={reachable ? color.textSecondary : color.faint} />
+              <MotionPressable
+                onPress={() =>
+                  chooseImageSource(images.clipboardReady, (source) =>
+                    void (source === "paste" ? images.paste() : images.pick()),
+                  )
+                }
+                style={styles.attach}
+                disabled={!reachable || !images.canAdd || images.busy}
+                accessibilityRole="button"
+                accessibilityLabel="Add an image"
+              >
+                {images.busy ? (
+                  <ActivityIndicator size="small" color={color.faint} />
+                ) : (
+                  <Feather name="plus" size={20} color={reachable ? color.textSecondary : color.faint} />
+                )}
               </MotionPressable>
               <View style={styles.toolbarGap} />
               {settings ? (
@@ -408,22 +451,30 @@ function BriefCard({ entry }: { entry: ManagerEntry }) {
   const router = useRouter();
   const session = entry.sessionId ? store.findSession(entry.sessionId) : undefined;
   const brief = entry.sessionId ? manager.briefs[entry.sessionId] : undefined;
+  const name = session?.name ?? brief?.name ?? "An agent";
   return (
-    <MotionPressable
-      onPress={() => session && router.push(`/session/${encodeURIComponent(session.id)}`)}
-      disabled={!session}
-      style={styles.brief}
-      pressedScale={0.99}
-      accessibilityRole={session ? "button" : "text"}
-    >
-      <View style={styles.briefHead}>
-        <AgentIcon kind={session?.kind ?? ""} size={20} />
-        <Text style={styles.briefName} numberOfLines={1}>{session?.name ?? brief?.name ?? "An agent"}</Text>
-        {session ? <Feather name="chevron-right" size={16} color={color.faint} /> : null}
-      </View>
-      <Text style={styles.briefText} selectable>{entry.text}</Text>
-      {brief?.needsYou ? <Text style={styles.briefNeeds}>{brief.needsYou}</Text> : null}
-    </MotionPressable>
+    <SwipeToDismiss onDismiss={() => void manager.close(entry)} accessibilityLabel={`News about ${name}`}>
+      <MotionPressable
+        onPress={() => session && router.push(`/session/${encodeURIComponent(session.id)}`)}
+        disabled={!session}
+        style={styles.brief}
+        pressedScale={0.99}
+        accessibilityRole={session ? "button" : "text"}
+      >
+        <View style={styles.briefHead}>
+          <AgentIcon kind={session?.kind ?? ""} size={20} />
+          <Text style={styles.briefName} numberOfLines={1}>{name}</Text>
+          {session ? <Feather name="chevron-right" size={16} color={color.faint} /> : null}
+          {/* Closes it here and on the Mac; so does a swipe. */}
+          <MotionPressable onPress={() => void manager.close(entry)} hitSlop={10} style={styles.briefClose}
+            accessibilityRole="button" accessibilityLabel={`Close the news about ${name}`}>
+            <Feather name="x" size={16} color={color.muted} />
+          </MotionPressable>
+        </View>
+        <Text style={styles.briefText} selectable>{entry.text}</Text>
+        {brief?.needsYou ? <Text style={styles.briefNeeds}>{brief.needsYou}</Text> : null}
+      </MotionPressable>
+    </SwipeToDismiss>
   );
 }
 
@@ -439,22 +490,41 @@ function KeptImages({ names }: { names: string[] }) {
 
 function KeptImage({ name }: { name: string }) {
   const styles = useStyles(makeStyles);
+  const { color } = useTheme();
   const manager = useManager();
+  const router = useRouter();
   const [uri, setUri] = useState<string | null>(null);
+  const [gone, setGone] = useState(false);
   useEffect(() => {
     let current = true;
     void manager.keptImage(name).then((found) => {
-      if (current) setUri(found);
+      if (!current) return;
+      if (found) setUri(found);
+      else setGone(true);
     });
     return () => {
       current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name]);
+  if (gone) {
+    return (
+      <View style={[styles.kept, styles.keptGone]}>
+        <Feather name="image" size={16} color={color.muted} />
+        <Text style={styles.keptGoneText}>Sent image</Text>
+      </View>
+    );
+  }
   return (
-    <View style={styles.kept}>
+    <MotionPressable
+      onPress={() => router.push(`/agentman-image?name=${encodeURIComponent(name)}`)}
+      disabled={!uri}
+      style={styles.kept}
+      accessibilityRole="imagebutton"
+      accessibilityLabel="Sent image. Open full screen"
+    >
       {uri ? <Image source={{ uri }} style={styles.keptImage} resizeMode="cover" /> : null}
-    </View>
+    </MotionPressable>
   );
 }
 
@@ -556,6 +626,8 @@ const makeStyles = (c: Palette) =>
       borderColor: c.line,
     },
     keptImage: { width: "100%", height: "100%" },
+    keptGone: { alignItems: "center", justifyContent: "center", gap: space.xs },
+    keptGoneText: { fontFamily: font.sans, fontSize: size.caption, color: c.muted },
 
     toolCard: {
       paddingHorizontal: 10,
@@ -582,6 +654,7 @@ const makeStyles = (c: Palette) =>
     },
     briefHead: { flexDirection: "row", alignItems: "center", gap: space.sm },
     briefName: { flex: 1, fontFamily: font.sansMedium, fontSize: size.body, color: c.text },
+    briefClose: { width: 24, height: 24, marginRight: -4, alignItems: "center", justifyContent: "center" },
     briefText: { fontFamily: font.sans, fontSize: size.reading, lineHeight: 23, color: c.textSecondary },
     briefNeeds: { fontFamily: font.sans, fontSize: size.caption, color: c.needsYouText },
 

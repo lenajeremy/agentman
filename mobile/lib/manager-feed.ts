@@ -51,7 +51,7 @@ export function isNews(entry: ManagerEntry): boolean {
 
 /** What arrived since the user last looked. */
 export function unreadCount(entries: readonly ManagerEntry[], lastRead: number): number {
-  return entries.filter((entry) => entry.ts > lastRead && isNews(entry)).length;
+  return entries.filter((entry) => entry.ts > lastRead && !entry.closed && isNews(entry)).length;
 }
 
 export function openCards(entries: readonly ManagerEntry[]): ManagerCard[] {
@@ -82,8 +82,9 @@ export function chatItems(entries: readonly ManagerEntry[]): ChatItem[] {
     run = [];
   };
   for (const entry of entries) {
-    // A card answered in the agent itself, or put away, is gone.
-    if (cardIsGone(entry.card)) continue;
+    // A card answered in the agent itself, or put away, is gone, as is
+    // anything the user closed.
+    if (cardIsGone(entry.card) || entry.closed) continue;
     if (entry.role === "activity") {
       if (entry.path && entry.sessionId) {
         flush();
