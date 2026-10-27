@@ -335,6 +335,19 @@ final class EditorStore {
         monaco?.focus()
     }
 
+    /// Shows the Markdown file in front rendered, or its text again. The
+    /// text hidden under the preview gives up the keyboard, so nothing typed
+    /// edits what can't be seen.
+    func togglePreview() {
+        guard let document = active, document.isMarkdown else { return }
+        document.previewing.toggle()
+        if document.previewing {
+            window?.makeFirstResponder(nil)
+        } else {
+            focusEditor()
+        }
+    }
+
     private func entryExists(_ path: String) -> Bool {
         entries(in: (path as NSString).deletingLastPathComponent).contains { $0.path == path }
     }

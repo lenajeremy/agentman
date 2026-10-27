@@ -49,6 +49,10 @@ final class EditorDocument: Identifiable {
 
     var isDirty: Bool { kind == .text && text != saved }
     var name: String { url.lastPathComponent }
+    /// A Markdown file, which can be read rendered as well as edited.
+    var isMarkdown: Bool { kind == .text && ["md", "markdown", "mdown", "mkd", "mdx"].contains(url.pathExtension.lowercased()) }
+    /// Shown rendered rather than as its text.
+    var previewing = false
 
     init(root: URL, path: String, readOnly: Bool = false) {
         self.path = path

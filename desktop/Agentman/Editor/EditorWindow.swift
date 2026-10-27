@@ -84,6 +84,9 @@ struct EditorWindow: View {
                             if let document = store.active, document.kind != .text {
                                 NonTextView(document: document)
                             }
+                            if let document = store.active, document.isMarkdown, document.previewing {
+                                MarkdownPreview(document: document, window: store.window)
+                            }
                             if store.active == nil {
                                 EditorEmpty(store: store)
                             }
@@ -614,6 +617,15 @@ private struct PathBar: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 12)
+            if document.isMarkdown {
+                Button { store.togglePreview() } label: {
+                    Label(document.previewing ? "Edit" : "Preview", systemImage: document.previewing ? "pencil" : "eye")
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.muted)
+                }
+                .buttonStyle(.plain)
+                .help(document.previewing ? "Back to the text (⇧⌘V)" : "Read it rendered (⇧⌘V)")
+            }
             if document.readOnly {
                 Text("Read only")
                     .font(TextStyle.caption)
@@ -734,6 +746,29 @@ private struct LegacyPanes: View {
                 )
             }
         }
+    }
+}
+
+/// A Markdown file as it reads: headings, lists, tables, code and pictures,
+/// rendered as the conversation renders an agent's reply, and kept up with
+/// the text as it is edited.
+private struct MarkdownPreview: View {
+    let document: EditorDocument
+    let window: NSWindow?
+
+    var body: some View {
+        ScrollView {
+            MarkdownView(document.text)
+                .environment(\.markdownFolder, document.url.deletingLastPathComponent())
+                .frame(maxWidth: 760, alignment: .leading)
+                .padding(.horizontal, 40)
+                .padding(.vertical, 32)
+                .frame(maxWidth: .infinity)
+        }
+        .background(Palette.surface)
+        // Back on this file after another tab, the text under the preview
+        // took the keyboard again.
+        .onAppear { DispatchQueue.main.async { window?.makeFirstResponder(nil) } }
     }
 }
 
@@ -1133,6 +1168,10 @@ struct EditorCommands: Commands {
             .disabled(editor == nil)
         }
         CommandMenu("Editor") {
+            Button("Toggle Markdown Preview") { editor?.togglePreview() }
+                .keyboardShortcut("v", modifiers: [.command, .shift])
+                .disabled(editor?.active?.isMarkdown != true)
+            Divider()
             // The language server's; Monaco has the same keys, so these work
             // from the menu and from the keyboard alike.
             Button("Go to Definition") { perform("editor.action.revealDefinition") { _ in } }
