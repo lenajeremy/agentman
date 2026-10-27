@@ -770,6 +770,9 @@ struct Message: Codable, Sendable, Identifiable, Hashable {
     var ts: Int64
     var text: String?
     var tool: ToolCall?
+    /// Pictures attached to a user's message, as paths: from how the agent
+    /// recorded it, never from its words.
+    var images: [String]?
     var isSidechain: Bool?
 
     var date: Date { Date(timeIntervalSince1970: TimeInterval(ts) / 1000) }

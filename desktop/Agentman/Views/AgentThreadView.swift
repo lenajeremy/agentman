@@ -695,7 +695,14 @@ private struct StepDetail: View {
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let output = output?.trimmingCharacters(in: .whitespacesAndNewlines), !output.isEmpty, output != "[image]" {
+            if let output = output?.trimmingCharacters(in: .whitespacesAndNewlines), !output.isEmpty, output != "[image]",
+               case let diff = output.contains("@@ -") ? DiffRow.parse(output) : [], !diff.isEmpty {
+                // An edit's output is the change it made, read as one.
+                DiffView(rows: diff)
+                    .frame(height: min(220, CGFloat(diff.count) * 17 + 16))
+                    .background(Palette.toolWell, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else if let output = output?.trimmingCharacters(in: .whitespacesAndNewlines), !output.isEmpty, output != "[image]" {
                 ScrollView {
                     Text(output)
                         .font(Fonts.mono(11))
@@ -779,7 +786,7 @@ struct MessageRow: View {
             if let text = message.text, MessageRow.isCompactionSummary(text) {
                 FoldedText(label: "Summary of the earlier conversation", text: text)
             } else {
-                let sent = SentMessage(message.text ?? "")
+                let sent = SentMessage(message.text ?? "", attached: message.images ?? [])
                 VStack(alignment: .trailing, spacing: 8) {
                     if !sent.images.isEmpty {
                         SentFiles(paths: sent.images)

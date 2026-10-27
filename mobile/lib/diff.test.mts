@@ -96,3 +96,51 @@ test("an empty new file parses without inventing a line", () => {
   const rows = parseDiff("--- /dev/null\n+++ b/empty.txt\n@@ -0,0 +1,0 @@\n");
   assert.equal(rows.filter((row) => row.kind === "add").length, 0);
 });
+
+const twoFiles = [
+  "--- /dev/null",
+  "+++ b/repo/a.md",
+  "@@ -0,0 +1,2 @@",
+  "+# Title",
+  "+body",
+  "--- a/repo/b.go",
+  "+++ b/repo/b.go",
+  "@@ -1,2 +1,2 @@",
+  " a",
+  "-b",
+  "+c",
+  "--- a/repo/old.go",
+  "+++ /dev/null",
+  "@@ -1,1 +0,0 @@",
+  "-package old",
+].join("\n");
+
+test("a diff of several files names each over its hunks, and never reads a header as a change", () => {
+  assert.deepEqual(
+    parseDiff(twoFiles).map((r) => [r.kind, r.text]),
+    [
+      ["meta", "a.md"],
+      ["hunk", "@@ -0,0 +1,2 @@"],
+      ["add", "# Title"],
+      ["add", "body"],
+      ["meta", "b.go"],
+      ["hunk", "@@ -1,2 +1,2 @@"],
+      ["context", "a"],
+      ["remove", "b"],
+      ["add", "c"],
+      ["meta", "old.go"],
+      ["hunk", "@@ -1,1 +0,0 @@"],
+      ["remove", "package old"],
+    ],
+  );
+  assert.deepEqual(diffStat(parseDiff(twoFiles)), { added: 3, removed: 2 });
+});
+
+test("a removed line that looks like a header is still a change while the hunk has lines left", () => {
+  const rows = parseDiff("--- a/notes.md\n+++ b/notes.md\n@@ -1,2 +1,1 @@\n--- a rule\n keep");
+  assert.deepEqual(rows.map((r) => [r.kind, r.text]), [
+    ["hunk", "@@ -1,2 +1,1 @@"],
+    ["remove", "-- a rule"],
+    ["context", "keep"],
+  ]);
+});

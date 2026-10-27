@@ -116,4 +116,21 @@ final class SentMessageTests: XCTestCase {
         XCTAssertEqual(SentMessage("/Users/me/.agentman/images/s/notes.txt x").images, [])
         XCTAssertEqual(SentMessage("see /Users/me/.agentman/images/s/a.png").text, "see /Users/me/.agentman/images/s/a.png")
     }
+
+    // A picture pasted into the agent's own terminal: the agent's record of
+    // the message names it, wherever it is kept, and it leads.
+    func testPicturesTheAgentRecordedLeadTheMessage() {
+        let pasted = "/var/folders/x8/T/codex-clipboard-IcwiTL.png"
+        let sent = SentMessage("why does it look like this?", attached: [pasted])
+        XCTAssertEqual(sent.images, [pasted])
+        XCTAssertEqual(sent.text, "why does it look like this?")
+        let kept = "/Users/me/.agentman/images/codex-s/a1.png"
+        XCTAssertEqual(SentMessage("\(kept) look", attached: [pasted, kept]).images, [pasted, kept])
+    }
+
+    func testAMessageDecodesItsPictures() throws {
+        let json = #"{"id":"u1","sessionId":"codex:s","role":"user","ts":1,"text":"look","images":["/tmp/a.png"]}"#
+        let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+        XCTAssertEqual(message.images, ["/tmp/a.png"])
+    }
 }

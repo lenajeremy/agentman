@@ -81,3 +81,28 @@ final class ToolRunTests: XCTestCase {
         guard case .image(let single, _) = items[3], single.id == "5" else { return XCTFail("items = \(items)") }
     }
 }
+
+final class DiffRowTests: XCTestCase {
+    // An agent's edit of several files: each named over its hunks, and no
+    // header read as a change.
+    func testADiffOfSeveralFilesNamesEach() {
+        let diff = [
+            "--- /dev/null", "+++ b/repo/a.md", "@@ -0,0 +1,2 @@", "+# Title", "+body",
+            "--- a/repo/b.go", "+++ b/repo/b.go", "@@ -1,2 +1,2 @@", " a", "-b", "+c",
+            "--- a/repo/old.go", "+++ /dev/null", "@@ -1,1 +0,0 @@", "-package old",
+        ].joined(separator: "\n")
+        let rows = DiffRow.parse(diff)
+        XCTAssertEqual(rows.map { "\($0.kind) \($0.text)" }, [
+            "meta a.md", "hunk @@ -0,0 +1,2 @@", "add # Title", "add body",
+            "meta b.go", "hunk @@ -1,2 +1,2 @@", "context a", "remove b", "add c",
+            "meta old.go", "hunk @@ -1,1 +0,0 @@", "remove package old",
+        ])
+        XCTAssertEqual(rows.map(\.id), Array(0..<rows.count))
+    }
+
+    func testOneFileIsNotNamedAndAHeaderShapedLineInAHunkIsAChange() {
+        let rows = DiffRow.parse("--- a/notes.md\n+++ b/notes.md\n@@ -1,2 +1,1 @@\n--- a rule\n keep")
+        XCTAssertEqual(rows.map { "\($0.kind) \($0.text)" }, ["hunk @@ -1,2 +1,1 @@", "remove -- a rule", "context keep"])
+        XCTAssertEqual(rows.map(\.id), [0, 1, 2])
+    }
+}

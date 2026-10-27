@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { splitSentMessage } from "./sentimages.ts";
+import { sentMessageParts, splitSentMessage } from "./sentimages.ts";
 
 const DIR = "/Users/mac/.agentman/images/claude-s1";
 
@@ -49,4 +49,15 @@ test("other @ words stay words", () => {
   assert.deepEqual(splitSentMessage("@/etc/hosts hi").files, [], "a path without an extension stays words");
   assert.deepEqual(splitSentMessage("@/Users/me/Documents/Q3.pdf\n\nsummarize").files, ["/Users/me/Documents/Q3.pdf"],
     "a file attached at the Mac, named where it is");
+});
+
+test("pictures the agent recorded with a message lead it, wherever they are kept", () => {
+  const pasted = "/var/folders/x8/T/codex-clipboard-IcwiTL.png";
+  assert.deepEqual(sentMessageParts("why does it look like this?", [pasted]), {
+    images: [pasted],
+    files: [],
+    text: "why does it look like this?",
+  });
+  assert.deepEqual(sentMessageParts(`${DIR}/a1.png look`, [pasted, `${DIR}/a1.png`]).images, [pasted, `${DIR}/a1.png`]);
+  assert.deepEqual(sentMessageParts(`${DIR}/a1.png look`), splitSentMessage(`${DIR}/a1.png look`));
 });
