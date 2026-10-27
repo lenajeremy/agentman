@@ -204,6 +204,12 @@ type CodexSource struct {
 	past pastSessions
 	// pastRead is what history listings read from rollouts.
 	pastRead pastFacts[codexPastFacts]
+
+	// names and titled match a pane to the conversation its title names;
+	// see codex_title.go.
+	names   codexNames
+	titleMu sync.Mutex
+	titled  map[string]codexTitled
 }
 
 type codexSession struct {
@@ -399,6 +405,27 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			}
 		}
 	}
+	// A pane whose title names its conversation is that conversation's, as
+	// a pane reopened for a thread is, whatever the timing says: Codex goes
+	// on with a resumed conversation in its old rollout. See codex_title.go.
+	pinned := map[string]bool{}
+	for _, pane := range resumedBy {
+		pinned[pane.Name] = true
+	}
+	titledAt := map[string]string{}
+	for _, pane := range codexPanes {
+		if pinned[pane.Name] {
+			continue
+		}
+		thread, path := s.titledThread(pane, dirs)
+		if _, taken := resumedBy[thread]; thread == "" || taken {
+			continue
+		}
+		resumedBy[thread] = pane
+		titledAt[thread] = path
+		pinned[pane.Name] = true
+	}
+	s.forgetTitles(codexPanes)
 
 	// Rollouts are gathered before they are turned into sessions so they can be
 	// walked newest first. Order decides which rollout gets to claim a tmux
@@ -451,7 +478,10 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 		listed[entry.path] = true
 	}
 	for thread := range resumedBy {
-		path, ok := s.pastRollout(string(protocol.KindCodex) + ":" + thread)
+		path, ok := titledAt[thread]
+		if !ok {
+			path, ok = s.pastRollout(string(protocol.KindCodex) + ":" + thread)
+		}
 		if !ok || listed[path] {
 			continue
 		}
@@ -498,16 +528,16 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				pane, hasPane = resumer, true
 			case len(candidates) == 1:
 				pane = candidates[0]
-				_, reopening := codexResumedThread(pane.Name)
-				// A pane reopened for a thread is that thread's alone, even
-				// when another conversation in the folder is newer.
-				hasPane = !reopening && codexRolloutCanClaimPane(meta, pane)
+				// A pane reopened for a thread, or titled with one, is that
+				// thread's alone, even when another conversation in the
+				// folder is newer.
+				hasPane = !pinned[pane.Name] && codexRolloutCanClaimPane(meta, pane)
 			case len(candidates) > 1:
 				// Shared directory: a pane keeps only the rollout it already
 				// held while it was alone there. A second Codex opening beside
 				// it does not make that match any less certain.
 				for _, candidate := range candidates {
-					if boundToPane[path] == candidate.Name {
+					if boundToPane[path] == candidate.Name && !pinned[candidate.Name] {
 						pane, hasPane = candidate, true
 					}
 				}
