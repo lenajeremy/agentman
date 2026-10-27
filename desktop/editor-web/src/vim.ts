@@ -13,11 +13,17 @@ export interface Host {
 }
 
 let host: Host
-let adapter: VimAdapterInstance | null = null
-let strip: HTMLElement | null = null
-let observer: MutationObserver | null = null
-/** The mode, as the status bar says it. */
-export let mode = 'normal'
+/** Vim in one editor of the page: each split has its own, with its own
+ * command line at its foot. */
+interface Keys {
+  adapter: VimAdapterInstance | null
+  strip: HTMLElement
+  observer: MutationObserver
+  /** The mode, as the status bar says it. */
+  mode: string
+}
+const editors = new Map<monaco.editor.IStandaloneCodeEditor, Keys>()
+let on = false
 
 /** Vim's names for its modes, as Vim shows them. */
 function label(event: { mode: string; subMode?: string }): string {
@@ -29,7 +35,9 @@ function label(event: { mode: string; subMode?: string }): string {
  * the mode and the keys typed so far go to the app's status bar. */
 class CommandLine extends StatusBar {
   setMode(event: { mode: string; subMode?: string }) {
-    mode = label(event)
+    const mode = label(event)
+    const keys = editors.get((this as unknown as { editor: monaco.editor.IStandaloneCodeEditor }).editor)
+    if (keys) keys.mode = mode
     host.post({ type: 'vim', mode })
   }
 
@@ -44,9 +52,10 @@ type Ex = (cm: unknown, params: { args?: string[]; argString?: string }) => void
 type Adapter = { editor: monaco.editor.ICodeEditor }
 
 /** `:` commands that are the app's: saving, closing tabs, opening files.
- * And K, which in Vim looks up the word under the cursor: here it shows
- * what the language server says about the symbol (its type, signature and
- * documentation), the hover a pointer resting on it opens. */
+ * And the language server's, on the keys Vim's own LSP setups give them: K
+ * shows what it says about the symbol (its type, signature and
+ * documentation), the hover a pointer resting on it opens; gd goes to its
+ * definition, in another file if need be; gr lists its references. */
 function defineCommands() {
   const vim = (VimMode as unknown as {
     Vim: {
@@ -55,8 +64,15 @@ function defineCommands() {
       mapCommand(keys: string, type: string, name: string, args: object, extra: object): void
     }
   }).Vim
-  vim.defineAction('showHover', (cm) => cm.editor.trigger('vim', 'editor.action.showHover', {}))
-  vim.mapCommand('K', 'action', 'showHover', {}, { context: 'normal' })
+  const language: [keys: string, action: string, command: string][] = [
+    ['K', 'showHover', 'editor.action.showHover'],
+    ['gd', 'goToDefinition', 'editor.action.revealDefinition'],
+    ['gr', 'goToReferences', 'editor.action.goToReferences'],
+  ]
+  for (const [keys, action, command] of language) {
+    vim.defineAction(action, (cm) => cm.editor.trigger('vim', command, {}))
+    vim.mapCommand(keys, 'action', action, {}, { context: 'normal' })
+  }
   const commands = (VimMode as unknown as { commands: Record<string, (cm: unknown) => void> }).commands
   commands.save = () => host.post({ type: 'command', name: 'save' })
   vim.defineEx('quit', 'q', (_cm, params) => host.post({ type: 'command', name: params.argString?.trim() === '!' ? 'discard' : 'close' }))
@@ -92,17 +108,15 @@ export function setup(page: Host) {
   host = page
 }
 
-/** Turns Vim on or off for the editor. */
-export function setVim(editor: monaco.editor.IStandaloneCodeEditor, on: boolean) {
-  if (on === !!adapter) return
-  if (!on) {
-    adapter?.dispose()
-    adapter = null
-    observer?.disconnect()
-    strip?.remove()
-    strip = null
-    mode = 'normal'
-    host.post({ type: 'vim', mode: null })
+/** Turns Vim on or off for one editor, with its command line in container. */
+export function setVim(editor: monaco.editor.IStandaloneCodeEditor, enable: boolean, container: HTMLElement) {
+  if (enable === editors.has(editor)) return
+  if (!enable) {
+    const keys = editors.get(editor)!
+    keys.adapter?.dispose()
+    keys.observer.disconnect()
+    keys.strip.remove()
+    editors.delete(editor)
     editor.updateOptions({ cursorStyle: 'line' })
     return
   }
@@ -110,19 +124,32 @@ export function setVim(editor: monaco.editor.IStandaloneCodeEditor, on: boolean)
     defineCommands()
     defined = true
   }
-  strip = document.createElement('div')
-  strip.id = 'vim'
-  document.body.appendChild(strip)
+  const strip = document.createElement('div')
+  strip.className = 'vim'
+  container.appendChild(strip)
   // The strip shows only while it has something to say: a prompt, or a
   // message such as "E492: Not an editor command".
-  observer = new MutationObserver(() => {
-    strip?.classList.toggle('shown', !!(strip.querySelector('input') || strip.textContent?.trim()))
+  const observer = new MutationObserver(() => {
+    strip.classList.toggle('shown', !!(strip.querySelector('input') || strip.textContent?.trim()))
   })
   observer.observe(strip, { childList: true, subtree: true, characterData: true })
-  adapter = initVimMode(editor, strip, CommandLine as unknown as typeof StatusBar)
+  const keys: Keys = { adapter: null, strip, observer, mode: 'normal' }
+  editors.set(editor, keys)
+  keys.adapter = initVimMode(editor, strip, CommandLine as unknown as typeof StatusBar)
   shareYanks()
-  mode = 'normal'
-  host.post({ type: 'vim', mode })
 }
 
-export const isOn = () => !!adapter
+/** Turns Vim on or off for the page: every editor in it, and those to come. */
+export function setOn(enable: boolean, panes: { editor: monaco.editor.IStandaloneCodeEditor; element: HTMLElement }[]) {
+  on = enable
+  for (const pane of panes) setVim(pane.editor, enable, pane.element)
+  host.post({ type: 'vim', mode: enable ? 'normal' : null })
+}
+
+/** Vim's mode in an editor. */
+export function modeOf(editor: monaco.editor.IStandaloneCodeEditor): string {
+  return editors.get(editor)?.mode ?? 'normal'
+}
+
+export const isOn = () => on
+

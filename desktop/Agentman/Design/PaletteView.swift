@@ -11,6 +11,9 @@ struct PaletteItem: Identifiable {
     var fileIcon: String? = nil
     /// A shortcut shown at the row's end, such as "⌘P".
     var shortcut: String? = nil
+    /// A line of text shown instead of the title, with what matched marked,
+    /// as a search's result is; the detail then says where it is.
+    var line: AttributedString? = nil
 }
 
 /// A floating search box with its results under it, in the manner of the
@@ -22,7 +25,17 @@ struct PaletteView: View {
     let results: (String) -> [PaletteItem]
     let choose: (PaletteItem) -> Void
     let dismiss: () -> Void
-    @State private var query = ""
+    /// Told of every change to what is typed, for results that take a
+    /// moment to find, as a search's do.
+    var typed: ((String) -> Void)? = nil
+    /// Return before choosing: true when it was taken, as a search not run
+    /// yet takes it.
+    var submit: ((String) -> Bool)? = nil
+    /// Beside the box: a search's options.
+    var accessory: AnyView? = nil
+    /// Under the rows, or instead of them: "Searching…", "12 results".
+    var status: String? = nil
+    @State var query = ""
     @State private var selected = 0
     @FocusState private var focused: Bool
 
@@ -42,6 +55,7 @@ struct PaletteView: View {
                         .font(Fonts.sans(15))
                         .focused($focused)
                         .onSubmit {
+                            if submit?(query) == true { return }
                             if items.indices.contains(selected) { choose(items[selected]) }
                         }
                         .onKeyPress(.downArrow) {
@@ -56,6 +70,7 @@ struct PaletteView: View {
                             dismiss()
                             return .handled
                         }
+                    if let accessory { accessory }
                 }
                 .padding(.horizontal, 14)
                 .frame(height: 46)
@@ -79,9 +94,18 @@ struct PaletteView: View {
                             if items.indices.contains(now) { proxy.scrollTo(items[now].id) }
                         }
                     }
+                    if let status {
+                        Divider()
+                        Text(status)
+                            .font(TextStyle.caption)
+                            .foregroundStyle(Palette.faint)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 7)
+                    }
                 } else if !query.isEmpty {
                     Divider()
-                    Text("Nothing matches")
+                    Text(status ?? "Nothing matches")
                         .font(TextStyle.caption)
                         .foregroundStyle(Palette.muted)
                         .frame(maxWidth: .infinity)
@@ -94,8 +118,14 @@ struct PaletteView: View {
             .shadow(color: .black.opacity(0.18), radius: 30, y: 12)
             .padding(.top, 70)
         }
-        .onAppear { focused = true }
-        .onChange(of: query) { selected = 0 }
+        .onAppear {
+            focused = true
+            typed?(query)
+        }
+        .onChange(of: query) {
+            selected = 0
+            typed?(query)
+        }
     }
 
     private func row(_ item: PaletteItem, selected: Bool) -> some View {
@@ -112,16 +142,26 @@ struct PaletteView: View {
                 }
             }
             .frame(width: 18)
-            Text(item.title)
-                .font(Fonts.sans(13.5, .medium))
-                .foregroundStyle(Palette.text)
-                .lineLimit(1)
+            if let line = item.line {
+                Text(line)
+                    .font(Fonts.mono(12))
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+            } else {
+                Text(item.title)
+                    .font(Fonts.sans(13.5, .medium))
+                    .foregroundStyle(Palette.text)
+                    .lineLimit(1)
+            }
             if let detail = item.detail {
                 Text(detail)
                     .font(TextStyle.caption)
                     .foregroundStyle(Palette.faint)
                     .lineLimit(1)
                     .truncationMode(.head)
+                    // Where a line is: it keeps its room, the line gives way.
+                    .fixedSize(horizontal: item.line != nil, vertical: false)
             }
             Spacer(minLength: 8)
             if let shortcut = item.shortcut {

@@ -42,10 +42,32 @@ struct MarkdownBlock: Identifiable {
         case list(ordered: Bool, start: Int, items: [[MarkdownBlock]])
         case table(header: [AttributedString], rows: [[AttributedString]])
         case rule
+        /// Pictures on a line of their own: a README's banner, a row of badges.
+        case images([MarkdownImage])
     }
 
     let id: Int
     let kind: Kind
+    /// Inside HTML that centres, as a README's `<div align="center">` does.
+    var centered = false
+}
+
+/// A picture in markdown, as `![alt](source)` or an HTML `<img>`.
+struct MarkdownImage: Hashable {
+    let source: String
+    let alt: String
+    /// What the picture links to, as a badge does.
+    var link: URL?
+    /// The width an `<img>` asks for.
+    var width: CGFloat?
+}
+
+extension EnvironmentValues {
+    /// The folder of a Markdown file shown as a document, as the editor's
+    /// preview shows one: its pictures are read from there and its code is
+    /// coloured. A reply in the conversation has none, and its pictures
+    /// stay their words.
+    @Entry var markdownFolder: URL?
 }
 
 // MARK: - Parsing
@@ -68,20 +90,35 @@ private enum MarkdownCache {
 
 private struct BlockBuilder {
     private var next = 0
+    /// Inside a `<div align="center">` that an HTML block opened and a later
+    /// one closes, with markdown between them.
+    private var centering = false
 
     mutating func blocks(of parent: Markup) -> [MarkdownBlock] {
-        parent.children.compactMap { block(from: $0) }
+        parent.children.flatMap { blocks(from: $0) }
     }
 
     private mutating func make(_ kind: MarkdownBlock.Kind) -> MarkdownBlock {
         next += 1
-        return MarkdownBlock(id: next, kind: kind)
+        return MarkdownBlock(id: next, kind: kind, centered: centering)
+    }
+
+    private mutating func blocks(from node: Markup) -> [MarkdownBlock] {
+        switch node {
+        case let paragraph as Paragraph:
+            if let images = Self.images(alone: paragraph) {
+                return [make(.images(images))]
+            }
+            return [make(.paragraph(Inline.render(paragraph)))]
+        case let html as HTMLBlock:
+            return blocks(html: html.rawHTML)
+        default:
+            return block(from: node).map { [$0] } ?? []
+        }
     }
 
     private mutating func block(from node: Markup) -> MarkdownBlock? {
         switch node {
-        case let paragraph as Paragraph:
-            return make(.paragraph(Inline.render(paragraph)))
         case let heading as Heading:
             return make(.heading(level: heading.level, text: Inline.render(heading)))
         case let code as CodeBlock:
@@ -99,12 +136,105 @@ private struct BlockBuilder {
             return make(.table(header: Array(header), rows: Array(rows)))
         case is ThematicBreak:
             return make(.rule)
-        case let html as HTMLBlock:
-            return make(.paragraph(AttributedString(html.rawHTML.trimmingCharacters(in: .newlines))))
         default:
             let text = node.format().trimmingCharacters(in: .whitespacesAndNewlines)
             return text.isEmpty ? nil : make(.paragraph(AttributedString(text)))
         }
+    }
+
+    /// The pictures of a paragraph that is nothing else: a picture, or a
+    /// picture in a link, with spaces between them.
+    private static func images(alone paragraph: Paragraph) -> [MarkdownImage]? {
+        var found: [MarkdownImage] = []
+        func image(_ node: Markdown.Image, link: URL?) -> MarkdownImage {
+            MarkdownImage(source: node.source ?? "", alt: node.plainText, link: link)
+        }
+        for child in paragraph.children {
+            switch child {
+            case let picture as Markdown.Image:
+                found.append(image(picture, link: nil))
+            case let link as Markdown.Link:
+                let pictures = Array(link.children)
+                guard !pictures.isEmpty, pictures.allSatisfy({ $0 is Markdown.Image }) else { return nil }
+                let target = link.destination.flatMap(URL.init(string:))
+                found += pictures.compactMap { $0 as? Markdown.Image }.map { image($0, link: target) }
+            case let text as Markdown.Text where text.string.trimmingCharacters(in: .whitespaces).isEmpty:
+                continue
+            case is SoftBreak, is LineBreak:
+                continue
+            default:
+                return nil
+            }
+        }
+        return found.isEmpty ? nil : found
+    }
+
+    /// A block of HTML, as READMEs open with one, read for what it shows:
+    /// its pictures, its headings and its words, in order, with the tags
+    /// gone. A picture in a centred block is centred.
+    private mutating func blocks(html raw: String) -> [MarkdownBlock] {
+        let source = raw.replacing(/<!--[\s\S]*?-->/, with: "")
+        let opens = source.contains(/(?i)<div[^>]*align\s*=\s*["']?center/)
+        let closes = source.contains(/(?i)<\/div\s*>/)
+        let around = centering
+        if source.contains(/(?i)align\s*=\s*["']?center/) { centering = true }
+        defer {
+            if opens && !closes {
+                centering = true
+            } else if closes && !opens {
+                centering = false
+            } else {
+                centering = around
+            }
+        }
+        var out: [MarkdownBlock] = []
+        var text = "", heading: Int?
+        var pictures: [MarkdownImage] = []
+        var link: URL?
+        func flushText() {
+            let words = HTML.decode(text).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            text = ""
+            guard !words.isEmpty else { return }
+            if let level = heading {
+                out.append(make(.heading(level: level, text: AttributedString(words))))
+            } else {
+                out.append(make(.paragraph(AttributedString(words))))
+            }
+        }
+        func flushPictures() {
+            guard !pictures.isEmpty else { return }
+            out.append(make(.images(pictures)))
+            pictures = []
+        }
+        var rest = Substring(source)
+        while let tag = rest.firstMatch(of: /<(\/?)([a-zA-Z][a-zA-Z0-9]*)([^>]*)>/) {
+            text += rest[rest.startIndex..<tag.range.lowerBound]
+            rest = rest[tag.range.upperBound...]
+            let closing = !tag.1.isEmpty, name = tag.2.lowercased(), attributes = String(tag.3)
+            switch name {
+            case "img":
+                flushText()
+                if let source = HTML.attribute("src", in: attributes) {
+                    pictures.append(MarkdownImage(source: source, alt: HTML.attribute("alt", in: attributes) ?? "", link: link,
+                                                  width: HTML.attribute("width", in: attributes).flatMap(Double.init).map { CGFloat($0) }))
+                }
+            case "a":
+                link = closing ? nil : HTML.attribute("href", in: attributes).flatMap(URL.init(string:))
+            case "h1", "h2", "h3", "h4", "h5", "h6":
+                flushText()
+                flushPictures()
+                heading = closing ? nil : Int(name.dropFirst())
+            case "br", "p", "div", "li", "ul", "ol", "table", "tr", "td", "th", "section", "picture", "center", "blockquote", "hr":
+                flushText()
+                flushPictures()
+            default:
+                break
+            }
+        }
+        text += rest
+        flushText()
+        flushPictures()
+        return out
     }
 
     private mutating func items(of list: Markup) -> [[MarkdownBlock]] {
@@ -117,6 +247,27 @@ private struct BlockBuilder {
             }
             return content
         }
+    }
+}
+
+/// What a block of HTML needs reading: an attribute's value, and the
+/// entities in its words.
+private enum HTML {
+    static func attribute(_ name: String, in attributes: String) -> String? {
+        let pattern = try! Regex("(?i)\\b\(name)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))")
+        guard let match = attributes.firstMatch(of: pattern) else { return nil }
+        for index in 1...3 {
+            if let value = match.output[index].substring { return decode(String(value)) }
+        }
+        return nil
+    }
+
+    static func decode(_ text: String) -> String {
+        var out = text
+        for (entity, character) in [("&nbsp;", " "), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&apos;", "'"), ("&amp;", "&")] {
+            out = out.replacingOccurrences(of: entity, with: character)
+        }
+        return out
     }
 }
 
@@ -170,7 +321,8 @@ private enum Inline {
             let alt = render(image)
             return alt.characters.isEmpty ? AttributedString(image.source ?? "") : alt
         case let html as InlineHTML:
-            return AttributedString(html.rawHTML)
+            // The tags themselves: a <br> breaks the line, the rest go.
+            return html.rawHTML.contains(/(?i)^<br/) ? AttributedString("\n") : AttributedString()
         default:
             return render(node)
         }
@@ -181,8 +333,15 @@ private enum Inline {
 
 private struct BlockView: View {
     let block: MarkdownBlock
+    @Environment(\.markdownFolder) private var folder
 
     var body: some View {
+        content
+            .multilineTextAlignment(block.centered ? .center : .leading)
+            .frame(maxWidth: .infinity, alignment: block.centered ? .center : .leading)
+    }
+
+    @ViewBuilder private var content: some View {
         switch block.kind {
         case .paragraph(let text):
             SwiftUI.Text(text)
@@ -198,9 +357,9 @@ private struct BlockView: View {
                 .lineSpacing(3)
                 .padding(.top, level <= 2 ? 10 : 4)
                 .textSelection(.enabled)
-        case .code(_, let code):
+        case .code(let language, let code):
             ScrollView(.horizontal, showsIndicators: false) {
-                SwiftUI.Text(code)
+                SwiftUI.Text(folder == nil ? AttributedString(code) : Self.coloured(code, language: language))
                     .font(TextStyle.code)
                     .foregroundStyle(Palette.text)
                     .lineSpacing(4)
@@ -240,7 +399,130 @@ private struct BlockView: View {
                 .fill(Palette.line)
                 .frame(height: 1)
                 .padding(.vertical, 8)
+        case .images(let images):
+            FlowLayout(spacing: 6) {
+                ForEach(Array(images.enumerated()), id: \.offset) { _, image in
+                    MarkdownImageView(image: image)
+                }
+            }
         }
+    }
+
+    /// Code in a document, coloured as the editor colours its language.
+    private static func coloured(_ code: String, language: String?) -> AttributedString {
+        let named = ["typescript": "ts", "javascript": "js", "python": "py", "shell": "sh", "bash": "sh", "zsh": "sh",
+                     "console": "sh", "rust": "rs", "ruby": "rb", "kotlin": "kt", "yml": "yaml", "golang": "go"]
+        let fence = (language ?? "").lowercased()
+        guard !fence.isEmpty, let grammar = CodeHighlighter.language(for: "code." + (named[fence] ?? fence)) else {
+            return AttributedString(code)
+        }
+        let text = NSMutableAttributedString(string: code)
+        for (range, token) in CodeHighlighter.tokens(in: code, language: grammar) {
+            text.addAttribute(.foregroundColor, value: CodeHighlighter.color(token), range: range)
+        }
+        return (try? AttributedString(text, including: \.appKit)) ?? AttributedString(code)
+    }
+}
+
+/// A picture in a document: one from the file's folder, or from the web
+/// over HTTPS; in a reply, or one that won't load, its words.
+private struct MarkdownImageView: View {
+    let image: MarkdownImage
+    @Environment(\.markdownFolder) private var folder
+    @State private var loaded: NSImage?
+    @State private var failed = false
+
+    var body: some View {
+        if let link = image.link {
+            Link(destination: link) { picture }
+                .buttonStyle(.plain)
+                .help(link.absoluteString)
+        } else {
+            picture
+        }
+    }
+
+    @ViewBuilder private var picture: some View {
+        if let folder, let local = MarkdownImages.local(image.source, in: folder) {
+            sized(local)
+        } else if folder != nil, let url = URL(string: image.source), url.scheme == "https" {
+            Group {
+                if let loaded {
+                    sized(loaded)
+                } else if failed {
+                    words
+                } else {
+                    Color.clear.frame(width: image.width ?? 60, height: 20)
+                }
+            }
+            .task(id: url) {
+                if let picture = await MarkdownImages.remote(url) {
+                    loaded = picture
+                } else {
+                    failed = true
+                }
+            }
+        } else {
+            words
+        }
+    }
+
+    /// As wide as the `<img>` asks, or as the picture is, and never wider
+    /// than the page; as tall as that width makes it.
+    private func sized(_ picture: NSImage) -> some View {
+        let natural = picture.size
+        let aspect = natural.width > 0 && natural.height > 0 ? natural.width / natural.height : 1
+        let width = image.width ?? natural.width
+        return SwiftUI.Image(nsImage: picture)
+            .resizable()
+            .aspectRatio(aspect, contentMode: .fit)
+            .frame(maxWidth: width, maxHeight: width / aspect)
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .accessibilityLabel(image.alt)
+    }
+
+    private var words: some View {
+        SwiftUI.Text(image.alt.isEmpty ? image.source : image.alt)
+            .font(TextStyle.body)
+            .foregroundStyle(Palette.muted)
+    }
+}
+
+/// Pictures read from disk for documents, kept while the text is edited
+/// around them.
+@MainActor
+private enum MarkdownImages {
+    private static let cache = NSCache<NSString, NSImage>()
+
+    static func local(_ source: String, in folder: URL) -> NSImage? {
+        guard !source.isEmpty else { return nil }
+        let url: URL
+        if let scheme = URL(string: source)?.scheme {
+            guard scheme == "file", let file = URL(string: source) else { return nil }
+            url = file
+        } else {
+            let path = source.removingPercentEncoding ?? source
+            url = path.hasPrefix("/") ? URL(fileURLWithPath: path) : folder.appendingPathComponent(path)
+        }
+        let key = url.standardizedFileURL.path as NSString
+        if let hit = cache.object(forKey: key) { return hit }
+        guard let image = NSImage(contentsOf: url.standardizedFileURL) else { return nil }
+        cache.setObject(image, forKey: key)
+        return image
+    }
+
+    /// A picture from the web, as a README's badges are: NSImage reads the
+    /// SVG they come as, which AsyncImage does not.
+    static func remote(_ url: URL) async -> NSImage? {
+        let key = url.absoluteString as NSString
+        if let hit = cache.object(forKey: key) { return hit }
+        var request = URLRequest(url: url, timeoutInterval: 15)
+        request.setValue("Agentman", forHTTPHeaderField: "User-Agent")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200, data.count < 8 << 20,
+              let image = NSImage(data: data) else { return nil }
+        cache.setObject(image, forKey: key)
+        return image
     }
 }
 

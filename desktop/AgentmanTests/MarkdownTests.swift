@@ -33,6 +33,7 @@ final class MarkdownTests: XCTestCase {
             case .quote: "quote"
             case .paragraph: "p"
             case .rule: "hr"
+            case .images(let images): "img \(images.count)"
             }
         }
         XCTAssertEqual(kinds, ["h2", "table 2x1", "ul 2", "code go fmt.Println(\"hi\")", "quote", "p"])

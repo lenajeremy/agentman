@@ -9,17 +9,35 @@
   @font-face { font-family: "Google Sans Code"; src: url("fonts/GoogleSansCode-Italic.ttf"); font-weight: 300 800; font-style: italic; }
   html, body, #editor { margin: 0; width: 100%; height: 100%; overflow: hidden; }
   body { -webkit-user-select: none; }
-  /* Vim's command line: a strip at the foot of the editor, there while it
+  /* The splits, side by side; one fills the row. A split's title shows only
+     once there are two, with the file's name and a way to close it. */
+  #editor { display: flex; }
+  .pane { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+  .pane + .pane { border-left: 1px solid var(--widget-border); }
+  .pane-title { display: none; flex: none; height: 26px; align-items: center; gap: 6px; padding: 0 6px 0 12px;
+                box-sizing: border-box; border-bottom: 1px solid var(--widget-border); color: var(--faint);
+                font: 11.5px -apple-system, BlinkMacSystemFont, sans-serif; white-space: nowrap; overflow: hidden; }
+  #editor.split .pane-title { display: flex; }
+  .pane.focused .pane-title { color: var(--text); }
+  .pane-title span { overflow: hidden; text-overflow: ellipsis; }
+  .pane-close { margin-left: auto; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 5px;
+                background: transparent; color: var(--faint); font: 15px -apple-system, sans-serif; line-height: 18px; }
+  .pane-close:hover { background: var(--widget); color: var(--text); }
+  .pane-body { flex: 1; min-height: 0; }
+  .pane-empty { display: none; position: absolute; inset: 26px 0 0 0; align-items: center; justify-content: center;
+                color: var(--faint); font: 12.5px -apple-system, BlinkMacSystemFont, sans-serif; }
+  #editor.split .pane.empty .pane-empty { display: flex; }
+  /* Vim's command line: a strip at the foot of its split, there while it
      has a prompt or something to say. */
-  #vim { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; box-sizing: border-box; height: 28px;
+  .vim { position: absolute; left: 0; right: 0; bottom: 0; z-index: 20; box-sizing: border-box; height: 28px;
          padding: 0 14px; display: flex !important; align-items: center; gap: 8px;
          background: var(--widget); color: var(--text); border-top: 1px solid var(--widget-border);
          font: var(--font-size, 13px) "Google Sans Code", ui-monospace, Menlo, monospace; white-space: pre;
          transition: opacity 120ms ease, transform 120ms ease; }
-  #vim:not(.shown) { opacity: 0; transform: translateY(100%); pointer-events: none; }
-  #vim input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; padding: 0;
+  .vim:not(.shown) { opacity: 0; transform: translateY(100%); pointer-events: none; }
+  .vim input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; padding: 0;
                color: inherit; font: inherit; caret-color: var(--text); -webkit-user-select: text; }
-  #vim .vim-notification { color: var(--faint); }
+  .vim .vim-notification { color: var(--faint); }
 </style>
 </head>
 <body>

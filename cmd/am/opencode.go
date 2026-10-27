@@ -32,6 +32,14 @@ func runOpenCode(ctx context.Context, args []string) error {
 			"install it with `brew install opencode`")
 	}
 
+	// OpenCode 2 has no server of its own per terminal, and no --port: every
+	// opencode talks to one background service, which the daemon finds by
+	// itself. opencode starts as it is.
+	if source.OpenCodeMajorVersion(ctx) >= 2 {
+		fmt.Fprintf(os.Stderr, "%s\n", dim("agentman: reachable from your phone (through OpenCode's background service)"))
+		return execOpenCode(binary, args)
+	}
+
 	// A port the user chose wins. They may be running several projects, or
 	// avoiding a clash; silently overriding that would be worse than the
 	// session being missed, and the message below says how to reconcile it.

@@ -85,6 +85,11 @@ extension EditorStore {
             return true
         }
         if flags == .control {
+            // Back to the editor, as Ctrl-B came from it.
+            if key == "b" {
+                focusEditor()
+                return true
+            }
             if key == "w" {
                 treeKeys = "<C-w>"
                 return true
@@ -725,7 +730,7 @@ struct TreeKeysSheet: View {
             ("⏎", "Open the file; open or close the folder"),
             ("h", "Close the folder, or go to it"),
             ("/", "Filter the files"),
-            ("⌃W l", "To the editor (⌃W h back)"),
+            ("⌃B  ⌃W l", "To the editor (⌃B, ⌃W h back)"),
         ]),
         ("Files", [
             ("a", "New file; end with / for a folder"),
