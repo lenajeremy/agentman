@@ -151,3 +151,22 @@ func TestHeldPictureMessageIsReadByItsAttachments(t *testing.T) {
 		t.Fatalf("pending = %q", got)
 	}
 }
+
+// Enter confirms Codex's trust prompt and pickers; its approvals confirm on
+// a number, and an Enter after one would land on whatever follows.
+func TestCodexMenuWaitsForEnterByItsFooter(t *testing.T) {
+	cases := map[string]bool{
+		"codex_trust_folder_real_pane.txt": true,
+		"codex_model_picker_real_pane.txt": true,
+		"codex_approval_real_pane.txt":     false,
+	}
+	for fixture, want := range cases {
+		pane, err := os.ReadFile(filepath.Join("..", "question", "testdata", fixture))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := codexMenuWaitsForEnter(string(pane)); got != want {
+			t.Errorf("%s: %v, want %v", fixture, got, want)
+		}
+	}
+}

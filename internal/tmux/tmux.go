@@ -793,6 +793,54 @@ func Answer(ctx context.Context, name, key string) error {
 	return nil
 }
 
+// AnswerCodexMenu picks an option of a Codex menu that waits for Enter, as
+// its footer says ("enter continue", "enter select"): the folder trust
+// prompt, a picker. Its number picks an option and confirms it, except the
+// option already selected, which only Enter confirms. So the number is
+// typed, and Enter follows while the same menu still shows that option
+// selected; a menu the number already closed gets nothing more.
+func AnswerCodexMenu(ctx context.Context, name, key string) error {
+	if !Available() {
+		return ErrNotInstalled
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	pane, err := Capture(ctx, name)
+	if err != nil {
+		return err
+	}
+	before := question.Detect(pane)
+	if before == nil || !slices.ContainsFunc(before.Options, func(o question.Option) bool { return o.Key == key }) {
+		return errors.New("tmux: that Codex question is no longer current; refresh the session")
+	}
+	if err := sendLiteral(ctx, name, key); err != nil {
+		return fmt.Errorf("tmux: could not answer: %w", err)
+	}
+	time.Sleep(250 * time.Millisecond)
+	if pane, err = Capture(ctx, name); err != nil {
+		return err
+	}
+	after := question.Detect(pane)
+	if after == nil || !sameMenu(before, after) {
+		return nil
+	}
+	if !slices.ContainsFunc(after.Options, func(o question.Option) bool { return o.Key == key && o.Selected }) {
+		return errors.New("tmux: Codex did not take that choice; answer it in the terminal")
+	}
+	if _, err := run(ctx, "send-keys", "-t", name, "Enter"); err != nil {
+		return fmt.Errorf("tmux: could not confirm the answer: %w", err)
+	}
+	return nil
+}
+
+// sameMenu reports whether two reads of a pane show the same menu, whatever
+// is selected in it.
+func sameMenu(a, b *question.Question) bool {
+	return a.Title == b.Title && a.Prompt == b.Prompt && a.Detail == b.Detail &&
+		slices.EqualFunc(a.Options, b.Options, func(x, y question.Option) bool { return x.Key == y.Key && x.Label == y.Label })
+}
+
 // AnswerCodexCustom fills the current Codex follow-up question's Other field.
 // Codex needs Enter to open the field and commit its text. Some layouts then
 // submit immediately; others need a final Enter. Verify the pane before

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -698,7 +699,27 @@ func (s *CodexSource) Answer(ctx context.Context, sessionID string, answer proto
 	if !questionHasOption(current, answer.OptionKey) {
 		return fmt.Errorf("source: that question or option is no longer current; refresh the session")
 	}
+	if codexMenuWaitsForEnter(currentPane) {
+		return tmux.AnswerCodexMenu(ctx, session.tmuxName, answer.OptionKey)
+	}
 	return tmux.Answer(ctx, session.tmuxName, answer.OptionKey)
+}
+
+// codexMenuFooter is the key hint under a Codex menu that Enter confirms,
+// such as the folder trust prompt ("enter continue · esc back") and its
+// pickers ("enter select · esc back"). Its approvals confirm on a number.
+var codexMenuFooter = regexp.MustCompile(`^enter (?:continue|select)\b`)
+
+// codexMenuWaitsForEnter reports whether the menu on a Codex pane is one
+// that Enter confirms, by the hint on its last line.
+func codexMenuWaitsForEnter(pane string) bool {
+	lines := strings.Split(strings.TrimRight(pane, "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return codexMenuFooter.MatchString(line)
+		}
+	}
+	return false
 }
 
 // codexOptionTakesANote reports whether key names the refusal that carries a

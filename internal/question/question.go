@@ -185,9 +185,35 @@ func Detect(pane string) *Question {
 		return trust
 	}
 	if menu := detectMenu(lines); menu != nil {
+		describeCodexTrust(menu)
 		return menu
 	}
 	return detectClaudeDialog(lines)
+}
+
+// codexTrustQuestion opens the paragraph of Codex's prompt to trust a folder
+// it has not run in, which sits under the folder's path.
+const codexTrustQuestion = "Trust this folder?"
+
+// describeCodexTrust names Codex's folder trust prompt for what it asks. Its
+// paragraph wraps onto several lines over the options, so the menu took its
+// last line for the question and the rest for detail; the whole paragraph
+// is the question, and the folder is what it is about.
+func describeCodexTrust(q *Question) {
+	text := q.Detail + "\n" + q.Prompt
+	at := strings.Index(text, codexTrustQuestion)
+	if at < 0 || !slices.ContainsFunc(q.Options, func(o Option) bool { return o.Label == "Trust and continue" }) {
+		return
+	}
+	var folder string
+	for line := range strings.SplitSeq(text[:at], "\n") {
+		if line = strings.TrimSpace(line); strings.HasPrefix(line, "/") {
+			folder = line
+		}
+	}
+	q.Title = "Folder access"
+	q.Prompt = strings.Join(strings.Fields(text[at:]), " ")
+	q.Detail = folder
 }
 
 // detectMenu reads a numbered menu: permission prompts, AskUserQuestion and
