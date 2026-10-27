@@ -151,6 +151,13 @@ final class EditorPanelTests: XCTestCase {
         XCTAssertEqual(store.selection, "lib")
         _ = store.handleTreeKey(key("h"))
         XCTAssertFalse(store.isExpanded("lib"))
+        // Return on a folder opens it, and again closes it: the cursor stays.
+        XCTAssertTrue(store.handleTreeKey(key("\r", code: 36)))
+        XCTAssertTrue(store.isExpanded("lib"))
+        XCTAssertEqual(store.selection, "lib")
+        XCTAssertTrue(store.handleTreeKey(key("\r", code: 36)))
+        XCTAssertFalse(store.isExpanded("lib"))
+        XCTAssertEqual(store.selection, "lib")
         // Return on a file opens it.
         store.selectInTree("a.ts")
         XCTAssertTrue(store.handleTreeKey(key("\r", code: 36)))
