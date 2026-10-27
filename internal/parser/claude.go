@@ -140,6 +140,9 @@ type claudeRecord struct {
 	IsMeta      bool           `json:"isMeta"`
 	IsSidechain bool           `json:"isSidechain"`
 	Message     *claudeMessage `json:"message"`
+	// In updates mode, nonempty thinking text is a visible progress update,
+	// rendered by Claude Code alongside ordinary assistant text.
+	ThinkingDisplay string `json:"thinkingDisplay"`
 	// A "system" record's notice. Content is a bare string there; it is kept
 	// raw so a record of another type that uses the key differently still
 	// decodes.
@@ -173,6 +176,8 @@ type claudeBlock struct {
 	Type string `json:"type"`
 	// text
 	Text string `json:"text"`
+	// Visible progress text when the record's thinkingDisplay is "updates".
+	Thinking string `json:"thinking"`
 	// tool_use
 	ID    string          `json:"id"`
 	Name  string          `json:"name"`
@@ -284,8 +289,15 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 	var out []protocol.Message
 	for i, block := range blocks {
 		switch block.Type {
-		case "text":
-			body := strings.TrimSpace(block.Text)
+		case "text", "thinking":
+			text := block.Text
+			if block.Type == "thinking" {
+				if role != protocol.RoleAssistant || rec.ThinkingDisplay != "updates" {
+					continue
+				}
+				text = block.Thinking
+			}
+			body := strings.TrimSpace(text)
 			if body == "" || claudeCommandWrapper.MatchString(body) {
 				continue
 			}
@@ -364,9 +376,6 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 					IsSidechain: rec.IsSidechain,
 				})
 			}
-
-			// "thinking" blocks are deliberately dropped: long, mostly opaque
-			// signature payload, and not what a glance at a phone is for.
 		}
 	}
 	return p.tidyPrompt(rec.PromptID, out)
