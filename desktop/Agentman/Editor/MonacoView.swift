@@ -99,6 +99,8 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageH
     /// What the page has open, as it was last sent.
     private var opened: [UUID: MonacoView.Tab] = [:]
     private var shown: UUID?
+    /// A place to go once its file is in front: a search's match.
+    private var pendingReveal: (id: UUID, line: Int, column: Int, length: Int)?
     private var fontSize = 0.0
     private var vim: Bool?
     private var wanted: (tabs: [MonacoView.Tab], activeID: UUID?, fontSize: Double, vim: Bool) = ([], nil, 13, false)
@@ -284,6 +286,7 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageH
             }
             opened[tab.id] = tab
         }
+        defer { revealPending() }
         let front = tabs.contains { $0.id == activeID } ? activeID : nil
         if front != shown {
             shown = front
@@ -318,6 +321,21 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageH
     }
 
     // MARK: - Commands
+
+    /// Selects a range in a file once it is in front, which a file just
+    /// opened is not yet, and gives it the keyboard.
+    func reveal(_ id: UUID, line: Int, column: Int, length: Int) {
+        pendingReveal = (id, line, column, length)
+        revealPending()
+    }
+
+    private func revealPending() {
+        guard ready, let pending = pendingReveal, shown == pending.id, opened[pending.id] != nil else { return }
+        pendingReveal = nil
+        call("agentman.reveal(id, line, column, length)",
+             ["id": pending.id.uuidString, "line": pending.line, "column": pending.column, "length": pending.length])
+        focus()
+    }
 
     /// Gives the editor the keyboard, as Vim's Ctrl-W l does.
     func focus() {

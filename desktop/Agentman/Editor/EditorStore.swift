@@ -74,6 +74,15 @@ final class EditorStore {
     private(set) var branch: String?
     private(set) var isRepository = false
     var quickOpen = false
+    /// ⇧⌘F's search palette, and the search it shows: kept between
+    /// openings, as VS Code keeps it. See EditorSearch.swift.
+    var searchOpen = false
+    var searchQuery = ""
+    var searchOptions = SearchOptions()
+    var searchResults: SearchResults?
+    var searchRunning = false
+    @ObservationIgnored var searching: SearchKey?
+    @ObservationIgnored var searchWork: Task<SearchResults, Never>?
     /// Vim's mode in the editor while Vim is on ("normal", "insert",
     /// "visual", "visual line", "visual block", "replace"), and the keys of
     /// a command not finished yet.

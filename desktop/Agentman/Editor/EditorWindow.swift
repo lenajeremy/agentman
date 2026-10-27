@@ -104,6 +104,8 @@ struct EditorWindow: View {
                     .overlay {
                         if store.quickOpen {
                             GoToFile(store: store)
+                        } else if store.searchOpen {
+                            GoToText(store: store)
                         }
                     }
                     // Agentman beside the code: the folder's agent, or any
@@ -1140,8 +1142,14 @@ struct EditorCommands: Commands {
                 }
             }
             .keyboardShortcut("o", modifiers: .command)
-            Button("Go to File…") { editor?.quickOpen = true }
-                .keyboardShortcut("p", modifiers: .command)
+            Button("Go to File…") {
+                editor?.searchOpen = false
+                editor?.quickOpen = true
+            }
+            .keyboardShortcut("p", modifiers: .command)
+            .disabled(editor == nil)
+            Button("Search in Folder…") { editor?.showSearch() }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
                 .disabled(editor == nil)
             Button("Toggle Agent Panel") { editor?.showAgentPanel.toggle() }
                 .keyboardShortcut("l", modifiers: .command)

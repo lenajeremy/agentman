@@ -431,10 +431,11 @@ const agentman = {
     return docs.get(id)?.model.getValue() ?? null
   },
 
-  /** Shows a range in the file in front, as Go to Definition does. */
-  reveal(id: string, line: number, column: number) {
+  /** Shows a place in the file in front, as Go to Definition does, with
+   * length characters from it selected, as a search's match is. */
+  reveal(id: string, line: number, column: number, length = 0) {
     if (active !== id) return
-    editor.setPosition({ lineNumber: line, column })
+    editor.setSelection(new monaco.Selection(line, column, line, column + length))
     editor.revealPositionInCenter({ lineNumber: line, column })
   },
 
