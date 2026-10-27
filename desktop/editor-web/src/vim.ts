@@ -40,9 +40,23 @@ class CommandLine extends StatusBar {
 
 type Ex = (cm: unknown, params: { args?: string[]; argString?: string }) => void
 
-/** `:` commands that are the app's: saving, closing tabs, opening files. */
+/** monaco-vim's stand-in for CodeMirror, as an action is handed it. */
+type Adapter = { editor: monaco.editor.ICodeEditor }
+
+/** `:` commands that are the app's: saving, closing tabs, opening files.
+ * And K, which in Vim looks up the word under the cursor: here it shows
+ * what the language server says about the symbol (its type, signature and
+ * documentation), the hover a pointer resting on it opens. */
 function defineCommands() {
-  const vim = (VimMode as unknown as { Vim: { defineEx(name: string, prefix: string, run: Ex): void } }).Vim
+  const vim = (VimMode as unknown as {
+    Vim: {
+      defineEx(name: string, prefix: string, run: Ex): void
+      defineAction(name: string, run: (cm: Adapter) => void): void
+      mapCommand(keys: string, type: string, name: string, args: object, extra: object): void
+    }
+  }).Vim
+  vim.defineAction('showHover', (cm) => cm.editor.trigger('vim', 'editor.action.showHover', {}))
+  vim.mapCommand('K', 'action', 'showHover', {}, { context: 'normal' })
   const commands = (VimMode as unknown as { commands: Record<string, (cm: unknown) => void> }).commands
   commands.save = () => host.post({ type: 'command', name: 'save' })
   vim.defineEx('quit', 'q', (_cm, params) => host.post({ type: 'command', name: params.argString?.trim() === '!' ? 'discard' : 'close' }))

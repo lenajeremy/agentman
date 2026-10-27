@@ -86,6 +86,19 @@ final class EditorStore {
     /// What the panel shows: nil until it first opens, when it picks the
     /// agent working on the folder.
     var panelRoute: PanelRoute?
+    /// Asked to show the agent working on the folder, as `am open` asks:
+    /// done once the agents are known.
+    var showsFolderAgent = false
+
+    /// Opens the panel on the agent working on the folder, when asked and
+    /// the agents are known; with none there, the panel stays as it was.
+    func showFolderAgent(in sessions: [Session], loaded: Bool) {
+        guard showsFolderAgent, loaded else { return }
+        showsFolderAgent = false
+        guard let session = AgentPanel.agent(for: root.path, in: sessions) else { return }
+        panelRoute = .agent(session.id)
+        showAgentPanel = true
+    }
     /// The folder's files for `@` in the panel's message box.
     @ObservationIgnored private(set) var mentions: FileMentions!
 
