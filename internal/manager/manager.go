@@ -67,8 +67,10 @@ type Manager struct {
 	titles       *titleStore
 	knowledge    *knowledge.Store
 	keys         *keyStore
-	schedules    *scheduleStore
-	now          func() time.Time
+	// voice holds recordings whose parts are still arriving.
+	voice     voiceUploads
+	schedules *scheduleStore
+	now       func() time.Time
 
 	mu       sync.Mutex
 	settings protocol.ManagerSettings
@@ -186,7 +188,9 @@ func (m *Manager) Handles(kind protocol.RequestType) bool {
 		protocol.ReqAgentKnowledgeSearch, protocol.ReqAgentKnowledgeRead, protocol.ReqAgentKeys,
 		protocol.ReqAgentRequestKey, protocol.ReqAgentTell,
 		protocol.ReqManagerSchedules, protocol.ReqManagerScheduleCancel, protocol.ReqManagerImage,
-		protocol.ReqToolsTitle, protocol.ReqManagerOpenCards, protocol.ReqManagerCheckPermission:
+		protocol.ReqToolsTitle, protocol.ReqManagerOpenCards, protocol.ReqManagerCheckPermission,
+		protocol.ReqTranscribe, protocol.ReqVoiceAccount, protocol.ReqVoiceSignInStart, protocol.ReqVoiceSignInVerify,
+		protocol.ReqVoiceSignOut:
 		return true
 	}
 	return false
@@ -195,6 +199,16 @@ func (m *Manager) Handles(kind protocol.RequestType) bool {
 // Handle answers one manager request.
 func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Event {
 	switch req.Type {
+	case protocol.ReqTranscribe:
+		return m.transcribe(ctx, req.Voice)
+	case protocol.ReqVoiceAccount:
+		return m.voiceAccountEvent(ctx)
+	case protocol.ReqVoiceSignInStart:
+		return m.voiceSignInStart(ctx, req.VoiceSignIn)
+	case protocol.ReqVoiceSignInVerify:
+		return m.voiceSignInVerify(ctx, req.VoiceSignIn)
+	case protocol.ReqVoiceSignOut:
+		return m.voiceSignOut(ctx)
 	case protocol.ReqManagerSend:
 		return m.send(ctx, req.Text, req.Images...)
 	case protocol.ReqManagerImage:

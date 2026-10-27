@@ -17,7 +17,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useStyles, useTheme } from "../lib/appearance";
-import { font, Palette, radius, size, space } from "../lib/theme";
+import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 
 export interface PopoverItem {
   key: string;
@@ -173,7 +173,7 @@ const makeStyles = (c: Palette) =>
     title: {
       fontFamily: font.sans,
       fontSize: size.label,
-      lineHeight: 16,
+      lineHeight: scaled(16),
       color: c.muted,
       paddingHorizontal: space.lg,
       paddingTop: space.md,
@@ -191,7 +191,7 @@ const makeStyles = (c: Palette) =>
     rowPressed: { backgroundColor: c.fill },
     rowDisabled: { opacity: 0.4 },
     label: { flex: 1, fontFamily: font.sansMedium, fontSize: size.caption, color: c.text },
-    labelMono: { fontFamily: font.monoMedium, fontSize: 12.5 },
+    labelMono: { fontFamily: font.monoMedium, fontSize: scaled(12.5) },
     labelDestructive: { color: c.errorText },
     detail: { fontFamily: font.monoMedium, fontSize: size.label, color: c.faint },
   });

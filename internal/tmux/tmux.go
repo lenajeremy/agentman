@@ -97,11 +97,29 @@ func listSessions(ctx context.Context) ([]Session, error) {
 	if !Available() {
 		return nil, ErrNotInstalled
 	}
-	out, err := run(ctx, "list-sessions", "-F",
+	var sessions []Session
+	found := map[string]server{}
+	for _, server := range servers() {
+		listed := listOn(ctx, server)
+		for _, session := range listed {
+			if _, seen := found[session.Name]; seen {
+				continue
+			}
+			found[session.Name] = server
+			sessions = append(sessions, session)
+		}
+	}
+	rememberAll(found)
+	return sessions, nil
+}
+
+// listOn lists the agent sessions on one server.
+func listOn(ctx context.Context, server server) []Session {
+	out, err := runOn(ctx, server, "list-sessions", "-F",
 		"#{session_name}\t#{pane_pid}\t#{pane_current_path}\t#{pane_current_command}\t#{session_created}")
 	if err != nil {
 		// tmux exits non-zero when no server is running, which is normal.
-		return nil, nil
+		return nil
 	}
 
 	var sessions []Session
@@ -125,7 +143,7 @@ func listSessions(ctx context.Context) ([]Session, error) {
 		}
 		sessions = append(sessions, session)
 	}
-	return sessions, nil
+	return sessions
 }
 
 // Launch starts a command in a new detached tmux session and returns its name.
@@ -133,17 +151,28 @@ func listSessions(ctx context.Context) ([]Session, error) {
 // Detached so the caller can decide whether to attach: `am claude` attaches
 // immediately, giving the user their normal terminal experience while the
 // session stays reachable from the phone.
-func Launch(ctx context.Context, name, dir string, command []string) error {
+//
+// It runs on Agentman's own tmux server (see AgentsSocket), started first if
+// it isn't running. env, as KEY=value, is the environment the agent gets on
+// top of the server's: `am claude` passes the shell's own, so an agent
+// started from a terminal sees what a command typed there would.
+func Launch(ctx context.Context, name, dir string, command []string, env ...string) error {
 	if !Available() {
 		return ErrNotInstalled
 	}
 	if len(command) == 0 {
 		return errors.New("tmux: no command given")
 	}
+	if err := EnsureServer(ctx); err != nil {
+		return err
+	}
 
 	args := []string{"new-session", "-d", "-s", name}
 	if dir != "" {
 		args = append(args, "-c", dir)
+	}
+	for _, variable := range env {
+		args = append(args, "-e", variable)
 	}
 	// The command is passed as separate argv entries so tmux executes it
 	// directly rather than through a shell — no quoting, no interpretation of
@@ -160,14 +189,31 @@ func Launch(ctx context.Context, name, dir string, command []string) error {
 //
 // Exec rather than a subprocess: the user should get tmux's terminal handling
 // directly, with no wrapper sitting in between mangling signals or resizes.
-func Attach(name string) error {
+func Attach(ctx context.Context, name string) error {
 	binary, err := exec.LookPath("tmux")
 	if err != nil {
 		return ErrNotInstalled
 	}
-	args := append([]string{"tmux"}, globalArgs()...)
-	args = append(args, "attach-session", "-t", name)
-	return syscallExec(binary, args, os.Environ())
+	return syscallExec(binary, AttachArgs(ctx, name), os.Environ())
+}
+
+// AttachArgs is the command that shows a session in a terminal: tmux,
+// attached to it on whichever server it runs on.
+func AttachArgs(ctx context.Context, name string) []string {
+	server := locate(ctx, name)
+	args := append([]string{"tmux"}, server.flags()...)
+	return append(args, "attach-session", "-t", "="+name)
+}
+
+// Has reports whether a session of that name is running, on either server.
+func Has(ctx context.Context, name string) bool {
+	for _, server := range servers() {
+		if _, err := runOn(ctx, server, "has-session", "-t", "="+name); err == nil {
+			remember(name, server)
+			return true
+		}
+	}
+	return false
 }
 
 // Send types text into a session and submits it.
@@ -474,7 +520,7 @@ func (p *ProcessTree) OwnsPID(panePID, pid int) bool {
 }
 
 // SocketEnv names a private tmux server for this process to use instead of
-// the default one.
+// Agentman's own (AgentsSocket), and keeps it off the shared one.
 //
 // It exists for tests. An agent working on this repository runs inside a
 // tmux pane, so $TMUX is set, and a bare tmux command — from a test, a probe,
@@ -493,11 +539,7 @@ const SocketEnv = "AGENTMAN_TMUX_SOCKET"
 // every pane is skipped, and no agent can be typed into, all without an
 // error. -S pins the command to SocketEnv's server when that is set.
 func globalArgs() []string {
-	args := []string{"-u"}
-	if socket := os.Getenv(SocketEnv); socket != "" {
-		args = append(args, "-S", socket)
-	}
-	return args
+	return ours().flags()
 }
 
 func run(ctx context.Context, args ...string) (string, error) {
@@ -520,12 +562,30 @@ func run(ctx context.Context, args ...string) (string, error) {
 }
 
 // runOutput runs one tmux command and returns what it printed, including
-// when it failed partway through a sequence of commands.
+// when it failed partway through a sequence of commands. It goes to the
+// server the session it names runs on.
 func runOutput(ctx context.Context, args ...string) (string, error) {
+	return runOutputOn(ctx, serverFor(args), args...)
+}
+
+func runOutputOn(ctx context.Context, server server, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "tmux", append(globalArgs(), args...)...).Output()
+	out, err := exec.CommandContext(ctx, "tmux", append(server.flags(), args...)...).Output()
 	return string(out), err
+}
+
+// runOn runs one command on a given server, with run's error reporting.
+func runOn(ctx context.Context, server server, args ...string) (string, error) {
+	out, err := runOutputOn(ctx, server, args...)
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+			return "", fmt.Errorf("%s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return "", err
+	}
+	return out, nil
 }
 
 // NewName mints a session name for an agent launch.

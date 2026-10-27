@@ -57,7 +57,13 @@
       ],
       "./plugins/withIosBuildFixes",
       "expo-web-browser",
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Agentman listens while you record with the mic button, so you can speak a message to an agent or to Agentman instead of typing it. Your Mac has Celery write it out."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

@@ -2,7 +2,7 @@ import { StyleSheet, Text, View } from "react-native";
 import Svg, { Path } from "react-native-svg";
 
 import { useStyles, useTheme } from "../lib/appearance";
-import { font, Palette } from "../lib/theme";
+import { font, Palette, scaled } from "../lib/theme";
 
 /**
  * The mark: a terminal prompt with a notification waiting on it, which is the
@@ -71,5 +71,5 @@ export function Wordmark({ size = 22 }: { size?: number }) {
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     row: { flexDirection: "row", alignItems: "center", gap: 10 },
-    name: { fontFamily: font.sansBold, fontSize: 18, letterSpacing: -0.4, color: c.text },
+    name: { fontFamily: font.sansBold, fontSize: scaled(18), letterSpacing: -0.4, color: c.text },
   });

@@ -15,7 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useStyles, useTheme } from "../lib/appearance";
-import { font, Palette, radius, size, space } from "../lib/theme";
+import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { ContentColumn } from "./ContentColumn";
 import { MotionPressable } from "./MotionPressable";
 
@@ -219,7 +219,7 @@ export const makeStyles = (c: Palette) =>
       marginTop: space.lg,
       marginBottom: space.xs,
     },
-    intro: { fontFamily: font.sans, fontSize: size.caption, lineHeight: 19, color: c.muted, marginBottom: space.xs },
+    intro: { fontFamily: font.sans, fontSize: size.caption, lineHeight: scaled(19), color: c.muted, marginBottom: space.xs },
     sectionLabel: {
       fontFamily: font.sansBold,
       fontSize: size.caption,
@@ -239,7 +239,7 @@ export const makeStyles = (c: Palette) =>
     footer: {
       fontFamily: font.sans,
       fontSize: size.label,
-      lineHeight: 17,
+      lineHeight: scaled(17),
       color: c.faint,
       marginTop: space.sm,
       marginHorizontal: space.xs,
@@ -255,7 +255,7 @@ export const makeStyles = (c: Palette) =>
     },
     rowWords: { flex: 1, gap: 2 },
     rowLabel: { fontFamily: font.sansMedium, fontSize: size.body, color: c.text },
-    rowDetail: { fontFamily: font.sans, fontSize: size.label, lineHeight: 17, color: c.muted },
+    rowDetail: { fontFamily: font.sans, fontSize: size.label, lineHeight: scaled(17), color: c.muted },
     rowValue: { flexShrink: 1, textAlign: "right", fontFamily: font.sans, fontSize: size.caption, color: c.muted },
     linkLabel: { flexDirection: "row", alignItems: "center", gap: space.sm },
     linkValue: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: space.sm },
@@ -278,7 +278,7 @@ export const makeStyles = (c: Palette) =>
       fontSize: size.body,
       color: c.text,
     },
-    fieldMultiline: { minHeight: 120, textAlignVertical: "top", lineHeight: 21, paddingTop: space.md, paddingBottom: space.md },
+    fieldMultiline: { minHeight: 120, textAlignVertical: "top", lineHeight: scaled(21), paddingTop: space.md, paddingBottom: space.md },
     fieldMono: { fontFamily: font.mono, fontSize: size.caption },
     topAction: {
       height: 36,

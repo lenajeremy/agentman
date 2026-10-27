@@ -15,7 +15,7 @@ import {
 import { useStyles, useTheme } from "../lib/appearance";
 import { CodeViewer } from "./CodeViewer";
 import { SyntaxCode } from "./SyntaxCode";
-import { font, Palette, radius, size, space } from "../lib/theme";
+import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 
 type Styles = ReturnType<typeof makeStyles>;
 
@@ -475,7 +475,7 @@ function makeStyles(c: Palette) {
       fontFamily: font.mono,
       fontSize: size.caption,
       color: c.textSecondary,
-      lineHeight: 18,
+      lineHeight: scaled(18),
     },
     // The fallback keeps the old flat highlight, which wraps.
     inlineCodeFlat: { backgroundColor: c.fill },
@@ -555,7 +555,7 @@ function makeStyles(c: Palette) {
       paddingVertical: space.sm,
       fontFamily: font.sans,
       fontSize: size.caption,
-      lineHeight: 19,
+      lineHeight: scaled(19),
       color: c.text,
     },
     tableHeadCell: { fontFamily: font.sansMedium, color: c.muted },

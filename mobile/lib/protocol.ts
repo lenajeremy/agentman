@@ -250,7 +250,9 @@ export type RequestType =
   | "knowledge_delete"
   | "keys_list"
   | "key_set"
-  | "key_delete";
+  | "key_delete"
+  | "transcribe"
+  | "voice_account";
 
 export interface Request {
   type: RequestType;
@@ -304,6 +306,34 @@ export interface Request {
   manager?: ManagerSettings;
   /** A key's details on key_set; its value is never sent from the phone. */
   key?: Key;
+  /** One part of a recording for the Mac to write out, on transcribe. */
+  voice?: VoiceClip;
+}
+
+/**
+ * A voice prompt travels in parts: 16 kHz mono WAV, as Celery takes it, in
+ * slices of its base64 small enough for the relay, joined on the Mac.
+ */
+export interface VoiceClip {
+  id: string;
+  part: number;
+  parts: number;
+  mime: string;
+  data: string;
+}
+
+/** A part received, or, for the last, what the recording said. */
+export interface Transcript {
+  id: string;
+  done: boolean;
+  text?: string;
+}
+
+/** Whether the Mac is signed in to Celery, which writes voice prompts out. */
+export interface VoiceAccount {
+  signedIn: boolean;
+  email?: string;
+  plan?: string;
 }
 
 export type EventType =
@@ -335,7 +365,9 @@ export type EventType =
   | "manager_permission"
   | "manager_reset"
   | "knowledge"
-  | "keys";
+  | "keys"
+  | "transcript"
+  | "voice_account";
 
 export interface WorkspaceEntry { name: string; directory: boolean; size?: number }
 export interface WorkspaceChange {
@@ -431,6 +463,10 @@ export type SendStatus = "delivered" | "queued" | "failed";
 export interface DaemonEvent {
   type: EventType;
   sessionId?: string;
+  /** What a recording said, on transcript. */
+  transcript?: Transcript;
+  /** The Mac's Celery sign-in, on voice_account. */
+  voiceAccount?: VoiceAccount;
   sessions?: Session[];
   session?: Session;
   messages?: Message[];
@@ -730,6 +766,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     "manager_entry", "manager_delta", "manager_history", "manager_status",
     "manager_brief", "manager_schedules", "manager_settings",
     "manager_permission", "manager_reset", "knowledge", "keys",
+    "transcript", "voice_account",
   ] as const)) return null;
 
   switch (value.type) {
@@ -805,6 +842,16 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
         value.notes = value.notes.filter(isNote);
       }
       if (value.note !== undefined && !isNote(value.note)) delete value.note;
+      break;
+    case "transcript":
+      if (!isRecord(value.transcript) || !boundedString(value.transcript.id, 64, true) ||
+          typeof value.transcript.done !== "boolean" ||
+          !optionalBoundedString(value.transcript.text, 256 * 1024)) return null;
+      break;
+    case "voice_account":
+      if (!isRecord(value.voiceAccount) || typeof value.voiceAccount.signedIn !== "boolean" ||
+          !optionalBoundedString(value.voiceAccount.email, 320) ||
+          !optionalBoundedString(value.voiceAccount.plan, 64)) return null;
       break;
     case "keys":
       value.keys ??= [];

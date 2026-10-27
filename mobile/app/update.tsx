@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ContentColumn } from "../components/ContentColumn";
 import { MotionPressable } from "../components/MotionPressable";
 import { useStyles, useTheme } from "../lib/appearance";
-import { font, Palette, radius, size, space } from "../lib/theme";
+import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { behindText, PromptKind, versionLabel } from "../lib/updates";
 import { useUpdates } from "../lib/updates-context";
 
@@ -226,7 +226,7 @@ const makeStyles = (c: Palette) =>
     lede: {
       fontFamily: font.sans,
       fontSize: size.body,
-      lineHeight: 22,
+      lineHeight: scaled(22),
       color: c.muted,
       marginTop: space.xs,
     },
@@ -256,18 +256,18 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.faint,
       marginTop: 8,
     },
-    changeText: { flex: 1, fontFamily: font.sans, fontSize: size.caption + 1, lineHeight: 20, color: c.textSecondary },
+    changeText: { flex: 1, fontFamily: font.sans, fontSize: size.caption + 1, lineHeight: scaled(20), color: c.textSecondary },
     command: {
       backgroundColor: c.fill,
       borderRadius: radius.md,
       paddingHorizontal: space.md,
       paddingVertical: space.md,
     },
-    commandText: { fontFamily: font.mono, fontSize: size.caption, lineHeight: 19, color: c.text },
+    commandText: { fontFamily: font.mono, fontSize: size.caption, lineHeight: scaled(19), color: c.text },
     footnote: {
       fontFamily: font.sans,
       fontSize: size.label,
-      lineHeight: 16,
+      lineHeight: scaled(16),
       color: c.faint,
       marginTop: space.sm,
       marginHorizontal: space.xxs,
@@ -292,7 +292,7 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.inverse,
       paddingHorizontal: space.xl,
     },
-    primaryButtonText: { fontFamily: font.sansBold, fontSize: 16, color: c.onInverse },
+    primaryButtonText: { fontFamily: font.sansBold, fontSize: scaled(16), color: c.onInverse },
     textButton: { minHeight: 44, alignItems: "center", justifyContent: "center" },
     textButtonLabel: { fontFamily: font.sansMedium, fontSize: size.body, color: c.textSecondary },
   });

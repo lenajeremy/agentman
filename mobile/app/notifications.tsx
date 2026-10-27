@@ -12,7 +12,7 @@ import { useStyles, useTheme } from "../lib/appearance";
 import { NotifyChoice } from "../lib/notification-prefs";
 import { isPushActive, pushFailureReason } from "../lib/push";
 import { useStore } from "../lib/store";
-import { font, Palette, radius, size, space } from "../lib/theme";
+import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 
 type FeatherName = ComponentProps<typeof Feather>["name"];
 
@@ -221,7 +221,7 @@ const makeStyles = (c: Palette) =>
       marginTop: space.lg,
       marginBottom: space.xs,
     },
-    intro: { fontFamily: font.sans, fontSize: size.body, lineHeight: 22, color: c.muted },
+    intro: { fontFamily: font.sans, fontSize: size.body, lineHeight: scaled(22), color: c.muted },
     sectionLabel: {
       fontFamily: font.sansBold,
       fontSize: size.caption,
@@ -238,7 +238,7 @@ const makeStyles = (c: Palette) =>
       borderColor: c.line,
     },
     divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.line },
-    body: { fontFamily: font.sans, fontSize: size.caption, color: c.muted, lineHeight: 19 },
+    body: { fontFamily: font.sans, fontSize: size.caption, color: c.muted, lineHeight: scaled(19) },
     toggleRow: {
       flexDirection: "row",
       alignItems: "center",
@@ -258,7 +258,7 @@ const makeStyles = (c: Palette) =>
     footnote: {
       fontFamily: font.sans,
       fontSize: size.label,
-      lineHeight: 16,
+      lineHeight: scaled(16),
       color: c.faint,
       marginTop: space.sm,
       marginHorizontal: space.xxs,

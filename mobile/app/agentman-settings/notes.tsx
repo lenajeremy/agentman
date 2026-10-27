@@ -7,7 +7,7 @@ import { MotionPressable } from "../../components/MotionPressable";
 import { Divider, Section, SettingsPage, TopAction } from "../../components/SettingsKit";
 import { useStyles, useTheme } from "../../lib/appearance";
 import { useManager } from "../../lib/manager";
-import { font, Palette, size, space } from "../../lib/theme";
+import { font, Palette, size, space, scaled } from "../../lib/theme";
 
 /** The user's notes for their agents: how they like things done, facts about
  *  their projects. Shared ones any agent can read through Agentman; private
@@ -64,7 +64,7 @@ export default function NotesSettings() {
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     empty: { alignItems: "center", gap: space.sm, paddingVertical: space.xl, paddingHorizontal: space.md },
-    emptyText: { fontFamily: font.sans, fontSize: size.caption, lineHeight: 19, color: c.muted, textAlign: "center" },
+    emptyText: { fontFamily: font.sans, fontSize: size.caption, lineHeight: scaled(19), color: c.muted, textAlign: "center" },
     note: { flexDirection: "row", alignItems: "center", gap: space.md, paddingVertical: space.md },
     words: { flex: 1, gap: 4 },
     title: { fontFamily: font.sansMedium, fontSize: size.body, color: c.text },

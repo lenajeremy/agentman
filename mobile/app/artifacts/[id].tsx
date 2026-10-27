@@ -10,7 +10,7 @@ import { useStyles, useTheme } from "../../lib/appearance";
 import { artifactKind, artifactTitle, sortArtifacts } from "../../lib/artifacts";
 import { Artifact } from "../../lib/protocol";
 import { useStore } from "../../lib/store";
-import { agentLabel, ago, font, Palette, radius, size, space } from "../../lib/theme";
+import { agentLabel, ago, font, Palette, radius, size, space, scaled } from "../../lib/theme";
 
 /**
  * The documents one agent wrote for you apart from the conversation: an
@@ -227,7 +227,7 @@ const makeStyles = (c: Palette) =>
       fontSize: size.title,
       letterSpacing: -0.3,
     },
-    subtitle: { color: c.muted, fontFamily: font.mono, fontSize: 11, marginTop: 1 },
+    subtitle: { color: c.muted, fontFamily: font.mono, fontSize: scaled(11), marginTop: 1 },
     iconButton: {
       width: 36,
       height: 36,
@@ -276,15 +276,15 @@ const makeStyles = (c: Palette) =>
       fontFamily: font.sansMedium,
       fontSize: size.body,
     },
-    rowTime: { color: c.faint, fontFamily: font.mono, fontSize: 11 },
+    rowTime: { color: c.faint, fontFamily: font.mono, fontSize: scaled(11) },
     rowSummary: {
       color: c.muted,
       fontFamily: font.sans,
       fontSize: size.caption,
-      lineHeight: 18,
+      lineHeight: scaled(18),
     },
     rowMeta: { flexDirection: "row", alignItems: "center", gap: space.sm, marginTop: 1 },
-    rowName: { flexShrink: 1, color: c.faint, fontFamily: font.mono, fontSize: 11 },
+    rowName: { flexShrink: 1, color: c.faint, fontFamily: font.mono, fontSize: scaled(11) },
     // The same pill a question wears: the agent is waiting on you.
     reviewPill: {
       flexDirection: "row",
@@ -296,7 +296,7 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.needsYouWash,
     },
     reviewDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: c.needsYou },
-    reviewLabel: { color: c.needsYouText, fontFamily: font.sansBold, fontSize: 11 },
+    reviewLabel: { color: c.needsYouText, fontFamily: font.sansBold, fontSize: scaled(11) },
 
     emptyWrap: { alignItems: "center", gap: space.sm, paddingVertical: space.xxl },
     empty: {
@@ -315,8 +315,8 @@ const makeStyles = (c: Palette) =>
     note: {
       color: c.faint,
       fontFamily: font.sans,
-      fontSize: 11.5,
+      fontSize: scaled(11.5),
       marginTop: space.md,
-      lineHeight: 16,
+      lineHeight: scaled(16),
     },
   });

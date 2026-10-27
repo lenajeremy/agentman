@@ -27,15 +27,17 @@ import { SwipeToDismiss } from "../components/SwipeToDismiss";
 import { KEEP_READING, ScrollToLatest, SCROLL_AWAY } from "../components/ScrollToLatest";
 import { SeenImage } from "../components/SeenImage";
 import { Thinking } from "../components/Thinking";
+import { VoiceButton } from "../components/VoiceButton";
 import { useStyles, useTheme } from "../lib/appearance";
 import { useManager } from "../lib/manager";
 import { chatItems, type ChatItem } from "../lib/manager-feed";
 import { MANAGER_MODELS, modelName } from "../lib/manager-models";
 import type { ManagerEntry, ManagerSchedule } from "../lib/protocol";
 import { useStore } from "../lib/store";
-import { font, Palette, radius, size, space } from "../lib/theme";
+import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { useAttachments } from "../lib/use-attachments";
 import { chooseImageSource } from "../lib/image-source-sheet";
+import { addSpoken } from "../lib/voice";
 import { addPastedImagesListener, pasteTakesImages } from "../modules/image-paste";
 
 /**
@@ -289,6 +291,11 @@ export default function AgentmanScreen() {
                   <Feather name="chevron-down" size={13} color={color.muted} />
                 </MotionPressable>
               ) : null}
+              <VoiceButton
+                disabled={!reachable}
+                onText={(spoken) => setDraft((current) => addSpoken(current, spoken))}
+                onProblem={(message) => Alert.alert("Voice", message)}
+              />
               {manager.thinking ? (
                 <MotionPressable onPress={manager.stop} style={styles.send}
                   accessibilityRole="button" accessibilityLabel="Stop Agentman">
@@ -605,7 +612,7 @@ const makeStyles = (c: Palette) =>
     thinking: { paddingVertical: space.xs },
     empty: { alignItems: "center", gap: space.sm, paddingHorizontal: space.xl, paddingVertical: space.xxxl },
     emptyTitle: { fontFamily: font.sansMedium, fontSize: size.body, color: c.text, marginTop: space.sm },
-    emptyText: { fontFamily: font.sans, fontSize: size.caption, color: c.muted, textAlign: "center", lineHeight: 19 },
+    emptyText: { fontFamily: font.sans, fontSize: size.caption, color: c.muted, textAlign: "center", lineHeight: scaled(19) },
 
     userRow: { alignItems: "flex-end", gap: space.sm, paddingLeft: space.xxl },
     bubble: {
@@ -614,7 +621,7 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: 14,
       paddingVertical: 10,
     },
-    bubbleText: { fontFamily: font.sans, fontSize: size.reading, lineHeight: 23, color: c.text },
+    bubbleText: { fontFamily: font.sans, fontSize: size.reading, lineHeight: scaled(23), color: c.text },
     keptRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: space.sm },
     kept: {
       width: 110,
@@ -655,7 +662,7 @@ const makeStyles = (c: Palette) =>
     briefHead: { flexDirection: "row", alignItems: "center", gap: space.sm },
     briefName: { flex: 1, fontFamily: font.sansMedium, fontSize: size.body, color: c.text },
     briefClose: { width: 24, height: 24, marginRight: -4, alignItems: "center", justifyContent: "center" },
-    briefText: { fontFamily: font.sans, fontSize: size.reading, lineHeight: 23, color: c.textSecondary },
+    briefText: { fontFamily: font.sans, fontSize: size.reading, lineHeight: scaled(23), color: c.textSecondary },
     briefNeeds: { fontFamily: font.sans, fontSize: size.caption, color: c.needsYouText },
 
     quietLine: { flexDirection: "row", alignItems: "center", gap: 6 },
@@ -689,7 +696,7 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.fill,
     },
     noticeBody: { flex: 1, gap: space.xs },
-    noticeText: { fontFamily: font.sans, fontSize: size.caption, lineHeight: 19, color: c.textSecondary },
+    noticeText: { fontFamily: font.sans, fontSize: size.caption, lineHeight: scaled(19), color: c.textSecondary },
     noticeAction: { fontFamily: font.sansMedium, fontSize: size.caption, color: c.working },
     field: {
       backgroundColor: c.surface,
@@ -721,7 +728,7 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: 10,
       borderRadius: radius.pill,
     },
-    modelText: { flexShrink: 1, fontFamily: font.sansMedium, fontSize: 13, color: c.muted },
+    modelText: { flexShrink: 1, fontFamily: font.sansMedium, fontSize: scaled(13), color: c.muted },
     toolbarGap: { flex: 1 },
     attach: { width: 34, height: 34, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
     send: {

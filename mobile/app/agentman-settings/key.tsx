@@ -6,7 +6,7 @@ import { MotionPressable } from "../../components/MotionPressable";
 import { Divider, Field, Problem, Section, Segmented, SettingsPage, TopAction } from "../../components/SettingsKit";
 import { useStyles } from "../../lib/appearance";
 import { useManager } from "../../lib/manager";
-import { font, Palette, radius, size, space } from "../../lib/theme";
+import { font, Palette, radius, size, space, scaled } from "../../lib/theme";
 
 const RULES = [
   { value: "auto", label: "Any agent" },
@@ -108,7 +108,7 @@ export default function KeyEditor() {
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
-    valueNote: { fontFamily: font.sans, fontSize: size.label, lineHeight: 17, color: c.muted, marginTop: space.md, marginHorizontal: space.xs },
+    valueNote: { fontFamily: font.sans, fontSize: size.label, lineHeight: scaled(17), color: c.muted, marginTop: space.md, marginHorizontal: space.xs },
     delete: {
       minHeight: 48,
       marginTop: space.xl,

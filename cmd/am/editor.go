@@ -10,16 +10,35 @@ import (
 	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/lsp"
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/tmux"
 )
 
 // appRequests answers what only an app on this Mac may ask, then hands the
 // rest to the daemon, as the relay does. The phone's requests never come
 // this way, so the language servers' endpoint, token and settings stay on
 // the Mac.
-func appRequests(handle func(context.Context, string, protocol.Request) protocol.Event, languages *lsp.Host, configHome string) func(context.Context, string, protocol.Request) protocol.Event {
+func appRequests(handle func(context.Context, string, protocol.Request) protocol.Event, languages *lsp.Host, configHome string,
+	paneFor func(string) (string, bool)) func(context.Context, string, protocol.Request) protocol.Event {
 	return func(ctx context.Context, from string, req protocol.Request) protocol.Event {
 		var err error
 		switch req.Type {
+		case protocol.ReqAgentsTmux:
+			// `am claude` asks before starting an agent, so the server it
+			// runs on is started here, by am serve, not by a terminal.
+			if err := tmux.EnsureServer(ctx); err != nil {
+				return protocol.Event{Type: protocol.EvtError, Error: err.Error()}
+			}
+			return protocol.Event{Type: protocol.EvtAgentsTmux, Tmux: &protocol.AgentsTmux{
+				Socket: tmux.SocketPath(), PID: tmux.ServerPID(ctx), Service: inService(),
+			}}
+		case protocol.ReqSessionTerminal:
+			name, ok := paneFor(req.SessionID)
+			if !ok || name == "" || !tmux.Has(ctx, name) {
+				return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID,
+					Error: "this agent isn't running in a terminal Agentman can show"}
+			}
+			return protocol.Event{Type: protocol.EvtSessionTerminal, SessionID: req.SessionID,
+				Terminal: &protocol.SessionTerminal{Name: name, Argv: tmux.AttachArgs(ctx, name)}}
 		case protocol.ReqLSPEndpoint:
 			url, token, err := languages.Endpoint()
 			if err != nil {

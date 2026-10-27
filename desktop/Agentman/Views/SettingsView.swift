@@ -809,6 +809,107 @@ enum Appearance {
     }
 }
 
+/// Voice prompts: Celery writes out what the user says. Agentman signs in to
+/// their Celery account as a device of its own, with a code Celery emails;
+/// the sign-in stays in the Mac's Keychain and never reaches the app.
+struct VoiceSection: View {
+    @Environment(AgentsStore.self) private var store
+    @State private var account: VoiceAccount?
+    @State private var email = ""
+    @State private var code = ""
+    @State private var requestId: String?
+    @State private var busy = false
+    @State private var problem: String?
+
+    var body: some View {
+        SettingsSection(title: "Voice prompts",
+                        footer: "Speak a message with the mic beside any message box, here or on your phone. Celery writes it out: the ums and false starts go, and nothing is reworded.") {
+            if account?.signedIn == true {
+                SettingsRow(title: "Celery", detail: signedInDetail, divider: false) {
+                    Button("Sign Out") { act(.voiceSignOut, nil) }
+                        .disabled(busy)
+                }
+            } else if let requestId {
+                SettingsRow(title: "Code", detail: "Celery emailed a code to \(email).", divider: false) {
+                    HStack(spacing: 8) {
+                        TextField("Code", text: $code)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 100)
+                            .onSubmit { verify(requestId) }
+                        Button("Sign In") { verify(requestId) }
+                            .disabled(code.trimmingCharacters(in: .whitespaces).isEmpty || busy)
+                        Button("Back") {
+                            self.requestId = nil
+                            code = ""
+                        }
+                        .buttonStyle(.link)
+                    }
+                }
+            } else {
+                SettingsRow(title: "Celery", detail: "Sign in to your Celery account to speak your messages.", divider: false) {
+                    HStack(spacing: 8) {
+                        // Verbatim: as a localized key, the example address
+                        // became a mailto link.
+                        TextField("", text: $email, prompt: Text(verbatim: "you@example.com"))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 210)
+                            .onSubmit(start)
+                        Button("Send Code", action: start)
+                            .disabled(!email.contains("@") || busy)
+                    }
+                }
+            }
+            if let problem {
+                Text(problem)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.errorText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 12)
+            }
+        }
+        .task {
+            if case .success(let found) = await store.voiceAccount() { account = found }
+        }
+    }
+
+    private var signedInDetail: String {
+        let who = account?.email.map { "Signed in as \($0)" } ?? "Signed in"
+        guard let plan = account?.plan, !plan.isEmpty else { return who }
+        return who + " · " + plan.capitalized + " plan"
+    }
+
+    private func start() {
+        guard email.contains("@") else { return }
+        act(.voiceSignInStart, VoiceSignIn(email: email.trimmingCharacters(in: .whitespaces)))
+    }
+
+    private func verify(_ requestId: String) {
+        act(.voiceSignInVerify, VoiceSignIn(requestId: requestId, code: code.trimmingCharacters(in: .whitespaces)))
+    }
+
+    private func act(_ type: RequestType, _ step: VoiceSignIn?) {
+        busy = true
+        problem = nil
+        Task {
+            switch await store.voiceAccount(type, step) {
+            case .success(let found):
+                if let id = found.requestId, type == .voiceSignInStart {
+                    requestId = id
+                } else {
+                    account = found
+                    requestId = nil
+                    code = ""
+                }
+            case .failure(let failure):
+                problem = failure.message
+            }
+            busy = false
+        }
+    }
+}
+
 /// How the code editor takes keys.
 private struct EditorSection: View {
     @AppStorage("editorVim") private var vim = false

@@ -14,7 +14,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { useStyles } from "../lib/appearance";
-import { font, Palette, radius } from "../lib/theme";
+import { font, Palette, radius, scaled } from "../lib/theme";
 
 /** How far the row must travel before letting go dismisses it. */
 const THRESHOLD = 88;
@@ -162,6 +162,6 @@ const makeStyles = (c: Palette) =>
     backdropText: {
       color: "#fff",
       fontFamily: font.sansBold,
-      fontSize: 15,
+      fontSize: scaled(15),
     },
   });

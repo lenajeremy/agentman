@@ -802,6 +802,7 @@ private struct ThinkingDots: View {
 /// button, pasted or dropped, and wait above the words until sent. Return
 /// sends; Shift-Return starts a new line; the box grows to ten lines.
 private struct ManagerComposer: View {
+    @Environment(AgentsStore.self) private var store
     @Environment(\.fileMentions) private var mentions
     @Binding var text: String
     var attachments: Binding<[Attachment]> = .constant([])
@@ -844,6 +845,13 @@ private struct ManagerComposer: View {
                     mentions: mentions
                 )
                 .padding(.vertical, large ? 9 : 6)
+
+                VoiceButton(size: large ? 32 : 28, onText: { spoken in
+                    text = text.adding(spoken: spoken)
+                    focused = true
+                }, onProblem: { problem in
+                    store.manager.problem = problem
+                })
 
                 Button {
                     thinking ? onStop() : onSend()

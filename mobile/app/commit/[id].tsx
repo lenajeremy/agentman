@@ -28,7 +28,7 @@ import {
 } from "../../lib/commits";
 import { WorkspaceResult } from "../../lib/protocol";
 import { useStore } from "../../lib/store";
-import { font, Palette, radius, size, space } from "../../lib/theme";
+import { font, Palette, radius, size, space, scaled } from "../../lib/theme";
 
 /** The message's line height, and where a long one is cut: six lines is most
  *  messages whole, and leaves the files on the first screen of a long one. */
@@ -341,7 +341,7 @@ const makeStyles = (c: Palette) =>
     subtitle: {
       color: c.muted,
       fontFamily: font.mono,
-      fontSize: 11,
+      fontSize: scaled(11),
       marginTop: 1,
     },
     iconButton: {
@@ -359,8 +359,8 @@ const makeStyles = (c: Palette) =>
     subject: {
       color: c.text,
       fontFamily: font.sansBold,
-      fontSize: 20,
-      lineHeight: 26,
+      fontSize: scaled(20),
+      lineHeight: scaled(26),
       letterSpacing: -0.4,
     },
 
@@ -385,12 +385,12 @@ const makeStyles = (c: Palette) =>
     monogramText: {
       color: c.muted,
       fontFamily: font.sansBold,
-      fontSize: 12,
+      fontSize: scaled(12),
       letterSpacing: 0.3,
     },
     authorText: { flex: 1, minWidth: 0, gap: 1 },
-    author: { color: c.text, fontFamily: font.sansMedium, fontSize: 14 },
-    when: { color: c.muted, fontFamily: font.sans, fontSize: 12 },
+    author: { color: c.text, fontFamily: font.sansMedium, fontSize: scaled(14) },
+    when: { color: c.muted, fontFamily: font.sans, fontSize: scaled(12) },
     hashChip: {
       flexDirection: "row",
       alignItems: "center",
@@ -403,7 +403,7 @@ const makeStyles = (c: Palette) =>
       borderColor: c.line,
     },
     hashChipCopied: { backgroundColor: c.okWash, borderColor: c.okWash },
-    hash: { color: c.textSecondary, fontFamily: font.monoMedium, fontSize: 12 },
+    hash: { color: c.textSecondary, fontFamily: font.monoMedium, fontSize: scaled(12) },
     hashCopied: { color: c.ok, fontFamily: font.sansMedium },
 
     bodyBlock: { marginTop: space.lg },
@@ -456,15 +456,15 @@ const makeStyles = (c: Palette) =>
     trailerKey: {
       color: c.faint,
       fontFamily: font.sansMedium,
-      fontSize: 10.5,
+      fontSize: scaled(10.5),
       letterSpacing: 0.6,
       textTransform: "uppercase",
     },
     trailerValue: {
       color: c.textSecondary,
       fontFamily: font.sans,
-      fontSize: 13.5,
-      lineHeight: 19,
+      fontSize: scaled(13.5),
+      lineHeight: scaled(19),
     },
 
     summary: { marginTop: space.xl, marginBottom: space.md, gap: space.sm },
@@ -500,8 +500,8 @@ const makeStyles = (c: Palette) =>
       flex: 1,
       color: c.faint,
       fontFamily: font.sans,
-      fontSize: 11.5,
-      lineHeight: 16,
+      fontSize: scaled(11.5),
+      lineHeight: scaled(16),
     },
 
     center: { marginTop: space.xl },
@@ -520,8 +520,8 @@ const makeStyles = (c: Palette) =>
     note: {
       color: c.faint,
       fontFamily: font.sans,
-      fontSize: 11.5,
+      fontSize: scaled(11.5),
       marginTop: space.md,
-      lineHeight: 16,
+      lineHeight: scaled(16),
     },
   });

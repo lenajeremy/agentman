@@ -17,7 +17,7 @@ import { agentCount, folderLabel } from "../lib/folders";
 import { Folder } from "../lib/protocol";
 import { useStore } from "../lib/store";
 import { useDirectoryBrowser } from "../lib/use-directory-browser";
-import { font, Palette, radius, size, space } from "../lib/theme";
+import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 
 /**
  * Picking a folder to filter the agent list by.
@@ -355,14 +355,14 @@ function makeStyles(c: Palette) {
       borderTopColor: c.line,
     },
     rowBody: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
-    rowLabel: { fontFamily: font.sansMedium, fontSize: 14.5, color: c.text },
+    rowLabel: { fontFamily: font.sansMedium, fontSize: scaled(14.5), color: c.text },
     rowLabelMono: { fontFamily: font.monoMedium },
     rowLabelMuted: { color: c.textSecondary },
     rowNote: {
       marginTop: space.xxs,
       fontFamily: font.mono,
       fontSize: size.label,
-      lineHeight: 18,
+      lineHeight: scaled(18),
       color: c.muted,
     },
     liveDot: {

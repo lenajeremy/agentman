@@ -123,7 +123,7 @@ struct MessageField: NSViewRepresentable {
 
     static func font(_ size: CGFloat) -> NSFont {
         let descriptor = NSFontDescriptor(fontAttributes: [.family: "Google Sans"])
-        return NSFont(descriptor: descriptor, size: size) ?? .systemFont(ofSize: size)
+        return NSFont(descriptor: descriptor, size: size * Fonts.scale) ?? .systemFont(ofSize: size * Fonts.scale)
     }
 
     @MainActor

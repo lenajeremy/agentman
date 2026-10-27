@@ -37,6 +37,7 @@ import {
   size,
   space,
   stateStyle,
+  scaled,
 } from "../lib/theme";
 import { folderName, modelLabel } from "../lib/session-view";
 
@@ -896,7 +897,7 @@ const makeStyles = (c: Palette) =>
     pillDot: { width: 6, height: 6, borderRadius: 3 },
     pillLabel: {
       fontFamily: font.sansBold,
-      fontSize: 11.5,
+      fontSize: scaled(11.5),
       color: c.needsYouText,
     },
     askName: {
@@ -944,7 +945,7 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.fill,
     },
     serversLine: { flexDirection: "row", alignItems: "center", gap: 5 },
-    serversText: { fontFamily: font.mono, fontSize: 12, color: c.muted },
+    serversText: { fontFamily: font.mono, fontSize: scaled(12), color: c.muted },
     avatarPulse: {
       position: "absolute",
       right: -8,
@@ -1020,7 +1021,7 @@ const makeStyles = (c: Palette) =>
     },
     emptyTitle: {
       fontFamily: font.sansBold,
-      fontSize: 26,
+      fontSize: scaled(26),
       letterSpacing: -0.8,
       color: c.text,
       textAlign: "center",
@@ -1029,7 +1030,7 @@ const makeStyles = (c: Palette) =>
       fontFamily: font.sans,
       fontSize: size.body,
       color: c.muted,
-      lineHeight: 22,
+      lineHeight: scaled(22),
       textAlign: "center",
       maxWidth: 320,
     },
@@ -1046,8 +1047,8 @@ const makeStyles = (c: Palette) =>
       borderWidth: 1,
       borderColor: c.line,
     },
-    commandPrompt: { fontFamily: font.mono, fontSize: 14, color: c.faint },
-    commandText: { fontFamily: font.mono, fontSize: 14, color: c.text },
+    commandPrompt: { fontFamily: font.mono, fontSize: scaled(14), color: c.faint },
+    commandText: { fontFamily: font.mono, fontSize: scaled(14), color: c.text },
     emptyHint: {
       fontFamily: font.sans,
       fontSize: size.caption,

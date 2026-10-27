@@ -86,6 +86,12 @@ enum RequestType: String, Codable, Sendable {
     case lspStatus = "lsp_status"
     case lspSet = "lsp_set"
     case lspRemove = "lsp_remove"
+    case sessionTerminal = "session_terminal"
+    case transcribe
+    case voiceAccount = "voice_account"
+    case voiceSignInStart = "voice_signin_start"
+    case voiceSignInVerify = "voice_signin_verify"
+    case voiceSignOut = "voice_signout"
 }
 
 struct DaemonRequest: Codable, Sendable {
@@ -126,6 +132,10 @@ struct DaemonRequest: Codable, Sendable {
     var language: LanguageChange?
     /// An agent's own alerts on or off, on set_agent_alerts.
     var alerts: Bool?
+    /// One part of a recording to write out, on transcribe.
+    var voice: VoiceClip?
+    /// A step of signing in to Celery, for voice prompts.
+    var voiceSignIn: VoiceSignIn?
 
     init(_ type: RequestType, sessionId: String? = nil) {
         self.type = type
@@ -187,6 +197,12 @@ struct DaemonEvent: Codable, Sendable {
 
     /// Where the editor's language servers are, on "lsp_endpoint".
     var lsp: LSPEndpoint?
+    /// How to show an agent's terminal, on "session_terminal".
+    var terminal: SessionTerminal?
+    /// What a recording said, on "transcript".
+    var transcript: Transcript?
+    /// Agentman's Celery account, on "voice_account".
+    var voiceAccount: VoiceAccount?
     /// The editor's language servers, on "lsp_status".
     var languages: LanguagesState?
 }
@@ -218,6 +234,45 @@ struct LanguageChange: Codable, Sendable, Equatable {
     var path: String?
     var disabled: Bool?
     var noDownloads: Bool?
+}
+
+/// One part of a recording: 16 kHz mono WAV, as Celery takes it, sent in
+/// slices of its base64 that the daemon joins.
+struct VoiceClip: Codable, Sendable {
+    var id: String
+    var part: Int
+    var parts: Int
+    var mime: String
+    var data: String
+}
+
+/// A part received, or, for the last, what was said.
+struct Transcript: Codable, Sendable {
+    var id: String
+    var done: Bool
+    var text: String?
+}
+
+/// A step of signing in to Celery.
+struct VoiceSignIn: Codable, Sendable {
+    var email: String?
+    var requestId: String?
+    var code: String?
+}
+
+/// Agentman's Celery account, for voice prompts.
+struct VoiceAccount: Codable, Sendable, Equatable {
+    var signedIn: Bool
+    var email: String?
+    var plan: String?
+    var requestId: String?
+}
+
+/// An agent's terminal: the tmux session it runs in, and the command that
+/// attaches a terminal to it.
+struct SessionTerminal: Codable, Sendable, Equatable {
+    var name: String
+    var argv: [String]
 }
 
 /// The language servers' WebSocket on loopback, and the token it wants.

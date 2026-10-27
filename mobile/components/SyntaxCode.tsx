@@ -22,7 +22,7 @@ import { useMemo } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { useTheme } from "../lib/appearance";
-import { font, Palette, space } from "../lib/theme";
+import { font, Palette, space, scaled } from "../lib/theme";
 
 for (const [name, grammar] of Object.entries({ bash, c, cpp, css, dockerfile, go, java, javascript, json, kotlin, markdown, python, ruby, rust, sql, swift, typescript, xml, yaml })) {
   hljs.registerLanguage(name, grammar);
@@ -225,17 +225,17 @@ const makeStyles = (c: Palette) =>
     row: { flexDirection: "row", alignItems: "flex-start", paddingRight: space.md },
     gutter: {
       fontFamily: font.mono,
-      fontSize: 11,
-      lineHeight: 20,
+      fontSize: scaled(11),
+      lineHeight: scaled(20),
       color: c.faint,
       textAlign: "right",
       paddingRight: space.sm,
     },
-    code: { fontFamily: font.mono, fontSize: 12.5, lineHeight: 20, color: c.text },
+    code: { fontFamily: font.mono, fontSize: scaled(12.5), lineHeight: scaled(20), color: c.text },
     codeWrap: { flex: 1 },
     more: {
       fontFamily: font.sans,
-      fontSize: 12,
+      fontSize: scaled(12),
       color: c.muted,
       padding: space.md,
       borderTopWidth: 1,

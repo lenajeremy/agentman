@@ -89,6 +89,11 @@ enum Palette {
 /// Sans Code every weight from Light to ExtraBold, and the system picks the
 /// optical size for the point size.
 enum Fonts {
+    /// Every size in the app, made a little larger than the type scale
+    /// below says: the user found the text too small to read comfortably.
+    /// Changing this one number moves all the text together.
+    static let scale: CGFloat = 1.1
+
     static func register() {
         let urls = Bundle.main.urls(forResourcesWithExtension: "ttf", subdirectory: nil) ?? []
         for url in urls {
@@ -97,11 +102,11 @@ enum Fonts {
     }
 
     static func sans(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .custom("Google Sans", size: size).weight(weight)
+        .custom("Google Sans", size: size * scale).weight(weight)
     }
 
     static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .custom("Google Sans Code", size: size).weight(weight)
+        .custom("Google Sans Code", size: size * scale).weight(weight)
     }
 }
 

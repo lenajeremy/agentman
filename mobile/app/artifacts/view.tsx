@@ -22,7 +22,7 @@ import { useStyles, useTheme } from "../../lib/appearance";
 import { artifactKind, artifactTitle, isMarkdown } from "../../lib/artifacts";
 import { Artifact, WorkspaceResult } from "../../lib/protocol";
 import { useStore } from "../../lib/store";
-import { agentLabel, font, Palette, radius, size, space } from "../../lib/theme";
+import { agentLabel, font, Palette, radius, size, space, scaled } from "../../lib/theme";
 
 type Review =
   | { step: "idle" }
@@ -338,7 +338,7 @@ const makeStyles = (c: Palette) =>
       fontSize: size.title,
       letterSpacing: -0.3,
     },
-    subtitle: { color: c.muted, fontFamily: font.mono, fontSize: 11, marginTop: 1 },
+    subtitle: { color: c.muted, fontFamily: font.mono, fontSize: scaled(11), marginTop: 1 },
     iconButton: {
       width: 36,
       height: 36,
@@ -363,7 +363,7 @@ const makeStyles = (c: Palette) =>
     markdown: { paddingHorizontal: space.lg },
     center: { marginTop: space.xl },
     message: { paddingHorizontal: space.lg, paddingTop: space.md },
-    error: { color: c.errorText, fontFamily: font.sans, fontSize: size.body, lineHeight: 21 },
+    error: { color: c.errorText, fontFamily: font.sans, fontSize: size.body, lineHeight: scaled(21) },
     note: { color: c.muted, fontFamily: font.sans, fontSize: size.caption },
 
     // The session's question sheet, reused: docked, rounded on top, and on the
@@ -396,7 +396,7 @@ const makeStyles = (c: Palette) =>
     prompt: {
       fontFamily: font.sans,
       fontSize: size.body,
-      lineHeight: 21,
+      lineHeight: scaled(21),
       color: c.textSecondary,
     },
     input: {
@@ -412,8 +412,8 @@ const makeStyles = (c: Palette) =>
       paddingBottom: space.md,
       textAlignVertical: "top",
     },
-    failed: { fontFamily: font.sans, fontSize: size.caption, lineHeight: 18, color: c.errorText },
-    offline: { fontFamily: font.sans, fontSize: size.caption, lineHeight: 18, color: c.muted },
+    failed: { fontFamily: font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.errorText },
+    offline: { fontFamily: font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.muted },
     buttons: { flexDirection: "row", gap: space.sm },
     button: {
       flex: 1,
@@ -441,7 +441,7 @@ const makeStyles = (c: Palette) =>
       flex: 1,
       fontFamily: font.sansMedium,
       fontSize: size.caption,
-      lineHeight: 18,
+      lineHeight: scaled(18),
       color: c.text,
     },
   });

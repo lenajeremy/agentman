@@ -25,7 +25,7 @@ import { describeSource, fetchOriginal, saveName } from "../../lib/original";
 import { WorkspaceResult } from "../../lib/protocol";
 import { appendPiece, discard, offerFile, scratchFile } from "../../lib/save-image";
 import { useStore } from "../../lib/store";
-import { font, Palette, radius, size, space } from "../../lib/theme";
+import { font, Palette, radius, size, space, scaled } from "../../lib/theme";
 
 export default function FileScreen() {
   const {
@@ -591,7 +591,7 @@ const makeStyles = (c: Palette) =>
     },
     saveDetail: {
       fontFamily: font.mono,
-      fontSize: 11,
+      fontSize: scaled(11),
       color: "rgba(255, 255, 255, 0.62)",
       marginTop: 1,
     },
@@ -618,7 +618,7 @@ const makeStyles = (c: Palette) =>
     },
     photoPath: {
       fontFamily: font.mono,
-      fontSize: 11,
+      fontSize: scaled(11),
       color: "rgba(255, 255, 255, 0.55)",
       marginTop: 1,
     },
@@ -632,7 +632,7 @@ const makeStyles = (c: Palette) =>
     },
     heading: { flex: 1 },
     title: { color: c.text, fontFamily: font.sansBold, fontSize: size.title },
-    path: { color: c.muted, fontFamily: font.mono, fontSize: 11 },
+    path: { color: c.muted, fontFamily: font.mono, fontSize: scaled(11) },
     iconButton: {
       width: 40,
       height: 40,
@@ -678,7 +678,7 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.fill,
     },
     wrapToggleOn: { backgroundColor: c.inverse },
-    wrapLabel: { color: c.muted, fontFamily: font.sansMedium, fontSize: 12 },
+    wrapLabel: { color: c.muted, fontFamily: font.sansMedium, fontSize: scaled(12) },
     wrapLabelOn: { color: c.onInverse },
 
     statBar: {
@@ -688,13 +688,13 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: space.lg,
       paddingBottom: space.sm,
     },
-    statAdd: { color: c.ok, fontFamily: font.monoMedium, fontSize: 12 },
+    statAdd: { color: c.ok, fontFamily: font.monoMedium, fontSize: scaled(12) },
     statRemove: {
       color: c.errorText,
       fontFamily: font.monoMedium,
-      fontSize: 12,
+      fontSize: scaled(12),
     },
-    statNote: { color: c.faint, fontFamily: font.sans, fontSize: 11.5 },
+    statNote: { color: c.faint, fontFamily: font.sans, fontSize: scaled(11.5) },
     inlineStat: {
       flexDirection: "row",
       alignItems: "center",
@@ -707,7 +707,7 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.sm - 2,
       backgroundColor: c.fill,
     },
-    statHashText: { color: c.muted, fontFamily: font.mono, fontSize: 11 },
+    statHashText: { color: c.muted, fontFamily: font.mono, fontSize: scaled(11) },
 
     diffFrame: {
       backgroundColor: c.surface,
@@ -727,24 +727,24 @@ const makeStyles = (c: Palette) =>
       textAlign: "right",
       paddingRight: 6,
       fontFamily: font.mono,
-      fontSize: 10.5,
-      lineHeight: 19,
+      fontSize: scaled(10.5),
+      lineHeight: scaled(19),
       color: c.faint,
     },
     diffMark: {
       width: 14,
       textAlign: "center",
       fontFamily: font.monoMedium,
-      fontSize: 12,
-      lineHeight: 19,
+      fontSize: scaled(12),
+      lineHeight: scaled(19),
       color: c.faint,
     },
     markAdd: { color: c.ok },
     markRemove: { color: c.errorText },
     diffLine: {
       fontFamily: font.mono,
-      fontSize: 12,
-      lineHeight: 19,
+      fontSize: scaled(12),
+      lineHeight: scaled(19),
       color: c.text,
     },
     diffLineWrap: { flex: 1 },
@@ -758,5 +758,5 @@ const makeStyles = (c: Palette) =>
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderColor: c.workingSoft,
     },
-    hunkText: { color: c.workingText, fontFamily: font.mono, fontSize: 11 },
+    hunkText: { color: c.workingText, fontFamily: font.mono, fontSize: scaled(11) },
   });

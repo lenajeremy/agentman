@@ -33,7 +33,9 @@ import (
 	"github.com/lenajeremy/agentman/internal/relay"
 	"github.com/lenajeremy/agentman/internal/secrets"
 	"github.com/lenajeremy/agentman/internal/servers"
+	"github.com/lenajeremy/agentman/internal/shellenv"
 	"github.com/lenajeremy/agentman/internal/source"
+	"github.com/lenajeremy/agentman/internal/tmux"
 	"github.com/lenajeremy/agentman/internal/update"
 )
 
@@ -188,6 +190,23 @@ func runServe(ctx context.Context, args []string) error {
 		}
 	}
 
+	if *configHome == "" {
+		if err := refuseBesideService(); err != nil {
+			return err
+		}
+	}
+	// Started by the service at login, am serve has none of the environment
+	// a terminal would have given it; the login shell's puts it back, for
+	// itself and every agent it starts.
+	if inService() {
+		if env, err := shellenv.Load(ctx); err != nil {
+			fmt.Printf("%s\n", dim("service    couldn't read your shell's environment ("+err.Error()+"); agents get launchd's"))
+		} else {
+			shellenv.Apply(env)
+			fmt.Printf("%s\n", dim("service    running at login, with your shell's environment"))
+		}
+	}
+
 	cfg, err := hook.LoadConfig(*configHome)
 	if err != nil {
 		return err
@@ -279,6 +298,17 @@ func runServe(ctx context.Context, args []string) error {
 		}
 	}
 
+	// Agents run on a tmux server of their own, started here so it belongs
+	// to am serve (and, run by the service, to no terminal at all): quitting
+	// a terminal app leaves them running.
+	if tmux.Available() {
+		if err := tmux.EnsureServer(ctx); err != nil {
+			fmt.Printf("%s\n", dim("agents     "+err.Error()))
+		} else {
+			fmt.Printf("%s\n", dim("agents     tmux server "+collapseHome(tmux.SocketPath())))
+		}
+	}
+
 	sink := multiSink{sinks: sinks}
 	agent := daemon.New(registry, sink)
 	// The user's names for sessions, and the agents they asked to hear from
@@ -293,7 +323,7 @@ func runServe(ctx context.Context, args []string) error {
 	defer languages.Close()
 	if local != nil {
 		go func() {
-			if err := local.Serve(ctx, appRequests(agent.HandleFrom, languages, *configHome), agent.DisconnectSubscriber); err != nil {
+			if err := local.Serve(ctx, appRequests(agent.HandleFrom, languages, *configHome, agent.PaneFor), agent.DisconnectSubscriber); err != nil {
 				fmt.Fprintf(os.Stderr, "am: %v\n", err)
 			}
 		}()

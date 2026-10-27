@@ -18,7 +18,7 @@ import { parseDiff } from "../lib/diff";
 import { artifactRowName } from "../lib/artifacts";
 import { readImage, workspaceImage, type ImageTarget } from "../lib/imagepath";
 import { Message } from "../lib/protocol";
-import { font, Palette, radius, size, space } from "../lib/theme";
+import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { toolIcon } from "../lib/tool-icon";
 import { MotionPressable } from "./MotionPressable";
 import { OutputViewer } from "./OutputViewer";
@@ -591,8 +591,8 @@ const makeStyles = (c: Palette) =>
     },
     commandText: {
       fontFamily: font.mono,
-      fontSize: 12,
-      lineHeight: 18,
+      fontSize: scaled(12),
+      lineHeight: scaled(18),
       color: c.textSecondary,
     },
 
@@ -607,8 +607,8 @@ const makeStyles = (c: Palette) =>
     outputFailed: { backgroundColor: c.errorWash },
     outputText: {
       fontFamily: font.mono,
-      fontSize: 12,
-      lineHeight: 18,
+      fontSize: scaled(12),
+      lineHeight: scaled(18),
       color: c.muted,
     },
     outputTextFailed: { color: c.errorText },
