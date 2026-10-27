@@ -116,7 +116,9 @@ lsp.setup({
 })
 
 // Go to Definition into another file: Swift opens its tab, and the range
-// is revealed when it comes to the front.
+// is revealed when it comes to the front. Into the file in front there is
+// nothing to open: the editor moves there itself. Asked to open it, Swift
+// found it already in front, and nothing moved.
 monaco.editor.registerEditorOpener({
   openCodeEditor(_source, resource, selectionOrPosition) {
     if (resource.scheme !== 'file') return false
@@ -125,6 +127,11 @@ monaco.editor.registerEditorOpener({
         ? selectionOrPosition
         : monaco.Range.fromPositions(selectionOrPosition)
       lsp.reveal.set(resource.toString(), range)
+    }
+    const model = editor.getModel()
+    if (model?.uri.toString() === resource.toString()) {
+      revealPending(model)
+      return true
     }
     post({ type: 'open', path: resource.fsPath })
     return true
@@ -377,6 +384,8 @@ const agentman = {
   /** Brings a tab's model to the front, where it was left. */
   show(id: string | null, focus = true) {
     if (active === id) {
+      const open = id ? docs.get(id) : undefined
+      if (open) revealPending(open.model)
       if (focus && id) editor.focus()
       return
     }

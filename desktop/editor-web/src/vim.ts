@@ -44,9 +44,10 @@ type Ex = (cm: unknown, params: { args?: string[]; argString?: string }) => void
 type Adapter = { editor: monaco.editor.ICodeEditor }
 
 /** `:` commands that are the app's: saving, closing tabs, opening files.
- * And K, which in Vim looks up the word under the cursor: here it shows
- * what the language server says about the symbol (its type, signature and
- * documentation), the hover a pointer resting on it opens. */
+ * And the language server's, on the keys Vim's own LSP setups give them: K
+ * shows what it says about the symbol (its type, signature and
+ * documentation), the hover a pointer resting on it opens; gd goes to its
+ * definition, in another file if need be; gr lists its references. */
 function defineCommands() {
   const vim = (VimMode as unknown as {
     Vim: {
@@ -55,8 +56,15 @@ function defineCommands() {
       mapCommand(keys: string, type: string, name: string, args: object, extra: object): void
     }
   }).Vim
-  vim.defineAction('showHover', (cm) => cm.editor.trigger('vim', 'editor.action.showHover', {}))
-  vim.mapCommand('K', 'action', 'showHover', {}, { context: 'normal' })
+  const language: [keys: string, action: string, command: string][] = [
+    ['K', 'showHover', 'editor.action.showHover'],
+    ['gd', 'goToDefinition', 'editor.action.revealDefinition'],
+    ['gr', 'goToReferences', 'editor.action.goToReferences'],
+  ]
+  for (const [keys, action, command] of language) {
+    vim.defineAction(action, (cm) => cm.editor.trigger('vim', command, {}))
+    vim.mapCommand(keys, 'action', action, {}, { context: 'normal' })
+  }
   const commands = (VimMode as unknown as { commands: Record<string, (cm: unknown) => void> }).commands
   commands.save = () => host.post({ type: 'command', name: 'save' })
   vim.defineEx('quit', 'q', (_cm, params) => host.post({ type: 'command', name: params.argString?.trim() === '!' ? 'discard' : 'close' }))
