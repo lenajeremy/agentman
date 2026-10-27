@@ -132,10 +132,11 @@ type codexParsedCmd struct {
 	Cmd  string `json:"cmd"`
 }
 
-// CodexUserText is the text of the user message a rollout line records, as
-// the feed shows it, or "" for any other line. A message Codex reads in the
-// middle of a turn is written only when it reads it, so this is how the
-// daemon tells that a message it sent has arrived.
+// CodexUserText is the text of the user message a rollout line records, or
+// "" for any other line, with each pasted picture's path where its mark is:
+// the paths and the words, as the daemon sends a message with pictures. A
+// message Codex reads in the middle of a turn is written only when it reads
+// it, so this is how the daemon tells that a message it sent has arrived.
 func CodexUserText(line string) string {
 	var rec codexRecord
 	if !decode(line, &rec) || rec.Type != "event_msg" || rec.Payload == nil ||
@@ -143,7 +144,7 @@ func CodexUserText(line string) string {
 		rec.Payload.Item.Type != "UserMessage" {
 		return ""
 	}
-	return collectCodexText(rec.Payload.Item.Content)
+	return codexMarkedText(rec.Payload.Item.Content, func(path string) string { return path })
 }
 
 // Parse implements Parser.
@@ -469,41 +470,59 @@ var codexImageMark = regexp.MustCompile(`^\[Image #(\d+)\]$`)
 // left where each was pasted. A picture Codex kept only as data, with no
 // file to show, keeps its mark.
 func codexUserMessage(content []codexContent) (string, []string) {
+	pictures := codexPictures(content)
 	var images []string
-	// kept[n-1] says whether the nth picture, as the marks count them, is
-	// one of images.
-	var kept []bool
-	for _, block := range content {
-		switch strings.ToLower(block.Type) {
-		case "local_image":
-			usable := filepath.IsAbs(block.Path) && filepath.Clean(block.Path) == block.Path
-			if usable {
-				images = append(images, block.Path)
-			}
-			kept = append(kept, usable)
-		case "image", "input_image":
-			kept = append(kept, false)
+	for _, path := range pictures {
+		if path != "" {
+			images = append(images, path)
 		}
 	}
-	var parts []string
-	for _, block := range content {
-		switch strings.ToLower(block.Type) {
-		case "text", "input_text", "output_text":
-			if text := withoutImageMarks(block.Text, block.TextElements, kept); text != "" {
-				parts = append(parts, text)
-			}
-		}
-	}
-	text := strings.TrimSpace(strings.Join(parts, ""))
+	text := codexMarkedText(content, func(string) string { return "" })
 	text = codexAppRequest(text, images)
 	text = codexSpoken(text)
 	text = codexAnswers(text)
 	return text, images
 }
 
-// withoutImageMarks takes out the marks of the pictures kept, each with a
-// space beside it so no gap is left.
-func withoutImageMarks(text string, elements []codexTextElement, kept []bool) string {
+// codexPictures lists a message's pictures in the order its marks count
+// them: the file of each, or "" for one Codex kept only as data.
+func codexPictures(content []codexContent) []string {
+	var pictures []string
+	for _, block := range content {
+		switch strings.ToLower(block.Type) {
+		case "local_image":
+			if filepath.IsAbs(block.Path) && filepath.Clean(block.Path) == block.Path {
+				pictures = append(pictures, block.Path)
+			} else {
+				pictures = append(pictures, "")
+			}
+		case "image", "input_image":
+			pictures = append(pictures, "")
+		}
+	}
+	return pictures
+}
+
+// codexMarkedText is a message's words with the mark of each picture that
+// has a file put to with(path).
+func codexMarkedText(content []codexContent, with func(path string) string) string {
+	pictures := codexPictures(content)
+	var parts []string
+	for _, block := range content {
+		switch strings.ToLower(block.Type) {
+		case "text", "input_text", "output_text":
+			if text := replaceImageMarks(block.Text, block.TextElements, pictures, with); text != "" {
+				parts = append(parts, text)
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, ""))
+}
+
+// replaceImageMarks puts with(path) in place of the mark of each picture
+// that has a file. A mark taken out takes a space beside it, so no gap is
+// left.
+func replaceImageMarks(text string, elements []codexTextElement, pictures []string, with func(path string) string) string {
 	marks := slices.Clone(elements)
 	// Last first, so the ranges still to come keep pointing where they did.
 	slices.SortFunc(marks, func(a, b codexTextElement) int { return b.ByteRange.Start - a.ByteRange.Start })
@@ -513,15 +532,19 @@ func withoutImageMarks(text string, elements []codexTextElement, kept []bool) st
 		if m == nil || start < 0 || end > len(text) || start >= end || text[start:end] != mark.Placeholder {
 			continue
 		}
-		if n, err := strconv.Atoi(m[1]); err != nil || n < 1 || n > len(kept) || !kept[n-1] {
+		n, err := strconv.Atoi(m[1])
+		if err != nil || n < 1 || n > len(pictures) || pictures[n-1] == "" {
 			continue
 		}
-		if end < len(text) && text[end] == ' ' {
-			end++
-		} else if start > 0 && text[start-1] == ' ' {
-			start--
+		replacement := with(pictures[n-1])
+		if replacement == "" {
+			if end < len(text) && text[end] == ' ' {
+				end++
+			} else if start > 0 && text[start-1] == ' ' {
+				start--
+			}
 		}
-		text = text[:start] + text[end:]
+		text = text[:start] + replacement + text[end:]
 	}
 	return text
 }

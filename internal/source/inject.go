@@ -133,6 +133,18 @@ func (s *ClaudeSource) SendQueued(ctx context.Context, sessionID string) error {
 
 // Inject implements Injector for Codex.
 func (s *CodexSource) Inject(ctx context.Context, sessionID, text string) (protocol.InjectMode, error) {
+	return s.send(ctx, sessionID, text, nil)
+}
+
+// InjectWithAttachments implements AttachmentInjector for Codex. Each
+// picture's path is pasted on its own ahead of the words: Codex's composer
+// makes a pasted path to a picture an attachment ("[Image #1]") that the
+// model sees, where a typed path is only words it may or may not open.
+func (s *CodexSource) InjectWithAttachments(ctx context.Context, sessionID, text string, paths []string) (protocol.InjectMode, error) {
+	return s.send(ctx, sessionID, text, paths)
+}
+
+func (s *CodexSource) send(ctx context.Context, sessionID, text string, images []string) (protocol.InjectMode, error) {
 	s.mu.RLock()
 	session, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
@@ -144,22 +156,52 @@ func (s *CodexSource) Inject(ctx context.Context, sessionID, text string) (proto
 		if err := rejectSendIntoLiveQuestion(ctx, s.capturePane, session.tmuxName); err != nil {
 			return protocol.InjectNone, err
 		}
-		if err := tmux.Send(ctx, session.tmuxName, text); err != nil {
+		pastes := make([]string, len(images))
+		for i, path := range images {
+			pastes[i] = codexPastedPath(path)
+		}
+		if err := tmux.SendPasting(ctx, session.tmuxName, pastes, codexTyped(text)); err != nil {
 			return protocol.InjectNone, err
 		}
 		// Typed into a running turn, it waits for the tool call under way.
+		// It is followed as the paths and the words, which is how the
+		// rollout's message reads with each picture put back for its mark.
 		if session.meta.State == protocol.StateBusy || session.meta.State == protocol.StateWaitingInput {
-			s.held.add(sessionID, session.transcript, text)
+			s.held.add(sessionID, session.transcript, strings.TrimSpace(strings.Join(images, " ")+" "+text))
 		}
 		return protocol.InjectTmux, nil
 	}
 
+	if len(images) > 0 {
+		return protocol.InjectNone, ErrAttachmentsAsPaths
+	}
 	// Codex's supported notify callback is fire-and-forget: stdout is discarded
 	// and it cannot feed a blocking decision or queued prompt back into the
 	// turn. Advertising hook delivery here made the app report "queued" for a
 	// message that could never arrive.
 	return protocol.InjectNone, fmt.Errorf(
 		"source: this session cannot receive messages — start it with `am codex` to enable sending")
+}
+
+// codexTyped is a message as it is typed into Codex's composer. One ending on
+// an @path, typed or pasted, leaves Codex's file menu open, and the Enter
+// that should send it picks from the menu instead; a space after the path
+// closes the menu, and Codex trims it.
+func codexTyped(text string) string {
+	words := strings.Fields(text)
+	if len(words) > 0 && strings.HasPrefix(words[len(words)-1], "@") && !strings.HasSuffix(text, " ") {
+		return text + " "
+	}
+	return text
+}
+
+// codexPastedPath is a picture's path as pasted into Codex: quoted when it
+// has a space, as Finder would, or Codex reads it as words.
+func codexPastedPath(path string) string {
+	if strings.ContainsAny(path, " \t") && !strings.Contains(path, "'") {
+		return "'" + path + "'"
+	}
+	return path
 }
 
 func rejectSendIntoLiveQuestion(

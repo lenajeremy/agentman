@@ -268,21 +268,62 @@ func sendLocked(ctx context.Context, name, text string) error {
 	if _, err := run(ctx, "send-keys", "-t", name, "C-u"); err != nil {
 		return fmt.Errorf("tmux: could not clear the prompt: %w", err)
 	}
+	if err := typeLocked(ctx, name, text); err != nil {
+		return err
+	}
+	return submitLocked(ctx, name)
+}
 
-	if strings.ContainsAny(text, "\n\r") {
-		if err := pasteMultiline(ctx, name, text); err != nil {
+// SendPasting is Send with each of pastes pasted on its own ahead of the
+// text, under the same lock. Codex turns a pasted path to a picture into an
+// attachment ("[Image #1]"), where the same path typed is only words. text
+// may be empty when there are pastes.
+func SendPasting(ctx context.Context, name string, pastes []string, text string) error {
+	if len(pastes) == 0 {
+		return Send(ctx, name, text)
+	}
+	if !Available() {
+		return ErrNotInstalled
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	if _, err := run(ctx, "send-keys", "-t", name, "C-u"); err != nil {
+		return fmt.Errorf("tmux: could not clear the prompt: %w", err)
+	}
+	for _, paste := range pastes {
+		if err := pasteMultiline(ctx, name, paste); err != nil {
 			return err
 		}
-	} else {
-		// -l sends the text literally, so nothing in it is interpreted as a
-		// key name: a message containing the word "Enter" stays that word.
-		// "--" ends the flags, so a message beginning with a dash is typed
-		// rather than read by tmux as an option of its own.
-		if _, err := run(ctx, "send-keys", "-t", name, "-l", "--", text); err != nil {
-			return fmt.Errorf("tmux: could not type into session: %w", err)
+		// Each paste is taken in as one before the next arrives.
+		time.Sleep(80 * time.Millisecond)
+	}
+	if strings.TrimSpace(text) != "" {
+		if err := typeLocked(ctx, name, text); err != nil {
+			return err
 		}
 	}
+	return submitLocked(ctx, name)
+}
 
+// typeLocked types text into the prompt box, pasting it when it has more
+// than one line. The caller holds the pane's action lock.
+func typeLocked(ctx context.Context, name, text string) error {
+	if strings.ContainsAny(text, "\n\r") {
+		return pasteMultiline(ctx, name, text)
+	}
+	// -l sends the text literally, so nothing in it is interpreted as a
+	// key name: a message containing the word "Enter" stays that word.
+	// "--" ends the flags, so a message beginning with a dash is typed
+	// rather than read by tmux as an option of its own.
+	if _, err := run(ctx, "send-keys", "-t", name, "-l", "--", text); err != nil {
+		return fmt.Errorf("tmux: could not type into session: %w", err)
+	}
+	return nil
+}
+
+// submitLocked presses Enter. The caller holds the pane's action lock.
+func submitLocked(ctx context.Context, name string) error {
 	// Submit as a separate key event. Some TUIs need a moment to process a
 	// paste before the newline is treated as submission rather than content.
 	time.Sleep(60 * time.Millisecond)
@@ -292,7 +333,8 @@ func sendLocked(ctx context.Context, name, text string) error {
 	return nil
 }
 
-// pasteMultiline loads text into a private buffer and pastes it.
+// pasteMultiline loads text into a private buffer and pastes it, as a
+// terminal pastes: in one piece, marked as pasted.
 func pasteMultiline(ctx context.Context, name, text string) error {
 	file, err := os.CreateTemp("", "agentman-paste-*")
 	if err != nil {

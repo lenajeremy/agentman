@@ -453,9 +453,10 @@ func (r *Registry) PlaceAttachment(ctx context.Context, sessionID, path string) 
 }
 
 // AttachmentInjector is implemented by adapters that can hand images to the
-// agent as parts of one structured message rather than as paths typed into a
-// prompt: Cursor over ACP sends image blocks. The daemon prefers it to typing
-// paths, and does not ask an adapter that delivers this way to place them.
+// agent as attachments rather than as paths typed into a prompt: Cursor over
+// ACP sends image blocks, and Codex is pasted each path, which its composer
+// makes an attachment. The daemon prefers it to typing paths, and does not
+// ask an adapter that delivers this way to place them.
 type AttachmentInjector interface {
 	// InjectWithAttachments delivers text and the images saved at paths
 	// together. A session with no structured channel — a terminal chat of

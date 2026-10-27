@@ -295,3 +295,17 @@ func TestCodexAutomationRunIsANotice(t *testing.T) {
 		t.Fatalf("row = %+v", row)
 	}
 }
+
+// What the daemon follows a message it sent by: the words with each pasted
+// picture's path where Codex left its mark, as the daemon sent them.
+func TestCodexUserTextPutsPicturesBackForTheirMarks(t *testing.T) {
+	text := "[Image #1] [Image #2] compare these"
+	line := `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","content":[` +
+		`{"type":"local_image","path":"/tmp/a.png"},{"type":"image","image_url":"data:image/png;base64,AAAA"},` +
+		`{"type":"text","text":"` + text + `","text_elements":[` +
+		`{"byte_range":{"start":0,"end":10},"placeholder":"[Image #1]"},` +
+		`{"byte_range":{"start":11,"end":21},"placeholder":"[Image #2]"}]}]}}}`
+	if got := CodexUserText(line); got != "/tmp/a.png [Image #2] compare these" {
+		t.Fatalf("got %q", got)
+	}
+}
