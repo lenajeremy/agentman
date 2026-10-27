@@ -344,6 +344,43 @@ final class EditorStore {
         monaco?.focus()
     }
 
+    /// A link followed in a Markdown file's preview: one to a file in the
+    /// folder opens it in its tab (a Markdown file rendered, as the link was
+    /// read), one to a folder shows it in the tree, as GitHub links a
+    /// README's files; a path from / starts at the folder, as on GitHub.
+    /// Anything else, the web, mail, opens as it would anywhere.
+    func followLink(_ url: URL, from document: EditorDocument) -> OpenURLAction.Result {
+        if let scheme = url.scheme, scheme != "file" { return .systemAction }
+        let path = url.path(percentEncoded: false)
+        // An anchor in the same file: the preview has no headings to go to.
+        guard !path.isEmpty else { return .handled }
+        let target: URL
+        if url.scheme == "file" {
+            target = URL(fileURLWithPath: path)
+        } else if path.hasPrefix("/") {
+            target = root.appendingPathComponent(String(path.dropFirst()))
+        } else {
+            target = document.url.deletingLastPathComponent().appendingPathComponent(path)
+        }
+        var isDirectory: ObjCBool = false
+        guard let relative = relativePath(of: target),
+              FileManager.default.fileExists(atPath: target.standardizedFileURL.path, isDirectory: &isDirectory) else {
+            if !AgentmanApp.underTests { NSSound.beep() }
+            return .handled
+        }
+        if isDirectory.boolValue {
+            reveal(relative)
+            setExpanded(relative, true)
+            focusTree()
+            return .handled
+        }
+        open(relative)
+        if let opened = active, opened.isMarkdown, !opened.previewing {
+            togglePreview()
+        }
+        return .handled
+    }
+
     /// Shows the Markdown file in front rendered, or its text again. The
     /// text hidden under the preview gives up the keyboard, so nothing typed
     /// edits what can't be seen.

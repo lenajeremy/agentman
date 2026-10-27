@@ -97,6 +97,35 @@ final class MarkdownPreviewTests: XCTestCase {
         XCTAssertFalse(notes.previewing)
     }
 
+    // A README's links to the folder's files open them in the editor, as
+    // GitHub opens them; the web opens as it would.
+    func testLinksToTheFoldersFilesOpenThem() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for (path, text) in ["README.md": "# Shop\n", "LICENSE": "MIT\n", "docs/setup.md": "# Setup\n", "docs/api/x.go": "package api\n"] {
+            let url = root.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: url)
+        }
+        let store = EditorStore(root: root)
+        store.open("docs/setup.md")
+        let setup = try XCTUnwrap(store.active)
+        func follow(_ link: String) -> String {
+            let result = store.followLink(try! XCTUnwrap(URL(string: link)), from: setup)
+            let system = String(describing: result).contains("systemAction")
+            return "\(system ? "system" : "handled") \(store.active?.path ?? "-")\(store.active?.previewing == true ? " previewing" : "")"
+        }
+        XCTAssertEqual(follow("../LICENSE"), "handled LICENSE")
+        XCTAssertEqual(follow("/README.md"), "handled README.md previewing", "from / is from the folder; Markdown opens rendered")
+        XCTAssertEqual(follow("api/x.go#L1"), "handled docs/api/x.go")
+        XCTAssertEqual(follow("https://example.com/docs"), "system docs/api/x.go")
+        XCTAssertEqual(follow("../../elsewhere.md"), "handled docs/api/x.go", "outside the folder: nothing opens")
+        XCTAssertEqual(follow("missing.md"), "handled docs/api/x.go")
+        _ = follow("api")
+        XCTAssertEqual(store.selection, "docs/api")
+        XCTAssertTrue(store.isExpanded("docs/api"))
+    }
+
     // For screenshots: the repo's README and a sampler, rendered as the
     // editor's preview shows them. Runs with TEST_RUNNER_AGENTMAN_SHOTS=<folder>.
     func testRenderPreview() throws {

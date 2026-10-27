@@ -85,7 +85,7 @@ struct EditorWindow: View {
                                 NonTextView(document: document)
                             }
                             if let document = store.active, document.isMarkdown, document.previewing {
-                                MarkdownPreview(document: document, window: store.window)
+                                MarkdownPreview(store: store, document: document)
                             }
                             if store.active == nil {
                                 EditorEmpty(store: store)
@@ -755,13 +755,15 @@ private struct LegacyPanes: View {
 /// rendered as the conversation renders an agent's reply, and kept up with
 /// the text as it is edited.
 private struct MarkdownPreview: View {
+    let store: EditorStore
     let document: EditorDocument
-    let window: NSWindow?
 
     var body: some View {
         ScrollView {
             MarkdownView(document.text)
                 .environment(\.markdownFolder, document.url.deletingLastPathComponent())
+                // Links to the folder's files open them here.
+                .environment(\.openURL, OpenURLAction { store.followLink($0, from: document) })
                 .frame(maxWidth: 760, alignment: .leading)
                 .padding(.horizontal, 40)
                 .padding(.vertical, 32)
@@ -770,7 +772,7 @@ private struct MarkdownPreview: View {
         .background(Palette.surface)
         // Back on this file after another tab, the text under the preview
         // took the keyboard again.
-        .onAppear { DispatchQueue.main.async { window?.makeFirstResponder(nil) } }
+        .onAppear { DispatchQueue.main.async { store.window?.makeFirstResponder(nil) } }
     }
 }
 
