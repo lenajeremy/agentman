@@ -56,7 +56,7 @@ final class SlashCommandsTests: XCTestCase {
         XCTAssertFalse(slash.isOpen)
     }
 
-    func testOnlyAClaudeOrCodexInATerminalTakesCommands() throws {
+    func testOnlyAClaudeCodexOrAntigravityInATerminalTakesCommands() throws {
         let decode = { (json: String) in try JSONDecoder().decode(Session.self, from: Data(json.utf8)) }
         let base = #""id":"s","name":"n","cwd":"/","state":"idle","lastActivity":0"#
         XCTAssertTrue(SlashCommands.takes(try decode(#"{"kind":"claude","inject":"tmux","# + base + "}")))
@@ -64,6 +64,10 @@ final class SlashCommandsTests: XCTestCase {
         let codex = try decode(#"{"kind":"codex","inject":"tmux","# + base + "}")
         XCTAssertTrue(SlashCommands.takes(codex))
         XCTAssertEqual(SlashCommands.triggers(for: codex), ["/", "$"])
+        let antigravity = try decode(#"{"kind":"antigravity","inject":"tmux","# + base + "}")
+        XCTAssertTrue(SlashCommands.takes(antigravity))
+        XCTAssertEqual(SlashCommands.triggers(for: antigravity), ["/"])
+        XCTAssertFalse(SlashCommands.takes(try decode(#"{"kind":"antigravity","inject":"none","# + base + "}")))
         XCTAssertFalse(SlashCommands.takes(try decode(#"{"kind":"cursor","inject":"tmux","# + base + "}")))
         XCTAssertFalse(SlashCommands.takes(nil))
     }

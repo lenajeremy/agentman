@@ -34,7 +34,8 @@ func antigravityToolName(name string, args map[string]any) string {
 		return "Command input"
 	case name == "read_terminal":
 		return "Terminal"
-	case name == "view_file", name == "view_file_outline", name == "view_code_item", name == "view_content_chunk":
+	case name == "view_file", name == "view_file_outline", name == "view_code_item", name == "view_content_chunk",
+		name == "read_file":
 		return "Read"
 	case name == "write_to_file":
 		// A plan, task list or walkthrough is written with this same tool, and
@@ -61,6 +62,19 @@ func antigravityToolName(name string, args map[string]any) string {
 		return "Question"
 	case name == "invoke_subagent":
 		return "Agent"
+	case name == "send_message":
+		return "Message"
+	case name == "call_mcp_tool":
+		// An MCP server's tool, named as Codex's are: "agentman.list_keys".
+		server, _ := args["ServerName"].(string)
+		tool, _ := args["ToolName"].(string)
+		if server == "" {
+			server = "mcp"
+		}
+		if tool == "" {
+			tool = "call"
+		}
+		return server + "." + tool
 	case name == "manage_task":
 		return "Task"
 	case name == "generate_image":
@@ -97,6 +111,12 @@ func summarizeAntigravityArgs(name string, args map[string]any) string {
 	switch name {
 	case "run_command":
 		return ClipBlock(pick("CommandLine"), CommandLines, CommandChars)
+	case "call_mcp_tool":
+		raw, err := json.Marshal(args["Arguments"])
+		if err != nil {
+			return ""
+		}
+		return summarizeToolInput(antigravityToolName(name, args), raw)
 	case "ask_question":
 		if questions, ok := args["questions"].([]any); ok && len(questions) > 0 {
 			first, _ := questions[0].(map[string]any)
@@ -124,6 +144,10 @@ func summarizeAntigravityArgs(name string, args map[string]any) string {
 				return clip(text, SummaryChars)
 			}
 		}
+	case "send_message":
+		if message := firstLine(pick("Message")); message != "" {
+			return clip(message, SummaryChars)
+		}
 	case "manage_task":
 		action := pick("Action")
 		task := pick("TaskId")
@@ -137,7 +161,7 @@ func summarizeAntigravityArgs(name string, args map[string]any) string {
 	// A path is kept whole. Clipped, it is no longer a path: the phone could
 	// not open it, and the daemon would not record it as a file the agent
 	// touched.
-	if path := pick("AbsolutePath", "TargetFile", "File", "DirectoryPath", "SearchPath",
+	if path := pick("AbsolutePath", "TargetFile", "File", "Path", "DirectoryPath", "SearchPath",
 		"SearchDirectory"); path != "" && !strings.ContainsAny(path, "\n") {
 		return path
 	}

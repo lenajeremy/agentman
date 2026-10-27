@@ -207,7 +207,7 @@ func TestCodexDiffShowsChangesAndNewFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte("# Notes\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	text, err := codexDiff(context.Background(), dir)
+	text, err := folderDiff(context.Background(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,10 +219,10 @@ func TestCodexDiffShowsChangesAndNewFiles(t *testing.T) {
 }
 
 func TestCodexDiffOfAQuietFolder(t *testing.T) {
-	if text, err := codexDiff(context.Background(), gitRepo(t)); err != nil || text != "No changes." {
+	if text, err := folderDiff(context.Background(), gitRepo(t)); err != nil || text != "No changes." {
 		t.Fatalf("%q, %v", text, err)
 	}
-	if _, err := codexDiff(context.Background(), t.TempDir()); err == nil || !strings.Contains(err.Error(), "not in a git repository") {
+	if _, err := folderDiff(context.Background(), t.TempDir()); err == nil || !strings.Contains(err.Error(), "not in a git repository") {
 		t.Fatalf("outside git: %v", err)
 	}
 }

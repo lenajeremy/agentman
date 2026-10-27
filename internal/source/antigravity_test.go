@@ -208,6 +208,27 @@ func TestParseAntigravityOpenFiles(t *testing.T) {
 	}
 }
 
+// A ~/.gemini that is a link, as a dotfiles setup makes it: lsof names the
+// files agy holds by where the link leads, and they are agy's all the same.
+func TestParseAntigravityOpenFilesThroughALinkedGeminiFolder(t *testing.T) {
+	home, elsewhere := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(elsewhere, "antigravity-cli", "brain"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, filepath.Join(home, ".gemini")); err != nil {
+		t.Fatal(err)
+	}
+	real, err := filepath.EvalSymlinks(filepath.Join(elsewhere, "antigravity-cli"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := "p700\nfcwd\nn/w\nf24\nn" + real + "/brain/" + agConversation + "\n"
+	if process := parseAntigravityOpenFiles(home, []byte(output))[700]; len(process.conversations) != 1 ||
+		process.conversations[0] != agConversation {
+		t.Errorf("linked agy = %+v", process)
+	}
+}
+
 func TestAntigravityPagesAndFollows(t *testing.T) {
 	home := t.TempDir()
 	path := writeAntigravityConversation(t, home, agConversation, agLinePrompt, agLineCall)

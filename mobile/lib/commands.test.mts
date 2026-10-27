@@ -101,6 +101,8 @@ test("only a Claude or Codex the Mac types into takes commands", () => {
   assert.equal(takesCommands({ kind: "claude", inject: "hook" }), false);
   assert.equal(takesCommands({ kind: "codex", inject: "tmux" }), true);
   assert.equal(takesCommands({ kind: "codex", inject: "none" }), false);
+  assert.equal(takesCommands({ kind: "antigravity", inject: "tmux" }), true);
+  assert.equal(takesCommands({ kind: "antigravity", inject: "none" }), false);
   assert.equal(takesCommands({ kind: "cursor", inject: "tmux" }), false);
   assert.equal(takesCommands(undefined), false);
 });

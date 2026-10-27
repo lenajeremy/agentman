@@ -1,0 +1,30 @@
+  ⎿  Exited /tasks command
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+└ Models & Quota
+
+  Account: me@example.com
+
+
+
+CLAUDE AND GPT MODELS
+  Models within this group: Claude Opus, Claude Sonnet, GPT-OSS
+
+  Weekly Limit Remaining
+    [██████████████████████████████████████████████░░░░] 92.27%
+    Refreshes in 154h 36m
+
+  Five Hour Limit Remaining
+    [██████████████████████████████████████████░░░░░░░░] 84.54%
+    Refreshes in 4h 45m
+
+
+GEMINI 4 ARGON
+  For paid Pro plans, Argon quota is separate. Higher Argon quota (included as part of the larger Gemini quota
+
+  (11–27 of 38 lines)
+
+  ↑/↓ Scroll · pgup/pgdown Page · ctrl+end Bottom · ctrl+home Top · esc Close
+                                                                                        Claude Opus 5.5 · high

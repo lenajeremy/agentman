@@ -3,7 +3,9 @@ package parser
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
@@ -36,6 +38,12 @@ type AntigravityParser struct {
 	// awaiting is true when the newest record is a prompt, which is the only
 	// time a reply is actually being written. See AwaitingResponse.
 	awaiting bool
+	// open is the steps of calls with no result yet. agy records nothing for
+	// a call cancelled at its permission question or interrupted (agy
+	// 1.4.8), so the next prompt settles them as interrupted. lastPrompt is
+	// the newest prompt's step, for a call met after it paging backwards.
+	open       []int
+	lastPrompt int
 }
 
 type antigravityCall struct {
@@ -134,13 +142,34 @@ func (p *AntigravityParser) Parse(line string, offset int64) []protocol.Message 
 
 	switch step.Type {
 	case "USER_INPUT":
-		text := AntigravityRequest(step.Content)
+		out := p.interrupted(step.StepIndex)
+		text, images := AntigravityPrompt(step.Content)
+		if text == "" && len(images) == 0 {
+			return out
+		}
+		return append(out, protocol.Message{
+			ID: antigravityID(step.StepIndex), SessionID: p.sessionID,
+			Role: protocol.RoleUser, Ts: ts, Text: text, Images: images,
+		})
+
+	case "SYSTEM_MESSAGE":
+		text := antigravityNotice(step.Content)
 		if text == "" {
 			return nil
 		}
 		return []protocol.Message{{
 			ID: antigravityID(step.StepIndex), SessionID: p.sessionID,
-			Role: protocol.RoleUser, Ts: ts, Text: text,
+			Role: protocol.RoleSystem, Ts: ts, Text: text,
+		}}
+
+	case "CHECKPOINT":
+		// agy compacted the conversation: what follows starts from a summary.
+		if !strings.Contains(step.Content, "Resuming from a compaction") {
+			return nil
+		}
+		return []protocol.Message{{
+			ID: antigravityID(step.StepIndex), SessionID: p.sessionID,
+			Role: protocol.RoleSystem, Ts: ts, Text: "Context compacted",
 		}}
 
 	case "PLANNER_RESPONSE":
@@ -176,6 +205,10 @@ func (p *AntigravityParser) Parse(line string, offset int64) []protocol.Message 
 				outcome = remembered.settle(outcome)
 				message.Tool.Status = outcome.status
 				message.Text = outcome.preview
+			} else if p.lastPrompt > step.StepIndex {
+				message.Tool.Status, message.Text = protocol.ToolError, AntigravityInterrupted
+			} else {
+				p.open = append(p.open, step.StepIndex+1+j)
 			}
 			out = append(out, message)
 		}
@@ -183,6 +216,7 @@ func (p *AntigravityParser) Parse(line string, offset int64) []protocol.Message 
 
 	case "GENERIC":
 		id := antigravityID(step.StepIndex)
+		p.open = slices.DeleteFunc(p.open, func(call int) bool { return call == step.StepIndex })
 		outcome := antigravityOutcome(step)
 		p.outcomes.set(id, outcome)
 		call, known := p.calls.get(id)
@@ -199,6 +233,145 @@ func (p *AntigravityParser) Parse(line string, offset int64) []protocol.Message 
 		}}
 	}
 	return nil
+}
+
+// antigravityMessage is a message handed to the conversation as a system
+// message: from agy itself (sender=system), from a background task
+// (sender=<conversation>/task-N), or from another agent (sender=<its id>).
+var antigravityMessage = regexp.MustCompile(`(?s)\[Message\] [^\n]*?\bsender=(\S+)[^\n]*?\bcontent=(.*?)\s*</SYSTEM_MESSAGE>`)
+
+// antigravityNotice is the notice for a system message, or "" for one that
+// is not a message.
+func antigravityNotice(content string) string {
+	m := antigravityMessage.FindStringSubmatch(content)
+	if m == nil {
+		return ""
+	}
+	sender, text := m[1], strings.Join(strings.Fields(m[2]), " ")
+	switch {
+	case sender == "system":
+		text = strings.TrimPrefix(text, "[Notice] ")
+	case strings.Contains(sender, "/task-"):
+		// "Task id "<conversation>/task-80" finished…": the task, by its own name.
+		text = antigravityTaskName.ReplaceAllString(text, `"$1"`)
+	default:
+		text = "From another agent: " + text
+	}
+	return clip(text, 300)
+}
+
+var antigravityTaskName = regexp.MustCompile(`"[0-9a-f-]+/(task-\d+)"`)
+
+// antigravityPicture is a picture sent with a message, at its start: one agy
+// keeps in the conversation's .user_uploaded folder, where Agentman puts the
+// pictures it sends and agy those pasted at its prompt, or one Agentman
+// kept, typed before agy had a conversation to put it in. "@" in front
+// mentions it.
+var antigravityPicture = regexp.MustCompile(`^@?(/\S*/(?:\.gemini/antigravity-cli/brain/[^/\s]+/\.user_uploaded|\.agentman/images/[^/\s]+)/[^/\s]+\.(?i:png|jpe?g|gif|webp))$`)
+
+// agy writes a file named with @ as @[name], and says in the request's
+// metadata where each is:
+//
+//	@[main.go] is a [File]:
+//	/Users/me/code/shop/main.go
+var (
+	antigravityMentionPath = regexp.MustCompile(`(?m)^@\[([^\]\n]+)\] is a \[File\]:\n(/[^\n]*)$`)
+	antigravityMention     = regexp.MustCompile(`@\[([^\]\n]+)\]`)
+	antigravityLeadMention = regexp.MustCompile(`^@\[([^\]\n]+)\]`)
+)
+
+// AntigravityPrompt is what the person sent, as the apps show it: the
+// pictures it starts with, and its words, with the files it names written
+// as they were typed: by path when the message starts with them, as
+// Agentman sends a file, and by name where the words mention one.
+func AntigravityPrompt(content string) (string, []string) {
+	text := antigravityMentions(AntigravityRequest(content), content)
+	var images []string
+	for {
+		trimmed := strings.TrimLeft(text, " \t\r\n")
+		end := strings.IndexAny(trimmed, " \t\r\n")
+		if end < 0 {
+			end = len(trimmed)
+		}
+		m := antigravityPicture.FindStringSubmatch(trimmed[:end])
+		if m == nil || strings.Contains(m[1], "..") {
+			break
+		}
+		images = append(images, m[1])
+		text = strings.TrimSpace(trimmed[end:])
+	}
+	return text, images
+}
+
+// antigravityMentions writes agy's @[name] mentions back as they were typed.
+func antigravityMentions(text, content string) string {
+	if !strings.Contains(text, "@[") {
+		return text
+	}
+	paths := map[string]string{}
+	for _, m := range antigravityMentionPath.FindAllStringSubmatch(content, -1) {
+		paths[m[1]] = strings.TrimSpace(m[2])
+	}
+	var lead []string
+	rest := strings.TrimSpace(text)
+	for {
+		m := antigravityLeadMention.FindStringSubmatch(rest)
+		path := ""
+		if m != nil {
+			path = paths[m[1]]
+		}
+		if path == "" || strings.ContainsAny(path, " \t") {
+			break
+		}
+		lead = append(lead, "@"+path)
+		rest = strings.TrimSpace(rest[len(m[0]):])
+	}
+	rest = antigravityMention.ReplaceAllString(rest, "@$1")
+	switch {
+	case len(lead) == 0:
+		return rest
+	case rest == "":
+		return strings.Join(lead, " ")
+	}
+	return strings.Join(lead, " ") + "\n\n" + rest
+}
+
+// AntigravityInterrupted is what a call agy never answered shows.
+const AntigravityInterrupted = "Interrupted"
+
+// HasOpenCalls reports whether a call is still waiting for its result.
+func (p *AntigravityParser) HasOpenCalls() bool { return len(p.open) > 0 }
+
+// SettleOpenCalls settles every call still waiting for its result as
+// interrupted, for a turn that is over without one: agy has gone idle.
+func (p *AntigravityParser) SettleOpenCalls() []protocol.Message { return p.settleOpen(math.MaxInt) }
+
+// interrupted settles the calls still open when a prompt arrives: the turn
+// they were in is over, and agy wrote nothing for them.
+func (p *AntigravityParser) interrupted(prompt int) []protocol.Message {
+	p.lastPrompt = max(p.lastPrompt, prompt)
+	return p.settleOpen(prompt)
+}
+
+func (p *AntigravityParser) settleOpen(before int) []protocol.Message {
+	var out []protocol.Message
+	kept := p.open[:0]
+	for _, step := range p.open {
+		if step > before {
+			kept = append(kept, step)
+			continue
+		}
+		id := antigravityID(step)
+		if call, ok := p.calls.get(id); ok {
+			out = append(out, protocol.Message{
+				ID: id, SessionID: p.sessionID, Role: protocol.RoleTool, Ts: call.ts,
+				Text: AntigravityInterrupted,
+				Tool: &protocol.Tool{Name: call.name, Summary: call.summary, Status: protocol.ToolError},
+			})
+		}
+	}
+	p.open = kept
+	return out
 }
 
 // AntigravityRequest extracts what the user typed from a USER_INPUT step.

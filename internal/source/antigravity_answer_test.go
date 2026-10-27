@@ -456,3 +456,24 @@ func TestAntigravityAnswersAThreeQuestionForm(t *testing.T) {
 		t.Errorf("third: %q", got)
 	}
 }
+
+// Ending on an @path left agy's file menu open, and the Enter meant to send
+// the message picked the file instead (agy 1.4.8): a space closes the menu.
+func TestAntigravityMessageEndingOnAFileIsSent(t *testing.T) {
+	home := t.TempDir()
+	writeAntigravityConversation(t, home, agConversation, agLinePrompt, agLineReply)
+	pane := tmux.Session{Name: "agentman-antigravity-1-a", PanePID: 900, Cwd: "/work/ws1"}
+	s := newTestAntigravity(t, home, 900, map[int]antigravityProcess{
+		900: {cwd: "/work/ws1", conversations: []string{agConversation}},
+	}, pane)
+	keys := &agyKeys{panes: []string{agyFixture(t, "idle-after-reply")}}
+	s.capturePane = keys.capture
+	s.keys = keys.keys(false)
+	id := "antigravity:tmux-agentman-antigravity-1-a"
+	discoverAntigravity(t, s)
+
+	if _, err := s.Inject(context.Background(), id, "explain @main.go"); err != nil ||
+		strings.Join(keys.events, ";") != "type explain @main.go " {
+		t.Errorf("err %v keys %q", err, keys.events)
+	}
+}

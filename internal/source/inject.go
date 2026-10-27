@@ -192,8 +192,15 @@ func (s *CodexSource) send(ctx context.Context, sessionID, text string, images [
 // open, and the Enter that should send it picks from the menu instead; a
 // space after it closes the menu, and Codex trims it.
 func codexTyped(text string) string {
+	return closingMenu(text, "@$")
+}
+
+// closingMenu is text with a space after it when it ends on a word that
+// opens a menu in the agent's prompt (an @path, a $skill), which would take
+// the Enter meant to send it.
+func closingMenu(text, marks string) string {
 	words := strings.Fields(text)
-	if len(words) > 0 && strings.ContainsAny(words[len(words)-1][:1], "@$") && !strings.HasSuffix(text, " ") {
+	if len(words) > 0 && strings.ContainsAny(words[len(words)-1][:1], marks) && !strings.HasSuffix(text, " ") {
 		return text + " "
 	}
 	return text

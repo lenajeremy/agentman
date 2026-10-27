@@ -32,6 +32,9 @@ type antigravityKeys struct {
 	// SendKeys presses nothing unless every key is on its allowlist, so an
 	// answer needing a key it does not allow fails before touching the pane.
 	send func(ctx context.Context, name string, keys ...string) error
+	// taller makes the pane tall enough for a long panel while nobody is
+	// watching it, and returns what puts it back (tallerForPanel).
+	taller func(ctx context.Context, name string) (restore func())
 }
 
 func defaultAntigravityKeys() antigravityKeys {
@@ -41,6 +44,7 @@ func defaultAntigravityKeys() antigravityKeys {
 		writeIn:  tmux.AnswerCustom,
 		confirm:  tmux.AnswerArrowMenu,
 		send:     tmux.SendKeys,
+		taller:   tallerForPanel,
 	}
 }
 
