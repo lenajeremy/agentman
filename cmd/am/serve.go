@@ -311,6 +311,11 @@ func runServe(ctx context.Context, args []string) error {
 
 	sink := multiSink{sinks: sinks}
 	agent := daemon.New(registry, sink)
+	// A request that takes a while is named in the log, so a daemon that
+	// seems stuck can be read rather than restarted blind.
+	daemon.Logf = func(format string, args ...any) {
+		fmt.Printf("%s %s\n", stamp(), dim(fmt.Sprintf(format, args...)))
+	}
 	// The user's names for sessions, and the agents they asked to hear from
 	// while Agentman speaks for the rest, before the first sweep.
 	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {

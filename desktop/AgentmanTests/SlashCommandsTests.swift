@@ -56,7 +56,7 @@ final class SlashCommandsTests: XCTestCase {
         XCTAssertFalse(slash.isOpen)
     }
 
-    func testOnlyAClaudeOrCodexInATerminalTakesCommands() throws {
+    func testOnlyAClaudeCodexOrAntigravityInATerminalTakesCommands() throws {
         let decode = { (json: String) in try JSONDecoder().decode(Session.self, from: Data(json.utf8)) }
         let base = #""id":"s","name":"n","cwd":"/","state":"idle","lastActivity":0"#
         XCTAssertTrue(SlashCommands.takes(try decode(#"{"kind":"claude","inject":"tmux","# + base + "}")))
@@ -64,6 +64,10 @@ final class SlashCommandsTests: XCTestCase {
         let codex = try decode(#"{"kind":"codex","inject":"tmux","# + base + "}")
         XCTAssertTrue(SlashCommands.takes(codex))
         XCTAssertEqual(SlashCommands.triggers(for: codex), ["/", "$"])
+        let antigravity = try decode(#"{"kind":"antigravity","inject":"tmux","# + base + "}")
+        XCTAssertTrue(SlashCommands.takes(antigravity))
+        XCTAssertEqual(SlashCommands.triggers(for: antigravity), ["/"])
+        XCTAssertFalse(SlashCommands.takes(try decode(#"{"kind":"antigravity","inject":"none","# + base + "}")))
         XCTAssertFalse(SlashCommands.takes(try decode(#"{"kind":"cursor","inject":"tmux","# + base + "}")))
         XCTAssertFalse(SlashCommands.takes(nil))
     }
@@ -198,5 +202,15 @@ final class SentFilesTests: XCTestCase {
         XCTAssertEqual(attachment.file, file)
         XCTAssertTrue(Attachments.encoded([attachment]).isEmpty, "a file is not sent as a picture")
         XCTAssertNil(Attachments.make(file: file), "only pictures are pictures")
+    }
+}
+
+@MainActor
+final class DaemonRestartTests: XCTestCase {
+    // A daemon that isn't the login service can't be kicked; the app says
+    // what to do instead of failing quietly.
+    func testRestartingAServiceThatIsNotThereSaysWhatToDo() async {
+        let problem = await DaemonRestart.restart(service: "dev.agentman.no-such-service-\(UUID().uuidString.prefix(6))")
+        XCTAssertEqual(problem?.contains("am service restart"), true, problem ?? "nil")
     }
 }

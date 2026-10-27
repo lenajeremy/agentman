@@ -244,7 +244,7 @@ func scanSkillDir(dir, source, plugin string) []protocol.Command {
 	}
 	var out []protocol.Command
 	for _, entry := range entries {
-		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") || (plugin == "" && entry.Name() == "synced") {
+		if !isDirEntry(dir, entry) || strings.HasPrefix(entry.Name(), ".") || (plugin == "" && entry.Name() == "synced") {
 			continue
 		}
 		file, ok := readSkillFile(filepath.Join(dir, entry.Name(), "SKILL.md"))
@@ -258,6 +258,17 @@ func scanSkillDir(dir, source, plugin string) []protocol.Command {
 		out = append(out, file.command(withPlugin(plugin, name), source))
 	}
 	return out
+}
+
+// isDirEntry is whether entry is a folder, or a link to one: skills are
+// often linked in from where they were installed (~/.gemini/skills is all
+// links to ~/.claude/skills), and the agents follow the links.
+func isDirEntry(dir string, entry os.DirEntry) bool {
+	if entry.Type()&os.ModeSymlink == 0 {
+		return entry.IsDir()
+	}
+	info, err := os.Stat(filepath.Join(dir, entry.Name()))
+	return err == nil && info.IsDir()
 }
 
 // scanCommandDir reads the older command files: <dir>/deploy.md is /deploy,

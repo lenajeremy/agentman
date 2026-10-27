@@ -1,0 +1,30 @@
+  ⎿  Exited /tasks command
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+└ Models & Quota
+
+  Account: me@example.com
+
+GEMINI MODELS
+  Models within this group: Gemini Flash, Gemini Pro
+
+  Weekly Limit Remaining
+    [███████████████████████████████████████████████░░░] 93.52%
+    Refreshes in 113h 38m
+
+  Five Hour Limit Remaining
+    [██████████████████████████████████████████████████] 99.63%
+    Refreshes in 3h 50m
+
+
+CLAUDE AND GPT MODELS
+  Models within this group: Claude Opus, Claude Sonnet, GPT-OSS
+
+  Weekly Limit Remaining
+    [██████████████████████████████████████████████░░░░] 92.27%
+  (1–17 of 38 lines)
+
+  ↑/↓ Scroll · pgup/pgdown Page · ctrl+end Bottom · ctrl+home Top · esc Close
+                                                                                        Claude Opus 5.5 · high

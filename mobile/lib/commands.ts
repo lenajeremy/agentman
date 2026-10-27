@@ -10,10 +10,12 @@ import type { CommandPanel, DaemonEvent, Request, Session, SlashCommand } from "
 
 type Ask = (request: Request, timeoutMs?: number) => Promise<DaemonEvent>;
 
-/** Commands are typed into the agent's prompt, so only a Claude or Codex
- *  the Mac started in a terminal it can type into takes them. */
+const commandKinds = new Set(["claude", "codex", "antigravity"]);
+
+/** Commands are typed into the agent's prompt, so only a Claude, Codex or
+ *  Antigravity the Mac started in a terminal it can type into takes them. */
 export function takesCommands(session: Pick<Session, "kind" | "inject"> | undefined): boolean {
-  return (session?.kind === "claude" || session?.kind === "codex") && session.inject === "tmux";
+  return !!session && commandKinds.has(session.kind) && session.inject === "tmux";
 }
 
 /** A name being typed after "/", or after "$" for an agent whose skills take

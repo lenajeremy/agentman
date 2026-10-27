@@ -39,6 +39,11 @@ struct AgentmanApp: App {
                 Button("New Agent") { store.selection = .newAgent }
                     .keyboardShortcut("n", modifiers: .command)
             }
+            // The daemon outlives the app, by design: quitting the app
+            // leaves it running, so a stuck one is restarted here.
+            CommandGroup(after: .appSettings) {
+                Button("Restart Daemon…") { DaemonRestart.confirm() }
+            }
             CommandMenu("Go") {
                 Button("Command Palette…") {
                     openWindow(id: "main")

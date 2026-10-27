@@ -250,7 +250,7 @@ func (s *CodexSource) CommandPanel(ctx context.Context, sessionID, command strin
 		return protocol.CommandPanel{}, fmt.Errorf("source: unknown codex session %q", sessionID)
 	}
 	if name == "diff" {
-		text, err := codexDiff(ctx, session.meta.Cwd)
+		text, err := folderDiff(ctx, session.meta.Cwd)
 		if err != nil {
 			return protocol.CommandPanel{}, err
 		}
@@ -361,9 +361,9 @@ func codexPanelEnds(line string) bool {
 	return false
 }
 
-// codexDiff is what Codex's /diff shows: the folder's changes since its last
-// commit, and the files git does not track yet as new files.
-func codexDiff(ctx context.Context, cwd string) (string, error) {
+// folderDiff is what Codex's and agy's /diff show: the folder's changes since
+// its last commit, and the files git does not track yet as new files.
+func folderDiff(ctx context.Context, cwd string) (string, error) {
 	git := func(args ...string) (string, error) {
 		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", cwd, "--no-pager", "-c", "core.quotepath=off"}, args...)...)
 		out, err := cmd.Output()

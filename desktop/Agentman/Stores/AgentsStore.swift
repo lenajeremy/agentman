@@ -908,3 +908,50 @@ struct TerminalProblem: Error {
 struct VoiceProblem: Error {
     let message: String
 }
+
+/// Restarting am serve, the login service the agents' daemon runs as, as
+/// `am service restart` does. Agents keep running, in their own tmux server;
+/// the app reconnects on its own.
+@MainActor
+enum DaemonRestart {
+    static let label = "dev.agentman.serve"
+
+    static func confirm() {
+        let alert = NSAlert()
+        alert.messageText = "Restart the daemon?"
+        alert.informativeText = "Agentman's daemon starts again in a few seconds. Your agents keep running; a message still being sent may need sending again."
+        alert.addButton(withTitle: "Restart")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        Task {
+            if let problem = await restart() {
+                let failed = NSAlert()
+                failed.messageText = "The daemon couldn't be restarted"
+                failed.informativeText = problem
+                failed.runModal()
+            }
+        }
+    }
+
+    /// Kicks the service; answers why it couldn't.
+    static func restart(service: String = label) async -> String? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+                process.arguments = ["kickstart", "-k", "gui/\(getuid())/\(service)"]
+                process.standardOutput = FileHandle.nullDevice
+                process.standardError = FileHandle.nullDevice
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                } catch {
+                    continuation.resume(returning: error.localizedDescription)
+                    return
+                }
+                continuation.resume(returning: process.terminationStatus == 0 ? nil
+                    : "It isn't running as a service on this Mac. Run `am service restart` in a terminal, or stop am serve where it runs and start it again.")
+            }
+        }
+    }
+}

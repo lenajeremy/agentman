@@ -136,10 +136,11 @@ final class SlashCommands {
         return .message
     }
 
-    /// Commands are typed into the agent's prompt, so only a Claude or Codex
-    /// the Mac started in a terminal it can type into takes them.
+    /// Commands are typed into the agent's prompt, so only a Claude, Codex or
+    /// Antigravity the Mac started in a terminal it can type into takes them.
     static func takes(_ session: Session?) -> Bool {
-        (session?.kind == "claude" || session?.kind == "codex") && session?.inject == "tmux"
+        guard let session else { return false }
+        return ["claude", "codex", "antigravity"].contains(session.kind) && session.inject == "tmux"
     }
 
     /// What opens a session's list: Codex's skills are typed with "$".

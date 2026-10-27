@@ -95,6 +95,9 @@ type AntigravitySource struct {
 
 	// keys is how text and answers reach a pane. See antigravityKeys.
 	keys antigravityKeys
+	// panes holds a lock per tmux session, so a message waits for a panel
+	// command reading its pane. See paneLock.
+	panes sync.Map
 
 	// index is agy's conversation index, read for history.
 	index antigravityIndex
@@ -726,7 +729,8 @@ func firstAntigravityRequest(transcript string) string {
 			if json.Unmarshal([]byte(line.Text), &step) != nil || step.Type != "USER_INPUT" {
 				continue
 			}
-			if text := strings.Join(strings.Fields(parser.AntigravityRequest(step.Content)), " "); text != "" {
+			request, _ := parser.AntigravityPrompt(step.Content)
+			if text := strings.Join(strings.Fields(request), " "); text != "" {
 				if runes := []rune(text); len(runes) > 60 {
 					return string(runes[:59]) + "…"
 				}
@@ -887,11 +891,36 @@ func (s *AntigravitySource) Page(ctx context.Context, sessionID, before string, 
 		}
 		return protocol.Page{}, err
 	}
+	// A call agy never answered, in a turn that is over, was interrupted.
+	if before == "" && antigravityTurnOver(session, time.Now()) {
+		for i, message := range result.Messages {
+			if message.Tool != nil && message.Tool.Status == protocol.ToolRunning {
+				tool := *message.Tool
+				tool.Status = protocol.ToolError
+				result.Messages[i].Tool, result.Messages[i].Text = &tool, parser.AntigravityInterrupted
+			}
+		}
+	}
 	cursor := ""
 	if result.HasMore {
 		cursor = strconv.FormatInt(result.NextCursor, 10)
 	}
 	return protocol.NewPage(sessionID, result.Messages, cursor, result.HasMore), nil
+}
+
+// antigravityQuiet is how long agy must have been idle, with nothing new in
+// its transcript, before a call it never answered is taken as interrupted.
+// Cancelled at its permission question, or stopped, a call gets no result
+// (agy 1.4.8). The state is swept every second and can still say idle just
+// after a turn began; three sweeps after the newest record it cannot.
+const antigravityQuiet = 3 * time.Second
+
+func antigravityTurnOver(session antigravitySession, now time.Time) bool {
+	if session.meta.State != protocol.StateIdle || session.transcript == "" {
+		return false
+	}
+	info, err := os.Stat(session.transcript)
+	return err == nil && now.Sub(info.ModTime()) >= antigravityQuiet
 }
 
 // Follow implements Source.
@@ -976,6 +1005,9 @@ func (s *AntigravitySource) Follow(ctx context.Context, sessionID string, out ch
 		var batch []protocol.Message
 		for _, line := range lines {
 			batch = append(batch, p.Parse(line.Text, line.Offset)...)
+		}
+		if len(lines) == 0 && p.HasOpenCalls() && antigravityTurnOver(current, time.Now()) {
+			batch = append(batch, p.SettleOpenCalls()...)
 		}
 		// A record that just landed supersedes anything scraped for its step.
 		// When it carries no text of its own — the model called a tool and
@@ -1081,6 +1113,9 @@ func (s *AntigravitySource) Inject(ctx context.Context, sessionID, text string) 
 		return protocol.InjectNone, errors.New(
 			"source: this session cannot receive messages — start it with `am antigravity` to enable sending")
 	}
+	lock := s.paneLock(session.tmuxName)
+	lock.Lock()
+	defer lock.Unlock()
 	pane, err := s.capturePane(ctx, session.tmuxName)
 	if err != nil {
 		// Fail closed: without the pane there is no proof it is at a prompt.
@@ -1095,7 +1130,9 @@ func (s *AntigravitySource) Inject(ctx context.Context, sessionID, text string) 
 		return protocol.InjectNone, fmt.Errorf(
 			"source: a panel is open in Antigravity on the Mac; close it there before sending")
 	}
-	if err := s.keys.typeText(ctx, session.tmuxName, text); err != nil {
+	// Ending on an @path, typed or pasted, leaves agy's file menu open, and
+	// the Enter meant to send it picks the file instead (agy 1.4.8).
+	if err := s.keys.typeText(ctx, session.tmuxName, closingMenu(text, "@")); err != nil {
 		return protocol.InjectNone, err
 	}
 	return protocol.InjectTmux, nil
@@ -1159,7 +1196,13 @@ func antigravityOpenConversations(ctx context.Context, home string, pids []int) 
 }
 
 func parseAntigravityOpenFiles(home string, output []byte) map[int]antigravityProcess {
-	root := filepath.Join(home, ".gemini", "antigravity-cli") + string(filepath.Separator)
+	// lsof names files by their real paths: where ~/.gemini is a link, as a
+	// dotfiles setup makes it, the files agy holds are under where it leads.
+	root := filepath.Join(home, ".gemini", "antigravity-cli")
+	roots := []string{root + string(filepath.Separator)}
+	if real, err := filepath.EvalSymlinks(root); err == nil && real != root {
+		roots = append(roots, real+string(filepath.Separator))
+	}
 	result := map[int]antigravityProcess{}
 	pid, fd := 0, ""
 	held := map[int]map[string]bool{}
@@ -1184,7 +1227,12 @@ func parseAntigravityOpenFiles(home string, output []byte) map[int]antigravityPr
 				result[pid] = process
 				continue
 			}
-			rel, ok := strings.CutPrefix(path, root)
+			rel, ok := "", false
+			for _, root := range roots {
+				if rel, ok = strings.CutPrefix(path, root); ok {
+					break
+				}
+			}
 			if !ok {
 				continue
 			}
