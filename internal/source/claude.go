@@ -88,6 +88,9 @@ type ClaudeSource struct {
 	// panes serializes typing into a pane with reading a panel there: a
 	// message typed while a panel is open lands in the panel.
 	panes sync.Map // tmux name -> *sync.Mutex
+	// previous is the conversation each one took over in its process, by
+	// session id: /clear and /resume change a running Claude's session.
+	previous map[string]string
 }
 
 type claudeSession struct {
@@ -286,6 +289,7 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 		meta.Queued = s.queue.pending(id, transcript, working)
 		meta.CanSendQueued = tmuxName != "" && len(meta.Queued) > 0
 
+		meta.Previous = s.previousOf(id, file.PID)
 		found = append(found, meta)
 		next[id] = claudeSession{
 			meta:       meta,
@@ -335,9 +339,38 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 
 	s.mu.Lock()
 	s.sessions = next
+	for id := range s.previous {
+		if !live[id] {
+			delete(s.previous, id)
+		}
+	}
 	s.mu.Unlock()
 
 	return found, nil
+}
+
+// previousOf is the conversation a session took over in its process: the
+// last sweep saw the same process on another session. Remembered for as long
+// as the session lives, so an app that connects later can still follow.
+func (s *ClaudeSource) previousOf(id string, pid int) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if previous, ok := s.previous[id]; ok {
+		return previous
+	}
+	if _, known := s.sessions[id]; known || pid <= 0 {
+		return ""
+	}
+	for oldID, old := range s.sessions {
+		if old.pid == pid && oldID != id {
+			if s.previous == nil {
+				s.previous = map[string]string{}
+			}
+			s.previous[id] = oldID
+			return oldID
+		}
+	}
+	return ""
 }
 
 func launchedClaudeUUID(name string) (string, bool) {

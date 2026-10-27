@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -267,5 +268,43 @@ func TestClaudeCommandPanelNeverPressesEscWhenNothingOpened(t *testing.T) {
 	// normal mode.
 	if pane.escapes != 0 {
 		t.Errorf("pressed Esc %d times", pane.escapes)
+	}
+}
+
+// /clear starts a new conversation in the same Claude: its registry names a
+// new session for the same process. The new one names the old, so the apps
+// can follow from the old thread, as Claude's own app does.
+func TestClaudeClearNamesTheConversationItTookOver(t *testing.T) {
+	home := t.TempDir()
+	registry := filepath.Join(home, ".claude", "sessions", "4242.json")
+	write := func(id string) {
+		writeFile(t, registry, `{"pid": `+strconv.Itoa(os.Getpid())+`, "sessionId": "`+id+`", "cwd": "/tmp/proj",
+			"startedAt": 1, "updatedAt": 2, "status": "idle"}`)
+	}
+	source, err := NewClaudeSource(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source.listPanes = func(context.Context) ([]tmux.Session, error) { return nil, nil }
+	discover := func() protocol.Session {
+		t.Helper()
+		sessions, err := source.Discover(context.Background())
+		if err != nil || len(sessions) != 1 {
+			t.Fatalf("sessions = %+v, %v", sessions, err)
+		}
+		return sessions[0]
+	}
+
+	write("11111111-1111-4111-8111-111111111111")
+	if first := discover(); first.Previous != "" {
+		t.Fatalf("a first conversation took over nothing: %q", first.Previous)
+	}
+	write("22222222-2222-4222-8222-222222222222")
+	for range 2 {
+		next := discover()
+		if next.ID != "claude:22222222-2222-4222-8222-222222222222" ||
+			next.Previous != "claude:11111111-1111-4111-8111-111111111111" {
+			t.Fatalf("after /clear: %+v", next)
+		}
 	}
 }
