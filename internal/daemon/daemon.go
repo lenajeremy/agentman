@@ -1261,6 +1261,12 @@ func (d *Daemon) HandleFrom(
 	case protocol.ReqSetMode, protocol.ReqSetModel:
 		return d.switchSession(ctx, req)
 
+	case protocol.ReqListCommands:
+		return d.listCommands(ctx, req)
+
+	case protocol.ReqCommandPanel:
+		return d.commandPanel(ctx, req)
+
 	default:
 		return protocol.Event{Type: protocol.EvtError, Error: "unsupported request: " + string(req.Type)}
 	}
@@ -1347,7 +1353,8 @@ func validateRequest(req protocol.Request) error {
 		req.Type == protocol.ReqSetMode || req.Type == protocol.ReqSetModel ||
 		req.Type == protocol.ReqListCommits || req.Type == protocol.ReqCommitFiles ||
 		req.Type == protocol.ReqCommitDiff || req.Type == protocol.ReqListBranches ||
-		req.Type == protocol.ReqRenameSession || req.Type == protocol.ReqSetAgentAlerts
+		req.Type == protocol.ReqRenameSession || req.Type == protocol.ReqSetAgentAlerts ||
+		req.Type == protocol.ReqListCommands || req.Type == protocol.ReqCommandPanel
 	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
 		return fmt.Errorf("daemon: invalid session id")
 	}
@@ -1466,6 +1473,10 @@ func validateRequest(req protocol.Request) error {
 		return nil
 	case protocol.ReqListArtifacts:
 		return nil
+	case protocol.ReqListCommands:
+		return nil
+	case protocol.ReqCommandPanel:
+		return validCommandPanel(req)
 	case protocol.ReqRenameSession:
 		if len(req.Text) > 4*maxSessionName {
 			return fmt.Errorf("daemon: that name is too long")

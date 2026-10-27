@@ -362,6 +362,10 @@ type Event struct {
 	Transcript *Transcript `json:"transcript,omitempty"`
 	// VoiceAccount answers the voice_* requests.
 	VoiceAccount *VoiceAccount `json:"voiceAccount,omitempty"`
+	// Commands answers ReqListCommands, [] for an agent with none.
+	Commands []Command `json:"commands,omitzero"`
+	// Panel answers ReqCommandPanel.
+	Panel *CommandPanel `json:"panel,omitempty"`
 	// Languages answers the editor's language server requests.
 	Languages *LanguagesState `json:"languages,omitempty"`
 	// Schedules answers ReqManagerSchedules.

@@ -1,0 +1,69 @@
+
+  ⎿  Auto-compact window for Opus 5.5 unchanged: auto
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ ◉ xhigh · /effort ▔
+   Settings  Status   Config   Usage   Stats
+
+   Version:           2.1.311
+   Session name:      vim ok
+   Session ID:        00000000-0000-0000-0000-000000000000
+   Session kind:      interactive
+   Peer address:      uds:/tmp/cc-socks/1.sock
+   cwd:               /Users/me/code/proj
+                      
+   Login method:      Claude Max account
+   Organization:      me@example.com's Organization
+   Email:             me@example.com
+   Cloud sessions:    GitHub connected
+
+   Model:             opus (claude-opus-5-5)
+   MCP servers:       6 connected, 2 need auth, 1 disabled, 1 failed · /mcp
+   Setting sources:   User settings, Command line arguments
+   Auto mode server:  Enabled
+
+   Esc to cancel
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

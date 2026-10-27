@@ -235,6 +235,26 @@ func Send(ctx context.Context, name, text string) error {
 	return sendLocked(ctx, name, text)
 }
 
+// SendAfter is Send with a key typed first, under the same lock so nothing
+// lands between the two: "i", to bring a Vim prompt back to insert mode.
+func SendAfter(ctx context.Context, name, key, text string) error {
+	if !Available() {
+		return ErrNotInstalled
+	}
+	if strings.TrimSpace(text) == "" {
+		return errors.New("tmux: refusing to send an empty message")
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	if _, err := run(ctx, "send-keys", "-t", name, "-l", "--", key); err != nil {
+		return fmt.Errorf("tmux: could not type into session: %w", err)
+	}
+	// The TUI takes the key before the line is cleared and typed into.
+	time.Sleep(40 * time.Millisecond)
+	return sendLocked(ctx, name, text)
+}
+
 // sendLocked is Send for a caller that already holds the pane's action lock.
 func sendLocked(ctx context.Context, name, text string) error {
 	// Clear whatever is already in the prompt box first.
@@ -619,6 +639,35 @@ func Capture(ctx context.Context, name string) (string, error) {
 		}
 	}
 	return captureFresh(ctx, name)
+}
+
+// Size is a pane's window size, and how many terminals have its session open.
+func Size(ctx context.Context, name string) (width, height, clients int, err error) {
+	out, err := runOutput(ctx, "display-message", "-p", "-t", name, "#{window_width} #{window_height} #{session_attached}")
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	if _, err := fmt.Sscan(out, &width, &height, &clients); err != nil {
+		return 0, 0, 0, fmt.Errorf("tmux: could not read the size of %s: %w", name, err)
+	}
+	return width, height, clients, nil
+}
+
+// Resize sizes a window by hand, for a moment: tmux then stops following its
+// window-size option for it until Unresize hands sizing back.
+func Resize(ctx context.Context, name string, width, height int) error {
+	_, err := run(ctx, "resize-window", "-t", name, "-x", strconv.Itoa(width), "-y", strconv.Itoa(height))
+	return err
+}
+
+// Unresize puts a window back to the size it had and hands its sizing back
+// to the window-size option, so a terminal attaching later sizes it again.
+func Unresize(ctx context.Context, name string, width, height int) error {
+	if err := Resize(ctx, name, width, height); err != nil {
+		return err
+	}
+	_, err := run(ctx, "set-option", "-w", "-u", "-t", name, "window-size")
+	return err
 }
 
 func captureFresh(ctx context.Context, name string) (string, error) {

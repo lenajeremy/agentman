@@ -81,10 +81,13 @@ func (s *ClaudeSource) Inject(ctx context.Context, sessionID, text string) (prot
 	}
 
 	if session.tmuxName != "" {
+		lock := s.paneLock(session.tmuxName)
+		lock.Lock()
+		defer lock.Unlock()
 		if err := rejectSendIntoLiveQuestion(ctx, s.capturePane, session.tmuxName); err != nil {
 			return protocol.InjectNone, err
 		}
-		if err := tmux.Send(ctx, session.tmuxName, text); err != nil {
+		if err := s.typeInto(ctx, session.tmuxName, text); err != nil {
 			return protocol.InjectNone, err
 		}
 		return protocol.InjectTmux, nil

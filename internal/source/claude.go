@@ -82,6 +82,12 @@ type ClaudeSource struct {
 	switchMu      sync.Mutex
 	pickerLabels  []string
 	modelSwitches map[string]claudeModelSwitch
+
+	// editor is the editing mode the user set for Claude's prompt.
+	editor claudeEditorMode
+	// panes serializes typing into a pane with reading a panel there: a
+	// message typed while a panel is open lands in the panel.
+	panes sync.Map // tmux name -> *sync.Mutex
 }
 
 type claudeSession struct {

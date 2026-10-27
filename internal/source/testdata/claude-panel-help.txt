@@ -1,0 +1,70 @@
+       patterns
+     - Learning: Claude pauses and asks you to write small pieces of code for
+       hands-on practice
+
+     Usage: /output-style <style>
+
+❯ utocompact
+
+⏺ "utocompact" looks like a typo, and it isn't a command I can run. If you meant
+  to compact now, type /compact yourself (you can add focus instructions after
+  it).
+
+  If you were asking about autocompact: it's on. Your window is 1M tokens, it
+  compacts when free space drops to about 33k, and you've used about 3%. You can
+  turn it on or off in /config.
+
+✻ Cooked for 3s · done 5:56 AM
+
+❯ dvisor
+
+⏺ "dvisor" also looks like it lost its first letter. I think you meant /advisor,
+  but there's no skill by that name in this session, so I can't run it for you.
+  If it's a built-in Claude Code command, type /advisor yourself; typing /
+  shows the list of commands available.
+
+  If you meant something else, like advice on a specific thing, tell me what and
+  I'll help.
+
+✻ Cogitated for 3s · done 5:56 AM
+
+❯ /rename vim ok
+  ⎿  Session renamed to: vim ok
+
+❯ /config
+  ⎿  Disabled auto-compact
+
+❯ /autocompact
+  ⎿  Auto-compact window for Opus 5.5 unchanged: auto
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ ◉ xhigh · /effort ▔
+   Help  General   Commands   Custom commands
+
+
+   Claude understands your codebase, makes edits with your permission, and
+   executes commands — right from your terminal.
+
+   New here? Run /powerup to learn the features most people miss.
+
+   Shortcuts
+   ! for shell mode      double tap esc to clear       ctrl + shift + _ to
+   / for commands        input                         undo
+   @ for file paths      shift + tab to auto-accept    ctrl + z to suspend
+   /btw for side         edits                         ctrl + v to paste
+   question              ctrl + o for verbose output   images
+                         ctrl + t to toggle tasks      opt + p to switch
+                         \⏎ for newline                model
+                                                       opt + o to toggle fast
+                                                       mode
+                                                       ctrl + s to stash
+                                                       prompt
+                                                       ctrl + g to edit in
+                                                       $EDITOR
+                                                       /keybindings to
+                                                       customize
+
+
+   For more help: https://code.claude.com/docs/en/overview
+
+   Something else? Use /feedback to report bugs or request features.
+
+   Esc to cancel

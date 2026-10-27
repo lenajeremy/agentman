@@ -350,6 +350,40 @@ type ArtifactSource interface {
 	ReviewArtifact(ctx context.Context, sessionID, name string, approve bool, comment string) error
 }
 
+// CommandSource is an adapter whose agent takes slash commands: it lists
+// them, and runs the ones that answer in a panel of the terminal. The rest
+// are sent like any message.
+type CommandSource interface {
+	Commands(ctx context.Context, sessionID string) ([]protocol.Command, error)
+	CommandPanel(ctx context.Context, sessionID, command string) (protocol.CommandPanel, error)
+}
+
+// Commands lists a session's slash commands; an agent without them has none.
+func (r *Registry) Commands(ctx context.Context, sessionID string) ([]protocol.Command, error) {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	commands, ok := s.(CommandSource)
+	if !ok {
+		return []protocol.Command{}, nil
+	}
+	return commands.Commands(ctx, sessionID)
+}
+
+// CommandPanel routes a panel command to the adapter owning the session.
+func (r *Registry) CommandPanel(ctx context.Context, sessionID, command string) (protocol.CommandPanel, error) {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return protocol.CommandPanel{}, err
+	}
+	commands, ok := s.(CommandSource)
+	if !ok {
+		return protocol.CommandPanel{}, fmt.Errorf("source: %s sessions have no commands", s.Kind())
+	}
+	return commands.CommandPanel(ctx, sessionID, command)
+}
+
 // Artifacts lists a session's artifacts. A session whose adapter keeps none
 // has an empty list rather than an error, because that is the true answer.
 func (r *Registry) Artifacts(ctx context.Context, sessionID string) ([]protocol.Artifact, error) {
