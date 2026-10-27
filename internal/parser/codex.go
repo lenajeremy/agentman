@@ -4,7 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"path/filepath"
+	"regexp"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
@@ -57,6 +61,10 @@ type codexPayload struct {
 	Name      string     `json:"name"`
 	CallID    string     `json:"call_id"`
 	Arguments string     `json:"arguments"`
+
+	// turn_aborted
+	TurnID string `json:"turn_id"`
+	Reason string `json:"reason"`
 }
 
 type codexItem struct {
@@ -74,10 +82,15 @@ type codexItem struct {
 
 	// FileChange
 	Changes map[string]json.RawMessage `json:"changes"`
+	Stderr  string                     `json:"stderr"`
 
-	// McpToolCall
-	Server string `json:"server"`
-	Tool   string `json:"tool"`
+	// McpToolCall. Kept raw: their shapes are the server's, and one that
+	// did not decode would lose the whole row.
+	Server    string          `json:"server"`
+	Tool      string          `json:"tool"`
+	Arguments json.RawMessage `json:"arguments"`
+	Result    json.RawMessage `json:"result"`
+	Error     json.RawMessage `json:"error"`
 
 	// Extension and ImageView
 	Kind      string          `json:"kind"`
@@ -90,6 +103,28 @@ type codexItem struct {
 type codexContent struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
+	// Path is a local_image's file.
+	Path string `json:"path"`
+	// TextElements mark what the composer put in Text for something else:
+	// "[Image #1]" where a picture was pasted.
+	TextElements []codexTextElement `json:"text_elements"`
+}
+
+type codexTextElement struct {
+	ByteRange struct {
+		Start int `json:"start"`
+		End   int `json:"end"`
+	} `json:"byte_range"`
+	Placeholder string `json:"placeholder"`
+}
+
+// codexChange is one file of a FileChange: an update as its hunks, a new or
+// deleted file as its whole text.
+type codexChange struct {
+	Type        string `json:"type"`
+	UnifiedDiff string `json:"unified_diff"`
+	Content     string `json:"content"`
+	MovePath    string `json:"move_path"`
 }
 
 type codexParsedCmd struct {
@@ -123,6 +158,9 @@ func (p *CodexParser) Parse(line string, offset int64) []protocol.Message {
 	if rec.Type != "event_msg" || rec.Payload == nil {
 		return nil
 	}
+	if rec.Payload.Type == "turn_aborted" {
+		return p.interrupted(rec, offset)
+	}
 	if rec.Payload.Type != "item_completed" || rec.Payload.Item == nil {
 		return nil
 	}
@@ -137,16 +175,22 @@ func (p *CodexParser) Parse(line string, offset int64) []protocol.Message {
 
 	switch item.Type {
 	case "UserMessage":
-		body := collectCodexText(item.Content)
-		if body == "" {
+		body, images := codexUserMessage(item.Content)
+		if body == "" && len(images) == 0 {
 			return nil
+		}
+		if notice := codexAutomation(body); notice != "" {
+			base.Role = protocol.RoleSystem
+			base.Text = notice
+			return []protocol.Message{base}
 		}
 		base.Role = protocol.RoleUser
 		base.Text = body
+		base.Images = images
 		return []protocol.Message{base}
 
 	case "AgentMessage":
-		body := collectCodexText(item.Content)
+		body := codexCitations(collectCodexText(item.Content))
 		if body == "" {
 			return nil
 		}
@@ -219,6 +263,12 @@ func (p *CodexParser) Parse(line string, offset int64) []protocol.Message {
 			status = protocol.ToolError
 		}
 		base.Tool = &protocol.Tool{Name: "Edit", Summary: clip(summary, SummaryChars), Status: status}
+		// What went wrong when it did; otherwise the change itself.
+		if status == protocol.ToolError && strings.TrimSpace(item.Stderr) != "" {
+			base.Text = ClipBlock(item.Stderr, PreviewLines, PreviewChars)
+		} else if diff := codexDiffs(paths, item.Changes); diff != "" {
+			base.Text = ClipBlock(diff, PreviewLines, PreviewChars)
+		}
 		return []protocol.Message{base}
 
 	case "McpToolCall":
@@ -229,12 +279,24 @@ func (p *CodexParser) Parse(line string, offset int64) []protocol.Message {
 		if tool == "" {
 			tool = "call"
 		}
+		name := server + "." + tool
 		status := protocol.ToolOK
 		if item.Status == "failed" {
 			status = protocol.ToolError
 		}
+		args, own := codexArguments(item.Arguments)
+		summary := summarizeToolInput(name, args)
+		title := ""
+		if own != "" {
+			title = DescribeTool(name, summary, own)
+		}
+		output, failed := codexToolOutcome(item.Result, item.Error)
+		if failed {
+			status = protocol.ToolError
+		}
 		base.Role = protocol.RoleTool
-		base.Tool = &protocol.Tool{Name: server + "." + tool, Status: status}
+		base.Text = output
+		base.Tool = &protocol.Tool{Name: name, Summary: summary, Status: status, Title: title}
 		return []protocol.Message{base}
 
 	case "ContextCompaction":
@@ -271,10 +333,11 @@ func (p *CodexParser) Parse(line string, offset int64) []protocol.Message {
 		// the path as a plain absolute path is what lets the app offer it:
 		// Codex records a file:// URL, which neither the daemon nor the app
 		// treats as a file the agent opened. Not clipped either — half a path
-		// opens nothing.
+		// opens nothing. Named a read, as Claude's are, because that is what
+		// the apps show a picture under and line several up side by side by.
 		base.Role = protocol.RoleTool
 		base.Text = "[image]"
-		base.Tool = &protocol.Tool{Name: "View image", Summary: codexFilePath(item.Path), Status: protocol.ToolOK}
+		base.Tool = &protocol.Tool{Name: "Read", Summary: codexFilePath(item.Path), Status: protocol.ToolOK}
 		return []protocol.Message{base}
 
 	case "CollabAgentToolCall":
@@ -396,6 +459,310 @@ func collectCodexText(content []codexContent) string {
 		}
 	}
 	return strings.TrimSpace(strings.Join(parts, ""))
+}
+
+// codexImageMark is the composer's mark for the Nth picture of a message.
+var codexImageMark = regexp.MustCompile(`^\[Image #(\d+)\]$`)
+
+// codexUserMessage is what the person sent, as the apps show it: the
+// pictures that went with it, and its words without the marks the composer
+// left where each was pasted. A picture Codex kept only as data, with no
+// file to show, keeps its mark.
+func codexUserMessage(content []codexContent) (string, []string) {
+	var images []string
+	// kept[n-1] says whether the nth picture, as the marks count them, is
+	// one of images.
+	var kept []bool
+	for _, block := range content {
+		switch strings.ToLower(block.Type) {
+		case "local_image":
+			usable := filepath.IsAbs(block.Path) && filepath.Clean(block.Path) == block.Path
+			if usable {
+				images = append(images, block.Path)
+			}
+			kept = append(kept, usable)
+		case "image", "input_image":
+			kept = append(kept, false)
+		}
+	}
+	var parts []string
+	for _, block := range content {
+		switch strings.ToLower(block.Type) {
+		case "text", "input_text", "output_text":
+			if text := withoutImageMarks(block.Text, block.TextElements, kept); text != "" {
+				parts = append(parts, text)
+			}
+		}
+	}
+	text := strings.TrimSpace(strings.Join(parts, ""))
+	text = codexAppRequest(text, images)
+	text = codexSpoken(text)
+	text = codexAnswers(text)
+	return text, images
+}
+
+// withoutImageMarks takes out the marks of the pictures kept, each with a
+// space beside it so no gap is left.
+func withoutImageMarks(text string, elements []codexTextElement, kept []bool) string {
+	marks := slices.Clone(elements)
+	// Last first, so the ranges still to come keep pointing where they did.
+	slices.SortFunc(marks, func(a, b codexTextElement) int { return b.ByteRange.Start - a.ByteRange.Start })
+	for _, mark := range marks {
+		start, end := mark.ByteRange.Start, mark.ByteRange.End
+		m := codexImageMark.FindStringSubmatch(mark.Placeholder)
+		if m == nil || start < 0 || end > len(text) || start >= end || text[start:end] != mark.Placeholder {
+			continue
+		}
+		if n, err := strconv.Atoi(m[1]); err != nil || n < 1 || n > len(kept) || !kept[n-1] {
+			continue
+		}
+		if end < len(text) && text[end] == ' ' {
+			end++
+		} else if start > 0 && text[start-1] == ' ' {
+			start--
+		}
+		text = text[:start] + text[end:]
+	}
+	return text
+}
+
+// The Codex app sends a message with more than the person's words as a
+// document of its own, ending in a heading over what they asked. Ahead of it
+// can be the state of its browser, and a heading per file attached or text
+// pasted as one, naming where it is.
+var (
+	codexBrowserState   = regexp.MustCompile(`(?s)^<in-app-browser-context[^>]*>.*?</in-app-browser-context>`)
+	codexFilesHeading   = regexp.MustCompile(`^# Files (?:mentioned|pasted) by the user:`)
+	codexFileHeading    = regexp.MustCompile(`(?m)^## [^\n]*?: (/[^\n]*)$`)
+	codexRequestHeading = regexp.MustCompile(`(?m)^## My request(?: for Codex)?:[ \t]*\n?`)
+)
+
+// codexAppRequest turns that document back into the message: the files that
+// are not pictures named first as @path, as Agentman sends files, then the
+// request. The pictures travel with the message already.
+func codexAppRequest(text string, images []string) string {
+	if browser := codexBrowserState.FindStringIndex(text); browser != nil {
+		rest := strings.TrimSpace(text[browser[1]:])
+		if at := codexRequestHeading.FindStringIndex(rest); at != nil && at[0] == 0 {
+			return strings.TrimSpace(rest[at[1]:])
+		}
+		text = rest
+	}
+	if !codexFilesHeading.MatchString(text) {
+		return text
+	}
+	at := codexRequestHeading.FindStringIndex(text)
+	if at == nil {
+		return text
+	}
+	var refs []string
+	for _, m := range codexFileHeading.FindAllStringSubmatch(text[:at[0]], -1) {
+		if path := strings.TrimSpace(m[1]); !slices.Contains(images, path) {
+			refs = append(refs, "@"+path)
+		}
+	}
+	request := strings.TrimSpace(text[at[1]:])
+	switch {
+	case len(refs) == 0:
+		return request
+	case request == "":
+		return strings.Join(refs, " ")
+	}
+	return strings.Join(refs, " ") + "\n\n" + request
+}
+
+// An answer given in the Codex app to a question Codex asked reaches it as
+// the question and answer in JSON. The question has its own row already.
+var codexAnswerReply = regexp.MustCompile(`(?s)^<send_user_message_question_reply>(.*)</send_user_message_question_reply>$`)
+
+// codexAnswers is what the person answered, one answer a line.
+func codexAnswers(text string) string {
+	reply := codexAnswerReply.FindStringSubmatch(text)
+	if reply == nil {
+		return text
+	}
+	var answers []struct {
+		Answer string `json:"answer"`
+	}
+	if json.Unmarshal([]byte(strings.TrimSpace(reply[1])), &answers) != nil {
+		return text
+	}
+	var said []string
+	for _, answer := range answers {
+		if a := strings.TrimSpace(answer.Answer); a != "" {
+			said = append(said, a)
+		}
+	}
+	return strings.Join(said, "\n")
+}
+
+// A scheduled automation starts its run with a message of its own, its
+// instructions in full, which nobody typed.
+var (
+	codexAutomationRun = regexp.MustCompile(`^<heartbeat>`)
+	codexAutomationID  = regexp.MustCompile(`<automation_id>([^<\n]*)</automation_id>`)
+)
+
+// codexAutomation is the notice for an automation's run, or "" when text is
+// not one.
+func codexAutomation(text string) string {
+	if !codexAutomationRun.MatchString(text) {
+		return ""
+	}
+	if m := codexAutomationID.FindStringSubmatch(text); m != nil && strings.TrimSpace(m[1]) != "" {
+		return "Automation " + strings.TrimSpace(m[1]) + " started a run"
+	}
+	return "An automation started a run"
+}
+
+// A turn spoken in a voice session reaches the agent wrapped, with the
+// conversation so far. What the person said is its input. The handoff when
+// the session ends is Codex's own note, not anything they said.
+var (
+	codexVoiceTurn  = regexp.MustCompile(`(?s)^<realtime_delegation>(.*)</realtime_delegation>$`)
+	codexVoiceInput = regexp.MustCompile(`(?s)<input>(.*?)</input>`)
+	codexVoiceEnded = regexp.MustCompile(`<source>\s*transcript_tail_flush\s*</source>`)
+)
+
+// codexSpoken is what the person said, for a turn spoken in a voice session.
+func codexSpoken(text string) string {
+	turn := codexVoiceTurn.FindStringSubmatch(text)
+	if turn == nil {
+		return text
+	}
+	if codexVoiceEnded.MatchString(turn[1]) {
+		return ""
+	}
+	if input := codexVoiceInput.FindStringSubmatch(turn[1]); input != nil {
+		return strings.TrimSpace(input[1])
+	}
+	return text
+}
+
+// The Codex app names a file it made in a reply as a directive it draws as
+// a chip; elsewhere it reads as its path.
+var (
+	codexFileCitation = regexp.MustCompile(`:codex-file-citation\{[^}\n]*\}`)
+	codexCitedPath    = regexp.MustCompile(`path="([^"]*)"`)
+)
+
+func codexCitations(text string) string {
+	if !strings.Contains(text, ":codex-file-citation{") {
+		return text
+	}
+	return strings.TrimSpace(codexFileCitation.ReplaceAllStringFunc(text, func(citation string) string {
+		if m := codexCitedPath.FindStringSubmatch(citation); m != nil && m[1] != "" {
+			return "`" + m[1] + "`"
+		}
+		return ""
+	}))
+}
+
+// codexDiffs renders a FileChange's files, in the order given, as one
+// unified diff, which the apps colour.
+func codexDiffs(paths []string, changes map[string]json.RawMessage) string {
+	var diffs []string
+	for _, path := range paths {
+		var change codexChange
+		if json.Unmarshal(changes[path], &change) != nil {
+			continue
+		}
+		switch change.Type {
+		case "add":
+			if diff := UnifiedDiff(path, "", change.Content); diff != "" {
+				diffs = append(diffs, diff)
+			}
+		case "delete":
+			if diff := UnifiedDiff(path, change.Content, ""); diff != "" {
+				diffs = append(diffs, diff)
+			}
+		case "update":
+			hunks := strings.Trim(change.UnifiedDiff, "\n")
+			if hunks == "" {
+				continue
+			}
+			if !strings.HasPrefix(hunks, "--- ") {
+				to := path
+				if change.MovePath != "" {
+					to = change.MovePath
+				}
+				hunks = fmt.Sprintf("--- a/%s\n+++ b/%s\n%s",
+					strings.TrimPrefix(path, "/"), strings.TrimPrefix(to, "/"), hunks)
+			}
+			diffs = append(diffs, hunks)
+		}
+	}
+	return strings.Join(diffs, "\n")
+}
+
+// codexArguments splits an MCP call's arguments into what it was given and
+// the agent's own words for the step, which Codex asks for as its title.
+func codexArguments(raw json.RawMessage) (json.RawMessage, string) {
+	var args map[string]any
+	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil {
+		return nil, ""
+	}
+	own, _ := args["title"].(string)
+	if own == "" {
+		return raw, ""
+	}
+	delete(args, "title")
+	rest, err := json.Marshal(args)
+	if err != nil {
+		return raw, own
+	}
+	return rest, own
+}
+
+// codexToolOutcome is what an MCP call returned, or why it failed, and
+// whether it did.
+func codexToolOutcome(result, failure json.RawMessage) (string, bool) {
+	var reason struct {
+		Message string `json:"message"`
+	}
+	if len(failure) > 0 && string(failure) != "null" {
+		var plain string
+		if json.Unmarshal(failure, &plain) == nil && strings.TrimSpace(plain) != "" {
+			return ClipBlock(plain, PreviewLines, PreviewChars), true
+		}
+		if json.Unmarshal(failure, &reason) == nil && strings.TrimSpace(reason.Message) != "" {
+			return ClipBlock(reason.Message, PreviewLines, PreviewChars), true
+		}
+	}
+	var returned struct {
+		Content []codexContent `json:"content"`
+		IsError bool           `json:"isError"`
+	}
+	if len(result) == 0 || json.Unmarshal(result, &returned) != nil {
+		return "", false
+	}
+	var parts []string
+	for _, block := range returned.Content {
+		switch {
+		case block.Text != "":
+			parts = append(parts, block.Text)
+		case block.Type == "image":
+			parts = append(parts, "[image]")
+		}
+	}
+	return ClipBlock(strings.Join(parts, "\n"), PreviewLines, PreviewChars), returned.IsError
+}
+
+// interrupted is the notice for a turn the person stopped, from the
+// terminal or from Agentman. Codex ends turns early for its own reasons too,
+// which say nothing to them.
+func (p *CodexParser) interrupted(rec codexRecord, offset int64) []protocol.Message {
+	if rec.Payload.Reason != "interrupted" {
+		return nil
+	}
+	id := "codex-interrupted:" + rec.Payload.TurnID
+	if rec.Payload.TurnID == "" {
+		id = fmt.Sprintf("o%d", offset)
+	}
+	return []protocol.Message{{
+		ID: id, SessionID: p.sessionID, Role: protocol.RoleSystem,
+		Ts: parseTime(rec.Timestamp), Text: "Interrupted",
+	}}
 }
 
 func baseName(path string) string {

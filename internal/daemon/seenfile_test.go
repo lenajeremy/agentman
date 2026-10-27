@@ -71,6 +71,42 @@ func TestAnUnseenFileIsRefused(t *testing.T) {
 	}
 }
 
+// A picture pasted into the agent's own terminal sits in a temp folder; the
+// agent's record of the message is what lets the phone show it. The same path
+// only typed in the words grants nothing.
+func TestAPictureAttachedToAMessageCanBeRead(t *testing.T) {
+	pasted := filepath.Join(t.TempDir(), "codex-clipboard-a.png")
+	typed := filepath.Join(t.TempDir(), "typed.png")
+	writePNG(t, pasted)
+	writePNG(t, typed)
+	agent := workspaceDaemon(t.TempDir())
+	agent.seen.record("codex:test", []protocol.Message{{
+		ID: "u1", SessionID: "codex:test", Role: protocol.RoleUser,
+		Text: typed + " what is this?", Images: []string{pasted},
+	}})
+
+	if event := readSeen(agent, pasted); event.Type != protocol.EvtWorkspace || event.Workspace.Image == "" {
+		t.Fatalf("attached picture: %+v", event)
+	}
+	if event := readSeen(agent, typed); event.Type != protocol.EvtError {
+		t.Fatalf("a path in the words was served: %+v", event)
+	}
+}
+
+// Only the person's messages carry pictures that way.
+func TestImagesOnAnAgentRowGrantNothing(t *testing.T) {
+	shot := filepath.Join(t.TempDir(), "shot.png")
+	writePNG(t, shot)
+	agent := workspaceDaemon(t.TempDir())
+	agent.seen.record("codex:test", []protocol.Message{{
+		ID: "a1", SessionID: "codex:test", Role: protocol.RoleAssistant, Images: []string{shot},
+	}})
+
+	if event := readSeen(agent, shot); event.Type != protocol.EvtError {
+		t.Fatalf("an assistant row's image was served: %+v", event)
+	}
+}
+
 // One session's history must not authorise another's reads.
 func TestSeenPathsDoNotCrossSessions(t *testing.T) {
 	shot := filepath.Join(t.TempDir(), "shot.png")

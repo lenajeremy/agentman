@@ -315,7 +315,7 @@ func TestCodexCurrentExtensionAndImageItems(t *testing.T) {
 	})
 	msgs := pageAll(t, path, NewCodexParser("codex:s"), 10)
 	if len(msgs) != 5 || msgs[0].Tool.Name != "Web search" || msgs[0].Tool.Summary != "Codex docs" ||
-		msgs[1].Tool.Name != "View image" || msgs[2].Tool.Status != protocol.ToolError ||
+		msgs[1].Tool.Name != "Read" || msgs[2].Tool.Status != protocol.ToolError ||
 		msgs[3].Tool.Name != "Web search" || msgs[4].Tool.Summary != "spawn_agent" {
 		t.Fatalf("current Codex items = %+v", msgs)
 	}
