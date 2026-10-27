@@ -15,6 +15,10 @@ struct AgentmanApp: App {
         if Self.underTests {
             UserDefaults.standard.register(defaults: ["ApplePersistenceIgnoreState": true])
         }
+        // A held key repeats, as in a code editor or a terminal, instead of
+        // offering accents: holding j in the editor's Vim mode moves down.
+        // Someone who set press-and-hold themselves keeps it.
+        UserDefaults.standard.register(defaults: ["ApplePressAndHoldEnabled": false])
         Fonts.register()
     }
 
