@@ -65,3 +65,20 @@ export function newestTimestamp(messages: Message[]): number {
   }
   return newest;
 }
+
+/**
+ * The open threads to catch up when the phone comes back: the app returning
+ * to the foreground, or the connection or the Mac returning. Coming back
+ * subscribes again, which streams only what happens from then on, so what an
+ * open thread's agent wrote meanwhile would be missing until the thread was
+ * opened again. A thread with nothing on screen is still loading its first
+ * page, and one already catching up needs no second walk.
+ */
+export function threadsToCatchUp(
+  open: Iterable<string>,
+  onScreen: Readonly<Record<string, readonly Message[] | undefined>>,
+  catchingUp: Iterable<CatchUpState>,
+): string[] {
+  const walking = new Set(Array.from(catchingUp, (state) => state.sessionId));
+  return Array.from(open).filter((sessionId) => (onScreen[sessionId]?.length ?? 0) > 0 && !walking.has(sessionId));
+}

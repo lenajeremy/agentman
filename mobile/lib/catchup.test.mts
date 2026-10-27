@@ -5,6 +5,7 @@ import {
   CATCH_UP_MAX_PAGES,
   needsAnotherPage,
   newestTimestamp,
+  threadsToCatchUp,
   type CatchUpState,
 } from "./catchup.ts";
 import type { Message } from "./protocol.ts";
@@ -71,4 +72,23 @@ test("newestTimestamp finds the newest regardless of order", () => {
   // No messages means no catch-up is possible; a zero start would fetch the
   // whole history, which is exactly what the first-visit path is for.
   assert.equal(newestTimestamp([]), 0);
+});
+
+test("coming back catches up the threads still open that have messages on screen", () => {
+  const onScreen = {
+    "claude:a": [message(100)],
+    "codex:b": [message(200)],
+    "claude:loading": [],
+  };
+  assert.deepEqual(
+    threadsToCatchUp(["claude:a", "codex:b", "claude:loading", "kiro:unseen"], onScreen, []),
+    ["claude:a", "codex:b"],
+    "a thread still loading its first page, or never loaded, has nothing to catch up",
+  );
+  assert.deepEqual(
+    threadsToCatchUp(["claude:a", "codex:b"], onScreen, [{ sessionId: "codex:b", sinceTs: 200, depth: 0 }]),
+    ["claude:a"],
+    "one already walking back is not walked twice",
+  );
+  assert.deepEqual(threadsToCatchUp([], onScreen, []), []);
 });
