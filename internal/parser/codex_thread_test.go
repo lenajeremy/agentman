@@ -309,3 +309,27 @@ func TestCodexUserTextPutsPicturesBackForTheirMarks(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+// /init sends the model a page of instructions as the person's message; the
+// thread shows the command they ran, as Claude's does.
+func TestCodexInitShowsAsTheCommand(t *testing.T) {
+	row := onlyRow(t, codexUser(obj{"type": "text", "text": "Generate a file named AGENTS.md that serves as a contributor guide for this repository.\n" +
+		"Before writing, check whether AGENTS.md already exists in the current working directory."}))
+	if row.Role != protocol.RoleUser || row.Text != "/init" {
+		t.Fatalf("row = %+v", row)
+	}
+}
+
+func TestCodexGoalIsANotice(t *testing.T) {
+	goal := func(status string) obj {
+		return obj{"timestamp": "2026-10-27T09:40:00Z", "type": "event_msg", "payload": obj{
+			"type": "thread_goal_updated", "threadId": "t1",
+			"goal": obj{"objective": "ship the\nlab test", "status": status}}}
+	}
+	if row := onlyRow(t, goal("active")); row.Role != protocol.RoleSystem || row.Text != "Goal: ship the lab test" {
+		t.Fatalf("active: %+v", row)
+	}
+	if row := onlyRow(t, goal("budget_limited")); row.Text != "Goal budget limited: ship the lab test" {
+		t.Fatalf("budget_limited: %+v", row)
+	}
+}

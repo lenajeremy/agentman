@@ -65,6 +65,12 @@ type codexPayload struct {
 	// turn_aborted
 	TurnID string `json:"turn_id"`
 	Reason string `json:"reason"`
+
+	// thread_goal_updated
+	Goal *struct {
+		Objective string `json:"objective"`
+		Status    string `json:"status"`
+	} `json:"goal"`
 }
 
 type codexItem struct {
@@ -162,6 +168,9 @@ func (p *CodexParser) Parse(line string, offset int64) []protocol.Message {
 	if rec.Payload.Type == "turn_aborted" {
 		return p.interrupted(rec, offset)
 	}
+	if rec.Payload.Type == "thread_goal_updated" {
+		return p.goal(rec, offset)
+	}
 	if rec.Payload.Type != "item_completed" || rec.Payload.Item == nil {
 		return nil
 	}
@@ -184,6 +193,11 @@ func (p *CodexParser) Parse(line string, offset int64) []protocol.Message {
 			base.Role = protocol.RoleSystem
 			base.Text = notice
 			return []protocol.Message{base}
+		}
+		// /init sends the model a page of instructions in the person's
+		// name; what they did was run the command.
+		if strings.HasPrefix(body, codexInitPrompt) {
+			body = "/init"
 		}
 		base.Role = protocol.RoleUser
 		base.Text = body
@@ -769,6 +783,25 @@ func codexToolOutcome(result, failure json.RawMessage) (string, bool) {
 		}
 	}
 	return ClipBlock(strings.Join(parts, "\n"), PreviewLines, PreviewChars), returned.IsError
+}
+
+// codexInitPrompt opens what Codex sends the model for /init.
+const codexInitPrompt = "Generate a file named AGENTS.md that serves as a contributor guide for this repository."
+
+// goal is the notice for a goal set with /goal, or one whose state changed.
+func (p *CodexParser) goal(rec codexRecord, offset int64) []protocol.Message {
+	goal := rec.Payload.Goal
+	if goal == nil || strings.TrimSpace(goal.Objective) == "" {
+		return nil
+	}
+	text := "Goal: "
+	if status := strings.ReplaceAll(strings.TrimSpace(goal.Status), "_", " "); status != "" && status != "active" {
+		text = "Goal " + status + ": "
+	}
+	return []protocol.Message{{
+		ID: fmt.Sprintf("o%d", offset), SessionID: p.sessionID, Role: protocol.RoleSystem,
+		Ts: parseTime(rec.Timestamp), Text: text + clip(strings.Join(strings.Fields(goal.Objective), " "), 300),
+	}}
 }
 
 // interrupted is the notice for a turn the person stopped, from the

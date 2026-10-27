@@ -154,6 +154,9 @@ func (s *CodexSource) send(ctx context.Context, sessionID, text string, images [
 	}
 
 	if session.tmuxName != "" {
+		lock := s.paneLock(session.tmuxName)
+		lock.Lock()
+		defer lock.Unlock()
 		if err := rejectSendIntoLiveQuestion(ctx, s.capturePane, session.tmuxName); err != nil {
 			return protocol.InjectNone, err
 		}
@@ -185,12 +188,12 @@ func (s *CodexSource) send(ctx context.Context, sessionID, text string, images [
 }
 
 // codexTyped is a message as it is typed into Codex's composer. One ending on
-// an @path, typed or pasted, leaves Codex's file menu open, and the Enter
-// that should send it picks from the menu instead; a space after the path
-// closes the menu, and Codex trims it.
+// an @path or a $skill, typed or pasted, leaves Codex's file or skill menu
+// open, and the Enter that should send it picks from the menu instead; a
+// space after it closes the menu, and Codex trims it.
 func codexTyped(text string) string {
 	words := strings.Fields(text)
-	if len(words) > 0 && strings.HasPrefix(words[len(words)-1], "@") && !strings.HasSuffix(text, " ") {
+	if len(words) > 0 && strings.ContainsAny(words[len(words)-1][:1], "@$") && !strings.HasSuffix(text, " ") {
 		return text + " "
 	}
 	return text

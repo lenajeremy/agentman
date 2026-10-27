@@ -95,6 +95,9 @@ func TestCodexTypedClosesTheFileMenu(t *testing.T) {
 		"explain @main.go ":                "explain @main.go ",
 		"compare @a.go with @b.go please":  "compare @a.go with @b.go please",
 		"email me@example.com":             "email me@example.com",
+		"$imagegen":                        "$imagegen ",
+		"draw a cat with $imagegen":        "draw a cat with $imagegen ",
+		"$imagegen draw a cat":             "$imagegen draw a cat",
 		"":                                 "",
 	}
 	for in, want := range cases {
