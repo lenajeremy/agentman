@@ -34,6 +34,9 @@ type Install struct {
 	// executable in its package.json.
 	NPM string
 	Bin string
+	// Rustup is a component of the Mac's Rust toolchain, added with rustup
+	// when there is one, before Release is downloaded.
+	Rustup string
 	// Release is a binary to download, by GOOS/GOARCH.
 	Release map[string]Asset
 	// Size is about how much it takes on disk, for am lsp status.
@@ -159,6 +162,11 @@ func (in *Installer) Install(ctx context.Context, server *Server, progress func(
 	lock := in.lock(server.ID)
 	lock.Lock()
 	defer lock.Unlock()
+	if spec.Rustup != "" {
+		if launch, ok := in.rustupComponent(ctx, server, progress); ok {
+			return launch, nil
+		}
+	}
 	if launch, ok := in.Installed(server); ok {
 		return launch, nil
 	}
@@ -188,6 +196,28 @@ func (in *Installer) Install(ctx context.Context, server *Server, progress func(
 		return Launch{}, fmt.Errorf("%s installed, but can't be run", server.Name)
 	}
 	return launch, nil
+}
+
+// rustupComponent adds a server to the Mac's Rust toolchain, as rustup
+// itself suggests, and runs it through rustup's proxy, which picks the
+// toolchain each project asks for.
+func (in *Installer) rustupComponent(ctx context.Context, server *Server, progress func(string)) (Launch, bool) {
+	rustup := in.Tools.Look("rustup")
+	if rustup == "" {
+		return Launch{}, false
+	}
+	dir := filepath.Dir(rustup)
+	proxy := filepath.Join(dir, server.ID)
+	if !in.Tools.Runs(proxy, "--version") {
+		progress(fmt.Sprintf("Adding %s to your Rust toolchain…", server.Name))
+		if err := in.run(ctx, rustup, []string{"component", "add", server.Install.Rustup}, []string{dir}, nil); err != nil {
+			return Launch{}, false
+		}
+		if !in.Tools.Runs(proxy, "--version") {
+			return Launch{}, false
+		}
+	}
+	return Launch{Path: proxy, Args: server.Args, Dirs: []string{dir}}, true
 }
 
 // installed fills a fresh folder and only then moves it into place, marked

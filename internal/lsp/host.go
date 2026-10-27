@@ -196,7 +196,7 @@ func (h *Host) resolve(c *Client, file, folder, language string) *Session {
 	if server == nil || file == "" || h.off(server) {
 		return nil
 	}
-	root := Root(file, folder, server.Markers)
+	root := RootFor(server, file, folder)
 	key := server.ID + ":" + root
 	h.mu.Lock()
 	if h.closed {
@@ -317,6 +317,11 @@ func (h *Host) locate(server *Server) (Launch, bool) {
 		return Launch{Path: found, Args: server.Args}, true
 	}
 	if h.installer != nil {
+		if server.Install != nil && server.Install.Rustup != "" && h.canInstall(server) && h.tools.Look("rustup") != "" {
+			// With rustup, the toolchain's own copy, which Install adds,
+			// rather than one downloaded for another toolchain.
+			return Launch{}, false
+		}
 		return h.installer.Installed(server)
 	}
 	return Launch{}, false

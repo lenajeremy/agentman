@@ -1059,7 +1059,8 @@ private struct LanguageLabel: View {
                     .help("\(status.detail)\nClick to try again.")
                 default:
                     if !status.detail.isEmpty {
-                        Text(status.detail).lineLimit(1).frame(maxWidth: 280)
+                        // A server's warning can run longer than the bar.
+                        Text(status.detail).lineLimit(1).frame(maxWidth: 280).help(status.detail)
                     }
                 }
             }
