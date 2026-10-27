@@ -711,7 +711,7 @@ export default function SessionScreen() {
   // The "/" menu. The list is asked for when "/" is first typed in a session,
   // and again after a minute, as skills come and go on the Mac.
   const commandsOn = takesCommands(session) && canSend;
-  const menuQuery = commandsOn && !awaitingSend ? slashQuery(draft) : null;
+  const menuQuery = commandsOn && !awaitingSend ? slashQuery(draft, session?.kind === "codex") : null;
   const slashMenuShown = menuQuery !== null;
   useEffect(() => {
     if (!slashMenuShown || !store.daemonOnline || commandsLoading) return;
@@ -741,7 +741,7 @@ export default function SessionScreen() {
     setPanelView(null);
   }, [sessionId]);
   const menuMatches = useMemo(
-    () => (menuQuery === null ? [] : matchCommands(commands, menuQuery)),
+    () => (menuQuery === null ? [] : matchCommands(commands, menuQuery.query, undefined, menuQuery.prefix)),
     [commands, menuQuery],
   );
 
@@ -1194,7 +1194,8 @@ export default function SessionScreen() {
                   onPick={pickMention}
                 />
               ) : null}
-              {menuQuery !== null ? (
+              {/* "$" is also how a price starts: its menu only shows a match. */}
+              {menuQuery !== null && (menuQuery.prefix === "/" || menuMatches.length > 0) ? (
                 <SlashMenu
                   commands={menuMatches}
                   loading={commandsLoading}

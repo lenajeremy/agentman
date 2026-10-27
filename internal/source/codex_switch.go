@@ -193,6 +193,9 @@ func (s *CodexSource) SetMode(ctx context.Context, sessionID, mode string) error
 	if err != nil {
 		return err
 	}
+	lock := s.paneLock(name)
+	lock.Lock()
+	defer lock.Unlock()
 	d := s.switcher
 	for presses := 0; presses <= len(codexModes)+1; presses++ {
 		pane, err := d.capture(ctx, name)
@@ -269,6 +272,9 @@ func (s *CodexSource) SetModel(ctx context.Context, sessionID, model string) err
 	if err != nil {
 		return err
 	}
+	lock := s.paneLock(name)
+	lock.Lock()
+	defer lock.Unlock()
 	display := ""
 	for _, entry := range s.codexModels() {
 		if entry.slug == model {

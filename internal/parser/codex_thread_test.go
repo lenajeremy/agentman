@@ -295,3 +295,41 @@ func TestCodexAutomationRunIsANotice(t *testing.T) {
 		t.Fatalf("row = %+v", row)
 	}
 }
+
+// What the daemon follows a message it sent by: the words with each pasted
+// picture's path where Codex left its mark, as the daemon sent them.
+func TestCodexUserTextPutsPicturesBackForTheirMarks(t *testing.T) {
+	text := "[Image #1] [Image #2] compare these"
+	line := `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","content":[` +
+		`{"type":"local_image","path":"/tmp/a.png"},{"type":"image","image_url":"data:image/png;base64,AAAA"},` +
+		`{"type":"text","text":"` + text + `","text_elements":[` +
+		`{"byte_range":{"start":0,"end":10},"placeholder":"[Image #1]"},` +
+		`{"byte_range":{"start":11,"end":21},"placeholder":"[Image #2]"}]}]}}}`
+	if got := CodexUserText(line); got != "/tmp/a.png [Image #2] compare these" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// /init sends the model a page of instructions as the person's message; the
+// thread shows the command they ran, as Claude's does.
+func TestCodexInitShowsAsTheCommand(t *testing.T) {
+	row := onlyRow(t, codexUser(obj{"type": "text", "text": "Generate a file named AGENTS.md that serves as a contributor guide for this repository.\n" +
+		"Before writing, check whether AGENTS.md already exists in the current working directory."}))
+	if row.Role != protocol.RoleUser || row.Text != "/init" {
+		t.Fatalf("row = %+v", row)
+	}
+}
+
+func TestCodexGoalIsANotice(t *testing.T) {
+	goal := func(status string) obj {
+		return obj{"timestamp": "2026-10-27T09:40:00Z", "type": "event_msg", "payload": obj{
+			"type": "thread_goal_updated", "threadId": "t1",
+			"goal": obj{"objective": "ship the\nlab test", "status": status}}}
+	}
+	if row := onlyRow(t, goal("active")); row.Role != protocol.RoleSystem || row.Text != "Goal: ship the lab test" {
+		t.Fatalf("active: %+v", row)
+	}
+	if row := onlyRow(t, goal("budget_limited")); row.Text != "Goal budget limited: ship the lab test" {
+		t.Fatalf("budget_limited: %+v", row)
+	}
+}

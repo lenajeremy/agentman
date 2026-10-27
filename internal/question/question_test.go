@@ -826,3 +826,22 @@ func TestDetectsAQuestionWithATaskListBelowIt(t *testing.T) {
 		t.Error("Custom = false, want true — the pane offers a free-text row")
 	}
 }
+
+// Codex 0.162 asks before it runs in a folder it has not trusted. Its
+// paragraph wraps over several lines above the options, and the menu took
+// the last of them, "decision will be saved.", for the question.
+func TestCodexFolderTrustReadsAsTheQuestionItAsks(t *testing.T) {
+	q := Detect(readFixture(t, "testdata/codex_trust_folder_real_pane.txt"))
+	if q == nil {
+		t.Fatal("no question")
+	}
+	if q.Title != "Folder access" || q.Detail != "/Users/me/code/shop" ||
+		!strings.HasPrefix(q.Prompt, "Trust this folder? Codex can read, edit, and run files here,") ||
+		!strings.HasSuffix(q.Prompt, "Your trust decision will be saved.") {
+		t.Fatalf("question = %q / %q / %q", q.Title, q.Prompt, q.Detail)
+	}
+	if len(q.Options) != 2 || q.Options[0].Key != "1" || q.Options[0].Label != "Trust and continue" || !q.Options[0].Selected ||
+		q.Options[1].Label != "Back to Agent Command Center" {
+		t.Fatalf("options = %+v", q.Options)
+	}
+}

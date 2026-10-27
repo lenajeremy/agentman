@@ -357,6 +357,9 @@ export interface VoiceAccount {
 export interface SlashCommand {
   /** What follows the "/": "compact", "vercel:deploy". */
   name: string;
+  /** What goes before the name when it is typed, "/" when absent. Codex's
+   *  skills take "$". */
+  prefix?: string;
   description?: string;
   /** "[instructions]", "<model>": what it takes. */
   argumentHint?: string;

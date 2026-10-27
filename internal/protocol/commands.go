@@ -26,6 +26,9 @@ const (
 type Command struct {
 	// Name is what follows the "/": "compact", "vercel:deploy".
 	Name string `json:"name"`
+	// Prefix is what goes before Name when it is typed, "/" when empty.
+	// Codex's skills take "$": "$imagegen".
+	Prefix string `json:"prefix,omitempty"`
 	// Description says what it does, in one line.
 	Description string `json:"description,omitempty"`
 	// ArgumentHint shows what it takes, as the agent's own menu does:

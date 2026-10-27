@@ -17,18 +17,25 @@ final class SlashCommands {
     @ObservationIgnored weak var textView: NSTextView?
     @ObservationIgnored private let load: () async -> Result<[SlashCommand], TerminalProblem>
     @ObservationIgnored private var askedAt: Date?
+    /// What opens the list: "/", and "$" for an agent whose skills take it.
+    @ObservationIgnored private let triggers: Set<Character>
+    /// What opened it.
+    private(set) var prefix: Character = "/"
 
     static let shown = 9
 
-    init(load: @escaping () async -> Result<[SlashCommand], TerminalProblem>) {
+    init(triggers: Set<Character> = ["/"], load: @escaping () async -> Result<[SlashCommand], TerminalProblem>) {
+        self.triggers = triggers
         self.load = load
     }
 
     var isOpen: Bool { query != nil && (!results.isEmpty || problem != nil) }
 
-    /// Follows the box: open while all it holds is `/` and a name being typed.
+    /// Follows the box: open while all it holds is `/` (or a `$` it takes)
+    /// and a name being typed.
     func update(text: String) {
-        guard text.hasPrefix("/"), !text.contains(where: \.isWhitespace) else { return dismiss() }
+        guard let first = text.first, triggers.contains(first), !text.contains(where: \.isWhitespace) else { return dismiss() }
+        prefix = first
         query = String(text.dropFirst())
         refresh()
         // Asked for when first needed, and again after a minute, as skills
@@ -67,7 +74,8 @@ final class SlashCommands {
         let index = index ?? selected
         guard results.indices.contains(index), let textView else { return dismiss() }
         let command = results[index]
-        let picked = "/" + command.name + (command.argumentHint?.isEmpty == false ? " " : "")
+        // A skill is followed by what it is for.
+        let picked = command.label + (command.argumentHint?.isEmpty == false || command.prefix == "$" ? " " : "")
         let all = NSRange(location: 0, length: (textView.string as NSString).length)
         textView.insertText(picked, replacementRange: all)
         dismiss()
@@ -75,14 +83,15 @@ final class SlashCommands {
 
     private func refresh() {
         guard let query else { return }
-        results = Array(Self.match(commands, query).prefix(60))
+        results = Array(Self.match(commands, query, prefix: prefix).prefix(60))
         selected = min(selected, max(results.count - 1, 0))
     }
 
     /// Best first: the name itself, then names that start with what is typed,
     /// then a word within a name that does ("deploy" finds vercel:deploy),
     /// then any that contain it. Built-in commands lead within each.
-    static func match(_ commands: [SlashCommand], _ query: String) -> [SlashCommand] {
+    /// "$" lists only what takes it: Codex's skills.
+    static func match(_ commands: [SlashCommand], _ query: String, prefix: Character = "/") -> [SlashCommand] {
         func squash(_ text: String) -> String {
             text.lowercased().filter { !":_- ".contains($0) }
         }
@@ -98,6 +107,7 @@ final class SlashCommands {
             return nil
         }
         return commands
+            .filter { prefix == "/" || $0.prefix == String(prefix) }
             .compactMap { command in rank(command).map { (command, $0) } }
             .sorted { a, b in
                 if a.1 != b.1 { return a.1 < b.1 }
@@ -126,10 +136,15 @@ final class SlashCommands {
         return .message
     }
 
-    /// Commands are typed into the agent's prompt, so only a Claude the Mac
-    /// started in a terminal it can type into takes them.
+    /// Commands are typed into the agent's prompt, so only a Claude or Codex
+    /// the Mac started in a terminal it can type into takes them.
     static func takes(_ session: Session?) -> Bool {
-        session?.kind == "claude" && session?.inject == "tmux"
+        (session?.kind == "claude" || session?.kind == "codex") && session?.inject == "tmux"
+    }
+
+    /// What opens a session's list: Codex's skills are typed with "$".
+    static func triggers(for session: Session) -> Set<Character> {
+        session.kind == "codex" ? ["/", "$"] : ["/"]
     }
 }
 
@@ -149,9 +164,9 @@ struct SlashList: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 1) {
-                            ForEach(Array(slash.results.enumerated()), id: \.element.name) { index, command in
+                            ForEach(Array(slash.results.enumerated()), id: \.element.label) { index, command in
                                 SlashRow(command: command, selected: index == slash.selected)
-                                    .id(command.name)
+                                    .id(command.label)
                                     .contentShape(Rectangle())
                                     .onTapGesture { slash.choose(index) }
                                     .onHover { if $0 { slash.selected = index } }
@@ -160,7 +175,7 @@ struct SlashList: View {
                     }
                     .frame(maxHeight: CGFloat(SlashCommands.shown) * 39)
                     .onChange(of: slash.selected) { _, index in
-                        if slash.results.indices.contains(index) { proxy.scrollTo(slash.results[index].name) }
+                        if slash.results.indices.contains(index) { proxy.scrollTo(slash.results[index].label) }
                     }
                 }
             }
@@ -182,7 +197,7 @@ private struct SlashRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 6) {
-                Text("/" + command.name)
+                Text(command.label)
                     .font(Fonts.mono(12.5, selected ? .medium : .regular))
                     .foregroundStyle(Palette.text)
                     .lineLimit(1)
@@ -253,4 +268,9 @@ struct CommandPanelSheet: View {
 struct PanelItem: Identifiable {
     let panel: CommandPanel
     var id: String { panel.command + "\n" + panel.text }
+}
+
+extension SlashCommand {
+    /// As the menu and the box write it: "/compact", "$imagegen".
+    var label: String { (prefix ?? "/") + name }
 }

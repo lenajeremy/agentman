@@ -178,8 +178,11 @@ type CodexSource struct {
 	// switcher drives a pane to switch its mode or model; see
 	// codex_switch.go. switchMu guards the model list read from Codex's
 	// own cache of it.
-	switcher      paneDriver
-	switchMu      sync.Mutex
+	switcher paneDriver
+	switchMu sync.Mutex
+	// panes serializes typing into a pane with reading what a command
+	// printed there: a message typed meanwhile would land in the reading.
+	panes         sync.Map // tmux name -> *sync.Mutex
 	modelList     []codexModelEntry
 	modelsReadAt  time.Time
 	modelsModTime time.Time

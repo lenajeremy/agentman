@@ -268,21 +268,62 @@ func sendLocked(ctx context.Context, name, text string) error {
 	if _, err := run(ctx, "send-keys", "-t", name, "C-u"); err != nil {
 		return fmt.Errorf("tmux: could not clear the prompt: %w", err)
 	}
+	if err := typeLocked(ctx, name, text); err != nil {
+		return err
+	}
+	return submitLocked(ctx, name)
+}
 
-	if strings.ContainsAny(text, "\n\r") {
-		if err := pasteMultiline(ctx, name, text); err != nil {
+// SendPasting is Send with each of pastes pasted on its own ahead of the
+// text, under the same lock. Codex turns a pasted path to a picture into an
+// attachment ("[Image #1]"), where the same path typed is only words. text
+// may be empty when there are pastes.
+func SendPasting(ctx context.Context, name string, pastes []string, text string) error {
+	if len(pastes) == 0 {
+		return Send(ctx, name, text)
+	}
+	if !Available() {
+		return ErrNotInstalled
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	if _, err := run(ctx, "send-keys", "-t", name, "C-u"); err != nil {
+		return fmt.Errorf("tmux: could not clear the prompt: %w", err)
+	}
+	for _, paste := range pastes {
+		if err := pasteMultiline(ctx, name, paste); err != nil {
 			return err
 		}
-	} else {
-		// -l sends the text literally, so nothing in it is interpreted as a
-		// key name: a message containing the word "Enter" stays that word.
-		// "--" ends the flags, so a message beginning with a dash is typed
-		// rather than read by tmux as an option of its own.
-		if _, err := run(ctx, "send-keys", "-t", name, "-l", "--", text); err != nil {
-			return fmt.Errorf("tmux: could not type into session: %w", err)
+		// Each paste is taken in as one before the next arrives.
+		time.Sleep(80 * time.Millisecond)
+	}
+	if strings.TrimSpace(text) != "" {
+		if err := typeLocked(ctx, name, text); err != nil {
+			return err
 		}
 	}
+	return submitLocked(ctx, name)
+}
 
+// typeLocked types text into the prompt box, pasting it when it has more
+// than one line. The caller holds the pane's action lock.
+func typeLocked(ctx context.Context, name, text string) error {
+	if strings.ContainsAny(text, "\n\r") {
+		return pasteMultiline(ctx, name, text)
+	}
+	// -l sends the text literally, so nothing in it is interpreted as a
+	// key name: a message containing the word "Enter" stays that word.
+	// "--" ends the flags, so a message beginning with a dash is typed
+	// rather than read by tmux as an option of its own.
+	if _, err := run(ctx, "send-keys", "-t", name, "-l", "--", text); err != nil {
+		return fmt.Errorf("tmux: could not type into session: %w", err)
+	}
+	return nil
+}
+
+// submitLocked presses Enter. The caller holds the pane's action lock.
+func submitLocked(ctx context.Context, name string) error {
 	// Submit as a separate key event. Some TUIs need a moment to process a
 	// paste before the newline is treated as submission rather than content.
 	time.Sleep(60 * time.Millisecond)
@@ -292,7 +333,8 @@ func sendLocked(ctx context.Context, name, text string) error {
 	return nil
 }
 
-// pasteMultiline loads text into a private buffer and pastes it.
+// pasteMultiline loads text into a private buffer and pastes it, as a
+// terminal pastes: in one piece, marked as pasted.
 func pasteMultiline(ctx context.Context, name, text string) error {
 	file, err := os.CreateTemp("", "agentman-paste-*")
 	if err != nil {
@@ -749,6 +791,54 @@ func Answer(ctx context.Context, name, key string) error {
 		return fmt.Errorf("tmux: could not answer: %w", err)
 	}
 	return nil
+}
+
+// AnswerCodexMenu picks an option of a Codex menu that waits for Enter, as
+// its footer says ("enter continue", "enter select"): the folder trust
+// prompt, a picker. Its number picks an option and confirms it, except the
+// option already selected, which only Enter confirms. So the number is
+// typed, and Enter follows while the same menu still shows that option
+// selected; a menu the number already closed gets nothing more.
+func AnswerCodexMenu(ctx context.Context, name, key string) error {
+	if !Available() {
+		return ErrNotInstalled
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	pane, err := Capture(ctx, name)
+	if err != nil {
+		return err
+	}
+	before := question.Detect(pane)
+	if before == nil || !slices.ContainsFunc(before.Options, func(o question.Option) bool { return o.Key == key }) {
+		return errors.New("tmux: that Codex question is no longer current; refresh the session")
+	}
+	if err := sendLiteral(ctx, name, key); err != nil {
+		return fmt.Errorf("tmux: could not answer: %w", err)
+	}
+	time.Sleep(250 * time.Millisecond)
+	if pane, err = Capture(ctx, name); err != nil {
+		return err
+	}
+	after := question.Detect(pane)
+	if after == nil || !sameMenu(before, after) {
+		return nil
+	}
+	if !slices.ContainsFunc(after.Options, func(o question.Option) bool { return o.Key == key && o.Selected }) {
+		return errors.New("tmux: Codex did not take that choice; answer it in the terminal")
+	}
+	if _, err := run(ctx, "send-keys", "-t", name, "Enter"); err != nil {
+		return fmt.Errorf("tmux: could not confirm the answer: %w", err)
+	}
+	return nil
+}
+
+// sameMenu reports whether two reads of a pane show the same menu, whatever
+// is selected in it.
+func sameMenu(a, b *question.Question) bool {
+	return a.Title == b.Title && a.Prompt == b.Prompt && a.Detail == b.Detail &&
+		slices.EqualFunc(a.Options, b.Options, func(x, y question.Option) bool { return x.Key == y.Key && x.Label == y.Label })
 }
 
 // AnswerCodexCustom fills the current Codex follow-up question's Other field.

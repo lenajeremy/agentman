@@ -292,7 +292,7 @@ struct AgentThreadView: View {
                 return
             }
             let id = session.id
-            slash = SlashCommands { [store] in await store.commands(for: id) }
+            slash = SlashCommands(triggers: SlashCommands.triggers(for: session)) { [store] in await store.commands(for: id) }
         }
         .sheet(item: Binding(get: { panel.map(PanelItem.init) }, set: { panel = $0?.panel })) { item in
             CommandPanelSheet(panel: item.panel)

@@ -75,12 +75,14 @@ func (h *heldSends) pending(sessionID, path string, working bool) []string {
 		if !bytes.Contains(line, []byte("UserMessage")) && !bytes.Contains(line, []byte(`"user"`)) {
 			continue
 		}
-		read := strings.TrimSpace(h.userText(line))
+		// Spacing is the agent's: Codex puts a space after a pasted picture
+		// of its own.
+		read := strings.Join(strings.Fields(h.userText(line)), " ")
 		if read == "" {
 			continue
 		}
 		tail.waiting = slices.DeleteFunc(tail.waiting, func(waiting string) bool {
-			return strings.Contains(read, waiting)
+			return strings.Contains(read, strings.Join(strings.Fields(waiting), " "))
 		})
 	}
 	if !working {
