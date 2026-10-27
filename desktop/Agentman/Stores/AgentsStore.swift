@@ -781,14 +781,41 @@ final class AgentsStore {
 
     private func follow(_ sessionId: String) {
         client.send(DaemonRequest(.subscribe, sessionId: sessionId))
+        // Followed again after a reconnect, the thread already shows what came
+        // before it: the newest page has to reach back to that, or what came
+        // in between would be missing until it was scrolled to.
+        let since = messages[sessionId]?.map(\.ts).max()
         Task {
             var request = DaemonRequest(.fetchMessages, sessionId: sessionId)
             request.limit = 40
-            guard let page = try? await client.request(request).page else { return }
+            guard var page = try? await client.request(request).page else { return }
             merge(page.messages, into: sessionId)
+            var pages = 1
+            while let since, Self.needsAnotherPage(page.messages, hasMore: page.hasMore, since: since, pages: pages),
+                  let cursor = page.nextCursor {
+                var older = DaemonRequest(.fetchMessages, sessionId: sessionId)
+                older.before = cursor
+                older.limit = 40
+                guard let next = try? await client.request(older).page else { break }
+                merge(next.messages, into: sessionId)
+                page = next
+                pages += 1
+            }
             cursors[sessionId] = page.nextCursor
             hasMore[sessionId] = page.hasMore
         }
+    }
+
+    /// Pages a catch-up reads at most: a long absence stops there, and the
+    /// rest is still there to scroll to. As the phone's (mobile/lib/catchup.ts).
+    nonisolated static let catchUpPages = 4
+
+    /// Whether a catch-up needs the page before this one: its oldest message
+    /// is still newer than the newest that was on screen, so the two do not
+    /// meet yet.
+    nonisolated static func needsAnotherPage(_ page: [Message], hasMore: Bool, since: Int64, pages: Int) -> Bool {
+        guard hasMore, pages < catchUpPages, let oldest = page.map(\.ts).min() else { return false }
+        return oldest > since
     }
 
     /// Adds messages to an agent's conversation, once each, in time order.

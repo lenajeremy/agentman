@@ -34,4 +34,15 @@ final class MergeTests: XCTestCase {
         XCTAssertEqual(all.map(\.id), ["t1", "t2", "t3"])
         XCTAssertEqual(added.count, 2)
     }
+
+    // Back after a lost connection, the newest page is read and then the ones
+    // before it, until they meet what the thread showed: a few at most.
+    func testACatchUpReadsBackUntilItMeetsWhatWasShown() {
+        let page = [tool("a", "ok", ts: 50), tool("b", "ok", ts: 60)]
+        XCTAssertTrue(AgentsStore.needsAnotherPage(page, hasMore: true, since: 40, pages: 1))
+        XCTAssertFalse(AgentsStore.needsAnotherPage(page, hasMore: true, since: 50, pages: 1), "it meets what was shown")
+        XCTAssertFalse(AgentsStore.needsAnotherPage(page, hasMore: false, since: 40, pages: 1), "the start of the conversation")
+        XCTAssertFalse(AgentsStore.needsAnotherPage(page, hasMore: true, since: 40, pages: AgentsStore.catchUpPages), "a long absence stops")
+        XCTAssertFalse(AgentsStore.needsAnotherPage([], hasMore: true, since: 40, pages: 1))
+    }
 }

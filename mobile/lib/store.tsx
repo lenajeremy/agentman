@@ -36,6 +36,7 @@ import {
   needsAnotherPage,
   newestTimestamp,
   type CatchUpState,
+  threadsToCatchUp,
 } from "./catchup";
 import {
   canDismiss,
@@ -541,6 +542,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // The phone back after time away: the app in the background, the
+  // connection or the Mac gone. Each thread still open fetches what it
+  // missed, as reopening it does. Held in a ref for the client's handlers.
+  const catchUpOpenThreads = useCallback(() => {
+    followReachable(
+      threadsToCatchUp(desiredSubscriptions.current, messagesRef.current, catchUpRequests.current.values()),
+    );
+  }, [followReachable]);
+  const catchUpOpenThreadsRef = useRef(catchUpOpenThreads);
+  catchUpOpenThreadsRef.current = catchUpOpenThreads;
+
   const handleEvent = useCallback((event: DaemonEvent, replyTo?: string) => {
     for (const listener of listeners.current) listener(event);
     if (replyTo && settleAskRequest(replyTo, event)) return;
@@ -975,6 +987,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           // A Mac that was offline never saw the token, and one that restarted
           // may have lost it, so it is offered again each time the Mac is back.
           if (online && clientRef.current) registerPushToken(clientRef.current);
+          // What the open threads missed while the Mac or the connection was
+          // away.
+          if (online) catchUpOpenThreadsRef.current();
         },
       });
       clientRef.current = client;
@@ -1051,7 +1066,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // rather than waiting out a backoff the user is watching.
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (next) => {
-      if (next === "active") clientRef.current?.poke();
+      if (next !== "active") return;
+      clientRef.current?.poke();
+      // A socket iOS kept open while the app slept can look connected and
+      // have missed everything: the open threads fetch it.
+      catchUpOpenThreadsRef.current();
     });
     return () => subscription.remove();
   }, []);
