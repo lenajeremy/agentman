@@ -414,6 +414,36 @@ func TestListOnlyReportsOurSessions(t *testing.T) {
 	}
 }
 
+// Codex names the terminal after its conversation, and that title is how
+// discovery knows which conversation a pane has open.
+func TestListReportsThePanesTitle(t *testing.T) {
+	requireTmux(t)
+	ctx := context.Background()
+	name := Prefix + "codex-title-" + filepath.Base(t.TempDir())
+	title := "Respond to greeting | intro-to-hacking"
+	if err := Launch(ctx, name, t.TempDir(), []string{"sh", "-c", `printf '\033]2;%s\033\\' "$0"; sleep 30`, title}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = Kill(context.Background(), name) })
+
+	var got string
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		sessions, err := List(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, session := range sessions {
+			if session.Name == name {
+				got = session.Title
+			}
+		}
+		if got == title {
+			return
+		}
+	}
+	t.Errorf("the pane's title is %q, want %q", got, title)
+}
+
 func TestOwnsPIDMatchesDescendants(t *testing.T) {
 	requireTmux(t)
 	name, _ := newSink(t)

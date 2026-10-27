@@ -82,6 +82,10 @@ type Session struct {
 	// session discovered from a pane has no file to take a timestamp from, and
 	// using the current time instead makes it look changed on every sweep.
 	Created time.Time
+	// Title is what the program in the pane set as the terminal's title.
+	// Codex sets it to the conversation it has open, which nothing on disk
+	// ties to a pane.
+	Title string
 }
 
 // List returns the agentman-owned tmux sessions currently running. Within a
@@ -116,7 +120,7 @@ func listSessions(ctx context.Context) ([]Session, error) {
 // listOn lists the agent sessions on one server.
 func listOn(ctx context.Context, server server) []Session {
 	out, err := runOn(ctx, server, "list-sessions", "-F",
-		"#{session_name}\t#{pane_pid}\t#{pane_current_path}\t#{pane_current_command}\t#{session_created}")
+		"#{session_name}\t#{pane_pid}\t#{pane_current_path}\t#{pane_current_command}\t#{session_created}\t#{pane_title}")
 	if err != nil {
 		// tmux exits non-zero when no server is running, which is normal.
 		return nil
@@ -124,7 +128,8 @@ func listOn(ctx context.Context, server server) []Session {
 
 	var sessions []Session
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		fields := strings.Split(line, "\t")
+		// The title is last and kept whole: a program may put a tab in it.
+		fields := strings.SplitN(line, "\t", 6)
 		if len(fields) < 3 || !strings.HasPrefix(fields[0], Prefix) {
 			continue
 		}
@@ -140,6 +145,9 @@ func listOn(ctx context.Context, server server) []Session {
 			if unix, err := strconv.ParseInt(strings.TrimSpace(fields[4]), 10, 64); err == nil {
 				session.Created = time.Unix(unix, 0)
 			}
+		}
+		if len(fields) > 5 {
+			session.Title = fields[5]
 		}
 		sessions = append(sessions, session)
 	}
