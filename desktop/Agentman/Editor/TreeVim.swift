@@ -109,7 +109,7 @@ extension EditorStore {
             return true
         }
         switch event.keyCode {
-        case 36, 76: openTreeRow(focus: true); return true
+        case 36, 76: toggleTreeRow(); return true
         case 53: return clearTreeState()
         default: break
         }
@@ -174,8 +174,8 @@ extension EditorStore {
         selectInTree(rows[min(index, rows.count - 1)].path)
     }
 
-    /// l, o and Return: a folder opens (or the cursor goes into it if it
-    /// is open); a file opens in a tab, which takes the keyboard.
+    /// l and o: a folder opens (or the cursor goes into it if it is open);
+    /// a file opens in a tab, which takes the keyboard.
     func openTreeRow(focus: Bool) {
         guard let entry = currentTreeEntry else { return moveTree(to: 0) }
         if entry.isDirectory {
@@ -189,6 +189,13 @@ extension EditorStore {
         open(entry.path)
         if treeFilter != nil { treeFilter = nil }
         if focus { DispatchQueue.main.async { [weak self] in self?.focusEditor() } }
+    }
+
+    /// Return: a folder opens or closes, as clicking it does, and the cursor
+    /// stays on it; moving is for the arrows and j, k. A file opens in a tab.
+    func toggleTreeRow() {
+        guard let entry = currentTreeEntry, entry.isDirectory else { return openTreeRow(focus: true) }
+        setExpanded(entry.path, !isExpanded(entry.path))
     }
 
     /// h: an open folder closes; otherwise the cursor goes to the folder
@@ -714,7 +721,8 @@ struct TreeKeysSheet: View {
         ("Move", [
             ("j  k", "Down, up"),
             ("gg  G", "Top, bottom"),
-            ("l  o  ⏎", "Open the file, or the folder"),
+            ("l  o", "Open the file, or the folder"),
+            ("⏎", "Open the file; open or close the folder"),
             ("h", "Close the folder, or go to it"),
             ("/", "Filter the files"),
             ("⌃W l", "To the editor (⌃W h back)"),
