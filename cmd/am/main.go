@@ -42,6 +42,8 @@ Usage:
   am servers                  List the web servers your agents have started
   am claude [args...]         Start Claude Code so you can message it later
   am attach [name|number]     Show a running agent's terminal again
+  am open [folder]            Open a folder (this one by default) in Agentman
+                              for Mac's editor, with its agent beside the code
   am codex [args...]          Start Codex so you can message it later
   am opencode [args...]       Start OpenCode so you can message it later
   am cursor [args...]         Start Cursor Agent CLI so you can message it later
@@ -135,6 +137,8 @@ func main() {
 		err = runService(ctx, args)
 	case "attach":
 		err = runAttach(ctx, args)
+	case "open":
+		err = runOpen(args)
 	case "doctor":
 		err = runDoctor(ctx, args)
 	case "version", "--version", "-v":

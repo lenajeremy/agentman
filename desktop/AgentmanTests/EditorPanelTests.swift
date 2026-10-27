@@ -58,6 +58,40 @@ final class EditorPanelTests: XCTestCase {
         XCTAssertEqual(AgentPanel.agent(for: "/work/app/", in: alike)?.id, "own-newer")
     }
 
+    // am open: the editor shows the agent working on the folder, once the
+    // daemon has said which agents run.
+    func testAmOpenShowsTheFoldersAgent() throws {
+        let saved = UserDefaults.standard.object(forKey: "agentPanelOpen")
+        defer { UserDefaults.standard.set(saved, forKey: "agentPanelOpen") }
+        let root = try folder(["main.go"])
+        let store = EditorStore(root: root)
+        store.showAgentPanel = false
+        store.showsFolderAgent = true
+        let sessions = [session("elsewhere", "/work/other", .busy), session("here", root.path, .idle)]
+
+        store.showFolderAgent(in: [], loaded: false)
+        XCTAssertTrue(store.showsFolderAgent, "an empty list before the daemon answers says nothing")
+        XCTAssertFalse(store.showAgentPanel)
+        store.showFolderAgent(in: sessions, loaded: true)
+        XCTAssertEqual(store.panelRoute, .agent("here"))
+        XCTAssertTrue(store.showAgentPanel)
+        XCTAssertFalse(store.showsFolderAgent, "asked once, done once")
+
+        // No agent there: the panel stays as it was.
+        let quiet = EditorStore(root: try folder(["a.ts"]))
+        quiet.showAgentPanel = false
+        quiet.showsFolderAgent = true
+        quiet.showFolderAgent(in: sessions, loaded: true)
+        XCTAssertFalse(quiet.showAgentPanel)
+        XCTAssertNil(quiet.panelRoute)
+
+        // The store knows when the daemon has listed its sessions.
+        let agents = AgentsStore()
+        XCTAssertFalse(agents.sessionsLoaded)
+        agents.apply(DaemonEvent(type: "sessions"))
+        XCTAssertTrue(agents.sessionsLoaded)
+    }
+
     // MARK: - @ mentions
 
     private func mentions(_ root: URL, _ files: [String], front: String? = nil) -> FileMentions {

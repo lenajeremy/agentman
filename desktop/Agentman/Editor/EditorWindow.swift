@@ -8,10 +8,13 @@ extension FocusedValues {
 
 /// Opens a folder in the editor, at a file when one is given.
 enum EditorOpener {
+    /// Opens a folder's editor, with a file in front; showingAgent puts the
+    /// agent working on the folder in the panel, as `am open` asks.
     @MainActor
-    static func open(folder: String, file: String? = nil, with openWindow: OpenWindowAction) {
+    static func open(folder: String, file: String? = nil, showingAgent: Bool = false, with openWindow: OpenWindowAction) {
         let store = EditorRegistry.shared.store(for: folder)
         if let file, !file.isEmpty { store.open(file) }
+        if showingAgent { store.showsFolderAgent = true }
         openWindow(id: "editor", value: store.root.path)
     }
 
@@ -173,6 +176,10 @@ struct EditorWindow: View {
             }
         }
         .onAppear(perform: installKeys)
+        .onChange(of: FolderAgentWait(asked: store.showsFolderAgent, loaded: agents.sessionsLoaded, sessions: agents.sessions.map(\.id)),
+                  initial: true) {
+            store.showFolderAgent(in: agents.sessions, loaded: agents.sessionsLoaded)
+        }
         .onAppear {
             // For screenshots and tests: the tree's keys, a filter, marks or
             // the box for a new file.
@@ -273,6 +280,13 @@ struct Naming {
         case .rename(let entry): store.rename(entry, to: name)
         }
     }
+}
+
+/// What showing the folder's agent waits on: being asked, and the agents.
+private struct FolderAgentWait: Equatable {
+    let asked: Bool
+    let loaded: Bool
+    let sessions: [String]
 }
 
 // MARK: - Tree

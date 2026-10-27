@@ -23,6 +23,9 @@ struct AgentGroup: Identifiable {
 final class AgentsStore {
     private(set) var status: DaemonClient.Status = .connecting
     private(set) var sessions: [Session] = []
+    /// Whether the daemon has listed its sessions yet: until then, an empty
+    /// list says nothing about which agents are running.
+    private(set) var sessionsLoaded = false
     private(set) var daemonInfo: DaemonInfo?
     private(set) var messages: [String: [Message]] = [:]
     private(set) var hasMore: [String: Bool] = [:]
@@ -642,6 +645,7 @@ final class AgentsStore {
         switch event.type {
         case "sessions":
             sessions = (event.sessions ?? []).sorted(by: Self.boardOrder)
+            sessionsLoaded = true
             if let info = event.daemon {
                 daemonInfo = info
             }
