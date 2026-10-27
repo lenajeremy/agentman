@@ -259,7 +259,8 @@ export type RequestType =
   | "voice_account"
   | "list_commands"
   | "command_panel"
-  | "find_files";
+  | "find_files"
+  | "attach_file";
 
 export interface Request {
   type: RequestType;
@@ -315,6 +316,8 @@ export interface Request {
   key?: Key;
   /** One part of a recording for the Mac to write out, on transcribe. */
   voice?: VoiceClip;
+  /** One part of a file sent to an agent, on attach_file. */
+  file?: FilePart;
 }
 
 /**
@@ -360,6 +363,24 @@ export interface SlashCommand {
   panel?: boolean;
 }
 
+/** One part of a file sent to an agent: slices of its base64, joined on the
+ *  Mac, which keeps the file and answers with where. */
+export interface FilePart {
+  id: string;
+  part: number;
+  parts: number;
+  /** The file's name on the phone, kept so the agent sees it. */
+  name: string;
+  data: string;
+}
+
+/** A part received, or, for the last, where the file now is on the Mac. */
+export interface AttachedFile {
+  id: string;
+  done: boolean;
+  path?: string;
+}
+
 /** What a panel command showed. */
 export interface CommandPanel {
   command: string;
@@ -400,7 +421,8 @@ export type EventType =
   | "voice_account"
   | "commands"
   | "command_panel"
-  | "files";
+  | "files"
+  | "attached";
 
 export interface WorkspaceEntry { name: string; directory: boolean; size?: number }
 export interface WorkspaceChange {
@@ -506,6 +528,8 @@ export interface DaemonEvent {
   panel?: CommandPanel;
   /** Paths in the session's folder for an `@` mention, best first, on files. */
   files?: string[];
+  /** A file part received, or where the file now is, on attached. */
+  attached?: AttachedFile;
   sessions?: Session[];
   session?: Session;
   messages?: Message[];
@@ -805,7 +829,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     "manager_entry", "manager_delta", "manager_history", "manager_status",
     "manager_brief", "manager_schedules", "manager_settings",
     "manager_permission", "manager_reset", "knowledge", "keys",
-    "transcript", "voice_account", "commands", "command_panel", "files",
+    "transcript", "voice_account", "commands", "command_panel", "files", "attached",
   ] as const)) return null;
 
   switch (value.type) {
@@ -896,6 +920,10 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
       value.commands ??= [];
       if (!Array.isArray(value.commands) || value.commands.length > 2_000) return null;
       value.commands = value.commands.filter(isSlashCommand);
+      break;
+    case "attached":
+      if (!isRecord(value.attached) || !boundedString(value.attached.id, 64, true) ||
+          typeof value.attached.done !== "boolean" || !optionalBoundedString(value.attached.path, 4096)) return null;
       break;
     case "files":
       value.files ??= [];

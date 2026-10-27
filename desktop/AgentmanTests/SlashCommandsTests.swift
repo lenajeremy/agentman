@@ -134,3 +134,35 @@ final class FolderMentionsTests: XCTestCase {
         XCTAssertEqual(mentions.resolve("see @app/login.tsx please", folder: repo.path), "see @app/login.tsx please")
     }
 }
+
+@MainActor
+final class SentFilesTests: XCTestCase {
+    // Files go ahead of the words as @path; the thread shows them by name.
+    func testFilesNamedAheadOfAMessageAreSplitOff() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("am-sent-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let report = folder.appendingPathComponent("report.pdf")
+        let log = folder.appendingPathComponent("run.log")
+        try Data("x".utf8).write(to: report)
+        try Data("y".utf8).write(to: log)
+
+        let sent = SentMessage("@\(report.path) @\(log.path)\n\nWhat failed?")
+        XCTAssertEqual(sent.files, [report.path, log.path])
+        XCTAssertEqual(sent.text, "What failed?")
+        XCTAssertEqual(SentMessage("@docs/a.md what is it?").files, [], "a mention in a sentence stays words")
+        XCTAssertEqual(SentMessage("@\(folder.path) hi").files, [], "a folder is not a file sent")
+        XCTAssertEqual(SentMessage("@/no/such/file.pdf hi").text, "@/no/such/file.pdf hi")
+    }
+
+    // A file that isn't a picture is attached as itself, up to 10 MB.
+    func testAnyFileIsAttachedAsItself() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("am-attach-\(UUID().uuidString).csv")
+        try Data("a,b\n1,2\n".utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let attachment = try XCTUnwrap(Attachments.make(anyFile: file))
+        XCTAssertEqual(attachment.file, file)
+        XCTAssertTrue(Attachments.encoded([attachment]).isEmpty, "a file is not sent as a picture")
+        XCTAssertNil(Attachments.make(file: file), "only pictures are pictures")
+    }
+}

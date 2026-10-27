@@ -94,6 +94,7 @@ enum RequestType: String, Codable, Sendable {
     case voiceSignOut = "voice_signout"
     case listCommands = "list_commands"
     case commandPanel = "command_panel"
+    case attachFile = "attach_file"
 }
 
 struct DaemonRequest: Codable, Sendable {
@@ -136,6 +137,8 @@ struct DaemonRequest: Codable, Sendable {
     var alerts: Bool?
     /// One part of a recording to write out, on transcribe.
     var voice: VoiceClip?
+    /// One part of a file sent to an agent, on "attach_file".
+    var file: FilePart?
     /// A step of signing in to Celery, for voice prompts.
     var voiceSignIn: VoiceSignIn?
 
@@ -209,6 +212,8 @@ struct DaemonEvent: Codable, Sendable {
     var commands: [SlashCommand]?
     /// What a panel command showed, on "command_panel".
     var panel: CommandPanel?
+    /// A file part received, or where the file is kept, on "attached".
+    var attached: AttachedFile?
     /// The editor's language servers, on "lsp_status".
     var languages: LanguagesState?
 }
@@ -277,6 +282,22 @@ struct SlashCommand: Codable, Sendable, Equatable, Hashable {
     var source: String?
     /// Sent without arguments, it answers in a panel of the terminal.
     var panel: Bool?
+}
+
+/// One part of a file sent to an agent, joined and kept by the daemon.
+struct FilePart: Codable, Sendable, Equatable {
+    var id: String
+    var part: Int
+    var parts: Int
+    var name: String
+    var data: String
+}
+
+/// A file part received, or, for the last, where the daemon keeps the file.
+struct AttachedFile: Codable, Sendable, Equatable {
+    var id: String
+    var done: Bool
+    var path: String?
 }
 
 /// What a panel command (/usage, /status) showed in the agent's terminal.

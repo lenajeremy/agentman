@@ -47,9 +47,11 @@ var imageTypes = map[string]string{
 	"image/webp": ".webp",
 }
 
-// Store fetches images from the relay and files them under a directory it owns.
+// Store fetches images from the relay and files them under a directory it
+// owns, and keeps the other files sent to agents beside them.
 type Store struct {
 	dir      string
+	files    string
 	relayURL string
 	token    string
 	client   *http.Client
@@ -60,6 +62,7 @@ type Store struct {
 func New(dir, relayURL, token string) *Store {
 	return &Store{
 		dir:      filepath.Join(dir, "images"),
+		files:    filepath.Join(dir, "files"),
 		relayURL: strings.TrimRight(relayURL, "/"),
 		token:    token,
 		client:   &http.Client{Timeout: fetchTimeout},
@@ -111,6 +114,68 @@ func (s *Store) SaveData(sessionID string, data []byte) (string, error) {
 	return path, nil
 }
 
+// MaxFileBytes bounds a file sent to an agent: a long PDF or log, not a
+// disk image.
+const MaxFileBytes = 10 << 20
+
+// maxTotalFileBytes bounds every file kept, as maxTotalBytes does images.
+const maxTotalFileBytes = 200 << 20
+
+// SaveFile keeps a file sent to an agent and returns its absolute path. The
+// file keeps its name, made safe to type, so the agent sees what it is; a
+// folder of its own with a generated name keeps two of the same name apart.
+func (s *Store) SaveFile(sessionID, name string, data []byte) (string, error) {
+	if len(data) > MaxFileBytes {
+		return "", errors.New("attachments: that file is too large")
+	}
+	folder, err := randomName()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(s.files, sessionDir(sessionID), folder)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("attachments: could not create the file's folder: %w", err)
+	}
+	path := filepath.Join(dir, SafeFileName(name))
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", fmt.Errorf("attachments: could not write the file: %w", err)
+	}
+	return path, nil
+}
+
+// SafeFileName is a file's name as it can be typed after "@" and read back:
+// letters, digits, dots, dashes and underscores, everything else a dash, no
+// leading dot, and not too long, its extension kept.
+func SafeFileName(name string) string {
+	name = filepath.Base(strings.ReplaceAll(name, "\\", "/"))
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	safe := strings.Trim(b.String(), "-.")
+	for strings.Contains(safe, "--") {
+		safe = strings.ReplaceAll(safe, "--", "-")
+	}
+	// "(final).pdf" is "final.pdf", not "final-.pdf".
+	safe = strings.ReplaceAll(safe, "-.", ".")
+	if safe == "" {
+		return "file"
+	}
+	if len(safe) > 80 {
+		ext := filepath.Ext(safe)
+		if len(ext) > 16 {
+			ext = ""
+		}
+		safe = strings.TrimRight(safe[:80-len(ext)], "-.") + ext
+	}
+	return safe
+}
+
 func (s *Store) fetch(ctx context.Context, uploadID string) ([]byte, error) {
 	if s.relayURL == "" {
 		return nil, errors.New("attachments: this daemon has no relay to collect from")
@@ -147,6 +212,79 @@ func (s *Store) fetch(ctx context.Context, uploadID string) ([]byte, error) {
 // fortnight and it should tidy up the moment it comes back, rather than
 // waiting an hour for the first tick.
 func (s *Store) Sweep(now time.Time) error {
+	if err := s.sweepFiles(now); err != nil {
+		return err
+	}
+	return s.sweepImages(now)
+}
+
+// sweepFiles deletes files sent to agents past the week, and the oldest past
+// maxTotalFileBytes. Each lives in a folder of its own in its session's.
+func (s *Store) sweepFiles(now time.Time) error {
+	type file struct {
+		path string
+		size int64
+		age  time.Time
+	}
+	var kept []file
+	var total int64
+	sessions, err := os.ReadDir(s.files)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, session := range sessions {
+		if !session.IsDir() {
+			continue
+		}
+		sessionPath := filepath.Join(s.files, session.Name())
+		folders, _ := os.ReadDir(sessionPath)
+		for _, folder := range folders {
+			if !folder.IsDir() {
+				continue
+			}
+			folderPath := filepath.Join(sessionPath, folder.Name())
+			items, _ := os.ReadDir(folderPath)
+			for _, item := range items {
+				info, infoErr := item.Info()
+				// Plain files only, never through a symlink: this deletes.
+				if infoErr != nil || !info.Mode().IsRegular() {
+					continue
+				}
+				path := filepath.Join(folderPath, item.Name())
+				if now.Sub(info.ModTime()) > retention {
+					_ = os.Remove(path)
+					continue
+				}
+				kept = append(kept, file{path: path, size: info.Size(), age: info.ModTime()})
+				total += info.Size()
+			}
+		}
+	}
+	sort.Slice(kept, func(i, j int) bool { return kept[i].age.Before(kept[j].age) })
+	for _, item := range kept {
+		if total <= maxTotalFileBytes {
+			break
+		}
+		if os.Remove(item.path) == nil {
+			total -= item.size
+		}
+	}
+	// Emptied folders, then emptied session folders.
+	for _, session := range sessions {
+		sessionPath := filepath.Join(s.files, session.Name())
+		folders, _ := os.ReadDir(sessionPath)
+		for _, folder := range folders {
+			_ = os.Remove(filepath.Join(sessionPath, folder.Name()))
+		}
+		_ = os.Remove(sessionPath)
+	}
+	return nil
+}
+
+func (s *Store) sweepImages(now time.Time) error {
 	type file struct {
 		path string
 		size int64

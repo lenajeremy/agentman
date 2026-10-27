@@ -127,3 +127,20 @@ func TestClaudeInjectReturnsAVimPromptToInsertMode(t *testing.T) {
 		}
 	}
 }
+
+// Pasted, a message ending on an @path left Claude's file menu open, and
+// Enter went to the menu rather than sending (Claude Code 2.1.311).
+func TestClaudeTypedClosesTheFileMenuAfterAPastedMention(t *testing.T) {
+	cases := map[string]string{
+		"look at\n\n@/Users/me/report.pdf":  "look at\n\n@/Users/me/report.pdf ",
+		"look at\n\n@/Users/me/report.pdf ": "look at\n\n@/Users/me/report.pdf ",
+		"@docs/a.md\n\nwhat does it say?":   "@docs/a.md\n\nwhat does it say?",
+		"one line ending @docs/a.md":        "one line ending @docs/a.md",
+		"two\nlines":                        "two\nlines",
+	}
+	for in, want := range cases {
+		if got := claudeTyped(in); got != want {
+			t.Errorf("claudeTyped(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

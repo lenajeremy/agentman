@@ -308,7 +308,7 @@ struct AgentThreadView: View {
         .onDrop(of: [.fileURL, .image], isTargeted: Binding(get: { dropping }, set: { dropping = $0 && session.canReceive })) { providers in
             guard session.canReceive else { return false }
             Task { @MainActor in
-                let found = await Attachments.from(providers: providers)
+                let found = await Attachments.from(providers: providers, files: true)
                 attachments.append(contentsOf: found.prefix(max(0, Attachments.maxCount - attachments.count)))
             }
             return true
@@ -396,13 +396,35 @@ struct AgentThreadView: View {
         sending = true
         followRequest += 1
         let images = Attachments.encoded(attachments)
+        let files = attachments.compactMap(\.file)
         Task {
-            if await store.send(text, images: images, to: session.id) {
+            // Files are named ahead of the words, as the phone sends them.
+            var references: [String] = []
+            for file in files {
+                switch await fileReference(file) {
+                case .success(let path): references.append("@" + path)
+                case .failure(let problem):
+                    store.actionError[session.id] = problem.message
+                    sending = false
+                    return
+                }
+            }
+            let message = references.isEmpty ? text
+                : references.joined(separator: " ") + (text.isEmpty ? "" : "\n\n" + text)
+            if await store.send(message, images: images, to: session.id) {
                 draft = ""
                 attachments = []
             }
             sending = false
         }
+    }
+
+    /// How the agent is given a file: by its own path, which it reads where
+    /// it is; or, when that path can't follow an "@" as one word, by the path
+    /// of a copy the daemon keeps.
+    private func fileReference(_ url: URL) async -> Result<String, TerminalProblem> {
+        if !url.path.contains(where: \.isWhitespace) { return .success(url.path) }
+        return await store.keepFile(url, for: session.id)
     }
 }
 
@@ -761,6 +783,9 @@ struct MessageRow: View {
                 VStack(alignment: .trailing, spacing: 8) {
                     if !sent.images.isEmpty {
                         SentFiles(paths: sent.images)
+                    }
+                    if !sent.files.isEmpty {
+                        SentFileChips(paths: sent.files)
                     }
                     if !sent.text.isEmpty {
                         HStack {
@@ -1452,11 +1477,11 @@ struct Composer: View {
 
     private func attach() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image]
+        panel.allowedContentTypes = [.item]
         panel.allowsMultipleSelection = true
-        panel.message = "Choose images to send"
+        panel.message = "Choose images or files to send"
         if panel.runModal() == .OK {
-            add(panel.urls.compactMap(Attachments.make(file:)))
+            add(panel.urls.compactMap(Attachments.make(anyFile:)))
         }
     }
 

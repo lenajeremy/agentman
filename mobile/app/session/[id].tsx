@@ -30,6 +30,7 @@ import { ContentColumn } from "../../components/ContentColumn";
 import { Markdown } from "../../components/Markdown";
 import { NoticeRow } from "../../components/NoticeRow";
 import { SentImages } from "../../components/SentImages";
+import { SentFileChips } from "../../components/SentFileChips";
 import { ToolGroup } from "../../components/ToolGroup";
 import { KEEP_READING, ScrollToLatest, SCROLL_AWAY } from "../../components/ScrollToLatest";
 import { groupTools } from "../../lib/toolgroups";
@@ -63,6 +64,7 @@ import { useAttachments } from "../../lib/use-attachments";
 import { Message, type SlashCommand } from "../../lib/protocol";
 import { commandSend, listCommands, matchCommands, pickedCommand, runPanel, slashQuery, takesCommands } from "../../lib/commands";
 import { findFiles, mentionAt, withMention } from "../../lib/mentions";
+import { withFiles } from "../../lib/files";
 import { sessionNeedsAnswer } from "../../lib/question-alerts";
 import { useStyles, useTheme } from "../../lib/appearance";
 import { PendingSend, useStore } from "../../lib/store";
@@ -400,11 +402,15 @@ export default function SessionScreen() {
     // Uploaded here rather than when the image was chosen: the relay holds one
     // for two minutes, and the gap between picking a screenshot and finishing
     // the sentence about it is easily longer than that.
+    // Files go to the Mac first, and the message names each; pictures go
+    // through the relay with it.
     let uploadIds: string[] = [];
+    let message = text;
     if (images.attachments.length > 0) {
       setSendingImages(true);
       try {
         uploadIds = await images.upload();
+        message = withFiles(text, await images.sendFiles(store.ask, sessionId));
       } catch (reason) {
         images.setError(
           reason instanceof Error ? reason.message : String(reason),
@@ -415,7 +421,7 @@ export default function SessionScreen() {
       setSendingImages(false);
     }
 
-    setSubmittedClientId(store.sendMessage(sessionId, text, uploadIds));
+    setSubmittedClientId(store.sendMessage(sessionId, message, uploadIds));
     images.clear();
     // Sending always comes back to the latest, wherever the reader was.
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
@@ -1259,10 +1265,9 @@ export default function SessionScreen() {
                   />
                 </Pressable>
                 <View style={styles.toolbar}>
-                  {/* Two ways in, because copying a screenshot and choosing one
-                    from the library are different habits and neither
-                    substitutes for the other. Paste only appears when there is
-                    actually an image on the clipboard. */}
+                  {/* Ways in that are different habits: a copied screenshot, the
+                    photos, or any file for the agent to read. Paste only
+                    appears when there is an image on the clipboard. */}
                   <MotionPressable
                     onPress={() =>
                       chooseImageSource(
@@ -1270,7 +1275,10 @@ export default function SessionScreen() {
                         (source) =>
                           void (source === "paste"
                             ? images.paste()
-                            : images.pick()),
+                            : source === "file"
+                              ? images.pickFile()
+                              : images.pick()),
+                        true,
                       )
                     }
                     disabled={
@@ -1280,7 +1288,7 @@ export default function SessionScreen() {
                     pressedScale={0.92}
                     hitSlop={8}
                     accessibilityRole="button"
-                    accessibilityLabel="Add an image"
+                    accessibilityLabel="Attach an image or a file"
                     accessibilityState={{ disabled: !images.canAdd }}
                   >
                     {images.busy ? (
@@ -1829,10 +1837,11 @@ function SentMessage({
   const styles = useStyles(makeStyles);
   const held = useHeldMessage();
   // Images sent with it show as pictures, not as the paths the agent got.
-  const { images, text } = useMemo(() => splitSentMessage(message), [message]);
+  const { images, files, text } = useMemo(() => splitSentMessage(message), [message]);
   return (
     <Appear enabled={fresh}>
       {images.length > 0 && <SentImages sessionId={sessionId} paths={images} />}
+      {files.length > 0 && <SentFileChips paths={files} />}
       {/* The bubble itself is the target, so holding the space beside it does
           nothing. A plain Pressable rather than MotionPressable: a tap does
           nothing here, and shrinking on one would promise an action that is
@@ -1932,9 +1941,12 @@ function PendingRow({
               ? "Sent · syncing…"
               : "";
   const sendNow = waiting && onSendNow;
+  // Files sent with it read as their names, as they will once it lands.
+  const sent = splitSentMessage(pending.text);
   const body = (
     <>
-      <Text style={[styles.userText, sendNow && styles.pendingFaded]}>{pending.text}</Text>
+      {sent.files.length > 0 ? <SentFileChips paths={sent.files} /> : null}
+      {sent.text ? <Text style={[styles.userText, sendNow && styles.pendingFaded]}>{sent.text}</Text> : null}
       {sendNow ? (
         <View style={styles.pendingFooter}>
           <Text style={[styles.pendingStatus, styles.pendingFooterLabel, styles.pendingFaded]} numberOfLines={2}>

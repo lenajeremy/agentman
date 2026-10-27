@@ -7,6 +7,9 @@ struct Attachment: Identifiable {
     let image: NSImage
     let data: Data
     let mime: String
+    /// Set for a file that isn't a picture: the agent is given its path to
+    /// read, and `image` is its icon.
+    var file: URL? = nil
 }
 
 /// Turning what the user attaches, pastes or drops into images Agentman's
@@ -53,6 +56,18 @@ enum Attachments {
         return make(image)
     }
 
+    /// The largest file sent to an agent, as the daemon keeps them.
+    static let maxFileBytes = 10 << 20
+
+    /// A file for an agent to read: a picture as one, anything else as the
+    /// file itself, which the agent is given the path of.
+    static func make(anyFile url: URL) -> Attachment? {
+        if let picture = make(file: url) { return picture }
+        let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values?.isRegularFile == true, (values?.fileSize ?? 0) <= maxFileBytes else { return nil }
+        return Attachment(image: NSWorkspace.shared.icon(forFile: url.path), data: Data(), mime: "", file: url)
+    }
+
     /// The images on a pasteboard: image data, or image files copied in
     /// Finder. Empty when it holds only text.
     static func from(pasteboard: NSPasteboard) -> [Attachment] {
@@ -79,12 +94,13 @@ enum Attachments {
         return pasteboard.canReadItem(withDataConformingToTypes: [UTType.image.identifier])
     }
 
-    /// The images in a drop: image files, or image data.
-    static func from(providers: [NSItemProvider]) async -> [Attachment] {
+    /// The images in a drop: image files, or image data; and, where the
+    /// message goes to an agent, any other file.
+    static func from(providers: [NSItemProvider], files: Bool = false) async -> [Attachment] {
         var found: [Attachment] = []
         for provider in providers {
             if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
-               let url = await fileURL(from: provider), let attachment = make(file: url) {
+               let url = await fileURL(from: provider), let attachment = files ? make(anyFile: url) : make(file: url) {
                 found.append(attachment)
             } else if provider.canLoadObject(ofClass: NSImage.self), let image = await image(from: provider),
                       let attachment = make(image) {
@@ -97,7 +113,7 @@ enum Attachments {
     /// The images as the daemon takes them, squeezed further if together
     /// they would be too large for one message.
     static func encoded(_ attachments: [Attachment]) -> [InlineImage] {
-        var images = attachments.map { InlineImage(mime: $0.mime, data: $0.data.base64EncodedString()) }
+        var images = attachments.filter { $0.file == nil }.map { InlineImage(mime: $0.mime, data: $0.data.base64EncodedString()) }
         // Smaller and softer, a step at a time, until the message fits.
         for (edge, quality) in [(1200.0, 0.6), (1000.0, 0.5), (800.0, 0.45), (640.0, 0.4), (480.0, 0.35)] {
             guard images.reduce(0, { $0 + $1.data.count }) > budget else { break }

@@ -39,12 +39,29 @@ func (s *ClaudeSource) paneLock(tmuxName string) *sync.Mutex {
 // the footer was misread: the line is cleared before the message is typed.
 // The caller holds paneLock.
 func (s *ClaudeSource) typeInto(ctx context.Context, tmuxName, text string) error {
+	text = claudeTyped(text)
 	if s.editor.vimOn(s.home) {
 		if pane, err := s.capturePane(ctx, tmuxName); err == nil && claudeNormalMode(pane) {
 			return tmux.SendAfter(ctx, tmuxName, "i", text)
 		}
 	}
 	return tmux.Send(ctx, tmuxName, text)
+}
+
+// claudeTyped is a message as it is typed into Claude's prompt. Pasted (it
+// has more than one line), a message ending on an @path left Claude's file
+// menu open, and the Enter that should send it picked from the menu
+// instead; a space after the path closes the menu, and Claude trims it.
+// Typed on one line, it sends as it is.
+func claudeTyped(text string) string {
+	if !strings.ContainsAny(text, "\n\r") {
+		return text
+	}
+	words := strings.Fields(text)
+	if len(words) > 0 && strings.HasPrefix(words[len(words)-1], "@") && !strings.HasSuffix(text, " ") {
+		return text + " "
+	}
+	return text
 }
 
 // claudeNormalMode reports whether a prompt with Vim editing on is in normal

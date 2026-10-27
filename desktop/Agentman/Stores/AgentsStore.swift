@@ -480,6 +480,37 @@ final class AgentsStore {
         }
     }
 
+    /// Has the daemon keep a file for an agent to read, under a name it can
+    /// be given by, and answers with where: for a file whose own path can't
+    /// follow an "@" as one word.
+    func keepFile(_ url: URL, for sessionId: String) async -> Result<String, TerminalProblem> {
+        guard let data = try? Data(contentsOf: url) else {
+            return .failure(TerminalProblem(message: "\(url.lastPathComponent) couldn't be read."))
+        }
+        let base64 = data.base64EncodedString()
+        let size = 96_000
+        let parts = max(1, (base64.count + size - 1) / size)
+        let id = "mac-" + UUID().uuidString.prefix(8)
+        let characters = Array(base64.utf8)
+        for part in 0..<parts {
+            let slice = characters[min(part * size, characters.count)..<min((part + 1) * size, characters.count)]
+            var request = DaemonRequest(.attachFile, sessionId: sessionId)
+            request.file = FilePart(id: String(id), part: part, parts: parts, name: url.lastPathComponent,
+                                    data: String(decoding: slice, as: UTF8.self))
+            do {
+                let reply = try await client.request(request, timeout: 60)
+                if let attached = reply.attached {
+                    if attached.done, let path = attached.path { return .success(path) }
+                } else {
+                    return .failure(TerminalProblem(message: Self.plainProblem(reply.error, or: "\(url.lastPathComponent) couldn't be sent.")))
+                }
+            } catch {
+                return .failure(TerminalProblem(message: error.localizedDescription))
+            }
+        }
+        return .failure(TerminalProblem(message: "\(url.lastPathComponent) didn't reach the daemon."))
+    }
+
     /// The daemon's words without the package that raised them.
     static func plainProblem(_ error: String?, or fallback: String) -> String {
         guard let error, !error.isEmpty else { return fallback }
