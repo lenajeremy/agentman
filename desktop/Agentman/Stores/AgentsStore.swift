@@ -163,6 +163,19 @@ final class AgentsStore {
         sessions.first { $0.id == id } ?? pastSessions.first { $0.id == id }
     }
 
+    /// The conversation that took over from this one in its terminal, if one
+    /// did (/clear, /resume).
+    func successor(of id: String) -> String? {
+        sessions.first { $0.previous == id }?.id
+    }
+
+    /// The window follows a conversation that went on as another.
+    private func followTakeovers() {
+        if case .agent(let id) = selection, let next = successor(of: id) {
+            selection = .agent(next)
+        }
+    }
+
     var needsYou: [Session] { sessions.filter { $0.state == .waitingInput } }
     var working: [Session] { sessions.filter { $0.state == .busy } }
     var idle: [Session] { sessions.filter { $0.state == .idle } }
@@ -441,6 +454,38 @@ final class AgentsStore {
         }
     }
 
+    /// A session's "/" menu: what the agent would offer at its own prompt.
+    func commands(for sessionId: String) async -> Result<[SlashCommand], TerminalProblem> {
+        do {
+            let reply = try await client.request(DaemonRequest(.listCommands, sessionId: sessionId))
+            if let commands = reply.commands { return .success(commands) }
+            return .failure(TerminalProblem(message: Self.plainProblem(reply.error, or: "The commands couldn't be listed.")))
+        } catch {
+            return .failure(TerminalProblem(message: error.localizedDescription))
+        }
+    }
+
+    /// Runs a panel command (/usage, /status) in the agent's terminal and
+    /// answers with what the panel showed. /usage takes a few seconds to
+    /// settle.
+    func commandPanel(_ name: String, in sessionId: String) async -> Result<CommandPanel, TerminalProblem> {
+        var request = DaemonRequest(.commandPanel, sessionId: sessionId)
+        request.text = "/" + name
+        do {
+            let reply = try await client.request(request, timeout: 40)
+            if let panel = reply.panel { return .success(panel) }
+            return .failure(TerminalProblem(message: Self.plainProblem(reply.error, or: "The panel couldn't be read.")))
+        } catch {
+            return .failure(TerminalProblem(message: error.localizedDescription))
+        }
+    }
+
+    /// The daemon's words without the package that raised them.
+    static func plainProblem(_ error: String?, or fallback: String) -> String {
+        guard let error, !error.isEmpty else { return fallback }
+        return error.replacingOccurrences(of: "^(daemon|source|tmux): ", with: "", options: .regularExpression)
+    }
+
     func end(_ sessionId: String) async -> String? {
         do {
             let reply = try await client.request(DaemonRequest(.endSession, sessionId: sessionId))
@@ -557,7 +602,8 @@ final class AgentsStore {
         }
     }
 
-    private func apply(_ event: DaemonEvent) {
+    /// Internal rather than private so tests can feed it events.
+    func apply(_ event: DaemonEvent) {
         if event.type.hasPrefix("manager_") {
             manager.apply(event)
             return
@@ -568,6 +614,7 @@ final class AgentsStore {
             if let info = event.daemon {
                 daemonInfo = info
             }
+            followTakeovers()
         case "turn_complete":
             if let id = event.sessionId { away.record(.finished(event.preview), sessionId: id) }
             guard let id = event.sessionId, !looking(at: id), speaks(id),
@@ -595,6 +642,7 @@ final class AgentsStore {
                 sessions.append(session)
             }
             sessions.sort(by: Self.boardOrder)
+            followTakeovers()
         case "session_gone":
             sessions.removeAll { $0.id == event.sessionId }
         case "messages":

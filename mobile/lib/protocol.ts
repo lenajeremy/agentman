@@ -122,6 +122,10 @@ export interface Session {
   /** The Mac can press the agent's key that sends its waiting messages now.
    *  Absent from daemons before 0.18, which offered Send now for Claude only. */
   canSendQueued?: boolean;
+  /** The conversation this one took over in the same terminal: Claude's
+   *  /clear starts a new one there, and /resume switches to another. A thread
+   *  showing that one follows to this. */
+  previous?: string;
 }
 
 /** A local web server an agent started, which the phone can open. */
@@ -252,7 +256,9 @@ export type RequestType =
   | "key_set"
   | "key_delete"
   | "transcribe"
-  | "voice_account";
+  | "voice_account"
+  | "list_commands"
+  | "command_panel";
 
 export interface Request {
   type: RequestType;
@@ -336,6 +342,29 @@ export interface VoiceAccount {
   plan?: string;
 }
 
+/**
+ * One entry of an agent's "/" menu, as the agent itself would offer it: its
+ * own commands and the user's skills. Sent like any message, except a panel
+ * command sent bare, which the Mac reads off the terminal (command_panel).
+ */
+export interface SlashCommand {
+  /** What follows the "/": "compact", "vercel:deploy". */
+  name: string;
+  description?: string;
+  /** "[instructions]", "<model>": what it takes. */
+  argumentHint?: string;
+  /** builtin, bundled, personal, project, plugin or managed. */
+  source?: string;
+  /** Sent without arguments, it answers in a panel: run it with command_panel. */
+  panel?: boolean;
+}
+
+/** What a panel command showed. */
+export interface CommandPanel {
+  command: string;
+  text: string;
+}
+
 export type EventType =
   | "sessions"
   | "session_update"
@@ -367,7 +396,9 @@ export type EventType =
   | "knowledge"
   | "keys"
   | "transcript"
-  | "voice_account";
+  | "voice_account"
+  | "commands"
+  | "command_panel";
 
 export interface WorkspaceEntry { name: string; directory: boolean; size?: number }
 export interface WorkspaceChange {
@@ -467,6 +498,10 @@ export interface DaemonEvent {
   transcript?: Transcript;
   /** The Mac's Celery sign-in, on voice_account. */
   voiceAccount?: VoiceAccount;
+  /** A session's "/" menu, on commands. */
+  commands?: SlashCommand[];
+  /** What a panel command showed, on command_panel. */
+  panel?: CommandPanel;
   sessions?: Session[];
   session?: Session;
   messages?: Message[];
@@ -766,7 +801,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     "manager_entry", "manager_delta", "manager_history", "manager_status",
     "manager_brief", "manager_schedules", "manager_settings",
     "manager_permission", "manager_reset", "knowledge", "keys",
-    "transcript", "voice_account",
+    "transcript", "voice_account", "commands", "command_panel",
   ] as const)) return null;
 
   switch (value.type) {
@@ -852,6 +887,15 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
       if (!isRecord(value.voiceAccount) || typeof value.voiceAccount.signedIn !== "boolean" ||
           !optionalBoundedString(value.voiceAccount.email, 320) ||
           !optionalBoundedString(value.voiceAccount.plan, 64)) return null;
+      break;
+    case "commands":
+      value.commands ??= [];
+      if (!Array.isArray(value.commands) || value.commands.length > 2_000) return null;
+      value.commands = value.commands.filter(isSlashCommand);
+      break;
+    case "command_panel":
+      if (!isRecord(value.panel) || !boundedString(value.panel.command, 64, true) ||
+          !boundedString(value.panel.text, 256 * 1024)) return null;
       break;
     case "keys":
       value.keys ??= [];
@@ -1099,7 +1143,8 @@ function isSession(value: unknown): value is Session {
       boundedArray(value.queued, MAX_QUEUED, (text): text is string => boundedString(text, 64 * 1024, true))) &&
     (value.queuedMessageIds === undefined ||
       boundedArray(value.queuedMessageIds, MAX_QUEUED * 8, (id): id is string => boundedString(id, 512, true))) &&
-    (value.canSendQueued === undefined || typeof value.canSendQueued === "boolean");
+    (value.canSendQueued === undefined || typeof value.canSendQueued === "boolean") &&
+    (value.previous === undefined || boundedString(value.previous, 512, true));
 }
 
 /** More waiting messages than anyone types ahead of an agent; past it the
@@ -1174,6 +1219,12 @@ function isNote(value: unknown): value is Note {
   return isRecord(value) && boundedString(value.name, 512) && boundedString(value.tier, 64, true) &&
     boundedString(value.title, 4096) && optionalBoundedString(value.body, 256 * 1024) &&
     (value.always === undefined || typeof value.always === "boolean");
+}
+
+function isSlashCommand(value: unknown): value is SlashCommand {
+  return isRecord(value) && boundedString(value.name, 128, true) && !/\s/.test(value.name) &&
+    optionalBoundedString(value.description, 1024) && optionalBoundedString(value.argumentHint, 256) &&
+    optionalBoundedString(value.source, 32) && (value.panel === undefined || typeof value.panel === "boolean");
 }
 
 function isKey(value: unknown): value is Key {

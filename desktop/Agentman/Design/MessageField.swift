@@ -24,6 +24,8 @@ struct MessageField: NSViewRepresentable {
     var onDropTargeted: ((Bool) -> Void)?
     /// The editor's files, for `@`, in an editor's agent panel.
     var mentions: FileMentions?
+    /// The agent's commands, for `/` at the start, where it takes them.
+    var slash: SlashCommands?
 
     static let lineSpacing: CGFloat = 3
 
@@ -96,6 +98,8 @@ struct MessageField: NSViewRepresentable {
         textView.onDropTargeted = onDropTargeted
         textView.mentions = mentions
         mentions?.textView = textView
+        textView.slash = slash
+        slash?.textView = textView
     }
 
     /// As tall as its lines, from one to `maxLines`. Measured on the text
@@ -139,6 +143,7 @@ struct MessageField: NSViewRepresentable {
             parent.text = textView.string
             textView.styleMentions()
             followMention()
+            parent.slash?.update(text: textView.string)
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
@@ -169,7 +174,10 @@ struct MessageField: NSViewRepresentable {
 
         func focusChanged(_ now: Bool) {
             lastFocused = now
-            if !now { parent.mentions?.dismiss() }
+            if !now {
+                parent.mentions?.dismiss()
+                parent.slash?.dismiss()
+            }
             // Not while SwiftUI is updating the view that reported it.
             DispatchQueue.main.async { [parent] in
                 if parent.focused != now { parent.focused = now }
@@ -213,6 +221,7 @@ final class MessageTextView: NSTextView {
     var onDropTargeted: ((Bool) -> Void)?
     var focusChanged: (Bool) -> Void = { _ in }
     var mentions: FileMentions?
+    var slash: SlashCommands?
     /// Focus asked for before the box was in a window, given when it is.
     private var wantsFocus = false
 
@@ -235,6 +244,24 @@ final class MessageTextView: NSTextView {
     // MARK: Keys
 
     override func keyDown(with event: NSEvent) {
+        // The commands for `/`, as the files for `@`.
+        if let slash, slash.isOpen, !slash.results.isEmpty, !hasMarkedText() {
+            switch event.keyCode {
+            case 125: return slash.move(1)
+            case 126: return slash.move(-1)
+            case 36, 76, 48:
+                // Return on a name already typed in full sends it; Tab, or
+                // Return on part of one, completes it.
+                if event.keyCode != 48, let command = slash.results.first, slash.query == command.name,
+                   command.argumentHint?.isEmpty ?? true {
+                    slash.dismiss()
+                    break
+                }
+                return slash.choose()
+            case 53: return slash.dismiss()
+            default: break
+            }
+        }
         // The files for `@`: arrows move, Return or Tab picks, Escape closes.
         if let mentions, mentions.isOpen, !hasMarkedText() {
             switch event.keyCode {

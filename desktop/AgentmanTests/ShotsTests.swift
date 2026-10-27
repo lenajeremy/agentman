@@ -43,6 +43,55 @@ final class ShotsTests: XCTestCase {
             .padding(28)
             .background(Palette.paper)
             try render(thread, size: CGSize(width: 720, height: 460), dark: dark, to: folder.appendingPathComponent("thread-\(look).png"))
+            try renderSlash(dark: dark, look: look, folder: folder)
         }
+    }
+
+    /// A command and what it printed in a thread, the "/" menu open over the
+    /// box, and a panel command's sheet.
+    private func renderSlash(dark: Bool, look: String, folder: URL) throws {
+        let rows = try JSONDecoder().decode([Message].self, from: Data("""
+        [{"id":"1","sessionId":"s","role":"user","ts":1,"text":"/rename checkout fix"},
+         {"id":"2","sessionId":"s","role":"tool","ts":2,"tool":{"name":"Command","status":"ok","title":"Session renamed to: checkout fix"}},
+         {"id":"3","sessionId":"s","role":"user","ts":3,"text":"/context"},
+         {"id":"4","sessionId":"s","role":"tool","ts":4,"text":" Context Usage\\n⛁ ⛁ ⛀ ⛶ ⛶ ⛶  Opus 5.5\\n⛶ ⛶ ⛶ ⛶ ⛶ ⛶  34.6k/1m tokens (3%)","tool":{"name":"Command","status":"ok","title":"Context Usage"}}]
+        """.utf8))
+        let commands = [
+            SlashCommand(name: "compact", description: "Summarize the conversation so far to free up context", argumentHint: "[instructions]", source: "builtin"),
+            SlashCommand(name: "context", description: "Show how full the context window is", argumentHint: "[all]", source: "builtin"),
+            SlashCommand(name: "color", description: "Set this session's prompt bar colour", argumentHint: "[color|default]", source: "builtin"),
+            SlashCommand(name: "config", description: "Change a setting, such as theme=dark", argumentHint: "<key=value>", source: "builtin"),
+            SlashCommand(name: "code-review", description: "Review the current diff for bugs", argumentHint: "[level] [target]", source: "bundled"),
+        ]
+        let slash = SlashCommands { .success(commands) }
+        slash.update(text: "/co")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        let thread = VStack(alignment: .leading, spacing: 18) {
+            ForEach(rows) { MessageRow(message: $0) }
+            Spacer(minLength: 0)
+            Composer(text: .constant("/co"), attachments: .constant([]), placeholder: "Message checkout", enabled: true, slash: slash, onSend: {})
+        }
+        .padding(28)
+        .background(Palette.paper)
+        try render(thread, size: CGSize(width: 720, height: 620), dark: dark, to: folder.appendingPathComponent("slash-\(look).png"))
+
+        let usage = """
+        Session
+        Total cost:            $0.3525
+        Total duration (wall): 28m 48s
+
+        Current session
+        █▌                                                 3% used
+        Resets 11am (Europe/Dublin)
+
+        Current week (all models)
+        ██████████████████████████████████                 68% used
+        Resets Oct 30 at 10pm (Europe/Dublin)
+
+        Usage credits
+        Usage credits are off · /usage-credits to turn them on
+        """
+        try render(CommandPanelSheet(panel: CommandPanel(command: "/usage", text: usage)), size: CGSize(width: 680, height: 420),
+                   dark: dark, to: folder.appendingPathComponent("usage-sheet-\(look).png"))
     }
 }

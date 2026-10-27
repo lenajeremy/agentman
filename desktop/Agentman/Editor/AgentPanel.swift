@@ -30,7 +30,10 @@ struct AgentPanel: View {
                         .onAppear { agents.showInPanel(nil) }
                         .onDisappear { agents.hideFromPanel(nil) }
                 case .agent(let id):
-                    if let session = agents.session(id) {
+                    if let next = agents.successor(of: id) {
+                        // Cleared or switched in its terminal: follow it.
+                        Color.clear.onAppear { editor.panelRoute = .agent(next) }
+                    } else if let session = agents.session(id) {
                         AgentThreadView(session: session, inPanel: true)
                             .id(id)
                             .onAppear { agents.showInPanel(id) }

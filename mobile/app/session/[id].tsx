@@ -43,6 +43,8 @@ import { ToolRow } from "../../components/ToolRow";
 import { AttachmentStrip } from "../../components/AttachmentStrip";
 import { Popover, type PopoverItem } from "../../components/Popover";
 import { VoiceButton } from "../../components/VoiceButton";
+import { SlashMenu } from "../../components/SlashMenu";
+import { OutputViewer } from "../../components/OutputViewer";
 import { type Frame } from "../../lib/message-menu";
 import { artifactsButtonLabel } from "../../lib/artifacts";
 import { canEnd, shouldResume } from "../../lib/resume";
@@ -57,7 +59,8 @@ import { chooseImageSource } from "../../lib/image-source-sheet";
 import { draftNamespace } from "../../lib/draft-policy";
 import { clearDraft, loadDraft, saveDraft } from "../../lib/drafts";
 import { useAttachments } from "../../lib/use-attachments";
-import { Message } from "../../lib/protocol";
+import { Message, type SlashCommand } from "../../lib/protocol";
+import { commandSend, listCommands, matchCommands, pickedCommand, runPanel, slashQuery, takesCommands } from "../../lib/commands";
 import { sessionNeedsAnswer } from "../../lib/question-alerts";
 import { useStyles, useTheme } from "../../lib/appearance";
 import { PendingSend, useStore } from "../../lib/store";
@@ -107,6 +110,14 @@ export default function SessionScreen() {
   // than in the row so it survives the row re-rendering, and so there is only
   // ever one on screen.
   const [toast, setToast] = useState<string | null>(null);
+  // The "/" menu: the agent's commands, asked for when "/" is first typed,
+  // and a panel command's answer while it is being read and once it is.
+  const [commands, setCommands] = useState<SlashCommand[]>([]);
+  const [commandsLoading, setCommandsLoading] = useState(false);
+  const [commandsError, setCommandsError] = useState("");
+  const commandsAsked = useRef<{ sessionId: string; at: number } | null>(null);
+  const [panelBusy, setPanelBusy] = useState(false);
+  const [panelView, setPanelView] = useState<{ name: string; output: string } | null>(null);
   const showCopied = useCallback(() => setToast("Copied"), []);
   const hideToast = useCallback(() => setToast(null), []);
   const [sendingImages, setSendingImages] = useState(false);
@@ -139,6 +150,13 @@ export default function SessionScreen() {
   const settled = useRef<Set<string> | null>(null);
 
   const session = store.findSession(sessionId);
+  // A conversation cleared (/clear) or switched away from (/resume) in its
+  // terminal goes on as another: the thread follows it there.
+  const successor = store.sessions.find((candidate) => candidate.previous === sessionId)?.id;
+  useEffect(() => {
+    if (successor) router.replace(`/session/${encodeURIComponent(successor)}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [successor]);
   const messages = store.messages[sessionId] ?? [];
   const paging = store.pageState[sessionId];
   const answerAction = store.actions.find(
@@ -675,6 +693,77 @@ export default function SessionScreen() {
       open();
     }
   };
+
+  // The "/" menu. The list is asked for when "/" is first typed in a session,
+  // and again after a minute, as skills come and go on the Mac.
+  const commandsOn = takesCommands(session) && canSend;
+  const menuQuery = commandsOn && !awaitingSend ? slashQuery(draft) : null;
+  const slashMenuShown = menuQuery !== null;
+  useEffect(() => {
+    if (!slashMenuShown || !store.daemonOnline || commandsLoading) return;
+    const asked = commandsAsked.current;
+    if (asked?.sessionId === sessionId && Date.now() - asked.at < 60_000) return;
+    commandsAsked.current = { sessionId, at: Date.now() };
+    setCommandsLoading(true);
+    setCommandsError("");
+    listCommands(store.ask, sessionId)
+      .then((list) => setCommands(list))
+      .catch((reason: Error) => {
+        // Asked again the next time "/" is typed.
+        commandsAsked.current = null;
+        setCommandsError(
+          /unsupported request/.test(reason.message)
+            ? "Update agentman on your Mac to use commands from your phone."
+            : reason.message,
+        );
+      })
+      .finally(() => setCommandsLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slashMenuShown, sessionId, store.daemonOnline]);
+  useEffect(() => {
+    setCommands([]);
+    setCommandsError("");
+    commandsAsked.current = null;
+    setPanelView(null);
+  }, [sessionId]);
+  const menuMatches = useMemo(
+    () => (menuQuery === null ? [] : matchCommands(commands, menuQuery)),
+    [commands, menuQuery],
+  );
+
+  const clearComposer = () => {
+    setDraft("");
+    draftRef.current = "";
+    if (draftScope) void clearDraft(draftScope, sessionId);
+  };
+
+  // Sending, with the two commands the phone answers itself: a panel command
+  // sent bare is read off the Mac's terminal and shown here, since it never
+  // reaches the transcript, and a bare /model opens the model menu, which is
+  // the picker it would open in the terminal.
+  const sendDraft = () => {
+    if (commandsOn && images.attachments.length === 0 && !panelBusy) {
+      const action = commandSend(draft, commands);
+      if (action.kind === "panel") {
+        setPanelBusy(true);
+        runPanel(store.ask, sessionId, action.name)
+          .then((panel) => {
+            clearComposer();
+            setPanelView({ name: panel.command, output: panel.text });
+          })
+          .catch((reason: Error) => setToast(reason.message))
+          .finally(() => setPanelBusy(false));
+        return;
+      }
+      if (action.kind === "model" && modelChoices && !switchLocked) {
+        clearComposer();
+        openSwitchMenu("model");
+        return;
+      }
+    }
+    void submit();
+  };
+
   const artifactCount = session?.artifacts ?? 0;
   const artifactsToReview = session?.artifactsToReview ?? 0;
 
@@ -1041,6 +1130,18 @@ export default function SessionScreen() {
               {images.error ? (
                 <Text style={styles.attachError}>{images.error}</Text>
               ) : null}
+              {menuQuery !== null ? (
+                <SlashMenu
+                  commands={menuMatches}
+                  loading={commandsLoading}
+                  error={commandsError || undefined}
+                  onPick={(command) => {
+                    const picked = pickedCommand(command);
+                    setDraft(picked);
+                    draftRef.current = picked;
+                  }}
+                />
+              ) : null}
               <View
                 ref={fieldRef}
                 style={[
@@ -1092,7 +1193,7 @@ export default function SessionScreen() {
                     }
                     placeholderTextColor={color.faint}
                     multiline
-                    onSubmitEditing={() => void submit()}
+                    onSubmitEditing={sendDraft}
                     returnKeyType="send"
                     accessibilityLabel="Instruction"
                   />
@@ -1157,8 +1258,8 @@ export default function SessionScreen() {
                     onProblem={(message) => Alert.alert("Voice", message)}
                   />
                   <MotionPressable
-                    onPress={() => void submit()}
-                    disabled={!canSend || awaitingSend || nothingToSend}
+                    onPress={sendDraft}
+                    disabled={!canSend || awaitingSend || nothingToSend || panelBusy}
                     style={[
                       styles.send,
                       (!canSend || awaitingSend || nothingToSend) &&
@@ -1171,10 +1272,10 @@ export default function SessionScreen() {
                     accessibilityState={{
                       disabled: !canSend || awaitingSend || nothingToSend,
                       busy:
-                        submittedSend?.status === "sending" || sendingImages,
+                        submittedSend?.status === "sending" || sendingImages || panelBusy,
                     }}
                   >
-                    {submittedSend?.status === "sending" || sendingImages ? (
+                    {submittedSend?.status === "sending" || sendingImages || panelBusy ? (
                       <ActivityIndicator size="small" color={color.faint} />
                     ) : (
                       <Feather
@@ -1196,6 +1297,14 @@ export default function SessionScreen() {
       </KeyboardAvoidingView>
 
       <Toast message={toast} onHidden={hideToast} top={insets.top + headerHeight + space.sm} />
+      {panelView ? (
+        <OutputViewer
+          visible
+          onClose={() => setPanelView(null)}
+          name={panelView.name}
+          output={panelView.output}
+        />
+      ) : null}
     </View>
   );
 }

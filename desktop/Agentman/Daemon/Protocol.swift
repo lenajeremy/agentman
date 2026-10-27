@@ -92,6 +92,8 @@ enum RequestType: String, Codable, Sendable {
     case voiceSignInStart = "voice_signin_start"
     case voiceSignInVerify = "voice_signin_verify"
     case voiceSignOut = "voice_signout"
+    case listCommands = "list_commands"
+    case commandPanel = "command_panel"
 }
 
 struct DaemonRequest: Codable, Sendable {
@@ -203,6 +205,10 @@ struct DaemonEvent: Codable, Sendable {
     var transcript: Transcript?
     /// Agentman's Celery account, on "voice_account".
     var voiceAccount: VoiceAccount?
+    /// A session's "/" menu, on "commands".
+    var commands: [SlashCommand]?
+    /// What a panel command showed, on "command_panel".
+    var panel: CommandPanel?
     /// The editor's language servers, on "lsp_status".
     var languages: LanguagesState?
 }
@@ -258,6 +264,25 @@ struct VoiceSignIn: Codable, Sendable {
     var email: String?
     var requestId: String?
     var code: String?
+}
+
+/// One entry of an agent's "/" menu, as the agent itself would offer it.
+struct SlashCommand: Codable, Sendable, Equatable, Hashable {
+    /// What follows the "/": "compact", "vercel:deploy".
+    var name: String
+    var description: String?
+    /// "[instructions]", "<model>": what it takes.
+    var argumentHint: String?
+    /// builtin, bundled, personal, project, plugin or managed.
+    var source: String?
+    /// Sent without arguments, it answers in a panel of the terminal.
+    var panel: Bool?
+}
+
+/// What a panel command (/usage, /status) showed in the agent's terminal.
+struct CommandPanel: Codable, Sendable, Equatable {
+    var command: String
+    var text: String
 }
 
 /// Agentman's Celery account, for voice prompts.
@@ -656,6 +681,10 @@ struct Session: Codable, Sendable, Identifiable, Hashable {
     var contextPercent: Int?
     var question: Question?
     var queued: [String]?
+    /// The conversation this one took over in the same terminal: Claude's
+    /// /clear starts a new one there, and /resume switches to another. A
+    /// thread showing that one follows to this.
+    var previous: String?
 
     static func == (lhs: Session, rhs: Session) -> Bool {
         lhs.id == rhs.id && lhs.state == rhs.state && lhs.name == rhs.name &&

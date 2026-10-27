@@ -25,6 +25,11 @@ struct AgentThreadView: View {
     @State private var filesTab: WorkspaceTab = .changes
     /// How many files the agent has changed since the last commit.
     @State private var changed = 0
+    /// The agent's commands, for `/` in the box, where it takes them.
+    @State private var slash: SlashCommands?
+    /// What a panel command showed, in a sheet, and whether one is being read.
+    @State private var panel: CommandPanel?
+    @State private var readingPanel = false
 
     /// Claude Code in tmux reads the messages it is holding on Ctrl-X
     /// Ctrl-S, so they can be sent now rather than when the step ends.
@@ -251,7 +256,8 @@ struct AgentThreadView: View {
                     attachments: session.canReceive ? $attachments : nil,
                     session: session,
                     placeholder: placeholder,
-                    enabled: session.canReceive && !sending && session.question == nil,
+                    enabled: session.canReceive && !sending && !readingPanel && session.question == nil,
+                    slash: slash,
                     onDropTargeted: { dropping = $0 },
                     onSend: send
                 )
@@ -266,6 +272,18 @@ struct AgentThreadView: View {
         // An unsent draft waits for the user's return, as on the phone.
         .onAppear { draft = store.drafts[session.id] ?? "" }
         .onChange(of: draft) { _, now in store.saveDraft(now, for: session.id) }
+        // `/` offers the agent's commands where it takes them.
+        .task(id: SlashCommands.takes(session) ? session.id : "") {
+            guard SlashCommands.takes(session) else {
+                slash = nil
+                return
+            }
+            let id = session.id
+            slash = SlashCommands { [store] in await store.commands(for: id) }
+        }
+        .sheet(item: Binding(get: { panel.map(PanelItem.init) }, set: { panel = $0?.panel })) { item in
+            CommandPanelSheet(panel: item.panel)
+        }
         // The count is read when the thread opens and after each turn.
         .task(id: session.state == .busy) {
             guard session.state != .busy else { return }
@@ -335,6 +353,31 @@ struct AgentThreadView: View {
     private func send() {
         var text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { return }
+        // A panel command sent bare is read off the agent's terminal, since it
+        // never reaches the transcript; a bare /model would leave a picker
+        // open there.
+        if let slash, attachments.isEmpty {
+            switch SlashCommands.send(text, commands: slash.commands) {
+            case .panel(let name):
+                readingPanel = true
+                Task {
+                    switch await store.commandPanel(name, in: session.id) {
+                    case .success(let shown):
+                        draft = ""
+                        panel = shown
+                    case .failure(let problem):
+                        store.actionError[session.id] = problem.message
+                    }
+                    readingPanel = false
+                }
+                return
+            case .model:
+                store.actionError[session.id] = "Choose a model with the model button, or send /model and its name."
+                return
+            case .message:
+                break
+            }
+        }
         // Files named with @ in the editor, by a path the agent can open.
         if let mentions { text = mentions.resolve(text, folder: session.cwd) }
         sending = true
@@ -1054,7 +1097,7 @@ enum ToolKind: Hashable {
     init(_ name: String?) {
         let name = (name ?? "").lowercased()
         switch name {
-        case "bash", "shell", "exec_command", "run_shell_command", "local_shell", "terminal": self = .command
+        case "bash", "shell", "exec_command", "run_shell_command", "local_shell", "terminal", "command": self = .command
         case "read", "read_file", "view", "cat", "notebookread": self = .read
         case "edit", "multiedit", "apply_patch", "str_replace", "str_replace_editor", "notebookedit", "replace": self = .edit
         case "write", "create_file", "write_file": self = .write
@@ -1183,6 +1226,8 @@ struct Composer: View {
     var session: Session? = nil
     var placeholder: String
     var enabled: Bool
+    /// The agent's commands, for `/`, where it takes them.
+    var slash: SlashCommands? = nil
     var onDropTargeted: ((Bool) -> Void)? = nil
     var onSend: () -> Void
     @State private var focused = false
@@ -1211,7 +1256,8 @@ struct Composer: View {
                 onSubmit: { if canSend { onSend() } },
                 onImages: attachments == nil ? nil : { add($0) },
                 onDropTargeted: onDropTargeted,
-                mentions: mentions
+                mentions: mentions,
+                slash: slash
             )
             .opacity(enabled ? 1 : 0.6)
             .padding(.horizontal, 6)
@@ -1285,9 +1331,14 @@ struct Composer: View {
                 .strokeBorder(focused ? Palette.fillStrong : Palette.line, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
-        // The files for `@`, just above the box.
+        // The commands for `/`, and the files for `@`, just above the box.
         .overlay(alignment: .top) {
-            if let mentions, mentions.isOpen {
+            if let slash, slash.isOpen {
+                SlashList(slash: slash)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 6)
+                    .frame(height: 0, alignment: .bottom)
+            } else if let mentions, mentions.isOpen {
                 // Hung from the box's top edge, rising from it.
                 MentionList(mentions: mentions)
                     .fixedSize(horizontal: false, vertical: true)
