@@ -275,6 +275,9 @@ struct VoiceSignIn: Codable, Sendable {
 struct SlashCommand: Codable, Sendable, Equatable, Hashable {
     /// What follows the "/": "compact", "vercel:deploy".
     var name: String
+    /// What goes before the name when it is typed, "/" when absent. Codex's
+    /// skills take "$".
+    var prefix: String?
     var description: String?
     /// "[instructions]", "<model>": what it takes.
     var argumentHint: String?

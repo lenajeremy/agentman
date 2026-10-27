@@ -1,6 +1,7 @@
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { useStyles, useTheme } from "../lib/appearance";
+import { commandLabel } from "../lib/commands";
 import type { SlashCommand } from "../lib/protocol";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { MotionPressable } from "./MotionPressable";
@@ -43,15 +44,15 @@ export function SlashMenu({
         <ScrollView keyboardShouldPersistTaps="always" nestedScrollEnabled>
           {commands.map((command) => (
             <MotionPressable
-              key={command.name}
+              key={commandLabel(command)}
               onPress={() => onPick(command)}
               style={styles.row}
               pressedScale={0.99}
               accessibilityRole="button"
-              accessibilityLabel={`/${command.name}${command.description ? `. ${command.description}` : ""}`}
+              accessibilityLabel={`${commandLabel(command)}${command.description ? `. ${command.description}` : ""}`}
             >
               <Text style={styles.name} numberOfLines={1}>
-                {`/${command.name}`}
+                {commandLabel(command)}
                 {command.argumentHint ? <Text style={styles.hint}>{`  ${command.argumentHint}`}</Text> : null}
               </Text>
               {command.description ? (

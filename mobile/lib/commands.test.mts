@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   commandCall,
+  commandLabel,
   commandSend,
   listCommands,
   matchCommands,
@@ -27,11 +28,18 @@ const commands: SlashCommand[] = [
 ];
 
 test("the menu is open while the command's name is being typed", () => {
-  assert.equal(slashQuery("/"), "");
-  assert.equal(slashQuery("/comp"), "comp");
+  assert.deepEqual(slashQuery("/"), { prefix: "/", query: "" });
+  assert.deepEqual(slashQuery("/comp"), { prefix: "/", query: "comp" });
   assert.equal(slashQuery("/compact "), null);
   assert.equal(slashQuery("look at /tmp"), null);
   assert.equal(slashQuery(""), null);
+  assert.equal(slashQuery("$image"), null, "only an agent whose skills take $ opens a menu on it");
+});
+
+test("Codex's skills open on $", () => {
+  assert.deepEqual(slashQuery("$image", true), { prefix: "$", query: "image" });
+  assert.deepEqual(slashQuery("/st", true), { prefix: "/", query: "st" });
+  assert.equal(slashQuery("$imagegen a cat", true), null);
 });
 
 test("matches lead with the name, then names it starts, then words within", () => {
@@ -47,6 +55,27 @@ test("matches lead with the name, then names it starts, then words within", () =
 test("a picked command leaves room for its argument when it takes one", () => {
   assert.equal(pickedCommand(commands[0]), "/compact ");
   assert.equal(pickedCommand(commands[1]), "/context");
+});
+
+const codex: SlashCommand[] = [
+  { name: "status", source: "builtin", panel: true },
+  { name: "init", source: "builtin" },
+  { name: "imagegen", prefix: "$", source: "bundled", description: "Generate images" },
+  { name: "notion:notion-setup", prefix: "$", source: "plugin" },
+];
+
+test("a Codex skill is written with $, and is followed by what it is for", () => {
+  assert.equal(commandLabel(codex[2]), "$imagegen");
+  assert.equal(pickedCommand(codex[2]), "$imagegen ");
+  assert.equal(pickedCommand(codex[1]), "/init");
+});
+
+test("/ lists Codex's commands and then its skills; $ lists only the skills", () => {
+  const labels = (query: string, prefix: "/" | "$") => matchCommands(codex, query, undefined, prefix).map(commandLabel);
+  assert.deepEqual(labels("", "/"), ["/init", "/status", "$imagegen", "$notion:notion-setup"]);
+  assert.deepEqual(labels("", "$"), ["$imagegen", "$notion:notion-setup"]);
+  assert.deepEqual(labels("setup", "$"), ["$notion:notion-setup"]);
+  assert.deepEqual(labels("stat", "$"), []);
 });
 
 test("a message is a command when it starts with one", () => {
@@ -67,10 +96,12 @@ test("a bare panel command is read off the terminal, and a bare /model opens the
   assert.deepEqual(commandSend("hello", commands), { kind: "message" });
 });
 
-test("only a Claude the Mac types into takes commands", () => {
+test("only a Claude or Codex the Mac types into takes commands", () => {
   assert.equal(takesCommands({ kind: "claude", inject: "tmux" }), true);
   assert.equal(takesCommands({ kind: "claude", inject: "hook" }), false);
-  assert.equal(takesCommands({ kind: "codex", inject: "tmux" }), false);
+  assert.equal(takesCommands({ kind: "codex", inject: "tmux" }), true);
+  assert.equal(takesCommands({ kind: "codex", inject: "none" }), false);
+  assert.equal(takesCommands({ kind: "cursor", inject: "tmux" }), false);
   assert.equal(takesCommands(undefined), false);
 });
 

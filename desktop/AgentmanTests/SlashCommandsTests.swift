@@ -56,13 +56,47 @@ final class SlashCommandsTests: XCTestCase {
         XCTAssertFalse(slash.isOpen)
     }
 
-    func testOnlyAClaudeInATerminalTakesCommands() throws {
+    func testOnlyAClaudeOrCodexInATerminalTakesCommands() throws {
         let decode = { (json: String) in try JSONDecoder().decode(Session.self, from: Data(json.utf8)) }
         let base = #""id":"s","name":"n","cwd":"/","state":"idle","lastActivity":0"#
         XCTAssertTrue(SlashCommands.takes(try decode(#"{"kind":"claude","inject":"tmux","# + base + "}")))
         XCTAssertFalse(SlashCommands.takes(try decode(#"{"kind":"claude","inject":"hook","# + base + "}")))
-        XCTAssertFalse(SlashCommands.takes(try decode(#"{"kind":"codex","inject":"tmux","# + base + "}")))
+        let codex = try decode(#"{"kind":"codex","inject":"tmux","# + base + "}")
+        XCTAssertTrue(SlashCommands.takes(codex))
+        XCTAssertEqual(SlashCommands.triggers(for: codex), ["/", "$"])
+        XCTAssertFalse(SlashCommands.takes(try decode(#"{"kind":"cursor","inject":"tmux","# + base + "}")))
         XCTAssertFalse(SlashCommands.takes(nil))
+    }
+
+    private let codex: [SlashCommand] = [
+        SlashCommand(name: "status", source: "builtin", panel: true),
+        SlashCommand(name: "init", source: "builtin"),
+        SlashCommand(name: "imagegen", prefix: "$", description: "Generate images", source: "bundled"),
+        SlashCommand(name: "notion:notion-setup", prefix: "$", source: "plugin"),
+    ]
+
+    // "/" lists Codex's commands and then its skills; "$" only the skills.
+    func testCodexSkillsAreListedWithTheirDollar() {
+        func labels(_ query: String, _ prefix: Character) -> [String] { SlashCommands.match(codex, query, prefix: prefix).map(\.label) }
+        XCTAssertEqual(labels("", "/"), ["/init", "/status", "$imagegen", "$notion:notion-setup"])
+        XCTAssertEqual(labels("", "$"), ["$imagegen", "$notion:notion-setup"])
+        XCTAssertEqual(labels("setup", "$"), ["$notion:notion-setup"])
+        XCTAssertEqual(labels("stat", "$"), [])
+    }
+
+    func testAPickedSkillIsFollowedByWhatItIsFor() async throws {
+        let slash = SlashCommands(triggers: ["/", "$"]) { [codex] in .success(codex) }
+        let field = NSTextView()
+        slash.textView = field
+        slash.update(text: "$image")
+        for _ in 0..<50 where slash.results.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(slash.results.map(\.label), ["$imagegen"])
+        slash.choose()
+        XCTAssertEqual(field.string, "$imagegen ")
+
+        let claude = SlashCommands { [codex] in .success(codex) }
+        claude.update(text: "$image")
+        XCTAssertNil(claude.query, "only an agent whose skills take $ opens on it")
     }
 }
 

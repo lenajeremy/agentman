@@ -10,19 +10,32 @@ import type { CommandPanel, DaemonEvent, Request, Session, SlashCommand } from "
 
 type Ask = (request: Request, timeoutMs?: number) => Promise<DaemonEvent>;
 
-/** Commands are typed into the agent's prompt, so only a Claude the Mac
- *  started in a terminal it can type into takes them. */
+/** Commands are typed into the agent's prompt, so only a Claude or Codex
+ *  the Mac started in a terminal it can type into takes them. */
 export function takesCommands(session: Pick<Session, "kind" | "inject"> | undefined): boolean {
-  return session?.kind === "claude" && session.inject === "tmux";
+  return (session?.kind === "claude" || session?.kind === "codex") && session.inject === "tmux";
+}
+
+/** A name being typed after "/", or after "$" for an agent whose skills take
+ *  it (Codex). */
+export interface CommandQuery {
+  prefix: "/" | "$";
+  query: string;
 }
 
 /**
- * What is being typed after the "/", while the name is still being typed:
- * null once there is a space after it, or when the box holds anything else.
+ * What is being typed after the "/" (or "$", when `skills`), while the name
+ * is still being typed: null once there is a space after it, or when the box
+ * holds anything else.
  */
-export function slashQuery(draft: string): string | null {
-  const match = /^\/(\S*)$/.exec(draft);
-  return match ? match[1] : null;
+export function slashQuery(draft: string, skills = false): CommandQuery | null {
+  const match = (skills ? /^([/$])(\S*)$/ : /^(\/)(\S*)$/).exec(draft);
+  return match ? { prefix: match[1] as "/" | "$", query: match[2] } : null;
+}
+
+/** A command as the menu and the box write it: "/compact", "$imagegen". */
+export function commandLabel(command: SlashCommand): string {
+  return `${command.prefix ?? "/"}${command.name}`;
 }
 
 /** A command as sent: its name and what follows it. */
@@ -49,7 +62,13 @@ function squash(text: string): string {
  * ("deploy" finds vercel:deploy), then any that contain it. Built-in
  * commands lead within each, as in the agent's own menu.
  */
-export function matchCommands(commands: readonly SlashCommand[], query: string, limit = 60): SlashCommand[] {
+export function matchCommands(
+  commands: readonly SlashCommand[],
+  query: string,
+  limit = 60,
+  /** "$" lists only what takes "$": Codex's skills. */
+  prefix: "/" | "$" = "/",
+): SlashCommand[] {
   const typed = query.toLowerCase();
   const squashed = squash(query);
   const rank = (command: SlashCommand): number => {
@@ -63,6 +82,7 @@ export function matchCommands(commands: readonly SlashCommand[], query: string, 
   };
   const builtinFirst = (command: SlashCommand) => (command.source === "builtin" ? 0 : 1);
   return commands
+    .filter((command) => prefix === "/" || command.prefix === prefix)
     .map((command) => ({ command, rank: rank(command) }))
     .filter((entry) => entry.rank >= 0)
     .sort(
@@ -76,9 +96,10 @@ export function matchCommands(commands: readonly SlashCommand[], query: string, 
 }
 
 /** What the box holds once a command is picked: a space after it when it
- *  takes something, so the next word is its argument. */
+ *  takes something, so the next word is its argument. A skill always does:
+ *  what it is for comes next. */
 export function pickedCommand(command: SlashCommand): string {
-  return command.argumentHint ? `/${command.name} ` : `/${command.name}`;
+  return command.argumentHint || command.prefix === "$" ? `${commandLabel(command)} ` : commandLabel(command);
 }
 
 /** What sending a message does, when it is a command. */
