@@ -4,7 +4,8 @@ import SwiftUI
 /// to answer when it has one.
 struct AgentThreadView: View {
     @Environment(AgentsStore.self) private var store
-    @Environment(\.fileMentions) private var mentions
+    /// The editor's files, in an editor's agent panel.
+    @Environment(\.fileMentions) private var editorMentions
     let session: Session
     /// In an editor's agent panel: narrow, with no toolbar or title of its
     /// own, as the panel has its own header.
@@ -27,6 +28,9 @@ struct AgentThreadView: View {
     @State private var changed = 0
     /// The agent's commands, for `/` in the box, where it takes them.
     @State private var slash: SlashCommands?
+    /// The agent's folder's files, for `@`, where no editor is around.
+    @State private var folderMentions: FileMentions?
+    private var mentions: FileMentions? { editorMentions ?? folderMentions }
     /// What a panel command showed, in a sheet, and whether one is being read.
     @State private var panel: CommandPanel?
     @State private var readingPanel = false
@@ -254,6 +258,7 @@ struct AgentThreadView: View {
                     }
                 } else {
                 Composer(
+                    mentions: mentions,
                     text: $draft,
                     attachments: session.canReceive ? $attachments : nil,
                     session: session,
@@ -274,6 +279,12 @@ struct AgentThreadView: View {
         // An unsent draft waits for the user's return, as on the phone.
         .onAppear { draft = store.drafts[session.id] ?? "" }
         .onChange(of: draft) { _, now in store.saveDraft(now, for: session.id) }
+        // `@` offers the folder's files when no editor is around the thread.
+        .task(id: session.cwd) {
+            if editorMentions == nil, session.canReceive, FileManager.default.fileExists(atPath: session.cwd) {
+                folderMentions = FileMentions.folder(session.cwd)
+            }
+        }
         // `/` offers the agent's commands where it takes them.
         .task(id: SlashCommands.takes(session) ? session.id : "") {
             guard SlashCommands.takes(session) else {
@@ -1258,7 +1269,10 @@ private struct QueuedBubble: View {
 /// with the button, pasted or dropped, and wait above the words until sent.
 struct Composer: View {
     @Environment(AgentsStore.self) private var store
-    @Environment(\.fileMentions) private var mentions
+    @Environment(\.fileMentions) private var editorMentions
+    /// The files for `@`: the editor's, or the thread's own folder's.
+    var mentions: FileMentions? = nil
+    private var files: FileMentions? { mentions ?? editorMentions }
     @Binding var text: String
     /// Nil for an agent that can't be messaged, so nothing offers images.
     var attachments: Binding<[Attachment]>?
@@ -1296,7 +1310,7 @@ struct Composer: View {
                 onSubmit: { if canSend { onSend() } },
                 onImages: attachments == nil ? nil : { add($0) },
                 onDropTargeted: onDropTargeted,
-                mentions: mentions,
+                mentions: files,
                 slash: slash
             )
             .opacity(enabled ? 1 : 0.6)
@@ -1378,9 +1392,9 @@ struct Composer: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, 6)
                     .frame(height: 0, alignment: .bottom)
-            } else if let mentions, mentions.isOpen {
+            } else if let files, files.isOpen {
                 // Hung from the box's top edge, rising from it.
-                MentionList(mentions: mentions)
+                MentionList(mentions: files)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, 6)
                     .frame(height: 0, alignment: .bottom)

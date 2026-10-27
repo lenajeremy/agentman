@@ -97,3 +97,40 @@ final class TakeoverTests: XCTestCase {
         XCTAssertEqual(store.selection, .agent("claude:b"))
     }
 }
+
+@MainActor
+final class FolderMentionsTests: XCTestCase {
+    // A thread outside an editor offers its agent's folder's files for `@`:
+    // as git lists them, ignored ones left out, and what changed first.
+    func testAThreadsFolderIsIndexedForMentions() async throws {
+        let repo = FileManager.default.temporaryDirectory.appendingPathComponent("am-mentions-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        func write(_ path: String, _ body: String) throws {
+            let url = repo.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try body.write(to: url, atomically: true, encoding: .utf8)
+        }
+        func git(_ args: String...) async throws {
+            let out = await Git.run(["-c", "user.email=t@t", "-c", "user.name=t"] + args, in: repo)
+            XCTAssertNotNil(out, "git \(args)")
+        }
+        try write(".gitignore", "node_modules/\n")
+        try write("app/login.tsx", "x")
+        try write("node_modules/pad/index.js", "x")
+        try await git("init", "-q")
+        try await git("add", ".")
+        try await git("commit", "-q", "-m", "first")
+        try write("app/login.tsx", "changed")
+        try write("notes/login-bug.md", "new")
+
+        let index = FolderIndex(root: repo)
+        await index.load()
+        XCTAssertTrue(index.files.contains("app/login.tsx"))
+        XCTAssertTrue(index.files.contains("notes/login-bug.md"))
+        XCTAssertFalse(index.files.contains("node_modules/pad/index.js"))
+        XCTAssertEqual(Set(index.changed), ["app/login.tsx", "notes/login-bug.md"])
+        // Sent, a picked file goes as a path inside the agent's folder.
+        let mentions = FileMentions.folder(repo.path)
+        XCTAssertEqual(mentions.resolve("see @app/login.tsx please", folder: repo.path), "see @app/login.tsx please")
+    }
+}

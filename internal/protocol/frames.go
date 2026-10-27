@@ -366,6 +366,9 @@ type Event struct {
 	Commands []Command `json:"commands,omitzero"`
 	// Panel answers ReqCommandPanel.
 	Panel *CommandPanel `json:"panel,omitempty"`
+	// Files answers ReqFindFiles: paths in the session's folder, best match
+	// first, [] when none match.
+	Files []string `json:"files,omitzero"`
 	// Languages answers the editor's language server requests.
 	Languages *LanguagesState `json:"languages,omitempty"`
 	// Schedules answers ReqManagerSchedules.

@@ -224,3 +224,37 @@ private struct MentionRow: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
+
+extension FileMentions {
+    /// For an agent's thread where no editor is open around it: the files of
+    /// its folder, listed as the editor lists them, and before anything is
+    /// typed, the files changed since the last commit.
+    static func folder(_ path: String) -> FileMentions {
+        let root = URL(fileURLWithPath: path)
+        let index = FolderIndex(root: root)
+        return FileMentions(root: root, files: { index.files }, suggested: { index.changed }, load: { await index.load() })
+    }
+}
+
+/// A folder's files, for `@` in a thread outside an editor.
+@MainActor
+final class FolderIndex {
+    let root: URL
+    private(set) var files: [String] = []
+    private(set) var changed: [String] = []
+
+    init(root: URL) {
+        self.root = root
+    }
+
+    func load() async {
+        if let listed = await Git.run(["ls-files", "-co", "--exclude-standard", "-z"], in: root) {
+            files = listed.split(separator: "\0").map(String.init)
+            changed = (await Git.run(["ls-files", "-mo", "--exclude-standard", "-z"], in: root))?
+                .split(separator: "\0").map(String.init) ?? []
+        } else {
+            let root = self.root
+            files = await Task.detached(priority: .utility) { EditorStore.walk(root) }.value
+        }
+    }
+}

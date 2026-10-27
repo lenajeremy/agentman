@@ -44,6 +44,7 @@ import { AttachmentStrip } from "../../components/AttachmentStrip";
 import { Popover, type PopoverItem } from "../../components/Popover";
 import { VoiceButton } from "../../components/VoiceButton";
 import { SlashMenu } from "../../components/SlashMenu";
+import { FileMenu } from "../../components/FileMenu";
 import { OutputViewer } from "../../components/OutputViewer";
 import { type Frame } from "../../lib/message-menu";
 import { artifactsButtonLabel } from "../../lib/artifacts";
@@ -61,6 +62,7 @@ import { clearDraft, loadDraft, saveDraft } from "../../lib/drafts";
 import { useAttachments } from "../../lib/use-attachments";
 import { Message, type SlashCommand } from "../../lib/protocol";
 import { commandSend, listCommands, matchCommands, pickedCommand, runPanel, slashQuery, takesCommands } from "../../lib/commands";
+import { findFiles, mentionAt, withMention } from "../../lib/mentions";
 import { sessionNeedsAnswer } from "../../lib/question-alerts";
 import { useStyles, useTheme } from "../../lib/appearance";
 import { PendingSend, useStore } from "../../lib/store";
@@ -118,6 +120,12 @@ export default function SessionScreen() {
   const commandsAsked = useRef<{ sessionId: string; at: number } | null>(null);
   const [panelBusy, setPanelBusy] = useState(false);
   const [panelView, setPanelView] = useState<{ name: string; output: string } | null>(null);
+  // `@` and a file's name: where the caret is, the files that match, and
+  // where to put the caret once one is picked.
+  const [caret, setCaret] = useState(0);
+  const [mentionFiles, setMentionFiles] = useState<string[]>([]);
+  const [mentionLoading, setMentionLoading] = useState(false);
+  const [pickedSelection, setPickedSelection] = useState<{ start: number; end: number } | undefined>();
   const showCopied = useCallback(() => setToast("Copied"), []);
   const hideToast = useCallback(() => setToast(null), []);
   const [sendingImages, setSendingImages] = useState(false);
@@ -731,6 +739,48 @@ export default function SessionScreen() {
     [commands, menuQuery],
   );
 
+  // `@` mentions. The Mac is asked once typing pauses, and an answer for
+  // what is no longer typed is dropped.
+  const mention =
+    canSend && !awaitingSend && menuQuery === null ? mentionAt(draft, Math.min(caret, draft.length)) : null;
+  const mentionQuery = mention?.query ?? null;
+  useEffect(() => {
+    if (mentionQuery === null || !store.daemonOnline) {
+      setMentionFiles([]);
+      setMentionLoading(false);
+      return;
+    }
+    let current = true;
+    setMentionLoading(true);
+    const timer = setTimeout(() => {
+      findFiles(store.ask, sessionId, mentionQuery)
+        .then((files) => {
+          if (current) setMentionFiles(files);
+        })
+        .catch(() => {
+          if (current) setMentionFiles([]);
+        })
+        .finally(() => {
+          if (current) setMentionLoading(false);
+        });
+    }, 180);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mentionQuery, sessionId, store.daemonOnline]);
+  const pickMention = (path: string) => {
+    if (!mention) return;
+    const next = withMention(draft, mention, path);
+    setDraft(next.text);
+    draftRef.current = next.text;
+    setCaret(next.caret);
+    // The caret is put after the path once, then left to the user.
+    setPickedSelection({ start: next.caret, end: next.caret });
+    setTimeout(() => setPickedSelection(undefined), 50);
+  };
+
   const clearComposer = () => {
     setDraft("");
     draftRef.current = "";
@@ -1130,6 +1180,14 @@ export default function SessionScreen() {
               {images.error ? (
                 <Text style={styles.attachError}>{images.error}</Text>
               ) : null}
+              {mention ? (
+                <FileMenu
+                  files={mentionFiles}
+                  loading={mentionLoading}
+                  typed={mention.query.length > 0}
+                  onPick={pickMention}
+                />
+              ) : null}
               {menuQuery !== null ? (
                 <SlashMenu
                   commands={menuMatches}
@@ -1181,6 +1239,8 @@ export default function SessionScreen() {
                     style={styles.input}
                     value={draft}
                     onChangeText={setDraft}
+                    selection={pickedSelection}
+                    onSelectionChange={(event) => setCaret(event.nativeEvent.selection.end)}
                     onFocus={() => setInputFocused(true)}
                     onBlur={() => setInputFocused(false)}
                     editable={canSend && !awaitingSend}

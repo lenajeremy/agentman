@@ -258,7 +258,8 @@ export type RequestType =
   | "transcribe"
   | "voice_account"
   | "list_commands"
-  | "command_panel";
+  | "command_panel"
+  | "find_files";
 
 export interface Request {
   type: RequestType;
@@ -398,7 +399,8 @@ export type EventType =
   | "transcript"
   | "voice_account"
   | "commands"
-  | "command_panel";
+  | "command_panel"
+  | "files";
 
 export interface WorkspaceEntry { name: string; directory: boolean; size?: number }
 export interface WorkspaceChange {
@@ -502,6 +504,8 @@ export interface DaemonEvent {
   commands?: SlashCommand[];
   /** What a panel command showed, on command_panel. */
   panel?: CommandPanel;
+  /** Paths in the session's folder for an `@` mention, best first, on files. */
+  files?: string[];
   sessions?: Session[];
   session?: Session;
   messages?: Message[];
@@ -801,7 +805,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     "manager_entry", "manager_delta", "manager_history", "manager_status",
     "manager_brief", "manager_schedules", "manager_settings",
     "manager_permission", "manager_reset", "knowledge", "keys",
-    "transcript", "voice_account", "commands", "command_panel",
+    "transcript", "voice_account", "commands", "command_panel", "files",
   ] as const)) return null;
 
   switch (value.type) {
@@ -892,6 +896,11 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
       value.commands ??= [];
       if (!Array.isArray(value.commands) || value.commands.length > 2_000) return null;
       value.commands = value.commands.filter(isSlashCommand);
+      break;
+    case "files":
+      value.files ??= [];
+      if (!Array.isArray(value.files) || value.files.length > 1_000) return null;
+      value.files = value.files.filter((path: unknown) => boundedString(path, 4096, true));
       break;
     case "command_panel":
       if (!isRecord(value.panel) || !boundedString(value.panel.command, 64, true) ||
