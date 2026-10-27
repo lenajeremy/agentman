@@ -4,7 +4,8 @@ import SwiftUI
 /// to answer when it has one.
 struct AgentThreadView: View {
     @Environment(AgentsStore.self) private var store
-    @Environment(\.fileMentions) private var mentions
+    /// The editor's files, in an editor's agent panel.
+    @Environment(\.fileMentions) private var editorMentions
     let session: Session
     /// In an editor's agent panel: narrow, with no toolbar or title of its
     /// own, as the panel has its own header.
@@ -25,6 +26,14 @@ struct AgentThreadView: View {
     @State private var filesTab: WorkspaceTab = .changes
     /// How many files the agent has changed since the last commit.
     @State private var changed = 0
+    /// The agent's commands, for `/` in the box, where it takes them.
+    @State private var slash: SlashCommands?
+    /// The agent's folder's files, for `@`, where no editor is around.
+    @State private var folderMentions: FileMentions?
+    private var mentions: FileMentions? { editorMentions ?? folderMentions }
+    /// What a panel command showed, in a sheet, and whether one is being read.
+    @State private var panel: CommandPanel?
+    @State private var readingPanel = false
 
     /// Claude Code in tmux reads the messages it is holding on Ctrl-X
     /// Ctrl-S, so they can be sent now rather than when the step ends.
@@ -166,6 +175,8 @@ struct AgentThreadView: View {
                                 case .image(_, let path):
                                     ImageThumbnail(sessionId: session.id, path: path,
                                                    label: "Read " + (path as NSString).lastPathComponent, carded: true)
+                                case .images(let calls, let paths, let said):
+                                    PicturesRun(sessionId: session.id, calls: calls, paths: paths, said: said)
                                 }
                             }
                             .id(item.id)
@@ -247,11 +258,13 @@ struct AgentThreadView: View {
                     }
                 } else {
                 Composer(
+                    mentions: mentions,
                     text: $draft,
                     attachments: session.canReceive ? $attachments : nil,
                     session: session,
                     placeholder: placeholder,
-                    enabled: session.canReceive && !sending && session.question == nil,
+                    enabled: session.canReceive && !sending && !readingPanel && session.question == nil,
+                    slash: slash,
                     onDropTargeted: { dropping = $0 },
                     onSend: send
                 )
@@ -266,6 +279,24 @@ struct AgentThreadView: View {
         // An unsent draft waits for the user's return, as on the phone.
         .onAppear { draft = store.drafts[session.id] ?? "" }
         .onChange(of: draft) { _, now in store.saveDraft(now, for: session.id) }
+        // `@` offers the folder's files when no editor is around the thread.
+        .task(id: session.cwd) {
+            if editorMentions == nil, session.canReceive, FileManager.default.fileExists(atPath: session.cwd) {
+                folderMentions = FileMentions.folder(session.cwd)
+            }
+        }
+        // `/` offers the agent's commands where it takes them.
+        .task(id: SlashCommands.takes(session) ? session.id : "") {
+            guard SlashCommands.takes(session) else {
+                slash = nil
+                return
+            }
+            let id = session.id
+            slash = SlashCommands { [store] in await store.commands(for: id) }
+        }
+        .sheet(item: Binding(get: { panel.map(PanelItem.init) }, set: { panel = $0?.panel })) { item in
+            CommandPanelSheet(panel: item.panel)
+        }
         // The count is read when the thread opens and after each turn.
         .task(id: session.state == .busy) {
             guard session.state != .busy else { return }
@@ -277,7 +308,7 @@ struct AgentThreadView: View {
         .onDrop(of: [.fileURL, .image], isTargeted: Binding(get: { dropping }, set: { dropping = $0 && session.canReceive })) { providers in
             guard session.canReceive else { return false }
             Task { @MainActor in
-                let found = await Attachments.from(providers: providers)
+                let found = await Attachments.from(providers: providers, files: true)
                 attachments.append(contentsOf: found.prefix(max(0, Attachments.maxCount - attachments.count)))
             }
             return true
@@ -335,18 +366,65 @@ struct AgentThreadView: View {
     private func send() {
         var text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { return }
+        // A panel command sent bare is read off the agent's terminal, since it
+        // never reaches the transcript; a bare /model would leave a picker
+        // open there.
+        if let slash, attachments.isEmpty {
+            switch SlashCommands.send(text, commands: slash.commands) {
+            case .panel(let name):
+                readingPanel = true
+                Task {
+                    switch await store.commandPanel(name, in: session.id) {
+                    case .success(let shown):
+                        draft = ""
+                        panel = shown
+                    case .failure(let problem):
+                        store.actionError[session.id] = problem.message
+                    }
+                    readingPanel = false
+                }
+                return
+            case .model:
+                store.actionError[session.id] = "Choose a model with the model button, or send /model and its name."
+                return
+            case .message:
+                break
+            }
+        }
         // Files named with @ in the editor, by a path the agent can open.
         if let mentions { text = mentions.resolve(text, folder: session.cwd) }
         sending = true
         followRequest += 1
         let images = Attachments.encoded(attachments)
+        let files = attachments.compactMap(\.file)
         Task {
-            if await store.send(text, images: images, to: session.id) {
+            // Files are named ahead of the words, as the phone sends them.
+            var references: [String] = []
+            for file in files {
+                switch await fileReference(file) {
+                case .success(let path): references.append("@" + path)
+                case .failure(let problem):
+                    store.actionError[session.id] = problem.message
+                    sending = false
+                    return
+                }
+            }
+            let message = references.isEmpty ? text
+                : references.joined(separator: " ") + (text.isEmpty ? "" : "\n\n" + text)
+            if await store.send(message, images: images, to: session.id) {
                 draft = ""
                 attachments = []
             }
             sending = false
         }
+    }
+
+    /// How the agent is given a file: by its own path, which it reads where
+    /// it is; or, when that path can't follow an "@" as one word, by the path
+    /// of a copy the daemon keeps.
+    private func fileReference(_ url: URL) async -> Result<String, TerminalProblem> {
+        if !url.path.contains(where: \.isWhitespace) { return .success(url.path) }
+        return await store.keepFile(url, for: session.id)
     }
 }
 
@@ -706,6 +784,9 @@ struct MessageRow: View {
                     if !sent.images.isEmpty {
                         SentFiles(paths: sent.images)
                     }
+                    if !sent.files.isEmpty {
+                        SentFileChips(paths: sent.files)
+                    }
                     if !sent.text.isEmpty {
                         HStack {
                             Spacer(minLength: 80)
@@ -813,18 +894,21 @@ enum ThreadItem: Identifiable {
     case tools([Message], said: String)
     /// An image the agent read, shown as a thumbnail rather than its path.
     case image(Message, path: String)
+    /// Images read one after another: one run, the pictures side by side.
+    case images([Message], paths: [String], said: String)
 
     /// The last message's ID, so scrolling to the newest message finds it.
     var id: String {
         switch self {
         case .message(let message), .image(let message, _): message.id
-        case .tools(let calls, _): calls.last?.id ?? ""
+        case .tools(let calls, _), .images(let calls, _, _): calls.last?.id ?? ""
         }
     }
 
     static func items(from messages: [Message]) -> [ThreadItem] {
         var items: [ThreadItem] = []
         var run: [Message] = []
+        var pictures: [(message: Message, path: String)] = []
         var said = ""
         func flush() {
             if !run.isEmpty {
@@ -832,21 +916,56 @@ enum ThreadItem: Identifiable {
                 run = []
             }
         }
+        func flushPictures() {
+            if pictures.count == 1, let only = pictures.first {
+                items.append(.image(only.message, path: only.path))
+            } else if pictures.count > 1 {
+                items.append(.images(pictures.map(\.message), paths: pictures.map(\.path), said: said))
+            }
+            pictures = []
+        }
         for message in messages {
             if message.role == .tool, ToolKind(message.tool?.name) == .read,
                let path = ImageThumbnail.imagePath(in: message.tool?.summary ?? message.text ?? "") {
                 flush()
-                items.append(.image(message, path: path))
+                pictures.append((message, path))
             } else if message.role == .tool {
+                flushPictures()
                 run.append(message)
             } else {
                 flush()
+                flushPictures()
                 if message.role == .assistant { said = message.text ?? "" }
                 items.append(.message(message))
             }
         }
         flush()
+        flushPictures()
         return items
+    }
+}
+
+/// Images read one after another: the run's line, and the pictures side by
+/// side under it, as Claude's own app shows them.
+struct PicturesRun: View {
+    let sessionId: String
+    let calls: [Message]
+    let paths: [String]
+    let said: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ToolRun(calls: calls, said: said)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 8) {
+                    ForEach(Array(paths.enumerated()), id: \.offset) { _, path in
+                        ImageThumbnail(sessionId: sessionId, path: path,
+                                       label: "Read " + (path as NSString).lastPathComponent, pictureOnly: true)
+                    }
+                }
+                .padding(.leading, 12)
+            }
+        }
     }
 }
 
@@ -1054,7 +1173,7 @@ enum ToolKind: Hashable {
     init(_ name: String?) {
         let name = (name ?? "").lowercased()
         switch name {
-        case "bash", "shell", "exec_command", "run_shell_command", "local_shell", "terminal": self = .command
+        case "bash", "shell", "exec_command", "run_shell_command", "local_shell", "terminal", "command": self = .command
         case "read", "read_file", "view", "cat", "notebookread": self = .read
         case "edit", "multiedit", "apply_patch", "str_replace", "str_replace_editor", "notebookedit", "replace": self = .edit
         case "write", "create_file", "write_file": self = .write
@@ -1175,7 +1294,10 @@ private struct QueuedBubble: View {
 /// with the button, pasted or dropped, and wait above the words until sent.
 struct Composer: View {
     @Environment(AgentsStore.self) private var store
-    @Environment(\.fileMentions) private var mentions
+    @Environment(\.fileMentions) private var editorMentions
+    /// The files for `@`: the editor's, or the thread's own folder's.
+    var mentions: FileMentions? = nil
+    private var files: FileMentions? { mentions ?? editorMentions }
     @Binding var text: String
     /// Nil for an agent that can't be messaged, so nothing offers images.
     var attachments: Binding<[Attachment]>?
@@ -1183,6 +1305,8 @@ struct Composer: View {
     var session: Session? = nil
     var placeholder: String
     var enabled: Bool
+    /// The agent's commands, for `/`, where it takes them.
+    var slash: SlashCommands? = nil
     var onDropTargeted: ((Bool) -> Void)? = nil
     var onSend: () -> Void
     @State private var focused = false
@@ -1211,7 +1335,8 @@ struct Composer: View {
                 onSubmit: { if canSend { onSend() } },
                 onImages: attachments == nil ? nil : { add($0) },
                 onDropTargeted: onDropTargeted,
-                mentions: mentions
+                mentions: files,
+                slash: slash
             )
             .opacity(enabled ? 1 : 0.6)
             .padding(.horizontal, 6)
@@ -1285,11 +1410,16 @@ struct Composer: View {
                 .strokeBorder(focused ? Palette.fillStrong : Palette.line, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
-        // The files for `@`, just above the box.
+        // The commands for `/`, and the files for `@`, just above the box.
         .overlay(alignment: .top) {
-            if let mentions, mentions.isOpen {
+            if let slash, slash.isOpen {
+                SlashList(slash: slash)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 6)
+                    .frame(height: 0, alignment: .bottom)
+            } else if let files, files.isOpen {
                 // Hung from the box's top edge, rising from it.
-                MentionList(mentions: mentions)
+                MentionList(mentions: files)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, 6)
                     .frame(height: 0, alignment: .bottom)
@@ -1347,11 +1477,11 @@ struct Composer: View {
 
     private func attach() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image]
+        panel.allowedContentTypes = [.item]
         panel.allowsMultipleSelection = true
-        panel.message = "Choose images to send"
+        panel.message = "Choose images or files to send"
         if panel.runModal() == .OK {
-            add(panel.urls.compactMap(Attachments.make(file:)))
+            add(panel.urls.compactMap(Attachments.make(anyFile:)))
         }
     }
 

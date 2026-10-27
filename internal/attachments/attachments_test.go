@@ -198,3 +198,47 @@ func TestSessionDirNeverEscapes(t *testing.T) {
 		}
 	}
 }
+
+func TestSafeFileNamesTypeAsOneWord(t *testing.T) {
+	for in, want := range map[string]string{
+		"report.pdf":                      "report.pdf",
+		"Q3 report (final).pdf":           "Q3-report-final.pdf",
+		"../../etc/passwd":                "passwd",
+		".env":                            "env",
+		"   ":                             "file",
+		"résumé.docx":                     "r-sum.docx",
+		strings.Repeat("a", 200) + ".log": strings.Repeat("a", 76) + ".log",
+	} {
+		if got := SafeFileName(in); got != want {
+			t.Errorf("SafeFileName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestFilesSentToAgentsAreSweptAfterAWeek(t *testing.T) {
+	store := New(t.TempDir(), "", "token")
+	old, err := store.SaveFile("claude:s", "old.txt", []byte("x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := store.SaveFile("claude:s", "fresh.txt", []byte("y"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	weekAgo := time.Now().Add(-8 * 24 * time.Hour)
+	if err := os.Chtimes(old, weekAgo, weekAgo); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Sweep(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Errorf("a week-old file was kept")
+	}
+	if _, err := os.Stat(filepath.Dir(old)); !os.IsNotExist(err) {
+		t.Errorf("its emptied folder was kept")
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Errorf("a fresh file was swept: %v", err)
+	}
+}

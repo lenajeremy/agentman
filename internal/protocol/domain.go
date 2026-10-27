@@ -141,6 +141,10 @@ type Session struct {
 	// CanSendQueued says send_queued would work now: the agent offers a key
 	// that sends what it is holding at once, and the Mac can press it.
 	CanSendQueued bool `json:"canSendQueued,omitempty"`
+	// Previous is the conversation this one took over in the same terminal:
+	// Claude's /clear starts a new one there, and /resume switches to
+	// another. The apps follow from the old conversation's thread to this.
+	Previous string `json:"previous,omitempty"`
 
 	// AgentPID is the agent's own process, when the adapter knows it. It
 	// never leaves the machine: it is only how the daemon tells which
@@ -238,7 +242,7 @@ func (s Session) SameAs(other Session) bool {
 		s.AgentPID == other.AgentPID &&
 		s.Question.sameAs(other.Question) && SameServers(s.Servers, other.Servers) &&
 		slices.Equal(s.Queued, other.Queued) && slices.Equal(s.QueuedMessageIDs, other.QueuedMessageIDs) &&
-		s.CanSendQueued == other.CanSendQueued
+		s.CanSendQueued == other.CanSendQueued && s.Previous == other.Previous
 }
 
 // SameServers reports whether two server lists are identical, in order.

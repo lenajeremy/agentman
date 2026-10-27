@@ -229,6 +229,8 @@ type Request struct {
 	UploadIDs []string `json:"uploadIds,omitempty"`
 	// Voice is one part of a recording to write out, on "transcribe".
 	Voice *VoiceClip `json:"voice,omitempty"`
+	// File is one part of a file sent to an agent, on "attach_file".
+	File *FilePart `json:"file,omitempty"`
 	// VoiceSignIn is a step of signing in to Celery for voice prompts.
 	VoiceSignIn *VoiceSignIn `json:"voiceSignIn,omitempty"`
 	// Kind and Path select a local agent and a directory relative to home.
@@ -362,6 +364,15 @@ type Event struct {
 	Transcript *Transcript `json:"transcript,omitempty"`
 	// VoiceAccount answers the voice_* requests.
 	VoiceAccount *VoiceAccount `json:"voiceAccount,omitempty"`
+	// Commands answers ReqListCommands, [] for an agent with none.
+	Commands []Command `json:"commands,omitzero"`
+	// Panel answers ReqCommandPanel.
+	Panel *CommandPanel `json:"panel,omitempty"`
+	// Files answers ReqFindFiles: paths in the session's folder, best match
+	// first, [] when none match.
+	Files []string `json:"files,omitzero"`
+	// Attached answers ReqAttachFile.
+	Attached *AttachedFile `json:"attached,omitempty"`
 	// Languages answers the editor's language server requests.
 	Languages *LanguagesState `json:"languages,omitempty"`
 	// Schedules answers ReqManagerSchedules.

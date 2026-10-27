@@ -223,6 +223,9 @@ func (s *ClaudeSource) SetMode(ctx context.Context, sessionID, mode string) erro
 	if err != nil {
 		return err
 	}
+	lock := s.paneLock(name)
+	lock.Lock()
+	defer lock.Unlock()
 	d := s.switcher
 	for presses := 0; presses <= len(claudeModes)+1; presses++ {
 		pane, err := d.capture(ctx, name)
@@ -308,6 +311,9 @@ func (s *ClaudeSource) SetModel(ctx context.Context, sessionID, model string) er
 	if err != nil {
 		return err
 	}
+	lock := s.paneLock(name)
+	lock.Lock()
+	defer lock.Unlock()
 	label := claudeModelLabel(model)
 	if label == "" {
 		return fmt.Errorf("source: %q is not a Claude model this can switch to", model)
@@ -319,6 +325,12 @@ func (s *ClaudeSource) SetModel(ctx context.Context, sessionID, model string) er
 	}
 	if _, ok := claudePaneMode(pane); !ok || question.Detect(pane) != nil {
 		return errors.New("source: Claude is not at its prompt; close what is open in the terminal first")
+	}
+	// A Vim prompt in normal mode would take "/model" as commands.
+	if s.editor.vimOn(s.home) && claudeNormalMode(pane) {
+		if err := d.literal(ctx, name, "i"); err != nil {
+			return fmt.Errorf("source: could not type into Claude's prompt: %w", err)
+		}
 	}
 	if err := d.line(ctx, name, "/model"); err != nil {
 		return fmt.Errorf("source: could not open Claude's model picker: %w", err)

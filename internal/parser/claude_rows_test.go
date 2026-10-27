@@ -49,11 +49,9 @@ func TestClaudeNoticesBecomeSystemRows(t *testing.T) {
 		obj{"type": "system", "subtype": "model_refusal_fallback", "uuid": "s3", "level": "warning",
 			"content":       "The safeguards flagged this message. Retrying with another model.",
 			"originalModel": "claude-x", "fallbackModel": "claude-y"},
-		// Bookkeeping and command scaffolding stay out.
+		// Bookkeeping stays out.
 		obj{"type": "system", "subtype": "turn_duration", "uuid": "s4", "durationMs": 3662023, "messageCount": 511},
 		obj{"type": "system", "subtype": "stop_hook_summary", "uuid": "s5", "level": "suggestion", "hookCount": 1},
-		obj{"type": "system", "subtype": "local_command", "uuid": "s6", "level": "info",
-			"content": "<command-name>/skills</command-name>\n<command-message>skills</command-message>"},
 		obj{"type": "system", "subtype": "api_error", "uuid": "s7", "level": "error",
 			"error": obj{"message": "Connection error."}, "retryAttempt": 1, "maxRetries": 10},
 		// Empty: the explanation follows as an assistant message.

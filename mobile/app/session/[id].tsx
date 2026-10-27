@@ -30,6 +30,7 @@ import { ContentColumn } from "../../components/ContentColumn";
 import { Markdown } from "../../components/Markdown";
 import { NoticeRow } from "../../components/NoticeRow";
 import { SentImages } from "../../components/SentImages";
+import { SentFileChips } from "../../components/SentFileChips";
 import { ToolGroup } from "../../components/ToolGroup";
 import { KEEP_READING, ScrollToLatest, SCROLL_AWAY } from "../../components/ScrollToLatest";
 import { groupTools } from "../../lib/toolgroups";
@@ -43,6 +44,9 @@ import { ToolRow } from "../../components/ToolRow";
 import { AttachmentStrip } from "../../components/AttachmentStrip";
 import { Popover, type PopoverItem } from "../../components/Popover";
 import { VoiceButton } from "../../components/VoiceButton";
+import { SlashMenu } from "../../components/SlashMenu";
+import { FileMenu } from "../../components/FileMenu";
+import { OutputViewer } from "../../components/OutputViewer";
 import { type Frame } from "../../lib/message-menu";
 import { artifactsButtonLabel } from "../../lib/artifacts";
 import { canEnd, shouldResume } from "../../lib/resume";
@@ -57,7 +61,10 @@ import { chooseImageSource } from "../../lib/image-source-sheet";
 import { draftNamespace } from "../../lib/draft-policy";
 import { clearDraft, loadDraft, saveDraft } from "../../lib/drafts";
 import { useAttachments } from "../../lib/use-attachments";
-import { Message } from "../../lib/protocol";
+import { Message, type SlashCommand } from "../../lib/protocol";
+import { commandSend, listCommands, matchCommands, pickedCommand, runPanel, slashQuery, takesCommands } from "../../lib/commands";
+import { findFiles, mentionAt, withMention } from "../../lib/mentions";
+import { withFiles } from "../../lib/files";
 import { sessionNeedsAnswer } from "../../lib/question-alerts";
 import { useStyles, useTheme } from "../../lib/appearance";
 import { PendingSend, useStore } from "../../lib/store";
@@ -77,7 +84,7 @@ import {
 
 type Row =
   | { kind: "message"; message: Message }
-  | { kind: "tools"; key: string; calls: Message[]; said: string }
+  | { kind: "tools"; key: string; calls: Message[]; said: string; pictures?: boolean }
   | { kind: "pending"; pending: PendingSend }
   // A message the agent is holding until its current step ends, sent from
   // the phone or typed at the Mac.
@@ -107,6 +114,20 @@ export default function SessionScreen() {
   // than in the row so it survives the row re-rendering, and so there is only
   // ever one on screen.
   const [toast, setToast] = useState<string | null>(null);
+  // The "/" menu: the agent's commands, asked for when "/" is first typed,
+  // and a panel command's answer while it is being read and once it is.
+  const [commands, setCommands] = useState<SlashCommand[]>([]);
+  const [commandsLoading, setCommandsLoading] = useState(false);
+  const [commandsError, setCommandsError] = useState("");
+  const commandsAsked = useRef<{ sessionId: string; at: number } | null>(null);
+  const [panelBusy, setPanelBusy] = useState(false);
+  const [panelView, setPanelView] = useState<{ name: string; output: string } | null>(null);
+  // `@` and a file's name: where the caret is, the files that match, and
+  // where to put the caret once one is picked.
+  const [caret, setCaret] = useState(0);
+  const [mentionFiles, setMentionFiles] = useState<string[]>([]);
+  const [mentionLoading, setMentionLoading] = useState(false);
+  const [pickedSelection, setPickedSelection] = useState<{ start: number; end: number } | undefined>();
   const showCopied = useCallback(() => setToast("Copied"), []);
   const hideToast = useCallback(() => setToast(null), []);
   const [sendingImages, setSendingImages] = useState(false);
@@ -139,6 +160,13 @@ export default function SessionScreen() {
   const settled = useRef<Set<string> | null>(null);
 
   const session = store.findSession(sessionId);
+  // A conversation cleared (/clear) or switched away from (/resume) in its
+  // terminal goes on as another: the thread follows it there.
+  const successor = store.sessions.find((candidate) => candidate.previous === sessionId)?.id;
+  useEffect(() => {
+    if (successor) router.replace(`/session/${encodeURIComponent(successor)}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [successor]);
   const messages = store.messages[sessionId] ?? [];
   const paging = store.pageState[sessionId];
   const answerAction = store.actions.find(
@@ -266,8 +294,8 @@ export default function SessionScreen() {
     const chronological: Row[] = [
       // Filtered here rather than drawn as nothing: an empty cell still takes
       // the list's gap, and a withdrawn preview would leave a hole.
-      // Calls in a row read as one line saying what was done.
-      // A call that read a picture stands alone, with the picture under it.
+      // Calls in a row read as one line saying what was done. Calls that
+      // read pictures run apart, with the pictures under them.
       ...groupTools(messages.filter((message) => showsInFeed(message) && !waitingIds.has(message.id)), (message) =>
         Boolean(message.tool && readImage(message.tool.name, message.tool.summary ?? "", session?.cwd ?? "")),
       ),
@@ -374,11 +402,15 @@ export default function SessionScreen() {
     // Uploaded here rather than when the image was chosen: the relay holds one
     // for two minutes, and the gap between picking a screenshot and finishing
     // the sentence about it is easily longer than that.
+    // Files go to the Mac first, and the message names each; pictures go
+    // through the relay with it.
     let uploadIds: string[] = [];
+    let message = text;
     if (images.attachments.length > 0) {
       setSendingImages(true);
       try {
         uploadIds = await images.upload();
+        message = withFiles(text, await images.sendFiles(store.ask, sessionId));
       } catch (reason) {
         images.setError(
           reason instanceof Error ? reason.message : String(reason),
@@ -389,7 +421,7 @@ export default function SessionScreen() {
       setSendingImages(false);
     }
 
-    setSubmittedClientId(store.sendMessage(sessionId, text, uploadIds));
+    setSubmittedClientId(store.sendMessage(sessionId, message, uploadIds));
     images.clear();
     // Sending always comes back to the latest, wherever the reader was.
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
@@ -675,6 +707,119 @@ export default function SessionScreen() {
       open();
     }
   };
+
+  // The "/" menu. The list is asked for when "/" is first typed in a session,
+  // and again after a minute, as skills come and go on the Mac.
+  const commandsOn = takesCommands(session) && canSend;
+  const menuQuery = commandsOn && !awaitingSend ? slashQuery(draft) : null;
+  const slashMenuShown = menuQuery !== null;
+  useEffect(() => {
+    if (!slashMenuShown || !store.daemonOnline || commandsLoading) return;
+    const asked = commandsAsked.current;
+    if (asked?.sessionId === sessionId && Date.now() - asked.at < 60_000) return;
+    commandsAsked.current = { sessionId, at: Date.now() };
+    setCommandsLoading(true);
+    setCommandsError("");
+    listCommands(store.ask, sessionId)
+      .then((list) => setCommands(list))
+      .catch((reason: Error) => {
+        // Asked again the next time "/" is typed.
+        commandsAsked.current = null;
+        setCommandsError(
+          /unsupported request/.test(reason.message)
+            ? "Update agentman on your Mac to use commands from your phone."
+            : reason.message,
+        );
+      })
+      .finally(() => setCommandsLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slashMenuShown, sessionId, store.daemonOnline]);
+  useEffect(() => {
+    setCommands([]);
+    setCommandsError("");
+    commandsAsked.current = null;
+    setPanelView(null);
+  }, [sessionId]);
+  const menuMatches = useMemo(
+    () => (menuQuery === null ? [] : matchCommands(commands, menuQuery)),
+    [commands, menuQuery],
+  );
+
+  // `@` mentions. The Mac is asked once typing pauses, and an answer for
+  // what is no longer typed is dropped.
+  const mention =
+    canSend && !awaitingSend && menuQuery === null ? mentionAt(draft, Math.min(caret, draft.length)) : null;
+  const mentionQuery = mention?.query ?? null;
+  useEffect(() => {
+    if (mentionQuery === null || !store.daemonOnline) {
+      setMentionFiles([]);
+      setMentionLoading(false);
+      return;
+    }
+    let current = true;
+    setMentionLoading(true);
+    const timer = setTimeout(() => {
+      findFiles(store.ask, sessionId, mentionQuery)
+        .then((files) => {
+          if (current) setMentionFiles(files);
+        })
+        .catch(() => {
+          if (current) setMentionFiles([]);
+        })
+        .finally(() => {
+          if (current) setMentionLoading(false);
+        });
+    }, 180);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mentionQuery, sessionId, store.daemonOnline]);
+  const pickMention = (path: string) => {
+    if (!mention) return;
+    const next = withMention(draft, mention, path);
+    setDraft(next.text);
+    draftRef.current = next.text;
+    setCaret(next.caret);
+    // The caret is put after the path once, then left to the user.
+    setPickedSelection({ start: next.caret, end: next.caret });
+    setTimeout(() => setPickedSelection(undefined), 50);
+  };
+
+  const clearComposer = () => {
+    setDraft("");
+    draftRef.current = "";
+    if (draftScope) void clearDraft(draftScope, sessionId);
+  };
+
+  // Sending, with the two commands the phone answers itself: a panel command
+  // sent bare is read off the Mac's terminal and shown here, since it never
+  // reaches the transcript, and a bare /model opens the model menu, which is
+  // the picker it would open in the terminal.
+  const sendDraft = () => {
+    if (commandsOn && images.attachments.length === 0 && !panelBusy) {
+      const action = commandSend(draft, commands);
+      if (action.kind === "panel") {
+        setPanelBusy(true);
+        runPanel(store.ask, sessionId, action.name)
+          .then((panel) => {
+            clearComposer();
+            setPanelView({ name: panel.command, output: panel.text });
+          })
+          .catch((reason: Error) => setToast(reason.message))
+          .finally(() => setPanelBusy(false));
+        return;
+      }
+      if (action.kind === "model" && modelChoices && !switchLocked) {
+        clearComposer();
+        openSwitchMenu("model");
+        return;
+      }
+    }
+    void submit();
+  };
+
   const artifactCount = session?.artifacts ?? 0;
   const artifactsToReview = session?.artifactsToReview ?? 0;
 
@@ -936,7 +1081,7 @@ export default function SessionScreen() {
                 onCopied={showCopied}
               />
             ) : item.kind === "tools" ? (
-              <ToolGroup calls={item.calls} said={item.said} cwd={session?.cwd ?? ""} />
+              <ToolGroup calls={item.calls} said={item.said} cwd={session?.cwd ?? ""} pictures={item.pictures} />
             ) : item.kind === "pending" ? (
               <PendingRow
                 pending={item.pending}
@@ -1041,6 +1186,26 @@ export default function SessionScreen() {
               {images.error ? (
                 <Text style={styles.attachError}>{images.error}</Text>
               ) : null}
+              {mention ? (
+                <FileMenu
+                  files={mentionFiles}
+                  loading={mentionLoading}
+                  typed={mention.query.length > 0}
+                  onPick={pickMention}
+                />
+              ) : null}
+              {menuQuery !== null ? (
+                <SlashMenu
+                  commands={menuMatches}
+                  loading={commandsLoading}
+                  error={commandsError || undefined}
+                  onPick={(command) => {
+                    const picked = pickedCommand(command);
+                    setDraft(picked);
+                    draftRef.current = picked;
+                  }}
+                />
+              ) : null}
               <View
                 ref={fieldRef}
                 style={[
@@ -1080,6 +1245,8 @@ export default function SessionScreen() {
                     style={styles.input}
                     value={draft}
                     onChangeText={setDraft}
+                    selection={pickedSelection}
+                    onSelectionChange={(event) => setCaret(event.nativeEvent.selection.end)}
                     onFocus={() => setInputFocused(true)}
                     onBlur={() => setInputFocused(false)}
                     editable={canSend && !awaitingSend}
@@ -1092,16 +1259,15 @@ export default function SessionScreen() {
                     }
                     placeholderTextColor={color.faint}
                     multiline
-                    onSubmitEditing={() => void submit()}
+                    onSubmitEditing={sendDraft}
                     returnKeyType="send"
                     accessibilityLabel="Instruction"
                   />
                 </Pressable>
                 <View style={styles.toolbar}>
-                  {/* Two ways in, because copying a screenshot and choosing one
-                    from the library are different habits and neither
-                    substitutes for the other. Paste only appears when there is
-                    actually an image on the clipboard. */}
+                  {/* Ways in that are different habits: a copied screenshot, the
+                    photos, or any file for the agent to read. Paste only
+                    appears when there is an image on the clipboard. */}
                   <MotionPressable
                     onPress={() =>
                       chooseImageSource(
@@ -1109,7 +1275,10 @@ export default function SessionScreen() {
                         (source) =>
                           void (source === "paste"
                             ? images.paste()
-                            : images.pick()),
+                            : source === "file"
+                              ? images.pickFile()
+                              : images.pick()),
+                        true,
                       )
                     }
                     disabled={
@@ -1119,7 +1288,7 @@ export default function SessionScreen() {
                     pressedScale={0.92}
                     hitSlop={8}
                     accessibilityRole="button"
-                    accessibilityLabel="Add an image"
+                    accessibilityLabel="Attach an image or a file"
                     accessibilityState={{ disabled: !images.canAdd }}
                   >
                     {images.busy ? (
@@ -1157,8 +1326,8 @@ export default function SessionScreen() {
                     onProblem={(message) => Alert.alert("Voice", message)}
                   />
                   <MotionPressable
-                    onPress={() => void submit()}
-                    disabled={!canSend || awaitingSend || nothingToSend}
+                    onPress={sendDraft}
+                    disabled={!canSend || awaitingSend || nothingToSend || panelBusy}
                     style={[
                       styles.send,
                       (!canSend || awaitingSend || nothingToSend) &&
@@ -1171,10 +1340,10 @@ export default function SessionScreen() {
                     accessibilityState={{
                       disabled: !canSend || awaitingSend || nothingToSend,
                       busy:
-                        submittedSend?.status === "sending" || sendingImages,
+                        submittedSend?.status === "sending" || sendingImages || panelBusy,
                     }}
                   >
-                    {submittedSend?.status === "sending" || sendingImages ? (
+                    {submittedSend?.status === "sending" || sendingImages || panelBusy ? (
                       <ActivityIndicator size="small" color={color.faint} />
                     ) : (
                       <Feather
@@ -1196,6 +1365,14 @@ export default function SessionScreen() {
       </KeyboardAvoidingView>
 
       <Toast message={toast} onHidden={hideToast} top={insets.top + headerHeight + space.sm} />
+      {panelView ? (
+        <OutputViewer
+          visible
+          onClose={() => setPanelView(null)}
+          name={panelView.name}
+          output={panelView.output}
+        />
+      ) : null}
     </View>
   );
 }
@@ -1660,10 +1837,11 @@ function SentMessage({
   const styles = useStyles(makeStyles);
   const held = useHeldMessage();
   // Images sent with it show as pictures, not as the paths the agent got.
-  const { images, text } = useMemo(() => splitSentMessage(message), [message]);
+  const { images, files, text } = useMemo(() => splitSentMessage(message), [message]);
   return (
     <Appear enabled={fresh}>
       {images.length > 0 && <SentImages sessionId={sessionId} paths={images} />}
+      {files.length > 0 && <SentFileChips paths={files} />}
       {/* The bubble itself is the target, so holding the space beside it does
           nothing. A plain Pressable rather than MotionPressable: a tap does
           nothing here, and shrinking on one would promise an action that is
@@ -1763,9 +1941,12 @@ function PendingRow({
               ? "Sent · syncing…"
               : "";
   const sendNow = waiting && onSendNow;
+  // Files sent with it read as their names, as they will once it lands.
+  const sent = splitSentMessage(pending.text);
   const body = (
     <>
-      <Text style={[styles.userText, sendNow && styles.pendingFaded]}>{pending.text}</Text>
+      {sent.files.length > 0 ? <SentFileChips paths={sent.files} /> : null}
+      {sent.text ? <Text style={[styles.userText, sendNow && styles.pendingFaded]}>{sent.text}</Text> : null}
       {sendNow ? (
         <View style={styles.pendingFooter}>
           <Text style={[styles.pendingStatus, styles.pendingFooterLabel, styles.pendingFaded]} numberOfLines={2}>

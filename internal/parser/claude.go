@@ -12,9 +12,91 @@ import (
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
 
-// Slash-command scaffolding the CLI injects as though the user had typed it.
+// Scaffolding the CLI injects as though the user had typed it. A command's
+// own records match too; commandRows reads those first.
 var claudeCommandWrapper = regexp.MustCompile(
-	`^\s*<(command-name|command-message|command-args|local-command-stdout|user-prompt-submit-hook)`)
+	`^\s*<(command-name|command-message|command-args|local-command-stdout|local-command-stderr|user-prompt-submit-hook)`)
+
+// A command the person ran is two records: what they typed, as its name and
+// arguments, and then what it printed. A line run in shell mode ("!") is the
+// same pair under other tags.
+var (
+	claudeCommandName = regexp.MustCompile(`<command-name>([^<]*)</command-name>`)
+	claudeCommandArgs = regexp.MustCompile(`(?s)<command-args>(.*?)</command-args>`)
+	claudeCommandOut  = regexp.MustCompile(`(?s)^\s*<local-command-(stdout|stderr)>(.*?)</local-command-(?:stdout|stderr)>\s*$`)
+	claudeShellIn     = regexp.MustCompile(`(?s)^\s*<bash-input>(.*?)</bash-input>\s*$`)
+	claudeShellOut    = regexp.MustCompile(`(?s)<bash-(stdout|stderr)>(.*?)</bash-(?:stdout|stderr)>`)
+)
+
+// commandRows reads a record that is one half of a command, and whether it
+// was. What was typed is the person's line, as the terminal shows it; what it
+// printed is a step titled with its first line, opening to the rest.
+func (p *ClaudeParser) commandRows(body, id string, ts int64, sidechain bool) ([]protocol.Message, bool) {
+	typed := func(text string) []protocol.Message {
+		return []protocol.Message{{ID: id, SessionID: p.sessionID, Role: protocol.RoleUser, Ts: ts, Text: text, IsSidechain: sidechain}}
+	}
+	printed := func(name, output string, failed bool) []protocol.Message {
+		lines := blockLines(output)
+		if len(lines) == 0 {
+			return nil
+		}
+		status := protocol.ToolOK
+		if failed {
+			status = protocol.ToolError
+		}
+		row := protocol.Message{
+			ID: id, SessionID: p.sessionID, Role: protocol.RoleTool, Ts: ts, IsSidechain: sidechain,
+			Tool: &protocol.Tool{Name: name, Status: status, Title: clip(lines[0], 200)},
+		}
+		// One line is all title; more opens to the whole of it.
+		if len(lines) > 1 {
+			row.Text = ClipBlock(output, PreviewLines, PreviewChars)
+		}
+		return []protocol.Message{row}
+	}
+
+	if m := claudeCommandName.FindStringSubmatch(body); m != nil {
+		name := strings.TrimSpace(m[1])
+		if name == "" {
+			return nil, true
+		}
+		if !strings.HasPrefix(name, "/") {
+			name = "/" + name
+		}
+		if args := claudeCommandArgs.FindStringSubmatch(body); args != nil && strings.TrimSpace(args[1]) != "" {
+			name += " " + strings.TrimSpace(args[1])
+		}
+		return typed(name), true
+	}
+	if m := claudeCommandOut.FindStringSubmatch(body); m != nil {
+		return printed("Command", m[2], m[1] == "stderr"), true
+	}
+	if m := claudeShellIn.FindStringSubmatch(body); m != nil {
+		if line := strings.TrimSpace(m[1]); line != "" {
+			return typed("!" + line), true
+		}
+		return nil, true
+	}
+	if outs := claudeShellOut.FindAllStringSubmatch(body, -1); outs != nil {
+		var stdout, stderr string
+		for _, out := range outs {
+			if out[1] == "stderr" {
+				stderr = out[2]
+			} else {
+				stdout = out[2]
+			}
+		}
+		// What went wrong is the part worth reading when nothing else came out.
+		if strings.TrimSpace(stdout) == "" {
+			return printed("Bash", stderr, strings.TrimSpace(stderr) != ""), true
+		}
+		if strings.TrimSpace(stderr) != "" {
+			stdout += "\n" + stderr
+		}
+		return printed("Bash", stdout, false), true
+	}
+	return nil, false
+}
 
 // claudeTaskNotice is the note Claude Code hands the agent when a background
 // task ends. It arrives as though the user had typed it, XML and all; it is
@@ -174,6 +256,11 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 	var plain string
 	if json.Unmarshal(rec.Message.Content, &plain) == nil {
 		body := strings.TrimSpace(plain)
+		if role == protocol.RoleUser {
+			if rows, ok := p.commandRows(body, uuid, ts, rec.IsSidechain); ok {
+				return rows
+			}
+		}
 		if body == "" || claudeCommandWrapper.MatchString(body) {
 			return nil
 		}
@@ -424,12 +511,18 @@ func (p *ClaudeParser) notice(rec claudeRecord, offset int64) []protocol.Message
 		return nil
 	}
 	text = strings.TrimSpace(text)
-	if text == "" || rec.IsMeta || claudeCommandWrapper.MatchString(text) {
-		return nil
-	}
 	id := rec.UUID
 	if id == "" {
 		id = fmt.Sprintf("o%d", offset)
+	}
+	// Newer Claude Codes write a command the person ran here, rather than
+	// as their own message.
+	if rec.Subtype == "local_command" && !rec.IsMeta {
+		rows, _ := p.commandRows(text, id, parseTime(rec.Timestamp), rec.IsSidechain)
+		return rows
+	}
+	if text == "" || rec.IsMeta || claudeCommandWrapper.MatchString(text) {
+		return nil
 	}
 	return []protocol.Message{{
 		ID: id, SessionID: p.sessionID, Role: protocol.RoleSystem, Ts: parseTime(rec.Timestamp),

@@ -1,0 +1,45 @@
+
+
+⏺ hi
+
+✻ Churned for 1s · done 5:48 AM
+
+❯ /output-style
+  ⎿  Output style: default
+
+     Available styles:
+     - default (current)
+     - Proactive: Claude executes immediately, minimizes interruptions, and prefers action over planning
+     - Concise: Claude responds tersely, leading with results and skipping preamble and narration
+     - Explanatory: Claude explains its implementation choices and codebase patterns
+     - Learning: Claude pauses and asks you to write small pieces of code for hands-on practice
+
+     Usage: /output-style <style>
+
+❯ utocompact
+
+⏺ "utocompact" looks like a typo, and it isn't a command I can run. If you meant to compact now, type /compact yourself
+  (you can add focus instructions after it).
+
+  If you were asking about autocompact: it's on. Your window is 1M tokens, it compacts when free space drops to about
+  33k, and you've used about 3%. You can turn it on or off in /config.
+
+✻ Cooked for 3s · done 5:56 AM
+
+❯ dvisor
+
+⏺ "dvisor" also looks like it lost its first letter. I think you meant /advisor, but there's no skill by that name in
+  this session, so I can't run it for you. If it's a built-in Claude Code command, type /advisor yourself; typing /
+  shows the list of commands available.
+
+  If you meant something else, like advice on a specific thing, tell me what and I'll help.
+
+✻ Cogitated for 3s · done 5:56 AM
+
+● How is Claude doing this session? (optional)
+  1: Bad    2: Fine   3: Good   0: Dismiss
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────── lab test ─
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent

@@ -1,0 +1,70 @@
+  ⎿  Output style: default
+
+     Available styles:
+     - default (current)
+     - Proactive: Claude executes immediately, minimizes interruptions, and
+       prefers action over planning
+     - Concise: Claude responds tersely, leading with results and skipping
+       preamble and narration
+     - Explanatory: Claude explains its implementation choices and codebase
+       patterns
+     - Learning: Claude pauses and asks you to write small pieces of code for
+       hands-on practice
+
+     Usage: /output-style <style>
+
+❯ utocompact
+
+⏺ "utocompact" looks like a typo, and it isn't a command I can run. If you meant
+  to compact now, type /compact yourself (you can add focus instructions after
+  it).
+
+  If you were asking about autocompact: it's on. Your window is 1M tokens, it
+  compacts when free space drops to about 33k, and you've used about 3%. You can
+  turn it on or off in /config.
+
+✻ Cooked for 3s · done 5:56 AM
+
+❯ dvisor
+
+⏺ "dvisor" also looks like it lost its first letter. I think you meant /advisor,
+  but there's no skill by that name in this session, so I can't run it for you.
+  If it's a built-in Claude Code command, type /advisor yourself; typing /
+  shows the list of commands available.
+
+  If you meant something else, like advice on a specific thing, tell me what and
+  I'll help.
+
+✻ Cogitated for 3s · done 5:56 AM
+
+❯ /rename vim ok
+  ⎿  Session renamed to: vim ok
+
+❯ /config
+  ⎿  Disabled auto-compact
+
+❯ /autocompact
+  ⎿  Auto-compact window for Opus 5.5 unchanged: auto
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ ◉ xhigh · /effort ▔
+   Manage MCP servers
+   10 servers
+
+     User MCPs (/Users/me/.claude.json)
+   ❯ ✔ agentman                 5 tools
+     ✔ mobbin                   8 tools
+     ✘ railway
+     ✔ screenshotter            30 tools
+
+     claude.ai
+     ✔ claude.ai Claude Docs    8 tools
+
+     Built-in MCPs (always available)
+     ✔ claude-in-chrome         22 tools
+     ◯ computer-use
+     ✔ plugin:posthog:posthog   1 tool
+     ⚠ plugin:stripe:stripe     needs authentication
+     ⚠ plugin:vercel:vercel     needs authentication
+
+   ※ Run claude --debug to see error logs
+   https://code.claude.com/docs/en/mcp for help
+   ↑/↓ to navigate · Enter to confirm · Esc to cancel

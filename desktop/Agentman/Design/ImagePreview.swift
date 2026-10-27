@@ -28,12 +28,16 @@ struct ImageThumbnail: View {
     /// In an agent's thread: the tool call that read it in a tool card, and
     /// the picture under the card, outside it.
     var carded = false
+    /// The picture alone, for a row of them under one run of reads.
+    var pictureOnly = false
     @State private var image: NSImage?
     @State private var failed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: carded ? 8 : 7) {
-            if carded {
+            if pictureOnly {
+                picture
+            } else if carded {
                 header.toolCard()
                 picture.padding(.leading, 12)
             } else {
@@ -200,12 +204,7 @@ struct AttachmentStrip: View {
     var body: some View {
         HStack(spacing: 8) {
             ForEach(attachments) { attachment in
-                Image(nsImage: attachment.image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 56, height: 56)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.line))
+                preview(attachment)
                     .overlay(alignment: .topTrailing) {
                         Button {
                             withAnimation(.easeOut(duration: 0.12)) {
@@ -226,6 +225,34 @@ struct AttachmentStrip: View {
         }
         .padding(.top, 6)
         .padding(.trailing, 6)
+    }
+
+    /// A picture as itself; any other file as its icon and name.
+    @ViewBuilder private func preview(_ attachment: Attachment) -> some View {
+        if let file = attachment.file {
+            HStack(spacing: 8) {
+                Image(nsImage: attachment.image)
+                    .resizable()
+                    .frame(width: 28, height: 28)
+                Text(file.lastPathComponent)
+                    .font(Fonts.sans(12.5, .medium))
+                    .foregroundStyle(Palette.text)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 170, alignment: .leading)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 56)
+            .background(Palette.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .help(file.path)
+        } else {
+            Image(nsImage: attachment.image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 56, height: 56)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.line))
+        }
     }
 }
 
@@ -253,16 +280,35 @@ struct DropTarget: View {
 /// from the folder where it keeps them.
 struct SentMessage: Equatable {
     var images: [String] = []
+    /// Files sent with it, named ahead of the words as @path.
+    var files: [String] = []
     var text: String
 
     init(_ message: String) {
         var rest = Substring(message)
-        while let space = rest.firstIndex(of: " ") ?? (rest.isEmpty ? nil : rest.endIndex),
-              SentMessage.isKeptImage(rest[..<space]) {
-            images.append(String(rest[..<space]))
-            rest = rest[space...].drop(while: { $0 == " " })
+        while let end = rest.firstIndex(where: \.isWhitespace) ?? (rest.isEmpty ? nil : rest.endIndex) {
+            let token = rest[..<end]
+            if SentMessage.isKeptImage(token) {
+                images.append(String(token))
+            } else if let file = SentMessage.sentFile(token) {
+                files.append(file)
+            } else {
+                break
+            }
+            rest = rest[end...].drop(while: \.isWhitespace)
         }
         text = String(rest)
+    }
+
+    /// A file sent with a message: "@" and a path, to a file of the user's
+    /// or one the daemon keeps. Only an absolute path to a file: "@docs/a.md"
+    /// in a sentence stays words.
+    static func sentFile(_ token: Substring) -> String? {
+        guard token.hasPrefix("@/"), !token.contains("..") else { return nil }
+        let path = String(token.dropFirst())
+        var directory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &directory), !directory.boolValue else { return nil }
+        return path
     }
 
     /// An image the daemon filed for a message: under its own images folder,
@@ -270,6 +316,38 @@ struct SentMessage: Equatable {
     static func isKeptImage(_ token: Substring) -> Bool {
         token.hasPrefix("/") && token.contains("/.agentman/images/") && !token.contains("..") &&
             ["png", "jpg", "jpeg", "gif", "webp"].contains(token.split(separator: ".").last?.lowercased() ?? "")
+    }
+}
+
+/// The files sent with a message, by name, over its bubble; a click opens
+/// one as Finder would.
+struct SentFileChips: View {
+    let paths: [String]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(paths, id: \.self) { path in
+                Button {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(nsImage: NSWorkspace.shared.icon(forFile: path))
+                            .resizable()
+                            .frame(width: 18, height: 18)
+                        Text((path as NSString).lastPathComponent)
+                            .font(Fonts.sans(12.5, .medium))
+                            .foregroundStyle(Palette.text)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Palette.toolCard, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .help(path)
+            }
+        }
     }
 }
 

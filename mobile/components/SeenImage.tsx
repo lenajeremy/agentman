@@ -1,6 +1,6 @@
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Image, StyleSheet } from "react-native";
+import { ActivityIndicator, Image, type StyleProp, StyleSheet, type ViewStyle } from "react-native";
 
 import { useStyles, useTheme } from "../lib/appearance";
 import type { ImageTarget } from "../lib/imagepath";
@@ -18,7 +18,16 @@ const seen = new Map<string, { uri: string; aspect: number }>();
  * The picture a tool call read, under the call's card, as on the Mac. It is
  * read from the Mac when its row first appears; a tap opens it full screen.
  */
-export function SeenImage({ sessionId, target }: { sessionId: string; target: ImageTarget }) {
+export function SeenImage({
+  sessionId,
+  target,
+  style,
+}: {
+  sessionId: string;
+  target: ImageTarget;
+  /** In a row of pictures, the row sets the margin. */
+  style?: StyleProp<ViewStyle>;
+}) {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
   const store = useStore();
@@ -78,7 +87,7 @@ export function SeenImage({ sessionId, target }: { sessionId: string; target: Im
         )
       }
       disabled={!picture}
-      style={[styles.tile, { width }]}
+      style={[styles.tile, { width }, style]}
       accessibilityRole="imagebutton"
       accessibilityLabel={`${target.path.split("/").at(-1) ?? "Image"}. Open full screen`}
     >

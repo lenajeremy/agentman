@@ -1,9 +1,10 @@
 import Feather from "@expo/vector-icons/Feather";
-import { Image, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { useStyles, useTheme } from "../lib/appearance";
+import { fileSize } from "../lib/files";
 import type { Attachment } from "../lib/use-attachments";
-import { Palette, radius, space } from "../lib/theme";
+import { font, Palette, radius, scaled, space } from "../lib/theme";
 
 /**
  * The images riding with the next message.
@@ -34,13 +35,26 @@ export function AttachmentStrip({
     >
       {attachments.map((item) => (
         <View key={item.key} style={styles.item}>
-          <Image source={{ uri: item.uri }} style={styles.thumb} resizeMode="cover" />
+          {item.kind === "file" ? (
+            // A file has a name worth reading, and no picture to show.
+            <View style={styles.file}>
+              <Feather name="file-text" size={18} color={color.muted} />
+              <View style={styles.fileWords}>
+                <Text style={styles.fileName} numberOfLines={1} ellipsizeMode="middle">
+                  {item.name ?? "File"}
+                </Text>
+                {item.size !== undefined ? <Text style={styles.fileSize}>{fileSize(item.size)}</Text> : null}
+              </View>
+            </View>
+          ) : (
+            <Image source={{ uri: item.uri }} style={styles.thumb} resizeMode="cover" />
+          )}
           <Pressable
             onPress={() => onRemove(item.key)}
             style={styles.remove}
             hitSlop={10}
             accessibilityRole="button"
-            accessibilityLabel="Remove this image"
+            accessibilityLabel={item.kind === "file" ? `Remove ${item.name ?? "this file"}` : "Remove this image"}
           >
             <Feather name="x" size={11} color={color.onInverse} />
           </Pressable>
@@ -64,6 +78,19 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.md,
       backgroundColor: c.fill,
     },
+    file: {
+      height: THUMB,
+      maxWidth: 220,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingHorizontal: space.md,
+      borderRadius: radius.md,
+      backgroundColor: c.fill,
+    },
+    fileWords: { flexShrink: 1, gap: 1 },
+    fileName: { fontFamily: font.sansMedium, fontSize: scaled(13), color: c.text },
+    fileSize: { fontFamily: font.sans, fontSize: scaled(11.5), color: c.muted },
     remove: {
       position: "absolute",
       top: 0,

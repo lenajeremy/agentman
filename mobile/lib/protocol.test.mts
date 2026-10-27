@@ -493,3 +493,25 @@ test("accepts the rows of waiting messages and whether Send now works", () => {
       JSON.stringify(bad));
   }
 });
+
+test("accepts the conversation a session took over, for /clear to follow", () => {
+  const session = { ...baseSession, previous: "claude:11111111-1111-4111-8111-111111111111" };
+  assert.equal(decodeDaemonEvent({ type: "session_update", session })?.session?.previous, session.previous);
+  for (const bad of [{ previous: "" }, { previous: 7 }]) {
+    assert.equal(decodeDaemonEvent({ type: "session_update", session: { ...baseSession, ...bad } }), null,
+      JSON.stringify(bad));
+  }
+});
+
+test("decodes a session's commands and a panel's text", () => {
+  const event = decodeDaemonEvent({ type: "commands", sessionId: "claude:s", commands: [
+    { name: "compact", argumentHint: "[instructions]", source: "builtin" },
+    { name: "usage", source: "builtin", panel: true },
+    { name: "bad name" },
+    { name: "" },
+  ] });
+  assert.deepEqual(event?.commands?.map((command) => command.name), ["compact", "usage"]);
+  assert.deepEqual(decodeDaemonEvent({ type: "commands", sessionId: "claude:s" })?.commands, []);
+  assert.equal(decodeDaemonEvent({ type: "command_panel", panel: { command: "/usage", text: "68% used" } })?.panel?.text, "68% used");
+  assert.equal(decodeDaemonEvent({ type: "command_panel", panel: { command: "", text: "x" } }), null);
+});

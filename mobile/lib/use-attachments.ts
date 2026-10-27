@@ -1,16 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as Clipboard from "expo-clipboard";
+import * as DocumentPicker from "expo-document-picker";
+import { File } from "expo-file-system";
 
 import { canAttachMore, MAX_ATTACHMENTS } from "./attachments";
+import { MAX_FILE_BYTES, sendFile } from "./files";
+import type { DaemonEvent, Request } from "./protocol";
 import { clipboardHasImage, pasteImage, pickImages, preparePasted } from "./imagesource";
 import { uploadImage } from "./upload";
 import type { Credentials } from "./client";
 
 export interface Attachment {
   key: string;
-  /** Local uri for the thumbnail. */
+  /** Local uri for the thumbnail, or of the file. */
   uri: string;
+  /** A picture's, read when it was chosen; a file's is read on sending. */
   base64: string;
+  /** A picture goes through the relay's upload locker and is shown as one;
+   *  any other file goes to the Mac in parts and is named in the message. */
+  kind?: "image" | "file";
+  /** A file's name and size, for its chip. */
+  name?: string;
+  size?: number;
 }
 
 let sequence = 0;
@@ -79,6 +90,29 @@ export function useAttachments(credentials: Credentials | null) {
     [add, attachments.length],
   );
 
+  /** Any file, from Files or another app's documents. */
+  const pickFile = useCallback(
+    () =>
+      add(async () => {
+        const remaining = MAX_ATTACHMENTS - attachments.length;
+        if (remaining <= 0) return [];
+        const result = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true });
+        if (result.canceled) return [];
+        const chosen = result.assets.slice(0, remaining);
+        const large = chosen.find((asset) => (asset.size ?? 0) > MAX_FILE_BYTES);
+        if (large) throw new Error(`${large.name} is larger than 10 MB, the most your Mac takes.`);
+        return chosen.map((asset) => ({
+          key: `a${++sequence}`,
+          uri: asset.uri,
+          base64: "",
+          kind: "file" as const,
+          name: asset.name,
+          size: asset.size,
+        }));
+      }),
+    [add, attachments.length],
+  );
+
   const paste = useCallback(
     () =>
       add(async () => {
@@ -125,14 +159,29 @@ export function useAttachments(credentials: Credentials | null) {
    * have completed by waiting a moment.
    */
   const upload = useCallback(async (): Promise<string[]> => {
-    if (attachments.length === 0) return [];
+    const images = attachments.filter((item) => item.kind !== "file");
+    if (images.length === 0) return [];
     if (!credentials) throw new Error("Not paired with a Mac.");
     const ids: string[] = [];
-    for (const item of attachments) {
+    for (const item of images) {
       ids.push(await uploadImage(credentials.relayUrl, credentials.token, item.base64));
     }
     return ids;
   }, [attachments, credentials]);
+
+  /** Send every file to the Mac, in order, and return where each now is. */
+  const sendFiles = useCallback(
+    async (ask: (request: Request, timeoutMs?: number) => Promise<DaemonEvent>, sessionId: string): Promise<string[]> => {
+      const paths: string[] = [];
+      for (const item of attachments) {
+        if (item.kind !== "file") continue;
+        const base64 = await new File(item.uri).base64();
+        paths.push(await sendFile(ask, sessionId, item.key.replace(/[^A-Za-z0-9-]/g, "") + Date.now(), item.name ?? "file", base64));
+      }
+      return paths;
+    },
+    [attachments],
+  );
 
   return {
     attachments,
@@ -141,11 +190,13 @@ export function useAttachments(credentials: Credentials | null) {
     clipboardReady,
     canAdd: canAttachMore(attachments.length),
     pick,
+    pickFile,
     paste,
     addPasted,
     remove,
     clear,
     upload,
+    sendFiles,
     setError,
   };
 }

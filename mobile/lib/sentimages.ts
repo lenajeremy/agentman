@@ -10,20 +10,34 @@
 const KEPT_IMAGE =
   /^\/\S*\/\.agentman\/images\/[^\s/]+\/[^\s/]+\.(png|jpe?g|gif|webp)$/i;
 
+/**
+ * A file sent with a message is named ahead of the words as @ and its path
+ * on the Mac: one Agentman kept, sent from the phone, or the user's own,
+ * attached at the Mac. The conversation shows its name instead. Only an
+ * absolute path to something with an extension counts: "@docs/a.md" in a
+ * sentence stays words.
+ */
+const SENT_FILE = /^@(\/\S*\/[^\s/]+\.[A-Za-z0-9]{1,12})$/;
+
 export interface SentMessageParts {
   images: string[];
+  /** Files sent with it, as their paths on the Mac. */
+  files: string[];
   text: string;
 }
 
 export function splitSentMessage(message: string): SentMessageParts {
   const images: string[] = [];
+  const files: string[] = [];
   let rest = message;
   for (;;) {
-    const space = rest.indexOf(" ");
-    const token = space === -1 ? rest : rest.slice(0, space);
-    if (!token || token.includes("..") || !KEPT_IMAGE.test(token)) break;
-    images.push(token);
-    rest = space === -1 ? "" : rest.slice(space).replace(/^ +/, "");
+    const token = /^\S+/.exec(rest)?.[0];
+    if (!token || token.includes("..")) break;
+    const file = SENT_FILE.exec(token);
+    if (file) files.push(file[1]);
+    else if (KEPT_IMAGE.test(token)) images.push(token);
+    else break;
+    rest = rest.slice(token.length).replace(/^\s+/, "");
   }
-  return { images, text: rest };
+  return { images, files, text: rest };
 }
