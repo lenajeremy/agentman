@@ -313,6 +313,14 @@ struct DiffView: View {
     var truncated = false
 
     var body: some View {
+        // Each row is at least as wide as the view, so its colour runs the
+        // whole width rather than stopping where its text does.
+        GeometryReader { geometry in
+            lines(width: geometry.size.width)
+        }
+    }
+
+    private func lines(width: CGFloat) -> some View {
         ScrollView([.vertical, .horizontal]) {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(rows) { row in
@@ -331,7 +339,7 @@ struct DiffView: View {
                     .foregroundStyle(Palette.faint)
                     .font(Fonts.mono(11.5))
                     .padding(.vertical, 1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(minWidth: width, alignment: .leading)
                     .background(background(row.kind))
                 }
                 if truncated {

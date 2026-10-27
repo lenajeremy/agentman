@@ -362,6 +362,11 @@ type Message struct {
 	Ts        int64  `json:"ts"`
 	Text      string `json:"text,omitempty"`
 	Tool      *Tool  `json:"tool,omitempty"`
+	// Images are the pictures attached to a user's message, as paths on the
+	// Mac, in order. They come from how the agent recorded the message, never
+	// from its words, so a path someone only typed is not among them. The
+	// apps show them over the words.
+	Images []string `json:"images,omitempty"`
 	// IsSidechain marks subagent output, collapsed behind a chip in the UI
 	// rather than inlined with the main conversation.
 	IsSidechain bool `json:"isSidechain,omitempty"`

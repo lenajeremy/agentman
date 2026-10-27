@@ -41,3 +41,15 @@ export function splitSentMessage(message: string): SentMessageParts {
   }
   return { images, files, text: rest };
 }
+
+/**
+ * A message as the conversation shows it: the pictures attached to it, from
+ * the agent's own record of the message, then any its words lead with. A
+ * picture pasted into the agent's terminal sits wherever the agent kept it,
+ * so only that record can say it is one.
+ */
+export function sentMessageParts(text: string, attached: readonly string[] = []): SentMessageParts {
+  const parts = splitSentMessage(text);
+  if (attached.length === 0) return parts;
+  return { ...parts, images: [...attached, ...parts.images.filter((path) => !attached.includes(path))] };
+}

@@ -174,6 +174,9 @@ export interface Message {
   ts: number;
   text?: string;
   tool?: Tool;
+  /** Pictures attached to a user's message, as paths on the Mac: from how
+   *  the agent recorded it, never from its words. */
+  images?: string[];
   isSidechain?: boolean;
 }
 

@@ -277,19 +277,22 @@ struct DropTarget: View {
 
 /// A message the user sent an agent, split into the images that went with
 /// it and its words. The daemon types each image's path ahead of the words,
-/// from the folder where it keeps them.
+/// from the folder where it keeps them. A picture pasted into the agent's
+/// own terminal is kept wherever the agent keeps it, so only the agent's
+/// record of the message (`attached`) can say it went with it.
 struct SentMessage: Equatable {
     var images: [String] = []
     /// Files sent with it, named ahead of the words as @path.
     var files: [String] = []
     var text: String
 
-    init(_ message: String) {
+    init(_ message: String, attached: [String] = []) {
+        images = attached
         var rest = Substring(message)
         while let end = rest.firstIndex(where: \.isWhitespace) ?? (rest.isEmpty ? nil : rest.endIndex) {
             let token = rest[..<end]
             if SentMessage.isKeptImage(token) {
-                images.append(String(token))
+                if !attached.contains(String(token)) { images.append(String(token)) }
             } else if let file = SentMessage.sentFile(token) {
                 files.append(file)
             } else {

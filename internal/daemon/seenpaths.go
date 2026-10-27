@@ -65,6 +65,16 @@ func (s *seenPaths) record(sessionID string, messages []protocol.Message) {
 	}
 	var found []string
 	for _, message := range messages {
+		// Pictures attached to a message reached the agent as they are,
+		// which is what the agent opening a file amounts to. They are read
+		// from the agent's record of the message, never from its words.
+		if message.Role == protocol.RoleUser {
+			for _, image := range message.Images {
+				if path := toolFilePath(image); path != "" {
+					found = append(found, path)
+				}
+			}
+		}
 		if message.Tool == nil {
 			continue
 		}

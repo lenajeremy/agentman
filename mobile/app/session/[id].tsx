@@ -35,7 +35,7 @@ import { ToolGroup } from "../../components/ToolGroup";
 import { KEEP_READING, ScrollToLatest, SCROLL_AWAY } from "../../components/ScrollToLatest";
 import { groupTools } from "../../lib/toolgroups";
 import { readImage } from "../../lib/imagepath";
-import { splitSentMessage } from "../../lib/sentimages";
+import { sentMessageParts, splitSentMessage } from "../../lib/sentimages";
 import { MotionPressable } from "../../components/MotionPressable";
 import { Pulse } from "../../components/Pulse";
 import { QuestionCard } from "../../components/QuestionCard";
@@ -1699,6 +1699,7 @@ function MessageRow({
       <SentMessage
         sessionId={message.sessionId}
         text={message.text ?? ""}
+        attached={message.images}
         fresh={fresh}
         onCopied={onCopied}
       />
@@ -1826,18 +1827,21 @@ function FoldedSummary({ text, fresh }: { text: string; fresh: boolean }) {
 function SentMessage({
   sessionId,
   text: message,
+  attached,
   fresh,
   onCopied,
 }: {
   sessionId: string;
   text: string;
+  /** Pictures the agent's record of the message says went with it. */
+  attached?: string[];
   fresh: boolean;
   onCopied(): void;
 }) {
   const styles = useStyles(makeStyles);
   const held = useHeldMessage();
   // Images sent with it show as pictures, not as the paths the agent got.
-  const { images, files, text } = useMemo(() => splitSentMessage(message), [message]);
+  const { images, files, text } = useMemo(() => sentMessageParts(message, attached), [message, attached]);
   return (
     <Appear enabled={fresh}>
       {images.length > 0 && <SentImages sessionId={sessionId} paths={images} />}

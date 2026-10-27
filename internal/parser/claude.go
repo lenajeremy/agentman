@@ -153,6 +153,51 @@ type claudeRecord struct {
 	// here: a message the user sent while Claude was working, which it took
 	// in the middle of a turn rather than as a new one.
 	Attachment *claudeAttachment `json:"attachment"`
+	// ToolUseResult is what a tool returned, as Claude Code keeps it beside
+	// what it told the model. Kept raw: it is a string when the tool failed.
+	ToolUseResult json.RawMessage `json:"toolUseResult"`
+}
+
+// claudeFileChange is the part of an Edit's or a Write's result that says
+// what changed: the hunks, or a new file's text.
+type claudeFileChange struct {
+	FilePath        string `json:"filePath"`
+	Type            string `json:"type"`
+	Content         string `json:"content"`
+	StructuredPatch []struct {
+		OldStart int      `json:"oldStart"`
+		OldLines int      `json:"oldLines"`
+		NewStart int      `json:"newStart"`
+		NewLines int      `json:"newLines"`
+		Lines    []string `json:"lines"`
+	} `json:"structuredPatch"`
+}
+
+// claudeEditDiff renders a file change Claude Code recorded as a unified
+// diff, which the apps colour, or "" when the result is not one. What Claude
+// Code tells the model ("The file … has been updated successfully.") says
+// nothing the row does not.
+func claudeEditDiff(raw json.RawMessage) string {
+	var change claudeFileChange
+	if len(raw) == 0 || json.Unmarshal(raw, &change) != nil || !filepath.IsAbs(change.FilePath) {
+		return ""
+	}
+	if len(change.StructuredPatch) == 0 {
+		if change.Type == "create" {
+			return UnifiedDiff(change.FilePath, "", change.Content)
+		}
+		return ""
+	}
+	name := strings.TrimPrefix(change.FilePath, "/")
+	var out strings.Builder
+	fmt.Fprintf(&out, "--- a/%s\n+++ b/%s", name, name)
+	for _, hunk := range change.StructuredPatch {
+		fmt.Fprintf(&out, "\n@@ -%d,%d +%d,%d @@", hunk.OldStart, hunk.OldLines, hunk.NewStart, hunk.NewLines)
+		for _, line := range hunk.Lines {
+			out.WriteString("\n" + line)
+		}
+	}
+	return out.String()
 }
 
 type claudeAttachment struct {
@@ -286,6 +331,15 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 		return nil
 	}
 
+	// The record's result belongs to its one tool result; Claude Code writes
+	// each in a record of its own.
+	results := 0
+	for _, block := range blocks {
+		if block.Type == "tool_result" {
+			results++
+		}
+	}
+
 	var out []protocol.Message
 	for i, block := range blocks {
 		switch block.Type {
@@ -357,7 +411,11 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 			if block.IsError {
 				status = protocol.ToolError
 			}
-			outcome := toolOutcome{status: status, preview: ClipBlock(flattenClaudeResult(block.Content), PreviewLines, PreviewChars)}
+			result := flattenClaudeResult(block.Content)
+			if diff := claudeEditDiff(rec.ToolUseResult); diff != "" && !block.IsError && results == 1 {
+				result = diff
+			}
+			outcome := toolOutcome{status: status, preview: ClipBlock(result, PreviewLines, PreviewChars)}
 			p.outcomes.set(block.ToolUseID, outcome)
 			if _, known := p.toolCalls.get(block.ToolUseID); !known && len(p.awaiting) < maxAwaitingCalls {
 				p.awaiting[block.ToolUseID] = struct{}{}

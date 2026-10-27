@@ -8,7 +8,8 @@ import (
 
 // Codex 0.160 records a viewed image as an ImageView item whose path is a
 // file:// URL. The row must carry the plain path, or the phone has nothing it
-// can open, and "[image]" so it reads like every other agent's image read.
+// can open, and be a "Read" with "[image]" like every other agent's image
+// read, which is what the apps show a picture under.
 func TestCodexImageViewNamesThePictureAsAPath(t *testing.T) {
 	cases := map[string]string{
 		`file:///private/tmp/remediation-landing.png`:                           "/private/tmp/remediation-landing.png",
@@ -24,7 +25,7 @@ func TestCodexImageViewNamesThePictureAsAPath(t *testing.T) {
 			t.Fatalf("%s: rows = %+v", raw, got)
 		}
 		row := got[0]
-		if row.Role != protocol.RoleTool || row.Tool.Name != "View image" || row.Tool.Status != protocol.ToolOK {
+		if row.Role != protocol.RoleTool || row.Tool.Name != "Read" || row.Tool.Status != protocol.ToolOK {
 			t.Errorf("%s: row = %+v %+v", raw, row, *row.Tool)
 		}
 		if row.Tool.Summary != want {
