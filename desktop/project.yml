@@ -13,8 +13,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "0.25.0"
-    CURRENT_PROJECT_VERSION: "27"
+    MARKETING_VERSION: "0.26.0"
+    CURRENT_PROJECT_VERSION: "28"
     MACOSX_DEPLOYMENT_TARGET: "15.0"
 packages:
   # Parses agents' markdown, GitHub tables included (Design/MarkdownView.swift).
