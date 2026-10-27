@@ -271,6 +271,12 @@ let windowKey = false
 /** Vim's Ctrl-W h and l: the file tree on the left, the editor on the right. */
 function vimWindowKey(e: KeyboardEvent): boolean {
   if (!vim.isOn() || vim.modeOf(editor) === 'insert' || (e.target as HTMLElement | null)?.closest?.('.vim')) return false
+  // Ctrl-B: to the tree, and back from there; Vim's own (a page up) gives way.
+  if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'b') {
+    windowKey = false
+    post({ type: 'command', name: 'tree' })
+    return true
+  }
   if (windowKey) {
     windowKey = false
     if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) {

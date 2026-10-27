@@ -196,6 +196,8 @@ final class EditorPanelTests: XCTestCase {
         store.selectInTree("a.ts")
         XCTAssertTrue(store.handleTreeKey(key("\r", code: 36)))
         XCTAssertEqual(store.active?.path, "a.ts")
+        // Ctrl-B goes back to the editor, as it came from there.
+        XCTAssertTrue(store.handleTreeKey(key("b", flags: .control)))
         // A key the tree doesn't know is left to it.
         XCTAssertFalse(store.handleTreeKey(key("z")))
     }
