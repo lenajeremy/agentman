@@ -83,11 +83,13 @@ struct EditorWindow: View {
                             EditorPanes(store: store)
                             if let document = store.active, document.kind != .text {
                                 NonTextView(document: document)
+                                    .modifier(InFrontPane(store: store))
                             }
                             if let document = store.active, document.isMarkdown, document.previewing {
                                 MarkdownPreview(store: store, document: document)
+                                    .modifier(InFrontPane(store: store))
                             }
-                            if store.active == nil {
+                            if store.active == nil, store.panes.count == 1 {
                                 EditorEmpty(store: store)
                             }
                         }
@@ -506,6 +508,25 @@ private struct FilterRow: View {
     }
 }
 
+/// A view of the file in front over its own split, below the split's title,
+/// when the window is split; over the whole editor otherwise.
+private struct InFrontPane: ViewModifier {
+    let store: EditorStore
+
+    func body(content: Content) -> some View {
+        if store.panes.count > 1, store.paneFrames.indices.contains(store.focusedPane) {
+            let frame = store.paneFrames[store.focusedPane]
+            content
+                .frame(width: frame.upperBound - frame.lowerBound)
+                .padding(.top, 26)
+                .offset(x: frame.lowerBound)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else {
+            content
+        }
+    }
+}
+
 // MARK: - Tabs
 
 private struct TabStrip: View {
@@ -526,6 +547,14 @@ private struct TabStrip: View {
         .frame(height: 36)
         .background(Palette.paper)
         .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
+        // Right-click past the tabs: all of them at once.
+        .contextMenu {
+            Button("Close All") { store.closeAll() }
+            Button("Close Saved") { store.closeSaved() }
+            if let active = store.active {
+                Button("Close Others") { store.closeOthers(than: active) }
+            }
+        }
     }
 }
 
@@ -589,6 +618,10 @@ private struct EditorTab: View {
             Button("Close") { store.requestClose(document) }
             Button("Close Others") { store.closeOthers(than: document) }
             Button("Close Saved") { store.closeSaved() }
+            Button("Close All") { store.closeAll() }
+            Divider()
+            Button("Open to the Side") { store.openToSide(document) }
+                .disabled(store.panes.count >= EditorStore.maxPanes)
             Divider()
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([document.url]) }
             Button("Copy Path") { Clipboard.copy(document.url.path) }
@@ -714,7 +747,8 @@ private struct EditorPanes: View {
             MonacoView(
                 store: store,
                 tabs: store.documents.filter { $0.kind == .text }.map(MonacoView.Tab.init),
-                activeID: store.activeID,
+                panes: store.panes,
+                focusedPane: store.focusedPane,
                 fontSize: fontSize,
                 vim: vim
             )
@@ -1181,6 +1215,12 @@ struct EditorCommands: Commands {
             Button("Toggle Markdown Preview") { editor?.togglePreview() }
                 .keyboardShortcut("v", modifiers: [.command, .shift])
                 .disabled(editor?.active?.isMarkdown != true)
+            Divider()
+            Button("Split Editor Right") { editor?.split() }
+                .keyboardShortcut("\\", modifiers: .command)
+                .disabled(editor == nil || (editor?.panes.count ?? 0) >= EditorStore.maxPanes)
+            Button("Close Split") { if let editor { editor.closePane(editor.focusedPane) } }
+                .disabled((editor?.panes.count ?? 0) < 2)
             Divider()
             // The language server's; Monaco has the same keys, so these work
             // from the menu and from the keyboard alike.

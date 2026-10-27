@@ -63,7 +63,23 @@ final class EditorRegistry {
 final class EditorStore {
     let root: URL
     private(set) var documents: [EditorDocument] = []
-    var activeID: UUID?
+    /// The splits, left to right, and the file each shows: one, unless the
+    /// window is split (⌘\\). See Splits below.
+    var panes: [UUID?] = [nil]
+    /// The split with the keyboard.
+    var focusedPane = 0
+    /// Where the splits are across the editor, as the page measured them,
+    /// for the views a split shows over its text (a Markdown preview).
+    var paneFrames: [ClosedRange<CGFloat>] = []
+    /// The file in the split with the keyboard: the one in front.
+    var activeID: UUID? {
+        get { panes.indices.contains(focusedPane) ? panes[focusedPane] : nil }
+        set {
+            if !panes.indices.contains(focusedPane) { focusedPane = max(panes.count - 1, 0) }
+            if panes.isEmpty { panes = [nil] }
+            panes[focusedPane] = newValue
+        }
+    }
     /// The tree's selected row.
     var selection: String?
     private(set) var expanded: Set<String> = []
@@ -265,10 +281,48 @@ final class EditorStore {
     func close(_ document: EditorDocument) {
         guard let index = documents.firstIndex(where: { $0.id == document.id }) else { return }
         documents.remove(at: index)
-        if activeID == document.id {
-            activeID = documents.isEmpty ? nil : documents[min(index, documents.count - 1)].id
+        // A split that showed it shows another file, one no split shows,
+        // or, with none left to show, closes.
+        for pane in panes.indices.reversed() where panes[pane] == document.id {
+            let near = documents.indices.sorted { abs($0 - index) < abs($1 - index) }
+                .map { documents[$0].id }.first { !panes.contains($0) }
+            if let near {
+                panes[pane] = near
+            } else if panes.count > 1 {
+                closePane(pane)
+            } else {
+                panes[pane] = documents.isEmpty ? nil : documents[min(index, documents.count - 1)].id
+            }
         }
         if closing?.id == document.id { closing = nil }
+    }
+
+    // MARK: - Splits
+
+    /// At most this many splits side by side.
+    static let maxPanes = 4
+
+    /// ⌘\\: a split to the right of the one in front, showing its file, as
+    /// VS Code's Split Editor does; the same file in two splits is the same
+    /// text, edited in either.
+    func split() {
+        guard panes.count < Self.maxPanes else { return }
+        panes.insert(activeID, at: focusedPane + 1)
+        focusedPane += 1
+    }
+
+    /// Closes a split; its files stay open in their tabs.
+    func closePane(_ index: Int) {
+        guard panes.count > 1, panes.indices.contains(index) else { return }
+        panes.remove(at: index)
+        // The one on its left takes the keyboard, as going back does.
+        if focusedPane >= index { focusedPane = max(min(focusedPane - 1, panes.count - 1), 0) }
+    }
+
+    /// The split clicked into, or moved to with Vim's Ctrl-W.
+    func focusPane(_ index: Int) {
+        guard panes.indices.contains(index), index != focusedPane else { return }
+        focusedPane = index
     }
 
     func closeOthers(than document: EditorDocument) {
@@ -278,6 +332,25 @@ final class EditorStore {
 
     func closeSaved() {
         for document in documents where !document.isDirty { close(document) }
+    }
+
+    /// Every tab: the saved ones at once, then each with unsaved edits asks.
+    func closeAll() {
+        closeSaved()
+        if let dirty = documents.first(where: \.isDirty) {
+            activeID = dirty.id
+            requestClose(dirty)
+        }
+    }
+
+    /// A file in a new split to the right of the one in front.
+    func openToSide(_ document: EditorDocument) {
+        guard panes.count < Self.maxPanes else {
+            activate(document)
+            return
+        }
+        split()
+        activeID = document.id
     }
 
     func saveActive() {
@@ -303,8 +376,9 @@ final class EditorStore {
         case "saveAll":
             saveAll()
         case "closeAll":
-            closeSaved()
-            if let dirty = documents.first(where: \.isDirty) { activeID = dirty.id; requestClose(dirty) }
+            closeAll()
+        case "split":
+            split()
         case "saveCloseAll":
             saveAll()
             closeSaved()

@@ -13,7 +13,10 @@ struct MonacoView: NSViewRepresentable {
     let store: EditorStore
     /// The text files open in tabs, as the page needs them.
     var tabs: [Tab]
-    var activeID: UUID?
+    /// The splits, left to right, the file each shows, and the one with the
+    /// keyboard.
+    var panes: [UUID?]
+    var focusedPane: Int
     var fontSize: Double
     /// Vim's keys in the editor, as the setting says.
     var vim = false
@@ -50,7 +53,7 @@ struct MonacoView: NSViewRepresentable {
     }
 
     func updateNSView(_ host: MonacoHost, context: Context) {
-        host.controller?.sync(tabs: tabs, activeID: activeID, fontSize: fontSize, vim: vim)
+        host.controller?.sync(tabs: tabs, panes: panes, focused: focusedPane, fontSize: fontSize, vim: vim)
     }
 
     static func dismantleNSView(_ host: MonacoHost, coordinator: ()) {
@@ -98,12 +101,15 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageH
     private var ready = false
     /// What the page has open, as it was last sent.
     private var opened: [UUID: MonacoView.Tab] = [:]
-    private var shown: UUID?
+    /// The splits as the page last laid them out, and the one in front.
+    private var layout: [UUID?] = []
+    private var layoutFront = 0
+    private var shown: UUID? { layout.indices.contains(layoutFront) ? layout[layoutFront] : nil }
     /// A place to go once its file is in front: a search's match.
     private var pendingReveal: (id: UUID, line: Int, column: Int, length: Int)?
     private var fontSize = 0.0
     private var vim: Bool?
-    private var wanted: (tabs: [MonacoView.Tab], activeID: UUID?, fontSize: Double, vim: Bool) = ([], nil, 13, false)
+    private var wanted: (tabs: [MonacoView.Tab], panes: [UUID?], focused: Int, fontSize: Double, vim: Bool) = ([], [nil], 0, 13, false)
     private var release: Task<Void, Never>?
     /// Finding am serve's language servers, until it answers.
     private var languages: Task<Void, Never>?
@@ -238,8 +244,8 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageH
 
     // MARK: - Keeping the page in step
 
-    func sync(tabs: [MonacoView.Tab], activeID: UUID?, fontSize: Double, vim: Bool) {
-        wanted = (tabs, activeID, fontSize, vim)
+    func sync(tabs: [MonacoView.Tab], panes: [UUID?], focused: Int, fontSize: Double, vim: Bool) {
+        wanted = (tabs, panes, focused, fontSize, vim)
         guard ready, let store else { return }
         if fontSize != self.fontSize {
             self.fontSize = fontSize
@@ -253,7 +259,7 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageH
         for id in opened.keys where !ids.contains(id) {
             call("agentman.close(id)", ["id": id.uuidString])
             opened[id] = nil
-            if shown == id { shown = nil }
+            layout = layout.map { $0 == id ? nil : $0 }
         }
         for tab in tabs {
             guard let document = store.documents.first(where: { $0.id == tab.id }) else { continue }
@@ -287,11 +293,14 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageH
             opened[tab.id] = tab
         }
         defer { revealPending() }
-        let front = tabs.contains { $0.id == activeID } ? activeID : nil
-        if front != shown {
-            shown = front
-            call("agentman.show(id)", ["id": front?.uuidString ?? NSNull()])
-            if front != nil {
+        let wantedLayout = panes.map { pane in pane.flatMap { id in tabs.contains { $0.id == id } ? id : nil } }
+        let front = min(max(focused, 0), max(wantedLayout.count - 1, 0))
+        if wantedLayout != layout || front != layoutFront {
+            let moved = (wantedLayout.indices.contains(front) ? wantedLayout[front] : nil) != shown || front != layoutFront
+            layout = wantedLayout
+            layoutFront = front
+            call("agentman.layout(ids, front)", ["ids": wantedLayout.map { $0?.uuidString ?? NSNull() as Any }, "front": front])
+            if moved, shown != nil {
                 // A tab brought to the front takes the keyboard.
                 DispatchQueue.main.async { [weak self] in
                     guard let self, let window = self.webView.window else { return }
@@ -364,11 +373,12 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageH
         case "ready":
             ready = true
             opened = [:]
-            shown = nil
+            layout = []
+            layoutFront = 0
             fontSize = 0
             vim = nil
             sendTheme()
-            sync(tabs: wanted.tabs, activeID: wanted.activeID, fontSize: wanted.fontSize, vim: wanted.vim)
+            sync(tabs: wanted.tabs, panes: wanted.panes, focused: wanted.focused, fontSize: wanted.fontSize, vim: wanted.vim)
             connectLanguages()
         case "changes":
             guard let document = document(body["id"]), let gen = body["gen"] as? Int,
@@ -384,6 +394,20 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageH
             }
             if changes.count != raw.count || !document.apply(changes, expecting: length) {
                 refetch(document, revision: gen)
+            }
+        case "pane":
+            // A split clicked into: its file is the one in front.
+            guard let index = body["index"] as? Int else { return }
+            layoutFront = index
+            store?.focusPane(index)
+        case "closePane":
+            guard let index = body["index"] as? Int else { return }
+            store?.closePane(index)
+        case "panes":
+            guard let frames = body["frames"] as? [[String: Any]] else { return }
+            store?.paneFrames = frames.compactMap { frame in
+                guard let x = (frame["x"] as? NSNumber)?.doubleValue, let width = (frame["width"] as? NSNumber)?.doubleValue else { return nil }
+                return CGFloat(x)...CGFloat(x + width)
             }
         case "cursor":
             guard let document = document(body["id"]), let line = body["line"] as? Int, let column = body["column"] as? Int
