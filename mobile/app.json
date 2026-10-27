@@ -2,7 +2,7 @@
   "expo": {
     "name": "agentman",
     "slug": "agentman",
-    "version": "0.8.0",
+    "version": "0.9.0",
     "orientation": "portrait",
     "scheme": "agentman",
     "userInterfaceStyle": "automatic",
@@ -14,7 +14,7 @@
         "ITSAppUsesNonExemptEncryption": false,
         "NSPhotoLibraryAddUsageDescription": "Allow Agentman to save an image from your Mac to your photo library."
       },
-      "buildNumber": "33",
+      "buildNumber": "34",
       "appleTeamId": "N58PT393QS"
     },
     "android": {
