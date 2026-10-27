@@ -37,7 +37,8 @@ final class ManagerStore {
 
     private let client: DaemonClient
     private let defaults: UserDefaults
-    private var images: [String: NSImage] = [:]
+    /// Internal rather than private so screenshot tests can fill it.
+    var images: [String: NSImage] = [:]
     private static let lastReadKey = "managerLastRead"
 
     init(client: DaemonClient, defaults: UserDefaults = .standard) {

@@ -80,7 +80,7 @@ import {
 
 type Row =
   | { kind: "message"; message: Message }
-  | { kind: "tools"; key: string; calls: Message[]; said: string }
+  | { kind: "tools"; key: string; calls: Message[]; said: string; pictures?: boolean }
   | { kind: "pending"; pending: PendingSend }
   // A message the agent is holding until its current step ends, sent from
   // the phone or typed at the Mac.
@@ -284,8 +284,8 @@ export default function SessionScreen() {
     const chronological: Row[] = [
       // Filtered here rather than drawn as nothing: an empty cell still takes
       // the list's gap, and a withdrawn preview would leave a hole.
-      // Calls in a row read as one line saying what was done.
-      // A call that read a picture stands alone, with the picture under it.
+      // Calls in a row read as one line saying what was done. Calls that
+      // read pictures run apart, with the pictures under them.
       ...groupTools(messages.filter((message) => showsInFeed(message) && !waitingIds.has(message.id)), (message) =>
         Boolean(message.tool && readImage(message.tool.name, message.tool.summary ?? "", session?.cwd ?? "")),
       ),
@@ -1025,7 +1025,7 @@ export default function SessionScreen() {
                 onCopied={showCopied}
               />
             ) : item.kind === "tools" ? (
-              <ToolGroup calls={item.calls} said={item.said} cwd={session?.cwd ?? ""} />
+              <ToolGroup calls={item.calls} said={item.said} cwd={session?.cwd ?? ""} pictures={item.pictures} />
             ) : item.kind === "pending" ? (
               <PendingRow
                 pending={item.pending}

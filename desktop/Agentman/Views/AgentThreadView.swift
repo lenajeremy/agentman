@@ -171,6 +171,8 @@ struct AgentThreadView: View {
                                 case .image(_, let path):
                                     ImageThumbnail(sessionId: session.id, path: path,
                                                    label: "Read " + (path as NSString).lastPathComponent, carded: true)
+                                case .images(let calls, let paths, let said):
+                                    PicturesRun(sessionId: session.id, calls: calls, paths: paths, said: said)
                                 }
                             }
                             .id(item.id)
@@ -856,18 +858,21 @@ enum ThreadItem: Identifiable {
     case tools([Message], said: String)
     /// An image the agent read, shown as a thumbnail rather than its path.
     case image(Message, path: String)
+    /// Images read one after another: one run, the pictures side by side.
+    case images([Message], paths: [String], said: String)
 
     /// The last message's ID, so scrolling to the newest message finds it.
     var id: String {
         switch self {
         case .message(let message), .image(let message, _): message.id
-        case .tools(let calls, _): calls.last?.id ?? ""
+        case .tools(let calls, _), .images(let calls, _, _): calls.last?.id ?? ""
         }
     }
 
     static func items(from messages: [Message]) -> [ThreadItem] {
         var items: [ThreadItem] = []
         var run: [Message] = []
+        var pictures: [(message: Message, path: String)] = []
         var said = ""
         func flush() {
             if !run.isEmpty {
@@ -875,21 +880,56 @@ enum ThreadItem: Identifiable {
                 run = []
             }
         }
+        func flushPictures() {
+            if pictures.count == 1, let only = pictures.first {
+                items.append(.image(only.message, path: only.path))
+            } else if pictures.count > 1 {
+                items.append(.images(pictures.map(\.message), paths: pictures.map(\.path), said: said))
+            }
+            pictures = []
+        }
         for message in messages {
             if message.role == .tool, ToolKind(message.tool?.name) == .read,
                let path = ImageThumbnail.imagePath(in: message.tool?.summary ?? message.text ?? "") {
                 flush()
-                items.append(.image(message, path: path))
+                pictures.append((message, path))
             } else if message.role == .tool {
+                flushPictures()
                 run.append(message)
             } else {
                 flush()
+                flushPictures()
                 if message.role == .assistant { said = message.text ?? "" }
                 items.append(.message(message))
             }
         }
         flush()
+        flushPictures()
         return items
+    }
+}
+
+/// Images read one after another: the run's line, and the pictures side by
+/// side under it, as Claude's own app shows them.
+struct PicturesRun: View {
+    let sessionId: String
+    let calls: [Message]
+    let paths: [String]
+    let said: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ToolRun(calls: calls, said: said)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 8) {
+                    ForEach(Array(paths.enumerated()), id: \.offset) { _, path in
+                        ImageThumbnail(sessionId: sessionId, path: path,
+                                       label: "Read " + (path as NSString).lastPathComponent, pictureOnly: true)
+                    }
+                }
+                .padding(.leading, 12)
+            }
+        }
     }
 }
 

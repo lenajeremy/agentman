@@ -18,6 +18,7 @@ final class ToolRunTests: XCTestCase {
             case .message(let m): "message \(m.id)"
             case .tools(let calls, _): "tools \(calls.map(\.id).joined())"
             case .image(let m, _): "image \(m.id)"
+            case .images(let calls, _, _): "images \(calls.map(\.id).joined())"
             }
         }
         XCTAssertEqual(shapes, ["message 1", "tools 23", "message 4", "tools 5"])
@@ -57,5 +58,26 @@ final class ToolRunTests: XCTestCase {
         XCTAssertNil(ImageThumbnail.imagePath(in: "/tmp/notes.md"))
         XCTAssertEqual(ImageThumbnail.imagePath(in: "Looked at /a/b c.jpeg"), nil, "a path with a space is not guessed at")
         XCTAssertEqual(ImageThumbnail.imagePath(in: "open /a/b/c.jpeg now"), "/a/b/c.jpeg")
+    }
+
+    // Images read one after another are one run with the pictures side by
+    // side, as Claude's own app shows them; one on its own stays as it was.
+    func testImagesReadTogetherAreOneRun() {
+        let items = ThreadItem.items(from: [
+            message("1", .assistant),
+            message("2", .tool, tool: "Read", summary: "/tmp/a.png"),
+            message("3", .tool, tool: "Read", summary: "/tmp/b.jpg"),
+            message("4", .tool, tool: "Bash", summary: "ls"),
+            message("5", .tool, tool: "Read", summary: "/tmp/c.png"),
+        ])
+        guard items.count == 4, case .images(let calls, let paths, let said) = items[1] else {
+            return XCTFail("items = \(items)")
+        }
+        XCTAssertEqual(calls.map(\.id), ["2", "3"])
+        XCTAssertEqual(paths, ["/tmp/a.png", "/tmp/b.jpg"])
+        XCTAssertEqual(said, "text")
+        XCTAssertEqual(items[1].id, "3")
+        guard case .tools(let run, _) = items[2], run.map(\.id) == ["4"] else { return XCTFail("items = \(items)") }
+        guard case .image(let single, _) = items[3], single.id == "5" else { return XCTFail("items = \(items)") }
     }
 }

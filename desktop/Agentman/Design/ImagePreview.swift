@@ -28,12 +28,16 @@ struct ImageThumbnail: View {
     /// In an agent's thread: the tool call that read it in a tool card, and
     /// the picture under the card, outside it.
     var carded = false
+    /// The picture alone, for a row of them under one run of reads.
+    var pictureOnly = false
     @State private var image: NSImage?
     @State private var failed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: carded ? 8 : 7) {
-            if carded {
+            if pictureOnly {
+                picture
+            } else if carded {
                 header.toolCard()
                 picture.padding(.leading, 12)
             } else {

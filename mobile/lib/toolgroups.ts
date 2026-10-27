@@ -4,40 +4,55 @@ import type { Message } from "./protocol";
  * Runs of tool calls, gathered so the conversation reads as what was done
  * rather than a log of every command. Two calls or more in a row make a run;
  * a single call stays a row of its own. The Mac groups them the same way.
+ *
+ * Calls that read a picture run apart from the rest, so the pictures can be
+ * shown: one is a row with its picture under it, and several in a row are
+ * one run with theirs side by side under it (`pictures`), as Claude's own
+ * app shows them.
  */
 export type FeedItem =
   | { kind: "message"; message: Message }
-  | { kind: "tools"; key: string; calls: Message[]; said: string };
+  | { kind: "tools"; key: string; calls: Message[]; said: string; pictures?: boolean };
 
 export function groupTools(
   messages: readonly Message[],
-  /** A call shown on its own, breaking any run: one that read a picture,
-   *  which is shown under it. */
-  standsAlone: (message: Message) => boolean = () => false,
+  /** A call that read a picture, which is shown under it. */
+  readsPicture: (message: Message) => boolean = () => false,
 ): FeedItem[] {
   const items: FeedItem[] = [];
   let run: Message[] = [];
+  let pictures: Message[] = [];
   let said = "";
   const flush = () => {
     if (run.length === 1) items.push({ kind: "message", message: run[0] });
     else if (run.length > 1) items.push({ kind: "tools", key: toolRunKey(run), calls: run, said });
     run = [];
   };
+  const flushPictures = () => {
+    if (pictures.length === 1) items.push({ kind: "message", message: pictures[0] });
+    else if (pictures.length > 1) {
+      items.push({ kind: "tools", key: toolRunKey(pictures), calls: pictures, said, pictures: true });
+    }
+    pictures = [];
+  };
   for (const message of messages) {
-    if (message.role === "tool" && message.tool && standsAlone(message)) {
+    if (message.role === "tool" && message.tool && readsPicture(message)) {
       flush();
-      items.push({ kind: "message", message });
+      pictures.push(message);
       continue;
     }
     if (message.role === "tool" && message.tool) {
+      flushPictures();
       run.push(message);
       continue;
     }
     flush();
+    flushPictures();
     if (message.role === "assistant" && message.text) said = message.text;
     items.push({ kind: "message", message });
   }
   flush();
+  flushPictures();
   return items;
 }
 
