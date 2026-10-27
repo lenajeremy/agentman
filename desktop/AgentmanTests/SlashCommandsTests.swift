@@ -200,3 +200,13 @@ final class SentFilesTests: XCTestCase {
         XCTAssertNil(Attachments.make(file: file), "only pictures are pictures")
     }
 }
+
+@MainActor
+final class DaemonRestartTests: XCTestCase {
+    // A daemon that isn't the login service can't be kicked; the app says
+    // what to do instead of failing quietly.
+    func testRestartingAServiceThatIsNotThereSaysWhatToDo() async {
+        let problem = await DaemonRestart.restart(service: "dev.agentman.no-such-service-\(UUID().uuidString.prefix(6))")
+        XCTAssertEqual(problem?.contains("am service restart"), true, problem ?? "nil")
+    }
+}
