@@ -28,6 +28,7 @@ struct MonacoView: NSViewRepresentable {
         let indent: String
         let readOnly: Bool
         let saves: Int
+        let base: Int
 
         @MainActor
         init(_ document: EditorDocument) {
@@ -37,6 +38,7 @@ struct MonacoView: NSViewRepresentable {
             indent = document.indent
             readOnly = document.readOnly
             saves = document.saves
+            base = document.gitBaseVersion
         }
     }
 
@@ -280,6 +282,7 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageH
                 if was.saves != tab.saves {
                     call("agentman.saved(id)", ["id": tab.id.uuidString])
                 }
+                if was.base != tab.base { sendBase(document) }
             } else {
                 let doc: [String: Any] = [
                     "id": tab.id.uuidString, "uri": document.url.absoluteString, "text": document.text,
@@ -289,6 +292,7 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageH
                 call("return agentman.open(doc)", ["doc": doc]) { [weak self] length in
                     self?.check(document, length: length, revision: tab.revision)
                 }
+                if tab.base > 0 { sendBase(document) }
             }
             opened[tab.id] = tab
         }
@@ -308,6 +312,11 @@ final class MonacoController: NSObject, WKScriptMessageHandler, WKScriptMessageH
                 }
             }
         }
+    }
+
+    /// The file as git has it, which the page marks changes against.
+    private func sendBase(_ document: EditorDocument) {
+        call("agentman.setBase(id, text)", ["id": document.id.uuidString, "text": document.gitBase ?? NSNull()])
     }
 
     private static func tabSize(_ indent: String) -> Int {
@@ -691,6 +700,10 @@ enum EditorTheme {
                 "editorIndentGuide.activeBackground1": hex(Palette.faint, 0.6),
                 "editorWhitespace.foreground": hex(Palette.faint, 0.5),
                 "editorOverviewRuler.border": clear,
+                // What changed since git last had the file, as the tree marks files.
+                "editorGutter.addedBackground": hex(Palette.ok),
+                "editorGutter.modifiedBackground": hex(Palette.gitModified),
+                "editorGutter.deletedBackground": hex(Palette.error),
                 "editorError.foreground": hex(Palette.error),
                 "editorWarning.foreground": hex(Palette.needsYou),
                 "editorInfo.foreground": hex(Palette.working),

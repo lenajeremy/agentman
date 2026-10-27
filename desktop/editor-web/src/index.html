@@ -38,6 +38,36 @@
   .vim input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; padding: 0;
                color: inherit; font: inherit; caret-color: var(--text); -webkit-user-select: text; }
   .vim .vim-notification { color: var(--faint); }
+
+  /* What changed since git last had the file (gitdiff.ts), as VS Code draws it. */
+  .monaco-editor .git-bar { margin-left: 4px; z-index: 5; cursor: pointer; }
+  .monaco-editor .git-added { border-left: 3px solid var(--git-added); }
+  .monaco-editor .git-modified { border-left: 3px solid var(--git-modified); }
+  /* Wider under the pointer, to show it can be clicked. */
+  .monaco-editor .git-bar::before { content: ''; position: absolute; height: 100%; width: 0; left: -2px;
+    transition: width 80ms linear, left 80ms linear; }
+  .monaco-editor .git-added:hover::before { width: 7px; left: -5px; background: var(--git-added); }
+  .monaco-editor .git-modified:hover::before { width: 7px; left: -5px; background: var(--git-modified); }
+  .monaco-editor .git-deleted::after { content: ''; position: absolute; bottom: -4px; width: 4px; height: 0;
+    box-sizing: border-box; border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+    border-left: 4px solid var(--git-deleted); z-index: 9; pointer-events: none; }
+  .monaco-editor .git-deleted.git-top::after { bottom: auto; top: -4px; }
+  .monaco-editor .git-deleted:hover::after { border-left-width: 6px; }
+
+  .git-peek { box-sizing: border-box; border-top: 1px solid var(--git-deleted-line, var(--widget-border));
+    border-bottom: 1px solid var(--widget-border); background: var(--widget); color: var(--text);
+    font: 12px -apple-system, system-ui, sans-serif; z-index: 10; }
+  .git-peek-header { display: flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px 0 14px; }
+  .git-peek-header span:first-child { font-weight: 600; }
+  .git-peek-place { margin-left: 8px; color: var(--faint); margin-right: auto; }
+  .git-peek button { height: 20px; min-width: 22px; padding: 0 6px; border: 0; border-radius: 5px; background: transparent;
+    color: var(--faint); font: inherit; cursor: pointer; }
+  .git-peek button:hover { background: var(--widget-border); color: var(--text); }
+  .git-peek button[data-git="revert"] { color: var(--text); border: 1px solid var(--widget-border); }
+  .git-peek-lines { overflow: auto; padding-bottom: 8px; font-family: var(--peek-font); font-size: var(--peek-size);
+    line-height: var(--peek-line); tab-size: var(--peek-tab); }
+  .git-peek-line { white-space: pre; padding: 0 14px; background: color-mix(in srgb, var(--git-deleted) 14%, transparent); }
+  .git-peek-line::before { content: '−'; display: inline-block; width: 18px; color: var(--git-deleted); }
 </style>
 </head>
 <body>

@@ -7,7 +7,7 @@
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "esbuild test/convert.test.ts test/roles.test.ts --bundle --platform=node --format=esm --outdir=.test --splitting --log-level=warning && node --test .test/convert.test.js .test/roles.test.js"
+    "test": "esbuild test/convert.test.ts test/roles.test.ts test/gitdiff.test.ts --bundle --platform=node --format=esm --outdir=.test --splitting --log-level=warning && node --test .test/convert.test.js .test/roles.test.js .test/gitdiff.test.js"
   },
   "devDependencies": {
     "@shikijs/core": "4.5.0",
