@@ -98,6 +98,11 @@ type OpenCodeSource struct {
 	snapshotProcesses func(context.Context) (*tmux.ProcessTree, error)
 	openCodePIDs      map[int]bool
 	fullScanUntil     time.Time
+	// serviceFile is where OpenCode 2 says where its background service is,
+	// and services maps the one found to its password; guarded by scanMu.
+	// See opencode_service.go.
+	serviceFile string
+	services    map[string]string
 
 	// models remembers each session's model; see modelCache. It matters more
 	// here than for the file-backed agents, because finding it costs an HTTP
@@ -179,6 +184,7 @@ func NewOpenCodeSource(baseURL string) *OpenCodeSource {
 		listPanes:          tmux.List,
 		snapshotProcesses:  tmux.SnapshotProcessTree,
 		now:                time.Now,
+		serviceFile:        openCodeServiceFile(),
 	}
 	source.findServers = source.scanServers
 	return source
@@ -338,6 +344,21 @@ func (s *OpenCodeSource) doAtLimit(
 	if s.configurationError != nil {
 		return nil, s.configurationError
 	}
+	if password, ok := s.servicePassword(base); ok {
+		return s.doService(ctx, base, password, method, path, body, out, limit)
+	}
+	return s.send(ctx, method, base+path, s.username, s.password, body, out, limit)
+}
+
+// send makes one request, with the password when there is one, and reads at
+// most limit bytes of JSON back into out.
+func (s *OpenCodeSource) send(
+	ctx context.Context, method, target, username, password string, body, out any, limit int64,
+) (http.Header, error) {
+	path := target
+	if parsed, err := url.Parse(target); err == nil {
+		path = parsed.RequestURI()
+	}
 	var reader *bytes.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -349,13 +370,13 @@ func (s *OpenCodeSource) doAtLimit(
 		reader = bytes.NewReader(nil)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, base+path, reader)
+	req, err := http.NewRequestWithContext(ctx, method, target, reader)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if s.password != "" {
-		req.SetBasicAuth(s.username, s.password)
+	if password != "" {
+		req.SetBasicAuth(username, password)
 	}
 
 	resp, err := s.client.Do(req)
@@ -429,12 +450,14 @@ func (s *OpenCodeSource) scanServers(ctx context.Context) []string {
 		}
 		return nil // the user named a URL; looking elsewhere would surprise them
 	}
+	// OpenCode 2's service, which serves every project, says where it is.
+	services := s.findServices(ctx)
 	// A password is a credential, not a discovery token. Sending it to every
 	// process that happens to bind one of the watched ports lets an unrelated
 	// local process steal it. Authenticated servers must therefore be pinned
 	// explicitly with AGENTMAN_OPENCODE_URL; only that endpoint receives auth.
 	if s.password != "" {
-		return nil
+		return services
 	}
 
 	ports, full := s.portsToProbe(ctx)
@@ -453,7 +476,7 @@ func (s *OpenCodeSource) scanServers(ctx context.Context) []string {
 	}
 	wait.Wait()
 
-	servers := make([]string, 0, len(ports))
+	servers := append(make([]string, 0, len(ports)+len(services)), services...)
 	answered := make(map[int]bool, len(ports))
 	for index, ok := range healthy {
 		if ok {

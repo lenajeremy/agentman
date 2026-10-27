@@ -441,6 +441,16 @@ func newClaudeSessionID() (string, error) {
 func startOpenCodeSession(ctx context.Context, dir, prompt string) (string, error) {
 	base := strings.TrimRight(os.Getenv("AGENTMAN_OPENCODE_URL"), "/")
 	if base == "" {
+		// OpenCode 2 runs one service for every project, and starts the
+		// session there.
+		if id, ok, err := source.StartOpenCodeServiceSession(ctx, dir, prompt); ok {
+			if err != nil {
+				return "", err
+			}
+			return "opencode:" + id, nil
+		}
+	}
+	if base == "" {
 		base = managedOpenCodeBase(ctx, dir)
 	}
 	if base == "" {
