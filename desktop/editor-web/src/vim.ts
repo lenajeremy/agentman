@@ -68,6 +68,9 @@ function defineCommands() {
     ['K', 'showHover', 'editor.action.showHover'],
     ['gd', 'goToDefinition', 'editor.action.revealDefinition'],
     ['gr', 'goToReferences', 'editor.action.goToReferences'],
+  // As vim-gitgutter has them: the next change git would show, or the last.
+  [']c', 'nextChange', 'agentman.git.next'],
+  ['[c', 'previousChange', 'agentman.git.previous'],
   ]
   for (const [keys, action, command] of language) {
     vim.defineAction(action, (cm) => cm.editor.trigger('vim', command, {}))

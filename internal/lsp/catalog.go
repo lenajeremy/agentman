@@ -43,6 +43,14 @@ type Server struct {
 	// requests, by section ("gopls", "typescript.inlayHints").
 	Options  map[string]any
 	Settings map[string]any
+	// Workspace says whether a folder holds a workspace of several
+	// projects, which one server serves whole: a Cargo workspace's crates
+	// share its rust-analyzer rather than each starting one that loads it
+	// all again.
+	Workspace func(dir string) bool
+	// PathFirst are folders to put first on the server's PATH: where the
+	// toolchain it drives is.
+	PathFirst func(t *Tools) []string
 	// find looks for a copy already on the Mac.
 	find func(t *Tools) string
 }
@@ -87,8 +95,12 @@ var catalog = []*Server{
 		ID: "rust-analyzer", Name: "rust-analyzer", Language: "Rust",
 		Languages: []string{"rust"},
 		Markers:   []string{"Cargo.toml"},
+		Workspace: cargoWorkspace,
+		PathFirst: rustupDirs,
 		Missing:   "Rust support needs rust-analyzer: rustup component add rust-analyzer",
-		Install: &Install{Version: "2026-10-12", Size: "about 40 MB", Release: map[string]Asset{
+		// A toolchain's own rust-analyzer: one built for another (newer)
+		// toolchain says it doesn't support this one, and works only in part.
+		Install: &Install{Version: "2026-10-12", Size: "about 40 MB", Rustup: "rust-analyzer", Release: map[string]Asset{
 			"darwin/arm64": {"https://github.com/rust-lang/rust-analyzer/releases/download/2026-10-12/rust-analyzer-aarch64-apple-darwin.gz", "a2e45e828b37bfc4b507c2ca456e8b61096e0bdfbae225f3d33295546d1eeacf"},
 			"darwin/amd64": {"https://github.com/rust-lang/rust-analyzer/releases/download/2026-10-12/rust-analyzer-x86_64-apple-darwin.gz", "56a5698a2e0d495c3ec28155416db310c879f21a70f6f38db549166cf157cfab"},
 			"linux/arm64":  {"https://github.com/rust-lang/rust-analyzer/releases/download/2026-10-12/rust-analyzer-aarch64-unknown-linux-gnu.gz", "d7219d5d8f5537bb227b521157aebddfe7e4a90f4a85a74f31e53722f5691025"},
@@ -166,6 +178,52 @@ func (s *Server) setting(section string) any {
 	return current
 }
 
+// cargoWorkspace says whether a folder's Cargo.toml makes it a workspace.
+func cargoWorkspace(dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "Cargo.toml"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "[workspace]" || strings.HasPrefix(line, "[workspace.") {
+			return true
+		}
+	}
+	return false
+}
+
+// rustupDirs puts rustup's cargo and rustc ahead of any other: Homebrew's
+// rust formula puts an older cargo in /opt/homebrew/bin, which comes first
+// on the PATH am serve has, and rust-analyzer drives whichever cargo it
+// finds first. rustup's folder is where cargo is rustup itself, under
+// another name: Homebrew links rustup alone into /opt/homebrew/bin.
+func rustupDirs(t *Tools) []string {
+	for _, dir := range t.Dirs() {
+		cargo, err := filepath.EvalSymlinks(filepath.Join(dir, "cargo"))
+		if err != nil {
+			continue
+		}
+		rustup, err := filepath.EvalSymlinks(filepath.Join(dir, "rustup"))
+		if err != nil {
+			continue
+		}
+		if cargo == rustup || sameFile(cargo, rustup) {
+			return []string{dir}
+		}
+	}
+	return nil
+}
+
+func sameFile(a, b string) bool {
+	x, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	y, err := os.Stat(b)
+	return err == nil && os.SameFile(x, y)
+}
+
 // ServerByID is a server by its id ("gopls"), or nil.
 func ServerByID(id string) *Server {
 	for _, server := range catalog {
@@ -184,6 +242,22 @@ func ServerFor(language string) *Server {
 		}
 	}
 	return nil
+}
+
+// RootFor is the root a server serves a file from: its project's, or the
+// workspace's that project is part of.
+func RootFor(server *Server, file, folder string) string {
+	root := Root(file, folder, server.Markers)
+	if server.Workspace == nil {
+		return root
+	}
+	home, _ := os.UserHomeDir()
+	for dir := root; dir != home && dir != "/" && dir != "."; dir = filepath.Dir(dir) {
+		if server.Workspace(dir) {
+			return dir
+		}
+	}
+	return root
 }
 
 // Root is the project root a file belongs to: the nearest folder above it

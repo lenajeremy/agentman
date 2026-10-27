@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -57,18 +58,21 @@ type Session struct {
 	root   string
 	host   *Host
 
-	mu         sync.Mutex
-	state      State
-	detail     string
-	caps       json.RawMessage
-	proc       *process
-	clients    map[*Client]bool
-	pending    map[int64]pendingRequest
-	own        map[int64]chan message
-	nextID     int64
-	docs       map[string]*openDoc
-	watchers   []watcher
-	progress   map[string]string
+	mu       sync.Mutex
+	state    State
+	detail   string
+	caps     json.RawMessage
+	proc     *process
+	clients  map[*Client]bool
+	pending  map[int64]pendingRequest
+	own      map[int64]chan message
+	nextID   int64
+	docs     map[string]*openDoc
+	watchers []watcher
+	progress map[string]*progressReport
+	// notice is what the server last warned of: a toolchain it doesn't
+	// support, a project it couldn't load. Shown while nothing is under way.
+	notice     string
 	lastUsed   time.Time
 	lastClient *Client
 	crashes    []time.Time
@@ -108,7 +112,7 @@ func newSession(host *Host, server *Server, root string) *Session {
 		pending:  map[int64]pendingRequest{},
 		own:      map[int64]chan message{},
 		docs:     map[string]*openDoc{},
-		progress: map[string]string{},
+		progress: map[string]*progressReport{},
 		lastUsed: time.Now(),
 	}
 }
@@ -245,6 +249,9 @@ func (s *Session) start() {
 			return
 		}
 	}
+	if s.server.PathFirst != nil {
+		launch.Dirs = append(s.server.PathFirst(&s.host.tools), launch.Dirs...)
+	}
 	s.setState(StateStarting, "Starting "+s.server.Name+"…")
 	proc, err := s.host.spawn(launch, s.root)
 	if err != nil {
@@ -332,7 +339,8 @@ func (s *Session) exited(proc *process) {
 	s.proc = nil
 	s.docs = map[string]*openDoc{}
 	s.watchers = nil
-	s.progress = map[string]string{}
+	s.progress = map[string]*progressReport{}
+	s.notice = ""
 	failed := s.pending
 	s.pending = map[int64]pendingRequest{}
 	for id, ch := range s.own {
@@ -550,6 +558,16 @@ func (s *Session) fromServer(proc *process, msg message) {
 	case msg.Method == "window/logMessage" || msg.Method == "telemetry/event":
 	case msg.Method == "$/progress":
 		s.showProgress(msg.Params)
+	case msg.Method == "experimental/serverStatus":
+		s.serverStatus(msg.Params)
+	case msg.Method == "window/showMessage":
+		var p struct {
+			Type    int    `json:"type"`
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(msg.Params, &p) == nil && (p.Type == 1 || p.Type == 2) {
+			s.notify(p.Message)
+		}
 	default:
 		s.mu.Lock()
 		clients := s.clientsLocked()
@@ -698,16 +716,34 @@ func (s *Session) unregister(params json.RawMessage) {
 	}
 }
 
+// progressReport is a piece of work a server reports, as it last said.
+type progressReport struct {
+	title, message string
+	percentage     *int
+}
+
+func (r *progressReport) text() string {
+	text := r.title
+	if r.message != "" {
+		text += " (" + r.message + ")"
+	}
+	if r.percentage != nil {
+		text += fmt.Sprintf(" %d%%", *r.percentage)
+	}
+	return strings.TrimSpace(text)
+}
+
 // showProgress turns the server's progress reports ("Loading packages…")
-// into the status the editor shows.
+// into the status the editor shows. A report says only what changed: its
+// title comes with the first.
 func (s *Session) showProgress(params json.RawMessage) {
 	var p struct {
 		Token json.RawMessage `json:"token"`
 		Value struct {
-			Kind       string `json:"kind"`
-			Title      string `json:"title"`
-			Message    string `json:"message"`
-			Percentage *int   `json:"percentage"`
+			Kind       string  `json:"kind"`
+			Title      string  `json:"title"`
+			Message    *string `json:"message"`
+			Percentage *int    `json:"percentage"`
 		} `json:"value"`
 	}
 	if json.Unmarshal(params, &p) != nil || p.Value.Kind == "" {
@@ -715,34 +751,89 @@ func (s *Session) showProgress(params json.RawMessage) {
 	}
 	token := string(p.Token)
 	s.mu.Lock()
+	detail := ""
 	switch p.Value.Kind {
 	case "begin", "report":
-		text := p.Value.Title
-		if text == "" {
-			text = s.progress[token]
-			if i := strings.Index(text, " ("); i >= 0 {
-				text = text[:i]
-			}
+		report := s.progress[token]
+		if report == nil || p.Value.Kind == "begin" {
+			report = &progressReport{}
+			s.progress[token] = report
 		}
-		if p.Value.Message != "" {
-			text += " (" + p.Value.Message + ")"
+		if p.Value.Title != "" {
+			report.title = p.Value.Title
+		}
+		if p.Value.Message != nil {
+			report.message = *p.Value.Message
 		}
 		if p.Value.Percentage != nil {
-			text += fmt.Sprintf(" %d%%", *p.Value.Percentage)
+			report.percentage = p.Value.Percentage
 		}
-		s.progress[token] = strings.TrimSpace(text)
+		detail = report.text()
 	case "end":
 		delete(s.progress, token)
-	}
-	detail := ""
-	for _, text := range s.progress {
-		detail = text
-		break
+		detail = s.underWayLocked()
 	}
 	state := s.state
 	s.mu.Unlock()
 	if state == StateReady {
 		s.setState(StateReady, detail)
+	}
+}
+
+// underWayLocked is what to show when a piece of work ends: another under
+// way, or what the server last warned of.
+func (s *Session) underWayLocked() string {
+	tokens := make([]string, 0, len(s.progress))
+	for token := range s.progress {
+		tokens = append(tokens, token)
+	}
+	sort.Strings(tokens)
+	for _, token := range tokens {
+		if text := s.progress[token].text(); text != "" {
+			return text
+		}
+	}
+	return s.notice
+}
+
+// notify keeps what a server warns of, shown in the editor's status bar
+// until it says all is well: its first line, as the bar has room for one.
+func (s *Session) notify(message string) {
+	message, _, _ = strings.Cut(strings.TrimSpace(message), "\n")
+	s.mu.Lock()
+	s.notice = strings.TrimSpace(message)
+	busy := len(s.progress) > 0
+	state := s.state
+	s.mu.Unlock()
+	if state == StateReady && !busy {
+		s.setState(StateReady, message)
+	}
+}
+
+// serverStatus is rust-analyzer's word on how it is: a workspace it
+// couldn't load, or all well again.
+func (s *Session) serverStatus(params json.RawMessage) {
+	var p struct {
+		Health  string `json:"health"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(params, &p) != nil {
+		return
+	}
+	if p.Health == "ok" {
+		s.mu.Lock()
+		cleared := s.notice != ""
+		s.notice = ""
+		busy := len(s.progress) > 0
+		state := s.state
+		s.mu.Unlock()
+		if cleared && !busy && state == StateReady {
+			s.setState(StateReady, "")
+		}
+		return
+	}
+	if p.Message != "" {
+		s.notify(p.Message)
 	}
 }
 
@@ -930,6 +1021,8 @@ var clientCapabilities = map[string]any{
 		"semanticTokens":         map[string]any{"refreshSupport": true},
 		"inlayHint":              map[string]any{"refreshSupport": true},
 	},
+	// rust-analyzer says how it is (a workspace it couldn't load) when asked.
+	"experimental": map[string]any{"serverStatusNotification": true},
 	"window": map[string]any{
 		"workDoneProgress": true,
 		"showMessage":      map[string]any{},

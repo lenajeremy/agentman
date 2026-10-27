@@ -8,3 +8,31 @@ declare module 'monaco-core' {
 declare module 'monaco-editor/esm/vs/languages/definitions/*' {
   export const conf: import('monaco-editor').languages.LanguageConfiguration
 }
+
+// The line diff VS Code shows changes with, from inside Monaco (gitdiff.ts).
+declare module 'monaco-editor/editor/common/diff/linesDiffComputers' {
+  interface LineRange {
+    readonly startLineNumber: number
+    readonly endLineNumberExclusive: number
+    readonly isEmpty: boolean
+  }
+  interface LinesDiff {
+    readonly changes: readonly {
+      readonly original: LineRange
+      readonly modified: LineRange
+      /** Where, within the lines, the characters changed. */
+      readonly innerChanges?: readonly {
+        readonly modifiedRange: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }
+      }[]
+    }[]
+    readonly hitTimeout: boolean
+  }
+  interface LinesDiffComputer {
+    computeDiff(
+      original: string[],
+      modified: string[],
+      options: { ignoreTrimWhitespace: boolean; maxComputationTimeMs: number; computeMoves: boolean },
+    ): LinesDiff
+  }
+  export const linesDiffComputers: { getDefault(): LinesDiffComputer; getLegacy(): LinesDiffComputer }
+}

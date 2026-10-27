@@ -41,6 +41,17 @@ final class EditorDocument: Identifiable {
     var language: LanguageStatus?
     /// The language server's errors and warnings in the file.
     var problems = Problems()
+    /// The file as git's index has it, which the editor marks changes
+    /// against beside the line numbers: nil for a file git doesn't follow,
+    /// "" for one it hasn't seen yet. See EditorStore.updateGitBases.
+    private(set) var gitBase: String?
+    /// Bumped with each new gitBase, so the editor's page gets it.
+    private(set) var gitBaseVersion = 0
+    /// What gitBase was read for: the index as it was, and the file's path
+    /// and git mark then.
+    @ObservationIgnored var gitBaseKey: String?
+    /// Reading gitBase for that key, for another caller to wait on.
+    @ObservationIgnored var gitBaseRead: Task<String?, Never>?
     /// Each file keeps its own undo history, apart from the others.
     @ObservationIgnored let undo = UndoManager()
 
@@ -59,6 +70,12 @@ final class EditorDocument: Identifiable {
         self.readOnly = readOnly
         url = root.appendingPathComponent(path)
         load()
+    }
+
+    func setGitBase(_ base: String?) {
+        guard base != gitBase || gitBaseVersion == 0 else { return }
+        gitBase = base
+        gitBaseVersion += 1
     }
 
     /// The file moved, by a rename in the tree.

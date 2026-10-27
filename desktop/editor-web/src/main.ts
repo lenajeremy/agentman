@@ -8,6 +8,7 @@
 // webkit.messageHandlers.editor.
 
 import * as monaco from 'monaco-core'
+import * as gitdiff from './gitdiff'
 import * as lsp from './lsp'
 import * as syntax from './syntax'
 import * as vim from './vim'
@@ -143,6 +144,7 @@ function makePane(): Pane {
     if (created === editor) reportCursor()
   })
   created.onContextMenu((e) => contextMenu(pane, e))
+  gitdiff.install(created)
   title.addEventListener('mousedown', (e) => {
     e.preventDefault()
     if (e.target === close) {
@@ -415,6 +417,7 @@ const agentman = {
       document.body.style.setProperty('--widget-border', colors['editorWidget.border'] ?? '')
       document.body.style.setProperty('--text', colors['editor.foreground'] ?? '')
       document.body.style.setProperty('--faint', colors['editorLineNumber.foreground'] ?? '')
+      gitdiff.setColors(colors)
     }
     if (settings.fontSize) {
       fontSize = settings.fontSize
@@ -465,6 +468,7 @@ const agentman = {
       pane.views.delete(id)
     }
     lsp.detach(open.model)
+    gitdiff.detach(open.model)
     open.model.dispose()
     docs.delete(id)
   },
@@ -499,6 +503,13 @@ const agentman = {
     }
     for (const [pane, view] of views) if (view) pane.editor.restoreViewState(view)
     return open.model.getValueLength()
+  },
+
+  /** The file as git has it, to show what changed since; null for a file
+   * git doesn't follow. */
+  setBase(id: string, text: string | null) {
+    const open = docs.get(id)
+    if (open) gitdiff.setBase(open.model, text)
   },
 
   setOptions(id: string, tabSize: number, insertSpaces: boolean) {

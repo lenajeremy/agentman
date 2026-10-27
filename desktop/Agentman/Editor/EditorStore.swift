@@ -228,6 +228,7 @@ final class EditorStore {
         let document = EditorDocument(root: root, path: path)
         documents.append(document)
         if activeID == nil { activeID = document.id }
+        Task { await updateGitBases() }
         return document
     }
 
@@ -634,6 +635,52 @@ final class EditorStore {
 
         for document in documents { document.checkDisk() }
         window?.isDocumentEdited = hasUnsaved
+        await updateGitBases()
+    }
+
+    /// The repository's index, whose change means git's version of a file
+    /// may have changed: a commit, a file staged, a branch checked out.
+    @ObservationIgnored private var indexFile: URL?
+
+    /// Reads each open file as git's index has it, for the bars beside the
+    /// line numbers, when it hasn't been read since the index, the file's
+    /// name or its git mark changed.
+    func updateGitBases() async {
+        let open = documents.filter { $0.kind == .text && !$0.readOnly }
+        guard !open.isEmpty else { return }
+        guard isRepository else {
+            for document in open {
+                document.gitBaseKey = "none"
+                document.setGitBase(nil)
+            }
+            return
+        }
+        if indexFile == nil, let path = await Git.run(["rev-parse", "--git-path", "index"], in: root)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty {
+            indexFile = URL(fileURLWithPath: path, relativeTo: root).standardizedFileURL
+        }
+        let changed = indexFile.flatMap { try? FileManager.default.attributesOfItem(atPath: $0.path)[.modificationDate] as? Date }
+        for document in open {
+            let mark = mark(for: document.path)
+            let key = "\(changed?.timeIntervalSince1970 ?? 0)|\(document.path)|\(mark?.letter ?? "")"
+            let read: Task<String?, Never>
+            if document.gitBaseKey == key {
+                // Read already, or being read: wait for that.
+                guard let reading = document.gitBaseRead else { continue }
+                read = reading
+            } else {
+                document.gitBaseKey = key
+                // A file git hasn't seen is all new; one it ignores, or one
+                // outside the repository, has nothing to compare with.
+                let root = root, path = document.path
+                read = Task { mark == .untracked ? "" : await Git.run(["show", ":./" + path], in: root) }
+                document.gitBaseRead = read
+            }
+            let base = await read.value
+            guard document.gitBaseKey == key else { continue }
+            document.setGitBase(base)
+            if document.gitBaseRead == read { document.gitBaseRead = nil }
+        }
     }
 
     /// Every file in the folder, for Go to File: git's list when it is a
