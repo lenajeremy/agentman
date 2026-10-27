@@ -8,6 +8,8 @@ import {
   MAX_MARKDOWN_CHARS,
   MAX_NESTING,
   MAX_ROWS,
+  documentPath,
+  parseDocument,
   parseMarkdown,
   plainText,
   safeHref,
@@ -613,3 +615,98 @@ test("plain text passes through untouched", () => {
   assert.deepEqual(inline("nothing to mark up"), [text("nothing to mark up")]);
   assert.deepEqual(parseMarkdown(""), []);
 });
+
+// MARK: - Documents
+
+/** A document's blocks as a line each: what kind, centred or not, and what. */
+function outline(source: string, path = "README.md"): string[] {
+  return parseDocument(source, path).map((block) => {
+    const mark = block.centered ? "^" : "";
+    switch (block.kind) {
+      case "pictures":
+        return mark + "pictures:" + block.pictures.map((p) =>
+          (p.path ? `@${p.path}` : p.url ? p.url : "?") + (p.alt ? `[${p.alt}]` : "") +
+          (p.link ? "->" + ("href" in p.link ? p.link.href : "@" + p.link.path) : "") + (p.width ? `|${p.width}` : ""),
+        ).join(",");
+      case "heading":
+        return `${mark}h${block.level}:${plainText(block.content)}`;
+      case "paragraph":
+        return `${mark}p:${plainText(block.content)}`;
+      default:
+        return mark + block.kind;
+    }
+  });
+}
+
+test("a README's banner reads as GitHub shows it", () => {
+  assert.deepEqual(outline(`<div align="center">
+
+<img src="docs/hero.png" alt="Agentman on a phone" width="720">
+
+# agentman
+
+**Monitor your agents.**
+
+[![CI](https://img.shields.io/ci.svg)](https://ci.example) [![License](https://img.shields.io/license.svg)](LICENSE)
+
+</div>
+
+After the banner, a paragraph
+that wraps.
+
+<p align="center"><a href="https://example.com"><img src="logo.png" alt="Logo"></a><br>Made with &amp; for agents</p>
+
+<!-- a note to editors -->
+<h2>Install</h2>`), [
+    "^pictures:@docs/hero.png[Agentman on a phone]|720",
+    "^h1:agentman",
+    "^p:Monitor your agents.",
+    "^pictures:https://img.shields.io/ci.svg[CI]->https://ci.example,https://img.shields.io/license.svg[License]->@LICENSE",
+    "p:After the banner, a paragraph that wraps.",
+    "^pictures:@logo.png[Logo]->https://example.com",
+    "^p:Made with & for agents",
+    "h2:Install",
+  ]);
+});
+
+test("a document's links to its folder's files open them", () => {
+  const content = (source: string, path: string) => {
+    const [block] = parseDocument(source, path);
+    return block.kind === "paragraph" ? block.content : [];
+  };
+  assert.deepEqual(content("See [setup](setup.md#install), [the license](/LICENSE) and [Go](https://go.dev).", "docs/guide.md"), [
+    text("See "),
+    { kind: "file", path: "docs/setup.md", children: [text("setup")] },
+    text(", "),
+    { kind: "file", path: "LICENSE", children: [text("the license")] },
+    text(" and "),
+    { kind: "link", href: "https://go.dev", children: [text("Go")] },
+    text("."),
+  ]);
+  // A picture among words is a link to it.
+  assert.deepEqual(content("The ![flow](img/flow.png) above.", "README.md"), [
+    text("The "),
+    { kind: "file", path: "img/flow.png", children: [text("flow")] },
+    text(" above."),
+  ]);
+});
+
+test("a link that leaves the folder, or names no file, opens nothing", () => {
+  assert.equal(documentPath("../../outside.md", "docs"), null);
+  assert.equal(documentPath("#usage", "docs"), null);
+  assert.equal(documentPath("mailto:a@b.c", ""), null);
+  assert.equal(documentPath("javascript:alert(1)", ""), null);
+  assert.equal(documentPath("//evil.example/x", ""), null);
+  assert.equal(documentPath("../a%20b.md?raw=1", "docs/x"), "docs/a b.md");
+  assert.equal(documentPath("/", "docs"), null);
+});
+
+test("a document's other HTML gives its text", () => {
+  assert.deepEqual(outline("<details>\n<summary>More</summary>\n\nHidden text\n\n</details>"), ["p:More", "p:Hidden text"]);
+});
+
+test("a reply's HTML is still shown as written, its lines still break", () => {
+  assert.deepEqual(parseMarkdown('<div align="center">\n\n# Title\n\n</div>').map((b) => b.kind), ["paragraph", "heading", "paragraph"]);
+  assert.deepEqual(inline("one\ntwo"), [text("one"), { kind: "break" }, text("two")]);
+});
+

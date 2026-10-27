@@ -1,18 +1,22 @@
 import Feather from "@expo/vector-icons/Feather";
 import * as WebBrowser from "expo-web-browser";
-import { ReactNode, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { SvgXml } from "react-native-svg";
 
 import {
   MAX_MARKDOWN_CHARS,
+  parseDocument,
   parseMarkdown,
   plainText,
   type Block,
   type Inline,
   type ListItem,
+  type Picture,
   type Table,
 } from "../lib/markdown";
 import { useStyles, useTheme } from "../lib/appearance";
+import { looksLikeSvg, MAX_SVG_CHARS, svgSize } from "../lib/pictures";
 import { CodeViewer } from "./CodeViewer";
 import { SyntaxCode } from "./SyntaxCode";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
@@ -45,26 +49,43 @@ const CODE_LINES = 12;
  * in an in-app browser, so a tapped link can never reach the OS scheme
  * handler. This file only draws the result.
  */
-export function Markdown({ children }: { children: string }) {
+export function Markdown({ children, document }: { children: string; document?: MarkdownDocument }) {
   const clipped = children.length > MAX_MARKDOWN_CHARS;
+  const path = document?.path;
   // A transcript re-renders far more often than a message changes.
-  const blocks = useMemo(
-    () => parseMarkdown(clipped ? children.slice(0, MAX_MARKDOWN_CHARS) : children),
-    [children, clipped],
-  );
+  const blocks = useMemo(() => {
+    const source = clipped ? children.slice(0, MAX_MARKDOWN_CHARS) : children;
+    return path === undefined ? parseMarkdown(source) : parseDocument(source, path);
+  }, [children, clipped, path]);
   const styles = useStyles(makeStyles);
 
   return (
-    <View style={styles.body}>
-      <Blocks blocks={blocks} styles={styles} muted={false} />
+    <DocumentContext.Provider value={document ?? null}>
+      <View style={[styles.body, document && styles.documentBody]}>
+        <Blocks blocks={blocks} styles={styles} muted={false} />
       {clipped ? (
         <Text style={styles.truncated}>
-          Message truncated on this device after {MAX_MARKDOWN_CHARS.toLocaleString()} characters.
+          {document ? "File" : "Message"} truncated on this device after {MAX_MARKDOWN_CHARS.toLocaleString()} characters.
         </Text>
       ) : null}
-    </View>
+      </View>
+    </DocumentContext.Provider>
   );
 }
+
+/**
+ * A Markdown file from the session's folder, read as a document: what opens
+ * a file its links name, and loads a picture it shows, both by their path in
+ * the folder. `path` is the file's own.
+ */
+export interface MarkdownDocument {
+  path: string;
+  open(path: string): void;
+  /** A picture in the folder, as a URI an Image can show, or null. */
+  picture(path: string): Promise<string | null>;
+}
+
+const DocumentContext = createContext<MarkdownDocument | null>(null);
 
 /**
  * Heading sizes.
@@ -75,7 +96,9 @@ export function Markdown({ children }: { children: string }) {
  * and separate themselves by weight; a reply is not a document, and six
  * typographic ranks in a chat bubble would be noise.
  */
-function headingSize(level: number, styles: Styles) {
+function headingSize(level: number, styles: Styles, document: boolean) {
+  // A document is one, and its headings rank as GitHub sets them.
+  if (document) return [styles.docHeading1, styles.docHeading2, styles.docHeading3][level - 1];
   return level === 1 ? styles.heading1 : undefined;
 }
 
@@ -100,7 +123,9 @@ function CodeBlock({
   styles: Styles;
 }) {
   const { color } = useTheme();
-  const [full, setFull] = useState(false);
+  const document = useContext(DocumentContext);
+  // A document's code is there to be read: all of it.
+  const [full, setFull] = useState(document !== null);
   const [viewer, setViewer] = useState(false);
 
   const lines = useMemo(() => source.split("\n"), [source]);
@@ -171,21 +196,30 @@ function Blocks({ blocks, styles, muted }: { blocks: Block[]; styles: Styles; mu
 }
 
 function BlockView({ block, styles, muted }: { block: Block; styles: Styles; muted: boolean }) {
+  const document = useContext(DocumentContext);
+  const setting = { ...PLAIN, open: document?.open };
+  const centered = block.centered && styles.centered;
   switch (block.kind) {
-    case "heading":
-      return (
+    case "heading": {
+      const heading = (
         <Text
           selectable
           style={[
             styles.text,
             styles.heading,
-            headingSize(block.level, styles),
+            headingSize(block.level, styles, document !== null),
             muted && styles.muted,
+            centered,
           ]}
         >
-          {renderInline(block.content, styles, { ...PLAIN, bold: true })}
+          {renderInline(block.content, styles, { ...setting, bold: true })}
         </Text>
       );
+      // A document's top two ranks are ruled off below, as GitHub does.
+      return document && block.level <= 2 ? <View style={styles.docHeadingRule}>{heading}</View> : heading;
+    }
+    case "pictures":
+      return <Pictures pictures={block.pictures} centered={block.centered === true} styles={styles} />;
     case "rule":
       return <View style={styles.rule} />;
     case "code":
@@ -202,12 +236,150 @@ function BlockView({ block, styles, muted }: { block: Block; styles: Styles; mut
       return <ListView items={block.items} styles={styles} muted={muted} />;
     case "paragraph":
       return (
-        <Text selectable style={[styles.text, muted && styles.muted]}>
-          {renderInline(block.content, styles)}
+        <Text selectable style={[styles.text, muted && styles.muted, centered]}>
+          {renderInline(block.content, styles, setting)}
         </Text>
       );
   }
 }
+
+/**
+ * A document's pictures on a line of their own: a banner, or a row of
+ * badges. Shown as big as the document asks and the screen allows, from the
+ * folder or from the web, as GitHub shows them; one that can't be shown is
+ * named instead. A link around a picture is where a tap goes.
+ */
+function Pictures({ pictures, centered, styles }: { pictures: Picture[]; centered: boolean; styles: Styles }) {
+  return (
+    <View style={[styles.pictures, centered && styles.picturesCentered]}>
+      {pictures.map((picture, index) => (
+        <PictureView key={index} picture={picture} alone={pictures.length === 1} centered={centered} styles={styles} />
+      ))}
+    </View>
+  );
+}
+
+/** A picture ready to draw: an image by its URI, or an SVG's text. */
+type Shown = { uri: string; xml?: undefined; width: number; height: number } | { xml: string; uri?: undefined; width: number; height: number };
+
+/** How long a picture from the web may take before its name stands in. */
+const WEB_PICTURE_TIMEOUT = 10_000;
+
+function imageSize(uri: string): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    Image.getSize(uri, (width, height) => resolve(width > 0 && height > 0 ? { width, height } : null), () => resolve(null));
+  });
+}
+
+/** An SVG from the web, as text, if that is what the address serves. */
+async function webSvg(url: string): Promise<Shown | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), WEB_PICTURE_TIMEOUT);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) return null;
+    const xml = await response.text();
+    if (xml.length > MAX_SVG_CHARS) return null;
+    const size = svgSize(xml);
+    return size ? { xml, ...size } : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function loadPicture(picture: Picture, document: MarkdownDocument): Promise<Shown | null> {
+  if (picture.path) {
+    const uri = await document.picture(picture.path);
+    const size = uri ? await imageSize(uri) : null;
+    return uri && size ? { uri, ...size } : null;
+  }
+  if (!picture.url) return null;
+  // A badge is SVG, which an Image can't draw; anything else is tried as an
+  // image first, and as SVG when it isn't one.
+  if (looksLikeSvg(picture.url)) return webSvg(picture.url);
+  const size = await imageSize(picture.url);
+  return size ? { uri: picture.url, ...size } : webSvg(picture.url);
+}
+
+function PictureView({
+  picture,
+  alone,
+  centered,
+  styles,
+}: {
+  picture: Picture;
+  alone: boolean;
+  centered: boolean;
+  styles: Styles;
+}) {
+  const document = useContext(DocumentContext);
+  const { color } = useTheme();
+  // undefined while it loads, null when there is nothing to show.
+  const [shown, setShown] = useState<Shown | null | undefined>(document ? undefined : null);
+  useEffect(() => {
+    if (!document) return;
+    let live = true;
+    void loadPicture(picture, document)
+      .then((found) => live && setShown(found))
+      .catch(() => live && setShown(null));
+    return () => {
+      live = false;
+    };
+  }, [picture, document]);
+
+  const target = picture.link ?? (picture.path ? { path: picture.path } : picture.url ? { href: picture.url } : undefined);
+  const open = target
+    ? () => ("href" in target ? openLink(target.href) : document?.open(target.path))
+    : undefined;
+  if (shown === undefined) return null;
+  if (shown) {
+    const aspectRatio = shown.width / Math.max(shown.height, 1);
+    // Alone, a banner: as wide as asked, at most the column. In a row, a
+    // badge's height.
+    const size = alone
+      ? { width: "100%" as const, maxWidth: picture.width ?? shown.width, aspectRatio, alignSelf: centered ? ("center" as const) : ("flex-start" as const) }
+      : picture.width
+        ? { width: picture.width, aspectRatio }
+        : { height: BADGE_HEIGHT, aspectRatio };
+    return (
+      <Pressable
+        onPress={open}
+        disabled={!open}
+        style={alone ? styles.pictureAlone : undefined}
+        accessibilityRole={open ? "link" : "image"}
+        accessibilityLabel={picture.alt || undefined}
+      >
+        {shown.xml !== undefined ? (
+          <View style={size}>
+            <SvgXml xml={shown.xml} width="100%" height="100%" onError={() => setShown(null)} />
+          </View>
+        ) : (
+          <Image source={{ uri: shown.uri }} style={[styles.picture, size]} resizeMode="contain" onError={() => setShown(null)} />
+        )}
+      </Pressable>
+    );
+  }
+  const name = picture.alt || (picture.path ?? picture.url ?? "").split("/").pop() || "Picture";
+  return (
+    <Pressable
+      onPress={open}
+      disabled={!open}
+      style={styles.pictureChip}
+      accessibilityRole={open ? "link" : "text"}
+      accessibilityLabel={`Picture: ${name}`}
+    >
+      <Feather name="image" size={11} color={color.faint} />
+      <Text style={styles.pictureChipText} numberOfLines={1}>
+        {name}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** A row of badges, at the height GitHub draws them. */
+const BADGE_HEIGHT = 20;
 
 function ListView({
   items,
@@ -284,6 +456,7 @@ function TableGrid({
   widths: number[];
   styles: Styles;
 }) {
+  const setting = { ...PLAIN, open: useContext(DocumentContext)?.open };
   return (
     <ScrollView
       horizontal
@@ -303,7 +476,7 @@ function TableGrid({
                 { width: widths[index], textAlign: table.align[index] },
               ]}
             >
-              {renderInline(heading, styles)}
+              {renderInline(heading, styles, setting)}
             </Text>
           ))}
         </View>
@@ -321,7 +494,7 @@ function TableGrid({
                   { width: widths[index], textAlign: table.align[index] },
                 ]}
               >
-                {renderInline(cell, styles)}
+                {renderInline(cell, styles, setting)}
               </Text>
             ))}
           </View>
@@ -348,6 +521,8 @@ interface Setting {
   bold: boolean;
   italic: boolean;
   inLink: boolean;
+  /** Opens a file a document links to. */
+  open?: (path: string) => void;
 }
 
 const PLAIN: Setting = { bold: false, italic: false, inLink: false };
@@ -426,6 +601,23 @@ function renderInline(content: Inline[], styles: Styles, setting = PLAIN): React
             {renderInline(node.children, styles, { ...setting, inLink: true })}
           </Text>
         );
+      case "file": {
+        // A file in the folder, opened in the app. Without a document to open
+        // it in, the words alone.
+        const open = setting.open;
+        if (!open) return <Text key={key}>{renderInline(node.children, styles, setting)}</Text>;
+        return (
+          <Text
+            key={key}
+            style={styles.link}
+            onPress={() => open(node.path)}
+            accessibilityRole="link"
+            accessibilityHint={`Opens ${node.path}`}
+          >
+            {renderInline(node.children, styles, { ...setting, inLink: true })}
+          </Text>
+        );
+      }
     }
   });
 }
@@ -444,6 +636,34 @@ function makeStyles(c: Palette) {
     },
     heading: { fontFamily: font.sansBold, marginTop: space.xs, letterSpacing: -0.2 },
     heading1: { fontSize: size.title },
+    // A document's: more air between blocks, and headings that rank.
+    documentBody: { gap: space.md },
+    docHeading1: { fontSize: size.heading, lineHeight: scaled(30), marginTop: space.md },
+    docHeading2: { fontSize: scaled(19), lineHeight: scaled(26), marginTop: space.md },
+    docHeading3: { fontSize: size.title, lineHeight: scaled(24), marginTop: space.sm },
+    docHeadingRule: {
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.line,
+      paddingBottom: space.sm,
+    },
+    centered: { textAlign: "center" },
+    pictures: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.sm },
+    picturesCentered: { justifyContent: "center" },
+    pictureAlone: { width: "100%" },
+    picture: { borderRadius: radius.sm },
+    pictureChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.xs,
+      maxWidth: "100%",
+      paddingHorizontal: space.sm,
+      paddingVertical: space.xxs + 1,
+      borderRadius: radius.pill,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.line,
+      backgroundColor: c.surface,
+    },
+    pictureChipText: { fontFamily: font.sansMedium, fontSize: size.label, color: c.muted, flexShrink: 1 },
     // Thematic breaks separate sections, so they need the air a paragraph gap
     // does not give on its own.
     rule: {

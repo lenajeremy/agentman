@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ContentColumn } from "../../components/ContentColumn";
 import { FileBadge } from "../../components/FileBadge";
 import { ImageViewer } from "../../components/ImageViewer";
+import { Markdown, type MarkdownDocument } from "../../components/Markdown";
 import { MotionPressable } from "../../components/MotionPressable";
 import { PhotoScrim } from "../../components/PhotoScrim";
 import { SyntaxCode } from "../../components/SyntaxCode";
@@ -53,15 +54,20 @@ export default function FileScreen() {
       : "";
   const sessionId = decodeURIComponent(String(id));
   const filePath = typeof pathParam === "string" ? pathParam : "";
+  // A Markdown file opens as it reads, as on GitHub, with its text a tab away.
+  const markdown = !commit && /\.(md|markdown|mdown|mkd|mdx)$/i.test(filePath);
   const store = useStore();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const window = useWindowDimensions();
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
-  const [tab, setTab] = useState<"code" | "diff">(() =>
-    tabParam === "diff" || commit ? "diff" : "code",
+  const [tab, setTab] = useState<"preview" | "code" | "diff">(() =>
+    tabParam === "diff" || commit ? "diff" : markdown && !seenOnly ? "preview" : "code",
   );
+  // The preview and the file are the same text: moving between them reads
+  // nothing again.
+  const reading = tab === "diff" ? "diff" : "file";
   const [result, setResult] = useState<WorkspaceResult | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -97,7 +103,7 @@ export default function FileScreen() {
           ? "read_seen_file"
           : commit
             ? "commit_diff"
-            : tab === "code"
+            : reading === "file"
               ? "read_file"
               : "file_diff",
         filePath,
@@ -108,8 +114,13 @@ export default function FileScreen() {
         if (current) setResult(value);
       })
       .catch((reason) => {
-        if (current)
-          setError(reason instanceof Error ? reason.message : String(reason));
+        const message = reason instanceof Error ? reason.message : String(reason);
+        // A document's link to a folder: show the folder.
+        if (current && /only regular files/.test(message) && !seenOnly && !commit) {
+          router.replace(`/workspace/${encodeURIComponent(sessionId)}?path=${encodeURIComponent(filePath)}`);
+          return;
+        }
+        if (current) setError(message);
       })
       .finally(() => {
         if (current) setLoading(false);
@@ -118,9 +129,23 @@ export default function FileScreen() {
       current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, filePath, tab, refresh, seenOnly, commit]);
+  }, [sessionId, filePath, reading, refresh, seenOnly, commit]);
 
   const name = filePath.split("/").at(-1) || "File";
+  // What a document's links and pictures reach: the files beside it.
+  const document = useMemo<MarkdownDocument>(
+    () => ({
+      path: filePath,
+      open: (path) =>
+        router.push(`/file/${encodeURIComponent(sessionId)}?path=${encodeURIComponent(path)}`),
+      picture: async (path) => {
+        const read = await store.workspace(sessionId, "read_file", path);
+        return read.image && read.mime ? `data:${read.mime};base64,${read.image}` : null;
+      },
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sessionId, filePath],
+  );
   const rows = useMemo(
     () => (result?.diff ? parseDiff(result.diff) : []),
     [result],
@@ -329,7 +354,12 @@ export default function FileScreen() {
           tabs would offer a choice with one broken half. A commit's file is
           only ever its diff. */}
       <ContentColumn style={styles.tabs}>
-        {(seenOnly || commit ? [] : (["code", "diff"] as const)).map((value) => (
+        {(seenOnly || commit
+          ? []
+          : markdown
+            ? (["preview", "code", "diff"] as const)
+            : (["code", "diff"] as const)
+        ).map((value) => (
           <MotionPressable
             key={value}
             onPress={() => setTab(value)}
@@ -340,7 +370,7 @@ export default function FileScreen() {
             <Text
               style={[styles.tabText, tab === value && styles.tabTextActive]}
             >
-              {value === "code" ? "File" : "Diff"}
+              {value === "preview" ? "Preview" : value === "code" ? "File" : "Diff"}
             </Text>
           </MotionPressable>
         ))}
@@ -356,7 +386,7 @@ export default function FileScreen() {
           </View>
         ) : null}
         <View style={styles.spacer} />
-        {!result?.image ? (
+        {!result?.image && tab !== "preview" ? (
           <MotionPressable
             onPress={() => setWrap((value) => !value)}
             style={[styles.wrapToggle, wrap && styles.wrapToggleOn]}
@@ -393,7 +423,11 @@ export default function FileScreen() {
         <ScrollView
           contentContainerStyle={{ paddingBottom: insets.bottom + space.xl }}
         >
-          {tab === "code" ? (
+          {tab === "preview" ? (
+            <ContentColumn style={styles.document}>
+              <Markdown document={document}>{result.text ?? ""}</Markdown>
+            </ContentColumn>
+          ) : tab === "code" ? (
             <SyntaxCode
               source={result.text ?? ""}
               filename={name}
@@ -664,6 +698,8 @@ const makeStyles = (c: Palette) =>
     tabTextActive: { color: c.onInverse },
     center: { marginTop: space.xl },
     message: { paddingHorizontal: space.lg, paddingTop: space.md },
+    // A document reads on the page, with the margins a page has.
+    document: { paddingHorizontal: space.xl, paddingTop: space.lg },
     error: { color: c.errorText, fontFamily: font.sans, fontSize: size.body },
     empty: { color: c.muted, fontFamily: font.sans, fontSize: size.body },
     note: { color: c.muted, fontFamily: font.sans, fontSize: size.caption },

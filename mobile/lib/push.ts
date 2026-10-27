@@ -15,6 +15,7 @@ import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 
 import { looksLikePushToken } from "./push-token";
+import { simulatorRoute } from "./simulator";
 
 export { looksLikePushToken };
 
@@ -72,6 +73,10 @@ export async function obtainPushToken(): Promise<string | null> {
   lastFailure = "";
   if (Platform.OS === "web") {
     lastFailure = "Not supported on web.";
+    return null;
+  }
+  if (simulatorRoute()) {
+    lastFailure = "Not asked in a simulator started on a route.";
     return null;
   }
 

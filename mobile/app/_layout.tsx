@@ -3,8 +3,7 @@ import * as Notifications from "expo-notifications";
 import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
-import Constants from "expo-constants";
-import { Platform, Settings, View } from "react-native";
+import { Platform, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -12,6 +11,7 @@ import { ThemeProvider, useTheme } from "../lib/appearance";
 import { StoreProvider } from "../lib/store";
 import { ManagerProvider } from "../lib/manager";
 import { UpdatesProvider } from "../lib/updates-context";
+import { simulatorRoute } from "../lib/simulator";
 import { palettes } from "../lib/theme";
 
 // Notifications are the product, not a nicety: an alert that arrives silently
@@ -67,9 +67,8 @@ function NotificationNavigation() {
 function SimulatorLaunch() {
   const router = useRouter();
   useEffect(() => {
-    if (Platform.OS !== "ios" || Constants.isDevice) return;
-    const route = Settings.get("AGENTMAN_OPEN");
-    if (typeof route !== "string" || !route.startsWith("/")) return;
+    const route = simulatorRoute();
+    if (!route) return;
     const timer = setTimeout(() => router.push(route as never), 600);
     return () => clearTimeout(timer);
   }, [router]);
@@ -89,8 +88,9 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    // Web has no notification permission model here; asking throws.
-    if (Platform.OS !== "web") {
+    // Web has no notification permission model here; asking throws. Nor
+    // does a simulator started on a route ask (lib/simulator).
+    if (Platform.OS !== "web" && !simulatorRoute()) {
       void (async () => {
         // Android 13 does not present the notification permission prompt until
         // the app has created a channel. Questions and completion alerts share
