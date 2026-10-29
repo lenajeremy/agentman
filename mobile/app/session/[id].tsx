@@ -62,7 +62,7 @@ import { draftNamespace } from "../../lib/draft-policy";
 import { clearDraft, loadDraft, saveDraft } from "../../lib/drafts";
 import { useAttachments } from "../../lib/use-attachments";
 import { Message, type SlashCommand } from "../../lib/protocol";
-import { commandSend, listCommands, matchCommands, pickedCommand, runPanel, slashQuery, takesCommands } from "../../lib/commands";
+import { commandSend, listCommands, matchCommands, menuQuery as commandMenu, pickedCommand, runPanel, takesCommands } from "../../lib/commands";
 import { findFiles, mentionAt, withMention } from "../../lib/mentions";
 import { withFiles } from "../../lib/files";
 import { sessionNeedsAnswer } from "../../lib/question-alerts";
@@ -119,6 +119,9 @@ export default function SessionScreen() {
   const [commands, setCommands] = useState<SlashCommand[]>([]);
   const [commandsLoading, setCommandsLoading] = useState(false);
   const [commandsError, setCommandsError] = useState("");
+  // The command just picked from the "/" menu, while the box holds only it:
+  // the menu closes, and the send button is a tap away.
+  const [pickedFromMenu, setPickedFromMenu] = useState<string | null>(null);
   const commandsAsked = useRef<{ sessionId: string; at: number } | null>(null);
   const [panelBusy, setPanelBusy] = useState(false);
   const [panelView, setPanelView] = useState<{ name: string; output: string } | null>(null);
@@ -711,7 +714,7 @@ export default function SessionScreen() {
   // The "/" menu. The list is asked for when "/" is first typed in a session,
   // and again after a minute, as skills come and go on the Mac.
   const commandsOn = takesCommands(session) && canSend;
-  const menuQuery = commandsOn && !awaitingSend ? slashQuery(draft, session?.kind === "codex") : null;
+  const menuQuery = commandsOn && !awaitingSend ? commandMenu(draft, pickedFromMenu, session?.kind === "codex") : null;
   const slashMenuShown = menuQuery !== null;
   useEffect(() => {
     if (!slashMenuShown || !store.daemonOnline || commandsLoading) return;
@@ -739,6 +742,7 @@ export default function SessionScreen() {
     setCommandsError("");
     commandsAsked.current = null;
     setPanelView(null);
+    setPickedFromMenu(null);
   }, [sessionId]);
   const menuMatches = useMemo(
     () => (menuQuery === null ? [] : matchCommands(commands, menuQuery.query, undefined, menuQuery.prefix)),
@@ -1204,6 +1208,7 @@ export default function SessionScreen() {
                     const picked = pickedCommand(command);
                     setDraft(picked);
                     draftRef.current = picked;
+                    setPickedFromMenu(picked);
                   }}
                 />
               ) : null}
@@ -1245,7 +1250,11 @@ export default function SessionScreen() {
                   <TextInput
                     style={styles.input}
                     value={draft}
-                    onChangeText={setDraft}
+                    onChangeText={(text) => {
+                      setDraft(text);
+                      // Typing again forgets the pick: the menu follows the box.
+                      if (text !== pickedFromMenu) setPickedFromMenu(null);
+                    }}
                     selection={pickedSelection}
                     onSelectionChange={(event) => setCaret(event.nativeEvent.selection.end)}
                     onFocus={() => setInputFocused(true)}
