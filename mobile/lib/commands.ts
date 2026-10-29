@@ -35,6 +35,15 @@ export function slashQuery(draft: string, skills = false): CommandQuery | null {
   return match ? { prefix: match[1] as "/" | "$", query: match[2] } : null;
 }
 
+/**
+ * The menu for what the box holds, after a pick: none while the box holds
+ * just the command picked. "/compact" would otherwise keep its own menu open
+ * over the send button, offering itself.
+ */
+export function menuQuery(draft: string, picked: string | null, skills = false): CommandQuery | null {
+  return draft === picked ? null : slashQuery(draft, skills);
+}
+
 /** A command as the menu and the box write it: "/compact", "$imagegen". */
 export function commandLabel(command: SlashCommand): string {
   return `${command.prefix ?? "/"}${command.name}`;

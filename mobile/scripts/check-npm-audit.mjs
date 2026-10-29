@@ -19,6 +19,8 @@ const allowedAdvisories = new Set([
   // @expo/cli, which validates the project's own config at build time and
   // still requires zod ^3.25.76 in its latest release; 3.x has no fix.
   "https://github.com/advisories/GHSA-mrhx-c7xc-m3w5",
+  // deepmerge <=4.3.1: prototype poisoning in mergeObject(). Reached only through @expo/config, which merges the app config at build time. 4.3.1 is the latest release.
+  "https://github.com/advisories/GHSA-gcqx-w48m-w2h4",
 ]);
 
 const audit = spawnSync("npm", ["audit", "--omit=dev", "--json"], {

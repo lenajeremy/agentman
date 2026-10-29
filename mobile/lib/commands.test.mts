@@ -9,6 +9,7 @@ import {
   matchCommands,
   pickedCommand,
   runPanel,
+  menuQuery,
   slashQuery,
   takesCommands,
 } from "./commands.ts";
@@ -123,3 +124,14 @@ test("the menu and a panel come from the Mac", async () => {
     ["command_panel", "claude:s", "/usage"],
   ]);
 });
+
+test("a picked command closes its menu, until the box changes", () => {
+  // Picked: the box holds it, and nothing is offered over the send button.
+  assert.equal(menuQuery("/compact", "/compact"), null);
+  // Edited back to part of a name: the menu again.
+  assert.deepEqual(menuQuery("/compac", "/compact"), { prefix: "/", query: "compac" });
+  // Typed by hand, never picked: the menu, as before.
+  assert.deepEqual(menuQuery("/compact", null), { prefix: "/", query: "compact" });
+  assert.deepEqual(menuQuery("$imagegen", null, true), { prefix: "$", query: "imagegen" });
+});
+
