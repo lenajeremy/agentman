@@ -101,8 +101,8 @@ func (r *Registry) Discover(ctx context.Context) ([]protocol.Session, error) {
 	defer sweepDone()
 
 	var (
-		mu       sync.Mutex
-		all      []protocol.Session
+		all      = make([][]protocol.Session, len(sources))
+		nextSlot int
 		failures []string
 		wg       sync.WaitGroup
 	)
@@ -124,23 +124,29 @@ func (r *Registry) Discover(ctx context.Context) ([]protocol.Session, error) {
 				r.last[s.Kind()] = append([]protocol.Session(nil), sessions...)
 				r.mu.Unlock()
 			}
-			mu.Lock()
-			defer mu.Unlock()
+			// Reserve a result slot up front so adapters never contend on one
+			// large append lock while copying their session lists.
+			slot := nextSlot
+			nextSlot++
 			if err != nil {
 				failures = append(failures, fmt.Sprintf("%s: %v", s.Kind(), err))
 			}
-			all = append(all, sessions...)
+			all[slot] = sessions
 		}(s)
 	}
 	wg.Wait()
 
-	SortSessions(all)
+	combined := make([]protocol.Session, 0)
+	for _, sessions := range all {
+		combined = append(combined, sessions...)
+	}
+	SortSessions(combined)
 
 	if len(failures) > 0 {
 		sort.Strings(failures)
-		return all, fmt.Errorf("source: %s", strings.Join(failures, "; "))
+		return combined, fmt.Errorf("source: %s", strings.Join(failures, "; "))
 	}
-	return all, nil
+	return combined, nil
 }
 
 // SortSessions puts the list in the order the app's agent screen relies on:
