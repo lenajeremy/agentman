@@ -146,7 +146,7 @@ final class AgentmanTerminalView: LocalProcessTerminalView {
         let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         font = NSFont(descriptor: NSFontDescriptor(fontAttributes: [.family: "Google Sans Code"]), size: 12.5 * Fonts.scale)
             ?? .monospacedSystemFont(ofSize: 12.5, weight: .regular)
-        nativeBackgroundColor = NSColor(rgb: dark ? 0x17181B : 0xFFFFFF)
+        nativeBackgroundColor = NSColor(rgb: dark ? 0x000000 : 0xFFFFFF)
         nativeForegroundColor = NSColor(rgb: dark ? 0xE6E7EA : 0x1E2025)
         caretColor = NSColor(rgb: dark ? 0x6B80FF : 0x2E4BFF)
         selectedTextBackgroundColor = NSColor(rgb: dark ? 0x6B80FF : 0x2E4BFF).withAlphaComponent(0.3)

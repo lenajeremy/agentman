@@ -3,7 +3,20 @@ import SwiftUI
 /// Agentman first, pinned above every agent, which are grouped by the
 /// folder they work in.
 struct Sidebar: View {
+    @Environment(\.windowHeaderLeading) private var headerLeading
     @Environment(AgentsStore.self) private var store
+    @AppStorage(Sidebar.hiddenKey) private var hidden = false
+
+    // Its width as T3 Code's: dragged, kept, double-click for the default;
+    // never so wide that the conversation is squeezed.
+    static let widthKey = "sidebarWidth"
+    static let hiddenKey = "sidebarHidden"
+    static let defaultWidth: Double = 256
+    static let minWidth: Double = 208
+
+    static func clamp(_ width: Double, window: CGFloat) -> CGFloat {
+        CGFloat(min(max(width, minWidth), max(minWidth, Double(window) - 640)))
+    }
 
     var body: some View {
         @Bindable var store = store
@@ -15,31 +28,29 @@ struct Sidebar: View {
                     .listRowSeparator(.hidden)
             }
 
-            ForEach(store.groups) { group in
-                Section {
-                    ForEach(group.sessions) { session in
-                        AgentButton(session: session)
-                            .contextMenu {
-                                Button("Rename…") { store.renaming = session.id }
-                                if let own = session.originalName {
-                                    Button("Use the agent's own name, “\(own)”") {
-                                        Task { await store.rename(session.id, to: "") }
-                                    }
-                                }
-                                // Agentman speaks for the agents while it is on;
-                                // this one can speak for itself as well.
-                                if store.manager.on {
-                                    Divider()
-                                    Toggle("Notify Me About This Agent", isOn: Binding(
-                                        get: { session.alerts == true },
-                                        set: { on in Task { await store.setAlerts(session.id, on) } }
-                                    ))
-                                }
+            ForEach(store.groups.flatMap(\.sessions)) { session in
+                AgentButton(session: session)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 2, leading: 10, bottom: 2, trailing: 10))
+                    .contextMenu {
+                        Button("Rename…") { store.renaming = session.id }
+                        Button("Show Project") { store.folderFilter = session.cwd }
+                        if let own = session.originalName {
+                            Button("Use the agent's own name, “\(own)”") {
+                                Task { await store.rename(session.id, to: "") }
                             }
+                        }
+                        Divider()
+                        // Agentman speaks for the agents while it is on;
+                        // this one can speak for itself as well.
+                        if store.manager.on {
+                            Toggle("Notify Me About This Agent", isOn: Binding(
+                                get: { session.alerts == true },
+                                set: { on in Task { await store.setAlerts(session.id, on) } }
+                            ))
+                        }
+                        FolderMuteButton(folder: session.cwd)
                     }
-                } header: {
-                    FolderHeader(name: group.name, folder: group.id)
-                }
             }
 
             // In a folder, the sessions that ran there and ended: read them,
@@ -58,23 +69,50 @@ struct Sidebar: View {
                 }
             }
         }
-        .listStyle(.sidebar)
+        .listStyle(.plain)
+        .environment(\.defaultMinListRowHeight, 18)
         .onMoveCommand(perform: move)
-        .searchable(text: $store.search, placement: .sidebar, prompt: "Search agents")
-        // Agentman is where the user spends most of their time, so it stays
-        // in view above the agents, set apart from them.
-        .safeAreaInset(edge: .top, spacing: 0) { AgentmanCard() }
-        .safeAreaInset(edge: .bottom) { ConnectionFooter() }
-        .toolbar {
-            ToolbarItemGroup {
-                FilterMenu()
-                Button {
-                    store.selection = .newAgent
-                } label: {
-                    Label("New Agent", systemImage: "square.and.pencil")
+        .scrollContentBackground(.hidden)
+        .background(Palette.sidebar)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    AgentmanBadge(size: 20)
+                    Text("Agentman").font(Fonts.sans(14, .semibold))
+                    Spacer()
+                    ChromeButton(symbol: "sidebar.left", help: "Hide the sidebar (⌃⌘S)") { hidden = true }
                 }
-                .help("Start a new agent (⌘N)")
+                .padding(.leading, headerLeading)
+                .padding(.trailing, 14)
+                .frame(height: 32)
+                HStack(spacing: 9) {
+                    Image(systemName: "magnifyingglass")
+                    TextField("Search agents", text: $store.search)
+                        .textFieldStyle(.plain)
+                        .accessibilityLabel("Search agents")
+                    FilterMenu()
+                        .labelStyle(.iconOnly)
+                        .fixedSize()
+                    Button { store.selection = .newAgent } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .help("New agent (⌘N)")
+                    .accessibilityLabel("New agent")
+                }
+                .font(TextStyle.caption)
+                .foregroundStyle(Palette.muted)
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
+            .background(Palette.sidebar)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                AgentmanCard()
+                ConnectionFooter()
+            }
+            .background(Palette.sidebar)
         }
         .task { await store.loadFolders() }
         .overlay {
@@ -134,13 +172,13 @@ private struct RowHighlight: View {
     var hovering: Bool
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
+        RoundedRectangle(cornerRadius: 7, style: .continuous)
             .fill(Color.primary.opacity(selected ? 0.10 : hovering ? 0.05 : 0))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .strokeBorder(Color.primary.opacity(selected ? 0.10 : 0))
             )
-            .padding(.horizontal, SidebarMetrics.margin)
+            .padding(.horizontal, 10)
             .padding(.vertical, 1)
     }
 }
@@ -164,7 +202,6 @@ private enum SidebarMetrics {
 /// new since the user last looked.
 private struct AgentmanCard: View {
     @Environment(AgentsStore.self) private var store
-    @Environment(\.colorScheme) private var scheme
     @State private var hovering = false
 
     var body: some View {
@@ -172,10 +209,10 @@ private struct AgentmanCard: View {
             store.selection = .manager
         } label: {
             HStack(spacing: 11) {
-                AgentmanBadge(size: 32)
+                AgentmanBadge(size: 19)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Agentman")
-                        .font(Fonts.sans(14.5, .medium))
+                        .font(Fonts.sans(13, .medium))
                         .foregroundStyle(Palette.text)
                     Text(summary)
                         .font(Fonts.sans(12))
@@ -195,11 +232,11 @@ private struct AgentmanCard: View {
                 }
             }
             .padding(.horizontal, 11)
-            .padding(.vertical, 10)
+            .padding(.vertical, 8)
             .background(background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(selected ? 0.10 : 0.06))
+                    .strokeBorder(Palette.line.opacity(selected ? 1 : 0))
             )
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
@@ -207,7 +244,7 @@ private struct AgentmanCard: View {
         .onHover { hovering = $0 }
         .padding(.horizontal, SidebarMetrics.margin)
         .padding(.top, 6)
-        .padding(.bottom, 8)
+        .padding(.bottom, 4)
         .help("Agentman (⌥⌘0)")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
@@ -219,9 +256,8 @@ private struct AgentmanCard: View {
     /// Grey like a selected row when it is open; otherwise a card of its
     /// own, white on a light sidebar, so it never passes for the selection.
     private var background: Color {
-        if selected { return Color.primary.opacity(0.10) }
-        if scheme == .light { return hovering ? Color.white.opacity(0.75) : .white }
-        return Color.primary.opacity(hovering ? 0.07 : 0.045)
+        if selected { return Palette.fill }
+        return hovering ? Palette.fill.opacity(0.6) : .clear
     }
 
     /// What arrived since the user last looked at the conversation.
@@ -244,26 +280,16 @@ private struct AgentmanCard: View {
     }
 }
 
-/// Agentman's mark: the app icon's prompt, on the brand's ink tile.
+/// The desktop app's own icon, including its macOS optical inset.
 struct AgentmanBadge: View {
     var size: CGFloat
 
     var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-            .fill(Palette.inverse)
+        Image(nsImage: NSImage(named: NSImage.applicationIconName) ?? NSImage())
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
             .frame(width: size, height: size)
-            .overlay {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: size * 0.42, weight: .bold))
-                    .foregroundStyle(Palette.onInverse)
-                    .offset(x: -size * 0.04)
-            }
-            .overlay(alignment: .topTrailing) {
-                Circle()
-                    .fill(Palette.needsYou)
-                    .frame(width: size * 0.26, height: size * 0.26)
-                    .offset(x: -size * 0.12, y: size * 0.12)
-            }
             .accessibilityHidden(true)
     }
 }
@@ -273,51 +299,52 @@ struct AgentRow: View {
     let session: Session
 
     var body: some View {
-        HStack(spacing: SidebarMetrics.gap) {
-            AgentMark(kind: session.kind, size: 16)
-                .frame(width: SidebarMetrics.mark)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if store.renaming == session.id {
-                        RenameField(session: session)
-                    } else {
-                        Text(session.name)
-                            .font(Fonts.sans(13.5, session.state == .waitingInput ? .medium : .regular))
-                            .foregroundStyle(session.state == .ended ? Palette.muted : Palette.text)
-                            .lineLimit(1)
-                            .help(session.originalName.map { "Renamed from “\($0)”" } ?? session.name)
-                    }
-                    Spacer(minLength: 4)
-                    if let when = session.lastActivity {
-                        Text(Relative.short(when))
-                            .font(Fonts.sans(11))
-                            .monospacedDigit()
-                            .foregroundStyle(Palette.faint)
-                    }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 7) {
+                Text(String((session.cwd as NSString).lastPathComponent.prefix(2)).uppercased())
+                    .font(Fonts.sans(8, .bold))
+                    .foregroundStyle(Palette.workingText)
+                    .frame(width: 16, height: 16)
+                    .background(Palette.workingWash, in: RoundedRectangle(cornerRadius: 4))
+                Text((session.cwd as NSString).lastPathComponent)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if let when = session.lastActivity {
+                    Text(Relative.short(when)).monospacedDigit()
                 }
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(Palette.dot(session.state))
-                        .frame(width: 6, height: 6)
-                    Text(detail)
-                        .font(Fonts.sans(11.5))
-                        .foregroundStyle(detailColor)
-                        .lineLimit(1)
-                }
+            }
+            .font(TextStyle.caption)
+            .foregroundStyle(Palette.muted)
+            if store.renaming == session.id {
+                RenameField(session: session)
+            } else {
+                Text(session.name)
+                    .font(Fonts.sans(13.5, session.state == .waitingInput ? .medium : .regular))
+                    .foregroundStyle(session.state == .ended ? Palette.muted : Palette.text)
+                    .lineLimit(1)
+                    .help(session.originalName.map { "Renamed from “\($0)”" } ?? session.name)
+            }
+            HStack(spacing: 5) {
+                Circle().fill(Palette.dot(session.state)).frame(width: 5, height: 5)
+                Text(detail).lineLimit(1)
+                    .foregroundStyle(detailColor)
+                Spacer(minLength: 4)
                 if let servers = session.servers, !servers.isEmpty {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 3) {
                         Image(systemName: "globe")
                             .font(.system(size: 9))
                             .foregroundStyle(Palette.ok)
-                        Text(servers.map { ":\($0.port)" }.joined(separator: "  "))
+                        Text(servers.map { ":\($0.port)" }.joined(separator: " "))
                             .font(Fonts.mono(10.5))
-                            .foregroundStyle(Palette.muted)
+                            .lineLimit(1)
                     }
                     .help("Dev servers it is running")
                 }
+                AgentMark(kind: session.kind, size: 14)
             }
+            .font(TextStyle.caption)
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 8)
         .padding(.horizontal, SidebarMetrics.inset)
         .accessibilityElement(children: .combine)
     }
@@ -362,12 +389,13 @@ private struct ConnectionFooter: View {
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)
             Spacer()
+            AppearanceMenu()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         // Its own ground, so the list ends above it instead of running under.
-        .background(SidebarMaterial())
-        .overlay(alignment: .top) { Divider() }
+        .background(Palette.sidebar)
+        .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 1) }
         .help(store.socketPath)
     }
 
@@ -527,32 +555,48 @@ private struct ActiveFilters: View {
 
 /// A folder's name over its agents; its menu mutes the folder's
 /// notifications.
-private struct FolderHeader: View {
-    let name: String
+/// Mutes or unmutes the notifications from an agent's folder, as read
+/// when the menu opens.
+private struct FolderMuteButton: View {
     let folder: String
-    @State private var muted = false
 
     var body: some View {
-        HStack(spacing: 4) {
-            Text(name)
-                .font(TextStyle.label)
-                .foregroundStyle(Palette.faint)
-                .textCase(nil)
-            if muted {
-                Image(systemName: "bell.slash")
-                    .font(.system(size: 8.5))
-                    .foregroundStyle(Palette.faint)
-                    .help("Notifications from this folder are muted")
-            }
+        let muted = NotificationPolicy.isMuted(folder)
+        Button(muted ? "Unmute Notifications From This Folder" : "Mute Notifications From This Folder") {
+            NotificationPolicy.setMuted(folder, !muted)
         }
-        .padding(.leading, SidebarMetrics.header)
-        .help(folder)
-        .contextMenu {
-            Button(muted ? "Unmute Notifications" : "Mute Notifications") {
-                NotificationPolicy.setMuted(folder, !muted)
-                muted.toggle()
+    }
+}
+
+/// The sidebar's edge: drag to resize, double-click for the default width.
+struct SidebarResizeHandle: View {
+    @Binding var width: Double
+    let window: CGFloat
+    @State private var start: Double?
+
+    var body: some View {
+        Rectangle()
+            .fill(Palette.line)
+            .frame(width: 1)
+            .frame(maxHeight: .infinity)
+            .overlay {
+                Color.clear
+                    .frame(width: 8)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { drag in
+                                let from = start ?? width
+                                start = from
+                                width = Double(Sidebar.clamp(from + drag.translation.width, window: window))
+                            }
+                            .onEnded { _ in start = nil }
+                    )
+                    .onTapGesture(count: 2) { width = Sidebar.defaultWidth }
             }
-        }
-        .onAppear { muted = NotificationPolicy.isMuted(folder) }
+            .accessibilityHidden(true)
     }
 }

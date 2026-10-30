@@ -19,8 +19,9 @@ struct AgentThreadView: View {
     @State private var atEnd = true
     /// Bumped when the user sends, which always brings them to the end.
     @State private var followRequest = 0
-    @State private var showFiles = false
+    @State private var showFiles = true
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.detailHeaderLeading) private var headerLeading
     @State private var confirmEnd = false
     @State private var resuming = false
     @State private var filesTab: WorkspaceTab = .changes
@@ -43,18 +44,23 @@ struct AgentThreadView: View {
         if inPanel {
             thread
         } else {
-            thread
-            .confirmationDialog("End this session?", isPresented: $confirmEnd) {
-                Button("End session") {
-                    Task { store.actionError[session.id] = await store.end(session.id) }
+            VStack(spacing: 0) {
+                threadHeader
+                HStack(alignment: .top, spacing: 0) {
+                    thread
+                    if showFiles {
+                        // Its own width: a summary beside the thread, wider
+                        // for a list, a diff or a file.
+                        WorkspacePanel(session: session, tab: $filesTab)
+                            .padding(.top, 12)
+                            .padding(.trailing, 12)
+                            .padding(.bottom, 20)
+                    }
                 }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Its terminal closes. The conversation is kept, and you can resume it from its folder.")
             }
-            .inspector(isPresented: $showFiles) {
-                WorkspacePanel(session: session, tab: $filesTab)
-                    .inspectorColumnWidth(min: 320, ideal: 480, max: 1100)
+            .confirmationDialog("End this session?", isPresented: $confirmEnd) {
+                Button("End session") { Task { store.actionError[session.id] = await store.end(session.id) } }
+                Button("Cancel", role: .cancel) {}
             }
             .onAppear {
                 // For screenshots and tests: the files panel open on a tab.
@@ -63,76 +69,55 @@ struct AgentThreadView: View {
                     showFiles = true
                 }
             }
-            // The window keeps the name; the toolbar shows ThreadTitle instead,
-            // which renames the session when clicked.
             .navigationTitle(session.name)
-            .toolbar(removing: .title)
-            .toolbar {
-                if #available(macOS 26, *) {
-                    // Plain text on the title bar, as the system title was.
-                    ToolbarItem(placement: .navigation) {
-                        ThreadTitle(session: session, subtitle: subtitle)
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-                    ToolbarSpacer(.flexible)
-                } else {
-                    ToolbarItem(placement: .navigation) {
-                        ThreadTitle(session: session, subtitle: subtitle)
-                    }
-                }
-                ToolbarItemGroup(placement: .primaryAction) {
-                    if let servers = session.servers, !servers.isEmpty {
-                        ServersMenu(session: session, servers: servers)
-                    }
-                    if FileManager.default.fileExists(atPath: session.cwd) {
-                        Button {
-                            EditorOpener.open(folder: session.cwd, with: openWindow)
-                        } label: {
-                            Label("Open in Editor", systemImage: "chevron.left.forwardslash.chevron.right")
-                        }
-                        .help("Open \((session.cwd as NSString).lastPathComponent) in the editor")
-                        // An agent Agentman runs in tmux shows its own live
-                        // terminal; any other, a shell in its folder.
-                        Button {
-                            if session.inject == "tmux" {
-                                showAgentTerminal()
-                            } else {
-                                EditorOpener.openTerminal(folder: session.cwd, with: openWindow)
-                            }
-                        } label: {
-                            Label(session.inject == "tmux" ? "Agent's Terminal" : "Open Terminal", systemImage: "terminal")
-                        }
-                        .help(session.inject == "tmux"
-                              ? "\(session.name)'s own terminal, live. Closing it leaves the agent running."
-                              : "A terminal in \((session.cwd as NSString).lastPathComponent)")
-                    }
-                    Button {
-                        showFiles.toggle()
-                    } label: {
-                        Label("Files", systemImage: "sidebar.right")
-                    }
-                    .help(showFiles ? "Hide files" : "Files, changes and history")
-                    .keyboardShortcut("e", modifiers: [.command, .shift])
-                    if Self.endable(session) {
-                        Menu {
-                            Button("End session…") { confirmEnd = true }
-                        } label: {
-                            Label("More", systemImage: "ellipsis")
-                        }
-                        .menuIndicator(.hidden)
-                        .help("More")
-                    }
-                    if session.state == .busy, session.canReceive {
-                        Button {
-                            store.interrupt(session.id)
-                        } label: {
-                            Label("Stop", systemImage: "stop.fill")
-                        }
-                        .help("Stop the agent's current turn")
-                    }
+        }
+    }
+
+    /// The conversation's width at most, as T3 Code's: long lines read
+    /// worse than short ones.
+    static let column: CGFloat = 740
+
+    private var threadHeader: some View {
+        let folderExists = FileManager.default.fileExists(atPath: session.cwd)
+        return HStack(spacing: 8) {
+            ThreadTitle(session: session)
+            Spacer(minLength: 12)
+            // The dev servers it started: open one, share a link, stop it.
+            if let servers = session.servers, !servers.isEmpty {
+                ServersMenu(session: session, servers: servers)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+            }
+            // An agent Agentman runs in tmux shows its own live terminal;
+            // any other, a shell in its folder.
+            if folderExists {
+                ChromeButton(symbol: "terminal",
+                             help: session.inject == "tmux" ? "\(session.name)'s own terminal, live" : "Open a terminal in its folder") {
+                    if session.inject == "tmux" { showAgentTerminal() }
+                    else { EditorOpener.openTerminal(folder: session.cwd, with: openWindow) }
                 }
             }
+            ChromeButton(symbol: "sidebar.right", help: showFiles ? "Hide the workspace (⇧⌘E)" : "Files, changes and history (⇧⌘E)", active: showFiles) { showFiles.toggle() }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+            if folderExists || Self.endable(session) {
+                Menu {
+                    if folderExists {
+                        Button("Open in Editor") { EditorOpener.open(folder: session.cwd, with: openWindow) }
+                    }
+                    if Self.endable(session) { Button("End Session…") { confirmEnd = true } }
+                } label: { Image(systemName: "ellipsis").frame(width: 24, height: 26) }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("More")
+            }
         }
+        .padding(.horizontal, 18)
+        .padding(.leading, headerLeading)
+        .frame(height: 32)
+        .background(Palette.paper)
     }
 
     /// The conversation and the box under it, in the window or a panel.
@@ -145,21 +130,21 @@ struct AgentThreadView: View {
                 }
                 .padding(.horizontal, gutter)
                 .padding(.top, 10)
-                .frame(maxWidth: 820)
+                .frame(maxWidth: Self.column)
                 .frame(maxWidth: .infinity)
             }
-            if changed > 0 {
+            if changed > 0, inPanel || !showFiles {
                 ChangedBar(count: changed) {
                     filesTab = .changes
                     showFiles = true
                 }
                 .padding(.horizontal, gutter)
                 .padding(.top, 10)
-                .frame(maxWidth: 820)
+                .frame(maxWidth: Self.column)
                 .frame(maxWidth: .infinity)
             }
             ScrollViewReader { proxy in
-                ScrollView {
+                ScrollView(showsIndicators: false) {
                     let items = ThreadItem.items(from: store.messages[session.id] ?? [])
                     LazyVStack(alignment: .leading, spacing: 24) {
                         if store.hasMore[session.id] == true {
@@ -202,9 +187,10 @@ struct AgentThreadView: View {
                     .padding(.horizontal, gutter)
                     .padding(.top, 24)
                     .padding(.bottom, 6)
-                    .frame(maxWidth: 820)
+                    .frame(maxWidth: Self.column)
                     .frame(maxWidth: .infinity)
                 }
+                .scrollIndicators(.never)
                 .modifier(FollowsEnd(atEnd: $atEnd, earlier: store.hasMore[session.id] == true ? { await store.loadOlder(session.id) } : nil))
                 .modifier(TopFade())
                 .overlay {
@@ -241,13 +227,7 @@ struct AgentThreadView: View {
                 }
             }
 
-            VStack(spacing: 10) {
-                if let error = store.actionError[session.id] {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .font(TextStyle.caption)
-                        .foregroundStyle(Palette.errorText)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+            VStack(spacing: 0) {
                 if Self.resumable(session) {
                     ResumeBar(session: session, resuming: resuming) {
                         resuming = true
@@ -270,10 +250,13 @@ struct AgentThreadView: View {
                 )
                 }
             }
+            .modifier(ComposerFeedback(message: store.actionError[session.id]) {
+                store.actionError[session.id] = nil
+            })
             .padding(.horizontal, gutter)
             .padding(.top, 4)
-            .padding(.bottom, 22)
-            .frame(maxWidth: 820)
+            .padding(.bottom, 20)
+            .frame(maxWidth: Self.column)
             .frame(maxWidth: .infinity)
         }
         // An unsent draft waits for the user's return, as on the phone.
@@ -340,13 +323,6 @@ struct AgentThreadView: View {
     /// A session running in a terminal agentman can close and reopen.
     static func endable(_ session: Session) -> Bool {
         session.inject == "tmux" && resumableKinds.contains(session.kind)
-    }
-
-    /// Where it works and on which model, under its name in the title bar.
-    private var subtitle: String {
-        let folder = session.cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~")
-        guard let model = session.model, !model.isEmpty else { return folder }
-        return folder + " · " + model
     }
 
     private var isEmpty: Bool {
@@ -434,14 +410,18 @@ struct AgentThreadView: View {
 private struct ThreadTitle: View {
     @Environment(AgentsStore.self) private var store
     let session: Session
-    let subtitle: String
     @State private var editing = false
     @State private var name = ""
     @State private var hovering = false
     @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        HStack(spacing: 10) {
+            Text((session.cwd as NSString).lastPathComponent)
+                .font(TextStyle.caption)
+                .foregroundStyle(Palette.muted)
+                .lineLimit(1)
+            Text("/").foregroundStyle(Palette.faint)
             if editing {
                 TextField("Name", text: $name)
                     .textFieldStyle(.plain)
@@ -463,7 +443,7 @@ private struct ThreadTitle: View {
                 HStack(spacing: 6) {
                     Button(action: begin) {
                         Text(session.name)
-                            .font(TextStyle.title)
+                            .font(TextStyle.bodyMedium)
                             .foregroundStyle(Palette.text)
                             .lineLimit(1)
                             .padding(.horizontal, 5)
@@ -475,18 +455,10 @@ private struct ThreadTitle: View {
                     .onHover { hovering = $0 }
                     .help(session.originalName.map { "Click to rename · renamed from “\($0)”" } ?? "Click to rename")
                     .accessibilityLabel("Rename \(session.name)")
-                    StateChip(state: session.state)
-                        .fixedSize()
                 }
             }
-            Text(subtitle)
-                .font(TextStyle.caption)
-                .foregroundStyle(Palette.muted)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .padding(.horizontal, 5)
         }
-        .frame(maxWidth: 440, alignment: .leading)
+        .frame(maxWidth: 640, alignment: .leading)
         .contextMenu {
             Button("Rename…", action: begin)
             if let own = session.originalName {
@@ -538,8 +510,8 @@ private struct ResumeBar: View {
             .disabled(resuming)
         }
         .padding(14)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.line))
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.line))
     }
 }
 
@@ -703,7 +675,7 @@ private struct StepDetail: View {
                     .background(Palette.toolWell, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             } else if let output = output?.trimmingCharacters(in: .whitespacesAndNewlines), !output.isEmpty, output != "[image]" {
-                ScrollView {
+                ScrollView(showsIndicators: false) {
                     Text(output)
                         .font(Fonts.mono(11))
                         .foregroundStyle(failed ? Palette.errorText : Palette.muted)
@@ -1165,11 +1137,8 @@ extension View {
     /// A tool call's soft card: a step greyer than the page, so the work
     /// stands apart from the conversation.
     func toolCard() -> some View {
-        padding(.horizontal, 12)
-            .padding(.vertical, 9)
+        padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Palette.toolCard, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.toolCardEdge))
     }
 }
 
@@ -1270,7 +1239,7 @@ private struct QueuedBubble: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .strokeBorder(Palette.line, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                     )
                 HStack(spacing: 8) {
@@ -1329,7 +1298,7 @@ struct Composer: View {
     private var models: [String] { session?.modelScope == nil ? [] : (session?.models ?? []) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
             if let attachments, !attachments.wrappedValue.isEmpty {
                 AttachmentStrip(attachments: attachments)
                     .padding(.leading, 4)
@@ -1346,18 +1315,18 @@ struct Composer: View {
                 slash: slash
             )
             .opacity(enabled ? 1 : 0.6)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(minHeight: 36, alignment: .topLeading)
             .padding(.horizontal, 6)
-            .padding(.top, 4)
             // The things to do with a message, under it: attach on the left,
             // what the agent runs as, then send on the right.
             HStack(spacing: 6) {
                 if let attachments {
                     Button(action: attach) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 13, weight: .semibold))
+                        Image(systemName: "paperclip")
+                            .font(.system(size: 14, weight: .regular))
                             .foregroundStyle(Palette.muted)
                             .frame(width: 28, height: 28)
-                            .background(Palette.fill, in: Circle())
                     }
                     .buttonStyle(.plain)
                     .disabled(!enabled || attachments.wrappedValue.count >= Attachments.maxCount)
@@ -1386,11 +1355,21 @@ struct Composer: View {
                         if let id = session?.id { store.actionError[id] = problem }
                     })
                 }
+                if models.isEmpty, let session {
+                    HStack(spacing: 5) {
+                        AgentMark(kind: session.kind, size: 14)
+                        Text(session.model.map(SessionLabels.model) ?? AgentName.of(session.kind))
+                            .font(TextStyle.caption)
+                            .foregroundStyle(Palette.muted)
+                            .lineLimit(1)
+                    }
+                }
                 sendButton
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
         .confirmationDialog(
             confirming.map { "Switch to \(SessionLabels.model($0))?" } ?? "",
             isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } })
@@ -1408,15 +1387,14 @@ struct Composer: View {
         // A click on the card around the text, not on a control, goes to
         // the text.
         .background {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Palette.surface)
                 .onTapGesture { if enabled { focused = true } }
         }
         .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(focused ? Palette.fillStrong : Palette.line, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
         // The commands for `/`, and the files for `@`, just above the box.
         .overlay(alignment: .top) {
             if let slash, slash.isOpen {
@@ -1456,9 +1434,8 @@ struct Composer: View {
             }
             .font(TextStyle.caption)
             .foregroundStyle(Palette.textSecondary)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 5)
             .frame(height: 28)
-            .background(Palette.fill, in: Capsule())
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
@@ -1492,19 +1469,36 @@ struct Composer: View {
         }
     }
 
-    private var sendButton: some View {
+    /// Send; or Stop while the agent works and nothing is typed, as T3
+    /// Code has it, where the eyes already are.
+    @ViewBuilder private var sendButton: some View {
+        if let session, session.state == .busy, session.canReceive,
+           text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           attachments?.wrappedValue.isEmpty ?? true {
+            Button { store.interrupt(session.id) } label: {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(.white)
+                    .frame(width: 9, height: 9)
+                    .frame(width: 28, height: 28)
+                    .background(Palette.error.opacity(0.9), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Stop the agent's turn")
+            .accessibilityLabel("Stop the agent's turn")
+        } else {
             Button(action: onSend) {
                 Image(systemName: "arrow.up")
                     .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Palette.onInverse)
+                    .foregroundStyle(canSend ? Color.white : Palette.muted)
                     .frame(width: 28, height: 28)
-                    .background(Palette.inverse, in: Circle())
+                    .background(canSend ? Palette.working : Palette.fillStrong, in: Circle())
             }
             .buttonStyle(.plain)
             .disabled(!canSend)
             .opacity(enabled ? 1 : 0.4)
             .keyboardShortcut(.return, modifiers: .command)
             .help("Send")
+        }
     }
 }
 
@@ -1550,5 +1544,59 @@ enum Clipboard {
     @MainActor static func copy(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+
+/// An error follows the composer's rounded silhouette, with its own dismiss action.
+struct ComposerFeedback: ViewModifier {
+    let message: String?
+    var radius: CGFloat = 18
+    let dismiss: () -> Void
+
+    func body(content: Content) -> some View {
+        VStack(spacing: 0) {
+            if let message {
+                HStack(alignment: .top, spacing: 7) {
+                    Image(systemName: "exclamationmark.circle")
+                        .font(.system(size: 12, weight: .medium))
+                        .padding(.top, 4)
+                    // Wrapped to the box's width, four lines at most. Not
+                    // fixedSize: a split view asks its panes how small they
+                    // can be at almost no width, where a fixed-height text
+                    // runs a letter a line, and the window's content grew
+                    // taller than the window.
+                    Text(message)
+                        .font(TextStyle.caption)
+                        .lineLimit(4)
+                        .help(message)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 2)
+                    Button(action: dismiss) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Dismiss error")
+                    .accessibilityLabel("Dismiss error")
+                }
+                .foregroundStyle(Palette.errorText)
+                .padding(.leading, 16)
+                .padding(.trailing, 8)
+                .padding(.top, 4)
+                .padding(.bottom, 4)
+            }
+            content
+        }
+        .background(message == nil ? Color.clear : Palette.errorWash, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .overlay {
+            if message != nil {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(Palette.error.opacity(0.3), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 }

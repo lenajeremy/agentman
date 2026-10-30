@@ -51,6 +51,7 @@ enum EditorOpener {
 /// changed, the files open in tabs, and a status bar, in the manner of VS
 /// Code, Zed and the code views in v0 and AI Studio.
 struct EditorWindow: View {
+    @State private var headerLeading: CGFloat = 82
     @Environment(AgentsStore.self) private var agents
     @State private var store: EditorStore
     @State private var naming: Naming?
@@ -65,10 +66,12 @@ struct EditorWindow: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        VStack(spacing: 0) {
+            editorHeader
+            HSplitView {
             FileTree(store: store, naming: $naming)
-                .navigationSplitViewColumnWidth(min: 190, ideal: 250, max: 420)
-        } detail: {
+                .frame(width: 240)
+
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
@@ -122,9 +125,12 @@ struct EditorWindow: View {
                 }
                 StatusBar(store: store)
             }
-            .background(Palette.surface)
+            .background(Palette.paper)
             .animation(.easeOut(duration: 0.18), value: store.showAgentPanel)
+            }
         }
+        .background(Palette.paper)
+        .ignoresSafeArea(.container, edges: .top)
         // An image from the agent panel, full size over the editor.
         .overlay {
             if let box = agents.lightbox, box.place == store.root.path {
@@ -133,37 +139,10 @@ struct EditorWindow: View {
         }
         .animation(.easeOut(duration: 0.15), value: agents.lightbox?.id)
         .navigationTitle(store.name)
-        .navigationSubtitle(store.branch.map { "on \($0)" } ?? (store.root.path as NSString).abbreviatingWithTildeInPath)
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    store.quickOpen = true
-                } label: {
-                    Label("Go to File", systemImage: "magnifyingglass")
-                }
-                .help("Go to File (⌘P)")
-                Button {
-                    store.showTerminal.toggle()
-                } label: {
-                    Label("Terminal", systemImage: "terminal")
-                }
-                .help(store.showTerminal ? "Hide the terminal (⌃`)" : "Show the terminal (⌃`)")
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([store.active?.url ?? store.root])
-                } label: {
-                    Label("Show in Finder", systemImage: "folder")
-                }
-                .help("Show in Finder")
-                Button {
-                    store.showAgentPanel.toggle()
-                } label: {
-                    Label("Agentman", systemImage: store.showAgentPanel ? "bubble.left.and.text.bubble.right.fill" : "bubble.left.and.text.bubble.right")
-                }
-                .help(store.showAgentPanel ? "Hide Agentman (⌘L)" : "Agentman and your agents, beside the code (⌘L)")
-            }
-        }
         .focusedSceneValue(\.editorStore, store)
         .background(WindowReader { window in
+            WindowChrome.configure(window)
+            headerLeading = WindowChrome.leading(window)
             // One window per folder. macOS can restore a second one beside
             // the first; it gives way, since both would show the same tabs
             // and only one can hold the editor's page.
@@ -228,6 +207,34 @@ struct EditorWindow: View {
         .alert(store.problem ?? "", isPresented: Binding(get: { store.problem != nil }, set: { if !$0 { store.problem = nil } })) {
             Button("OK", role: .cancel) { store.problem = nil }
         }
+    }
+
+    private var editorHeader: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 7) {
+                AgentmanBadge(size: 20)
+                Text("Agentman").font(Fonts.sans(13, .semibold))
+            }
+            .padding(.leading, headerLeading)
+            .frame(width: 240, alignment: .leading)
+            Image(systemName: "folder").foregroundStyle(Palette.muted)
+            Text(store.name).font(Fonts.sans(13, .medium))
+            if let branch = store.branch {
+                Text("/").foregroundStyle(Palette.faint)
+                Text(branch).font(Fonts.sans(12)).foregroundStyle(Palette.muted)
+            }
+            Spacer(minLength: 8)
+            ChromeButton(symbol: "magnifyingglass", help: "Go to file (⌘P)") { store.quickOpen = true }
+            ChromeButton(symbol: "terminal", help: "Toggle terminal", active: store.showTerminal) { store.showTerminal.toggle() }
+            ChromeButton(symbol: "folder", help: "Show in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([store.active?.url ?? store.root])
+            }
+            ChromeButton(symbol: "sidebar.right", help: "Toggle agent conversation", active: store.showAgentPanel) { store.showAgentPanel.toggle() }
+        }
+        .padding(.trailing, 14)
+        .frame(height: 32)
+        .background(Palette.paper)
+        .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
     }
 
     /// ⌘W closes the tab in front, and the window once no tab is left.
@@ -309,7 +316,7 @@ private struct FileTree: View {
                 Section {
                     FileTreeLevel(store: store, folder: "")
                 } header: {
-                    Text(store.name.uppercased())
+                    Text(store.name)
                         .font(TextStyle.label)
                         .foregroundStyle(Palette.faint)
                 }
@@ -329,12 +336,27 @@ private struct FileTree: View {
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(Palette.sidebar)
+        .tint(Palette.muted)
         .background(SiblingReader<NSOutlineView> { store.treeView = $0 })
         .safeAreaInset(edge: .top, spacing: 0) {
-            if store.treeFilter != nil {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Files").font(Fonts.sans(12, .medium))
+                    Spacer()
+                    ChromeButton(symbol: "doc.badge.plus", help: "New file") { naming = Naming(kind: .file, folder: "") }
+                    ChromeButton(symbol: "folder.badge.plus", help: "New folder") { naming = Naming(kind: .folder, folder: "") }
+                }
+                .foregroundStyle(Palette.muted)
+                .padding(.horizontal, 14)
+                .frame(height: 42)
+                if store.treeFilter != nil {
                 TreeFilterBar(store: store)
                     .task { await store.loadAllFiles() }
+                }
             }
+            .background(Palette.sidebar)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !store.trashing.isEmpty {
@@ -544,7 +566,7 @@ private struct TabStrip: View {
                 }
             }
         }
-        .frame(height: 36)
+        .frame(height: 38)
         .background(Palette.paper)
         .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
         // Right-click past the tabs: all of them at once.
@@ -601,12 +623,9 @@ private struct EditorTab: View {
         }
         .padding(.leading, 12)
         .padding(.trailing, 8)
-        .frame(height: 36)
-        .background(active ? Palette.surface : .clear)
-        .overlay(alignment: .top) {
-            if active { Rectangle().fill(Palette.working).frame(height: 2) }
-        }
-        .overlay(alignment: .trailing) { Rectangle().fill(Palette.line).frame(width: 1) }
+        .frame(height: 38)
+        .background(active ? Palette.fill.opacity(0.55) : .clear, in: RoundedRectangle(cornerRadius: 6))
+        .padding(.horizontal, 3)
         .overlay(alignment: .bottom) {
             if active { Rectangle().fill(Palette.surface).frame(height: 1) }
         }
@@ -689,7 +708,7 @@ private struct PathBar: View {
         }
         .padding(.horizontal, 14)
         .frame(height: 28)
-        .background(Palette.surface)
+        .background(Palette.paper)
         .alert(document.problem ?? "", isPresented: Binding(get: { document.problem != nil }, set: { if !$0 { document.problem = nil } })) {
             Button("OK", role: .cancel) { document.problem = nil }
         }
@@ -803,7 +822,7 @@ private struct MarkdownPreview: View {
                 .padding(.vertical, 32)
                 .frame(maxWidth: .infinity)
         }
-        .background(Palette.surface)
+        .background(Palette.paper)
         // Back on this file after another tab, the text under the preview
         // took the keyboard again.
         .onAppear { DispatchQueue.main.async { store.window?.makeFirstResponder(nil) } }
@@ -839,7 +858,7 @@ private struct NonTextView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Palette.surface)
+        .background(Palette.paper)
     }
 
     private var message: String {
@@ -904,7 +923,7 @@ private struct EditorEmpty: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Palette.surface)
+        .background(Palette.paper)
     }
 
     private func shortcut(_ title: String, _ keys: String, action: (() -> Void)?) -> some View {
@@ -1145,12 +1164,36 @@ extension NSView {
 struct WindowReader: NSViewRepresentable {
     let found: (NSWindow) -> Void
 
-    func makeNSView(context: Context) -> NSView { NSView() }
+    func makeNSView(context: Context) -> Probe { Probe() }
 
-    func updateNSView(_ view: NSView, context: Context) {
-        DispatchQueue.main.async {
-            if let window = view.window { found(window) }
+    func updateNSView(_ view: Probe, context: Context) {
+        view.found = found
+        DispatchQueue.main.async { [weak view] in view?.report() }
+    }
+
+    final class Probe: NSView {
+        var found: ((NSWindow) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            NotificationCenter.default.removeObserver(self)
+            if let window {
+                for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification,
+                             NSWindow.didResizeNotification] {
+                    NotificationCenter.default.addObserver(self, selector: #selector(changed), name: name, object: window)
+                }
+            }
+            // After this layout pass: what it reports changes SwiftUI state.
+            DispatchQueue.main.async { [weak self] in self?.report() }
         }
+
+        @objc private func changed(_ notification: Notification) { report() }
+
+        func report() {
+            if let window { found?(window) }
+        }
+
+        deinit { NotificationCenter.default.removeObserver(self) }
     }
 }
 
@@ -1278,5 +1321,21 @@ struct EditorCommands: Commands {
     @MainActor private func adjustFont(_ step: Double) {
         let now = UserDefaults.standard.object(forKey: "editorFontSize") as? Double ?? 14
         UserDefaults.standard.set(min(max(now + step, 9), 28), forKey: "editorFontSize")
+    }
+}
+
+/// A single title row: the content fills the frame behind native controls.
+@MainActor
+enum WindowChrome {
+    static func leading(_ window: NSWindow) -> CGFloat {
+        window.styleMask.contains(.fullScreen) ? 16 : 82
+    }
+
+    static func configure(_ window: NSWindow) {
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        if !window.styleMask.contains(.fullSizeContentView) {
+            window.styleMask.insert(.fullSizeContentView)
+        }
     }
 }

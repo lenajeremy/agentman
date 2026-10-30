@@ -6,36 +6,44 @@ struct ContentView: View {
     @Environment(AgentsStore.self) private var store
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
+    @State private var headerLeading: CGFloat = 82
     @AppStorage("settingsTab") private var settingsTab = "general"
+    /// The sidebar's width, as dragged, and whether it is hidden (⌃⌘S).
+    @AppStorage(Sidebar.widthKey) private var sidebarWidth = Sidebar.defaultWidth
+    @AppStorage(Sidebar.hiddenKey) private var sidebarHidden = false
 
     var body: some View {
-        NavigationSplitView {
-            Sidebar()
-                .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 380)
-        } detail: {
-            Group {
-                switch store.selection {
-                case .agent(let id):
-                    if let session = store.session(id) {
-                        AgentThreadView(session: session)
-                            .id(session.id)
-                    } else {
-                        GoneView()
-                    }
-                case .newAgent:
-                    NewAgentView()
-                case .manager, nil:
-                    ManagerChatView()
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                if !sidebarHidden {
+                    Sidebar()
+                        .frame(width: Sidebar.clamp(sidebarWidth, window: geometry.size.width))
+                        .overlay(alignment: .trailing) {
+                            SidebarResizeHandle(width: $sidebarWidth, window: geometry.size.width)
+                        }
+                        .transition(.move(edge: .leading))
                 }
+                detail
+                    // With the sidebar hidden, the headers make room for the
+                    // window's buttons and the one that brings it back.
+                    .environment(\.detailHeaderLeading, sidebarHidden ? headerLeading + 34 : 0)
+                    .overlay(alignment: .topLeading) {
+                        if sidebarHidden {
+                            ChromeButton(symbol: "sidebar.left", help: "Show the sidebar (⌃⌘S)") { sidebarHidden = false }
+                                .padding(.leading, headerLeading)
+                                .padding(.top, 2)
+                        }
+                    }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Palette.paper)
-            // The title bar is the same paper as the page, so there is no
-            // band above the conversation, and what scrolls up goes behind
-            // it rather than under the title.
-            .toolbarBackground(Palette.paper, for: .windowToolbar)
-            .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
+            .animation(.easeOut(duration: 0.18), value: sidebarHidden)
         }
+        .environment(\.windowHeaderLeading, headerLeading)
+        .background(Palette.paper)
+        .background(WindowReader { window in
+            WindowChrome.configure(window)
+            headerLeading = WindowChrome.leading(window)
+        })
+        .ignoresSafeArea(.container, edges: .top)
         // A note Agentman suggests, over whatever is on screen.
         .overlay(alignment: .topTrailing) {
             NoteSuggestionPopup()
@@ -81,6 +89,28 @@ struct ContentView: View {
 
     /// agentman://settings opens Settings, at a tab with
     /// agentman://settings/keys; the rest are the store's to open.
+
+    /// Agentman, or the agent picked, beside the sidebar.
+    private var detail: some View {
+        Group {
+            switch store.selection {
+            case .agent(let id):
+                if let session = store.session(id) {
+                    AgentThreadView(session: session)
+                        .id(session.id)
+                } else {
+                    GoneView()
+                }
+            case .newAgent:
+                NewAgentView()
+            case .manager, nil:
+                ManagerChatView()
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Palette.paper)
+    }
+
     private func open(_ url: URL) {
         if url.host() == "terminal" {
             let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []

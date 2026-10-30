@@ -8,3 +8,4 @@ build-shots/
 Agentman/Resources/EditorWeb/
 editor-web/node_modules/
 build-ci/
+build-test-app/

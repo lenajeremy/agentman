@@ -28,6 +28,7 @@ struct AgentmanApp: App {
         Window("Agentman", id: "main") {
             if !Self.underTests {
                 ContentView()
+                    .frame(minWidth: 1040, minHeight: 640)
                     .environment(store)
                     .task {
                         Appearance.apply(UserDefaults.standard.string(forKey: "appearance") ?? "system")
@@ -36,12 +37,27 @@ struct AgentmanApp: App {
             }
         }
         .defaultLaunchBehavior(Self.underTests ? .suppressed : .automatic)
-        .defaultSize(width: 1180, height: 760)
-        .windowToolbarStyle(.unified(showsTitle: true))
+        .defaultSize(width: 1560, height: 980)
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Agent") { store.selection = .newAgent }
                     .keyboardShortcut("n", modifiers: .command)
+            }
+            CommandGroup(replacing: .sidebar) {
+                Button("Toggle Sidebar") {
+                    UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: Sidebar.hiddenKey), forKey: Sidebar.hiddenKey)
+                }
+                .keyboardShortcut("s", modifiers: [.command, .control])
+                // Light, Dark, Match the Mac, in turn, as T3 Code's ⌥⇧⌘A.
+                Button("Cycle Appearance") {
+                    let order = ["light", "dark", "system"]
+                    let now = UserDefaults.standard.string(forKey: "appearance") ?? "system"
+                    let next = order[((order.firstIndex(of: now) ?? 2) + 1) % order.count]
+                    UserDefaults.standard.set(next, forKey: "appearance")
+                    Appearance.apply(next)
+                }
+                .keyboardShortcut("a", modifiers: [.command, .option, .shift])
             }
             // The daemon outlives the app, by design: quitting the app
             // leaves it running, so a stuck one is restarted here.
@@ -71,8 +87,8 @@ struct AgentmanApp: App {
                     .environment(store)
             }
         }
-        .defaultSize(width: 1180, height: 760)
-        .windowToolbarStyle(.unified(showsTitle: true))
+        .defaultSize(width: 1560, height: 980)
+        .windowStyle(.hiddenTitleBar)
         .commands { EditorCommands() }
 
         Settings {

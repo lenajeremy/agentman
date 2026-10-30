@@ -2,9 +2,8 @@ import AppKit
 import CoreText
 import SwiftUI
 
-// Agentman's look, shared with the phone: the palette and type in
-// mobile/lib/theme.ts, so the two apps read as one product. Each colour has a
-// light and a dark value, and follows the system appearance.
+// Neutral surfaces keep the conversation in focus. Colour is reserved for
+// agent state and actions; both appearances use the same hierarchy.
 
 extension Color {
     fileprivate init(light: UInt32, dark: UInt32) {
@@ -27,27 +26,28 @@ extension NSColor {
 }
 
 enum Palette {
-    static let paper = Color(light: 0xF5F5F2, dark: 0x0E0F11)
-    static let surface = Color(light: 0xFFFFFF, dark: 0x17181B)
-    static let fill = Color(light: 0xEDECE8, dark: 0x202226)
-    static let fillStrong = Color(light: 0xE4E3DE, dark: 0x2C2E33)
-    static let line = Color(light: 0xE3E2DD, dark: 0x25272C)
+    static let paper = Color(light: 0xFAFAFA, dark: 0x000000)
+    static let sidebar = Color(light: 0xF5F5F5, dark: 0x050505)
+    static let surface = Color(light: 0xFFFFFF, dark: 0x0D0D0D)
+    static let fill = Color(light: 0xEFEFEF, dark: 0x202020)
+    static let fillStrong = Color(light: 0xE4E4E4, dark: 0x303030)
+    static let line = Color(light: 0xE5E5E5, dark: 0x242424)
     // Tool calls in a thread: a soft card a step greyer than the page, set
     // apart from the conversation and from the user's own bubbles, with a
     // well inside it for a command's output.
-    static let toolCard = Color(light: 0xEEEEEA, dark: 0x17181B)
-    static let toolCardEdge = Color(light: 0xE5E4DF, dark: 0x212327)
-    static let toolWell = Color(light: 0xF8F8F5, dark: 0x0F1012)
+    static let toolCard = Color(light: 0xF5F5F5, dark: 0x0D0D0D)
+    static let toolCardEdge = Color(light: 0xE8E8E8, dark: 0x202020)
+    static let toolWell = Color(light: 0xFAFAFA, dark: 0x101010)
     // Git, in the editor's tree: a file changed.
     static let gitModified = Color(light: 0xA8690F, dark: 0xE2B45C)
-    static let text = Color(light: 0x0F1012, dark: 0xF2F3F5)
-    static let textSecondary = Color(light: 0x34363B, dark: 0xD2D4D9)
-    static let muted = Color(light: 0x6A6D75, dark: 0x9A9DA5)
-    static let faint = Color(light: 0x9C9EA5, dark: 0x6E717A)
-    static let inverse = Color(light: 0x0F1012, dark: 0xF2F3F5)
-    static let onInverse = Color(light: 0xFFFFFF, dark: 0x0E0F11)
+    static let text = Color(light: 0x101010, dark: 0xF2F2F2)
+    static let textSecondary = Color(light: 0x3C3C3C, dark: 0xD0D0D0)
+    static let muted = Color(light: 0x737373, dark: 0xA0A0A0)
+    static let faint = Color(light: 0x999999, dark: 0x737373)
+    static let inverse = Color(light: 0x101010, dark: 0xF2F2F2)
+    static let onInverse = Color(light: 0xFFFFFF, dark: 0x000000)
     /// An agent is working. Also the brand colour.
-    static let working = Color(light: 0x2E4BFF, dark: 0x6B80FF)
+    static let working = Color(light: 0x3268F5, dark: 0x578CFF)
     static let workingText = Color(light: 0x1F35C7, dark: 0x9DAAFF)
     static let workingWash = Color(light: 0xEEF1FF, dark: 0x1A1F3D)
     /// An agent needs you.
@@ -83,16 +83,11 @@ enum Palette {
     }
 }
 
-/// Google Sans for text and Google Sans Code for code, bundled with the app
-/// (both under the SIL Open Font License, in Resources/Fonts). Both are
-/// variable fonts: Google Sans has Regular, Medium and Bold faces, Google
-/// Sans Code every weight from Light to ExtraBold, and the system picks the
-/// optical size for the point size.
+/// The Mac's own font for interface text, as T3 Code's app uses on macOS;
+/// bundled Google Sans Code for code.
 enum Fonts {
-    /// Every size in the app, made a little larger than the type scale
-    /// below says: the user found the text too small to read comfortably.
-    /// Changing this one number moves all the text together.
-    static let scale: CGFloat = 1.1
+    /// Shared scale for interface and code typography.
+    static let scale: CGFloat = 1.0
 
     static func register() {
         let urls = Bundle.main.urls(forResourcesWithExtension: "ttf", subdirectory: nil) ?? []
@@ -102,7 +97,7 @@ enum Fonts {
     }
 
     static func sans(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .custom("Google Sans", size: size * scale).weight(weight)
+        .system(size: size * scale, weight: weight)
     }
 
     static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
@@ -176,4 +171,35 @@ struct SidebarMaterial: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+}
+
+/// Quiet, square controls shared by the conversation and editor chrome.
+struct ChromeButton: View {
+    let symbol: String
+    let help: String
+    var active = false
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(active ? Palette.text : Palette.muted)
+                .frame(width: 28, height: 28)
+                .background(active || hovering ? Palette.fill.opacity(0.55) : .clear, in: RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
+        .onHover { hovering = $0 }
+    }
+}
+
+
+extension EnvironmentValues {
+    /// Space for native traffic lights in a window, removed in full screen.
+    @Entry var windowHeaderLeading: CGFloat = 82
+    /// Space before a page's header while the sidebar is hidden: the
+    /// window's buttons and the one that shows the sidebar sit there.
+    @Entry var detailHeaderLeading: CGFloat = 0
 }

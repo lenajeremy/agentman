@@ -679,9 +679,9 @@ enum EditorTheme {
             let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             let clear = "#00000000"
             let colors: [String: String] = [
-                "editor.background": hex(Palette.surface),
+                "editor.background": hex(Palette.paper),
                 "editor.foreground": hex(Palette.text),
-                "editorGutter.background": hex(Palette.surface),
+                "editorGutter.background": hex(Palette.paper),
                 "editorLineNumber.foreground": hex(Palette.faint),
                 "editorLineNumber.activeForeground": hex(Palette.textSecondary),
                 "editor.lineHighlightBackground": hex(Palette.text, 0.045),

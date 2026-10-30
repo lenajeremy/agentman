@@ -126,7 +126,7 @@ private struct PanelHeader: View {
             HeaderButton(symbol: "xmark", help: "Close the panel (⌘L)") { editor.showAgentPanel = false }
         }
         .padding(.horizontal, 8)
-        .frame(height: 36)
+        .frame(height: 38)
         .background(Palette.paper)
         .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
         .confirmationDialog("Start a new chat?", isPresented: $confirmNewChat) {
@@ -213,7 +213,7 @@ private struct PanelAgentList: View {
         let running = agents.sessions.filter { $0.state != .ended }
         let here = running.filter { Self.related($0.cwd, folder) }
         let elsewhere = running.filter { !Self.related($0.cwd, folder) }
-        ScrollView {
+        ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 2) {
                 AgentmanRow { choose(.agentman) }
                     .padding(.bottom, 8)
@@ -236,6 +236,7 @@ private struct PanelAgentList: View {
             }
             .padding(10)
         }
+        .scrollIndicators(.never)
     }
 
     private func heading(_ text: String) -> some View {

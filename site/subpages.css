@@ -1,0 +1,569 @@
+.page-hero {
+  text-align: center;
+  padding-block: 96px 60px;
+}
+.page-hero h1 {
+  font-size: clamp(44px, 5.5vw, 72px);
+  letter-spacing: -3.5px;
+  line-height: 1.08;
+}
+.page-hero > p {
+  max-width: 660px;
+  margin: 25px auto 0;
+  font-size: 19px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.page-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 30px;
+}
+.requirements {
+  display: block;
+  margin-top: 17px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.desktop-hero {
+  margin-block: 0 72px;
+}
+.section-heading {
+  margin-bottom: 35px;
+}
+.section-heading p {
+  color: var(--muted);
+  line-height: 1.6;
+  font-size: 17px;
+  margin-top: 18px;
+}
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 38px;
+}
+.detail-card {
+  padding: 30px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 12px;
+}
+.detail-card h3 {
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: -0.5px;
+  line-height: 1.3;
+}
+.detail-card p {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.65;
+  margin-top: 12px;
+  max-width: 460px;
+}
+.detail-card .text-link {
+  display: inline-block;
+  margin-top: 20px;
+}
+.card-glyph {
+  display: block;
+  color: #999;
+  font-family: "Geist Mono", monospace;
+  font-size: 23px;
+  margin-bottom: 24px;
+}
+.install-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) 1fr;
+  gap: 60px;
+  align-items: center;
+}
+.install-action {
+  text-align: center;
+}
+.install-note {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--muted);
+  margin: 18px 0;
+}
+code {
+  font-family: "Geist Mono", monospace;
+  font-size: 0.86em;
+}
+.video-section video {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.setup-container {
+  max-width: 900px;
+}
+.setup-head {
+  padding: 80px 0 46px;
+}
+.setup-head h1,
+.policy h1 {
+  font-size: 60px;
+  letter-spacing: -3px;
+  line-height: 1.1;
+  margin: 0;
+}
+.setup-head > p {
+  margin-top: 22px;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1.6;
+  max-width: 640px;
+}
+.setup-index {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 30px 0 0;
+}
+.setup-index a {
+  display: block;
+  font-size: 12px;
+  padding: 9px 13px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+}
+.setup-index a:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+.setup {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.setup-step {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 22px;
+  border-top: 1px solid var(--line);
+  padding: 42px 0;
+  scroll-margin-top: 30px;
+}
+.setup-num {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  font:
+    12px "Geist Mono",
+    monospace;
+  color: var(--muted);
+  border: 1px solid #333;
+  border-radius: 50%;
+  margin-top: 2px;
+}
+.setup-body h2,
+.setup-done h2 {
+  font-size: 28px;
+  line-height: 1.25;
+  letter-spacing: -1px;
+}
+.setup-body p,
+.setup-done p {
+  font-size: 16px;
+  line-height: 1.75;
+  color: var(--muted);
+  margin-top: 15px;
+}
+.setup-body b {
+  color: var(--text);
+  font-weight: 500;
+}
+.setup-body p code,
+.setup-done p code,
+.install-note code {
+  color: var(--text);
+  border: 1px solid var(--line);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+.setup-note {
+  font-size: 13px !important;
+}
+.cmd-label {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 25px;
+}
+.command {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  margin-top: 15px;
+  padding: 16px;
+}
+.command code {
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre;
+  min-width: 0;
+  scrollbar-width: thin;
+}
+.pr {
+  color: #7599ff;
+  margin-right: 12px;
+  user-select: none;
+}
+.copy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 7px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font:
+    12px Geist,
+    sans-serif;
+}
+.copy:hover {
+  color: #fff;
+  background: #202020;
+}
+.copy:focus-visible {
+  outline: 2px solid #8babff;
+  outline-offset: 2px;
+}
+.copy svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.term-out {
+  border: 1px solid var(--line);
+  border-top: 0;
+  padding: 18px;
+  font:
+    12px/1.9 "Geist Mono",
+    monospace;
+  color: var(--muted);
+  border-radius: 0 0 9px 9px;
+  margin-top: -5px;
+}
+.term-out span {
+  display: block;
+}
+.term-out .ok {
+  color: var(--green);
+}
+.setup-actions {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--blue);
+  color: #fff;
+  border-radius: 8px;
+  padding: 12px 18px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.btn:hover {
+  background: #4278ff;
+}
+.btn svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+.agent-cmds {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin-top: 15px;
+}
+.agent-cmds code {
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 5px;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+.setup-done {
+  border-top: 1px solid var(--line);
+  padding: 45px 0 80px;
+}
+.cta {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  margin-top: 25px;
+  flex-wrap: wrap;
+}
+.policy {
+  max-width: 900px;
+  padding-block: 80px;
+}
+.policy-header {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 38px;
+}
+.policy-eyebrow {
+  display: block;
+  color: var(--muted);
+  font:
+    11px "Geist Mono",
+    monospace;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin-bottom: 22px;
+}
+.policy p,
+.policy li {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.8;
+}
+.policy-header p {
+  margin-top: 22px;
+}
+.policy-date {
+  font-size: 12px !important;
+}
+.policy-body section {
+  padding-top: 36px;
+}
+.policy-body h2 {
+  font-size: 25px;
+  line-height: 1.3;
+  letter-spacing: -0.8px;
+  margin-bottom: 17px;
+}
+.policy-body p + p {
+  margin-top: 16px;
+}
+.policy-body ul {
+  padding-left: 22px;
+  margin-block: 0 18px;
+}
+.policy-body li + li {
+  margin-top: 16px;
+}
+.policy-body strong {
+  color: var(--text);
+  font-weight: 500;
+}
+.policy-body a {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 900px) {
+  .install-panel {
+    gap: 30px;
+    grid-template-columns: minmax(0, 1.5fr) 1fr;
+  }
+}
+@media (max-width: 700px) {
+  .page-hero {
+    padding: 70px 0 40px;
+  }
+  .page-hero h1 {
+    font-size: clamp(39px, 10vw, 54px);
+    letter-spacing: -2px;
+  }
+  .page-hero > p {
+    font-size: 16px;
+  }
+  .page-actions {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .page-actions .button {
+    min-width: 210px;
+  }
+  .desktop-hero {
+    width: calc(100% - 24px);
+    margin-bottom: 45px;
+  }
+  .feature-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    margin-top: 28px;
+  }
+  .detail-card {
+    padding: 24px;
+  }
+  .detail-card p {
+    font-size: 15px;
+  }
+  .install-panel {
+    grid-template-columns: 1fr;
+    gap: 30px;
+  }
+  .install-action {
+    text-align: left;
+  }
+  .setup-head {
+    padding-top: 60px;
+  }
+  .setup-head h1,
+  .policy h1 {
+    font-size: 44px;
+    letter-spacing: -2px;
+  }
+  .setup-head > p {
+    font-size: 16px;
+  }
+  .setup-step {
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 12px;
+    padding-block: 32px;
+  }
+  .setup-num {
+    width: 26px;
+    height: 26px;
+  }
+  .setup-body h2,
+  .setup-done h2 {
+    font-size: 23px;
+    letter-spacing: -0.7px;
+  }
+  .setup-body p,
+  .setup-done p {
+    font-size: 14px;
+  }
+  .command {
+    padding: 12px;
+    gap: 8px;
+  }
+  .command code {
+    font-size: 11px;
+  }
+  .copy {
+    padding: 5px;
+  }
+  .copy svg {
+    display: none;
+  }
+  .pr {
+    margin-right: 8px;
+  }
+  .setup-actions {
+    gap: 14px;
+  }
+  .setup-actions .text-link {
+    font-size: 12px;
+  }
+  .policy {
+    padding-block: 60px;
+  }
+  .policy p,
+  .policy li {
+    font-size: 14px;
+  }
+  .policy-body h2 {
+    font-size: 23px;
+  }
+}
+
+.editor-preview {
+  margin: 0;
+}
+.editor-preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* The iPhone and its purpose share the first screen. */
+.iphone-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  gap: 72px;
+  align-items: center;
+  text-align: left;
+  padding-block: 56px 72px;
+}
+.iphone-hero h1 {
+  margin-top: 24px;
+  letter-spacing: -0.04em;
+}
+.iphone-hero-copy > p {
+  max-width: 550px;
+  margin-top: 24px;
+  font-size: 19px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.iphone-hero .page-actions {
+  justify-content: flex-start;
+}
+.iphone-hero-device {
+  display: flex;
+  justify-content: center;
+}
+.iphone-hero-device img {
+  display: block;
+  width: min(360px, 100%);
+  height: auto;
+}
+@media (max-width: 1000px) and (min-width: 701px) {
+  .iphone-hero {
+    gap: 32px;
+    grid-template-columns: 1.1fr 0.9fr;
+  }
+  .iphone-hero h1 {
+    font-size: 54px;
+  }
+}
+@media (max-width: 700px) {
+  .iphone-hero {
+    grid-template-columns: 1fr;
+    gap: 32px;
+    padding-block: 48px 48px;
+    text-align: center;
+  }
+  .iphone-hero-copy > p {
+    font-size: 17px;
+    margin-top: 20px;
+  }
+  .iphone-hero .page-actions {
+    justify-content: center;
+  }
+  .iphone-hero-device img {
+    width: min(340px, 90vw);
+  }
+}

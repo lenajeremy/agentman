@@ -41,7 +41,7 @@ struct TerminalPanel: View {
             .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 1) }
 
             ZStack {
-                Palette.surface
+                Palette.paper
                 ForEach(store.terminals) { session in
                     TerminalHost(session: session, visible: session.id == store.activeTerminalID)
                         .padding(.leading, 10)

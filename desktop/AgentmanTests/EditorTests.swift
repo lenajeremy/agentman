@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import Agentman
 
@@ -231,5 +232,44 @@ final class EditorTests: XCTestCase {
         let usual = try JSONSerialization.jsonObject(with: JSONEncoder().encode(LanguageChange(server: "gopls", path: ""))) as? [String: Any]
         XCTAssertEqual(usual?["path"] as? String, "")
         XCTAssertNil(usual?["disabled"])
+    }
+}
+
+/// Exercise the AppKit input's layout as its SwiftUI composer narrows and widens.
+@MainActor
+final class ComposerLayoutTests: XCTestCase {
+    private func findField(in view: NSView) -> MessageScrollView? {
+        if let field = view as? MessageScrollView { return field }
+        return view.subviews.lazy.compactMap { self.findField(in: $0) }.first
+    }
+
+    func testWrappedDraftFitsTheInputAcrossWindowWidths() throws {
+        let draft = "Keep the original destination when signing in. Verify that this draft wraps across the available width and that the cursor remains visible.\nA second line must stay below the first paragraph."
+        let store = AgentsStore()
+        func composer(width: CGFloat) -> AnyView {
+            AnyView(Composer(text: .constant(draft), placeholder: "Message", enabled: true, onSend: {})
+                .frame(width: width)
+                .fixedSize(horizontal: false, vertical: true)
+                .environment(store))
+        }
+        let host = NSHostingView(rootView: composer(width: 780))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 400), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+        for width: CGFloat in [780, 320, 540, 780] {
+            host.rootView = composer(width: width)
+            window.setContentSize(NSSize(width: width, height: 400))
+            host.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.08))
+            let field = try XCTUnwrap(findField(in: host))
+            let text = try XCTUnwrap(field.documentView as? NSTextView)
+            let container = try XCTUnwrap(text.textContainer)
+            let layout = try XCTUnwrap(text.layoutManager)
+            layout.ensureLayout(for: container)
+            XCTAssertEqual(text.frame.width, field.contentSize.width, accuracy: 1, "The clickable text view must fill the input width")
+            XCTAssertLessThanOrEqual(layout.usedRect(for: container).height, field.contentSize.height + 2, "A draft below the line limit must not be clipped")
+            XCTAssertEqual(text.string, draft, "Resizing must preserve the draft")
+        }
     }
 }

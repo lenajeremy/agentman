@@ -1109,3 +1109,30 @@ private struct NotificationsPage: View {
         muted = NotificationPolicy.mutedFolders()
     }
 }
+
+
+/// The appearance picker stays within reach from the sidebar.
+struct AppearanceMenu: View {
+    @AppStorage("appearance") private var appearance = "system"
+
+    var body: some View {
+        Menu {
+            Picker("Appearance", selection: $appearance) {
+                Text("Light").tag("light")
+                Text("Dark").tag("dark")
+                Text("Match the Mac").tag("system")
+            }
+        } label: {
+            Image(systemName: "circle.lefthalf.filled")
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.muted)
+                .frame(width: 22, height: 20)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Appearance: Light, Dark, or Match the Mac")
+        .accessibilityLabel("Appearance")
+        .onChange(of: appearance) { _, choice in Appearance.apply(choice) }
+    }
+}

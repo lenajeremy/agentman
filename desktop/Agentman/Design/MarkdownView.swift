@@ -1,5 +1,6 @@
 import Markdown
 import SwiftUI
+import UniformTypeIdentifiers
 
 // Agents answer in markdown: paragraphs, lists, code, and often tables. This
 // renders it as SwiftUI views, parsed by swift-markdown (CommonMark plus
@@ -65,8 +66,7 @@ struct MarkdownImage: Hashable {
 extension EnvironmentValues {
     /// The folder of a Markdown file shown as a document, as the editor's
     /// preview shows one: its pictures are read from there and its code is
-    /// coloured. A reply in the conversation has none, and its pictures
-    /// stay their words.
+    /// coloured. Replies can also show screenshots with absolute local paths.
     @Entry var markdownFolder: URL?
 }
 
@@ -425,7 +425,7 @@ private struct BlockView: View {
 }
 
 /// A picture in a document: one from the file's folder, or from the web
-/// over HTTPS; in a reply, or one that won't load, its words.
+/// over HTTPS. Replies also show local screenshots; failures keep their caption.
 private struct MarkdownImageView: View {
     let image: MarkdownImage
     @Environment(\.markdownFolder) private var folder
@@ -444,6 +444,10 @@ private struct MarkdownImageView: View {
 
     @ViewBuilder private var picture: some View {
         if let folder, let local = MarkdownImages.local(image.source, in: folder) {
+            sized(local)
+        } else if folder == nil,
+                  image.source.hasPrefix("/") || URL(string: image.source)?.isFileURL == true,
+                  let local = MarkdownImages.local(image.source, in: URL(fileURLWithPath: "/", isDirectory: true)) {
             sized(local)
         } else if folder != nil, let url = URL(string: image.source), url.scheme == "https" {
             Group {
@@ -491,8 +495,11 @@ private struct MarkdownImageView: View {
 /// Pictures read from disk for documents, kept while the text is edited
 /// around them.
 @MainActor
-private enum MarkdownImages {
+enum MarkdownImages {
     private static let cache = NSCache<NSString, NSImage>()
+    /// A screenshot is a few megabytes; past this a path isn't a picture to
+    /// show in a reply.
+    static let maxLocalBytes = 32 << 20
 
     static func local(_ source: String, in folder: URL) -> NSImage? {
         guard !source.isEmpty else { return nil }
@@ -506,9 +513,20 @@ private enum MarkdownImages {
         }
         let key = url.standardizedFileURL.path as NSString
         if let hit = cache.object(forKey: key) { return hit }
-        guard let image = NSImage(contentsOf: url.standardizedFileURL) else { return nil }
+        // A reply can name any path, read as the page draws: only a regular
+        // file of an image type, of a picture's size. /dev/zero, a pipe or a
+        // disk image would hold the app reading it.
+        guard isPicture(url.standardizedFileURL),
+              let image = NSImage(contentsOf: url.standardizedFileURL) else { return nil }
         cache.setObject(image, forKey: key)
         return image
+    }
+
+    static func isPicture(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentTypeKey]),
+              values.isRegularFile == true, let size = values.fileSize, size <= maxLocalBytes,
+              let type = values.contentType else { return false }
+        return type.conforms(to: .image)
     }
 
     /// A picture from the web, as a README's badges are: NSImage reads the

@@ -44,6 +44,8 @@ __pycache__/
 # Local dev-server config and UI iteration screenshots, not source.
 .claude/
 review-screenshots/
+design-review/
+DESIGN_REVIEW.md
 
 # Not part of the project: a prompt and issue list from another tool.
 ISSUES.md

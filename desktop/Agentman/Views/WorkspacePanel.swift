@@ -7,47 +7,155 @@ struct WorkspacePanel: View {
     @Environment(AgentsStore.self) private var store
     let session: Session
     @Binding var tab: WorkspaceTab
+    @Environment(\.openWindow) private var openWindow
+    @State private var branch: String?
     /// What is open over the list, deepest last.
     @State private var stack: [WorkspaceRoute] = []
+
+    @State private var expanded = false
+    @State private var changes: [WorkspaceChange] = []
 
     var body: some View {
         VStack(spacing: 0) {
             if let route = stack.last {
                 header(route.title) { stack.removeLast() }
-                Divider()
-                destination(route)
-                    .id(route)
-            } else {
-                Picker("", selection: $tab) {
-                    ForEach(WorkspaceTab.allCases.filter { $0 != .plans || (session.artifacts ?? 0) > 0 || tab == .plans }) {
-                        Text($0.title).tag($0)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                Divider()
+                Divider().overlay(Palette.line)
+                destination(route).id(route)
+            } else if expanded {
+                header(tab.title) { expanded = false }
+                Divider().overlay(Palette.line)
                 switch tab {
                 case .changes: ChangesList(session: session, open: push)
                 case .files: FileList(session: session, path: "", open: push)
                 case .history: HistoryList(session: session, open: push)
                 case .plans: ArtifactList(session: session, open: push)
                 }
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 9) {
+                        Image(systemName: "desktopcomputer").foregroundStyle(Palette.muted)
+                        Text("This Mac")
+                        Spacer()
+                        ChromeButton(symbol: "folder", help: "Show project in Finder") {
+                            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: session.cwd)
+                        }
+                    }
+                    .padding(.bottom, 5)
+                    if FileManager.default.fileExists(atPath: session.cwd) {
+                        workspaceRow("Open in editor", symbol: "arrow.up.right.square") {
+                            EditorOpener.open(folder: session.cwd, with: openWindow)
+                        }
+                        workspaceRow("Open terminal", symbol: "terminal") {
+                            EditorOpener.openTerminal(folder: session.cwd, with: openWindow)
+                        }
+                    }
+                }
+                .padding(16)
+                Divider().overlay(Palette.line)
+                VStack(alignment: .leading, spacing: 0) {
+                    if let branch {
+                        Label(branch, systemImage: "point.3.connected.trianglepath.dotted")
+                            .padding(.vertical, 10)
+                    }
+                    workspaceRow("History", symbol: "clock.arrow.circlepath", opens: true) { show(.history) }
+                    Button { show(.changes) } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "doc.badge.plus").frame(width: 16)
+                            Text("Changes")
+                            Spacer(minLength: 8)
+                            Text("+\(changes.reduce(0) { $0 + ($1.added ?? 0) })")
+                                .foregroundStyle(Palette.ok)
+                            Text("−\(changes.reduce(0) { $0 + ($1.removed ?? 0) })")
+                                .foregroundStyle(Palette.errorText)
+                        }
+                        .foregroundStyle(Palette.muted)
+                        .padding(.vertical, 10)
+                    }
+                    .buttonStyle(.plain)
+                    workspaceRow("Files", symbol: "folder", opens: true) { show(.files) }
+                    if (session.artifacts ?? 0) > 0 {
+                        workspaceRow("Plans", symbol: "doc.text", opens: true) { show(.plans) }
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 9)
+                let siblings = store.sessions.filter { $0.cwd == session.cwd && $0.id != session.id && $0.state != .ended }
+                if !siblings.isEmpty {
+                    Divider().overlay(Palette.line)
+                    VStack(alignment: .leading, spacing: 18) {
+                        Text("In this project · \(siblings.count)")
+                            .font(Fonts.sans(12))
+                            .foregroundStyle(Palette.muted)
+                        ForEach(Array(siblings.prefix(6))) { sibling in
+                            Button { store.selection = .agent(sibling.id) } label: {
+                                HStack(spacing: 10) {
+                                    AgentMark(kind: sibling.kind, size: 17)
+                                    Text(sibling.name).lineLimit(1)
+                                    Spacer(minLength: 4)
+                                    Circle().fill(Palette.dot(sibling.state)).frame(width: 5, height: 5)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(18)
+                }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Palette.paper)
+        .font(Fonts.sans(13))
+        .foregroundStyle(Palette.textSecondary)
+        .frame(maxWidth: .infinity, maxHeight: expanded || !stack.isEmpty ? .infinity : nil, alignment: .top)
+        .frame(width: expanded || !stack.isEmpty ? Self.openWidth : Self.summaryWidth)
+        .animation(.easeOut(duration: 0.18), value: expanded || !stack.isEmpty)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Palette.line))
+        // Again as the agent works: a turn changes files long before it ends.
+        // A burst of activity asks once, a second after it settles.
+        .task(id: Refresh(state: session.state, activity: session.lastActivityAt)) {
+            if changes.isEmpty == false || branch != nil { try? await Task.sleep(for: .seconds(1)) }
+            guard !Task.isCancelled else { return }
+            branch = try? await store.workspace(.listCommits, session: session.id).branch
+            changes = (try? await store.workspace(.listChanges, session: session.id).changes) ?? []
+        }
         .task {
-            // For screenshots and tests: "diff:<path>" or "file:<path>" open,
-            // once the tab the thread asked for has been set.
             let open = ProcessInfo.processInfo.environment["AGENTMAN_FILES_OPEN"] ?? ""
-            try? await Task.sleep(for: .milliseconds(300))
             if open.hasPrefix("diff:") { stack = [.diff(String(open.dropFirst(5)))] }
             if open.hasPrefix("file:") { stack = [.file(String(open.dropFirst(5)))] }
         }
-        .onChange(of: tab) { _, _ in stack = [] }
-        .onChange(of: session.id) { _, _ in stack = [] }
+        .onChange(of: tab) { _, _ in stack = []; expanded = true }
+        .onChange(of: session.id) { _, _ in stack = []; expanded = false }
+    }
+
+    /// What brings the branch and changes up to date.
+    private struct Refresh: Equatable {
+        let state: SessionState
+        let activity: Int64?
+    }
+
+    /// The summary beside the thread; a list, a diff or a file, wider.
+    static let summaryWidth: CGFloat = 280
+    static let openWidth: CGFloat = 540
+
+    private func show(_ selected: WorkspaceTab) {
+        tab = selected
+        expanded = true
+    }
+
+    /// A row that does something at once, or, with `opens`, shows a list.
+    private func workspaceRow(_ title: String, symbol: String, opens: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol).frame(width: 16)
+                Text(title)
+                Spacer(minLength: 4)
+                if opens { Image(systemName: "chevron.right").font(.system(size: 9)) }
+            }
+            .foregroundStyle(Palette.muted)
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func push(_ route: WorkspaceRoute) { stack.append(route) }
@@ -295,7 +403,7 @@ private struct DiffLoader: View {
                         added: rows.filter { $0.kind == .add }.count,
                         removed: rows.filter { $0.kind == .remove }.count,
                         copy: result.diff, local: commit == nil)
-                Divider()
+                Divider().overlay(Palette.line)
                 if rows.isEmpty {
                     EmptyNote(text: result.truncated == true ? "This diff is too large to show." : "No line changes: a binary file, or only its mode changed.")
                 } else {
@@ -508,7 +616,7 @@ private struct FileLoader: View {
             } else if let text = result.text {
                 VStack(spacing: 0) {
                     FileBar(session: session, path: path, lines: text.reduce(into: 1) { if $1 == "\n" { $0 += 1 } }, copy: text)
-                    Divider()
+                    Divider().overlay(Palette.line)
                     CodeTextView(text: text, path: path)
                     if result.truncated == true {
                         Text("Showing the start of a long file.")
@@ -548,7 +656,7 @@ private struct HistoryList: View {
                 .labelsHidden()
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
-                Divider()
+                Divider().overlay(Palette.line)
             }
             if let problem, commits.isEmpty {
                 EmptyNote(text: problem)
@@ -863,7 +971,7 @@ private struct ArtifactView: View {
                 }
             }
             if artifact.review == true {
-                Divider()
+                Divider().overlay(Palette.line)
                 review
             }
         }

@@ -5,6 +5,7 @@ import SwiftUI
 struct ManagerChatView: View {
     @Environment(AgentsStore.self) private var store
     @Environment(\.fileMentions) private var mentions
+    @Environment(\.detailHeaderLeading) private var headerLeading
     /// In an editor's agent panel: narrow, with no toolbar of its own, as
     /// the panel has its own header.
     var inPanel = false
@@ -34,25 +35,23 @@ struct ManagerChatView: View {
         if inPanel {
             conversation
         } else {
-            conversation
-                .navigationTitle("")
-                .toolbar {
-                    if !manager.schedules.isEmpty {
-                        ToolbarItem(placement: .primaryAction) {
-                            SchedulesButton()
-                        }
-                    }
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Text("Agentman").font(Fonts.sans(14, .semibold))
+                    Spacer()
+                    if !manager.schedules.isEmpty { SchedulesButton() }
                     if !manager.entries.isEmpty {
-                        ToolbarItem(placement: .primaryAction) {
-                            Button {
-                                confirmNewChat = true
-                            } label: {
-                                Label("New Chat", systemImage: "plus.bubble")
-                            }
-                            .help("Start a new conversation with Agentman")
+                        ChromeButton(symbol: "plus.bubble", help: "Start a new conversation with Agentman") {
+                            confirmNewChat = true
                         }
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.leading, headerLeading)
+                .frame(height: 32)
+                conversation
+            }
+                .navigationTitle("")
                 .confirmationDialog("Start a new chat?", isPresented: $confirmNewChat) {
                     Button("New Chat") {
                         Task { manager.problem = await manager.reset() }
@@ -74,7 +73,7 @@ struct ManagerChatView: View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
-                    ScrollView {
+                    ScrollView(showsIndicators: false) {
                         let items = ChatItem.items(from: manager.entries)
                         LazyVStack(alignment: .leading, spacing: 28) {
                             if manager.hasOlder, !manager.entries.isEmpty {
@@ -95,7 +94,7 @@ struct ManagerChatView: View {
                                 }
                                 // The whole visible height, the title bar's
                                 // too, so it sits in the middle of the page.
-                                .frame(minHeight: geometry.size.height + geometry.safeAreaInsets.top)
+                                .frame(minHeight: geometry.size.height)
                                 .id("entry")
                             } else {
                                 // The end of the conversation, below the last
@@ -107,10 +106,11 @@ struct ManagerChatView: View {
                         .padding(.horizontal, gutter)
                         .padding(.top, entry ? 0 : 28)
                         .padding(.bottom, entry ? 0 : 6)
-                        .frame(maxWidth: 780)
+                        .frame(maxWidth: AgentThreadView.column)
                         .frame(maxWidth: .infinity)
                     }
                     .modifier(FollowsEnd(atEnd: $atEnd, earlier: manager.hasOlder ? { await manager.loadOlder() } : nil))
+                    .scrollIndicators(.never)
                     .modifier(TopFade())
                     .overlay(alignment: .bottom) {
                         if !atEnd, !entry {
@@ -143,12 +143,6 @@ struct ManagerChatView: View {
 
                 if !entry {
                     VStack(spacing: 8) {
-                        if let problem = manager.problem {
-                            Label(problem, systemImage: "exclamationmark.triangle")
-                                .font(TextStyle.caption)
-                                .foregroundStyle(Palette.errorText)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
                         if store.status != .connected || manager.needsKey {
                             // Agentman can't take a message yet: the box
                             // says why, as on the entry page.
@@ -162,12 +156,15 @@ struct ManagerChatView: View {
                             } onStop: {
                                 manager.stop()
                             }
+                            .modifier(ComposerFeedback(message: manager.problem, radius: 22) {
+                                manager.problem = nil
+                            })
                         }
                     }
                     .padding(.horizontal, gutter)
                     .padding(.top, 4)
                     .padding(.bottom, 22)
-                    .frame(maxWidth: 780)
+                    .frame(maxWidth: AgentThreadView.column)
                     .frame(maxWidth: .infinity)
                 }
             }
@@ -275,6 +272,9 @@ private struct ManagerBox: View {
                                     onDropTargeted: { dropping = $0 }, onSend: send, onStop: {})
                 }
             }
+            .modifier(ComposerFeedback(message: manager.problem, radius: large ? 26 : 22) {
+                manager.problem = nil
+            })
 
             Group {
                 if case .unavailable = store.status {
@@ -291,8 +291,6 @@ private struct ManagerBox: View {
                             Link("Get a key", destination: URL(string: "https://console.anthropic.com/settings/keys")!)
                         }
                     }
-                } else if let problem = manager.problem {
-                    Text(problem).foregroundStyle(Palette.errorText)
                 }
             }
             .font(TextStyle.caption)
