@@ -25,6 +25,10 @@ struct AgentThreadView: View {
     @State private var confirmEnd = false
     @State private var resuming = false
     @State private var filesTab: WorkspaceTab = .changes
+    /// The right panel: its diff and files, at the window's edge.
+    @AppStorage(RightPanel.openKey) private var panelOpen = false
+    @AppStorage(RightPanel.widthKey) private var panelWidth = RightPanel.defaultWidth
+    @State private var panelMaximised = false
     /// How many files the agent has changed since the last commit.
     @State private var changed = 0
     /// The agent's commands, for `/` in the box, where it takes them.
@@ -44,17 +48,42 @@ struct AgentThreadView: View {
         if inPanel {
             thread
         } else {
-            VStack(spacing: 0) {
-                threadHeader
-                HStack(alignment: .top, spacing: 0) {
-                    thread
-                    if showFiles {
-                        // Its own width: a summary beside the thread, wider
-                        // for a list, a diff or a file.
-                        WorkspacePanel(session: session, tab: $filesTab)
-                            .padding(.top, 12)
-                            .padding(.trailing, 12)
-                            .padding(.bottom, 20)
+            GeometryReader { geometry in
+                let width = RightPanel.clamp(panelWidth, available: geometry.size.width, room: Self.threadRoom)
+                // The card goes while the panel leaves too little room
+                // for it beside the conversation.
+                let cardFits = !panelOpen || geometry.size.width - width >= Self.threadRoom + WorkspacePanel.summaryWidth + 12
+                HStack(spacing: 0) {
+                    if !(panelOpen && panelMaximised) {
+                        VStack(spacing: 0) {
+                            threadHeader
+                            HStack(alignment: .top, spacing: 0) {
+                                thread
+                                if showFiles, cardFits {
+                                    // Its own width: a summary beside the thread, wider
+                                    // for a list, a diff or a file.
+                                    WorkspacePanel(session: session, tab: $filesTab)
+                                        .padding(.top, 12)
+                                        .padding(.trailing, 12)
+                                        .padding(.bottom, 20)
+                                }
+                            }
+                        }
+                    }
+                    if panelOpen {
+                        RightPanel(session: session, maximised: $panelMaximised) {
+                            panelOpen = false
+                            panelMaximised = false
+                        }
+                        .frame(width: panelMaximised ? nil : width)
+                        .frame(maxWidth: panelMaximised ? .infinity : nil)
+                        .overlay(alignment: .leading) {
+                            if !panelMaximised {
+                                PaneResizeHandle(width: $panelWidth, grows: -1, clamp: {
+                                    RightPanel.clamp($0, available: geometry.size.width, room: Self.threadRoom)
+                                }, reset: RightPanel.defaultWidth)
+                            }
+                        }
                     }
                 }
             }
@@ -76,6 +105,8 @@ struct AgentThreadView: View {
     /// The conversation's width at most, as T3 Code's: long lines read
     /// worse than short ones.
     static let column: CGFloat = 740
+    /// The least the conversation keeps beside the right panel.
+    static let threadRoom: CGFloat = 380
 
     private var threadHeader: some View {
         let folderExists = FileManager.default.fileExists(atPath: session.cwd)
@@ -99,6 +130,10 @@ struct AgentThreadView: View {
                     else { EditorOpener.openTerminal(folder: session.cwd, with: openWindow) }
                 }
             }
+            ChromeButton(symbol: "plus.forwardslash.minus", help: panelOpen ? "Close the diff (⇧⌘D)" : "Diff and files (⇧⌘D)", active: panelOpen) {
+                if panelOpen { panelOpen = false; panelMaximised = false } else { RightPanel.show(.diff) }
+            }
+            .keyboardShortcut("d", modifiers: [.command, .shift])
             ChromeButton(symbol: "sidebar.right", help: showFiles ? "Hide the workspace (⇧⌘E)" : "Files, changes and history (⇧⌘E)", active: showFiles) { showFiles.toggle() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
             if folderExists || Self.endable(session) {
@@ -133,10 +168,14 @@ struct AgentThreadView: View {
                 .frame(maxWidth: Self.column)
                 .frame(maxWidth: .infinity)
             }
-            if changed > 0, inPanel || !showFiles {
+            if changed > 0, inPanel || (!showFiles && !panelOpen) {
                 ChangedBar(count: changed) {
-                    filesTab = .changes
-                    showFiles = true
+                    if inPanel {
+                        filesTab = .changes
+                        showFiles = true
+                    } else {
+                        RightPanel.show(.diff)
+                    }
                 }
                 .padding(.horizontal, gutter)
                 .padding(.top, 10)

@@ -48,6 +48,10 @@ enum RequestType: String, Codable, Sendable {
     case commitFiles = "commit_files"
     case commitDiff = "commit_diff"
     case listBranches = "list_branches"
+    case gitStatus = "git_status"
+    case gitCommit = "git_commit"
+    case gitPush = "git_push"
+    case gitCreatePR = "git_create_pr"
     case startSession = "start_session"
     case listFolders = "list_folders"
     case directorySessions = "directory_sessions"
@@ -127,6 +131,10 @@ struct DaemonRequest: Codable, Sendable {
     var commit: String?
     /// The branch list_commits reads; absent for the one checked out.
     var ref: String?
+    /// Leaves changes to whitespace alone out of a file_diff.
+    var ignoreWhitespace: Bool?
+    /// The files a git_commit commits.
+    var paths: [String]?
     /// Which way a review_artifact goes: approved, or changes asked for.
     var approve: Bool?
     /// The server an open_server, close_server or stop_server is about.
@@ -179,6 +187,7 @@ struct DaemonEvent: Codable, Sendable {
     var error: String?
     var daemon: DaemonInfo?
     var workspace: WorkspaceResult?
+    var git: GitState?
 
     // Agentman, the manager.
     var entry: ManagerEntry?
@@ -387,6 +396,31 @@ struct Key: Codable, Sendable, Hashable, Identifiable {
 
 /// What an agent's folder holds: a listing, its changes, a file, a diff,
 /// or its history.
+/// An agent's branch as the git actions need it, and, after one, what it did.
+struct GitState: Codable, Sendable, Equatable {
+    var sessionId: String
+    /// Absent while HEAD is detached.
+    var branch: String?
+    var defaultBranch: String?
+    /// Where the branch is pushed, as origin/name; absent before its first push.
+    var upstream: String?
+    /// Commits not pushed; the upstream's not here.
+    var ahead: Int
+    var behind: Int
+    var aheadOfDefault: Int
+    var remote: String?
+    /// Files changed and not committed.
+    var changes: Int
+    /// "committed", "pushed" or "pr_created", after an action.
+    var done: String?
+    var commit: String?
+    var message: String?
+    /// The pull request created, or the one already open.
+    var url: String?
+
+    var onDefaultBranch: Bool { branch != nil && branch == defaultBranch }
+}
+
 struct WorkspaceResult: Codable, Sendable {
     var kind: String
     var sessionId: String

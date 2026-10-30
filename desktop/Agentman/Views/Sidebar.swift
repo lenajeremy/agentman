@@ -568,10 +568,15 @@ private struct FolderMuteButton: View {
     }
 }
 
-/// The sidebar's edge: drag to resize, double-click for the default width.
-struct SidebarResizeHandle: View {
+/// The line between two panes: drag to resize the pane it belongs to,
+/// double-click for its default width. The sidebar grows as its trailing
+/// edge moves right; the right panel, as its leading edge moves left.
+struct PaneResizeHandle: View {
     @Binding var width: Double
-    let window: CGFloat
+    /// 1 when dragging right widens the pane, -1 when it narrows it.
+    var grows: CGFloat = 1
+    let clamp: (Double) -> CGFloat
+    let reset: Double
     @State private var start: Double?
 
     var body: some View {
@@ -589,13 +594,13 @@ struct SidebarResizeHandle: View {
                     .gesture(
                         DragGesture(minimumDistance: 1, coordinateSpace: .global)
                             .onChanged { drag in
-                                let from = start ?? width
+                                let from = start ?? Double(clamp(width))
                                 start = from
-                                width = Double(Sidebar.clamp(from + drag.translation.width, window: window))
+                                width = Double(clamp(from + Double(drag.translation.width * grows)))
                             }
                             .onEnded { _ in start = nil }
                     )
-                    .onTapGesture(count: 2) { width = Sidebar.defaultWidth }
+                    .onTapGesture(count: 2) { width = reset }
             }
             .accessibilityHidden(true)
     }

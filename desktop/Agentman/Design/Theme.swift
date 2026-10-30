@@ -72,6 +72,9 @@ enum Palette {
     static let diffAdd = Color(light: 0xE8F7EE, dark: 0x13281C)
     static let diffRemove = Color(light: 0xFDECEC, dark: 0x2C1517)
     static let diffHunk = Color(light: 0xEEF1FF, dark: 0x1A1F3D)
+    // The words that changed inside a changed line, over its colour.
+    static let diffAddWord = Color(light: 0xBFEBD0, dark: 0x1F5134)
+    static let diffRemoveWord = Color(light: 0xF8C9CB, dark: 0x5C2427)
 
     /// The dot beside an agent: what state it is in, at a glance.
     static func dot(_ state: SessionState) -> Color {

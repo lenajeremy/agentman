@@ -133,7 +133,7 @@ func (d *Daemon) workspace(ctx context.Context, req protocol.Request) protocol.E
 		result.Changes, result.Truncated, result.Hidden, err = listChanges(ctx, session.Cwd, root, rel)
 	case protocol.ReqFileDiff:
 		result.Kind = "diff"
-		result.Diff, result.Truncated, err = fileDiff(ctx, session.Cwd, root, rel)
+		result.Diff, result.Truncated, err = fileDiff(ctx, session.Cwd, root, rel, req.IgnoreWhitespace)
 	}
 	if err != nil {
 		return workspaceError(req, err.Error())
@@ -437,7 +437,7 @@ func countLines(root *os.Root, rel string) int {
 	return lines
 }
 
-func fileDiff(ctx context.Context, cwd string, root *os.Root, rel string) (string, bool, error) {
+func fileDiff(ctx context.Context, cwd string, root *os.Root, rel string, ignoreWhitespace bool) (string, bool, error) {
 	status, _, err := runGit(ctx, cwd, "status", "--porcelain=v1", "--no-renames", "--", rel)
 	if err != nil {
 		return "", false, err
@@ -495,7 +495,11 @@ func fileDiff(ctx context.Context, cwd string, root *os.Root, rel string) (strin
 		}
 		base = strings.TrimSpace(emptyTree)
 	}
-	text, truncated, err := runGit(ctx, cwd, "diff", "--no-ext-diff", "--no-textconv", base, "--", rel)
+	args := []string{"diff", "--no-ext-diff", "--no-textconv"}
+	if ignoreWhitespace {
+		args = append(args, "-w")
+	}
+	text, truncated, err := runGit(ctx, cwd, append(args, base, "--", rel)...)
 	if err != nil {
 		return "", false, err
 	}

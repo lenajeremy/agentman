@@ -19,7 +19,7 @@ struct ContentView: View {
                     Sidebar()
                         .frame(width: Sidebar.clamp(sidebarWidth, window: geometry.size.width))
                         .overlay(alignment: .trailing) {
-                            SidebarResizeHandle(width: $sidebarWidth, window: geometry.size.width)
+                            PaneResizeHandle(width: $sidebarWidth, clamp: { Sidebar.clamp($0, window: geometry.size.width) }, reset: Sidebar.defaultWidth)
                         }
                         .transition(.move(edge: .leading))
                 }

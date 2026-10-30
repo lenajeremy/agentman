@@ -75,6 +75,7 @@ final class AgentsStore {
     var showPalette = false
     /// Unsent messages, by session, kept across launches.
     private(set) var drafts: [String: String] = (UserDefaults.standard.dictionary(forKey: "drafts") as? [String: String]) ?? [:]
+    @ObservationIgnored private var draftWrite: Task<Void, Never>?
 
     /// Keeps a session's unsent message, or forgets it once empty.
     func saveDraft(_ text: String, for sessionId: String) {
@@ -85,6 +86,18 @@ final class AgentsStore {
             let live = Set(sessions.map(\.id))
             drafts = drafts.filter { live.contains($0.key) }
         }
+        // Written once typing pauses, and at quit: a write wakes every view
+        // that keeps a setting, and at each key that redrew the panels
+        // beside the box.
+        draftWrite?.cancel()
+        draftWrite = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(0.8))
+            guard !Task.isCancelled else { return }
+            self?.writeDrafts()
+        }
+    }
+
+    func writeDrafts() {
         UserDefaults.standard.set(drafts, forKey: "drafts")
     }
 
@@ -121,6 +134,9 @@ final class AgentsStore {
         appActive = NSApplication.shared.isActive
         notifier.start()
         let center = NotificationCenter.default
+        center.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.writeDrafts() }
+        }
         Task {
             for await _ in center.notifications(named: NSApplication.didBecomeActiveNotification) {
                 appActive = true

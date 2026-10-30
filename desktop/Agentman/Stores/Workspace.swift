@@ -10,12 +10,14 @@ extension AgentsStore {
     }
 
     func workspace(_ type: RequestType, session: String, path: String = "",
-                   offset: Int? = nil, commit: String? = nil, ref: String? = nil) async throws -> WorkspaceResult {
+                   offset: Int? = nil, commit: String? = nil, ref: String? = nil,
+                   ignoreWhitespace: Bool = false) async throws -> WorkspaceResult {
         var request = DaemonRequest(type, sessionId: session)
         request.path = path
         request.offset = offset
         request.commit = commit
         request.ref = ref
+        request.ignoreWhitespace = ignoreWhitespace ? true : nil
         let reply = try await client.request(request)
         if reply.type == "error" {
             let message = (reply.error ?? "That couldn't be read.")
@@ -24,6 +26,22 @@ extension AgentsStore {
         }
         guard let result = reply.workspace else { throw WorkspaceError(message: "That couldn't be read.") }
         return result
+    }
+
+    /// A git action in an agent's folder, or, with .gitStatus, where its
+    /// branch stands. A push or a pull request can take a while.
+    func git(_ type: RequestType, session: String, message: String? = nil, paths: [String]? = nil) async throws -> GitState {
+        var request = DaemonRequest(type, sessionId: session)
+        request.text = message
+        request.paths = paths
+        let reply = try await client.request(request, timeout: type == .gitStatus ? 20 : 150)
+        if reply.type == "error" {
+            let message = (reply.error ?? "Git couldn't do that.")
+                .replacingOccurrences(of: "^(daemon|workspace): ", with: "", options: .regularExpression)
+            throw WorkspaceError(message: message.prefix(1).uppercased() + message.dropFirst())
+        }
+        guard let state = reply.git else { throw WorkspaceError(message: "Update am serve to commit and push from here.") }
+        return state
     }
 
     /// Shares a dev server through the relay and returns its public link.
