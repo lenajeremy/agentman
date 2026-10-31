@@ -4,10 +4,14 @@
 // each.
 
 import { Lightbox } from "./LightboxView";
+import { AgentmanToasts } from "./manager/Toasts";
+import { NoteSuggestionPopup } from "./manager/NoteSuggestion";
 
 export function Overlays() {
   return (
     <>
+      <AgentmanToasts />
+      <NoteSuggestionPopup />
       <Lightbox />
     </>
   );

@@ -1,0 +1,315 @@
+/* Agentman, the manager (Views/ManagerChatView.swift, CompactCard.swift,
+   NoteSuggestion.swift, AgentmanToasts.swift). 1 pt = 1 px. Text with
+   SwiftUI's lineSpacing(n) puts n between lines only, so a block of it
+   takes n/2 back above and below. */
+
+:root {
+  --am-inverse: #101010; --am-on-inverse: #ffffff;
+  --am-accent: #007aff;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --am-inverse: #f2f2f2; --am-on-inverse: #000000; --am-accent: #0a84ff; }
+}
+
+.am-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.am-spacer { flex: 1; }
+
+/* Header: "Agentman" 14 semibold, 16 either side, 32 high. */
+.am-header { height: 32px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 16px 0 calc(16px + var(--detail-header-leading, 0px)); }
+.am-title { font-size: 14px; font-weight: 600; }
+/* The conversation runs on up under the header, which has no background of
+   its own, as the Mac's scroll view does; the fade stays at its top. */
+.am-header { position: relative; z-index: 3; }
+.am-page.with-header .am-scroll { top: -32px; }
+.am-page.with-header .am-column { padding-top: 60px; }
+.am-page.with-header .am-column.entry { padding-top: 32px; }
+
+.am-conversation { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.am-scroll-wrap { flex: 1; min-height: 0; position: relative; }
+.am-scroll { position: absolute; inset: 0; overflow-y: auto; scrollbar-width: none; }
+.am-scroll::-webkit-scrollbar { display: none; }
+.am-top-fade { position: absolute; z-index: 1; top: 0; left: 0; right: 0; height: 20px; background: linear-gradient(var(--paper), color-mix(in srgb, var(--paper) 0%, transparent)); pointer-events: none; }
+
+/* The column: 740 wide at most, items 28 apart, 28 above, 6 below. */
+.am-column { max-width: 740px; margin: 0 auto; padding-top: 28px; padding-bottom: 6px; display: flex; flex-direction: column; align-items: stretch; gap: 28px; user-select: text; }
+.am-column.entry { padding-top: 0; padding-bottom: 0; min-height: 100%; }
+.am-end { height: 1px; flex: none; }
+.am-loading-earlier { display: flex; justify-content: center; }
+
+/* The entry page: the icon and wordmark over the large box, a third of the
+   way down, as SwiftUI shares the room between its three spacers. */
+.am-hero { flex: 1; display: flex; flex-direction: column; align-items: center; }
+.am-hero-space { flex: 1 1 0; min-height: 48px; }
+.am-hero-space.small { min-height: 24px; }
+.am-hero-name { display: flex; flex-direction: column; align-items: center; gap: 16px; padding-bottom: 28px; }
+.am-wordmark { font-size: 34px; line-height: 41px; color: var(--text); }
+.am-hero-box { width: 100%; max-width: 620px; }
+
+/* The foot: the box, 4 above it and 22 below. */
+.am-foot { flex: none; max-width: 740px; width: 100%; margin: 0 auto; padding-top: 4px; padding-bottom: 22px; display: flex; flex-direction: column; gap: 8px; }
+
+/* The composer pill: radius 22 (26 large), 1pt line (fillStrong focused). */
+.am-composer { position: relative; background: var(--surface); border-radius: 22px; padding: 7px 8px 7px 10px; display: flex; flex-direction: column; gap: 4px; box-shadow: 0 2px 16px rgba(0, 0, 0, 0.04), inset 0 0 0 1px var(--line); }
+.am-composer.focused { box-shadow: 0 2px 16px rgba(0, 0, 0, 0.04), inset 0 0 0 1px var(--fill-strong); }
+.am-composer.large { border-radius: 26px; padding: 9px 8px 9px 12px; box-shadow: 0 6px 36px rgba(0, 0, 0, 0.06), inset 0 0 0 1px var(--line); }
+.am-composer.large.focused { box-shadow: 0 6px 36px rgba(0, 0, 0, 0.06), inset 0 0 0 1px var(--fill-strong); }
+.am-composer-row { display: flex; align-items: flex-end; gap: 10px; }
+.am-field { flex: 1; min-width: 0; border: 0; outline: none; resize: none; background: none; margin: 0; overflow-y: auto; scrollbar-width: none;
+  font-size: 14px; line-height: 20px; padding: 4.5px 0 7.5px; color: var(--text); user-select: text; display: block; }
+.am-field::-webkit-scrollbar { display: none; }
+.am-field.large { font-size: 15px; line-height: 21px; padding: 7.5px 0 10.5px; }
+.am-field::placeholder { color: var(--muted); opacity: 1; }
+.am-field:disabled { background: none; }
+.am-round { flex: none; border-radius: 50%; display: grid; place-items: center; }
+.am-plus { background: var(--fill); color: var(--muted); }
+
+.am-send { background: color-mix(in srgb, var(--am-inverse) 25%, transparent); color: var(--am-on-inverse); }
+.am-send.can { background: var(--am-inverse); }
+.am-send:disabled, .am-plus:disabled, .am-voice:disabled { opacity: 0.5; }
+
+/* The mic: a grey circle; red with the time while it listens. */
+.am-voice { flex: none; position: relative; border-radius: 999px; display: grid; place-items: center; background: var(--fill); color: var(--muted); }
+.am-voice.recording { display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--error); color: #fff; }
+.am-voice-halo { position: absolute; inset: 0; border-radius: 999px; background: color-mix(in srgb, var(--error) 25%, transparent); z-index: -1; transition: transform 0.12s ease-out; }
+.am-voice-stop { width: 8px; height: 8px; border-radius: 2px; background: #fff; }
+.am-voice-time { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Images waiting in the box: 56 squares, radius 10, × at the corner. */
+.am-strip { display: flex; gap: 8px; padding: 6px 6px 0 0; }
+.am-strip-item { position: relative; width: 56px; height: 56px; }
+.am-strip-item img { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; display: block; }
+.am-strip-item::after { content: ""; position: absolute; inset: 0; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--line); pointer-events: none; }
+.am-strip-remove { position: absolute; top: -5px; right: -5px; width: 18px; height: 18px; border-radius: 50%; background: rgba(0, 0, 0, 0.65); color: #fff; display: grid; place-items: center; z-index: 1; }
+
+/* An error over the box, in its shape. */
+.am-feedback { position: relative; }
+.am-feedback.shown { background: var(--error-wash); }
+.am-feedback.shown::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--error) 30%, transparent); pointer-events: none; }
+.am-feedback-line { display: flex; align-items: flex-start; gap: 7px; padding: 4px 8px 4px 16px; color: var(--error-text); }
+.am-feedback-icon { margin-top: 4px; }
+.am-feedback-text { flex: 1; min-width: 0; font-size: 12px; padding: 2px 0; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.am-feedback-close { width: 20px; height: 20px; display: grid; place-items: center; flex: none; }
+
+/* The box's notes: 12 muted, 14 below the box, 34 high, centred. */
+.am-box { display: flex; flex-direction: column; }
+.am-box-note { height: 34px; padding-top: 14px; font-size: 12px; color: var(--muted); text-align: center; }
+.am-box-note b { font-weight: 600; }
+.am-key-note { display: inline-flex; gap: 4px; }
+.am-key-note a { color: var(--am-accent); text-decoration: none; }
+
+/* The key box: radius 26, 20 before the key icon, a 32 arrow button. */
+.am-keybox-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.am-keybox { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 8px 9px 20px; background: var(--surface); border-radius: 26px; box-shadow: 0 6px 36px rgba(0, 0, 0, 0.06), inset 0 0 0 1px var(--line); }
+.am-key-icon { color: var(--muted); }
+.am-key-field { flex: 1; min-width: 0; border: 0; outline: none; background: none; font-size: 15px; padding: 9px 0; line-height: 18px; color: var(--text); user-select: text; }
+.am-key-field::placeholder { color: var(--muted); opacity: 1; }
+.am-key-problem { font-size: 12px; color: var(--error-text); }
+
+/* The user's words: a bubble, fill, radius 18, 16 by 12, 80 clear on the left. */
+.am-user { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; padding-left: 80px; }
+.am-bubble { background: var(--fill); border-radius: 18px; padding: 9.5px 16px; font-size: 14px; line-height: calc(1.2em + 5px); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+.am-sent-row { display: flex; gap: 8px; }
+.am-sent { position: relative; height: 110px; width: 110px; border-radius: 12px; overflow: hidden; flex: none; }
+.am-sent img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.am-sent::after, .am-thumb::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px var(--line); pointer-events: none; }
+.am-sent.placeholder, .am-thumb.placeholder { background: var(--fill); display: grid; place-items: center; }
+
+/* Agentman's reply: the badge, 14, then markdown. */
+.am-reply { display: flex; align-items: flex-start; gap: 14px; }
+.am-reply-badge { padding-top: 1px; flex: none; display: flex; }
+.am-reply-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.am-thinking { display: flex; align-items: center; gap: 12px; padding-bottom: 8px; }
+.am-dots { display: inline-flex; align-items: center; gap: 4px; height: 18px; }
+.am-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); opacity: 0.35; animation: am-breathe 1.571s linear infinite; }
+.am-dots span:nth-child(2) { animation-delay: 0.175s; }
+.am-dots span:nth-child(3) { animation-delay: 0.35s; }
+@keyframes am-breathe { 0% { opacity: 0.35; } 12.5% { opacity: 0.81; } 25% { opacity: 1; } 37.5% { opacity: 0.81; } 50% { opacity: 0.35; } 100% { opacity: 0.35; } }
+
+/* Agentman's activity: a quiet line, 12 muted, 9 above and below, 34 in. */
+.am-acts { padding: 9px 0 9px 34px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+.am-act-toggle { display: flex; align-items: center; gap: 7px; max-width: 100%; text-align: left; color: var(--muted); }
+.am-act-toggle-icon { width: 12px; flex: none; display: grid; place-items: center; }
+.am-act-last { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.am-act-more { color: var(--faint); white-space: nowrap; flex: none; }
+.am-chevron { flex: none; transition: transform 0.15s ease-out; }
+.am-chevron.open { transform: rotate(90deg); }
+.am-act-rule { height: 1px; background: var(--tool-edge); margin: 3px 0; }
+.am-act-list { display: flex; flex-direction: column; gap: 8px; padding: 0 0 2px 18px; }
+.am-act-row { display: flex; align-items: baseline; gap: 7px; }
+.am-act-icon { width: 12px; flex: none; display: inline-grid; place-items: center; color: var(--faint); }
+.am-act-row .am-act-icon { align-self: flex-start; margin-top: 2px; }
+.am-act-text { color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* An image Agentman looked at: its label, then a 120-high thumbnail. */
+.am-image-act { padding-left: 34px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.am-image-head { padding: 9px 0; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); max-width: 100%; }
+.am-image-head .am-act-icon { color: inherit; }
+.am-image-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.am-thumb { position: relative; margin-left: 12px; height: 120px; width: 160px; border-radius: 10px; overflow: hidden; }
+.am-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* News from an agent: surface, radius 16, 18 by 16. */
+.am-brief { display: flex; align-items: flex-start; gap: 12px; padding: 16px 18px; background: var(--surface); border-radius: 16px; box-shadow: inset 0 0 0 1px var(--line); }
+.am-brief-mark { padding-top: 2px; flex: none; display: flex; }
+.am-brief-body { flex: 1; min-width: 0; margin-right: 20px; display: flex; flex-direction: column; gap: 4px; }
+.am-brief-name { font-size: 14px; font-weight: 500; color: var(--text); }
+.am-brief-text { font-size: 14px; line-height: calc(1.2em + 5px); margin: -2.5px 0; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.am-open-agent { font-size: 12px; color: var(--muted); flex: none; white-space: nowrap; }
+.am-close { width: 20px; height: 20px; flex: none; display: grid; place-items: center; color: var(--muted); }
+/* SwiftUI's Label: the symbol, 8 apart from its words. */
+.am-label { display: flex; align-items: center; gap: 9px; font-size: 12px; }
+.am-needs { color: var(--needs-you-text); }
+.am-error { color: var(--error-text); }
+
+/* Receipts: "✓ name · outcome", 12 muted, 34 in; × under the pointer. */
+.am-hover-close { display: flex; align-items: center; gap: 6px; width: 100%; }
+.am-hover-close .hover-only { opacity: 0; }
+.am-hover-close:hover .hover-only { opacity: 1; }
+.am-receipt { display: flex; align-items: center; gap: 6px; padding-left: 34px; font-size: 12px; color: var(--muted); min-width: 0; }
+.am-receipt-check { color: var(--ok); display: inline-flex; }
+.am-receipt-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A link button takes the row's colour (foregroundStyle(muted)). */
+.am-link { color: inherit; font-size: 12px; flex: none; }
+.am-faint { color: var(--faint); display: inline-flex; }
+
+.am-scheduled { display: flex; align-items: center; gap: 7px; padding-left: 34px; font-size: 12px; color: var(--muted); }
+.am-scheduled .am-act-icon { color: inherit; }
+.am-scheduled-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.am-compacted { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--faint); white-space: nowrap; }
+.am-rule { flex: 1; height: 1px; background: var(--line); }
+.am-faint-line { font-size: 12px; color: var(--faint); }
+
+/* An open card in the chat: surface, radius 14. */
+.am-card-box { background: var(--surface); border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line); }
+
+/* CompactCard: 12 around, 8 between. */
+.am-compact { margin: 0; border: 0; min-width: 0; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.am-compact-head { display: flex; align-items: center; gap: 6px; }
+.am-compact-name { font-size: 12px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.am-needs-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--needs-you); flex: none; }
+.am-needs-text { font-size: 12px; color: var(--needs-you-text); white-space: nowrap; }
+.am-compact-head .am-spacer { min-width: 0; margin-left: 0; }
+.am-icon-button { width: 18px; height: 18px; flex: none; display: grid; place-items: center; color: var(--muted); }
+.am-compact-title { font-size: 13px; color: var(--text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; }
+.am-inline-code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: inherit; }
+.am-compact-detail { display: block; font-family: var(--mono); font-size: 11px; color: var(--text-2); white-space: nowrap; overflow: hidden; padding: 4px 8px; background: color-mix(in srgb, var(--fill) 70%, transparent); border-radius: 6px; }
+.am-reply-field { display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; background: var(--fill); border-radius: 999px; }
+.am-reply-field input { flex: 1; min-width: 0; border: 0; outline: none; background: none; font-size: 12px; padding: 0; color: var(--text); user-select: text; }
+.am-reply-field input::placeholder { color: var(--text-2); opacity: 1; }
+.am-reply-send { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; flex: none; background: color-mix(in srgb, var(--am-inverse) 25%, transparent); color: var(--am-on-inverse); }
+.am-reply-send.can { background: var(--am-inverse); }
+.am-reply-send:disabled { opacity: 0.5; }
+.am-problem { font-size: 12px; color: var(--error-text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Compact choices: rows 2 apart, 8 by 5, radius 8; the likely one filled. */
+.am-choices { margin: 0; padding: 0; border: 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.am-options { display: flex; flex-direction: column; gap: 2px; }
+.am-option { display: flex; align-items: baseline; gap: 8px; padding: 5px 8px; border-radius: 8px; text-align: left; width: 100%; }
+.am-option.lead { background: var(--fill); }
+.am-option:hover { background: var(--fill-strong); }
+.am-option-number { width: 17px; height: 17px; flex: none; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 500; color: var(--muted); background: var(--fill); border-radius: 5px; }
+.am-option-label { flex: 1; min-width: 0; font-size: 12px; line-height: calc(1.2em + 2px); color: var(--text); }
+.am-option-pick { color: var(--working-text); display: inline-flex; align-self: center; }
+.am-option-return { color: var(--faint); display: none; align-self: center; }
+.am-option:hover .am-option-return { display: inline-flex; }
+.am-multi { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.am-check { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+.am-submit { padding: 6px 14px; border-radius: 15px; background: var(--am-inverse); color: var(--am-on-inverse); }
+.am-submit:disabled { opacity: 0.5; }
+.am-noting { display: flex; flex-direction: column; gap: 8px; }
+.am-noting-label { font-size: 12px; color: var(--muted); }
+.am-typed { display: flex; align-items: center; gap: 8px; }
+
+/* macOS's own controls, as near as a page draws them. */
+.am-rounded-field { flex: 1; min-width: 0; height: 22px; padding: 0 6px; font-size: 13px; color: var(--text); background: var(--surface); border: 1px solid var(--fill-strong); border-radius: 5px; outline: none; user-select: text; }
+.am-rounded-field.small { height: 19px; font-size: 12px; }
+.am-rounded-field:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--am-accent) 35%, transparent); border-color: var(--am-accent); }
+/* A push button as macOS 26 draws it: a grey capsule, 24 high; the default
+   one in the accent colour while the window is in front, grey otherwise. */
+.am-push { height: 24px; padding: 0 12px; border-radius: 12px; font-size: 13px; color: rgba(0, 0, 0, 0.85); background: #ebebeb; white-space: nowrap; }
+.am-push.small { height: 20px; padding: 0 9px; font-size: 11px; border-radius: 10px; }
+.am-push.prominent { background: var(--am-accent); color: #fff; }
+.inactive .am-push.prominent { background: #ebebeb; color: rgba(0, 0, 0, 0.85); }
+.am-push:disabled { opacity: 0.5; }
+@media (prefers-color-scheme: dark) {
+  .am-push, .inactive .am-push.prominent { background: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.85); }
+  .am-push.prominent { background: var(--am-accent); color: #fff; }
+}
+
+/* A suggested note: surface, radius 16, 18 around, 14 between. */
+.am-note { padding: 18px; display: flex; flex-direction: column; gap: 14px; background: var(--surface); border-radius: 16px; box-shadow: inset 0 0 0 1px var(--line); }
+.am-note-head { display: flex; align-items: center; gap: 8px; }
+.am-note-bookmark { color: var(--working); display: inline-flex; }
+.am-note-kicker { font-size: 12px; font-weight: 500; color: var(--text-2); }
+.am-note-position { font-size: 12px; color: var(--faint); }
+.am-note-x { width: 22px; height: 22px; display: grid; place-items: center; color: var(--muted); }
+.am-note-reading { display: flex; flex-direction: column; gap: 8px; }
+.am-note-title { font-size: 14px; font-weight: 500; color: var(--text); }
+.am-note-body { font-size: 14px; line-height: calc(1.2em + 3px); margin: -1.5px 0; color: var(--text-2); white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 8; -webkit-box-orient: vertical; overflow: hidden; }
+.am-note-why { font-size: 12px; color: var(--muted); }
+.am-note-who { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--faint); padding-top: 2px; }
+/* Editing: macOS 26's rounded field (26 high), the text box at its 160 most
+   (it takes the most it may), a segmented control as wide as its longer
+   label allows each half, and a checkbox. */
+.am-note-editor { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.am-note-title-field { flex: none; align-self: stretch; font-size: 14px; font-weight: 500; height: 26px; margin-top: -1px; margin-bottom: 2px; padding: 0 5.5px; border-radius: 7px; border: 1px solid #c4c4c4; border-bottom-color: #bababa; background: linear-gradient(#f9f9f9, #e6e6e6); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.07); }
+.am-note-title-field:focus { border-color: #c4c4c4; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.07), 0 0 0 3px color-mix(in srgb, var(--am-accent) 35%, transparent); }
+.am-note-body-field { align-self: stretch; height: 158px; padding: 5px 16px 5px 11px; font-size: 14px; line-height: normal; color: var(--text); background: var(--paper); border: 0; box-shadow: inset 0 0 0 1px var(--line); border-radius: 8px; outline: none; resize: none; user-select: text; }
+.am-segmented { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; height: 24px; margin-top: 0.5px; border-radius: 7px; background: #e7e7e7; }
+.am-segmented button { padding: 0 12.5px; border-radius: 7px; font-size: 13px; color: rgba(0, 0, 0, 0.85); white-space: nowrap; }
+.am-segmented button.on { background: #cacaca; }
+.am-checkbox { display: flex; align-items: center; gap: 5px; margin-top: -0.5px; font-size: 12px; color: var(--text); }
+.am-checkbox input { appearance: none; -webkit-appearance: none; margin: 0; width: 16px; height: 16px; border-radius: 4px; background: #dbdbdb; display: grid; place-items: center; }
+.am-checkbox input:checked::after { content: ""; width: 10px; height: 10px; background: #212121; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.5 5.2 4 7.8 8.6 2' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.5 5.2 4 7.8 8.6 2' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; }
+.am-note:not(.inactive) .am-checkbox input:checked { background: var(--am-accent); }
+.am-note:not(.inactive) .am-checkbox input:checked::after { background: #fff; }
+.am-checkbox.disabled { color: var(--faint); }
+.am-checkbox.disabled input { opacity: 0.5; }
+@media (prefers-color-scheme: dark) {
+  .am-note-title-field { border-color: rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.06); box-shadow: none; }
+  .am-segmented { background: rgba(255, 255, 255, 0.08); }
+  .am-segmented button { color: rgba(255, 255, 255, 0.85); }
+  .am-segmented button.on { background: rgba(255, 255, 255, 0.22); }
+  .am-checkbox input { background: rgba(255, 255, 255, 0.16); }
+  .am-checkbox input:checked::after { background: #f2f2f2; }
+}
+.am-note-buttons { display: flex; justify-content: flex-end; gap: 10px; }
+
+/* The popup: 400 wide, 22 from the right, 64 from the top. */
+/* 64 under the title bar's 32, as the overlay keeps to the safe area. */
+.am-note-popup { position: fixed; top: 96px; right: 22px; width: 400px; z-index: 40; border-radius: 16px; box-shadow: 0 10px 48px rgba(0, 0, 0, 0.18); }
+
+/* Toasts: bottom right, 16 in, 132 above the foot, 8 apart, 340 wide. */
+.am-toasts { position: fixed; right: 16px; bottom: 132px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; z-index: 30; pointer-events: none; }
+.am-toast { pointer-events: auto; width: 340px; background: var(--surface); border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line), 0 6px 28px rgba(0, 0, 0, 0.14); animation: am-toast-in 0.3s cubic-bezier(0.2, 1.1, 0.4, 1); }
+@keyframes am-toast-in { from { transform: translateX(40px); opacity: 0; } }
+.am-news { padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.am-news-head { display: flex; align-items: center; gap: 6px; }
+.am-news-says { font-size: 12px; color: var(--muted); }
+.am-news-text { font-size: 13px; color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Back to the latest: 32, surface, a fine line, 10 above the foot. */
+.am-jump { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--text); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line), 0 3px 16px rgba(0, 0, 0, 0.1); }
+
+/* Where dropped images land. */
+.am-drop { position: absolute; inset: 18px; border-radius: 18px; border: 2px dashed var(--working); background: color-mix(in srgb, var(--working-wash) 60%, transparent); display: grid; place-items: center; pointer-events: none; z-index: 5; }
+.am-drop-label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; color: var(--working-text); }
+
+/* The scheduled button and its popover (360 wide, 18 around). */
+/* A push button with a Label, as macOS 26 draws one: a grey capsule. */
+.am-scheduled-button { display: inline-flex; align-items: center; gap: 8.5px; height: 23px; padding: 0 13px; border-radius: 999px; font-size: 12px; color: rgba(0, 0, 0, 0.85); background: #ebebeb; }
+@media (prefers-color-scheme: dark) { .am-scheduled-button { background: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.85); } }
+.am-popover { position: fixed; z-index: 50; width: 360px; background: var(--surface); border-radius: 12px; box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.15), 0 10px 30px rgba(0, 0, 0, 0.18); }
+.am-popover-arrow { position: absolute; top: -7px; width: 14px; height: 14px; margin-left: -7px; background: var(--surface); transform: rotate(45deg); border-radius: 2px; box-shadow: -0.5px -0.5px 0 0 rgba(0, 0, 0, 0.12); }
+.am-schedules { position: relative; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+.am-schedules-title { font-size: 16px; font-weight: 500; color: var(--text); }
+.am-schedules-empty { font-size: 12px; color: var(--muted); }
+.am-schedule { display: flex; align-items: flex-start; gap: 10px; }
+.am-schedule-icon { width: 16px; flex: none; padding-top: 2px; display: grid; place-items: center; color: var(--working); }
+.am-schedule-text { flex: 1; min-width: 0; margin-right: 8px; display: flex; flex-direction: column; gap: 3px; }
+.am-schedule-what { font-size: 14px; line-height: calc(1.2em + 3px); margin: -1.5px 0; color: var(--text); }
+.am-schedule-when { font-size: 12px; color: var(--muted); }
+.am-schedule-cancel { color: var(--faint); display: inline-flex; }
+
+/* ProgressView, small. */
+.am-spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--muted) 35%, transparent); border-top-color: var(--muted); animation: spin 0.9s linear infinite; display: inline-block; }

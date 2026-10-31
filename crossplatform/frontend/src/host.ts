@@ -4,6 +4,7 @@
 
 import { Daemon, Host, Windows } from "../bindings/github.com/lenajeremy/agentman/crossplatform";
 import { Events } from "@wailsio/runtime";
+import { NotificationService } from "../bindings/github.com/wailsapp/wails/v3/pkg/services/notifications";
 
 export interface Endpoint {
   url: string;
@@ -96,6 +97,44 @@ export async function notify(id: string, title: string, body: string, link = "")
 
 export async function clearNotification(id: string): Promise<void> {
   if (inShell) await Host.ClearNotification(id);
+}
+
+/** A notification with the Mac's other parts: a subtitle, its thread
+ *  (grouped in Notification Center), and no sound when silent. Asks for
+ *  permission the first time, not at launch. Nothing where the shell can't
+ *  post them (a development build on macOS). */
+export interface Notice {
+  id: string;
+  title: string;
+  subtitle?: string;
+  body: string;
+  link?: string;
+  thread?: string;
+  silent?: boolean;
+}
+
+let noticeAsked = false;
+
+export async function notifyWith(n: Notice): Promise<void> {
+  if (!inShell) return;
+  try {
+    if (!(await NotificationService.CheckNotificationAuthorization())) {
+      if (noticeAsked) return;
+      noticeAsked = true;
+      if (!(await NotificationService.RequestNotificationAuthorization())) return;
+    }
+    await NotificationService.SendNotification({
+      id: n.id, title: n.title, subtitle: n.subtitle, body: n.body, threadId: n.thread,
+      data: { link: n.link ?? "" }, ...(n.silent ? { sound: { silent: true } } : {}),
+    });
+  } catch {
+    // Not available here.
+  }
+}
+
+/** Takes back every notification delivered, as opening Agentman does. */
+export async function clearAllNotifications(): Promise<void> {
+  if (inShell) await NotificationService.RemoveAllDeliveredNotifications().catch(() => {});
 }
 
 /** The dock icon's badge ("" clears it). macOS only. */
