@@ -21,9 +21,9 @@ func main() {
 	app := application.New(application.Options{
 		Name:        "Agentman",
 		Description: "Every coding agent on this computer, in one window",
-		Services: []application.Service{
+		Services: append([]application.Service{
 			application.NewService(&Daemon{}),
-		},
+		}, newHost().services()...),
 		Assets: application.AssetOptions{
 			Handler: withSymbols(application.AssetFileServerFS(assets)),
 		},
