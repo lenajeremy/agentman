@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Appear } from "../components/Appear";
 import { AgentIcon } from "../components/AgentIcon";
 import { AgentmanCard } from "../components/AgentmanCard";
+import { Loader } from "../components/Loader";
 import { ContentColumn } from "../components/ContentColumn";
 import { EmptyIllustration } from "../components/Illustrations";
 import { MotionPressable } from "../components/MotionPressable";
@@ -454,7 +455,12 @@ function AgentRow({
         ]}
       >
         <AgentIcon kind={session.kind} size={20} />
-        {displayState !== "idle" && displayState !== "ended" ? (
+        {displayState === "busy" ? (
+          // The Mac's working ring, on a disc cut out of the avatar's corner.
+          <View style={styles.avatarLoader}>
+            <Loader size={12} />
+          </View>
+        ) : displayState !== "idle" && displayState !== "ended" ? (
           <View style={styles.avatarPulse}>
             <Pulse state={displayState} size={7} />
           </View>
@@ -946,6 +952,17 @@ const makeStyles = (c: Palette) =>
     },
     serversLine: { flexDirection: "row", alignItems: "center", gap: 5 },
     serversText: { ...font.mono, fontSize: scaled(12), color: c.muted },
+    avatarLoader: {
+      position: "absolute",
+      right: -5,
+      bottom: -5,
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+    },
     avatarPulse: {
       position: "absolute",
       right: -8,

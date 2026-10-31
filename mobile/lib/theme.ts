@@ -52,6 +52,8 @@ const light = {
   workingText: "#1F35C7",
   workingWash: "#EEF1FF",
   workingSoft: "#D9DFFF",
+  /** The working ring's second colour, which it flows into and back from. */
+  loaderPink: "#F0407F",
   /** An agent is blocked on the user — the most actionable state there is. */
   needsYou: "#FF6A2B",
   needsYouText: "#C2451A",
@@ -101,6 +103,7 @@ const dark: Palette = {
   workingText: "#9DAAFF",
   workingWash: "#1A1F3D",
   workingSoft: "#28305E",
+  loaderPink: "#FF5C9A",
   needsYou: "#FF7D45",
   needsYouText: "#FF9A6C",
   needsYouWash: "#2E1B12",

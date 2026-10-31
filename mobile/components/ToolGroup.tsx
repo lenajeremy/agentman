@@ -9,6 +9,7 @@ import { useStore } from "../lib/store";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { runCounts, runFinished, toolRunKey } from "../lib/toolgroups";
 import { MotionPressable } from "./MotionPressable";
+import { Loader } from "./Loader";
 import { SeenImage } from "./SeenImage";
 import { ToolRow } from "./ToolRow";
 
@@ -86,7 +87,7 @@ export function ToolGroup({
         accessibilityState={{ expanded: open }}
       >
         <View style={[styles.tile, running && styles.tileRunning]}>
-          <Feather name="layers" size={12} color={running ? color.working : color.muted} />
+          {running ? <Loader size={11} /> : <Feather name="layers" size={12} color={color.muted} />}
         </View>
         {/* One line while it is a pill; all of it once opened. */}
         <Text style={styles.line} numberOfLines={open ? undefined : 1}>

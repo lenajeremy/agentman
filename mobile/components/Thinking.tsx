@@ -1,19 +1,8 @@
-import { useEffect } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import Animated, {
-  Easing,
-  cancelAnimation,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withDelay,
-  withRepeat,
-  withSequence,
-  withTiming,
-} from "react-native-reanimated";
 
 import { useStyles } from "../lib/appearance";
 import { font, Palette, size, space } from "../lib/theme";
+import { Loader } from "./Loader";
 
 /**
  * Shown at the foot of the feed while the agent is mid-turn.
@@ -23,67 +12,21 @@ import { font, Palette, size, space } from "../lib/theme";
  * app, because "it is thinking" and "it is done and this is the answer" are
  * the two states the whole product exists to distinguish.
  *
- * Three dots rather than a spinner. A spinner says "the app is loading"; the
- * app is fine, and it is the agent that is busy — this reads as someone
- * composing a reply, which is what is actually happening.
+ * The Mac's working ring, so an agent at work looks the same on both.
  */
 export function Thinking({ label = "Working" }: { label?: string }) {
-  const reduceMotion = useReducedMotion();
   const styles = useStyles(makeStyles);
 
   return (
     <View style={styles.row} accessibilityRole="progressbar" accessibilityLabel={label}>
-      <View style={styles.dots}>
-        {[0, 1, 2].map((index) => (
-          <Dot key={index} index={index} still={reduceMotion} />
-        ))}
-      </View>
+      <Loader size={14} />
       <Text style={styles.label}>{label}</Text>
     </View>
   );
 }
 
-function Dot({ index, still }: { index: number; still: boolean }) {
-  const opacity = useSharedValue(0.25);
-  const styles = useStyles(makeStyles);
-
-  useEffect(() => {
-    if (still) {
-      opacity.value = 0.6;
-      return;
-    }
-    // Staggered so the dots travel as a wave rather than blinking in unison,
-    // which would read as an alert rather than activity.
-    opacity.value = withDelay(
-      index * 180,
-      withRepeat(
-        withSequence(
-          withTiming(1, { duration: 360, easing: Easing.linear }),
-          withTiming(0.25, { duration: 360, easing: Easing.linear }),
-        ),
-        -1,
-        false,
-      ),
-    );
-    return () => cancelAnimation(opacity);
-  }, [index, still, opacity]);
-
-  const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
-
-  return <Animated.View style={[styles.dot, style]} />;
-}
-
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     row: { flexDirection: "row", alignItems: "center", gap: space.sm },
-    dots: { flexDirection: "row", gap: 5, alignItems: "center" },
-    dot: {
-      width: 6,
-      height: 6,
-      borderRadius: 3,
-      // The same cobalt the status dot uses for a working agent, so the two
-      // read as one signal in different places.
-      backgroundColor: c.working,
-    },
     label: { ...font.sansMedium, fontSize: size.caption, color: c.muted },
   });
