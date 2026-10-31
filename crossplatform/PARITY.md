@@ -442,12 +442,12 @@ Swift that does it today.
 - Differs: the legacy NSTextView editor (`-legacyEditor YES`, CodeTextView.swift) is not carried over; Monaco is the only editor.
 
 ## 13. Anything else
-- [ ] Away detection: app in the background, screen locked, computer asleep. Summary on return when away long enough and something happened — AgentsStore.swift:1019, AwayLog.swift:44
-- [ ] Away summary sheet — AwaySummary.swift:6
-  - [ ] "While you were away" and "<time> away · N agents worked · Agentman approved N · N need you" — AwaySummary.swift:84
-  - [ ] Rows: mark, name, folder, Needs you badge, what it waits on, brief or last words, turns finished / approvals; click opens the agent — AwaySummary.swift:110
-  - [ ] Ask Agentman for more (needs a key); Done ⏎, Esc, click outside — AwaySummary.swift:56
-- [ ] Away log keeps at most a day, 3000 events — AwayLog.swift:23
+- [x] Away detection: app in the background, screen locked, computer asleep. Summary on return when away long enough and something happened — AgentsStore.swift:1019, AwayLog.swift:44
+- [x] Away summary sheet — AwaySummary.swift:6
+  - [x] "While you were away" and "<time> away · N agents worked · Agentman approved N · N need you" — AwaySummary.swift:84
+  - [x] Rows: mark, name, folder, Needs you badge, what it waits on, brief or last words, turns finished / approvals; click opens the agent — AwaySummary.swift:110
+  - [x] Ask Agentman for more (needs a key); Done ⏎, Esc, click outside — AwaySummary.swift:56
+- [x] Away log keeps at most a day, 3000 events — AwayLog.swift:23
 - [ ] File icon theme: exact name, then longest extension, then default; open/closed folder icons — WorkspacePanel.swift:529
 - [ ] Agent marks per kind (one-colour marks take the text colour; terminal symbol fallback); product names — Theme.swift:132, SessionLabels.swift:43
 - [ ] Readable mode and model labels (e.g. "Opus 5.5", "Accept edits", "GPT-…") — SessionLabels.swift:6
