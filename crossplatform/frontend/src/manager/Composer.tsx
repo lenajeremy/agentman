@@ -183,6 +183,13 @@ export function ManagerComposer({ text, setText, attachments, setAttachments, th
   );
 }
 
+/** Where am serve keeps the key: the Keychain on a Mac, a file only the
+ *  user can read elsewhere (internal/secrets). */
+function keptWhere(): string {
+  const os = document.documentElement.dataset.platform;
+  return os === "linux" || os === "windows" ? "kept in a file only you can read" : "kept in your Keychain";
+}
+
 /** Where the API key goes, in place of the message box until there is one. */
 function KeyBox() {
   const s = useManager();
@@ -260,7 +267,7 @@ export function ManagerBox({ text, setText, attachments, setAttachments, sending
             <span>Connecting…</span>
           ) : (
             <span className="am-key-note">
-              {gemini ? "Agentman runs on your Gemini API key, kept in your Keychain." : "Agentman runs on your Anthropic API key, kept in your Keychain."}
+              {`Agentman runs on your ${gemini ? "Gemini" : "Anthropic"} API key, ${keptWhere()}.`}
               <a
                 href={gemini ? "https://aistudio.google.com/apikey" : "https://console.anthropic.com/settings/keys"}
                 onClick={(e) => {

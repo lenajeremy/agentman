@@ -69,13 +69,13 @@ export function MiddleTruncated({ text, className, title }: { text: string; clas
       let hi = text.length;
       while (lo < hi) {
         const mid = Math.ceil((lo + hi) / 2);
-        const head = Math.ceil(mid / 2);
-        const candidate = text.slice(0, head) + "…" + text.slice(text.length - (mid - head));
+        const head = Math.floor(mid / 2);
+        const candidate = text.slice(0, head) + "…" + text.slice(text.length - head);
         if (ctx.measureText(candidate).width <= width) lo = mid;
         else hi = mid - 1;
       }
-      const head = Math.ceil(lo / 2);
-      setShown(text.slice(0, head) + "…" + text.slice(text.length - (lo - head)));
+      const head = Math.floor(lo / 2);
+      setShown(text.slice(0, head) + "…" + text.slice(text.length - head));
     };
     fit();
     const observer = new ResizeObserver(fit);
