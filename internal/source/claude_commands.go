@@ -672,6 +672,9 @@ func (s *ClaudeSource) CommandPanel(ctx context.Context, sessionID, command stri
 	lock := s.paneLock(session.tmuxName)
 	lock.Lock()
 	defer lock.Unlock()
+	if err := s.clearInfoPanel(ctx, session.tmuxName); err != nil {
+		return protocol.CommandPanel{}, err
+	}
 	pane, err := s.capturePane(ctx, session.tmuxName)
 	if err != nil {
 		return protocol.CommandPanel{}, fmt.Errorf("source: could not read the terminal: %w", err)
@@ -812,6 +815,73 @@ func claudePanelText(pane string) (string, bool) {
 		body = body[1:]
 	}
 	return strings.Join(dedent(singleBlanks(blockLinesOf(body))), "\n"), true
+}
+
+// claudeInfoPanel reports whether the pane shows one of Claude Code's
+// panels that only show something: the Settings panel /status, /config,
+// /usage and /stats open, /help, /mcp and /tasks. Esc closes each, and
+// closing one changes nothing. Left open in the terminal, one is not
+// something the agent waits on: the phone neither reports it as a question
+// nor has a message refused for it; it is closed first. A dialog that asks
+// something is not one of these, and still is.
+func claudeInfoPanel(pane string) bool {
+	if _, prompt := claudePromptFooter(pane); prompt {
+		return false
+	}
+	lines := strings.Split(strings.TrimRight(pane, "\n"), "\n")
+	top := -1
+	for index := len(lines) - 1; index >= 0; index-- {
+		if strings.Count(lines[index], "▔") >= 20 {
+			top = index
+			break
+		}
+	}
+	if top < 0 {
+		return false
+	}
+	end := len(lines) - 1
+	for end > top && strings.TrimSpace(lines[end]) == "" {
+		end--
+	}
+	if end <= top || !strings.Contains(lines[end], "Esc to ") {
+		return false
+	}
+	for _, line := range lines[top+1 : end] {
+		if first := strings.TrimSpace(line); first != "" {
+			return claudeInfoPanelTop(first)
+		}
+	}
+	return false
+}
+
+// claudeInfoPanelTop recognises an info panel by its first line: the tabs
+// of the Settings or Help panel, or the title of /mcp's or /tasks'.
+func claudeInfoPanelTop(first string) bool {
+	if first == "Manage MCP servers" || first == "Background" || strings.HasPrefix(first, "Background tasks") {
+		return true
+	}
+	if !isPanelTabs(first) {
+		return false
+	}
+	for _, tab := range strings.Fields(first) {
+		switch tab {
+		case "Status", "Config", "Usage", "Stats", "General", "Commands":
+			return true
+		}
+	}
+	return false
+}
+
+// clearInfoPanel closes an info panel left open in the terminal before
+// something is typed there or read from it; see claudeInfoPanel. The caller
+// holds the pane's lock. Anything else on screen is left for the checks
+// that follow to judge.
+func (s *ClaudeSource) clearInfoPanel(ctx context.Context, tmuxName string) error {
+	pane, err := s.capture(ctx, tmuxName)
+	if err != nil || !claudeInfoPanel(pane) {
+		return nil
+	}
+	return s.closePanel(ctx, tmuxName)
 }
 
 // singleBlanks keeps one blank line where a panel leaves several.

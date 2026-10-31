@@ -308,3 +308,95 @@ func TestClaudeClearNamesTheConversationItTookOver(t *testing.T) {
 		}
 	}
 }
+
+// /usage, /status, /help, /mcp and /tasks only show something; the prompt,
+// a dialog that asks something, a permission prompt, a question and the
+// model picker are not panels to close.
+func TestClaudeInfoPanels(t *testing.T) {
+	for _, name := range []string{"usage", "status", "help", "mcp", "tasks"} {
+		if !claudeInfoPanel(readPaneFixture(t, "testdata", "claude-panel-"+name+".txt")) {
+			t.Errorf("/%s is not an info panel", name)
+		}
+	}
+	for _, path := range [][]string{
+		{"testdata", "claude-pane-vim-insert.txt"},
+		{"..", "question", "testdata", "claude_auto_mode_setup_dialog_real_pane.txt"},
+		{"..", "question", "testdata", "claude_permission_real_pane.txt"},
+		{"..", "question", "testdata", "claude_single_real_pane.txt"},
+		{"..", "question", "testdata", "claude_model_picker_real_pane.txt"},
+	} {
+		if claudeInfoPanel(readPaneFixture(t, path...)) {
+			t.Errorf("%s read as an info panel", path[len(path)-1])
+		}
+	}
+}
+
+// /usage left open at the Mac used to refuse every message from the phone.
+// It is closed, with one Esc, and the message goes; a dialog that asks
+// something is still refused, and no Esc is pressed on it.
+func TestClaudeSendClosesAnInfoPanelFirst(t *testing.T) {
+	if !tmux.Available() {
+		t.Skip("tmux not installed")
+	}
+	ctx := context.Background()
+	name := "agentman-claude-info-panel"
+	out := filepath.Join(t.TempDir(), "typed")
+	if err := tmux.Launch(ctx, name, t.TempDir(), []string{"sh", "-c", "stty raw -echo; cat > " + out}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tmux.Kill(context.Background(), name) })
+	time.Sleep(300 * time.Millisecond)
+
+	pane := &scriptedPane{
+		prompt: readPaneFixture(t, "testdata", "claude-pane-vim-insert.txt"),
+		panel:  readPaneFixture(t, "testdata", "claude-panel-usage.txt"),
+		typed:  true, opens: true,
+	}
+	s := &ClaudeSource{home: t.TempDir(), capturePane: pane.capture, closeDialog: pane.escape,
+		sessions: map[string]claudeSession{"claude:s1": {tmuxName: name}}}
+	mode, err := s.Inject(ctx, "claude:s1", "hello from the phone")
+	if err != nil || mode != protocol.InjectTmux {
+		t.Fatalf("Inject = %v, %v", mode, err)
+	}
+	if pane.escapes != 1 {
+		t.Errorf("pressed Esc %d times, want once", pane.escapes)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		data, _ := os.ReadFile(out)
+		if strings.Contains(string(data), "hello from the phone") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("typed %q", data)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	dialog := &scriptedPane{prompt: readPaneFixture(t, "..", "question", "testdata", "claude_auto_mode_setup_dialog_real_pane.txt")}
+	asking := &ClaudeSource{home: t.TempDir(), capturePane: dialog.capture, closeDialog: dialog.escape,
+		sessions: map[string]claudeSession{"claude:s1": {tmuxName: name}}}
+	if _, err := asking.Inject(ctx, "claude:s1", "typed into a dialog"); err == nil {
+		t.Error("a message was sent into a dialog that asks something")
+	}
+	if dialog.escapes != 0 {
+		t.Errorf("pressed Esc %d times on a dialog that asks something", dialog.escapes)
+	}
+}
+
+// An open /usage is not the agent waiting on the user: no question, and the
+// registry's "waiting" for it reads as idle.
+func TestClaudeInfoPanelIsNotAQuestion(t *testing.T) {
+	usage := readPaneFixture(t, "testdata", "claude-panel-usage.txt")
+	s := &ClaudeSource{home: t.TempDir(), questionSpecs: map[string]claudeQuestionSpecCache{},
+		capturePane: func(context.Context, string) (string, error) { return usage, nil }}
+	meta := protocol.Session{ID: "claude:s1", State: protocol.StateWaitingInput}
+	s.applyPane(&meta, "", usage)
+	if meta.Question != nil || meta.State != protocol.StateIdle {
+		t.Errorf("question %+v, state %s", meta.Question, meta.State)
+	}
+	s.sessions = map[string]claudeSession{"claude:s1": {tmuxName: "agentman-claude-unused", meta: meta}}
+	if current, err := s.CurrentQuestion(context.Background(), "claude:s1"); current != nil || err != nil {
+		t.Errorf("CurrentQuestion = %+v, %v", current, err)
+	}
+}

@@ -132,6 +132,14 @@ func (s *ClaudeSource) offeredModels() []string {
 // applyPane fills in what a pane-bound session's screen says about it: the
 // question it is blocked on, and the mode and models it can be switched to.
 func (s *ClaudeSource) applyPane(meta *protocol.Session, transcript, pane string) {
+	// /usage left open in the terminal is not something to answer, and the
+	// registry's "waiting" for it is not either.
+	if claudeInfoPanel(pane) {
+		if meta.State == protocol.StateWaitingInput {
+			meta.State = protocol.StateIdle
+		}
+		return
+	}
 	if detected := question.Detect(pane); detected != nil {
 		s.enrichClaudeQuestion(meta.ID, transcript, detected)
 		meta.Question = protocolQuestion(detected)
@@ -226,6 +234,9 @@ func (s *ClaudeSource) SetMode(ctx context.Context, sessionID, mode string) erro
 	lock := s.paneLock(name)
 	lock.Lock()
 	defer lock.Unlock()
+	if err := s.clearInfoPanel(ctx, name); err != nil {
+		return err
+	}
 	d := s.switcher
 	for presses := 0; presses <= len(claudeModes)+1; presses++ {
 		pane, err := d.capture(ctx, name)
@@ -314,6 +325,9 @@ func (s *ClaudeSource) SetModel(ctx context.Context, sessionID, model string) er
 	lock := s.paneLock(name)
 	lock.Lock()
 	defer lock.Unlock()
+	if err := s.clearInfoPanel(ctx, name); err != nil {
+		return err
+	}
 	label := claudeModelLabel(model)
 	if label == "" {
 		return fmt.Errorf("source: %q is not a Claude model this can switch to", model)
