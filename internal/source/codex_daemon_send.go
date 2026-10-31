@@ -53,6 +53,13 @@ func (s *CodexSource) sendThroughDaemon(ctx context.Context, sessionID string, s
 	if thread == "" || server == nil {
 		return false, nil
 	}
+	// The daemon compacts directly, pane or not.
+	if codexCompactCommand(text) && len(images) == 0 {
+		if err := server.call(ctx, "thread/compact/start", map[string]any{"threadId": thread}, nil); err != nil {
+			return true, fmt.Errorf("source: Codex did not compact: %w", err)
+		}
+		return true, nil
+	}
 	if codexTerminalOnly(text) {
 		if session.tmuxName != "" {
 			return false, nil

@@ -658,6 +658,18 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			if read {
 				s.applyFooter(&session, screen)
 			}
+			// With no footer to read, the daemon says the mode and model,
+			// and switches them; see codex_daemon_switch.go.
+			if onDaemon && len(session.Modes) == 0 {
+				session.Modes = append([]string(nil), codexModes...)
+				session.Mode = thread.Mode
+				for _, model := range s.codexModels() {
+					session.Models = append(session.Models, model.slug)
+				}
+				if len(session.Models) > 0 {
+					session.ModelScope = protocol.ModelScopeSession
+				}
+			}
 
 			found = append(found, session)
 			next[id] = codexSession{meta: session, transcript: path, tmuxName: tmuxName}

@@ -39,8 +39,10 @@ type codexDaemonThread struct {
 	// the first message, when Codex writes the rollout.
 	Cwd  string
 	Path string
-	// Model is the model the thread's next turn uses.
-	Model string
+	// Model is the model the thread's next turn uses, and Effort its
+	// reasoning effort ("" when unset).
+	Model  string
+	Effort string
 	// Mode is Codex's collaboration mode, "plan" or "default", when known.
 	Mode string
 	// Ephemeral threads (the TUI's title generation) and subagents' threads
@@ -79,6 +81,7 @@ type codexWireThread struct {
 	Cwd            string          `json:"cwd"`
 	Path           *string         `json:"path"`
 	Model          string          `json:"model"`
+	Effort         *string         `json:"reasoningEffort"`
 	Ephemeral      bool            `json:"ephemeral"`
 	ParentThreadID *string         `json:"parentThreadId"`
 	Status         codexWireStatus `json:"status"`
@@ -104,6 +107,9 @@ func (w codexWireThread) thread() codexDaemonThread {
 	}
 	if w.Path != nil {
 		t.Path = *w.Path
+	}
+	if w.Effort != nil {
+		t.Effort = *w.Effort
 	}
 	if w.ParentThreadID != nil {
 		t.ParentThreadID = *w.ParentThreadID
@@ -277,7 +283,8 @@ func (l *codexLiveThreads) apply(msg codexRPCMessage) {
 		var params struct {
 			ThreadID string `json:"threadId"`
 			Settings struct {
-				Model             string `json:"model"`
+				Model             string  `json:"model"`
+				Effort            *string `json:"effort"`
 				CollaborationMode *struct {
 					Mode string `json:"mode"`
 				} `json:"collaborationMode"`
@@ -290,6 +297,9 @@ func (l *codexLiveThreads) apply(msg codexRPCMessage) {
 		if thread, known := l.threads[params.ThreadID]; known {
 			if params.Settings.Model != "" {
 				thread.Model = params.Settings.Model
+			}
+			if params.Settings.Effort != nil {
+				thread.Effort = *params.Settings.Effort
 			}
 			if params.Settings.CollaborationMode != nil {
 				thread.Mode = params.Settings.CollaborationMode.Mode
