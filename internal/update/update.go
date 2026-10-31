@@ -229,17 +229,53 @@ func changes(body string) []string {
 	return out
 }
 
-// UpgradeCommand is the command that upgrades the am at executable, judged by
-// where it was installed.
-func UpgradeCommand(executable string) string {
+// UpgradeCommand upgrades agentman, whichever way it was installed: am
+// upgrade does it the way the am at hand came (see HowInstalled).
+const UpgradeCommand = "am upgrade"
+
+// How is the way an am was installed.
+type How int
+
+const (
+	// Downloaded is the install script's way, or a copy put somewhere by
+	// hand: a binary nothing else manages.
+	Downloaded How = iota
+	// Homebrew is the agentman cask.
+	Homebrew
+	// Npm is the agentman package, installed globally.
+	Npm
+)
+
+// HomebrewCask is the cask, named fully: Homebrew refuses a bare name from a
+// tap nobody has trusted yet.
+const HomebrewCask = "lenajeremy/agentman/agentman"
+
+// HowInstalled judges how the am at executable (with symlinks resolved) was
+// installed, by where it is.
+func HowInstalled(executable string) How {
 	switch {
 	case strings.Contains(executable, "/Caskroom/"):
-		return "brew upgrade --cask lenajeremy/agentman/agentman"
+		return Homebrew
 	case strings.Contains(executable, "/node_modules/"):
-		return "npm install -g agentman@latest"
+		return Npm
 	default:
-		return "curl -fsSL https://agentman-nu.vercel.app/install | sh"
+		return Downloaded
 	}
+}
+
+// IsRelease reports whether v names a release ("0.31.0") rather than a
+// build of unreleased work ("0.30.0-dev+history-tab").
+func IsRelease(v string) bool {
+	_, ok := parseVersion(v)
+	return ok
+}
+
+// Before reports whether release a is older than release b; false when
+// either is not a release.
+func Before(a, b string) bool {
+	x, okA := parseVersion(a)
+	y, okB := parseVersion(b)
+	return okA && okB && y.after(x)
 }
 
 type version [3]int

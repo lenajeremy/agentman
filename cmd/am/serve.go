@@ -341,7 +341,7 @@ func runServe(ctx context.Context, args []string) error {
 	// what is newer, once GitHub has said. The phone offers the upgrade; this
 	// only finds out.
 	updates := update.NewChecker(version)
-	upgrade := update.UpgradeCommand(installedPath())
+	upgrade := update.UpgradeCommand
 	agent.SetDaemonInfo(func() *protocol.DaemonInfo { return daemonInfo(updates, upgrade) })
 	if cfg.Updates.Enabled() && version != "dev" {
 		updates.OnChange = func(status update.Status) {

@@ -60,6 +60,8 @@ Usage:
   am lsp install <language>   Get a language's server now (go, typescript, python, rust)
   am lsp clean                Remove the language servers am downloaded
   am doctor                   Check that everything is wired up correctly
+  am upgrade [-check]         Install the newest agentman the way this one was
+                              installed, and restart the service on it
   am version                  Print the version
 
 Flags:
@@ -141,6 +143,8 @@ func main() {
 		err = runOpen(args)
 	case "doctor":
 		err = runDoctor(ctx, args)
+	case "upgrade":
+		err = runUpgrade(ctx, args)
 	case "version", "--version", "-v":
 		err = runVersion(args)
 	case "-h", "--help", "help":
