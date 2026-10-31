@@ -137,6 +137,54 @@ final class RedesignShotsTests: XCTestCase {
         }
     }
 
+    /// The editor with no file open: a folder with nothing changed, and one
+    /// where agents changed a few files, in light and dark.
+    func testRenderEditorEmpty() async throws {
+        guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
+        let key = "agentPanelOpen"
+        let was = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let was { UserDefaults.standard.set(was, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        func git(_ args: [String], in folder: URL) throws {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["-c", "user.name=Test", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"] + args
+            process.currentDirectoryURL = folder
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+        }
+        for changes in [false, true] {
+            let root = try folder(changes ? "webify" : "notes")
+            func write(_ files: [String: String]) throws {
+                for (path, text) in files {
+                    let url = root.appendingPathComponent(path)
+                    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try Data(text.utf8).write(to: url)
+                }
+            }
+            try write(["README.md": "# Webify\n", "package.json": "{}\n", "src/login.tsx": "export {}\n",
+                       "src/checkout/cart.tsx": "export {}\n", "go.mod": "module webify\n"])
+            try git(["init", "-q", "-b", "main"], in: root)
+            try git(["add", "-A"], in: root)
+            try git(["commit", "-qm", "Start"], in: root)
+            if changes {
+                try write(["src/login.tsx": "export const id = 1\n", "src/checkout/cart.tsx": "export const cart = []\n",
+                           "README.md": "# Webify\n\nNow with Linux.\n", "src/lib/uuid.ts": "export {}\n"])
+            }
+            let editor = EditorRegistry.shared.store(for: root.path)
+            editor.showAgentPanel = false
+            await editor.refresh()
+            for dark in [false, true] {
+                try render(EditorWindow(folder: root.path, client: DaemonClient(socketPath: "/nonexistent/agentman-shots.sock")),
+                           size: CGSize(width: 1180, height: 720), dark: dark, store: try store().0,
+                           to: URL(fileURLWithPath: out).appendingPathComponent("editor-empty-\(changes ? "changed" : "clean")-\(dark ? "dark" : "light").png"))
+            }
+        }
+    }
+
     /// The message box with a picture and a few lines in it, alone, to see
     /// the room around its text.
     func testRenderTheMessageBox() throws {
