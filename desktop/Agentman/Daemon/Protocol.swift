@@ -491,6 +491,9 @@ struct Usage: Codable, Sendable, Equatable {
 
     var days: Int
     var hourly: Bool?
+    /// How wide the buckets are: "hour", "day", "week" or "month"; absent
+    /// from daemons that predate it.
+    var unit: String?
     var sessions: Int
     var tokens: Tokens
     var cost: Cost
