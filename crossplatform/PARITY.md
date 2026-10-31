@@ -356,22 +356,25 @@ Swift that does it today.
     - Differs: shortcuts read "Ctrl+N" off macOS.
 
 ## 11. Notifications
-- [ ] Kinds: agent finished, agent needs you, Agentman (replies, briefs, what agents tell it), note suggestions — NotificationPolicy.swift:6
-- [ ] Policy: switch per kind (on by default), muted folders and their subfolders, quiet hours that can cross midnight (needs-you may still come through) — NotificationPolicy.swift:39
-- [ ] While Agentman is on, an agent notifies for itself only when flagged per agent or "every agent" is on — NotificationPolicy.swift:60
-- [ ] Never for the thread in view (main window or editor panel, app in front) — AgentsStore.swift:1037
-- [ ] "<name> finished" with its last words; "<name> needs you" with the question — AgentsStore.swift:773, AgentsStore.swift:789
+- [x] Kinds: agent finished, agent needs you, Agentman (replies, briefs, what agents tell it), note suggestions — NotificationPolicy.swift:6
+  - Note: src/notify/policy.ts shouldNotify(kind, folder) answers for every kind; the Agentman area posts its own.
+- [x] Policy: switch per kind (on by default), muted folders and their subfolders, quiet hours that can cross midnight (needs-you may still come through) — NotificationPolicy.swift:39
+- [x] While Agentman is on, an agent notifies for itself only when flagged per agent or "every agent" is on — NotificationPolicy.swift:60
+- [x] Never for the thread in view (main window or editor panel, app in front) — AgentsStore.swift:1037
+  - Note: an editor's agent panel says what it shows with showInPanel() from src/notify/onScreen.ts.
+- [x] "<name> finished" with its last words; "<name> needs you" with the question — AgentsStore.swift:773, AgentsStore.swift:789
 - [ ] Agentman notifications — Notifier.swift:21
   - [ ] "Agentman suggests a note" (silent) — Notifier.swift:29
   - [ ] "<agent> needs you", subtitle "Agentman marked its pick for you to confirm" — Notifier.swift:34
   - [ ] Briefs as "Agentman", agent messages as "<agent> says" (link to the agent); replies as "Agentman" — Notifier.swift:41
   - [ ] Markdown flattened to plain text, body ≤400 chars — Notifier.swift:52, Notifier.swift:110
 - [ ] Routing: viewing Agentman marks it read; app in front shows a toast; otherwise a notification — AgentsStore.swift:842
-- [ ] Grouped by thread (agentman / agent-<id>); sound per setting; shown even with the app in front — Notifier.swift:25, Notifier.swift:127
-- [ ] Click activates the app and opens agentman://agent/<id> or agentman://home/conversation — Notifier.swift:135
+- [x] Grouped by thread (agentman / agent-<id>); sound per setting; shown even with the app in front — Notifier.swift:25, Notifier.swift:127
+  - Differs: not grouped by thread, which Wails' notifications can't set; the sound and the banner in front as the Mac's.
+- [x] Click activates the app and opens agentman://agent/<id> or agentman://home/conversation — Notifier.swift:135
 - [ ] A card answered anywhere takes back its notification; opening Agentman clears all delivered — Notifier.swift:79, AgentsStore.swift:897
-- [ ] Permission asked the first time there is something to say, not at launch — Notifier.swift:96
-- [ ] Tells the daemon what is on screen (again every minute) so agents in view get no card or push — AgentsStore.swift:1061
+- [x] Permission asked the first time there is something to say, not at launch — Notifier.swift:96
+- [x] Tells the daemon what is on screen (again every minute) so agents in view get no card or push — AgentsStore.swift:1061
 
 ## 12. Editor window
 - [ ] Header: app badge, folder / branch, Go to file, Toggle terminal, Show in Finder, Toggle agent panel — EditorWindow.swift:203

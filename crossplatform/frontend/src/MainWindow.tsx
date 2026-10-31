@@ -21,6 +21,7 @@ import { useFullscreen } from "./shell/native";
 import { useShell } from "./shell/state";
 import { useStore } from "./store";
 import { ChromeButton, Icon } from "./ui";
+import "./notify/agents";
 import "./styles/shell.css";
 
 // Whether the daemon has listed its sessions yet: until then an agent that

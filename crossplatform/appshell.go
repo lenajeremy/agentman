@@ -115,6 +115,9 @@ func (s *Shell) start(app *application.App, win *application.WebviewWindow, test
 			s.emitLater("agentman:open", link)
 		}
 	})
+	// A clicked notification's link brings the window forward too, as
+	// Notifier.swift activates the app.
+	app.Event.On("agentman:open", func(*application.CustomEvent) { s.raise() })
 	for _, arg := range os.Args[1:] {
 		if isAppLink(arg) {
 			s.emitLater("agentman:open", arg)
