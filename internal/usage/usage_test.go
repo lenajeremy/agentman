@@ -124,6 +124,37 @@ func TestCodexCallsAreTheChangeInItsTotals(t *testing.T) {
 	}
 }
 
+// A session carried on from another starts with that one's totals, its
+// last call nothing: only what it adds is its own.
+func TestCodexCarriedTotalsAreNotCountedAgain(t *testing.T) {
+	home := t.TempDir()
+	at := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	count := func(in, cached, out, lastIn, lastCached, lastOut int) string {
+		return `{"timestamp":"` + at + `","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":` + itoa(in) +
+			`,"cached_input_tokens":` + itoa(cached) + `,"output_tokens":` + itoa(out) + `},"last_token_usage":{"input_tokens":` + itoa(lastIn) +
+			`,"cached_input_tokens":` + itoa(lastCached) + `,"output_tokens":` + itoa(lastOut) + `}}}}`
+	}
+	write(t, filepath.Join(home, ".codex/sessions/2026/10/31/rollout-carried.jsonl"),
+		`{"timestamp":"`+at+`","type":"session_meta","payload":{"id":"s2"}}`,
+		`{"timestamp":"`+at+`","type":"compacted","payload":{"message":"summary"}}`,
+		count(900000, 800000, 5000, 0, 0, 0),
+		`{"timestamp":"`+at+`","type":"turn_context","payload":{"model":"gpt-6.1-sol"}}`,
+		count(903000, 802500, 5030, 3000, 2500, 30),
+	)
+	records, _ := NewScanner(home, WithCatalog(prices)).Records(context.Background(), time.Now().Add(-24*time.Hour))
+	if len(records) != 1 || records[0].Tokens != (protocol.Tokens{Input: 500, CacheRead: 2500, Output: 30}) || records[0].Model != "gpt-6.1-sol" {
+		t.Fatalf("records = %+v", records)
+	}
+}
+
+// Codex's input counts what it wrote to the cache: fresh input is the rest.
+func TestCodexCacheWritesAreNotFreshInput(t *testing.T) {
+	u := codexUsage{Input: 1000, Cached: 600, CacheWrite: 300, Output: 10}
+	if got := u.tokens(); got != (protocol.Tokens{Input: 100, CacheRead: 600, CacheWrite: 300, Output: 10}) {
+		t.Fatalf("tokens = %+v", got)
+	}
+}
+
 // A long prompt is charged at the dearer price above its threshold.
 func TestPricesRisePastTheirContextLength(t *testing.T) {
 	p, _ := prices.Lookup("openai", "gpt-6.1-sol")

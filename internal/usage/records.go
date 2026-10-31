@@ -43,10 +43,11 @@ type fileState struct {
 	offset  int64
 	records []Record
 	skipped int
-	// Codex counts tokens as running totals: the last one seen, and the
-	// model the turn runs on.
-	total protocol.Tokens
-	model string
+	// Codex counts tokens as running totals: the last one seen, whether
+	// one has been, and the model the turn runs on.
+	total   protocol.Tokens
+	counted bool
+	model   string
 }
 
 // logs reads the records of a folder of JSONL logs, keeping what it read.
@@ -218,7 +219,9 @@ func parseClaude(line []byte, path string, _ *fileState) (Record, bool, error) {
 
 // Codex: a turn_context line names the model; a token_count event carries
 // the session's running totals, so each call is the change since the last.
-// Its input counts the cached part too.
+// Its input counts the cached part, and the part written to the cache, too.
+// A session carried on from another (compacted, or resumed in a new file)
+// starts with that one's totals, already counted where they were made.
 
 var (
 	tokenCountMark = []byte(`"token_count"`)
@@ -233,7 +236,7 @@ type codexUsage struct {
 }
 
 func (u codexUsage) tokens() protocol.Tokens {
-	return protocol.Tokens{Input: max(u.Input-u.Cached, 0), CacheRead: u.Cached, CacheWrite: u.CacheWrite, Output: u.Output}
+	return protocol.Tokens{Input: max(u.Input-u.Cached-u.CacheWrite, 0), CacheRead: u.Cached, CacheWrite: u.CacheWrite, Output: u.Output}
 }
 
 func parseCodex(line []byte, path string, state *fileState) (Record, bool, error) {
@@ -274,14 +277,15 @@ func parseCodex(line []byte, path string, state *fileState) (Record, bool, error
 		Input: total.Input - state.total.Input, CacheRead: total.CacheRead - state.total.CacheRead,
 		CacheWrite: total.CacheWrite - state.total.CacheWrite, Output: total.Output - state.total.Output,
 	}
-	if call.Input < 0 || call.CacheRead < 0 || call.CacheWrite < 0 || call.Output < 0 {
-		// The totals started again: the last call stands on its own.
+	if !state.counted || call.Input < 0 || call.CacheRead < 0 || call.CacheWrite < 0 || call.Output < 0 {
+		// The file's first totals, or totals that started again: only the
+		// last call is new.
 		call = protocol.Tokens{}
 		if last := l.Payload.Info.Last; last != nil {
 			call = last.tokens()
 		}
 	}
-	state.total = total
+	state.total, state.counted = total, true
 	if call.Total() == 0 {
 		// The same totals again, as a rate-limit update repeats them.
 		return Record{}, false, nil
