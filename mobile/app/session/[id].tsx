@@ -52,6 +52,7 @@ import { FileMenu } from "../../components/FileMenu";
 import { OutputViewer } from "../../components/OutputViewer";
 import { type Frame } from "../../lib/message-menu";
 import { artifactsButtonLabel } from "../../lib/artifacts";
+import { simulatorOpensSessionMenu } from "../../lib/simulator";
 import { canEnd, shouldResume } from "../../lib/resume";
 import { folderName, modeLabel, modelLabel, showsInFeed, statusChip } from "../../lib/session-view";
 import {
@@ -481,6 +482,14 @@ export default function SessionScreen() {
     interruptAction?.status === "delivered";
 
   const [menuOpen, setMenuOpen] = useState(false);
+  // For screenshots in the simulator (lib/simulator): the menu open once the
+  // session has arrived.
+  const sessionArrived = session !== undefined;
+  useEffect(() => {
+    if (!sessionArrived || !simulatorOpensSessionMenu()) return;
+    const timer = setTimeout(() => setMenuOpen(true), 800);
+    return () => clearTimeout(timer);
+  }, [sessionArrived, sessionId]);
   // Opening a read-only session reopens it on the Mac.
   //
   // Most of what a folder holds has already ended, and every CLI can reopen

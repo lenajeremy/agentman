@@ -35,3 +35,12 @@ export function simulatorScroll(): number {
   const value = Number(Settings.get("AGENTMAN_SCROLL"));
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
+
+/**
+ * Whether a simulator started on a route was also started with
+ * `-AGENTMAN_MENU session`, to show a session's "…" menu open: a menu is
+ * opened by a tap, which nothing outside can make. Never on a phone.
+ */
+export function simulatorOpensSessionMenu(): boolean {
+  return simulatorRoute() !== null && Settings.get("AGENTMAN_MENU") === "session";
+}
