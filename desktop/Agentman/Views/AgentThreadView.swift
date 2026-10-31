@@ -289,6 +289,7 @@ struct AgentThreadView: View {
                     .frame(maxWidth: Self.column)
                     .frame(maxWidth: .infinity)
                     .environment(\.imageGallery, ThreadItem.pictures(in: items))
+                    .environment(\.threadFolder, session.cwd)
                 }
                 .scrollIndicators(.never)
                 .modifier(FollowsEnd(following: following, earlier: store.hasMore[session.id] == true ? { await store.loadOlder(session.id) } : nil))
@@ -935,13 +936,14 @@ extension MessageRow {
 /// A user's message, clipped to a few lines when it is long, with the way
 /// to read the rest.
 private struct LongText: View {
+    @Environment(\.threadFolder) private var folder
     let text: String
     @State private var open = false
     private var long: Bool { text.count > 700 || text.filter(\.isNewline).count > 10 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(text)
+            FileTags.text(text, folder: folder)
                 .font(TextStyle.body)
                 .foregroundStyle(Palette.text)
                 .lineSpacing(5)
@@ -1366,6 +1368,7 @@ enum ToolKind: Hashable {
 /// A message the agent has not read yet: held until its current step ends,
 /// or queued until its turn does.
 private struct QueuedBubble: View {
+    @Environment(\.threadFolder) private var folder
     let text: String
     let note: String
     /// Hurries the agent's queue, where the agent can be: Claude Code in
@@ -1377,7 +1380,7 @@ private struct QueuedBubble: View {
         HStack {
             Spacer(minLength: 80)
             VStack(alignment: .trailing, spacing: 4) {
-                Text(text)
+                FileTags.text(text, folder: folder)
                     .font(TextStyle.body)
                     .foregroundStyle(Palette.textSecondary)
                     .padding(.horizontal, 14)

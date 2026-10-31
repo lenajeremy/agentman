@@ -356,7 +356,8 @@ private struct ChatItemView: View {
                         SentImages(names: images)
                     }
                     if !entry.text.isEmpty {
-                        Text(entry.text)
+                        // Files are named to Agentman by their full paths.
+                        FileTags.text(entry.text, folder: nil)
                             .font(TextStyle.body)
                             .foregroundStyle(Palette.text)
                             .lineSpacing(5)

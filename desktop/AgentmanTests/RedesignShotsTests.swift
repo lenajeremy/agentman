@@ -131,6 +131,35 @@ final class RedesignShotsTests: XCTestCase {
         }
     }
 
+    /// A sent message naming files, under the box naming the same ones:
+    /// the tags look alike.
+    func testRenderSentTags() throws {
+        guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
+        let files = ["src/surface.test.ts", "src/components/SettingsPanels.tsx", "docs"]
+        let root = try folder("site")
+        for file in ["src/surface.test.ts", "src/components/SettingsPanels.tsx", "docs/x.md"] {
+            let url = root.appendingPathComponent(file)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("x".utf8).write(to: url)
+        }
+        let text = "Fix the flaky test in @src/surface.test.ts and align the header with @src/components/SettingsPanels.tsx before shipping."
+        let mentions = FileMentions(root: root, files: { files }, suggested: { [] }, load: {})
+        for dark in [false, true] {
+            let page = VStack(spacing: 28) {
+                MessageRow(message: Message(id: "u", sessionId: "a", role: .user, ts: 1, text: text))
+                Composer(text: .constant(text), attachments: nil, placeholder: "Message", enabled: true, onSend: {})
+                    .environment(\.fileMentions, mentions)
+            }
+            .environment(\.threadFolder, root.path)
+            .frame(width: 640)
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(Palette.paper)
+            try render(page, size: CGSize(width: 688, height: 300), dark: dark, store: try store().0,
+                       to: URL(fileURLWithPath: out).appendingPathComponent("sent-tags-\(dark ? "dark" : "light").png"))
+        }
+    }
+
     private func renderEditor(_ shots: URL) throws {
         let key = "agentPanelOpen"
         let was = UserDefaults.standard.object(forKey: key)

@@ -206,6 +206,25 @@ final class ComposerBehaviourTests: XCTestCase {
         XCTAssertEqual(field.frame.height, line * CGFloat(lines), accuracy: 3, "As tall as its lines")
     }
 
+    // A sent message shows the files it names as the box did: only words
+    // that name a file, inside the folder or in full; punctuation after
+    // one isn't part of it.
+    func testASentMessageShowsItsFilesAsTags() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("src"), withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: root.appendingPathComponent("src/a.ts"))
+        try Data("x".utf8).write(to: root.appendingPathComponent("README.md"))
+        let text = "Use @src/a.ts and @README.md, not @lena or @missing.ts"
+        XCTAssertEqual(FileTags.segments(text, folder: root.path), [
+            .text("Use "), .file(path: "src/a.ts", directory: false), .text(" and "),
+            .file(path: "README.md", directory: false), .text(", not @lena or @missing.ts"),
+        ])
+        XCTAssertEqual(FileTags.segments("See @\(root.path)/src", folder: nil),
+                       [.text("See "), .file(path: root.path + "/src", directory: true)], "In full, and a folder")
+        XCTAssertEqual(FileTags.segments("See @src/a.ts", folder: nil), [.text("See @src/a.ts")], "No folder to find it in")
+    }
+
     // An error over the box, short or long, then dismissed: the same text
     // view, the same draft, the focus where it was.
     func testAnErrorOverTheBoxComesAndGoesWithoutTheDraft() throws {

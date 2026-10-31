@@ -64,6 +64,8 @@ extension EnvironmentValues {
     /// The pictures an agent looked at in the conversation, in order, so
     /// one opened full window leads on to the others.
     @Entry var imageGallery: [String] = []
+    /// The conversation's folder, where the files its messages name are.
+    @Entry var threadFolder: String?
 }
 
 /// Pictures made as small as where they show, decoded off the main thread

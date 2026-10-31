@@ -79,3 +79,91 @@ final class FileChip: NSTextAttachmentCell {
     /// Clicks place the caret, as on any letter; a chip isn't dragged.
     override func wantsToTrackMouse() -> Bool { false }
 }
+
+/// Sent text with each `@path` naming a file drawn as the message box drew
+/// it: the file's icon and name. Paths are as the reader got them, inside
+/// the agent's folder or in full; a word that names no file stays as typed.
+enum FileTags {
+    enum Segment: Equatable {
+        case text(String)
+        case file(path: String, directory: Bool)
+    }
+
+    private static let word = try! NSRegularExpression(pattern: #"(?<![^\s])@([^\s@]+)"#)
+    @MainActor private static var cache: [String: [Segment]] = [:]
+    @MainActor private static var icons: [String: NSImage] = [:]
+
+    @MainActor static func text(_ text: String, folder: String?) -> Text {
+        let parts = segments(text, folder: folder)
+        guard parts.contains(where: { if case .file = $0 { true } else { false } }) else { return Text(text) }
+        return parts.reduce(Text("")) { line, part in
+            switch part {
+            case .text(let words):
+                return Text("\(line)\(words)")
+            case .file(let path, let directory):
+                let name = (path as NSString).lastPathComponent
+                // A no-break space: the icon never ends a line its name begins.
+                let tag = Text("\(Text(Image(nsImage: icon(name, directory: directory))).baselineOffset(-2))\u{00A0}\(name)")
+                    .foregroundStyle(Palette.mention)
+                return Text("\(line)\(tag)")
+            }
+        }
+    }
+
+    /// The text cut into words and files, remembered: a conversation draws
+    /// its messages again and again.
+    @MainActor static func segments(_ text: String, folder: String?) -> [Segment] {
+        guard text.contains("@") else { return [.text(text)] }
+        let key = (folder ?? "") + "\u{0}" + text
+        if let known = cache[key] { return known }
+        let ns = text as NSString
+        var parts: [Segment] = []
+        var at = 0
+        for match in word.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            var range = match.range
+            var path = ns.substring(with: match.range(at: 1))
+            var found = exists(path, in: folder)
+            while found == nil, let last = path.last, ".,;:!?)]}'\"".contains(last) {
+                path.removeLast()
+                range.length -= 1
+                found = exists(path, in: folder)
+            }
+            guard let directory = found else { continue }
+            if range.location > at { parts.append(.text(ns.substring(with: NSRange(location: at, length: range.location - at)))) }
+            parts.append(.file(path: path, directory: directory))
+            at = NSMaxRange(range)
+        }
+        if at < ns.length { parts.append(.text(ns.substring(from: at))) }
+        if cache.count > 500 { cache.removeAll() }
+        cache[key] = parts
+        return parts
+    }
+
+    /// Whether a path names something, and if so whether a folder.
+    private static func exists(_ path: String, in folder: String?) -> Bool? {
+        guard !path.isEmpty else { return nil }
+        let full: String
+        if path.hasPrefix("/") {
+            full = path
+        } else if let folder {
+            full = (folder as NSString).appendingPathComponent(path)
+        } else {
+            return nil
+        }
+        var directory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: full, isDirectory: &directory) ? directory.boolValue : nil
+    }
+
+    /// The file's icon at the size of the words around it.
+    @MainActor private static func icon(_ name: String, directory: Bool) -> NSImage {
+        let asset = FileIcon.asset(name, directory: directory)
+        if let icon = icons[asset] { return icon }
+        let source = NSImage(named: asset)
+        let icon = NSImage(size: NSSize(width: FileChip.iconSize, height: FileChip.iconSize), flipped: false) { rect in
+            source?.draw(in: rect)
+            return true
+        }
+        icons[asset] = icon
+        return icon
+    }
+}
