@@ -64,6 +64,17 @@ var codexStreamMethods = map[string]bool{
 
 // open starts a feed, joining the thread if nothing else watches it.
 func (st *codexStreams) open(ctx context.Context, threadID string) (*codexStream, error) {
+	return st.join(ctx, threadID, true)
+}
+
+// hold joins a thread, or keeps it joined, without a feed of its events:
+// what the daemon sends only to clients that joined (an approval, a
+// question) is all that is wanted. See holdWaiting.
+func (st *codexStreams) hold(ctx context.Context, threadID string) (*codexStream, error) {
+	return st.join(ctx, threadID, false)
+}
+
+func (st *codexStreams) join(ctx context.Context, threadID string, feed bool) (*codexStream, error) {
 	st.joinMu.Lock()
 	defer st.joinMu.Unlock()
 	st.mu.Lock()
@@ -77,7 +88,10 @@ func (st *codexStreams) open(ctx context.Context, threadID string) (*codexStream
 			return nil, err
 		}
 	}
-	stream := &codexStream{thread: threadID, events: make(chan codexRPCMessage, codexStreamBuffer)}
+	stream := &codexStream{thread: threadID}
+	if feed {
+		stream.events = make(chan codexRPCMessage, codexStreamBuffer)
+	}
 	st.mu.Lock()
 	if st.subs[threadID] == nil {
 		st.subs[threadID] = map[*codexStream]bool{}
@@ -123,6 +137,9 @@ func (st *codexStreams) dispatch(msg codexRPCMessage) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	for stream := range st.subs[params.ThreadID] {
+		if stream.events == nil {
+			continue
+		}
 		select {
 		case stream.events <- msg:
 		default:

@@ -18,13 +18,20 @@ func connectedDaemonSource(t *testing.T, home string, panes []tmux.Session, thre
 	t.Helper()
 	fake := startFakeCodexDaemon(t)
 	server := newTestCodexAppServer(t, fake.socket)
+	src := daemonSource(t, home, true, threads...)
+	src.appServer = server
+	src.streams = newCodexStreams(server)
+	src.requests = newCodexRequests()
+	server.handle = func(msg codexRPCMessage) {
+		src.live.apply(msg)
+		src.streams.dispatch(msg)
+		src.requests.apply(msg)
+	}
 	runCodexAppServer(t, server)
 	conn := fake.accept(t)
 	conn.handshake(t)
 	waitConnected(t, server)
 
-	src := daemonSource(t, home, true, threads...)
-	src.appServer = server
 	if panes != nil {
 		src.listPanes = func(context.Context) ([]tmux.Session, error) { return panes, nil }
 	}

@@ -689,6 +689,10 @@ func (s *CodexSource) Answer(ctx context.Context, sessionID string, answer proto
 	if !ok {
 		return fmt.Errorf("source: unknown codex session %q", sessionID)
 	}
+	// Through the daemon when it has the request; see codex_requests.go.
+	if handled, err := s.answerThroughDaemon(ctx, session, answer); handled {
+		return err
+	}
 	if session.tmuxName == "" {
 		return fmt.Errorf("source: only sessions started with `am codex` can be answered")
 	}

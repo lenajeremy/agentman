@@ -221,6 +221,11 @@ type CodexSource struct {
 	// streams hands the live events of joined threads to follows; see
 	// codex_stream.go.
 	streams *codexStreams
+	// requests are the approvals and questions threads wait on, and holds
+	// the joins kept so the daemon sends them; see codex_requests.go.
+	requests *codexRequests
+	holdMu   sync.Mutex
+	holds    map[string]*codexHold
 }
 
 type codexSession struct {
@@ -337,6 +342,9 @@ func (s *CodexSource) CurrentQuestion(ctx context.Context, sessionID string) (*p
 	if !ok {
 		return nil, fmt.Errorf("source: unknown codex session %q", sessionID)
 	}
+	if asked := s.daemonQuestion(s.daemonThreadOf(session)); asked != nil {
+		return asked, nil
+	}
 	if session.tmuxName == "" {
 		return session.meta.Question, nil
 	}
@@ -372,6 +380,9 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	// threads are open; see codex_threads.go. Its own process always passes
 	// the probe below, which then proves nothing.
 	daemon, daemonReady := s.liveThreads()
+	if daemonReady {
+		s.holdWaiting(daemon)
+	}
 
 	if !daemonReady && !anyCodexPane(panes) && s.processCheck != nil && !s.processCheck(ctx) {
 		s.mu.Lock()
@@ -636,6 +647,14 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				model = thread.Model
 			}
 			session.Model = model
+			// The daemon's request is the question exactly as Codex asks it,
+			// for a session in a pane or not; see codex_requests.go.
+			if onDaemon {
+				if asked := s.daemonQuestion(thread.ID); asked != nil {
+					session.Question = asked
+					session.State = protocol.StateWaitingInput
+				}
+			}
 			if read {
 				s.applyFooter(&session, screen)
 			}
