@@ -35,7 +35,7 @@ struct WorkspacePanel: View {
                 switch tab {
                 case .changes: ChangesList(session: session, open: push)
                 case .files: FileList(session: session, path: "", open: push)
-                case .history: HistoryList(session: session, open: push)
+                case .history: HistoryPanel(sessionID: session.id, cwd: session.cwd, state: session.state, activity: session.lastActivityAt)
                 case .plans: ArtifactList(session: session, open: push)
                 }
             } else {
@@ -48,7 +48,7 @@ struct WorkspacePanel: View {
                             NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: session.cwd)
                         }
                     }
-                    .padding(.bottom, 5)
+                    .padding(.bottom, 3)
                     if FileManager.default.fileExists(atPath: session.cwd) {
                         workspaceRow("Open in editor", symbol: "arrow.up.right.square") {
                             EditorOpener.open(folder: session.cwd, with: openWindow)
@@ -63,7 +63,8 @@ struct WorkspacePanel: View {
                 VStack(alignment: .leading, spacing: 0) {
                     if let branch {
                         Label(branch, systemImage: "point.3.connected.trianglepath.dotted")
-                            .padding(.vertical, 10)
+                            .lineLimit(1).truncationMode(.middle)
+                            .padding(.vertical, 7)
                         // Not from a daemon too old to read where the branch stands.
                         if var git {
                             // The changes as last listed, read more often than the branch.
@@ -71,7 +72,7 @@ struct WorkspacePanel: View {
                             GitActionsRow(session: session, state: git, changes: changes, hidden: hidden) { reread += 1 }
                         }
                     }
-                    workspaceRow("History", symbol: "clock.arrow.circlepath", opens: true) { show(.history) }
+                    workspaceRow("History", symbol: "clock.arrow.circlepath") { RightPanel.show(.history) }
                     Button { RightPanel.show(.diff) } label: {
                         HStack(spacing: 10) {
                             Image(systemName: "doc.badge.plus").frame(width: 16)
@@ -83,7 +84,7 @@ struct WorkspacePanel: View {
                                 .foregroundStyle(Palette.errorText)
                         }
                         .foregroundStyle(Palette.muted)
-                        .padding(.vertical, 10)
+                        .padding(.vertical, 7)
                     }
                     .buttonStyle(.plain)
                     workspaceRow("Files", symbol: "folder") { RightPanel.show(.files) }
@@ -91,19 +92,19 @@ struct WorkspacePanel: View {
                         workspaceRow("Plans", symbol: "doc.text", opens: true) { show(.plans) }
                     }
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 9)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
                 let siblings = store.sessions.filter { $0.cwd == session.cwd && $0.id != session.id && $0.state != .ended }
                 if !siblings.isEmpty {
                     Divider().overlay(Palette.line)
-                    VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 12) {
                         Text("In this project · \(siblings.count)")
-                            .font(Fonts.sans(12))
+                            .font(Fonts.sans(11))
                             .foregroundStyle(Palette.muted)
                         ForEach(Array(siblings.prefix(6))) { sibling in
                             Button { store.selection = .agent(sibling.id) } label: {
                                 HStack(spacing: 10) {
-                                    AgentMark(kind: sibling.kind, size: 17)
+                                    AgentMark(kind: sibling.kind, size: 14)
                                     Text(sibling.name).lineLimit(1)
                                     Spacer(minLength: 4)
                                     Circle().fill(Palette.dot(sibling.state)).frame(width: 5, height: 5)
@@ -112,18 +113,18 @@ struct WorkspacePanel: View {
                             .buttonStyle(.plain)
                         }
                     }
-                    .padding(18)
+                    .padding(16)
                 }
             }
         }
-        .font(Fonts.sans(13))
+        .font(Fonts.sans(12))
         .foregroundStyle(Palette.textSecondary)
         .frame(maxWidth: .infinity, maxHeight: expanded || !stack.isEmpty ? .infinity : nil, alignment: .top)
         .frame(width: expanded || !stack.isEmpty ? Self.openWidth : Self.summaryWidth)
         .animation(.easeOut(duration: 0.18), value: expanded || !stack.isEmpty)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Palette.line))
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Palette.line))
         // Again as the agent works: a turn changes files long before it ends.
         // A burst of activity asks once, a second after it settles.
         .task(id: Refresh(state: session.state, activity: session.lastActivityAt, reread: reread)) {
@@ -164,7 +165,7 @@ struct WorkspacePanel: View {
     }
 
     /// The summary beside the thread; a list, a diff or a file, wider.
-    static let summaryWidth: CGFloat = 280
+    static let summaryWidth: CGFloat = 220
     static let openWidth: CGFloat = 540
 
     private func show(_ selected: WorkspaceTab) {
@@ -182,7 +183,7 @@ struct WorkspacePanel: View {
                 if opens { Image(systemName: "chevron.right").font(.system(size: 9)) }
             }
             .foregroundStyle(Palette.muted)
-            .padding(.vertical, 9)
+            .padding(.vertical, 7)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -220,10 +221,6 @@ struct WorkspacePanel: View {
             FileLoader(session: session, path: path)
         case .folder(let path):
             FileList(session: session, path: path, open: push)
-        case .commit(let commit):
-            CommitFiles(session: session, commit: commit, open: push)
-        case .commitDiff(let hash, let path):
-            DiffLoader(session: session, path: path, commit: hash)
         case .artifact(let artifact):
             ArtifactView(session: session, artifact: artifact)
         }
@@ -244,12 +241,11 @@ enum WorkspaceTab: String, CaseIterable, Identifiable {
 }
 
 enum WorkspaceRoute: Hashable {
-    case diff(String), file(String), folder(String), commit(WorkspaceCommit), commitDiff(String, String), artifact(Artifact)
+    case diff(String), file(String), folder(String), artifact(Artifact)
 
     var title: String {
         switch self {
-        case .diff(let path), .file(let path), .folder(let path), .commitDiff(_, let path): path
-        case .commit(let commit): commit.subject
+        case .diff(let path), .file(let path), .folder(let path): path
         case .artifact(let artifact): artifact.title ?? artifact.name
         }
     }
@@ -646,142 +642,6 @@ private struct FileLoader: View {
             } else {
                 EmptyNote(text: "This file can't be shown here.")
             }
-        }
-    }
-}
-
-// MARK: - History
-
-private struct HistoryList: View {
-    @Environment(AgentsStore.self) private var store
-    let session: Session
-    let open: (WorkspaceRoute) -> Void
-    @State private var ref: String?
-    @State private var branches: [WorkspaceBranch] = []
-    @State private var commits: [WorkspaceCommit] = []
-    @State private var more = false
-    @State private var problem: String?
-    @State private var loading = false
-
-    var body: some View {
-        VStack(spacing: 0) {
-            if branches.count > 1 {
-                Picker("Branch", selection: Binding(get: { ref ?? "" }, set: { ref = $0.isEmpty ? nil : $0 })) {
-                    ForEach(branches) { branch in
-                        Text(branch.name + (branch.current == true ? " (checked out)" : "")).tag(branch.current == true ? "" : branch.ref)
-                    }
-                }
-                .labelsHidden()
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                Divider().overlay(Palette.line)
-            }
-            if let problem, commits.isEmpty {
-                EmptyNote(text: problem)
-            } else if commits.isEmpty, loading {
-                ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if commits.isEmpty {
-                EmptyNote(text: "No commits here yet.")
-            } else {
-                List {
-                    ForEach(commits) { commit in
-                        Button { open(.commit(commit)) } label: { CommitRow(commit: commit) }
-                            .buttonStyle(.plain)
-                    }
-                    if more {
-                        Button(loading ? "Loading…" : "Load older commits") { Task { await page() } }
-                            .buttonStyle(.link)
-                            .font(TextStyle.caption)
-                            .disabled(loading)
-                    }
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-            }
-        }
-        .task(id: ref) {
-            commits = []
-            await page()
-        }
-        .task {
-            if let result = try? await store.workspace(.listBranches, session: session.id) {
-                branches = result.branches ?? []
-            }
-        }
-    }
-
-    private func page() async {
-        loading = true
-        defer { loading = false }
-        do {
-            let result = try await store.workspace(.listCommits, session: session.id, offset: commits.count, ref: ref)
-            commits += result.commits ?? []
-            more = result.truncated == true
-            problem = nil
-        } catch {
-            problem = error.localizedDescription
-        }
-    }
-}
-
-private struct CommitRow: View {
-    let commit: WorkspaceCommit
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(commit.subject)
-                .font(TextStyle.caption)
-                .foregroundStyle(Palette.text)
-                .lineLimit(2)
-            HStack(spacing: 6) {
-                Text(String(commit.hash.prefix(7))).font(Fonts.mono(10.5))
-                Text("·")
-                Text(commit.author)
-                Text("·")
-                Text(Date(timeIntervalSince1970: TimeInterval(commit.authoredAt) / 1000), style: .relative)
-                if let added = commit.added, added > 0 { Text("+\(added)").foregroundStyle(Palette.ok) }
-                if let removed = commit.removed, removed > 0 { Text("−\(removed)").foregroundStyle(Palette.errorText) }
-            }
-            .font(TextStyle.caption)
-            .foregroundStyle(Palette.faint)
-            .lineLimit(1)
-        }
-        .padding(.vertical, 5)
-        .contentShape(Rectangle())
-    }
-}
-
-private struct CommitFiles: View {
-    @Environment(AgentsStore.self) private var store
-    let session: Session
-    let commit: WorkspaceCommit
-    let open: (WorkspaceRoute) -> Void
-
-    var body: some View {
-        Loaded(load: { try await store.workspace(.commitFiles, session: session.id, commit: commit.hash) }) { result in
-            List {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(result.commit?.subject ?? commit.subject)
-                        .font(TextStyle.bodyMedium)
-                        .foregroundStyle(Palette.text)
-                    if let body = result.commit?.body, !body.isEmpty {
-                        Text(body)
-                            .font(TextStyle.caption)
-                            .foregroundStyle(Palette.textSecondary)
-                            .textSelection(.enabled)
-                    }
-                    Text("\(commit.author) · \(String(commit.hash.prefix(10)))")
-                        .font(TextStyle.caption)
-                        .foregroundStyle(Palette.faint)
-                }
-                .padding(.vertical, 6)
-                ForEach(result.changes ?? []) { change in
-                    Button { open(.commitDiff(commit.hash, change.path)) } label: { ChangeRow(change: change) }
-                        .buttonStyle(.plain)
-                }
-            }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
         }
     }
 }

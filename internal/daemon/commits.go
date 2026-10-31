@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
@@ -71,7 +72,10 @@ func (d *Daemon) history(ctx context.Context, req protocol.Request) protocol.Eve
 		result.Commit, result.Changes, result.Truncated, result.Hidden, err = commitFiles(ctx, session.Cwd, req.Commit)
 	case protocol.ReqCommitDiff:
 		result.Kind = "diff"
-		result.Diff, result.Truncated, err = commitDiff(ctx, session.Cwd, req.Commit, req.Path)
+		result.Diff, result.Truncated, err = commitDiff(ctx, session.Cwd, req.Commit, req.Path, req.IgnoreWhitespace)
+		if err == nil && req.WithFile {
+			result.Text = commitContext(ctx, session.Cwd, req.Commit, req.Path)
+		}
 	}
 	if err != nil {
 		return workspaceError(req, err.Error())
@@ -337,10 +341,38 @@ func commitFiles(ctx context.Context, cwd, hash string) (*protocol.WorkspaceComm
 }
 
 // commitDiff is one file's change within one commit.
-func commitDiff(ctx context.Context, cwd, hash, rel string) (string, bool, error) {
+func commitDiff(ctx context.Context, cwd, hash, rel string, ignoreWhitespace bool) (string, bool, error) {
 	base, err := commitBase(ctx, cwd, hash)
 	if err != nil {
 		return "", false, err
 	}
-	return runGit(ctx, cwd, append(append([]string{"diff", "--relative", "--no-renames"}, gitHistoryFlags...), base, hash, "--", rel)...)
+	args := append([]string{"diff", "--relative", "--no-renames"}, gitHistoryFlags...)
+	if ignoreWhitespace {
+		args = append(args, "-w")
+	}
+	return runGit(ctx, cwd, append(args, base, hash, "--", rel)...)
+}
+
+// The new side of a historical diff, for expanding unchanged context. Read
+// the exact blob rather than a working file, and never expose symlinks,
+// submodules, binary data or incomplete text as context.
+func commitContext(ctx context.Context, cwd, hash, rel string) string {
+	tree, truncated, err := runGit(ctx, cwd, "ls-tree", "-z", hash, "--", rel)
+	if err != nil || truncated {
+		return ""
+	}
+	entries := strings.Split(strings.TrimSuffix(tree, "\x00"), "\x00")
+	if len(entries) != 1 {
+		return ""
+	}
+	meta, _, ok := strings.Cut(entries[0], "\t")
+	fields := strings.Fields(meta)
+	if !ok || len(fields) != 3 || (fields[0] != "100644" && fields[0] != "100755") || fields[1] != "blob" || !commitHash.MatchString(fields[2]) {
+		return ""
+	}
+	text, truncated, err := runGit(ctx, cwd, "cat-file", "blob", fields[2])
+	if err != nil || truncated || strings.ContainsRune(text, 0) || !utf8.ValidString(text) {
+		return ""
+	}
+	return text
 }

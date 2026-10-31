@@ -96,7 +96,7 @@ struct GitActionsRow: View {
                         Spacer(minLength: 4)
                         if running != nil { ProgressView().controlSize(.mini) }
                     }
-                    .padding(.vertical, 9)
+                    .padding(.vertical, 7)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

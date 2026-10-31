@@ -131,8 +131,10 @@ struct DaemonRequest: Codable, Sendable {
     var commit: String?
     /// The branch list_commits reads; absent for the one checked out.
     var ref: String?
-    /// Leaves changes to whitespace alone out of a file_diff.
+    /// Leaves changes to whitespace alone out of a file_diff or commit_diff.
     var ignoreWhitespace: Bool?
+    /// Asks a commit_diff for the file as the commit left it as well.
+    var withFile: Bool?
     /// The files a git_commit commits.
     var paths: [String]?
     /// Which way a review_artifact goes: approved, or changes asked for.
