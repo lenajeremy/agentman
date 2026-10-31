@@ -2,8 +2,9 @@ import AppKit
 import SwiftUI
 
 /// A picture fitted to where it shows, never drawn larger than its own size,
-/// that zooms: pinch, ⌘+ and ⌘−, ⌘0 to fit it again, a double-click for its
-/// actual size and back. Zoomed in, it scrolls. The image viewer and the
+/// that zooms: the scroll wheel or a pinch about the pointer, ⌘+ and ⌘−, ⌘0
+/// to fit it again, a double-click for its actual size and back. Zoomed in,
+/// it scrolls. The image viewer and the
 /// editor's image files both show pictures this way.
 struct ZoomableImage: View {
     let image: NSImage
@@ -97,6 +98,9 @@ final class PictureScrollView: NSScrollView {
     private(set) var fit: CGFloat = 1
     /// How far past fitting it is zoomed: 1 fits.
     private(set) var zoom: CGFloat = 1
+    /// Whether the scroll under way zooms rather than pans, decided as it
+    /// begins, so one gesture doesn't turn from one to the other.
+    private var wheelZooms = false
 
     init() {
         super.init(frame: .zero)
@@ -156,6 +160,33 @@ final class PictureScrollView: NSScrollView {
 
     private func toggleZoom(at point: NSPoint) {
         setZoom(zoom == 1 ? ZoomableImage.actualSize(fit: fit) : 1, at: point)
+        onZoom?(zoom)
+    }
+
+    /// A mouse's wheel zooms about the pointer. A trackpad's scroll zooms a
+    /// picture that fits, which has nowhere to go, and pans one zoomed in;
+    /// with ⌘ held, any scroll zooms.
+    override func scrollWheel(with event: NSEvent) {
+        let starting = event.phase.contains(.began) || event.phase.contains(.mayBegin)
+            || (event.phase.isEmpty && event.momentumPhase.isEmpty)
+        if starting {
+            wheelZooms = !event.hasPreciseScrollingDeltas || event.modifierFlags.contains(.command) || zoom == 1
+        }
+        guard wheelZooms else { return super.scrollWheel(with: event) }
+        // A flick's coast isn't zoom.
+        guard event.momentumPhase.isEmpty else { return }
+        // Away from the person, the wheel rolled up or two fingers pushed up,
+        // zooms in, whichever way scrolling is set to go.
+        let away = event.scrollingDeltaY * (event.isDirectionInvertedFromDevice ? -1 : 1)
+        wheelZoom(by: away, precise: event.hasPreciseScrollingDeltas, at: picture.convert(event.locationInWindow, from: nil))
+    }
+
+    /// Zooms by a scroll of this much, about a point in the picture: a notch
+    /// of a wheel a step of ⌘+, a trackpad's points smoothly.
+    func wheelZoom(by away: CGFloat, precise: Bool, at point: NSPoint) {
+        guard away != 0 else { return }
+        let factor = precise ? exp(away * 0.01) : pow(ZoomableImage.step, max(min(away, 3), -3))
+        setZoom(zoom * factor, at: point)
         onZoom?(zoom)
     }
 

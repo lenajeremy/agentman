@@ -63,6 +63,55 @@ final class ImageViewerTests: XCTestCase {
         XCTAssertEqual(Lightbox(pictures: [], start: 4).start, 0)
     }
 
+    // The scroll wheel zooms about the pointer: the spot under it stays put.
+    // A real wheel's notch zooms a step; a trackpad pans a zoomed picture.
+    func testTheScrollWheelZoomsAboutThePointer() throws {
+        let view = PictureScrollView()
+        view.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+        let window = NSWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer { window.orderOut(nil) }
+        view.show(Self.swatch(.systemBlue, CGSize(width: 800, height: 600)))
+        XCTAssertEqual(view.zoom, 1)
+
+        // A notch away zooms in a step, about a spot off centre.
+        let spot = NSPoint(x: 600, y: 150)
+        let before = view.picture.convert(spot, to: view)
+        view.wheelZoom(by: 1, precise: false, at: spot)
+        XCTAssertEqual(view.zoom, ZoomableImage.step, accuracy: 0.001)
+        let after = view.picture.convert(spot, to: view)
+        XCTAssertEqual(after.x, before.x, accuracy: 1, "The spot under the pointer stays put")
+        XCTAssertEqual(after.y, before.y, accuracy: 1)
+        // A notch back, and no further out than fitting.
+        view.wheelZoom(by: -1, precise: false, at: spot)
+        view.wheelZoom(by: -1, precise: false, at: spot)
+        XCTAssertEqual(view.zoom, 1, accuracy: 0.001)
+
+        // A mouse's wheel, as AppKit hands it over.
+        let notch = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: 1, wheel2: 0, wheel3: 0))
+        let wheel = try XCTUnwrap(NSEvent(cgEvent: notch))
+        XCTAssertFalse(wheel.hasPreciseScrollingDeltas)
+        view.scrollWheel(with: wheel)
+        XCTAssertNotEqual(view.zoom, 1, accuracy: 0.001, "The wheel zoomed")
+
+        // Zoomed in, a trackpad's scroll is left to the scroll view to pan
+        // with, not zoomed. (AppKit doesn't move an offscreen scroll view
+        // for a made-up event, so the pan itself isn't checked here.)
+        view.setZoom(2)
+        let swipe = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -40, wheel2: 0, wheel3: 0))
+        let pan = try XCTUnwrap(NSEvent(cgEvent: swipe))
+        XCTAssertTrue(pan.hasPreciseScrollingDeltas)
+        view.scrollWheel(with: pan)
+        XCTAssertEqual(view.zoom, 2, accuracy: 0.001, "It panned, not zoomed")
+        // At fit, there is nowhere to pan: the trackpad zooms.
+        view.setZoom(1)
+        let up = try XCTUnwrap(NSEvent(cgEvent: try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1,
+                                                                        wheel1: 40, wheel2: 0, wheel3: 0))))
+        view.scrollWheel(with: up)
+        XCTAssertNotEqual(view.zoom, 1, accuracy: 0.001, "A fitted picture zooms")
+    }
+
     func testArrowKeysMoveBetweenPictures() throws {
         let asked = Asked()
         let colors: [NSColor] = [.systemBlue, .systemGreen, .systemOrange]
