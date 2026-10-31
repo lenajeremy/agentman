@@ -3,10 +3,14 @@ import SwiftUI
 
 /// What the right panel shows, a tab each.
 enum RightPanelTab: String, CaseIterable, Identifiable {
-    case diff, files
+    case diff, files, history
     var id: String { rawValue }
-    var title: String { self == .diff ? "Diff" : "Files" }
-    var symbol: String { self == .diff ? "doc.text" : "folder" }
+    var title: String {
+        switch self { case .diff: "Diff"; case .files: "Files"; case .history: "History" }
+    }
+    var symbol: String {
+        switch self { case .diff: "doc.text"; case .files: "folder"; case .history: "clock.arrow.circlepath" }
+    }
 }
 
 /// The panel at the window's right edge, beside the workspace card, as T3
@@ -91,6 +95,8 @@ struct RightPanel: View {
                     .id(session.id)
             case .files:
                 FilesPanel(folder: session.cwd).equatable().id(session.cwd)
+            case .history:
+                HistoryPanel(sessionID: session.id, cwd: session.cwd).id(session.id)
             }
         }
         .background(Palette.paper)
@@ -140,7 +146,7 @@ private struct PanelTab: View {
 }
 
 /// A small icon button for a panel's toolbar, lit while what it toggles is on.
-private struct PanelButton: View {
+struct PanelButton: View {
     let symbol: String
     let help: String
     var on = false
@@ -222,6 +228,8 @@ final class DiffPanelModel {
         var styled: [String: AttributedString]
     }
 
+    private(set) var commit: String?
+    private(set) var detail: WorkspaceCommit?
     private(set) var changes: [WorkspaceChange] = []
     private(set) var hidden = 0
     private(set) var problem: String?
@@ -246,10 +254,19 @@ final class DiffPanelModel {
 
     /// Reads the list again. A file whose entry changed is read again, and
     /// with `everything`, every file is.
-    func refresh(store: AgentsStore, session: String, ignoreWhitespace: Bool, everything: Bool = false) async {
+    func refresh(store: AgentsStore, session: String, ignoreWhitespace: Bool, everything: Bool = false, commit: String? = nil) async {
         readAt = Date()
         do {
-            let result = try await store.workspace(.listChanges, session: session)
+            let result = try await store.workspace(commit == nil ? .listChanges : .commitFiles, session: session, commit: commit)
+            if self.commit != commit {
+                diffs = [:]
+                readVersions = [:]
+                opened = [:]
+                files = [:]
+                collapsed = []
+            }
+            self.commit = commit
+            detail = result.commit
             let listed = (result.changes ?? []).sorted { ChangeStatus.treeOrder($0.path, $1.path) }
             let whitespace = ignoreWhitespace != self.ignoreWhitespace
             if whitespace {
@@ -277,12 +294,12 @@ final class DiffPanelModel {
         guard readVersions[path] != version, !loading.contains(path) else { return }
         loading.insert(path)
         do {
-            let result = try await store.workspace(.fileDiff, session: session, path: path, ignoreWhitespace: ignoreWhitespace)
+            let result = try await store.workspace(commit == nil ? .fileDiff : .commitDiff, session: session, path: path, commit: commit, ignoreWhitespace: ignoreWhitespace)
             let text = result.diff ?? ""
             // The same diff as before changes nothing on screen.
             if text != diffs[path]?.text || diffs[path]?.truncated != (result.truncated == true) {
                 opened[path] = nil
-                files[path] = nil
+                files[path] = result.text?.components(separatedBy: "\n")
                 diffs[path] = await Self.layout(path: path, text: text, truncated: result.truncated == true, opened: [], file: nil)
             }
             if failures[path] != nil { failures[path] = nil }
@@ -298,6 +315,8 @@ final class DiffPanelModel {
     /// Shows the unchanged lines a fold stands for, read from the file.
     func open(_ fold: DiffLayout.Fold, in path: String, store: AgentsStore, session: String) async {
         if files[path] == nil {
+            // Historical context must never come from the working tree.
+            guard commit == nil else { return }
             guard let text = try? await store.workspace(.readFile, session: session, path: path).text else { return }
             files[path] = text.components(separatedBy: "\n")
         }
@@ -343,6 +362,8 @@ struct DiffPanel: View, Equatable {
     let cwd: String
     let state: SessionState
     let activity: Int64?
+    var commit: WorkspaceCommit? = nil
+    var back: (() -> Void)? = nil
     @State private var model = DiffPanelModel()
     @AppStorage("diffSplit") private var split = false
     @AppStorage("diffWrap") private var wrap = true
@@ -355,7 +376,7 @@ struct DiffPanel: View, Equatable {
     @State private var seenState: SessionState?
 
     nonisolated static func == (a: DiffPanel, b: DiffPanel) -> Bool {
-        a.sessionID == b.sessionID && a.cwd == b.cwd && a.state == b.state && a.activity == b.activity
+        a.sessionID == b.sessionID && a.cwd == b.cwd && a.state == b.state && a.activity == b.activity && a.commit == b.commit
     }
 
     static let treeWidth: CGFloat = 196
@@ -372,6 +393,20 @@ struct DiffPanel: View, Equatable {
         VStack(spacing: 0) {
             toolbar
             Divider().overlay(Palette.line)
+            if let commit = model.detail ?? commit {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(commit.subject).font(TextStyle.captionMedium).foregroundStyle(Palette.text)
+                    Text(commit.author + " · " + Date(timeIntervalSince1970: Double(commit.authoredAt) / 1000).formatted(date: .abbreviated, time: .shortened))
+                        .font(TextStyle.caption).foregroundStyle(Palette.muted)
+                    if let body = commit.body, !body.isEmpty {
+                        Text(body).font(TextStyle.caption).foregroundStyle(Palette.textSecondary).lineLimit(4)
+                    }
+                }
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                Divider().overlay(Palette.line)
+            }
             content
         }
         // While the agent works, every few seconds; when a turn begins or
@@ -384,26 +419,31 @@ struct DiffPanel: View, Equatable {
             }
             guard !Task.isCancelled else { return }
             seenState = state
-            await model.refresh(store: store, session: sessionID, ignoreWhitespace: ignoreWhitespace, everything: turned)
+            await model.refresh(store: store, session: sessionID, ignoreWhitespace: ignoreWhitespace, everything: turned, commit: commit?.hash)
         }
     }
 
     private var toolbar: some View {
         HStack(spacing: 4) {
-            // Only the uncommitted changes for now; a turn's or a branch's
-            // join them here.
-            Menu {
-                Button { } label: { Label("Uncommitted", systemImage: "checkmark") }
-            } label: {
-                // One text: a menu's label puts an image of its own first.
-                (Text("Uncommitted ") + Text(Image(systemName: "chevron.down")).font(.system(size: 8, weight: .semibold)))
-                    .font(TextStyle.captionMedium)
+            if let commit {
+                PanelButton(symbol: "chevron.left", help: "Back to history") { back?() }
+                Text(String(commit.hash.prefix(7)))
+                    .font(Fonts.mono(11.5, .medium))
+                    .foregroundStyle(Palette.text)
+                    .help(commit.subject)
+            } else {
+                Menu {
+                    Button { } label: { Label("Uncommitted", systemImage: "checkmark") }
+                } label: {
+                    (Text("Uncommitted ") + Text(Image(systemName: "chevron.down")).font(.system(size: 8, weight: .semibold)))
+                        .font(TextStyle.captionMedium)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .foregroundStyle(Palette.text)
+                .help("Which changes to show")
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .foregroundStyle(Palette.text)
-            .help("Which changes to show")
             Spacer(minLength: 8)
             if !model.changes.isEmpty {
                 HStack(spacing: 5) {
@@ -438,7 +478,7 @@ struct DiffPanel: View, Equatable {
         } else if let problem = model.problem {
             note(problem)
         } else if model.changes.isEmpty {
-            note(model.hidden > 0 ? "Only files holding secrets have changed; they aren't shown." : "No uncommitted changes.")
+            note(model.hidden > 0 ? "Only files holding secrets have changed; they aren't shown." : commit == nil ? "No uncommitted changes." : "No file changes in this commit.")
         } else {
             GeometryReader { geometry in
                 let tree = showTree && geometry.size.width >= 480
@@ -501,7 +541,7 @@ struct DiffPanel: View, Equatable {
     @ViewBuilder private func section(_ change: WorkspaceChange, width: CGFloat) -> some View {
         if let diff = model.diffs[change.path] {
             if diff.items.isEmpty {
-                sectionNote(diff.truncated ? "This diff is too large to show." : "No line changes: a binary file, or only its mode changed.", width: width)
+                sectionNote(diff.truncated ? "This diff is too large to show." : ignoreWhitespace && diff.text.isEmpty ? "No changes with whitespace hidden." : "No line changes: a binary file, or only its mode changed.", width: width)
             } else if split {
                 ForEach(diff.split) { item in
                     switch item {

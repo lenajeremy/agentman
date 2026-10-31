@@ -73,20 +73,44 @@ final class RightPanelTests: XCTestCase {
         var all: [DaemonRequest] { lock.lock(); defer { lock.unlock() }; return requests }
     }
 
-    static func client(_ asked: Asked = Asked()) -> DaemonClient {
+    static func client(_ asked: Asked = Asked(), previewHistory: Bool = false) -> DaemonClient {
         let client = DaemonClient(socketPath: "/nonexistent/agentman-panel.sock")
         client.answer = { request in
             asked.add(request)
             var result: [String: Any] = ["sessionId": request.sessionId ?? "", "path": request.path ?? ""]
             switch request.type {
-            case .listChanges:
+            case .listChanges, .commitFiles:
                 result["kind"] = "changes"
                 result["changes"] = try? JSONSerialization.jsonObject(with: Data(changes.utf8))
-            case .fileDiff:
+            case .fileDiff, .commitDiff:
                 result["kind"] = "diff"
                 var diff = diffs[request.path ?? ""] ?? ""
                 if request.ignoreWhitespace == true { diff = "" }
                 result["diff"] = diff
+                if request.type == .commitDiff { result["text"] = (1...12).map { "historical \($0)" }.joined(separator: "\n") }
+            case .listBranches:
+                result["kind"] = "branches"
+                result["branches"] = [["name": "main", "ref": "refs/heads/main", "current": true, "updatedAt": 0],
+                                      ["name": "feature/history", "ref": "refs/heads/feature/history", "updatedAt": 0]]
+            case .listCommits:
+                result["kind"] = "commits"
+                result["branch"] = "main"
+                result["truncated"] = request.offset == 0
+                result["commits"] = [["hash": String(repeating: request.ref == nil ? (request.offset == 0 ? "a" : "b") : "c", count: 40),
+                                       "subject": "Keep history beside the conversation", "author": "Jeremiah", "authoredAt": 1793448000000,
+                                       "added": 11, "removed": 4]]
+                if previewHistory {
+                    let subjects = ["Mac: history beside the diff and files", "Mac: conversations scroll smoothly, and up when scrolled up",
+                                    "Mac: a right panel with the diff, files and git actions", "Redesign desktop workspace and product pages",
+                                    "Ship iOS build 41 (0.14.1)", "Editor: what changed since git, beside the line numbers",
+                                    "Phone: Markdown files read as documents", "Mac: a blue and pink loader while an agent works"]
+                    result["commits"] = subjects.enumerated().map { index, subject in
+                        ["hash": String(repeating: String(index + 1), count: 40), "subject": subject,
+                         "author": index == 4 ? "Lena Jeremy" : "Jeremiah Lena", "authoredAt": 1793448000000 - index * 3600000,
+                         "added": [546, 432, 3102, 4366, 5, 693, 779, 163][index],
+                         "removed": [78, 47, 49, 1271, 5, 1, 70, 3][index]] as [String: Any]
+                    }
+                }
             case .readFile:
                 result["kind"] = "file"
                 result["text"] = (1...12).map { "line \($0)" }.joined(separator: "\n")
@@ -145,6 +169,63 @@ final class RightPanelTests: XCTestCase {
         XCTAssertEqual(requests.count, 2)
         XCTAssertEqual(requests.last?.ignoreWhitespace, true, "The whitespace button reaches the daemon")
         XCTAssertEqual(model.diffs[path]?.items.isEmpty, true)
+    }
+
+    func testHistoryPagesAndSwitchesBranchesWithoutCheckingOut() async {
+        let asked = Asked()
+        let store = AgentsStore(client: Self.client(asked))
+        let model = HistoryPanelModel()
+        await model.readBranches(store: store, session: "a")
+        XCTAssertEqual(model.branches.count, 2)
+        await model.reload(store: store, session: "a", ref: nil)
+        XCTAssertEqual(model.commits.count, 1)
+        XCTAssertTrue(model.more)
+        await model.page(store: store, session: "a")
+        XCTAssertEqual(model.commits.count, 2)
+        XCTAssertFalse(model.more)
+        await model.reload(store: store, session: "a", ref: "refs/heads/feature/history")
+        XCTAssertEqual(model.commits.map(\.hash), [String(repeating: "c", count: 40)])
+        XCTAssertFalse(model.loading)
+        XCTAssertNil(model.problem)
+        let pages = asked.all.filter { $0.type == .listCommits }
+        XCTAssertEqual(pages.map { $0.offset }, [0, 1, 0])
+        XCTAssertEqual(pages.last?.ref, "refs/heads/feature/history")
+        XCTAssertTrue(asked.all.allSatisfy { [.listBranches, .listCommits].contains($0.type) })
+    }
+
+    func testHistoricalDiffUsesTheSharedRendererAndHistoricalContext() async throws {
+        let asked = Asked()
+        let store = AgentsStore(client: Self.client(asked))
+        let model = DiffPanelModel()
+        let hash = String(repeating: "a", count: 40)
+        await model.refresh(store: store, session: "a", ignoreWhitespace: false, commit: hash)
+        let path = "docs/architecture.md"
+        await model.load(path, store: store, session: "a")
+        let diff = try XCTUnwrap(model.diffs[path])
+        guard case .fold(let fold) = diff.items.first else { return XCTFail("Expected folded context") }
+        await model.open(fold, in: path, store: store, session: "a")
+        let context = model.diffs[path]?.items.prefix(3).compactMap { item -> String? in
+            if case .line(let line) = item { line.row.text } else { nil }
+        }
+        XCTAssertEqual(context, ["historical 1", "historical 2", "historical 3"])
+        XCTAssertFalse(asked.all.contains { $0.type == .readFile || $0.type == .fileDiff })
+        XCTAssertEqual(asked.all.first { $0.type == .commitFiles }?.commit, hash)
+        await model.refresh(store: store, session: "a", ignoreWhitespace: true, commit: hash)
+        await model.load(path, store: store, session: "a")
+        let sent = try XCTUnwrap(asked.all.last { $0.type == .commitDiff })
+        XCTAssertEqual(sent.commit, hash)
+        XCTAssertEqual(sent.ignoreWhitespace, true)
+        XCTAssertEqual(model.diffs[path]?.items.isEmpty, true)
+    }
+
+    func testHistoryCanBeOpenedAsAWorkspaceTab() {
+        set([RightPanel.tabsKey: "diff,files", RightPanel.tabKey: "diff", RightPanel.openKey: false])
+        RightPanel.show(.history)
+        XCTAssertEqual(RightPanel.tabs(UserDefaults.standard.string(forKey: RightPanel.tabsKey) ?? ""), [.diff, .files, .history])
+        XCTAssertEqual(UserDefaults.standard.string(forKey: RightPanel.tabKey), "history")
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: RightPanel.openKey))
+        RightPanel.show(.history)
+        XCTAssertEqual(RightPanel.tabs(UserDefaults.standard.string(forKey: RightPanel.tabsKey) ?? "").count, 3)
     }
 
     func testCollapseAllFoldsEveryFileThenOpensThem() async {
@@ -295,7 +376,7 @@ final class RightPanelTests: XCTestCase {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         let sessions = """
         {"type":"sessions","sessions":[
-         {"id":"a","kind":"codex","name":"Make a few small changes","cwd":"\(cwd)","state":"idle","inject":"tmux","lastActivityAt":\(now - 60_000)}
+         {"id":"a","kind":"codex","name":"Make a few small changes","cwd":"\(cwd)","state":"idle","inject":"tmux","lastActivityAt":\(now - 60_000),"servers":[{"port":8766,"command":"python3","title":"Agentman"}]}
         ]}
         """
         let messages = """
@@ -304,7 +385,7 @@ final class RightPanelTests: XCTestCase {
          {"id":"2","sessionId":"a","role":"assistant","ts":\(now - 240_000),"text":"Made small wording edits in three files. No behaviour changes; `git diff --check` passed."}
         ]}
         """
-        let store = AgentsStore(client: Self.client())
+        let store = AgentsStore(client: Self.client(previewHistory: true))
         for json in [sessions, messages] {
             store.apply(try JSONDecoder().decode(DaemonEvent.self, from: Data(json.utf8)))
         }
@@ -336,7 +417,7 @@ final class RightPanelTests: XCTestCase {
         window.alphaValue = 0
         window.ignoresMouseEvents = true
         window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-        window.contentView = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
+        window.contentView = NSHostingView(rootView: view.frame(width: size.width, height: size.height).background(Palette.paper))
         window.orderFrontRegardless()
         RunLoop.main.run(until: Date().addingTimeInterval(0.8))
         let content = try XCTUnwrap(window.contentView)
@@ -362,6 +443,26 @@ final class RightPanelTests: XCTestCase {
             set([RightPanel.tabKey: "files", "diffSplit": false])
             try render(size: large, dark: dark, store: try store(cwd: cwd), to: shots.appendingPathComponent("panel-files-\(look).png"))
         }
+        for dark in [false, true] {
+            let look = dark ? "dark" : "light"
+            set([RightPanel.tabsKey: "diff,files,history", RightPanel.tabKey: "history"])
+            try render(size: large, dark: dark, store: try store(cwd: cwd), to: shots.appendingPathComponent("panel-history-\(look).png"))
+            try renderView(HistoryPanel(sessionID: "a", cwd: cwd).environment(AgentsStore(client: Self.client(previewHistory: true))),
+                           size: CGSize(width: 360, height: 760), dark: dark,
+                           to: shots.appendingPathComponent("history-list-360-\(look).png"))
+            let commit = WorkspaceCommit(hash: String(repeating: "a", count: 40), subject: "Keep history beside the conversation",
+                                         author: "Jeremiah", authoredAt: 1793448000000)
+            for width in [360.0, 540.0, 900.0] {
+                let split = width == 900
+                set(["diffSplit": split])
+                try renderView(DiffPanel(sessionID: "a", cwd: cwd, state: .idle, activity: nil, commit: commit, back: {}).environment(AgentsStore(client: Self.client())),
+                               size: CGSize(width: width, height: 760), dark: dark,
+                               to: shots.appendingPathComponent("history-commit-\(Int(width))-\(look).png"))
+            }
+        }
+        set([RightPanel.tabKey: "history"])
+        try render(size: CGSize(width: 1180, height: 720), dark: false, store: try store(cwd: cwd),
+                   to: shots.appendingPathComponent("panel-history-compact-light.png"))
         // The card's git row, and the commit sheet over the window.
         set([RightPanel.openKey: false])
         try render(size: CGSize(width: 1180, height: 720), dark: false, store: try store(cwd: cwd),

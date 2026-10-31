@@ -558,6 +558,7 @@ private struct ServersMenu: View {
     let session: Session
     let servers: [Server]
     @State private var stopping: Server?
+    @State private var hovering = false
 
     var body: some View {
         Menu {
@@ -576,14 +577,14 @@ private struct ServersMenu: View {
                 }
             }
         } label: {
-            Label {
-                Text(verbatim: servers.count == 1 ? ":" + String(servers[0].port) : "\(servers.count) servers")
-            } icon: {
-                Image(systemName: "globe")
-            }
-            .labelStyle(.titleAndIcon)
+            serverLabel
         }
-        .help("Dev servers")
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .onHover { hovering = $0 }
+        .accessibilityLabel("Dev servers, " + ports)
+        .help("Dev servers · " + ports)
         .confirmationDialog(
             stopping.map { "Stop the server on port " + String($0.port) + "?" } ?? "",
             isPresented: Binding(get: { stopping != nil }, set: { if !$0 { stopping = nil } })
@@ -598,6 +599,18 @@ private struct ServersMenu: View {
         } message: {
             Text("Its process ends. Agentman can't start it again.")
         }
+    }
+
+    private var ports: String { servers.map { ":" + String($0.port) }.joined(separator: ", ") }
+
+    private var serverLabel: some View {
+        let caption = servers.count == 1 ? " :" + String(servers[0].port) : " \(servers.count)"
+        return (Text(Image(systemName: "globe")) + Text(caption))
+            .font(Fonts.mono(11))
+            .foregroundStyle(hovering ? Palette.text : Palette.muted)
+            .padding(.horizontal, 7)
+            .frame(height: 28)
+            .background(hovering ? Palette.fill.opacity(0.55) : .clear, in: RoundedRectangle(cornerRadius: 6))
     }
 
     /// A server as its menu section names it: its page's title, or its

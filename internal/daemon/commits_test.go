@@ -168,6 +168,9 @@ func TestCommitDiffShowsOneFileAgainstTheParent(t *testing.T) {
 	if event.Type != protocol.EvtWorkspace || event.Workspace.Kind != "diff" {
 		t.Fatalf("commit_diff: %+v", event)
 	}
+	if event.Workspace.Text != "new\n" {
+		t.Fatalf("historical context: %q", event.Workspace.Text)
+	}
 	diff := event.Workspace.Diff
 	if !strings.Contains(diff, "-old") || !strings.Contains(diff, "+new") ||
 		strings.Contains(diff, "later") || strings.Contains(diff, "b.go") || strings.Contains(diff, "\x1b[") {
@@ -177,6 +180,34 @@ func TestCommitDiffShowsOneFileAgainstTheParent(t *testing.T) {
 	if first.Type != protocol.EvtWorkspace || !strings.Contains(first.Workspace.Diff, "@@ -0,0 +1 @@") ||
 		!strings.Contains(first.Workspace.Diff, "+old") {
 		t.Fatalf("root commit diff: %+v", first)
+	}
+}
+
+// A commit's diff can leave out lines whose only change is whitespace, as
+// the uncommitted diff can.
+func TestCommitDiffCanIgnoreWhitespace(t *testing.T) {
+	dir, git := historyRepo(t)
+	write(t, dir, "a.go", "func a() {\nreturn 1\n}\n")
+	git("add", ".")
+	git("commit", "-qm", "Base")
+	write(t, dir, "a.go", "func a() {\n\treturn 1\n}\n// done\n")
+	git("commit", "-qam", "Indent, and a comment")
+	head := git("rev-parse", "HEAD")
+
+	d := workspaceDaemon(dir)
+	diff := func(ignore bool) string {
+		event := d.Handle(context.Background(), protocol.Request{Type: protocol.ReqCommitDiff, SessionID: "codex:test",
+			Commit: head, Path: "a.go", IgnoreWhitespace: ignore})
+		if event.Type != protocol.EvtWorkspace {
+			t.Fatalf("commit_diff: %+v", event)
+		}
+		return event.Workspace.Diff
+	}
+	if all := diff(false); !strings.Contains(all, "+\treturn 1") || !strings.Contains(all, "+// done") {
+		t.Fatalf("whole diff: %q", all)
+	}
+	if some := diff(true); strings.Contains(some, "return 1\n+") || strings.Contains(some, "+\treturn 1") || !strings.Contains(some, "+// done") {
+		t.Fatalf("whitespace left in: %q", some)
 	}
 }
 
@@ -378,5 +409,27 @@ func TestOnlyAPlainBranchNameIsAccepted(t *testing.T) {
 	gone := d.Handle(context.Background(), protocol.Request{Type: protocol.ReqListCommits, SessionID: "codex:test", Ref: "refs/heads/deleted"})
 	if gone.Type != protocol.EvtError || !strings.Contains(gone.Error, "no longer in this repository") {
 		t.Errorf("a missing branch: %+v", gone)
+	}
+}
+
+func TestCommitContextStaysInTheSelectedTree(t *testing.T) {
+	dir, git := historyRepo(t)
+	write(t, dir, "folder/a.go", "historical\n")
+	write(t, dir, "binary", "a\x00b")
+	if err := os.Symlink("folder/a.go", filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-qm", "Files")
+	hash := git("rev-parse", "HEAD")
+	write(t, dir, "folder/a.go", "working\n")
+	ctx := context.Background()
+	if got := commitContext(ctx, filepath.Join(dir, "folder"), hash, "a.go"); got != "historical\n" {
+		t.Fatalf("subdirectory context: %q", got)
+	}
+	for _, name := range []string{"link", "binary", "missing"} {
+		if got := commitContext(ctx, dir, hash, name); got != "" {
+			t.Errorf("%s context: %q", name, got)
+		}
 	}
 }
