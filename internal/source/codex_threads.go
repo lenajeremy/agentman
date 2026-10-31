@@ -341,11 +341,15 @@ func (s *CodexSource) ConnectAppServer(version string) {
 	}
 	server := newCodexAppServer(codexAppServerSocket(s.home), version)
 	live := newCodexLiveThreads(server.call)
-	server.handle = live.apply
+	streams := newCodexStreams(server)
+	server.handle = func(msg codexRPCMessage) {
+		live.apply(msg)
+		streams.dispatch(msg)
+	}
 	server.up = live.connected
 	server.down = live.lost
 	ctx, stop := context.WithCancel(context.Background())
-	s.appServer, s.live, s.appStop = server, live, stop
+	s.appServer, s.live, s.streams, s.appStop = server, live, streams, stop
 	go server.run(ctx)
 }
 

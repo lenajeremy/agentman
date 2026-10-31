@@ -218,6 +218,9 @@ type CodexSource struct {
 	appServer *codexAppServer
 	live      *codexLiveThreads
 	appStop   context.CancelFunc
+	// streams hands the live events of joined threads to follows; see
+	// codex_stream.go.
+	streams *codexStreams
 }
 
 type codexSession struct {
@@ -1093,6 +1096,10 @@ func (s *CodexSource) Follow(ctx context.Context, sessionID string, out chan<- [
 
 	tail := jsonl.NewTail(session.transcript)
 	p := parser.NewCodexParser(sessionID)
+	// The turn as it happens, from the shared daemon; see codex_stream.go.
+	live := s.newFollowLive(sessionID)
+	defer live.stop()
+	live.track(ctx, session)
 	if !startedWithoutTranscript {
 		// From the end, with the parser primed so a question or call already
 		// open is settled when it finishes. See primeFollow.
@@ -1108,6 +1115,8 @@ func (s *CodexSource) Follow(ctx context.Context, sessionID string, out chan<- [
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case msg := <-live.events():
+			applyCodexLive(live.rows, msg)
 		case <-ticker.C:
 			// The rollout a session is reading can change under it. Codex opens
 			// a new file when a conversation is resumed or forked, and
@@ -1137,6 +1146,7 @@ func (s *CodexSource) Follow(ctx context.Context, sessionID string, out chan<- [
 					tail.SeekTo(info)
 				}
 			}
+			live.track(ctx, current)
 
 			lines, err := tail.Read()
 			if err != nil {
@@ -1149,6 +1159,7 @@ func (s *CodexSource) Follow(ctx context.Context, sessionID string, out chan<- [
 			for _, line := range lines {
 				batch = append(batch, p.Parse(line.Text, line.Offset)...)
 			}
+			batch = live.merge(batch)
 			if len(batch) == 0 {
 				continue
 			}
