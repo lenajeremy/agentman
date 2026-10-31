@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/lenajeremy/agentman/internal/daemon"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,9 @@ func languageOptions(cfg hook.Config, configHome string) lsp.Options {
 		MaxServers:  cfg.LSP.MaxServers,
 		Paths:       map[string]string{},
 		Disabled:    map[string]bool{},
+		// The cross-platform app loads the same editor page from its own
+		// origin.
+		AllowOrigin: daemon.AppOrigin,
 	}
 	if dir, err := hook.ConfigDir(configHome); err == nil {
 		opts.Dir = filepath.Join(dir, "lsp")
