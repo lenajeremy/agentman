@@ -189,6 +189,10 @@ func codexAtComposer(pane string) error {
 // SetMode implements ModeSetter: shift+tab, reading the mode back from the
 // footer after each press, until it is the one asked for.
 func (s *CodexSource) SetMode(ctx context.Context, sessionID, mode string) error {
+	// Through the daemon when it has the session; see codex_daemon_switch.go.
+	if handled, err := s.setModeThroughDaemon(ctx, sessionID, mode); handled {
+		return err
+	}
 	name, err := s.codexSwitchable(sessionID)
 	if err != nil {
 		return err
@@ -268,6 +272,10 @@ func codexModelRows(pane string) ([]paneRow, bool) {
 // its reasoning level, then "s" for this session only. Enter on the
 // reasoning level would save the model as the default, and is never pressed.
 func (s *CodexSource) SetModel(ctx context.Context, sessionID, model string) error {
+	// Through the daemon when it has the session; see codex_daemon_switch.go.
+	if handled, err := s.setModelThroughDaemon(ctx, sessionID, model); handled {
+		return err
+	}
 	name, err := s.codexSwitchable(sessionID)
 	if err != nil {
 		return err

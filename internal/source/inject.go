@@ -163,6 +163,19 @@ func (s *CodexSource) send(ctx context.Context, sessionID, text string, images [
 		return protocol.InjectNone, fmt.Errorf("source: unknown codex session %q", sessionID)
 	}
 
+	// Through Codex's shared daemon when it has the session open; see
+	// codex_daemon_send.go. A session in a pane still reports tmux delivery,
+	// which is what the apps key the rest of its controls on.
+	if sent, err := s.sendThroughDaemon(ctx, sessionID, session, text, images); sent {
+		if err != nil {
+			return protocol.InjectNone, err
+		}
+		if session.tmuxName != "" {
+			return protocol.InjectTmux, nil
+		}
+		return protocol.InjectAPI, nil
+	}
+
 	if session.tmuxName != "" {
 		lock := s.paneLock(session.tmuxName)
 		lock.Lock()
@@ -675,6 +688,14 @@ func (s *CodexSource) Answer(ctx context.Context, sessionID string, answer proto
 	s.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("source: unknown codex session %q", sessionID)
+	}
+	// Through the daemon when it has the request; see codex_requests.go.
+	if handled, err := s.answerThroughDaemon(ctx, session, answer); handled {
+		return err
+	}
+	// A question Codex asked without waiting; see codex_asks.go.
+	if handled, err := s.answerAsk(ctx, session, answer); handled {
+		return err
 	}
 	if session.tmuxName == "" {
 		return fmt.Errorf("source: only sessions started with `am codex` can be answered")

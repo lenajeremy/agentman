@@ -228,6 +228,7 @@ func runServe(ctx context.Context, args []string) error {
 	}
 	defer registry.Close()
 	registry.EnableAsyncCursor()
+	registry.ConnectCodex(version)
 
 	// Messages for sessions with no live input channel wait here until their
 	// next Stop hook, which is the only moment such a session can be reached.

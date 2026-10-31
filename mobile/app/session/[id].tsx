@@ -2,7 +2,7 @@ import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import Feather from "@expo/vector-icons/Feather";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -140,7 +140,7 @@ export default function SessionScreen() {
   );
   const [inputFocused, setInputFocused] = useState(false);
   // The text box, measured when the model menu opens so the menu sits on it.
-  const fieldRef = useRef<View>(null);
+  const fieldRef = useRef<ComponentRef<typeof View>>(null);
   const [modelMenuBottom, setModelMenuBottom] = useState<number | null>(null);
   // Paste in the text box takes an image only while it is focused: a paste
   // goes to whichever box has focus, and this one is where images belong.
@@ -255,7 +255,7 @@ export default function SessionScreen() {
   // content stayed where it was, which left the box being typed into below
   // the visible part of the sheet. Scrolling to the end shows it: the note
   // sits under the last option.
-  const sheetScroll = useRef<ScrollView>(null);
+  const sheetScroll = useRef<ComponentRef<typeof ScrollView>>(null);
   useEffect(() => {
     if (Platform.OS === "web") return;
     const shown = Keyboard.addListener("keyboardDidShow", () => {
@@ -1114,7 +1114,7 @@ export default function SessionScreen() {
               <View style={styles.thinking}>
                 <Thinking />
               </View>
-            ) : null
+            ) : undefined
           }
           // With the list inverted, the "end" is the oldest message.
           onEndReached={() => store.loadOlder(sessionId)}
@@ -1128,10 +1128,10 @@ export default function SessionScreen() {
               </Text>
             ) : paging && !paging.hasMore && messages.length > 0 ? (
               <Text style={styles.startOfSession}>Start of session</Text>
-            ) : null
+            ) : undefined
           }
           ListEmptyComponent={
-            paging?.loading ? null : (
+            paging?.loading ? undefined : (
               <Text style={styles.emptyFeed}>
                 {session ? "No messages yet." : "Waiting for session status from your Mac…"}
               </Text>
@@ -1753,7 +1753,7 @@ const HOLD_MS = 350;
  * message was a moment earlier rather than where it ends up.
  */
 function useHeldMessage() {
-  const ref = useRef<View>(null);
+  const ref = useRef<ComponentRef<typeof View>>(null);
   const [anchor, setAnchor] = useState<Frame | null>(null);
 
   const open = useCallback(() => {

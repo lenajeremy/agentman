@@ -191,7 +191,7 @@ export default function AgentmanScreen() {
         ListHeaderComponent={
           manager.thinking && manager.entries.at(-1)?.streaming !== true ? (
             <View style={styles.thinking}><Thinking label="Thinking" /></View>
-          ) : null
+          ) : undefined
         }
         ListEmptyComponent={
           <View style={styles.empty}>

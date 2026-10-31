@@ -144,6 +144,8 @@ func (d *Daemon) startLocalSession(ctx context.Context, req protocol.Request) (s
 		id, err = d.registry.LaunchCursor(ctx, dir, req.Text)
 	} else if req.Kind == protocol.KindOpenCode {
 		id, err = startOpenCodeSession(ctx, dir, req.Text)
+	} else if req.Kind == protocol.KindCodex {
+		id, err = d.startCodexSession(ctx, dir, req.Text)
 	} else {
 		id, err = startTerminalSession(ctx, req.Kind, dir, req.Text)
 	}
@@ -154,6 +156,33 @@ func (d *Daemon) startLocalSession(ctx context.Context, req protocol.Request) (s
 	d.launches[req.ClientID] = id
 	d.mu.Unlock()
 	return id, nil
+}
+
+// startCodexSession starts Codex on its shared daemon when Agentman is
+// connected to it, then opens a terminal on the conversation with `codex
+// resume`, in a pane that names the thread so discovery matches it exactly
+// and several can share a folder. See source.CodexSource.StartThread.
+// Without the daemon, Codex is opened in a pane with its first message, as
+// before.
+func (d *Daemon) startCodexSession(ctx context.Context, dir, prompt string) (string, error) {
+	thread, err := startCodexThread(ctx, d.registry, dir, prompt)
+	if errors.Is(err, source.ErrNoCodexDaemon) {
+		return startTerminalSession(ctx, protocol.KindCodex, dir, prompt)
+	}
+	if err != nil {
+		return "", err
+	}
+	resume, _ := source.ResumeArgs(protocol.KindCodex, thread)
+	sessionID := string(protocol.KindCodex) + ":" + thread
+	naming := func(native, pane string) (string, string) {
+		return d.registry.ResumedSession(sessionID, native, pane)
+	}
+	return startResumedSession(ctx, protocol.KindCodex, dir, resume, naming)
+}
+
+// startCodexThread is a variable so a test can launch without Codex.
+var startCodexThread = func(ctx context.Context, registry *source.Registry, dir, prompt string) (string, error) {
+	return registry.StartCodexThread(ctx, dir, prompt)
 }
 
 // agentCommand maps a kind to the program that runs it and the word its tmux

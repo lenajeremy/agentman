@@ -255,22 +255,7 @@ func (p *CodexParser) Parse(line string, offset int64) []protocol.Message {
 		// re-reads and a message keeps the same content when paged again.
 		sort.Strings(paths)
 
-		summary := ""
-		switch len(paths) {
-		case 0:
-		case 1:
-			summary = paths[0]
-		default:
-			shown := paths
-			if len(shown) > 3 {
-				shown = shown[:3]
-			}
-			names := make([]string, len(shown))
-			for i, path := range shown {
-				names[i] = baseName(path)
-			}
-			summary = fmt.Sprintf("%d files: %s", len(paths), strings.Join(names, ", "))
-		}
+		summary := codexEditSummary(paths)
 
 		base.Role = protocol.RoleTool
 		status := protocol.ToolOK
@@ -819,6 +804,26 @@ func (p *CodexParser) interrupted(rec codexRecord, offset int64) []protocol.Mess
 		ID: id, SessionID: p.sessionID, Role: protocol.RoleSystem,
 		Ts: parseTime(rec.Timestamp), Text: "Interrupted",
 	}}
+}
+
+// codexEditSummary names the files of an edit, sorted: the one path, or how
+// many and the first few names.
+func codexEditSummary(paths []string) string {
+	switch len(paths) {
+	case 0:
+		return ""
+	case 1:
+		return paths[0]
+	}
+	shown := paths
+	if len(shown) > 3 {
+		shown = shown[:3]
+	}
+	names := make([]string, len(shown))
+	for i, path := range shown {
+		names[i] = baseName(path)
+	}
+	return fmt.Sprintf("%d files: %s", len(paths), strings.Join(names, ", "))
 }
 
 func baseName(path string) string {

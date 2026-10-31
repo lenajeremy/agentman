@@ -210,6 +210,24 @@ type CodexSource struct {
 	names   codexNames
 	titleMu sync.Mutex
 	titled  map[string]codexTitled
+
+	// appServer is the connection to Codex's shared daemon and live what it
+	// says about the threads it has open, once `am serve` has connected;
+	// nil otherwise. See codex_appserver.go and codex_threads.go.
+	appMu     sync.Mutex
+	appServer *codexAppServer
+	live      *codexLiveThreads
+	appStop   context.CancelFunc
+	// streams hands the live events of joined threads to follows; see
+	// codex_stream.go.
+	streams *codexStreams
+	// asks are the questions Codex asked without waiting; see codex_asks.go.
+	asks *codexAsks
+	// requests are the approvals and questions threads wait on, and holds
+	// the joins kept so the daemon sends them; see codex_requests.go.
+	requests *codexRequests
+	holdMu   sync.Mutex
+	holds    map[string]*codexHold
 }
 
 type codexSession struct {
@@ -310,6 +328,7 @@ func NewCodexSource(home string) (*CodexSource, error) {
 		readMeta:       readCodexMeta,
 		readActivity:   codexActivity,
 		rolloutCache:   map[string]codexRolloutCacheEntry{},
+		asks:           newCodexAsks(),
 		sessions:       map[string]codexSession{},
 	}, nil
 }
@@ -325,6 +344,12 @@ func (s *CodexSource) CurrentQuestion(ctx context.Context, sessionID string) (*p
 	s.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("source: unknown codex session %q", sessionID)
+	}
+	if asked := s.daemonQuestion(s.daemonThreadOf(session)); asked != nil {
+		return asked, nil
+	}
+	if asked := s.askQuestion(session); asked != nil {
+		return asked, nil
 	}
 	if session.tmuxName == "" {
 		return session.meta.Question, nil
@@ -357,7 +382,15 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	// every install, and this gate clears the whole session map when it says
 	// no, so a probe that fails to see a running Codex does not report it idle
 	// — it hides it. A pane agentman opened for Codex settles the question.
-	if !anyCodexPane(panes) && s.processCheck != nil && !s.processCheck(ctx) {
+	// While connected to Codex's shared daemon, the daemon says which
+	// threads are open; see codex_threads.go. Its own process always passes
+	// the probe below, which then proves nothing.
+	daemon, daemonReady := s.liveThreads()
+	if daemonReady {
+		s.holdWaiting(daemon)
+	}
+
+	if !daemonReady && !anyCodexPane(panes) && s.processCheck != nil && !s.processCheck(ctx) {
 		s.mu.Lock()
 		s.sessions = map[string]codexSession{}
 		s.mu.Unlock()
@@ -487,6 +520,17 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 		}
 		if info, err := os.Stat(path); err == nil {
 			rollouts = append(rollouts, rollout{path: path, modTime: info.ModTime(), info: info, kept: true})
+			listed[path] = true
+		}
+	}
+	// A thread the daemon has open is live however long it has sat idle.
+	for _, thread := range daemon {
+		if !thread.session() || thread.Path == "" || listed[thread.Path] {
+			continue
+		}
+		if info, err := os.Stat(thread.Path); err == nil {
+			rollouts = append(rollouts, rollout{path: thread.Path, modTime: info.ModTime(), info: info})
+			listed[thread.Path] = true
 		}
 	}
 	sort.Slice(rollouts, func(i, j int) bool {
@@ -558,6 +602,15 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			if entry.kept && tmuxName == "" {
 				continue
 			}
+			// A terminal Codex running through the shared daemon is open
+			// exactly while the daemon has its thread loaded. One the daemon
+			// has closed is not a session, however recent its rollout,
+			// unless a pane still vouches for it.
+			thread, onDaemon := daemon[meta.threadID()]
+			onDaemon = onDaemon && thread.session()
+			if daemonReady && !onDaemon && tmuxName == "" && codexOnSharedDaemon(meta) {
+				continue
+			}
 
 			session := protocol.Session{
 				ID:             id,
@@ -569,6 +622,14 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				Inject:         inject,
 				StartedAt:      parseCodexTime(meta.Payload.Timestamp),
 				LastActivityAt: lastActivity,
+			}
+			if onDaemon {
+				session.State = thread.state()
+				// Messages reach it through the daemon, pane or not; see
+				// codex_daemon_send.go.
+				if tmuxName == "" {
+					session.Inject = protocol.InjectAPI
+				}
 			}
 			var screen string
 			var read bool
@@ -588,9 +649,36 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				model = codexModel(path)
 				s.models.put(id, model)
 			}
+			if onDaemon && thread.Model != "" {
+				model = thread.Model
+			}
 			session.Model = model
+			// The daemon's request is the question exactly as Codex asks it,
+			// for a session in a pane or not; see codex_requests.go.
+			if onDaemon {
+				asked := s.daemonQuestion(thread.ID)
+				if asked == nil {
+					asked = s.askQuestion(codexSession{meta: session, transcript: path})
+				}
+				if asked != nil {
+					session.Question = asked
+					session.State = protocol.StateWaitingInput
+				}
+			}
 			if read {
 				s.applyFooter(&session, screen)
+			}
+			// With no footer to read, the daemon says the mode and model,
+			// and switches them; see codex_daemon_switch.go.
+			if onDaemon && len(session.Modes) == 0 {
+				session.Modes = append([]string(nil), codexModes...)
+				session.Mode = thread.Mode
+				for _, model := range s.codexModels() {
+					session.Models = append(session.Models, model.slug)
+				}
+				if len(session.Models) > 0 {
+					session.ModelScope = protocol.ModelScopeSession
+				}
 			}
 
 			found = append(found, session)
@@ -664,12 +752,25 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	s.models.forget(live)
 	s.held.forget(live)
 	s.forgetCodexRollouts(liveRollouts)
+	s.asks.forget(liveRollouts)
 
 	s.mu.Lock()
 	s.sessions = next
 	s.mu.Unlock()
 
 	return found, nil
+}
+
+// codexOnSharedDaemon reports whether a rollout was written by a terminal
+// Codex running through the shared daemon, the one kind of session the daemon
+// speaks for. The TUI reaches the daemon as an app-server client, which Codex
+// records as source "vscode"; a TUI from before the daemon recorded "cli".
+// codex exec, the ChatGPT app and other apps run app-servers of their own,
+// so their sessions keep to the rollout path.
+func codexOnSharedDaemon(meta codexMeta) bool {
+	var source string
+	return meta.Payload.Originator == "codex-tui" &&
+		json.Unmarshal(meta.Payload.Source, &source) == nil && source == "vscode"
 }
 
 // tmuxID derives a stable session identifier from a tmux session name.
@@ -1042,6 +1143,10 @@ func (s *CodexSource) Follow(ctx context.Context, sessionID string, out chan<- [
 
 	tail := jsonl.NewTail(session.transcript)
 	p := parser.NewCodexParser(sessionID)
+	// The turn as it happens, from the shared daemon; see codex_stream.go.
+	live := s.newFollowLive(sessionID)
+	defer live.stop()
+	live.track(ctx, session)
 	if !startedWithoutTranscript {
 		// From the end, with the parser primed so a question or call already
 		// open is settled when it finishes. See primeFollow.
@@ -1057,6 +1162,8 @@ func (s *CodexSource) Follow(ctx context.Context, sessionID string, out chan<- [
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case msg := <-live.events():
+			applyCodexLive(live.rows, msg)
 		case <-ticker.C:
 			// The rollout a session is reading can change under it. Codex opens
 			// a new file when a conversation is resumed or forked, and
@@ -1086,6 +1193,7 @@ func (s *CodexSource) Follow(ctx context.Context, sessionID string, out chan<- [
 					tail.SeekTo(info)
 				}
 			}
+			live.track(ctx, current)
 
 			lines, err := tail.Read()
 			if err != nil {
@@ -1098,6 +1206,7 @@ func (s *CodexSource) Follow(ctx context.Context, sessionID string, out chan<- [
 			for _, line := range lines {
 				batch = append(batch, p.Parse(line.Text, line.Offset)...)
 			}
+			batch = live.merge(batch)
 			if len(batch) == 0 {
 				continue
 			}
