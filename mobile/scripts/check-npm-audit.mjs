@@ -21,6 +21,17 @@ const allowedAdvisories = new Set([
   "https://github.com/advisories/GHSA-mrhx-c7xc-m3w5",
   // deepmerge <=4.3.1: prototype poisoning in mergeObject(). Reached only through @expo/config, which merges the app config at build time. 4.3.1 is the latest release.
   "https://github.com/advisories/GHSA-gcqx-w48m-w2h4",
+  // glob >=9.0.0 <=14.0.1: an AbortSignal does not stop a walk already
+  // under way. Reached only through @expo/cli, @expo/config,
+  // @expo/config-plugins, @expo/fingerprint and @expo/metro-config, which glob
+  // the project's own files at build time, never with a signal. The fix is in
+  // 14.0.2, and every one of them, in SDK 58's latest releases, requires ^13.
+  "https://github.com/advisories/GHSA-3g3m-2fjr-6pw4",
+  // minimatch <11.0.1: denial of service when a crafted pattern expands into
+  // many globparts. Reached only through glob 13 and @expo/fingerprint, which
+  // match the project's own patterns at build time; both require ^10.2.2 in
+  // their latest releases, and the fix is in 11.0.1.
+  "https://github.com/advisories/GHSA-g3hv-75wg-m249",
 ]);
 
 const audit = spawnSync("npm", ["audit", "--omit=dev", "--json"], {
