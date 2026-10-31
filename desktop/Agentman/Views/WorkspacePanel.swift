@@ -611,6 +611,9 @@ struct FileLoader: View {
                     .contentShape(Rectangle())
                     .onTapGesture { store.lightbox = Lightbox(image: picture, title: (path as NSString).lastPathComponent) }
                     .help("Open full window")
+                    .contextMenu {
+                        Button("Copy Image") { ImageClipboard.copy(picture) }
+                    }
             } else if let text = result.text {
                 VStack(spacing: 0) {
                     FileBar(session: session, path: path, lines: text.reduce(into: 1) { if $1 == "\n" { $0 += 1 } }, copy: text)

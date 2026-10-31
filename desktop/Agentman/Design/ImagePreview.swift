@@ -1,6 +1,24 @@
 import AppKit
 import SwiftUI
 
+/// Copies a picture to the clipboard, as PNG and TIFF so any app can take
+/// it: right-click Copy Image wherever a picture shows.
+enum ImageClipboard {
+    /// The clipboard written to; tests use one of their own.
+    @MainActor static var pasteboard = NSPasteboard.general
+
+    @MainActor static func copy(_ image: NSImage) {
+        guard let tiff = image.tiffRepresentation else { return }
+        let item = NSPasteboardItem()
+        if let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+            item.setData(png, forType: .png)
+        }
+        item.setData(tiff, forType: .tiff)
+        pasteboard.clearContents()
+        pasteboard.writeObjects([item])
+    }
+}
+
 /// Images opened full window: what an agent or Agentman looked at, one
 /// shown at a time, the rest a key or an arrow away.
 struct Lightbox: Identifiable {
@@ -216,6 +234,11 @@ struct ImageThumbnail: View {
             }
             .buttonStyle(.plain)
             .help("Open full window")
+            .contextMenu {
+                Button("Copy Image") {
+                    Task { ImageClipboard.copy(await store.manager.image(sessionId: sessionId, path: path) ?? image) }
+                }
+            }
         } else if !failed {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(Palette.fill)
@@ -421,6 +444,9 @@ private struct SentImage: View {
                 }
                 .buttonStyle(.plain)
                 .help("Open full window")
+                .contextMenu {
+                    Button("Copy Image") { ImageClipboard.copy(image) }
+                }
             } else {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Palette.fill)
@@ -635,6 +661,9 @@ private struct SentFile: View {
                 }
                 .buttonStyle(.plain)
                 .help("Open full window")
+                .contextMenu {
+                    Button("Copy Image") { ImageClipboard.copy(NSImage(contentsOfFile: path) ?? image) }
+                }
             } else if missing {
                 Label("Image no longer kept", systemImage: "photo")
                     .font(TextStyle.caption)

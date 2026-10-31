@@ -90,7 +90,7 @@ private struct PictureScroller: NSViewRepresentable {
 /// The picture at its own size as the document, magnified to fit, and a
 /// clip view that keeps it centred while it is smaller than the view.
 final class PictureScrollView: NSScrollView {
-    private let picture = PictureView()
+    let picture = PictureView()
     var onTapBeside: (() -> Void)?
     var onZoom: ((CGFloat) -> Void)?
     /// The magnification that fits the picture.
@@ -188,9 +188,9 @@ private final class CentringClipView: NSClipView {
     }
 }
 
-/// The picture itself: a click on it isn't one beside it, and a double-click
-/// zooms where it lands.
-private final class PictureView: NSImageView {
+/// The picture itself: a click on it isn't one beside it, a double-click
+/// zooms where it lands, and a right-click offers to copy it.
+final class PictureView: NSImageView {
     var onDoubleClick: ((NSPoint) -> Void)?
 
     init() {
@@ -207,5 +207,16 @@ private final class PictureView: NSImageView {
         if event.clickCount == 2 {
             onDoubleClick?(convert(event.locationInWindow, from: nil))
         }
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard image != nil else { return nil }
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Copy Image", action: #selector(copyImage), keyEquivalent: "").target = self
+        return menu
+    }
+
+    @objc func copyImage() {
+        if let image { ImageClipboard.copy(image) }
     }
 }

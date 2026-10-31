@@ -89,6 +89,122 @@ final class ImageViewerTests: XCTestCase {
         XCTAssertEqual(asked.all, [1, 2, 1], "→ goes on, not past the last; ← goes back")
     }
 
+    // MARK: - Copying
+
+    /// A clipboard of the test's own, so the user's isn't touched.
+    private func privateClipboard() -> NSPasteboard {
+        let board = NSPasteboard(name: NSPasteboard.Name("agentman-test-" + UUID().uuidString))
+        let was = ImageClipboard.pasteboard
+        ImageClipboard.pasteboard = board
+        addTeardownBlock { @MainActor in
+            ImageClipboard.pasteboard = was
+            board.releaseGlobally()
+        }
+        return board
+    }
+
+    /// The picture on the clipboard, as an app pasting PNG reads it.
+    private func copied(_ board: NSPasteboard) -> CGSize? {
+        guard let png = board.data(forType: .png), let rep = NSBitmapImageRep(data: png) else { return nil }
+        return CGSize(width: rep.pixelsWide, height: rep.pixelsHigh)
+    }
+
+    func testCopyImagePutsThePictureOnTheClipboard() {
+        let board = privateClipboard()
+        ImageClipboard.copy(Self.swatch(.systemTeal, CGSize(width: 300, height: 200)))
+        XCTAssertEqual(copied(board), CGSize(width: 300, height: 200))
+        XCTAssertNotNil(board.data(forType: .tiff), "TIFF too, for apps that take only that")
+    }
+
+    // A right-click on the picture in the viewer or an editor tab offers
+    // Copy Image; beside the picture, nothing.
+    func testRightClickingTheViewersPictureCopiesIt() throws {
+        let board = privateClipboard()
+        let view = PictureScrollView()
+        view.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+        view.show(Self.swatch(.systemOrange, CGSize(width: 800, height: 600)))
+        let click = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                                     windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let menu = try XCTUnwrap(view.picture.menu(for: click))
+        XCTAssertEqual(menu.items.map(\.title), ["Copy Image"])
+        menu.performActionForItem(at: 0)
+        XCTAssertEqual(copied(board), CGSize(width: 800, height: 600), "The whole picture, not as fitted")
+    }
+
+    // A right-click on a picture in a conversation offers Copy Image too,
+    // and copies the picture itself, not its thumbnail.
+    func testRightClickingAPictureInAConversationCopiesIt() throws {
+        let board = privateClipboard()
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let path = folder.appendingPathComponent("sent.png").path
+        let rep = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(Self.swatch(.systemPurple, CGSize(width: 1200, height: 900)).tiffRepresentation)))
+        try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: path))
+
+        let store = AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-viewer.sock"))
+        let window = Self.window(SentFiles(paths: [path]).padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading),
+                                 size: CGSize(width: 400, height: 200), dark: false, store: store)
+        defer { window.orderOut(nil) }
+        RunLoop.main.run(until: Date().addingTimeInterval(1))
+        // In the middle of the thumbnail, 20 in and 110 high.
+        let point = NSPoint(x: 60, y: 200 - 20 - 55)
+        let click = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: point, modifierFlags: [], timestamp: 0,
+                                                     windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let content = try XCTUnwrap(window.contentView)
+        let hit = try XCTUnwrap(content.hitTest(content.convert(point, from: nil)))
+        let menu = try XCTUnwrap(hit.menu(for: click), "No menu under the thumbnail")
+        let copy = try XCTUnwrap(menu.items.firstIndex { $0.title == "Copy Image" }, "\(menu.items.map(\.title))")
+        menu.performActionForItem(at: copy)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertEqual(copied(board), CGSize(width: 1200, height: 900), "The picture itself")
+
+        // A click still opens it full window.
+        XCTAssertNil(store.lightbox)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            window.sendEvent(try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: 0,
+                                                              windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertEqual(store.lightbox?.pictures.first?.title, "sent.png", "A click opens it full window")
+    }
+
+    // And a picture an agent looked at, read through the daemon.
+    func testRightClickingAPictureAnAgentLookedAtCopiesIt() throws {
+        let board = privateClipboard()
+        let store = AgentsStore(client: Self.serving(Self.swatch(.systemGreen, CGSize(width: 1600, height: 1000))))
+        let thumbnail = ImageThumbnail(sessionId: "a", path: "/tmp/agent-shot.png", label: "Read agent-shot.png", pictureOnly: true)
+            .padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        let window = Self.window(thumbnail, size: CGSize(width: 400, height: 200), dark: false, store: store)
+        defer { window.orderOut(nil) }
+        RunLoop.main.run(until: Date().addingTimeInterval(1))
+        let point = NSPoint(x: 60, y: 200 - 20 - 60)
+        let click = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: point, modifierFlags: [], timestamp: 0,
+                                                     windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let content = try XCTUnwrap(window.contentView)
+        let menu = try XCTUnwrap(content.hitTest(content.convert(point, from: nil))?.menu(for: click), "No menu under the picture")
+        menu.performActionForItem(at: try XCTUnwrap(menu.items.firstIndex { $0.title == "Copy Image" }))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertEqual(copied(board), CGSize(width: 1600, height: 1000))
+    }
+
+    // And an image file in the right panel's Files.
+    func testRightClickingAnImageFileInThePanelCopiesIt() throws {
+        let board = privateClipboard()
+        let store = AgentsStore(client: Self.serving(Self.swatch(.systemRed, CGSize(width: 900, height: 600))))
+        let session = try JSONDecoder().decode(Session.self, from: Data(#"{"id":"a","kind":"claude","name":"x","cwd":"/tmp","state":"idle"}"#.utf8))
+        let window = Self.window(FileLoader(session: session, path: "shots/home.png"), size: CGSize(width: 400, height: 400), dark: false, store: store)
+        defer { window.orderOut(nil) }
+        RunLoop.main.run(until: Date().addingTimeInterval(1))
+        let point = NSPoint(x: 200, y: 200)
+        let click = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: point, modifierFlags: [], timestamp: 0,
+                                                     windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let content = try XCTUnwrap(window.contentView)
+        let menu = try XCTUnwrap(content.hitTest(content.convert(point, from: nil))?.menu(for: click), "No menu over the picture")
+        menu.performActionForItem(at: try XCTUnwrap(menu.items.firstIndex { $0.title == "Copy Image" }))
+        XCTAssertEqual(copied(board), CGSize(width: 900, height: 600))
+    }
+
     // MARK: - Screenshots
 
     func testRenderTheViewer() throws {
@@ -128,7 +244,7 @@ final class ImageViewerTests: XCTestCase {
         let client = DaemonClient(socketPath: "/nonexistent/agentman-viewer.sock")
         let png = NSBitmapImageRep(data: image.tiffRepresentation!)!.representation(using: .png, properties: [:])!.base64EncodedString()
         client.answer = { request in
-            guard request.type == .readFile else { return nil }
+            guard request.type == .readFile || request.type == .readSeenFile else { return nil }
             let event: [String: Any] = ["type": "workspace", "workspace": ["kind": "file", "sessionId": "a", "path": request.path ?? "", "image": png]]
             return try? JSONDecoder().decode(DaemonEvent.self, from: JSONSerialization.data(withJSONObject: event))
         }
