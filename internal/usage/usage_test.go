@@ -177,9 +177,9 @@ func TestPricesRisePastTheirContextLength(t *testing.T) {
 // Days are local days, the last day's hours; nothing before the range.
 func TestBucketsAreLocalDaysOrTheLastDaysHours(t *testing.T) {
 	now := time.Date(2026, 10, 31, 15, 30, 0, 0, time.Local)
-	from, step := Window(7, now)
-	if !from.Equal(time.Date(2026, 10, 25, 0, 0, 0, 0, time.Local)) || step != 24*time.Hour {
-		t.Errorf("7 days from %v by %v", from, step)
+	from, unit := Window(7, now)
+	if !from.Equal(time.Date(2026, 10, 25, 0, 0, 0, 0, time.Local)) || unit != Day {
+		t.Errorf("7 days from %v by %v", from, unit)
 	}
 	call := func(at time.Time, model string, agent protocol.Kind, session string) Record {
 		return Record{Agent: agent, Session: session, Model: model, Provider: "anthropic", At: at, Tokens: protocol.Tokens{Input: 1000, Output: 100}}
@@ -190,7 +190,7 @@ func TestBucketsAreLocalDaysOrTheLastDaysHours(t *testing.T) {
 		call(time.Date(2026, 10, 31, 9, 0, 0, 0, time.Local), "claude-opus-5-5", protocol.KindClaude, "a"),
 		call(time.Date(2026, 10, 31, 10, 0, 0, 0, time.Local), "mystery-model", protocol.KindOpenCode, "b"),
 	}
-	u := Summarize(records, prices, 7, from, step, now, 0)
+	u := Summarize(records, prices, 7, from, unit, now, 0)
 	if len(u.Buckets) != 7 || u.Sessions != 2 {
 		t.Fatalf("buckets %d, sessions %d", len(u.Buckets), u.Sessions)
 	}
@@ -210,10 +210,60 @@ func TestBucketsAreLocalDaysOrTheLastDaysHours(t *testing.T) {
 		t.Errorf("an unpriced model = %+v", mystery)
 	}
 
-	from, step = Window(1, now)
-	day := Summarize(records, prices, 1, from, step, now, 0)
-	if !day.Hourly || len(day.Buckets) != 24 || day.Tokens.Total() != 2200 {
+	from, unit = Window(1, now)
+	day := Summarize(records, prices, 1, from, unit, now, 0)
+	if !day.Hourly || day.Unit != "hour" || len(day.Buckets) != 24 || day.Tokens.Total() != 2200 {
 		t.Errorf("the last day: hourly %v, %d buckets, %d tokens", day.Hourly, len(day.Buckets), day.Tokens.Total())
+	}
+}
+
+// Six months go by day, a year by week from a Monday, and all of it by
+// week, or by month once it spans more than two years.
+func TestLongerRangesGoByWeekOrMonth(t *testing.T) {
+	now := time.Date(2026, 10, 31, 15, 30, 0, 0, time.Local) // a Saturday
+	if from, unit := Window(180, now); unit != Day || !from.Equal(time.Date(2026, 5, 5, 0, 0, 0, 0, time.Local)) {
+		t.Errorf("180 days from %v by %v", from, unit)
+	}
+	from, unit := Window(365, now)
+	if unit != Week || from.Weekday() != time.Monday || !from.Equal(time.Date(2025, 10, 27, 0, 0, 0, 0, time.Local)) {
+		t.Errorf("a year from %v (%v) by %v", from, from.Weekday(), unit)
+	}
+	call := func(at time.Time) Record {
+		return Record{Agent: protocol.KindClaude, Session: "s", Model: "claude-opus-5-5", Provider: "anthropic", At: at, Tokens: protocol.Tokens{Input: 10}}
+	}
+	year := Summarize([]Record{call(from), call(time.Date(2026, 10, 26, 8, 0, 0, 0, time.Local)), call(now)}, prices, 365, from, unit, now, 0)
+	last := year.Buckets[len(year.Buckets)-1]
+	if year.Unit != "week" || len(year.Buckets) != 53 || year.Buckets[0].Tokens[protocol.KindClaude] != 10 || last.Tokens[protocol.KindClaude] != 20 {
+		t.Errorf("a year: %s, %d buckets, first %v, last %v", year.Unit, len(year.Buckets), year.Buckets[0].Tokens, last.Tokens)
+	}
+
+	if from, unit := AllTime(time.Date(2026, 3, 4, 12, 0, 0, 0, time.Local), now); unit != Week || !from.Equal(time.Date(2026, 3, 2, 0, 0, 0, 0, time.Local)) {
+		t.Errorf("all of it from %v by %v", from, unit)
+	}
+	if from, unit := AllTime(time.Date(2023, 6, 15, 12, 0, 0, 0, time.Local), now); unit != Month || !from.Equal(time.Date(2023, 6, 1, 0, 0, 0, 0, time.Local)) {
+		t.Errorf("years of it from %v by %v", from, unit)
+	}
+}
+
+// All of it begins at the first record.
+func TestAllOfItBeginsAtTheFirstRecord(t *testing.T) {
+	home := t.TempDir()
+	old := time.Now().AddDate(0, -8, 0)
+	path := filepath.Join(home, ".claude/projects/p/old.jsonl")
+	write(t, path, claudeLine("a", old.UTC().Format(time.RFC3339Nano), "claude-opus-5-5", 10, 0, 0, 0, 1))
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	s := NewScanner(home, WithCatalog(prices))
+	if u := s.Summary(context.Background(), 30, time.Now()); u.Tokens.Total() != 0 {
+		t.Fatalf("30 days holds nothing from 8 months ago: %d", u.Tokens.Total())
+	}
+	all := s.Summary(context.Background(), 0, time.Now())
+	if all.Days != 0 || all.Unit != "week" || all.Tokens.Total() != 11 || len(all.Buckets) < 34 {
+		t.Fatalf("all of it: unit %s, %d tokens, %d buckets", all.Unit, all.Tokens.Total(), len(all.Buckets))
+	}
+	if first := time.UnixMilli(all.Buckets[0].Start); first.After(old) || old.Sub(first) > 7*24*time.Hour {
+		t.Fatalf("starts %v, the record %v", first, old)
 	}
 }
 

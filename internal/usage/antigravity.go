@@ -63,23 +63,23 @@ func (a *antigravityReader) read(ctx context.Context, roots []string, since time
 	if err != nil {
 		return nil, 0
 	}
-	seen := map[string]bool{}
+	present := map[string]bool{}
 	var calls []antigravityCall
 	skipped := 0
 	for _, root := range roots {
 		_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-			if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".db") || seen[path] {
+			if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".db") || present[path] {
 				return nil
 			}
 			info, err := entry.Info()
 			if err != nil {
 				return nil
 			}
+			present[path] = true
 			fingerprint, changed := dbFingerprint(path, info)
 			if changed.Before(since) {
 				return nil
 			}
-			seen[path] = true
 			db := a.dbs[path]
 			if db == nil || db.fingerprint != fingerprint {
 				db = &antigravityDB{fingerprint: fingerprint}
@@ -93,8 +93,9 @@ func (a *antigravityReader) read(ctx context.Context, roots []string, since time
 			return nil
 		})
 	}
+	// Databases gone are let go; those only past the range are kept.
 	for path := range a.dbs {
-		if !seen[path] {
+		if !present[path] {
 			delete(a.dbs, path)
 		}
 	}
