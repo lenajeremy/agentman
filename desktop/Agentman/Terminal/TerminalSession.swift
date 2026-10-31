@@ -111,6 +111,7 @@ final class AgentmanTerminalView: LocalProcessTerminalView {
         // Option types characters, as it does everywhere else on a Mac.
         optionAsMetaKey = false
         applyTheme()
+        Self.watchScrolling
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -136,6 +137,74 @@ final class AgentmanTerminalView: LocalProcessTerminalView {
         }
         return super.performKeyEquivalent(with: event)
     }
+
+    /// The wheel and the trackpad. A program that takes the mouse, as tmux
+    /// does in an agent's terminal, gets the wheel and scrolls its own
+    /// history; SwiftTerm only ever moved its own scrollback, which tmux's
+    /// screen doesn't have, so an agent's terminal didn't scroll. A full
+    /// screen program that doesn't take the mouse, such as less, gets the
+    /// arrow keys, as in Terminal. A trackpad's small movements add up to
+    /// whole lines rather than each counting as one or more.
+    ///
+    /// SwiftTerm's own scrollWheel can't be overridden, so the app's events
+    /// pass through here first (see `watchScrolling`).
+    func scroll(with event: NSEvent) {
+        let terminal = getTerminal()
+        let rows = max(terminal.rows, 1)
+        let lineHeight = max(bounds.height / CGFloat(rows), 1)
+        let reports = allowMouseReporting && terminal.mouseMode != .off
+        // tmux scrolls five lines for each wheel report, so a report goes
+        // for every few lines of movement.
+        let unit: CGFloat = reports ? Self.linesPerReport : 1
+        if event.hasPreciseScrollingDeltas {
+            if event.phase == .began { wheel = 0 }
+            wheel += event.scrollingDeltaY / lineHeight / unit
+        } else {
+            wheel += event.deltaY == 0 ? 0 : max(abs(event.deltaY) / unit, 1) * (event.deltaY > 0 ? 1 : -1)
+        }
+        let steps = Int(wheel)
+        wheel -= CGFloat(steps)
+        guard steps != 0 else { return }
+        let count = min(abs(steps), max(rows, 1))
+        if reports {
+            let point = convert(event.locationInWindow, from: nil)
+            let column = min(max(Int(point.x / max(bounds.width / CGFloat(max(terminal.cols, 1)), 1)), 0), terminal.cols - 1)
+            let fromTop = isFlipped ? point.y : bounds.height - point.y
+            let row = min(max(Int(fromTop / lineHeight), 0), rows - 1)
+            // The wheel is buttons 4 (up) and 5 (down), as in X11.
+            let flags = terminal.encodeButton(button: steps > 0 ? 4 : 5, release: false, shift: false, meta: false, control: false)
+            for _ in 0..<count { terminal.sendEvent(buttonFlags: flags, x: column, y: row) }
+        } else if terminal.isCurrentBufferAlternate {
+            let key = steps > 0
+                ? (terminal.applicationCursor ? EscapeSequences.moveUpApp : EscapeSequences.moveUpNormal)
+                : (terminal.applicationCursor ? EscapeSequences.moveDownApp : EscapeSequences.moveDownNormal)
+            for _ in 0..<count { send(data: key[...]) }
+        } else if steps > 0 {
+            scrollUp(lines: count)
+        } else {
+            scrollDown(lines: count)
+        }
+    }
+
+    /// Lines of movement for each wheel report to a program that takes the
+    /// mouse.
+    static let linesPerReport: CGFloat = 3
+
+    /// Sends scrolling over a terminal to `scroll(with:)` instead of
+    /// SwiftTerm's handling. Once, for every terminal.
+    @MainActor static let watchScrolling: Void = {
+        NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+            guard let window = event.window, let content = window.contentView,
+                  let hit = content.hitTest(content.convert(event.locationInWindow, from: nil)) else { return event }
+            var view: NSView? = hit
+            while let current = view, !(current is AgentmanTerminalView) { view = current.superview }
+            guard let terminal = view as? AgentmanTerminalView else { return event }
+            terminal.scroll(with: event)
+            return nil
+        }
+    }()
+    /// Movement not yet a whole line (or report), carried to the next event.
+    private var wheel: CGFloat = 0
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
