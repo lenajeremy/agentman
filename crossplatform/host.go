@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
@@ -20,8 +21,25 @@ type Host struct {
 }
 
 func newHost() *Host {
-	return &Host{notes: notifications.New()}
+	h := &Host{}
+	if notificationsWork() {
+		h.notes = notifications.New()
+	}
+	return h
 }
+
+// notificationsWork says whether this process can post notifications: on
+// macOS only from an app bundle (they need its identifier), not from the
+// bare binary a development build is.
+func notificationsWork() bool {
+	if runtime.GOOS != "darwin" {
+		return true
+	}
+	exe, err := os.Executable()
+	return err == nil && strings.Contains(exe, ".app/Contents/MacOS/")
+}
+
+var errNoNotifications = errors.New("notifications need Agentman.app; a development build can't post them")
 
 // PickFolder asks for a folder, as NSOpenPanel does; "" when cancelled.
 func (h *Host) PickFolder(title, start string) (string, error) {
@@ -84,6 +102,9 @@ func (h *Host) OpenURL(url string) error {
 // Notify shows a notification; clicking it sends the window the link it
 // carries (an agentman:// route), as the Mac app's do.
 func (h *Host) Notify(id, title, body, link string) error {
+	if h.notes == nil {
+		return errNoNotifications
+	}
 	if ok, err := h.notes.CheckNotificationAuthorization(); err == nil && !ok {
 		if ok, _ := h.notes.RequestNotificationAuthorization(); !ok {
 			return errors.New("notifications are off for Agentman")
@@ -97,7 +118,9 @@ func (h *Host) Notify(id, title, body, link string) error {
 // ClearNotification takes a notification away once what it was about is
 // settled.
 func (h *Host) ClearNotification(id string) {
-	_ = h.notes.RemoveDeliveredNotification(id)
+	if h.notes != nil {
+		_ = h.notes.RemoveDeliveredNotification(id)
+	}
 }
 
 // SetBadge puts a count on the dock icon ("" clears it). macOS only.
@@ -106,6 +129,10 @@ func (h *Host) SetBadge(label string) error { return setBadge(label) }
 // services are what main registers for the host: itself and the system
 // services it uses.
 func (h *Host) services() []application.Service {
+	services := append([]application.Service{application.NewService(h)}, badgeServices()...)
+	if h.notes == nil {
+		return services
+	}
 	h.notes.OnNotificationResponse(func(result notifications.NotificationResult) {
 		if result.Error != nil {
 			return
@@ -114,5 +141,5 @@ func (h *Host) services() []application.Service {
 			application.Get().Event.Emit("agentman:open", link)
 		}
 	})
-	return append([]application.Service{application.NewService(h), application.NewService(h.notes)}, badgeServices()...)
+	return append(services, application.NewService(h.notes))
 }
