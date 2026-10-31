@@ -151,6 +151,12 @@ struct CommandPalette: View {
         commands.append(Command(item: PaletteItem(id: "settings", title: "Settings", icon: "gearshape", shortcut: "⌘,")) {
             openSettings()
         })
+        commands.append(Command(item: PaletteItem(id: "pair", title: "Connect a Device…", detail: "a phone or tablet", icon: "qrcode"),
+                                keywords: "pair phone iphone ipad qr code") {
+            settingsTab = SettingsPage.devices.rawValue
+            store.pairingRequested = true
+            openSettings()
+        })
         for page in SettingsPage.allCases {
             commands.append(Command(item: PaletteItem(id: "settings:" + page.rawValue, title: "Settings: \(page.title)", icon: page.icon),
                                     keywords: "preferences") {

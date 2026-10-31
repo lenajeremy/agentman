@@ -21,6 +21,11 @@ final class AgentsStore {
     /// list says nothing about which agents are running.
     private(set) var sessionsLoaded = false
     private(set) var daemonInfo: DaemonInfo?
+    /// The phones and tablets that have reached this Mac; nil until the
+    /// daemon has said.
+    var devices: [Device]?
+    /// Set to open the Devices page straight into connecting one.
+    var pairingRequested = false
     private(set) var messages: [String: [Message]] = [:]
     private(set) var hasMore: [String: Bool] = [:]
     private(set) var loadingOlder: Set<String> = []
@@ -803,6 +808,8 @@ final class AgentsStore {
             followTakeovers()
         case "session_gone":
             sessions.removeAll { $0.id == event.sessionId }
+        case "devices":
+            devices = event.devices ?? []
         case "messages":
             if let id = event.sessionId, let new = event.messages {
                 merge(new, into: id)

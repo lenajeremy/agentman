@@ -56,6 +56,8 @@ enum RequestType: String, Codable, Sendable {
     case listWorktrees = "list_worktrees"
     case removeWorktree = "remove_worktree"
     case usage
+    case pairCode = "pair_code"
+    case devices
     case startSession = "start_session"
     case listFolders = "list_folders"
     case directorySessions = "directory_sessions"
@@ -204,6 +206,8 @@ struct DaemonEvent: Codable, Sendable {
     var worktree: Worktree?
     var worktrees: [Worktree]?
     var usage: Usage?
+    var pairCode: PairCode?
+    var devices: [Device]?
 
     // Agentman, the manager.
     var entry: ManagerEntry?
@@ -420,6 +424,33 @@ struct Key: Codable, Sendable, Hashable, Identifiable {
 /// One of a repository's working folders.
 /// What the agents on the Mac spent over a stretch of time, from their own
 /// records: tokens by kind, and what the API would have charged for them.
+/// A code a new phone or tablet connects with, good until `expires`.
+struct PairCode: Codable, Sendable, Equatable {
+    /// The ten digits to type on the device.
+    var code: String
+    /// What the QR code holds: agentman://pair?token=….
+    var url: String
+    /// Milliseconds since 1970.
+    var expiresAt: Int64
+    var expires: Date { Date(timeIntervalSince1970: Double(expiresAt) / 1000) }
+}
+
+/// A phone or tablet that has reached this Mac through the relay.
+struct Device: Codable, Sendable, Equatable, Identifiable {
+    var id: String
+    /// The device's own name, where it can tell; absent from phone apps that
+    /// predate it.
+    var name: String?
+    var model: String?
+    /// "ios" or "android".
+    var platform: String?
+    var os: String?
+    /// Milliseconds since 1970.
+    var firstSeen: Int64
+    var lastSeen: Int64
+    var connected: Bool?
+}
+
 struct Usage: Codable, Sendable, Equatable {
     struct Tokens: Codable, Sendable, Equatable {
         var input: Int64
