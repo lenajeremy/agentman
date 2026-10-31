@@ -67,8 +67,8 @@ targets:
         # agentman://agent/<session id> opens that agent: what Agentman's
         # cards and notifications link to.
         CFBundleURLTypes:
-          - CFBundleURLName: dev.agentman.mac
-            CFBundleURLSchemes: [agentman]
+          - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)
+            CFBundleURLSchemes: [$(AGENTMAN_URL_SCHEME)]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.agentman.mac
@@ -83,6 +83,15 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Agentman/Agentman.entitlements
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_IDENTITY: "-"
+        AGENTMAN_URL_SCHEME: agentman
+      configs:
+        # Debug builds, the tests' host among them, are an app of their own:
+        # sharing the released app's id, they shared its settings, so a test
+        # that opened a panel opened it in the user's running Agentman, and
+        # agentman:// links could open a build in DerivedData.
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: dev.agentman.mac.debug
+          AGENTMAN_URL_SCHEME: agentman-debug
   AgentmanTests:
     type: bundle.unit-test
     platform: macOS
