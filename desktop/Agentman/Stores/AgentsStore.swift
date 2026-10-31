@@ -9,13 +9,6 @@ enum SidebarItem: Hashable {
     case agent(String)
 }
 
-/// The agents working in one folder.
-struct AgentGroup: Identifiable {
-    let id: String
-    let name: String
-    let sessions: [Session]
-}
-
 /// Everything the app knows about the agents on this Mac, kept current from
 /// the daemon's events.
 @MainActor
@@ -209,25 +202,97 @@ final class AgentsStore {
     var working: [Session] { sessions.filter { $0.state == .busy } }
     var idle: [Session] { sessions.filter { $0.state == .idle } }
 
-    /// Agents grouped by the folder they work in: the group with someone
-    /// waiting on you first, then the most recently active.
-    var groups: [AgentGroup] {
+    /// The sidebar's agents in sections: pinned, active, working, archived.
+    /// See SidebarSections. Search and the filters apply first.
+    var sidebar: SidebarSections {
         let query = search.trimmingCharacters(in: .whitespaces)
         let shown = sessions.filter { session in
-            (query.isEmpty || session.name.localizedCaseInsensitiveContains(query) || session.cwd.localizedCaseInsensitiveContains(query))
+            (query.isEmpty || session.name.localizedCaseInsensitiveContains(query) || session.cwd.localizedCaseInsensitiveContains(query)
+                || (branches[session.cwd]?.localizedCaseInsensitiveContains(query) ?? false))
                 && Self.inFolder(session.cwd, folderFilter)
                 && (stateFilter == nil || Self.filterState(session) == stateFilter)
         }
-        return Dictionary(grouping: shown, by: \.cwd)
-            .map { cwd, members in
-                AgentGroup(id: cwd, name: Self.folderName(cwd), sessions: members.sorted(by: Self.boardOrder))
-            }
-            .sorted { a, b in
-                let rankA = a.sessions.first?.state.rank ?? 9
-                let rankB = b.sessions.first?.state.rank ?? 9
-                if rankA != rankB { return rankA < rankB }
-                return (a.sessions.first?.lastActivityAt ?? 0) > (b.sessions.first?.lastActivityAt ?? 0)
-            }
+        return SidebarSections.make(shown, choices: sidebarChoices)
+    }
+
+    /// What the user chose for the sidebar: pins, and agents archived or
+    /// brought back by hand. Kept across launches.
+    private(set) var sidebarChoices = AgentsStore.loadSidebarChoices() {
+        didSet { saveSidebarChoices() }
+    }
+
+    func pin(_ id: String) {
+        sidebarChoices.pinned.removeAll { $0 == id }
+        sidebarChoices.pinned.append(id)
+        // A pinned agent is live work again.
+        sidebarChoices.archived[id] = nil
+        sidebarChoices.unarchived[id] = Date()
+    }
+
+    func unpin(_ id: String) {
+        sidebarChoices.pinned.removeAll { $0 == id }
+    }
+
+    /// Done with: out of the active list, its pin with it. The conversation
+    /// stays, and comes back if the agent works or asks again.
+    func archive(_ id: String) {
+        sidebarChoices.pinned.removeAll { $0 == id }
+        sidebarChoices.unarchived[id] = nil
+        sidebarChoices.archived[id] = Date()
+    }
+
+    /// Back to active work, and kept there until it next does something.
+    func unarchive(_ id: String) {
+        sidebarChoices.archived[id] = nil
+        sidebarChoices.unarchived[id] = Date()
+    }
+
+    func isPinned(_ id: String) -> Bool { sidebarChoices.pinned.contains(id) }
+
+    func isArchived(_ session: Session) -> Bool {
+        SidebarSections.isArchived(session, choices: sidebarChoices, now: .now)
+    }
+
+    private static let choicesKey = "sidebarChoices"
+
+    private static func loadSidebarChoices() -> SidebarSections.Choices {
+        let saved = UserDefaults.standard.dictionary(forKey: choicesKey) ?? [:]
+        func dates(_ key: String) -> [String: Date] {
+            ((saved[key] as? [String: Double]) ?? [:]).mapValues { Date(timeIntervalSince1970: $0) }
+        }
+        return SidebarSections.Choices(pinned: saved["pinned"] as? [String] ?? [], archived: dates("archived"), unarchived: dates("unarchived"))
+    }
+
+    private func saveSidebarChoices() {
+        // A bounded few: choices for agents long gone are let go.
+        let live = Set(sessions.map(\.id))
+        func trim(_ dates: [String: Date]) -> [String: Double] {
+            let kept = dates.count > 200 ? dates.filter { live.contains($0.key) } : dates
+            return kept.mapValues(\.timeIntervalSince1970)
+        }
+        UserDefaults.standard.set([
+            "pinned": sidebarChoices.pinned,
+            "archived": trim(sidebarChoices.archived),
+            "unarchived": trim(sidebarChoices.unarchived),
+        ], forKey: Self.choicesKey)
+    }
+
+    /// The branch checked out in each folder an agent works in, as T3 Code
+    /// shows it under a thread's title. Read every few seconds while the
+    /// sidebar shows; folders that aren't repositories have none.
+    private(set) var branches: [String: String] = [:]
+
+    func readBranches() async {
+        let folders = Set(sessions.filter { $0.state != .ended }.map(\.cwd))
+        var read: [String: String] = [:]
+        for folder in folders {
+            // Empty on a detached HEAD; a new repository's branch, before
+            // its first commit, is named all the same.
+            guard let branch = await Git.run(["branch", "--show-current"], in: URL(fileURLWithPath: folder))?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !branch.isEmpty else { continue }
+            read[folder] = branch
+        }
+        if read != branches { branches = read }
     }
 
     /// Opens what an agentman:// link names: agentman://agent/<session id>,
