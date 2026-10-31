@@ -17,6 +17,7 @@ enum TestSnapshot {
     static func start() {
         guard let path = env["AGENTMAN_TEST_SNAPSHOT"], !path.isEmpty else { return }
         NSApp.setActivationPolicy(.accessory)
+        TestTyping.start()
         // Every window is hidden the moment it exists, the editor's too.
         let timer = Timer(timeInterval: 0.01, repeats: true) { _ in
             MainActor.assumeIsolated { hideWindows() }
