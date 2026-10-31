@@ -102,6 +102,15 @@ type Manager struct {
 	briefMu     sync.Mutex
 	briefDue    map[string]time.Time
 	lastBriefAt map[string]time.Time
+	// heldBack is the last need each agent's brief held back as already
+	// answered, said once in the conversation; see writeBrief.
+	heldBack map[string]string
+	// viewers, heldQuestions and heldNeeds are what the user has on screen
+	// and the cards not put up while they did; see attention.go.
+	viewMu        sync.Mutex
+	viewers       map[string]viewer
+	heldQuestions map[string]string
+	heldNeeds     map[string]bool
 	// asked is the question each agent was last seen asking, so a question
 	// is taken once, not on every sweep that sees it.
 	asked map[string]string
@@ -174,6 +183,7 @@ func New(cfg Config) (*Manager, error) {
 func (m *Manager) Run(ctx context.Context) {
 	go m.watchSessions(ctx)
 	go m.runSchedules(ctx)
+	go m.watchViewing(ctx)
 	m.runBriefs(ctx)
 }
 
@@ -190,7 +200,7 @@ func (m *Manager) Handles(kind protocol.RequestType) bool {
 		protocol.ReqManagerSchedules, protocol.ReqManagerScheduleCancel, protocol.ReqManagerImage,
 		protocol.ReqToolsTitle, protocol.ReqManagerOpenCards, protocol.ReqManagerCheckPermission,
 		protocol.ReqTranscribe, protocol.ReqVoiceAccount, protocol.ReqVoiceSignInStart, protocol.ReqVoiceSignInVerify,
-		protocol.ReqVoiceSignOut:
+		protocol.ReqVoiceSignOut, protocol.ReqManagerViewing:
 		return true
 	}
 	return false
@@ -248,6 +258,8 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 		return m.replyToCard(ctx, req)
 	case protocol.ReqManagerEntryClose:
 		return m.closeEntry(req.EntryID)
+	case protocol.ReqManagerViewing:
+		return m.setViewing(ctx, req.ClientID, req.Viewing)
 	case protocol.ReqManagerCardDismiss:
 		return m.dismissCard(req.CardID)
 	case protocol.ReqKnowledgeList, protocol.ReqKnowledgeRead, protocol.ReqKnowledgeWrite, protocol.ReqKnowledgeDelete:
@@ -345,7 +357,8 @@ func (m *Manager) addEntry(entry protocol.ManagerEntry) protocol.ManagerEntry {
 	_, kept := m.conversation.entry(entry.ID)
 	_ = m.conversation.addEntry(entry)
 	m.emit(protocol.Event{Type: protocol.EvtManagerEntry, Entry: &entry})
-	if !kept && unasked(entry) {
+	// What is about an agent the user is looking at is no news to push.
+	if !kept && unasked(entry) && !m.viewed(entry.SessionID) {
 		m.tell(entry)
 	}
 	return entry

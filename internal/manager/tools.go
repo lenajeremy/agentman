@@ -135,9 +135,73 @@ func init() {
 					"items":       map[string]any{"type": "string"},
 					"description": "Images the user sent you to pass on, by the names given with their message.",
 				},
+				"continue_from": continueFromProperty,
 			},
 			required: []string{"agent", "text"},
 			run:      runSendToAgent,
+		},
+		{
+			name: "start_agent",
+			description: "Start a new agent in a folder with a task, when the user asks you to. It opens in a terminal of its own, " +
+				"as `am codex` would, so the user can watch it live, and you watch it until its turn ends. " +
+				"To hand over another agent's work (\"have Codex continue what Claude was doing\"), name that agent in continue_from.",
+			properties: map[string]any{
+				"kind":          map[string]any{"type": "string", "enum": launchKindNames},
+				"folder":        map[string]any{"type": "string", "description": "Where it works: a path such as ~/code/api, or an agent's name or id for that agent's folder."},
+				"task":          map[string]any{"type": "string", "description": "Its first message: what to do, written as the user would write it."},
+				"continue_from": continueFromProperty,
+				"watch":         map[string]any{"type": "boolean", "description": "Watch it until its turn ends. Default true."},
+			},
+			required: []string{"kind", "folder", "task"},
+			run:      runStartAgent,
+		},
+		{
+			name: "end_agent",
+			description: "End an agent's session and close its terminal, when the user asks you to. Only for agents running in a terminal " +
+				"Agentman started (from the apps, by you, or with am); one in the user's own terminal they close themselves. " +
+				"Its conversation is kept, and reopen_agent brings it back. To stop what it is doing but keep it open, use interrupt.",
+			properties: map[string]any{"agent": agentProperty},
+			required:   []string{"agent"},
+			run:        runEndAgent,
+		},
+		{
+			name: "create_worktree",
+			description: "Make a git worktree of a repository, when the user asks: a folder of its own under ~/Agentman/Worktrees, " +
+				"on a new branch named after it from what the repository's folder has checked out, with its .env files copied in. " +
+				"Several agents can then work on one repository at once without stepping on each other: start them there with start_agent.",
+			properties: map[string]any{
+				"folder": map[string]any{"type": "string", "description": "The repository: a path such as ~/code/api, or an agent's name or id for its folder."},
+				"name":   map[string]any{"type": "string", "description": "A short name for the work, such as rate-limits; it names the folder and the branch."},
+			},
+			required: []string{"folder", "name"},
+			run:      runCreateWorktree,
+		},
+		{
+			name:        "list_worktrees",
+			description: "List a repository's worktrees: its own folder first, then the rest, marked when Agentman made them.",
+			properties: map[string]any{
+				"folder": map[string]any{"type": "string", "description": "The repository: a path, or an agent's name or id for its folder."},
+			},
+			required: []string{"folder"},
+			run:      runListWorktrees,
+		},
+		{
+			name: "remove_worktree",
+			description: "Remove a worktree Agentman made, when the user asks: its folder goes, its branch stays. " +
+				"One with uncommitted changes or an agent working in it is refused; set force only when the user has confirmed losing that.",
+			properties: map[string]any{
+				"worktree": map[string]any{"type": "string", "description": "The worktree's folder, as list_worktrees gives it."},
+				"force":    map[string]any{"type": "boolean", "description": "Remove it even with uncommitted changes or an agent in it. Only on the user's say-so."},
+			},
+			required: []string{"worktree"},
+			run:      runRemoveWorktree,
+		},
+		{
+			name:        "reopen_agent",
+			description: "Reopen an agent that has ended, in a terminal of its own, with its conversation as it was, when the user asks you to.",
+			properties:  map[string]any{"agent": agentProperty},
+			required:    []string{"agent"},
+			run:         runReopenAgent,
 		},
 		{
 			name: "answer_question",
@@ -609,6 +673,16 @@ func runSendToAgent(ctx context.Context, m *Manager, input map[string]any) toolR
 	if session.Inject == "" || session.Inject == protocol.InjectNone {
 		return toolResult{text: session.Name + " can't be messaged from here; the user has to open it.", isError: true}
 	}
+	var from protocol.Session
+	if source, _ := input["continue_from"].(string); strings.TrimSpace(source) != "" {
+		if from, err = m.resolveAgent(map[string]any{"agent": source}); err != nil {
+			return toolResult{text: err.Error(), isError: true}
+		}
+		if from.ID == session.ID {
+			return toolResult{text: "An agent can't carry on its own work; name the agent whose work it takes over.", isError: true}
+		}
+		text += "\n\n" + m.handoff(ctx, from)
+	}
 	images, err := m.forwardImages(stringList(input["images"]))
 	if err != nil {
 		return toolResult{text: err.Error(), isError: true}
@@ -629,9 +703,13 @@ func runSendToAgent(ctx context.Context, m *Manager, input map[string]any) toolR
 	default:
 		sent += fmt.Sprintf(" %d images", len(images))
 	}
+	activity := fmt.Sprintf("Sent %s: “%s”", sent, clip(text, 120))
+	if from.ID != "" {
+		activity = fmt.Sprintf("Handed %s's work to %s: “%s”", from.Name, sent, clip(strings.SplitN(text, "\n\n", 2)[0], 100))
+	}
 	return toolResult{
 		text:      result,
-		activity:  fmt.Sprintf("Sent %s: “%s”", sent, clip(text, 120)),
+		activity:  activity,
 		sessionID: session.ID,
 	}
 }

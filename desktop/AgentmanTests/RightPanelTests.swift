@@ -453,10 +453,31 @@ final class RightPanelTests: XCTestCase {
         let content = try XCTUnwrap(window.contentView)
         let bitmap = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
         content.cacheDisplay(in: content.bounds, to: bitmap)
+        drawTerminals(in: content, onto: bitmap)
         try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: url)
         // Put away rather than closed: closing the last titled window ends
         // the app the tests run in, and the next test with it.
         window.orderOut(nil)
+    }
+
+    /// A shell's screen comes out blank in a capture of the whole window,
+    /// though it draws in the app and in a capture of its own: each is
+    /// captured alone and laid over the window's.
+    private func drawTerminals(in content: NSView, onto bitmap: NSBitmapImageRep) {
+        func terminals(in view: NSView) -> [AgentmanTerminalView] {
+            (view as? AgentmanTerminalView).map { [$0] } ?? view.subviews.flatMap(terminals)
+        }
+        guard let context = NSGraphicsContext(bitmapImageRep: bitmap) else { return }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        for terminal in terminals(in: content) where !terminal.isHiddenOrHasHiddenAncestor && terminal.bounds.width > 0 {
+            guard let own = terminal.bitmapImageRepForCachingDisplay(in: terminal.bounds) else { continue }
+            terminal.cacheDisplay(in: terminal.bounds, to: own)
+            var rect = terminal.convert(terminal.bounds, to: content)
+            if content.isFlipped { rect.origin.y = content.bounds.height - rect.maxY }
+            own.draw(in: rect)
+        }
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     private func renderView<V: View>(_ view: V, size: CGSize, dark: Bool, to url: URL) throws {
@@ -473,6 +494,131 @@ final class RightPanelTests: XCTestCase {
         content.cacheDisplay(in: content.bounds, to: bitmap)
         try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: url)
         window.close()
+    }
+
+    // The terminal button opens a shell in the agent's folder in the main
+    // window's panel, not the editor: the folder's own shell, the one its
+    // editor shows too.
+    func testTheTerminalOpensInTheMainWindow() throws {
+        let cwd = try project()
+        let editor = EditorRegistry.shared.store(for: cwd)
+        defer { for terminal in editor.terminals { editor.closeTerminal(terminal) } }
+        set([RightPanel.openKey: true, RightPanel.tabsKey: "diff,terminal", RightPanel.tabKey: "terminal",
+             RightPanel.widthKey: 620.0, Sidebar.hiddenKey: false, RightPanel.terminalDockKey: "side",
+             RightPanel.bottomTerminalKey: false])
+        let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"].map(URL.init(fileURLWithPath:))
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        for dark in [false, true] {
+            try render(size: CGSize(width: 1500, height: 900), dark: dark, store: try store(cwd: cwd),
+                       to: out.appendingPathComponent("panel-terminal-\(dark ? "dark" : "light").png"))
+        }
+        XCTAssertEqual(editor.terminals.count, 1, "One shell, kept across the two renders")
+        XCTAssertEqual(editor.terminals.first?.folder.resolvingSymlinksInPath().path, URL(fileURLWithPath: cwd).resolvingSymlinksInPath().path)
+        XCTAssertNil(editor.terminals.first?.command, "A shell, not an agent's terminal")
+
+        // Moved under the conversation: out of the side panel, the same shell.
+        RightPanel.dockTerminal(.bottom)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: RightPanel.tabsKey), "diff")
+        XCTAssertEqual(UserDefaults.standard.string(forKey: RightPanel.tabKey), "diff")
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: RightPanel.bottomTerminalKey))
+        set([RightPanel.openKey: false])
+        for dark in [false, true] {
+            try render(size: CGSize(width: 1500, height: 900), dark: dark, store: try store(cwd: cwd),
+                       to: out.appendingPathComponent("bottom-terminal-\(dark ? "dark" : "light").png"))
+        }
+        XCTAssertEqual(editor.terminals.count, 1, "The same shell, moved")
+        set([RightPanel.openKey: true])
+        try render(size: CGSize(width: 1500, height: 900), dark: false, store: try store(cwd: cwd),
+                   to: out.appendingPathComponent("bottom-terminal-with-diff-light.png"))
+
+        // And back into the side panel.
+        RightPanel.dockTerminal(.side)
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: RightPanel.bottomTerminalKey))
+        XCTAssertEqual(UserDefaults.standard.string(forKey: RightPanel.tabKey), "terminal")
+    }
+
+    // A tab split in two: a second shell beside the first, closed again
+    // by the split button, and a split left behind as one shell when
+    // either half is stopped.
+    func testATerminalSplitsInTwo() throws {
+        let cwd = try project()
+        let editor = EditorRegistry.shared.store(for: cwd)
+        defer { for terminal in editor.terminals { editor.closeTerminal(terminal) } }
+        editor.newTerminal()
+        let left = try XCTUnwrap(editor.activeTerminal)
+        editor.splitTerminal()
+        let right = try XCTUnwrap(editor.splitPartner(of: left.id))
+        XCTAssertEqual(editor.terminals.count, 2)
+        XCTAssertTrue(editor.isSplitHalf(right.id), "The right half has no tab of its own")
+        XCTAssertEqual(editor.activeTerminalID, left.id)
+        editor.splitTerminal()
+        XCTAssertEqual(editor.terminals.count, 2, "A split tab doesn't split again")
+
+        editor.unsplitTerminal()
+        XCTAssertEqual(editor.terminals.map(\.id), [left.id])
+        XCTAssertNil(editor.splitPartner(of: left.id))
+
+        // Stopping the left half leaves the right one as the tab.
+        editor.splitTerminal()
+        let other = try XCTUnwrap(editor.splitPartner(of: left.id))
+        editor.newTerminal()
+        let third = try XCTUnwrap(editor.activeTerminal)
+        editor.activeTerminalID = left.id
+        editor.closeTerminal(left)
+        XCTAssertEqual(editor.activeTerminalID, other.id)
+        XCTAssertFalse(editor.isSplitHalf(other.id))
+        XCTAssertEqual(Set(editor.terminals.map(\.id)), [other.id, third.id])
+
+        // How it looks, under the conversation.
+        guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"].map(URL.init(fileURLWithPath:)) else { return }
+        editor.splitTerminal()
+        set([RightPanel.openKey: false, RightPanel.bottomTerminalKey: true, RightPanel.terminalDockKey: "bottom", Sidebar.hiddenKey: false])
+        try render(size: CGSize(width: 1500, height: 900), dark: false, store: try store(cwd: cwd), to: out.appendingPathComponent("bottom-terminal-split-light.png"))
+        try render(size: CGSize(width: 1500, height: 900), dark: true, store: try store(cwd: cwd), to: out.appendingPathComponent("bottom-terminal-split-dark.png"))
+    }
+
+    /// The workspace card alone: as it was reported, on a branch with a
+    /// push waiting and nothing changed, and with changes to commit.
+    func testRenderTheCard() throws {
+        guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"].map(URL.init(fileURLWithPath:)) else {
+            throw XCTSkip("for screenshots")
+        }
+        let cwd = try project()
+        for (name, changed) in [("card-push", false), ("card-changes", true)] {
+            let client = DaemonClient(socketPath: "/nonexistent/agentman-card.sock")
+            client.answer = { request in
+                var event: [String: Any]
+                switch request.type {
+                case .gitStatus:
+                    event = ["type": "git", "git": ["sessionId": "a", "branch": "feat/agentman-attention", "defaultBranch": "main",
+                                                    "remote": "origin", "upstream": "origin/feat/agentman-attention",
+                                                    "ahead": changed ? 0 : 2, "behind": 0, "aheadOfDefault": 9, "changes": changed ? 2 : 0]]
+                case .listChanges:
+                    event = ["type": "workspace", "workspace": ["kind": "changes", "sessionId": "a", "changes": changed
+                        ? [["path": "a.go", "status": " M", "added": 12, "removed": 3], ["path": "b.go", "status": "??", "added": 40]] : []]]
+                default:
+                    return nil
+                }
+                let data = try! JSONSerialization.data(withJSONObject: event)
+                return try? JSONDecoder().decode(DaemonEvent.self, from: data)
+            }
+            let store = AgentsStore(client: client)
+            let now = Int64(Date().timeIntervalSince1970 * 1000)
+            let json = """
+            {"type":"sessions","sessions":[
+             {"id":"a","kind":"claude","name":"Redesign the sidebar","cwd":"\(cwd)","state":"idle","inject":"tmux","lastActivityAt":\(now)},
+             {"id":"b","kind":"codex","name":"agentman","cwd":"\(cwd)","state":"idle","inject":"tmux","lastActivityAt":\(now)}
+            ]}
+            """
+            store.apply(try JSONDecoder().decode(DaemonEvent.self, from: Data(json.utf8)))
+            let session = try XCTUnwrap(store.sessions.first { $0.id == "a" })
+            for dark in [false, true] {
+                try renderView(WorkspacePanel(session: session, tab: .constant(.changes)).environment(store).padding(20),
+                               size: CGSize(width: 320, height: 470), dark: dark,
+                               to: out.appendingPathComponent("\(name)-\(dark ? "dark" : "light").png"))
+            }
+        }
     }
 
     func testRenderThePanel() throws {

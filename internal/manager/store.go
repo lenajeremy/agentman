@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -311,4 +312,27 @@ func (c *conversation) reset() error {
 	c.history = nil
 	c.entries = open
 	return nil
+}
+
+// saidSince is what alreadySaid reads from the conversation: the user's own
+// messages to Agentman since a moment, and the cards one agent put to them
+// that have ended since, the last limit of each, oldest first.
+func (c *conversation) saidSince(sessionID string, since int64, limit int) (toYou, cards []protocol.ManagerEntry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i := len(c.entries) - 1; i >= 0 && (len(toYou) < limit || len(cards) < limit); i-- {
+		entry := c.entries[i]
+		if entry.Ts < since {
+			break
+		}
+		switch {
+		case entry.Role == "user" && len(toYou) < limit && strings.TrimSpace(entry.Text) != "":
+			toYou = append(toYou, entry)
+		case entry.Card != nil && entry.Card.SessionID == sessionID && entry.Card.State != protocol.CardOpen && len(cards) < limit:
+			cards = append(cards, entry)
+		}
+	}
+	slices.Reverse(toYou)
+	slices.Reverse(cards)
+	return toYou, cards
 }

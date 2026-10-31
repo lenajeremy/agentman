@@ -156,7 +156,11 @@ final class EditorStore {
     /// The shells in the terminal panel; they run on while the panel is
     /// hidden or the window closed, until the app quits.
     private(set) var terminals: [TerminalSession] = []
+    /// The shell in front: a tab's, the left half when it is split.
     var activeTerminalID: UUID?
+    /// Tabs split in two: each split shell's left half, and the shell beside
+    /// it, which has no tab of its own.
+    private(set) var splits: [UUID: UUID] = [:]
     var showTerminal = false {
         didSet { if showTerminal && terminals.isEmpty { newTerminal() } }
     }
@@ -477,6 +481,28 @@ final class EditorStore {
 
     var activeTerminal: TerminalSession? { terminals.first { $0.id == activeTerminalID } }
 
+    /// The shell to the right of one, when its tab is split.
+    func splitPartner(of id: UUID?) -> TerminalSession? {
+        guard let id, let right = splits[id] else { return nil }
+        return terminals.first { $0.id == right }
+    }
+
+    /// Whether a shell is the right half of a split tab.
+    func isSplitHalf(_ id: UUID) -> Bool { splits.values.contains(id) }
+
+    /// A new shell beside the one in front, in the same tab.
+    func splitTerminal() {
+        guard let active = activeTerminal, splits[active.id] == nil else { return }
+        let session = TerminalSession(folder: root, number: terminals.count + 1)
+        terminals.append(session)
+        splits[active.id] = session.id
+    }
+
+    /// Closes the shell beside the one in front: the tab whole again.
+    func unsplitTerminal() {
+        if let right = splitPartner(of: activeTerminalID) { closeTerminal(right) }
+    }
+
     /// A new shell in the folder, in front.
     func newTerminal() {
         let session = TerminalSession(folder: root, number: terminals.count + 1)
@@ -500,10 +526,18 @@ final class EditorStore {
 
     func closeTerminal(_ session: TerminalSession) {
         session.terminate()
+        // The right half of a split goes back to being the tab's only shell;
+        // a left half leaves its right one the tab.
+        if let left = splits.first(where: { $0.value == session.id })?.key {
+            splits[left] = nil
+        } else if let right = splits.removeValue(forKey: session.id), activeTerminalID == session.id {
+            activeTerminalID = right
+        }
         guard let index = terminals.firstIndex(where: { $0.id == session.id }) else { return }
         terminals.remove(at: index)
         if activeTerminalID == session.id {
-            activeTerminalID = terminals.isEmpty ? nil : terminals[min(index, terminals.count - 1)].id
+            let tabs = terminals.filter { !isSplitHalf($0.id) }
+            activeTerminalID = tabs.isEmpty ? nil : tabs[min(index, tabs.count - 1)].id
         }
         if terminals.isEmpty { showTerminal = false }
     }

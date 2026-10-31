@@ -179,6 +179,18 @@ const (
 	ReqGitCommit   RequestType = "git_commit"
 	ReqGitPush     RequestType = "git_push"
 	ReqGitCreatePR RequestType = "git_create_pr"
+	// Worktrees, so several agents can work in one repository at once, each
+	// on a branch of its own in a folder of its own. ReqCreateWorktree makes
+	// one named Text from the repository at Path (relative to home) or of
+	// the session named by SessionID, on a new branch from what that folder
+	// has checked out, under ~/Agentman/Worktrees/<repo>/<name>, with the
+	// repository's .env files copied in; answered with EvtWorktree.
+	// ReqListWorktrees lists a repository's worktrees, answered with
+	// EvtWorktrees. ReqRemoveWorktree removes one Agentman made, at Path; it
+	// refuses one with uncommitted changes or a running agent unless Force.
+	ReqCreateWorktree RequestType = "create_worktree"
+	ReqListWorktrees  RequestType = "list_worktrees"
+	ReqRemoveWorktree RequestType = "remove_worktree"
 )
 
 // Request is anything the app asks of the daemon.
@@ -259,9 +271,14 @@ type Request struct {
 	// Paths are the files ReqGitCommit commits, relative to the session's
 	// directory as ReqListChanges names them.
 	Paths []string `json:"paths,omitempty"`
+	// Force removes a worktree with uncommitted changes or an agent in it,
+	// on ReqRemoveWorktree.
+	Force bool `json:"force,omitempty"`
 	// IgnoreWhitespace leaves changes to whitespace alone out of a
 	// ReqFileDiff or a ReqCommitDiff, as `git diff -w` does.
 	IgnoreWhitespace bool `json:"ignoreWhitespace,omitempty"`
+	// Viewing is the agents in front of the user, on ReqManagerViewing.
+	Viewing []string `json:"viewing,omitempty"`
 	// WithFile asks a ReqCommitDiff for the file as the commit left it as
 	// well, in the result's Text: the unchanged lines around a change, read
 	// when someone opens them rather than sent with every diff.
@@ -292,6 +309,8 @@ const (
 	EvtError          EventType = "error"
 	EvtWorkspace      EventType = "workspace"
 	EvtGit            EventType = "git"
+	EvtWorktree       EventType = "worktree"
+	EvtWorktrees      EventType = "worktrees"
 	EvtDirectories    EventType = "directories"
 	EvtSessionStarted EventType = "session_started"
 	// EvtFolders answers ReqListFolders.
@@ -346,6 +365,8 @@ type Event struct {
 	Link      string           `json:"link,omitempty"`
 	Workspace *WorkspaceResult `json:"workspace,omitempty"`
 	Git       *GitState        `json:"git,omitempty"`
+	Worktree  *Worktree        `json:"worktree,omitempty"`
+	Worktrees []Worktree       `json:"worktrees,omitempty"`
 	// Directory names only; the app never needs the Mac's absolute home path.
 	Directories []string `json:"directories,omitempty"`
 	Path        string   `json:"path,omitempty"`
@@ -436,6 +457,23 @@ type ReleaseNote struct {
 }
 
 // WorkspaceResult is a bounded, read-only view of one session's directory.
+// Worktree is one of a repository's working folders.
+type Worktree struct {
+	// Path is the folder, absolute.
+	Path string `json:"path"`
+	// Name is the folder's name; Repo is the repository's own folder name.
+	Name string `json:"name"`
+	Repo string `json:"repo"`
+	// Branch is checked out there; empty when detached.
+	Branch string `json:"branch,omitempty"`
+	// Main marks the repository's own folder, which can't be removed.
+	Main bool `json:"main,omitempty"`
+	// Agentman marks one Agentman made, which it can remove.
+	Agentman bool `json:"agentman,omitempty"`
+	// Copied are the .env files copied in when it was made, by path.
+	Copied []string `json:"copied,omitempty"`
+}
+
 // GitState is a session's branch as the right panel's git actions need it,
 // and, after one of them, what it did.
 type GitState struct {

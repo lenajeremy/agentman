@@ -64,6 +64,9 @@ final class AgentsStore {
     var lightbox: Lightbox?
     /// The session being renamed in the sidebar, if one is.
     var renaming: String?
+    /// What the New Agent page opens on, when something sends the user there
+    /// to start one in a particular place.
+    var newAgentPreset: NewAgentPreset?
     /// The command palette, over the main window.
     var showPalette = false
     /// Unsent messages, by session, kept across launches.
@@ -145,12 +148,14 @@ final class AgentsStore {
                 appActive = true
                 cameBack()
                 seeManagerIfShown()
+                tellOnScreen()
             }
         }
         Task {
             for await _ in center.notifications(named: NSApplication.didResignActiveNotification) {
                 appActive = false
                 away.left()
+                tellOnScreen()
             }
         }
         // The screen locked, or the Mac asleep, is away too, with the app in
@@ -742,10 +747,12 @@ final class AgentsStore {
             await manager.reload()
             seeManagerIfShown()
             refreshBadge()
-            // A reconnect starts the daemon's side afresh: follow again.
+            // A reconnect starts the daemon's side afresh: follow again,
+            // and say again what is on screen.
             for id in following.keys {
                 follow(id)
             }
+            tellOnScreen(again: true)
         }
     }
 
@@ -835,6 +842,10 @@ final class AgentsStore {
     private func news(_ entry: ManagerEntry) {
         if viewingManager {
             manager.markRead()
+        } else if let id = entry.sessionId, looking(at: id) {
+            // About the agent in front of the user: nothing to tell.
+        } else if appActive, Self.toasts(entry) {
+            showToast(entry)
         } else {
             let agent = entry.sessionId.flatMap { session($0) }
             notifier.announce(entry, agentName: agent?.name, folder: agent?.cwd)
@@ -842,8 +853,51 @@ final class AgentsStore {
         refreshBadge()
     }
 
+    // MARK: - Toasts
+
+    /// One piece of Agentman's news in the window's corner; see
+    /// AgentmanToasts. Its ID is the entry's.
+    struct Toast: Identifiable, Equatable {
+        let id: String
+        let sessionId: String?
+        let card: Bool
+    }
+
+    /// Newest last, three at most.
+    private(set) var toasts: [Toast] = []
+    static let maxToasts = 3
+
+    /// What becomes a toast while the app is in front: an agent waiting on
+    /// the user, its news, word from it, and Agentman's reply. A note or a
+    /// key Agentman asks about stays a notification.
+    nonisolated static func toasts(_ entry: ManagerEntry) -> Bool {
+        if let card = entry.card {
+            return card.isOpen && (card.kind == "question" || card.kind == "needs_you")
+        }
+        return entry.role == "brief" || entry.role == "agent" || entry.role == "assistant"
+    }
+
+    func showToast(_ entry: ManagerEntry) {
+        toasts.removeAll { $0.id == entry.id }
+        toasts.append(Toast(id: entry.id, sessionId: entry.sessionId, card: entry.card != nil))
+        if toasts.count > Self.maxToasts {
+            // News goes before a card that still waits on the user.
+            if let index = toasts.firstIndex(where: { !$0.card }) {
+                toasts.remove(at: index)
+            } else {
+                toasts.removeFirst()
+            }
+        }
+    }
+
+    func dismissToast(_ id: String) {
+        toasts.removeAll { $0.id == id }
+    }
+
     private func seeManagerIfShown() {
         guard viewingManager else { return }
+        // Agentman's conversation shows all of it.
+        toasts.removeAll()
         manager.markRead()
         notifier.clearAll()
         refreshBadge()
@@ -856,6 +910,11 @@ final class AgentsStore {
     private func selectionChanged(from old: SidebarItem?) {
         guard old != selection else { return }
         seeManagerIfShown()
+        tellOnScreen()
+        // Opened, an agent's own thread says what its toasts did.
+        if case .agent(let id) = selection {
+            toasts.removeAll { $0.sessionId == id }
+        }
         if case .agent(let id) = old {
             unwatch(id)
         }
@@ -888,12 +947,14 @@ final class AgentsStore {
         let key = sessionId ?? Self.agentmanPanel
         inPanels[key, default: 0] += 1
         if let sessionId { watch(sessionId) } else { seeManagerIfShown() }
+        tellOnScreen()
     }
 
     func hideFromPanel(_ sessionId: String?) {
         let key = sessionId ?? Self.agentmanPanel
         if let count = inPanels[key] { inPanels[key] = count > 1 ? count - 1 : nil }
         if let sessionId { unwatch(sessionId) }
+        tellOnScreen()
     }
 
     private func follow(_ sessionId: String) {
@@ -975,6 +1036,46 @@ final class AgentsStore {
     /// Whether the user is looking at that agent's thread right now.
     private func looking(at sessionId: String) -> Bool {
         appActive && (selection == .agent(sessionId) || inPanels[sessionId] != nil)
+    }
+
+    // MARK: - What is on screen
+
+    /// The agents whose threads are in front of the user: the one selected
+    /// and those in editors' panels, while the app is in front.
+    var onScreen: [String] {
+        guard appActive else { return [] }
+        var shown = Set(inPanels.keys.filter { $0 != Self.agentmanPanel })
+        if case .agent(let id) = selection { shown.insert(id) }
+        return shown.sorted()
+    }
+
+    /// This app, to the daemon, for as long as it runs.
+    private let viewerId = "mac-" + UUID().uuidString
+    private var toldOnScreen: [String] = []
+    private var onScreenRenewal: Task<Void, Never>?
+
+    /// Tells Agentman what is on screen when it changes, so an agent the
+    /// user is looking at gets no card and no push. Agentman forgets after
+    /// two minutes unless told again, so it is said again every minute while
+    /// anything is shown.
+    func tellOnScreen(again: Bool = false) {
+        let shown = onScreen
+        guard again || shown != toldOnScreen else { return }
+        toldOnScreen = shown
+        var request = DaemonRequest(.managerViewing)
+        request.clientId = viewerId
+        request.viewing = shown
+        client.send(request)
+        onScreenRenewal?.cancel()
+        onScreenRenewal = nil
+        guard !shown.isEmpty else { return }
+        onScreenRenewal = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard !Task.isCancelled else { return }
+                self?.tellOnScreen(again: true)
+            }
+        }
     }
 
 

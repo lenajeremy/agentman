@@ -23,11 +23,19 @@ struct AgentThreadView: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.detailHeaderLeading) private var headerLeading
     @State private var confirmEnd = false
+    /// Removing the worktree the agent works in: asked first, then, if it
+    /// holds work or an agent, asked again with why.
+    @State private var confirmRemoveWorktree = false
+    @State private var removeWorktreeAnyway: String?
     @State private var resuming = false
     @State private var filesTab: WorkspaceTab = .changes
     /// The right panel: its diff and files, at the window's edge.
     @AppStorage(RightPanel.openKey) private var panelOpen = false
     @AppStorage(RightPanel.widthKey) private var panelWidth = RightPanel.defaultWidth
+    @AppStorage(RightPanel.tabKey) private var panelTab: RightPanelTab = .diff
+    /// The terminal under the conversation, and how tall it was dragged.
+    @AppStorage(RightPanel.bottomTerminalKey) private var bottomTerminal = false
+    @AppStorage("bottomTerminalHeight") private var bottomTerminalHeight = 260.0
     @State private var panelMaximised = false
     /// How many files the agent has changed since the last commit.
     @State private var changed = 0
@@ -68,6 +76,16 @@ struct AgentThreadView: View {
                                         .padding(.bottom, 20)
                                 }
                             }
+                            if bottomTerminal, FileManager.default.fileExists(atPath: session.cwd) {
+                                let tallest = max(geometry.size.height - 260, 160)
+                                PanelDivider(height: $bottomTerminalHeight, maximum: tallest)
+                                    .padding(.vertical, -3)
+                                    .zIndex(1)
+                                FolderTerminal(folder: session.cwd, hide: { bottomTerminal = false }, move: .toSide)
+                                    .equatable()
+                                    .id(session.cwd)
+                                    .frame(height: min(max(bottomTerminalHeight, 120), tallest))
+                            }
                         }
                     }
                     if panelOpen {
@@ -90,6 +108,18 @@ struct AgentThreadView: View {
             .confirmationDialog("End this session?", isPresented: $confirmEnd) {
                 Button("End session") { Task { store.actionError[session.id] = await store.end(session.id) } }
                 Button("Cancel", role: .cancel) {}
+            }
+            .confirmationDialog("Remove the \(Worktrees.parts(of: session.cwd)?.name ?? "") worktree?", isPresented: $confirmRemoveWorktree) {
+                Button("Remove Worktree", role: .destructive) { removeWorktree(force: false) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Its folder, \(session.cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~")), goes. Its branch stays, with any commits on it.")
+            }
+            .alert("Remove it anyway?", isPresented: Binding(get: { removeWorktreeAnyway != nil }, set: { if !$0 { removeWorktreeAnyway = nil } })) {
+                Button("Remove Anyway", role: .destructive) { removeWorktree(force: true) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(removeWorktreeAnyway ?? "")
             }
             .onAppear {
                 // For screenshots and tests: the files panel open on a tab.
@@ -121,14 +151,22 @@ struct AgentThreadView: View {
                     .menuStyle(.borderlessButton)
                     .fixedSize()
             }
-            // An agent Agentman runs in tmux shows its own live terminal;
-            // any other, a shell in its folder.
+            // A shell in the agent's folder, in this window's panel; the
+            // agent's own live terminal is in the menu beside it.
             if folderExists {
-                ChromeButton(symbol: "terminal",
-                             help: session.inject == "tmux" ? "\(session.name)'s own terminal, live" : "Open a terminal in its folder") {
-                    if session.inject == "tmux" { showAgentTerminal() }
-                    else { EditorOpener.openTerminal(folder: session.cwd, with: openWindow) }
+                let inPanelTab = panelOpen && panelTab == .terminal
+                let showing = bottomTerminal || inPanelTab
+                ChromeButton(symbol: "terminal", help: showing ? "Close the terminal (⌃`)" : "Terminal in this folder (⌃`)", active: showing) {
+                    if bottomTerminal {
+                        bottomTerminal = false
+                    } else if inPanelTab {
+                        panelOpen = false
+                        panelMaximised = false
+                    } else {
+                        RightPanel.showTerminal()
+                    }
                 }
+                .keyboardShortcut("`", modifiers: .control)
             }
             ChromeButton(symbol: "plus.forwardslash.minus", help: panelOpen ? "Close the diff (⇧⌘D)" : "Diff and files (⇧⌘D)", active: panelOpen) {
                 if panelOpen { panelOpen = false; panelMaximised = false } else { RightPanel.show(.diff) }
@@ -140,6 +178,19 @@ struct AgentThreadView: View {
                 Menu {
                     if folderExists {
                         Button("Open in Editor") { EditorOpener.open(folder: session.cwd, with: openWindow) }
+                        if session.inject == "tmux" {
+                            Button("Show the Agent's Own Terminal") { showAgentTerminal() }
+                        }
+                        if Worktrees.inRepository(session.cwd) {
+                            Divider()
+                            Button("New Worktree from \(Worktrees.parts(of: session.cwd)?.repo ?? (session.cwd as NSString).lastPathComponent)…") {
+                                store.newAgentPreset = NewAgentPreset(folder: session.cwd, newWorktree: true)
+                                store.selection = .newAgent
+                            }
+                            if Worktrees.parts(of: session.cwd) != nil {
+                                Button("Remove This Worktree…") { confirmRemoveWorktree = true }
+                            }
+                        }
                     }
                     if Self.endable(session) { Button("End Session…") { confirmEnd = true } }
                 } label: { Image(systemName: "ellipsis").frame(width: 24, height: 26) }
@@ -335,11 +386,30 @@ struct AgentThreadView: View {
     }
 
     /// Opens the agent's own terminal in its folder's editor.
+    private func removeWorktree(force: Bool) {
+        let folder = session.cwd
+        Task {
+            do {
+                try await store.removeWorktree(folder, force: force)
+            } catch {
+                let problem = error.localizedDescription
+                // Work or an agent would be lost: theirs to decide.
+                if !force, problem.contains("uncommitted") || problem.contains("still working") {
+                    removeWorktreeAnyway = problem
+                } else {
+                    store.actionError[session.id] = problem
+                }
+            }
+        }
+    }
+
     private func showAgentTerminal() {
         Task {
             switch await store.terminal(for: session.id) {
             case .success(let terminal):
-                EditorOpener.openAgentTerminal(folder: session.cwd, terminal: terminal, title: session.name, with: openWindow)
+                // In this window's panel, beside the folder's shells.
+                EditorRegistry.shared.store(for: session.cwd).showAgentTerminal(terminal, title: session.name)
+                RightPanel.showTerminal()
             case .failure(let problem):
                 store.actionError[session.id] = problem.message
             }
@@ -453,7 +523,7 @@ private struct ThreadTitle: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Text((session.cwd as NSString).lastPathComponent)
+            Text(Worktrees.label(session.cwd))
                 .font(TextStyle.caption)
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)
