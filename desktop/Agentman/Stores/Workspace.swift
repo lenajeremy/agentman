@@ -11,13 +11,14 @@ extension AgentsStore {
 
     func workspace(_ type: RequestType, session: String, path: String = "",
                    offset: Int? = nil, commit: String? = nil, ref: String? = nil,
-                   ignoreWhitespace: Bool = false) async throws -> WorkspaceResult {
+                   ignoreWhitespace: Bool = false, withFile: Bool = false) async throws -> WorkspaceResult {
         var request = DaemonRequest(type, sessionId: session)
         request.path = path
         request.offset = offset
         request.commit = commit
         request.ref = ref
         request.ignoreWhitespace = ignoreWhitespace ? true : nil
+        request.withFile = withFile ? true : nil
         let reply = try await client.request(request)
         if reply.type == "error" {
             let message = (reply.error ?? "That couldn't be read.")

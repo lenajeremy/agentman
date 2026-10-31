@@ -96,7 +96,9 @@ struct RightPanel: View {
             case .files:
                 FilesPanel(folder: session.cwd).equatable().id(session.cwd)
             case .history:
-                HistoryPanel(sessionID: session.id, cwd: session.cwd).id(session.id)
+                HistoryPanel(sessionID: session.id, cwd: session.cwd, state: session.state, activity: session.lastActivityAt)
+                    .equatable()
+                    .id(session.id)
             }
         }
         .background(Palette.paper)
@@ -299,7 +301,7 @@ final class DiffPanelModel {
             // The same diff as before changes nothing on screen.
             if text != diffs[path]?.text || diffs[path]?.truncated != (result.truncated == true) {
                 opened[path] = nil
-                files[path] = result.text?.components(separatedBy: "\n")
+                files[path] = nil
                 diffs[path] = await Self.layout(path: path, text: text, truncated: result.truncated == true, opened: [], file: nil)
             }
             if failures[path] != nil { failures[path] = nil }
@@ -312,12 +314,19 @@ final class DiffPanelModel {
         if self.version(path) != version { await load(path, store: store, session: session) }
     }
 
-    /// Shows the unchanged lines a fold stands for, read from the file.
+    /// Shows the unchanged lines a fold stands for, read from the file: as
+    /// it is now, or in a commit, as the commit left it, never from disk. A
+    /// daemon too old to send a commit's file leaves the fold as it is.
     func open(_ fold: DiffLayout.Fold, in path: String, store: AgentsStore, session: String) async {
         if files[path] == nil {
-            // Historical context must never come from the working tree.
-            guard commit == nil else { return }
-            guard let text = try? await store.workspace(.readFile, session: session, path: path).text else { return }
+            let read: WorkspaceResult?
+            if let commit {
+                read = try? await store.workspace(.commitDiff, session: session, path: path, commit: commit,
+                                                  ignoreWhitespace: ignoreWhitespace, withFile: true)
+            } else {
+                read = try? await store.workspace(.readFile, session: session, path: path)
+            }
+            guard let text = read?.text else { return }
             files[path] = text.components(separatedBy: "\n")
         }
         opened[path, default: []].insert(fold.id)
@@ -398,8 +407,8 @@ struct DiffPanel: View, Equatable {
                     Text(commit.subject).font(TextStyle.captionMedium).foregroundStyle(Palette.text)
                     Text(commit.author + " · " + Date(timeIntervalSince1970: Double(commit.authoredAt) / 1000).formatted(date: .abbreviated, time: .shortened))
                         .font(TextStyle.caption).foregroundStyle(Palette.muted)
-                    if let body = commit.body, !body.isEmpty {
-                        Text(body).font(TextStyle.caption).foregroundStyle(Palette.textSecondary).lineLimit(4)
+                    if let body = commit.body?.trimmingCharacters(in: .whitespacesAndNewlines), !body.isEmpty {
+                        CommitBody(text: body).id(commit.hash)
                     }
                 }
                 .textSelection(.enabled)
@@ -587,6 +596,49 @@ struct DiffPanel: View, Equatable {
 
     private func open(_ fold: DiffLayout.Fold, _ path: String) {
         Task { await model.open(fold, in: path, store: store, session: sessionID) }
+    }
+}
+
+/// The rest of a commit's message, over its diff: four lines, and all of it
+/// a click away, scrolling when it is longer than the panel can spare.
+private struct CommitBody: View {
+    let text: String
+    @State private var full = false
+    @State private var shown: CGFloat = 0
+    @State private var whole: CGFloat = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if full {
+                ViewThatFits(in: .vertical) {
+                    message
+                    ScrollView { message.frame(maxWidth: .infinity, alignment: .leading) }
+                }
+                .frame(maxHeight: 220)
+            } else {
+                message
+                    .lineLimit(4)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { shown = $0 }
+                    // The message unlimited at the same width, to tell whether
+                    // four lines cut it short.
+                    .background {
+                        message
+                            .fixedSize(horizontal: false, vertical: true)
+                            .hidden()
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { whole = $0 }
+                    }
+            }
+            if full || whole > shown + 1 {
+                Button(full ? "Show less" : "Show more") { full.toggle() }
+                    .buttonStyle(.plain)
+                    .font(TextStyle.captionMedium)
+                    .foregroundStyle(Palette.muted)
+            }
+        }
+    }
+
+    private var message: some View {
+        Text(text).font(TextStyle.caption).foregroundStyle(Palette.textSecondary)
     }
 }
 

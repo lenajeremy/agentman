@@ -35,7 +35,7 @@ struct WorkspacePanel: View {
                 switch tab {
                 case .changes: ChangesList(session: session, open: push)
                 case .files: FileList(session: session, path: "", open: push)
-                case .history: HistoryPanel(sessionID: session.id, cwd: session.cwd)
+                case .history: HistoryPanel(sessionID: session.id, cwd: session.cwd, state: session.state, activity: session.lastActivityAt)
                 case .plans: ArtifactList(session: session, open: push)
                 }
             } else {

@@ -29,6 +29,27 @@ final class HistoryPanelModel {
         await page(store: store, session: session)
     }
 
+    /// The newest commits put on top of those already read, so a commit the
+    /// agent makes shows without losing the pages scrolled through. History
+    /// rewritten under the list (an amend, a rebase, a reset, another branch
+    /// checked out) is read again from the start.
+    func update(store: AgentsStore, session: String) async {
+        guard !loading else { return }
+        guard let top = commits.first else { return await reload(store: store, session: session, ref: ref) }
+        let current = generation
+        guard let result = try? await store.workspace(.listCommits, session: session, offset: 0, ref: ref),
+              current == generation, !Task.isCancelled else { return }
+        let fresh = result.commits ?? []
+        if let index = fresh.firstIndex(where: { $0.hash == top.hash }) {
+            if index > 0 { commits.insert(contentsOf: fresh[..<index], at: 0) }
+        } else {
+            commits = fresh
+            more = result.truncated == true
+        }
+        branch = result.branch
+        problem = nil
+    }
+
     func page(store: AgentsStore, session: String) async {
         guard !loading else { return }
         let current = generation
@@ -50,12 +71,27 @@ final class HistoryPanelModel {
 }
 
 /// History is a workspace tab, with the same chrome and diff renderer as
-/// Diff and Files. Looking at another branch never checks it out.
-struct HistoryPanel: View {
+/// Diff and Files. Looking at another branch never checks it out. It keeps
+/// up as the agent works: a commit it makes appears on top.
+struct HistoryPanel: View, Equatable {
     @Environment(AgentsStore.self) private var store
     let sessionID: String
     let cwd: String
+    let state: SessionState
+    let activity: Int64?
     @State private var model = HistoryPanelModel()
+    /// Whether the tab has read its list, after which the agent's work
+    /// reads it again.
+    @State private var watching = false
+
+    nonisolated static func == (a: HistoryPanel, b: HistoryPanel) -> Bool {
+        a.sessionID == b.sessionID && a.cwd == b.cwd && a.state == b.state && a.activity == b.activity
+    }
+
+    private struct Watch: Equatable {
+        let state: SessionState
+        let activity: Int64?
+    }
     @State private var ref: String?
     @State private var selected: WorkspaceCommit?
     @State private var lastSelected: String?
@@ -73,6 +109,14 @@ struct HistoryPanel: View {
         }
         .task(id: ref) { await model.reload(store: store, session: sessionID, ref: ref) }
         .task { await model.readBranches(store: store, session: sessionID) }
+        // Once the agent has been quiet for two seconds, or its turn begins
+        // or ends; not as the tab opens, which reads the list anyway.
+        .task(id: Watch(state: state, activity: activity)) {
+            guard watching else { watching = true; return }
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            await model.update(store: store, session: sessionID)
+        }
     }
 
     private var list: some View {

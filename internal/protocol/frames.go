@@ -262,6 +262,10 @@ type Request struct {
 	// IgnoreWhitespace leaves changes to whitespace alone out of a
 	// ReqFileDiff or a ReqCommitDiff, as `git diff -w` does.
 	IgnoreWhitespace bool `json:"ignoreWhitespace,omitempty"`
+	// WithFile asks a ReqCommitDiff for the file as the commit left it as
+	// well, in the result's Text: the unchanged lines around a change, read
+	// when someone opens them rather than sent with every diff.
+	WithFile bool `json:"withFile,omitempty"`
 	// Manager is the settings on ReqManagerSetSettings.
 	Manager *ManagerSettings `json:"manager,omitempty"`
 }

@@ -168,8 +168,12 @@ func TestCommitDiffShowsOneFileAgainstTheParent(t *testing.T) {
 	if event.Type != protocol.EvtWorkspace || event.Workspace.Kind != "diff" {
 		t.Fatalf("commit_diff: %+v", event)
 	}
-	if event.Workspace.Text != "new\n" {
-		t.Fatalf("historical context: %q", event.Workspace.Text)
+	if event.Workspace.Text != "" {
+		t.Fatalf("the file sent unasked: %q", event.Workspace.Text)
+	}
+	withFile := d.Handle(context.Background(), protocol.Request{Type: protocol.ReqCommitDiff, SessionID: "codex:test", Commit: head, Path: "a.go", WithFile: true})
+	if withFile.Type != protocol.EvtWorkspace || withFile.Workspace.Text != "new\n" {
+		t.Fatalf("historical context: %+v", withFile)
 	}
 	diff := event.Workspace.Diff
 	if !strings.Contains(diff, "-old") || !strings.Contains(diff, "+new") ||

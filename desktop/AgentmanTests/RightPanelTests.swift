@@ -87,7 +87,9 @@ final class RightPanelTests: XCTestCase {
                 var diff = diffs[request.path ?? ""] ?? ""
                 if request.ignoreWhitespace == true { diff = "" }
                 result["diff"] = diff
-                if request.type == .commitDiff { result["text"] = (1...12).map { "historical \($0)" }.joined(separator: "\n") }
+                if request.type == .commitDiff, request.withFile == true {
+                    result["text"] = (1...12).map { "historical \($0)" }.joined(separator: "\n")
+                }
             case .listBranches:
                 result["kind"] = "branches"
                 result["branches"] = [["name": "main", "ref": "refs/heads/main", "current": true, "updatedAt": 0],
@@ -201,9 +203,13 @@ final class RightPanelTests: XCTestCase {
         await model.refresh(store: store, session: "a", ignoreWhitespace: false, commit: hash)
         let path = "docs/architecture.md"
         await model.load(path, store: store, session: "a")
+        XCTAssertFalse(asked.all.contains { $0.withFile == true }, "the file is read only when a fold opens")
         let diff = try XCTUnwrap(model.diffs[path])
         guard case .fold(let fold) = diff.items.first else { return XCTFail("Expected folded context") }
         await model.open(fold, in: path, store: store, session: "a")
+        XCTAssertEqual(asked.all.last?.type, .commitDiff)
+        XCTAssertEqual(asked.all.last?.withFile, true)
+        XCTAssertEqual(asked.all.last?.commit, hash)
         let context = model.diffs[path]?.items.prefix(3).compactMap { item -> String? in
             if case .line(let line) = item { line.row.text } else { nil }
         }
@@ -216,6 +222,46 @@ final class RightPanelTests: XCTestCase {
         XCTAssertEqual(sent.commit, hash)
         XCTAssertEqual(sent.ignoreWhitespace, true)
         XCTAssertEqual(model.diffs[path]?.items.isEmpty, true)
+    }
+
+    // A commit the agent makes goes on top of the pages already read; history
+    // rewritten underneath is read again from the start.
+    func testHistoryKeepsUpWithNewCommits() async {
+        final class Log: @unchecked Sendable {
+            private let lock = NSLock()
+            private var hashes: [String]
+            init(_ hashes: [String]) { self.hashes = hashes }
+            var all: [String] { get { lock.lock(); defer { lock.unlock() }; return hashes }
+                                set { lock.lock(); hashes = newValue; lock.unlock() } }
+        }
+        func hash(_ name: String) -> String { String(repeating: name, count: 40) }
+        let log = Log(["3", "2", "1"].map(hash))
+        let client = DaemonClient(socketPath: "/nonexistent/agentman-history.sock")
+        client.answer = { request in
+            // Two a page, newest first, as git log pages them.
+            let all = log.all, from = request.offset ?? 0
+            let page = Array(all.dropFirst(from).prefix(2))
+            let commits = page.map { ["hash": $0, "subject": "Commit " + String($0.prefix(1)), "author": "Jeremiah", "authoredAt": 0] as [String: Any] }
+            let result: [String: Any] = ["sessionId": "a", "path": "", "kind": "commits", "branch": "main",
+                                         "commits": commits, "truncated": from + 2 < all.count]
+            let data = try! JSONSerialization.data(withJSONObject: ["type": "workspace", "workspace": result])
+            return try? JSONDecoder().decode(DaemonEvent.self, from: data)
+        }
+        let store = AgentsStore(client: client)
+        let model = HistoryPanelModel()
+        await model.reload(store: store, session: "a", ref: nil)
+        await model.page(store: store, session: "a")
+        XCTAssertEqual(model.commits.map(\.hash), ["3", "2", "1"].map(hash))
+        log.all = ["4", "3", "2", "1"].map(hash)
+        await model.update(store: store, session: "a")
+        XCTAssertEqual(model.commits.map(\.hash), ["4", "3", "2", "1"].map(hash), "new on top, older pages kept")
+        XCTAssertFalse(model.more)
+        log.all = ["5", "3", "2", "1"].map(hash)
+        await model.update(store: store, session: "a")
+        XCTAssertEqual(model.commits.map(\.hash), ["5", "3"].map(hash), "an amend reads the list again")
+        XCTAssertTrue(model.more)
+        await model.page(store: store, session: "a")
+        XCTAssertEqual(model.commits.map(\.hash), ["5", "3", "2", "1"].map(hash))
     }
 
     func testHistoryCanBeOpenedAsAWorkspaceTab() {
@@ -408,7 +454,9 @@ final class RightPanelTests: XCTestCase {
         let bitmap = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
         content.cacheDisplay(in: content.bounds, to: bitmap)
         try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: url)
-        window.close()
+        // Put away rather than closed: closing the last titled window ends
+        // the app the tests run in, and the next test with it.
+        window.orderOut(nil)
     }
 
     private func renderView<V: View>(_ view: V, size: CGSize, dark: Bool, to url: URL) throws {
@@ -447,10 +495,13 @@ final class RightPanelTests: XCTestCase {
             let look = dark ? "dark" : "light"
             set([RightPanel.tabsKey: "diff,files,history", RightPanel.tabKey: "history"])
             try render(size: large, dark: dark, store: try store(cwd: cwd), to: shots.appendingPathComponent("panel-history-\(look).png"))
-            try renderView(HistoryPanel(sessionID: "a", cwd: cwd).environment(AgentsStore(client: Self.client(previewHistory: true))),
+            try renderView(HistoryPanel(sessionID: "a", cwd: cwd, state: .idle, activity: nil)
+                            .environment(AgentsStore(client: Self.client(previewHistory: true))),
                            size: CGSize(width: 360, height: 760), dark: dark,
                            to: shots.appendingPathComponent("history-list-360-\(look).png"))
             let commit = WorkspaceCommit(hash: String(repeating: "a", count: 40), subject: "Keep history beside the conversation",
+                                         body: (1...7).map { "A line of the message that says what changed and why, number \($0)." }
+                                             .joined(separator: "\n"),
                                          author: "Jeremiah", authoredAt: 1793448000000)
             for width in [360.0, 540.0, 900.0] {
                 let split = width == 900

@@ -73,7 +73,7 @@ func (d *Daemon) history(ctx context.Context, req protocol.Request) protocol.Eve
 	case protocol.ReqCommitDiff:
 		result.Kind = "diff"
 		result.Diff, result.Truncated, err = commitDiff(ctx, session.Cwd, req.Commit, req.Path, req.IgnoreWhitespace)
-		if err == nil {
+		if err == nil && req.WithFile {
 			result.Text = commitContext(ctx, session.Cwd, req.Commit, req.Path)
 		}
 	}

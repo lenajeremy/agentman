@@ -70,7 +70,9 @@ final class RedesignShotsTests: XCTestCase {
         let bitmap = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
         content.cacheDisplay(in: content.bounds, to: bitmap)
         try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: url)
-        window.close()
+        // Put away rather than closed: closing the last titled window ends
+        // the app the tests run in, and the next test with it.
+        window.orderOut(nil)
     }
 
     func testRenderTheRedesign() throws {
