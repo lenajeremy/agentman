@@ -129,6 +129,9 @@ type codexAppServer struct {
 	// Whatever happened while the connection was down was not seen, so a
 	// follower reads the thread again.
 	rejoined func(threadID string)
+	// up runs, on a goroutine of its own, each time a connection is ready
+	// for calls; down runs each time one drops.
+	up, down func()
 
 	// retryMin and retryMax bound the delay between connection attempts.
 	retryMin, retryMax time.Duration
@@ -227,6 +230,9 @@ func (s *codexAppServer) serve(ctx context.Context, conn *websocket.Conn) {
 	s.mu.Unlock()
 	sort.Strings(threads)
 	go s.rejoin(ctx, conn, threads)
+	if s.up != nil {
+		go s.up()
+	}
 
 	select {
 	case <-done:
@@ -312,13 +318,17 @@ func (s *codexAppServer) read(ctx context.Context, conn *websocket.Conn) {
 // waiting on it.
 func (s *codexAppServer) dropped(conn *websocket.Conn) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.conn == conn {
+	wasUp := s.conn == conn
+	if wasUp {
 		s.conn = nil
 	}
 	for id, reply := range s.pending {
 		delete(s.pending, id)
 		reply <- codexRPCReply{err: errCodexAppServerDown}
+	}
+	s.mu.Unlock()
+	if wasUp && s.down != nil {
+		s.down()
 	}
 }
 

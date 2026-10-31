@@ -210,6 +210,14 @@ type CodexSource struct {
 	names   codexNames
 	titleMu sync.Mutex
 	titled  map[string]codexTitled
+
+	// appServer is the connection to Codex's shared daemon and live what it
+	// says about the threads it has open, once `am serve` has connected;
+	// nil otherwise. See codex_appserver.go and codex_threads.go.
+	appMu     sync.Mutex
+	appServer *codexAppServer
+	live      *codexLiveThreads
+	appStop   context.CancelFunc
 }
 
 type codexSession struct {
@@ -357,7 +365,12 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	// every install, and this gate clears the whole session map when it says
 	// no, so a probe that fails to see a running Codex does not report it idle
 	// — it hides it. A pane agentman opened for Codex settles the question.
-	if !anyCodexPane(panes) && s.processCheck != nil && !s.processCheck(ctx) {
+	// While connected to Codex's shared daemon, the daemon says which
+	// threads are open; see codex_threads.go. Its own process always passes
+	// the probe below, which then proves nothing.
+	daemon, daemonReady := s.liveThreads()
+
+	if !daemonReady && !anyCodexPane(panes) && s.processCheck != nil && !s.processCheck(ctx) {
 		s.mu.Lock()
 		s.sessions = map[string]codexSession{}
 		s.mu.Unlock()
@@ -487,6 +500,17 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 		}
 		if info, err := os.Stat(path); err == nil {
 			rollouts = append(rollouts, rollout{path: path, modTime: info.ModTime(), info: info, kept: true})
+			listed[path] = true
+		}
+	}
+	// A thread the daemon has open is live however long it has sat idle.
+	for _, thread := range daemon {
+		if !thread.session() || thread.Path == "" || listed[thread.Path] {
+			continue
+		}
+		if info, err := os.Stat(thread.Path); err == nil {
+			rollouts = append(rollouts, rollout{path: thread.Path, modTime: info.ModTime(), info: info})
+			listed[thread.Path] = true
 		}
 	}
 	sort.Slice(rollouts, func(i, j int) bool {
@@ -558,6 +582,15 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			if entry.kept && tmuxName == "" {
 				continue
 			}
+			// A terminal Codex running through the shared daemon is open
+			// exactly while the daemon has its thread loaded. One the daemon
+			// has closed is not a session, however recent its rollout,
+			// unless a pane still vouches for it.
+			thread, onDaemon := daemon[meta.threadID()]
+			onDaemon = onDaemon && thread.session()
+			if daemonReady && !onDaemon && tmuxName == "" && codexOnSharedDaemon(meta) {
+				continue
+			}
 
 			session := protocol.Session{
 				ID:             id,
@@ -569,6 +602,9 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				Inject:         inject,
 				StartedAt:      parseCodexTime(meta.Payload.Timestamp),
 				LastActivityAt: lastActivity,
+			}
+			if onDaemon {
+				session.State = thread.state()
 			}
 			var screen string
 			var read bool
@@ -587,6 +623,9 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			if !cached {
 				model = codexModel(path)
 				s.models.put(id, model)
+			}
+			if onDaemon && thread.Model != "" {
+				model = thread.Model
 			}
 			session.Model = model
 			if read {
@@ -670,6 +709,18 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	s.mu.Unlock()
 
 	return found, nil
+}
+
+// codexOnSharedDaemon reports whether a rollout was written by a terminal
+// Codex running through the shared daemon, the one kind of session the daemon
+// speaks for. The TUI reaches the daemon as an app-server client, which Codex
+// records as source "vscode"; a TUI from before the daemon recorded "cli".
+// codex exec, the ChatGPT app and other apps run app-servers of their own,
+// so their sessions keep to the rollout path.
+func codexOnSharedDaemon(meta codexMeta) bool {
+	var source string
+	return meta.Payload.Originator == "codex-tui" &&
+		json.Unmarshal(meta.Payload.Source, &source) == nil && source == "vscode"
 }
 
 // tmuxID derives a stable session identifier from a tmux session name.

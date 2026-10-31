@@ -266,6 +266,18 @@ func (r *Registry) ResumeQueued() {
 	}
 }
 
+// ConnectCodex connects the Codex adapter to Codex's shared daemon, which
+// says exactly which terminal Codex sessions are open. Only the long-running
+// daemon does this; see CodexSource.ConnectAppServer.
+func (r *Registry) ConnectCodex(version string) {
+	r.mu.RLock()
+	s := r.sources[protocol.KindCodex]
+	r.mu.RUnlock()
+	if connector, ok := s.(interface{ ConnectAppServer(string) }); ok {
+		connector.ConnectAppServer(version)
+	}
+}
+
 // EnableAsyncCursor makes daemon sends acknowledge once ACP accepts the turn.
 // Standalone CLI sends remain attached until their child process finishes.
 func (r *Registry) EnableAsyncCursor() {
