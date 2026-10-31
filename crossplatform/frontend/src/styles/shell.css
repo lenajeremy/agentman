@@ -1,0 +1,15 @@
+/* The main window around the sidebar and the detail (Views/ContentView.swift). */
+.sidebar-pane { position: relative; display: flex; flex: none; min-height: 0; }
+.app > .detail { position: relative; }
+/* With the sidebar hidden, the button that brings it back, by the window's own. */
+.show-sidebar { position: absolute; top: 2px; z-index: 6; }
+/* "This agent has ended": its symbol, a title, and a link back. */
+.gone { -webkit-font-smoothing: auto; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; line-height: 1.193; }
+/* moon.zzz at 28 is 37 high, as SwiftUI lays it out. */
+.gone-icon { color: var(--faint); height: 37px; display: flex; align-items: center; }
+.gone-title { font-size: 16px; line-height: 20px; font-weight: 500; color: var(--text); }
+/* A link button: the system's link colour. */
+:root { --link: #0068da; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --link: #419cff; } }
+:root[data-theme="dark"] { --link: #419cff; }
+.gone-link { color: var(--link); font-size: 13px; line-height: 16px; }

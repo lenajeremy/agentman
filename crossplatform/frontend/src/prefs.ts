@@ -36,6 +36,23 @@ export function setPref<T>(key: string, value: T) {
   for (const l of listeners.get(key) ?? []) l();
 }
 
+/** A setting for this run of this window only, never written: what a test
+ *  run starts with (AGENTMAN_OPEN's pref.<key>=<json>). */
+export function overridePref<T>(key: string, value: T) {
+  cache.set(key, value);
+  for (const l of listeners.get(key) ?? []) l();
+}
+
+// A test run's settings, from the start, before anything reads them.
+for (const [name, raw] of new URLSearchParams(location.search)) {
+  if (!name.startsWith("pref.")) continue;
+  try {
+    cache.set(name.slice(5), JSON.parse(raw));
+  } catch {
+    cache.set(name.slice(5), raw);
+  }
+}
+
 // Another window changed it.
 window.addEventListener("storage", (e) => {
   if (!e.key?.startsWith(PREFIX)) return;

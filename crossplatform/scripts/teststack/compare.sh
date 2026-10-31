@@ -71,6 +71,10 @@ W=${SIZE%x*}; HGT=${SIZE#*x}
 defaults write dev.agentman.mac.debug "NSWindow Frame main" "0 0 $W $HGT 0 0 1920 1080" 2>/dev/null || true
 for d in ${MAC_DEFAULTS:-}; do
   value=${d#*=}
+  # A plist without spaces, such as a dictionary: key={pinned=("id");}
+  case $value in
+    "{"*|"("*) defaults write dev.agentman.mac.debug "${d%%=*}" "$value"; continue ;;
+  esac
   defaults write dev.agentman.mac.debug "${d%%=*}" "${value%%:*}" "${value#*:}"
 done
 MAC_ENV_ARGS=()
