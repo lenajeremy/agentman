@@ -37,11 +37,11 @@ func deviceRequests(next handler, client *daemon.Client, devices *daemon.Devices
 	}
 }
 
-// namingDevices keeps what a device says about itself when it registers for
-// notifications, then answers as before.
+// namingDevices keeps what a device says about itself, as it connects or
+// registers for notifications, then answers as before.
 func namingDevices(next handler, devices *daemon.Devices) handler {
 	return func(ctx context.Context, from string, req protocol.Request) protocol.Event {
-		if req.Type == protocol.ReqRegisterPush && req.Device != nil {
+		if req.Device != nil {
 			devices.Named(from, *req.Device)
 		}
 		return next(ctx, from, req)

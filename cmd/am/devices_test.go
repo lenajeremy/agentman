@@ -30,18 +30,27 @@ func TestDeviceRequests(t *testing.T) {
 	relayed(context.Background(), "phone", protocol.Request{Type: protocol.ReqRegisterPush, PushToken: "t",
 		Device: &protocol.DeviceInfo{Name: "iPhone", Platform: "ios"}})
 	relayed(context.Background(), "tablet", protocol.Request{Type: protocol.ReqRegisterPush, PushToken: "t"})
+	relayed(context.Background(), "ipad", protocol.Request{Type: protocol.ReqListSessions,
+		Device: &protocol.DeviceInfo{Model: "iPad", Platform: "ios"}})
 
 	local := deviceRequests(next, nil, devices, DefaultRelay)
 	listed := local(context.Background(), "local:1", protocol.Request{Type: protocol.ReqDevices})
-	if listed.Type != protocol.EvtDevices || len(listed.Devices) != 1 || listed.Devices[0].Name != "iPhone" {
+	if listed.Type != protocol.EvtDevices || len(listed.Devices) != 2 {
 		t.Fatalf("devices = %+v", listed)
 	}
 	if code := local(context.Background(), "local:1", protocol.Request{Type: protocol.ReqPairCode}); code.Type != protocol.EvtError || code.Error == "" {
 		t.Fatalf("no relay: %+v", code)
 	}
 	local(context.Background(), "local:1", protocol.Request{Type: protocol.ReqListSessions})
-	if passed != 3 {
-		t.Fatalf("passed on %d requests, want the two registrations and the session list", passed)
+	names := map[string]string{}
+	for _, device := range listed.Devices {
+		names[device.ID] = device.Name + device.Model
+	}
+	if names["phone"] != "iPhone" || names["ipad"] != "iPad" {
+		t.Fatalf("named on registering and on connecting: %v", names)
+	}
+	if passed != 4 {
+		t.Fatalf("passed on %d requests, want all four through", passed)
 	}
 }
 

@@ -281,6 +281,9 @@ export interface Request {
   pushToken?: string;
   /** Which alerts this phone wants pushed, on register_push. */
   notify?: { finished: boolean; needsYou: boolean; agentman: boolean; agents: boolean };
+  /** What this phone says about itself, for the Mac's list of devices: on
+   *  register_push and on the session list asked for on connecting. */
+  device?: DeviceInfo;
   /** An agent's own alerts on or off, on set_agent_alerts. */
   alerts?: boolean;
   /** Chooses an option on answer_question. */
@@ -523,6 +526,14 @@ export interface WorkspaceResult {
 }
 
 export type SendStatus = "delivered" | "queued" | "failed";
+
+/** What a phone says about itself, for the Mac's list of devices. */
+export interface DeviceInfo {
+  name?: string;
+  model?: string;
+  platform?: string;
+  os?: string;
+}
 
 export interface DaemonEvent {
   type: EventType;

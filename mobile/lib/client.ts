@@ -11,6 +11,7 @@ import {
   decodeDaemonEvent,
   decodeEnvelope,
 } from "./protocol";
+import { deviceInfo } from "./device";
 import { newFrameId } from "./id";
 import { normalizeCredentials, normalizeRelayUrl } from "./pairing";
 
@@ -241,7 +242,8 @@ export class Client {
       // state, so a reconnect starts from nothing on its side.
 	  this.sendSubscriptions();
 	  this.resendReplayable();
-	  this.write(newFrameId(), { type: "list_sessions" });
+	  // Saying which phone this is, for the Mac's list of devices.
+	  this.write(newFrameId(), { type: "list_sessions", device: deviceInfo() });
     };
 
 	ws.onmessage = (event) => {
@@ -272,7 +274,7 @@ export class Client {
 		  // a socket reconnect there is no onopen event to restore these.
 		  this.sendSubscriptions();
 		  this.resendReplayable();
-		  this.write(newFrameId(), { type: "list_sessions" });
+		  this.write(newFrameId(), { type: "list_sessions", device: deviceInfo() });
         } else if (control.type === "daemon_offline") {
           this.handlers.onConnectionChange("online", false);
         }
@@ -406,7 +408,9 @@ export class Client {
     notify?: { finished: boolean; needsYou: boolean; agentman: boolean; agents: boolean },
   ): string | null {
     const id = newFrameId();
-    return this.write(id, { type: "register_push", pushToken: token, ...(notify ? { notify } : {}) }) ? id : null;
+    return this.write(id, {
+      type: "register_push", pushToken: token, device: deviceInfo(), ...(notify ? { notify } : {}),
+    }) ? id : null;
   }
 
   private write(id: string, request: Request): boolean {
