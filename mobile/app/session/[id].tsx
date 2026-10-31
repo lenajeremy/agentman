@@ -37,6 +37,7 @@ import { groupTools } from "../../lib/toolgroups";
 import { readImage } from "../../lib/imagepath";
 import { sentMessageParts, splitSentMessage } from "../../lib/sentimages";
 import { MotionPressable } from "../../components/MotionPressable";
+import { Loader } from "../../components/Loader";
 import { Pulse } from "../../components/Pulse";
 import { QuestionCard } from "../../components/QuestionCard";
 import { Thinking } from "../../components/Thinking";
@@ -50,7 +51,7 @@ import { OutputViewer } from "../../components/OutputViewer";
 import { type Frame } from "../../lib/message-menu";
 import { artifactsButtonLabel } from "../../lib/artifacts";
 import { canEnd, shouldResume } from "../../lib/resume";
-import { modeLabel, modelLabel, showsInFeed, statusChip } from "../../lib/session-view";
+import { folderName, modeLabel, modelLabel, showsInFeed, statusChip } from "../../lib/session-view";
 import {
   defaultScopeWarning,
   switchChoices,
@@ -858,35 +859,34 @@ export default function SessionScreen() {
             </Text>
             {session ? (
               <>
+                {/* The agents list's first line: the folder, then what the
+                    agent is doing now, so the row you tapped and the page it
+                    opened say the same thing in the same place. */}
                 <View style={styles.subtitleRow}>
-                  {/* A colour, not a word: the dot pulses while the agent runs,
-                      which says "working" faster than the word did, and the
-                      word survives as its label. */}
+                  <View style={styles.folderBadge}>
+                    <Text style={styles.folderBadgeText}>
+                      {folderName(session.cwd).slice(0, 2).toUpperCase()}
+                    </Text>
+                  </View>
+                  <Text style={[styles.subtitle, styles.subtitlePath]} numberOfLines={1}>
+                    {folderName(session.cwd)}
+                  </Text>
+                  <Text style={[styles.subtitle, styles.subtitleModel]}>{"  ·  "}</Text>
                   <View
-                    style={styles.stateDot}
+                    style={styles.stateLine}
                     accessible
                     accessibilityRole="text"
                     accessibilityLabel={state.label}
                   >
-                    <Pulse state={displayState} size={6} inline />
+                    {displayState === "busy" ? (
+                      <Loader size={10} />
+                    ) : (
+                      <View style={[styles.stateDotSmall, { backgroundColor: state.color }]} />
+                    )}
+                    <Text style={[styles.subtitle, styles.subtitleModel, { color: state.text }]}>
+                      {state.label}
+                    </Text>
                   </View>
-                  {/* Which agent and which project: the two facts this line is
-                      read for. The model and mode used to share it, and at
-                      phone width that left the folder as "…ts/northstar" and
-                      the mode as "kir…" — four facts, none of them whole. */}
-                  <Text style={[styles.subtitle, styles.subtitleModel]} numberOfLines={1}>
-                    {agentLabel(session.kind).name}
-                  </Text>
-                  <Text style={[styles.subtitle, styles.subtitleModel]}>{" · "}</Text>
-                  {/* Truncated from the front: a path's last segment is the one
-                      that says which project this is. */}
-                  <Text
-                    style={[styles.subtitle, styles.subtitlePath]}
-                    numberOfLines={1}
-                    ellipsizeMode="head"
-                  >
-                    {shortPath(session.cwd)}
-                  </Text>
                 </View>
               </>
             ) : (
@@ -1322,6 +1322,7 @@ export default function SessionScreen() {
                     belongs where the message is written, not in the header. */}
                   {session?.model || switching?.kind === "model" ? (
                     <ModelButton
+                      agent={session?.kind}
                       model={modelLabel(
                         (switching?.kind === "model" ? switching.value : session?.model) ?? "",
                       )}
@@ -1451,7 +1452,10 @@ function ModelButton({
   onPress,
   disabled,
   kind = "Model",
+  agent,
 }: {
+  /** The agent's kind, whose mark leads the model's name, as on the Mac. */
+  agent?: string;
   model: string;
   pending: boolean;
   onPress?: () => void;
@@ -1463,6 +1467,7 @@ function ModelButton({
   const { color } = useTheme();
   const body = (
     <>
+      {agent ? <AgentIcon kind={agent} size={14} /> : null}
       <Text style={[styles.modelText, pending && styles.switchPending]} numberOfLines={1}>
         {pending ? `${model}…` : model}
       </Text>
@@ -2182,6 +2187,18 @@ const makeStyles = (c: Palette) =>
     // fact now, not a control, so it occupies exactly itself and starts where
     // the title starts.
     stateDot: { marginRight: 6 },
+    stateLine: { flexDirection: "row", alignItems: "center", gap: 5, flexShrink: 0 },
+    stateDotSmall: { width: 6, height: 6, borderRadius: 3 },
+    folderBadge: {
+      width: 16,
+      height: 16,
+      marginRight: 6,
+      borderRadius: 4,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.workingWash,
+    },
+    folderBadgeText: { ...font.sansBold, fontSize: 7.5, color: c.workingText },
 
     note: {
       flexDirection: "row",
@@ -2244,9 +2261,8 @@ const makeStyles = (c: Palette) =>
       alignSelf: "flex-end",
       maxWidth: "84%",
       backgroundColor: c.fill,
-      borderRadius: radius.xl,
-      borderBottomRightRadius: 6,
-      paddingHorizontal: 14,
+      borderRadius: 18,
+      paddingHorizontal: 15,
       paddingVertical: 10,
     },
     userText: {
@@ -2333,20 +2349,15 @@ const makeStyles = (c: Palette) =>
     // a sentence needs.
     field: {
       backgroundColor: c.surface,
-      borderRadius: radius.xxl,
+      borderRadius: 20,
       borderWidth: 1,
       borderColor: c.line,
       paddingLeft: 6,
       paddingRight: 6,
       paddingTop: 4,
       paddingBottom: 6,
-      shadowColor: c.shadow,
-      shadowOpacity: 0.06,
-      shadowRadius: 16,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: 2,
     },
-    fieldFocused: { borderColor: c.working },
+    fieldFocused: { borderColor: c.fillStrong },
     fieldDisabled: { opacity: 0.55 },
     // Inset so the text starts where the + under it does.
     input: {
@@ -2371,7 +2382,7 @@ const makeStyles = (c: Palette) =>
     modelButton: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 3,
+      gap: 5,
       height: 32,
       maxWidth: 200,
       paddingHorizontal: 10,
@@ -2408,5 +2419,5 @@ const makeStyles = (c: Palette) =>
       alignItems: "center",
       justifyContent: "center",
     },
-    sendDisabled: { backgroundColor: c.fill },
+    sendDisabled: { backgroundColor: c.fillStrong },
   });
