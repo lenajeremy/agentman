@@ -61,6 +61,17 @@ final class ToastShotsTests: XCTestCase {
         XCTAssertEqual(store.toasts.last?.id, "brief-4")
     }
 
+    // At the window's foot, unless that would cover the message box: then
+    // just above it.
+    func testToastsSitAtTheFootUnlessOverTheMessageBox() {
+        let size = CGSize(width: 1600, height: 900)
+        XCTAssertEqual(AgentmanToasts.bottom(in: size, messageBox: nil), AgentmanToasts.margin, "No box: at the foot")
+        let centred = CGRect(x: 420, y: 760, width: 760, height: 120)
+        XCTAssertEqual(AgentmanToasts.bottom(in: size, messageBox: centred), AgentmanToasts.margin, "Room beside the box: at the foot")
+        let wide = CGRect(x: 300, y: 760, width: 1000, height: 120)
+        XCTAssertEqual(AgentmanToasts.bottom(in: size, messageBox: wide), 900 - 760 + 12, "Over the box: just above it")
+    }
+
     func testRenderTheToasts() throws {
         guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
         let shots = URL(fileURLWithPath: out)
@@ -69,6 +80,9 @@ final class ToastShotsTests: XCTestCase {
             let store = try store()
             try render(ContentView(), size: CGSize(width: 1180, height: 760), dark: dark, store: store,
                        to: shots.appendingPathComponent("toasts-\(look).png"))
+            // A wide window: room beside the message box, so at the foot.
+            try render(ContentView(), size: CGSize(width: 1680, height: 900), dark: dark, store: store,
+                       to: shots.appendingPathComponent("toasts-wide-\(look).png"))
             store.selection = .manager
             try render(ContentView(), size: CGSize(width: 1180, height: 760), dark: dark, store: store,
                        to: shots.appendingPathComponent("toasts-chat-\(look).png"))

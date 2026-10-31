@@ -351,6 +351,7 @@ struct AgentThreadView: View {
             .modifier(ComposerFeedback(message: store.actionError[session.id]) {
                 store.actionError[session.id] = nil
             })
+            .anchorPreference(key: MessageBoxFrame.self, value: .bounds) { $0 }
             .padding(.horizontal, gutter)
             .padding(.top, 4)
             .padding(.bottom, 20)
