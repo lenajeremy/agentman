@@ -29,10 +29,10 @@ function Header({ session, terminal, card, onTerminal, onCard }: { session: Sess
         <span className="crumb-name no-drag">{session.name || session.kind}</span>
       </div>
       <div className="header-buttons no-drag">
-        <ChromeButton icon={SquareTerminal} title="Terminal" active={terminal} onClick={onTerminal} />
-        <ChromeButton glyph={<PlusSlashMinus />} title="Changes" />
-        <ChromeButton icon={PanelRight} title="Workspace" active={card} onClick={onCard} />
-        <button className="ellipsis" aria-label="More"><Icon icon={Ellipsis} size={15} /></button>
+        <ChromeButton icon={SquareTerminal} sf="terminal" title="Terminal" active={terminal} onClick={onTerminal} />
+        <ChromeButton sf="plus.forwardslash.minus" glyph={<PlusSlashMinus />} title="Changes" />
+        <ChromeButton icon={PanelRight} sf="sidebar.right" title="Workspace" active={card} onClick={onCard} />
+        <button className="ellipsis" aria-label="More"><Icon icon={Ellipsis} sf="ellipsis" size={13} /></button>
       </div>
     </header>
   );
@@ -55,7 +55,7 @@ function EditorWindow() {
 export default function App() {
   const { sessions } = useStore();
   const [os, setOs] = useState("");
-  const [selectedId, setSelectedId] = useState<string>();
+  const [selectedId, setSelectedId] = useState<string | undefined>(query.get("agent") ?? undefined);
   const [terminal, setTerminal] = useState(query.get("tab") === "terminal");
   const [card, setCard] = useState(true);
   const [sent, setSent] = useState(0);

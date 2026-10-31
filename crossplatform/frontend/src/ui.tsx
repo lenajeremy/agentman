@@ -5,17 +5,37 @@
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 
-/** SF Symbols draw "regular" at about 1.6 of Lucide's 24-unit stroke. */
-export function Icon({ icon: I, size, weight = "regular", className }: { icon: LucideIcon; size: number; weight?: "regular" | "medium" | "semibold" | "bold"; className?: string }) {
+type Weight = "regular" | "medium" | "semibold" | "bold";
+
+/**
+ * An icon as the Mac app draws it: on macOS, the SF Symbol itself, drawn by
+ * the system (the shell's /sf/ route, symbols.go) and used as a mask so it
+ * takes the text colour; elsewhere, where SF Symbols may not be used, the
+ * Lucide icon nearest to it. size and weight are the symbol's, in points.
+ */
+export function Icon({ icon: I, sf, size, weight = "regular", className }: { icon?: LucideIcon; sf?: string; size: number; weight?: Weight; className?: string }) {
+  if (sf && document.documentElement.dataset.platform === "darwin") {
+    const box = size * 1.5;
+    const url = `url(/sf/${sf}.png?size=${size}&weight=${weight})`;
+    return (
+      <span
+        className={`sf ${className ?? ""}`}
+        aria-hidden
+        style={{ width: box, height: box, margin: -(box - size) / 2, WebkitMaskImage: url, maskImage: url }}
+      />
+    );
+  }
+  if (!I) return null;
   const stroke = { regular: 1.7, medium: 2, semibold: 2.3, bold: 2.6 }[weight];
-  return <I size={size} strokeWidth={stroke} absoluteStrokeWidth={false} className={className} aria-hidden />;
+  return <I size={size + 1} strokeWidth={stroke} className={className} aria-hidden />;
 }
 
 /** 28×28, symbol 13 regular, muted (text when active), fill@0.55 on hover or active. */
-export function ChromeButton({ icon, glyph, active, title, onClick }: { icon?: LucideIcon; glyph?: ReactNode; active?: boolean; title: string; onClick?: () => void }) {
+export function ChromeButton({ icon, sf, glyph, active, title, onClick }: { icon?: LucideIcon; sf?: string; glyph?: ReactNode; active?: boolean; title: string; onClick?: () => void }) {
+  const symbol = sf && document.documentElement.dataset.platform === "darwin";
   return (
     <button className={`chrome ${active ? "active" : ""}`} title={title} aria-label={title} onClick={onClick}>
-      {glyph ?? (icon && <Icon icon={icon} size={14} />)}
+      {symbol || !glyph ? <Icon icon={icon} sf={sf} size={13} /> : glyph}
     </button>
   );
 }

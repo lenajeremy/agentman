@@ -46,15 +46,15 @@ export function Composer({ session, onSent }: { session: Session; onSent: () => 
       <div className="composer-box">
         <textarea id="composer" className="composer-field" value={draft} rows={1} placeholder={placeholder(session)} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} />
         <div className="composer-controls">
-          <button className="clip" aria-label="Attach"><Icon icon={Paperclip} size={15} /></button>
+          <button className="clip" aria-label="Attach"><Icon icon={Paperclip} sf="paperclip" size={14} /></button>
           <Spacer min={8} />
-          <button className="mic" aria-label="Record"><Icon icon={Mic} size={14} weight="semibold" /></button>
+          <button className="mic" aria-label="Record"><Icon icon={Mic} sf="mic" size={13} weight="semibold" /></button>
           <span className="model-chip">
             <AgentMark kind={session.kind} size={14} />
             {session.model ? modelLabel(session.model) : agentName(session.kind)}
           </span>
           <button className={`send ${canSend ? "can" : ""}`} disabled={!canSend} onClick={() => void send()} aria-label="Send">
-            <Icon icon={ArrowUp} size={14} weight="bold" />
+            <Icon icon={ArrowUp} sf="arrow.up" size={13} weight="bold" />
           </button>
         </div>
       </div>

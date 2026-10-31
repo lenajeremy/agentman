@@ -12,8 +12,9 @@ import { runSummary, toolKind, type ToolKind } from "./labels";
 import { follow, loadOlder, useStore } from "./store";
 import { Icon } from "./ui";
 
-const KIND_ICON: Record<ToolKind, LucideIcon> = {
-  terminal: SquareTerminal, read: FileText, edit: Pencil, search: Search, web: Globe, task: Users, plan: ListChecks, other: Wrench,
+const KIND_ICON: Record<ToolKind, [LucideIcon, string]> = {
+  terminal: [SquareTerminal, "terminal"], read: [FileText, "doc.text"], edit: [Pencil, "pencil"], search: [Search, "magnifyingglass"],
+  web: [Globe, "globe"], task: [Users, "person.2"], plan: [ListChecks, "checklist"], other: [Wrench, "wrench"],
 };
 
 function CallRow({ message }: { message: Message }) {
@@ -25,7 +26,7 @@ function CallRow({ message }: { message: Message }) {
     <div className="call">
       <div className="call-row" onClick={() => setOpen(!open)}>
         <span className={`call-icon ${failed ? "failed" : ""}`}>
-          {tool.status === "running" ? <span className="loader small" /> : <Icon icon={failed ? CircleX : KIND_ICON[toolKind(tool.name)]} size={11} weight="medium" />}
+          {tool.status === "running" ? <span className="loader small" /> : failed ? <Icon icon={CircleX} sf="xmark.circle.fill" size={10} weight="medium" /> : <Icon icon={KIND_ICON[toolKind(tool.name)][0]} sf={KIND_ICON[toolKind(tool.name)][1]} size={10} weight="medium" />}
         </span>
         <span className="call-title">{title}</span>
       </div>
@@ -41,10 +42,10 @@ function ToolRun({ calls }: { calls: Message[] }) {
   return (
     <div className="tool-run">
       <button className="run-toggle" onClick={() => setOpen(!open)}>
-        {running ? <span className="loader small" /> : <Icon icon={Wrench} size={11} weight="medium" />}
+        {running ? <span className="loader small" /> : <Icon icon={Wrench} sf="wrench.and.screwdriver" size={10} weight="medium" />}
         <span className="run-summary">{runSummary(calls)}</span>
         {failed > 0 && <span className="run-failed">· {failed} failed</span>}
-        <Icon icon={ChevronRight} size={10} weight="semibold" className={`run-chevron ${open ? "open" : ""}`} />
+        <Icon icon={ChevronRight} sf="chevron.right" size={9} weight="semibold" className={`run-chevron ${open ? "open" : ""}`} />
       </button>
       {open && (
         <div className="run-calls">
@@ -66,7 +67,7 @@ function Reply({ message }: { message: Message }) {
     <div className={`reply ${message.isSidechain ? "sidechain" : ""}`}>
       <div className="reply-body"><Markdown text={message.text ?? ""} /></div>
       <button className={`copy ${copied ? "copied" : ""}`} onClick={() => void copy()} aria-label="Copy">
-        <Icon icon={copied ? Check : Copy} size={12} />
+        <Icon icon={copied ? Check : Copy} sf={copied ? "checkmark" : "doc.on.doc"} size={11} />
       </button>
     </div>
   );

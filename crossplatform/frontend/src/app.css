@@ -50,6 +50,7 @@ input, textarea { font: inherit; color: inherit; }
 .chrome:hover, .chrome.active { background: color-mix(in srgb, var(--fill) 55%, transparent); }
 .chrome.active { color: var(--text); }
 .mark { display: inline-block; flex: none; object-fit: contain; }
+.sf { display: inline-block; flex: none; background-color: currentColor; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; }
 .mark-template { background: var(--text); -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; }
 .mark-none { color: var(--muted); font-family: var(--mono); font-weight: 500; line-height: 1; display: inline-grid; place-items: center; }
 .app-icon-frame { flex: none; display: grid; place-items: center; }

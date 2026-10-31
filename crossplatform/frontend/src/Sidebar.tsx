@@ -67,18 +67,18 @@ export function Sidebar({ selected, onSelect, platform }: { selected?: string; o
         <AppIcon size={20} />
         <span className="app-name">Agentman</span>
         <Spacer />
-        <span className="no-drag"><ChromeButton icon={PanelLeft} title="Hide Sidebar" /></span>
+        <span className="no-drag"><ChromeButton icon={PanelLeft} sf="sidebar.left" title="Hide Sidebar" /></span>
       </div>
       <div className="search-row">
-        <Icon icon={Search} size={13} />
+        <Icon icon={Search} sf="magnifyingglass" size={12} />
         <input id="search" placeholder="Search agents" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <span className="filter"><Icon icon={ListFilter} size={13} /></span>
-        <Icon icon={SquarePen} size={13} />
+        <span className="filter"><Icon icon={ListFilter} sf="line.3.horizontal.decrease" size={12} /></span>
+        <Icon icon={SquarePen} sf="square.and.pencil" size={12} />
       </div>
       <div className="agent-list">
         {working.length > 0 && (
           <>
-            <div className="section-head">Working <span className="count">{working.length}</span><Icon icon={ChevronRight} size={9} weight="semibold" className="open" /></div>
+            <div className="section-head">Working <span className="count">{working.length}</span><Icon icon={ChevronRight} sf="chevron.right" size={9} weight="semibold" className="open" /></div>
             {working.map(row)}
             <div className="section-rule" />
           </>
@@ -100,7 +100,7 @@ export function Sidebar({ selected, onSelect, platform }: { selected?: string; o
           {status === "connected" ? `${platform === "darwin" ? "Mac connected" : "Connected"}${version ? ` · am ${version}` : ""}` : status === "connecting" ? "Connecting to am serve…" : `${detail}. Run am serve.`}
         </span>
         <Spacer />
-        <span className="appearance"><Icon icon={Contrast} size={13} /></span>
+        <span className="appearance"><Icon icon={Contrast} sf="circle.lefthalf.filled" size={13} /></span>
       </footer>
     </nav>
   );
