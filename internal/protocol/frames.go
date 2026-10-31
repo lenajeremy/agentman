@@ -239,6 +239,9 @@ type Request struct {
 	// from an app that predates the choice, which keeps whatever the phone
 	// last chose, or the defaults for a phone that never chose.
 	Notify *NotifyPrefs `json:"notify,omitempty"`
+	// Device is what a phone says about itself on ReqRegisterPush, for the
+	// Mac's list of devices. Absent from apps that predate it.
+	Device *DeviceInfo `json:"device,omitempty"`
 	// Alerts is the choice on ReqSetAgentAlerts.
 	Alerts *bool `json:"alerts,omitempty"`
 	// Port names the server on ReqOpenServer and ReqCloseServer.
@@ -370,6 +373,8 @@ type Event struct {
 	Worktree  *Worktree        `json:"worktree,omitempty"`
 	Worktrees []Worktree       `json:"worktrees,omitempty"`
 	Usage     *Usage           `json:"usage,omitempty"`
+	PairCode  *PairCode        `json:"pairCode,omitempty"`
+	Devices   []Device         `json:"devices,omitempty"`
 	// Directory names only; the app never needs the Mac's absolute home path.
 	Directories []string `json:"directories,omitempty"`
 	Path        string   `json:"path,omitempty"`

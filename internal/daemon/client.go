@@ -42,9 +42,16 @@ type Client struct {
 
 	mu sync.Mutex
 	ws *daemonRelayConn
+	// pairing holds each pairing request still waiting for the relay's
+	// answer, by the request's envelope id, which the answer quotes.
+	pairing map[string]chan protocol.Control
 
-	// OnPairCode is called when the relay issues a pairing code.
+	// OnPairCode is called when the relay issues a pairing code no request
+	// is waiting for.
 	OnPairCode func(code, token string, expiresAt time.Time)
+	// OnDeviceSeen is called for each request a device sends through the
+	// relay.
+	OnDeviceSeen func(deviceID string)
 	// OnStatus reports connection transitions for the CLI to display.
 	OnStatus func(connected bool, detail string)
 	// OnDeviceDisconnected releases subscriptions owned by one app socket.
@@ -92,28 +99,60 @@ func (c *Client) Send(event protocol.Event) error {
 	return conn.Send(frame)
 }
 
-// RequestPairCode asks the relay for a pairing code.
-func (c *Client) RequestPairCode(ctx context.Context) error {
-	c.mu.Lock()
-	conn := c.ws
-	c.mu.Unlock()
-	if conn == nil {
-		return fmt.Errorf("daemon: not connected to the relay")
-	}
+// ErrNoRelay is PairCode's error while the daemon isn't connected to the
+// relay.
+var ErrNoRelay = errors.New("daemon: not connected to the relay")
 
+// pairCodeTimeout bounds the wait for the relay's answer.
+const pairCodeTimeout = 15 * time.Second
+
+// PairCode asks the relay for a pairing code over the live connection and
+// waits for its answer: a code and its token, or the relay's reason.
+func (c *Client) PairCode(ctx context.Context) (protocol.Control, error) {
 	envelope, err := protocol.NewEnvelope(newID(), protocol.PeerRelay,
 		protocol.Control{Type: protocol.CtlPairRequest})
 	if err != nil {
-		return err
+		return protocol.Control{}, err
 	}
 	frame, err := json.Marshal(envelope)
 	if err != nil {
-		return err
+		return protocol.Control{}, err
 	}
-	if err := ctx.Err(); err != nil {
-		return err
+	answer := make(chan protocol.Control, 1)
+	c.mu.Lock()
+	conn := c.ws
+	if conn != nil {
+		if c.pairing == nil {
+			c.pairing = map[string]chan protocol.Control{}
+		}
+		c.pairing[envelope.ID] = answer
 	}
-	return conn.Send(frame)
+	c.mu.Unlock()
+	if conn == nil {
+		return protocol.Control{}, ErrNoRelay
+	}
+	defer func() {
+		c.mu.Lock()
+		delete(c.pairing, envelope.ID)
+		c.mu.Unlock()
+	}()
+	if err := conn.Send(frame); err != nil {
+		return protocol.Control{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, pairCodeTimeout)
+	defer cancel()
+	select {
+	case control := <-answer:
+		if control.Type != protocol.CtlPairCode {
+			if control.Message == "" {
+				control.Message = "the relay didn't give a code"
+			}
+			return protocol.Control{}, errors.New(control.Message)
+		}
+		return control, nil
+	case <-ctx.Done():
+		return protocol.Control{}, errors.New("the relay didn't answer in time")
+	}
 }
 
 // Run maintains the relay connection until ctx is cancelled, dispatching app
@@ -235,6 +274,9 @@ func (c *Client) connectOnce(
 			continue
 		}
 		devices[envelope.From] = struct{}{}
+		if c.OnDeviceSeen != nil {
+			c.OnDeviceSeen(envelope.From)
+		}
 
 		req, err := DecodeRequest(envelope.Payload)
 		if err != nil {
@@ -284,6 +326,19 @@ func (c *Client) handleControl(envelope protocol.Envelope) string {
 	var control protocol.Control
 	if json.Unmarshal(envelope.Payload, &control) != nil {
 		return ""
+	}
+	// An answer to a pairing request goes to the request waiting for it.
+	if control.Type == protocol.CtlPairCode || control.Type == protocol.CtlError {
+		c.mu.Lock()
+		answer := c.pairing[envelope.ReplyTo]
+		c.mu.Unlock()
+		if answer != nil {
+			select {
+			case answer <- control:
+			default:
+			}
+			return ""
+		}
 	}
 	if control.Type == protocol.CtlPairCode && c.OnPairCode != nil {
 		c.OnPairCode(control.Code, control.Token, time.UnixMilli(control.ExpiresAt))
