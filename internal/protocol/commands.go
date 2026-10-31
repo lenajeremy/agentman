@@ -40,6 +40,12 @@ type Command struct {
 	// Panel marks a command that, sent without arguments, answers in a panel
 	// rather than the conversation: run it with ReqCommandPanel.
 	Panel bool `json:"panel,omitempty"`
+	// Skill marks a skill rather than a command: one a message can name
+	// anywhere, not only at its start.
+	Skill bool `json:"skill,omitempty"`
+	// Path is a skill's SKILL.md, when it is a file on this Mac, for a
+	// glance at what it says.
+	Path string `json:"path,omitempty"`
 }
 
 // CommandPanel is what a panel command showed.
