@@ -50,6 +50,7 @@ enum AgentName {
         case "cursor-cli": "Cursor CLI"
         case "kiro": "Kiro"
         case "antigravity": "Antigravity"
+        case "muse": "Muse"
         default: kind.capitalized
         }
     }
