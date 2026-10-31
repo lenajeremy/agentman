@@ -608,6 +608,11 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 			}
 			if onDaemon {
 				session.State = thread.state()
+				// Messages reach it through the daemon, pane or not; see
+				// codex_daemon_send.go.
+				if tmuxName == "" {
+					session.Inject = protocol.InjectAPI
+				}
 			}
 			var screen string
 			var read bool
