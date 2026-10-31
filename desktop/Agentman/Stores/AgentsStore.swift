@@ -64,6 +64,9 @@ final class AgentsStore {
     var lightbox: Lightbox?
     /// The session being renamed in the sidebar, if one is.
     var renaming: String?
+    /// What the New Agent page opens on, when something sends the user there
+    /// to start one in a particular place.
+    var newAgentPreset: NewAgentPreset?
     /// The command palette, over the main window.
     var showPalette = false
     /// Unsent messages, by session, kept across launches.

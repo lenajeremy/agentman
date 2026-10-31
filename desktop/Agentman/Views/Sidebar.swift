@@ -375,12 +375,12 @@ struct AgentRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 7) {
-                Text(String((session.cwd as NSString).lastPathComponent.prefix(2)).uppercased())
+                Text(String((Worktrees.parts(of: session.cwd)?.repo ?? (session.cwd as NSString).lastPathComponent).prefix(2)).uppercased())
                     .font(Fonts.sans(8, .bold))
                     .foregroundStyle(Palette.workingText)
                     .frame(width: 16, height: 16)
                     .background(Palette.workingWash, in: RoundedRectangle(cornerRadius: 4))
-                Text((session.cwd as NSString).lastPathComponent)
+                Text(Worktrees.label(session.cwd))
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 status

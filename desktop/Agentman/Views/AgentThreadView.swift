@@ -23,6 +23,10 @@ struct AgentThreadView: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.detailHeaderLeading) private var headerLeading
     @State private var confirmEnd = false
+    /// Removing the worktree the agent works in: asked first, then, if it
+    /// holds work or an agent, asked again with why.
+    @State private var confirmRemoveWorktree = false
+    @State private var removeWorktreeAnyway: String?
     @State private var resuming = false
     @State private var filesTab: WorkspaceTab = .changes
     /// The right panel: its diff and files, at the window's edge.
@@ -105,6 +109,18 @@ struct AgentThreadView: View {
                 Button("End session") { Task { store.actionError[session.id] = await store.end(session.id) } }
                 Button("Cancel", role: .cancel) {}
             }
+            .confirmationDialog("Remove the \(Worktrees.parts(of: session.cwd)?.name ?? "") worktree?", isPresented: $confirmRemoveWorktree) {
+                Button("Remove Worktree", role: .destructive) { removeWorktree(force: false) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Its folder, \(session.cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~")), goes. Its branch stays, with any commits on it.")
+            }
+            .alert("Remove it anyway?", isPresented: Binding(get: { removeWorktreeAnyway != nil }, set: { if !$0 { removeWorktreeAnyway = nil } })) {
+                Button("Remove Anyway", role: .destructive) { removeWorktree(force: true) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(removeWorktreeAnyway ?? "")
+            }
             .onAppear {
                 // For screenshots and tests: the files panel open on a tab.
                 if let tab = ProcessInfo.processInfo.environment["AGENTMAN_FILES"].flatMap(WorkspaceTab.init(rawValue:)) {
@@ -164,6 +180,16 @@ struct AgentThreadView: View {
                         Button("Open in Editor") { EditorOpener.open(folder: session.cwd, with: openWindow) }
                         if session.inject == "tmux" {
                             Button("Show \(session.name)'s Own Terminal") { showAgentTerminal() }
+                        }
+                        if Worktrees.inRepository(session.cwd) {
+                            Divider()
+                            Button("New Worktree from \(Worktrees.parts(of: session.cwd)?.repo ?? (session.cwd as NSString).lastPathComponent)…") {
+                                store.newAgentPreset = NewAgentPreset(folder: session.cwd, newWorktree: true)
+                                store.selection = .newAgent
+                            }
+                            if Worktrees.parts(of: session.cwd) != nil {
+                                Button("Remove This Worktree…") { confirmRemoveWorktree = true }
+                            }
                         }
                     }
                     if Self.endable(session) { Button("End Session…") { confirmEnd = true } }
@@ -360,6 +386,23 @@ struct AgentThreadView: View {
     }
 
     /// Opens the agent's own terminal in its folder's editor.
+    private func removeWorktree(force: Bool) {
+        let folder = session.cwd
+        Task {
+            do {
+                try await store.removeWorktree(folder, force: force)
+            } catch {
+                let problem = error.localizedDescription
+                // Work or an agent would be lost: theirs to decide.
+                if !force, problem.contains("uncommitted") || problem.contains("still working") {
+                    removeWorktreeAnyway = problem
+                } else {
+                    store.actionError[session.id] = problem
+                }
+            }
+        }
+    }
+
     private func showAgentTerminal() {
         Task {
             switch await store.terminal(for: session.id) {
@@ -480,7 +523,7 @@ private struct ThreadTitle: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Text((session.cwd as NSString).lastPathComponent)
+            Text(Worktrees.label(session.cwd))
                 .font(TextStyle.caption)
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)

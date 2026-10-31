@@ -52,6 +52,9 @@ enum RequestType: String, Codable, Sendable {
     case gitCommit = "git_commit"
     case gitPush = "git_push"
     case gitCreatePR = "git_create_pr"
+    case createWorktree = "create_worktree"
+    case listWorktrees = "list_worktrees"
+    case removeWorktree = "remove_worktree"
     case startSession = "start_session"
     case listFolders = "list_folders"
     case directorySessions = "directory_sessions"
@@ -138,6 +141,8 @@ struct DaemonRequest: Codable, Sendable {
     var withFile: Bool?
     /// The files a git_commit commits.
     var paths: [String]?
+    /// Removes a worktree with uncommitted changes or an agent in it.
+    var force: Bool?
     /// Which way a review_artifact goes: approved, or changes asked for.
     var approve: Bool?
     /// The server an open_server, close_server or stop_server is about.
@@ -193,6 +198,8 @@ struct DaemonEvent: Codable, Sendable {
     var daemon: DaemonInfo?
     var workspace: WorkspaceResult?
     var git: GitState?
+    var worktree: Worktree?
+    var worktrees: [Worktree]?
 
     // Agentman, the manager.
     var entry: ManagerEntry?
@@ -402,6 +409,24 @@ struct Key: Codable, Sendable, Hashable, Identifiable {
 /// What an agent's folder holds: a listing, its changes, a file, a diff,
 /// or its history.
 /// An agent's branch as the git actions need it, and, after one, what it did.
+/// One of a repository's working folders.
+struct Worktree: Codable, Sendable, Hashable, Identifiable {
+    /// The folder, absolute.
+    var path: String
+    var name: String
+    /// The repository's own folder name.
+    var repo: String
+    /// Checked out there; absent when detached.
+    var branch: String?
+    /// The repository's own folder.
+    var main: Bool?
+    /// Made by Agentman, under ~/Agentman/Worktrees, which it can remove.
+    var agentman: Bool?
+    /// The .env files copied in when it was made.
+    var copied: [String]?
+    var id: String { path }
+}
+
 struct GitState: Codable, Sendable, Equatable {
     var sessionId: String
     /// Absent while HEAD is detached.
