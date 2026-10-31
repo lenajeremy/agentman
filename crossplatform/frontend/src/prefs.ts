@@ -8,10 +8,17 @@ import { useCallback, useSyncExternalStore } from "react";
 const PREFIX = "agentman.";
 const listeners = new Map<string, Set<() => void>>();
 const cache = new Map<string, unknown>();
+// ?fresh: a comparison run starts from the defaults, as compare.sh clears the
+// Mac test copy's, and keeps nothing it changes.
+const fresh = new URLSearchParams(location.search).has("fresh");
 
 function read<T>(key: string, fallback: T): T {
   if (cache.has(key)) return cache.get(key) as T;
   let value = fallback;
+  if (fresh) {
+    cache.set(key, value);
+    return value;
+  }
   try {
     const raw = localStorage.getItem(PREFIX + key);
     if (raw !== null) value = JSON.parse(raw) as T;
@@ -29,6 +36,7 @@ export function getPref<T>(key: string, fallback: T): T {
 export function setPref<T>(key: string, value: T) {
   cache.set(key, value);
   try {
+    if (fresh) throw new Error("kept for this run only");
     localStorage.setItem(PREFIX + key, JSON.stringify(value));
   } catch {
     // Kept for this run only.
