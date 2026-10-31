@@ -20,7 +20,8 @@ OUT=${1:?out dir}
 AGENT=${2:-claude:6f1c2a9e-3b7d-4c55-9a10-2d8e4f6b7c01}
 MAC_LINK=${3:-agentman://agent/$AGENT}
 APP_QUERY=${4:-agent=$AGENT}
-T=${TMPDIR%/}/amx
+T=${AMX:-${TMPDIR:-/tmp}}
+T=${T%/}/amx
 H=$T/home
 SIZE=${SIZE:-1560x980}
 mkdir -p "$OUT"
@@ -34,9 +35,15 @@ fi
 MAC_APP=$(cd -P "$MAC_APP" && pwd)
 NEW_APP=${NEW_APP:-$REPO/crossplatform/bin/agentman}
 
-pkill -f "$MAC_APP/Contents/MacOS/Agentman" 2>/dev/null || true
-pkill -f "$NEW_APP" 2>/dev/null || true
-sleep 1
+# One comparison at a time: they share the screen and the Mac app's saved
+# state. The lock is a directory; a run that died leaves it for 5 minutes.
+LOCK=${TMPDIR%/}/amx-compare.lock
+for _ in $(seq 1 600); do
+  mkdir "$LOCK" 2>/dev/null && break
+  [ -n "$(find "$LOCK" -maxdepth 0 -mmin +5 2>/dev/null)" ] && rm -rf "$LOCK"
+  sleep 1
+done
+trap 'rm -rf "$LOCK"' EXIT
 
 # The test copy's saved state (its own app id, never the user's) is cleared
 # so both apps start the same way: no panel left open, no tab remembered.
@@ -50,7 +57,7 @@ open -g -n --env AGENTMAN_SOCKET="$H/.agentman/am.sock" --env "AGENTMAN_OPEN=$MA
 AGENTMAN_HOME=$H AGENTMAN_SIZE=$SIZE AGENTMAN_OPEN="$APP_QUERY" nohup "$NEW_APP" > "$T/app.log" 2>&1 &
 NEW_PID=$!
 sleep "${WAIT:-12}"
-MAC_PID=$(pgrep -f "$MAC_APP/Contents/MacOS/Agentman" | head -1)
+MAC_PID=$(pgrep -n -f "$MAC_APP/Contents/MacOS/Agentman")
 
 screencapture -x -o -l "$("$T/winid" "$MAC_PID")" "$OUT/mac.png"
 screencapture -x -o -l "$("$T/winid" "$NEW_PID")" "$OUT/new.png"

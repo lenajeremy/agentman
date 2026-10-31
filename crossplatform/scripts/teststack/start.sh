@@ -4,6 +4,10 @@
 # agents with long transcripts, and am serve built from this checkout on
 # 127.0.0.1:18797. Safe to run again: it rebuilds am and restarts the daemon.
 #
+# AMX=<dir> PORT=<port> run a second stack beside the first (its home is
+# <dir>/amx/home), for work that changes the agents or the daemon. Never
+# restart a stack someone else is using.
+#
 #   scripts/teststack/start.sh          # prints the home and the agents' ids
 #
 # Agents:
@@ -63,7 +67,7 @@ sleep 0.5
 PATHS="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 nohup env -i HOME="$H" USER="$USER" LOGNAME="$USER" SHELL=/bin/bash TERM=xterm-256color LANG=en_US.UTF-8 \
   TMPDIR="${TMPDIR:-/tmp}" TMUX_TMPDIR="$TMUX_TMPDIR" PATH="$PATHS" \
-  "$T/am" serve -relay none -config-home "$H" -addr 127.0.0.1:18797 > "$T/serve.log" 2>&1 &
+  "$T/am" serve -relay none -config-home "$H" -addr 127.0.0.1:${PORT:-18797} > "$T/serve.log" 2>&1 &
 for _ in $(seq 1 50); do
   [ -f "$H/.agentman/app.json" ] && break
   sleep 0.2

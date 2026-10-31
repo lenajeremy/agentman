@@ -12,6 +12,14 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
 OUT=${1:?out.png}
 QUERY=${2:-}
+# One run at a time: the machine has one screen.
+LOCK=${TMPDIR%/}/amx-linux.lock
+for _ in $(seq 1 600); do
+  mkdir "$LOCK" 2>/dev/null && break
+  [ -n "$(find "$LOCK" -maxdepth 0 -mmin +5 2>/dev/null)" ] && rm -rf "$LOCK"
+  sleep 1
+done
+trap 'rm -rf "$LOCK"' EXIT
 orb -m agentman-linux bash -s -- "$REPO" "$OUT" "$QUERY" "${WAIT:-9}" <<'EOF'
 set -uo pipefail
 REPO=$1 OUT=$2 QUERY=$3 WAIT=$4
