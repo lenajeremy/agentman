@@ -6,7 +6,6 @@
     "orientation": "portrait",
     "scheme": "agentman",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "dev.agentman.mobile",
@@ -20,7 +19,6 @@
     "android": {
       "package": "dev.agentman.mobile",
       "googleServicesFile": "./google-services.json",
-      "edgeToEdgeEnabled": true,
       "permissions": [
         "android.permission.CAMERA"
       ],
@@ -63,7 +61,8 @@
         {
           "microphonePermission": "Agentman listens while you record with the mic button, so you can speak a message to an agent or to Agentman instead of typing it. Your Mac has Celery write it out."
         }
-      ]
+      ],
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true
