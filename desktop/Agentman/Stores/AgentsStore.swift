@@ -102,8 +102,18 @@ final class AgentsStore {
     }
 
     /// Agentman's titles for runs of tool calls, by the run's first and last
-    /// call; empty when there is none to be had.
-    var toolTitles: [String: String] = [:]
+    /// call: each run's its own, so a title arriving redraws that run alone.
+    /// One dictionary every run read redrew them all at each title, and a
+    /// run scrolled into view asks for its title.
+    @ObservationIgnored private var toolTitles: [String: ToolRunTitle] = [:]
+    /// Runs whose title has been asked for and not answered yet, and when a
+    /// run's asking last failed: asked again a minute later, not at every
+    /// scroll past it.
+    @ObservationIgnored private var titling: Set<String> = []
+    @ObservationIgnored private var titleFailed: [String: Date] = [:]
+    /// Each conversation's rows, made again only when its messages change:
+    /// not at every redraw while it scrolls.
+    @ObservationIgnored private var itemCache: [String: (messages: [Message], items: [ThreadItem])] = [:]
 
     let client: DaemonClient
     private var cursors: [String: String] = [:]
@@ -287,23 +297,45 @@ final class AgentsStore {
         return await perform(request, for: sessionId)
     }
 
+    /// A run of tool calls' title, which its row alone observes.
+    func toolTitle(_ calls: [Message]) -> ToolRunTitle {
+        let key = Self.toolRunKey(calls)
+        if let title = toolTitles[key] { return title }
+        let title = ToolRunTitle()
+        toolTitles[key] = title
+        return title
+    }
+
     /// Asks Agentman for a plain line saying what a finished run of tool
     /// calls did and why, once per run.
     func titleTools(_ calls: [Message], said: String) async {
         guard calls.count > 1, let first = calls.first else { return }
         let key = Self.toolRunKey(calls)
-        guard toolTitles[key] == nil else { return }
-        toolTitles[key] = ""
+        let title = toolTitle(calls)
+        guard title.text == nil, !titling.contains(key) else { return }
+        if let failed = titleFailed[key], Date().timeIntervalSince(failed) < 60 { return }
+        titling.insert(key)
+        defer { titling.remove(key) }
         var request = DaemonRequest(.toolsTitle, sessionId: first.sessionId)
         request.text = said
         request.steps = calls.compactMap(\.tool)
         if let reply = try? await client.request(request), reply.type == "tools_title",
-           let title = reply.preview, !title.isEmpty {
-            toolTitles[key] = title
+           let line = reply.preview, !line.isEmpty {
+            title.text = line
+            titleFailed[key] = nil
         } else {
-            // Asked again when the run is next shown or the Mac reconnects.
-            toolTitles[key] = nil
+            titleFailed[key] = Date()
         }
+    }
+
+    /// A conversation's rows, from its messages.
+    func threadItems(_ sessionId: String) -> [ThreadItem] {
+        let messages = self.messages[sessionId] ?? []
+        // Equal at once while the messages are the very same array.
+        if let cached = itemCache[sessionId], cached.messages == messages { return cached.items }
+        let items = ThreadItem.items(from: messages)
+        itemCache[sessionId] = (messages, items)
+        return items
     }
 
     nonisolated static func toolRunKey(_ calls: [Message]) -> String {
@@ -975,3 +1007,10 @@ enum DaemonRestart {
         }
     }
 }
+
+/// Agentman's line for one run of tool calls, once it has one.
+@MainActor @Observable
+final class ToolRunTitle {
+    var text: String?
+}
+

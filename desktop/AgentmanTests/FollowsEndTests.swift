@@ -33,7 +33,7 @@ final class FollowsEndTests: XCTestCase {
 
     struct FeedView: View {
         let feed: Feed
-        @State private var atEnd = true
+        @State private var following = Following()
 
         var body: some View {
             ScrollView {
@@ -50,7 +50,7 @@ final class FollowsEndTests: XCTestCase {
                 .padding(24)
             }
             .coordinateSpace(.named("feed"))
-            .modifier(FollowsEnd(atEnd: $atEnd, earlier: feed.more ? { await feed.loadEarlier() } : nil))
+            .modifier(FollowsEnd(following: following, earlier: feed.more ? { await feed.loadEarlier() } : nil))
         }
     }
 
@@ -137,6 +137,36 @@ final class FollowsEndTests: XCTestCase {
         scrollToTop(scroll)
         settle(0.5)
         XCTAssertEqual(feed.loads, 3, "nothing more loads once the start is reached")
+    }
+
+    // Scrolling up through messages not laid out yet: as they are measured
+    // the conversation grows, and the reader stays where they scrolled to.
+    // "Start at the bottom" stayed in force and pulled them back to the end,
+    // over and over, which felt like the conversation fighting the scroll.
+    func testScrollingUpIsNotPulledBackToTheEnd() throws {
+        continueAfterFailure = false
+        let feed = Feed()
+        let window = show(feed)
+        defer { window.close() }
+        settle(0.3)
+        feed.rows = Array(0..<160)
+        settle { feed.tops[159] != nil }
+        settle(0.5)
+
+        let scroll = try XCTUnwrap(scrollView(in: window.contentView!))
+        let clip = scroll.contentView
+        var pulledBack = 0
+        for _ in 0..<1000 where clip.bounds.origin.y > 0.5 {
+            let target = max(0, clip.bounds.origin.y - 48)
+            clip.scroll(to: NSPoint(x: clip.bounds.minX, y: target))
+            scroll.reflectScrolledClipView(clip)
+            settle(0.02)
+            // Back at the end, from well above it.
+            let end = (scroll.documentView?.frame.height ?? 0) - clip.bounds.height
+            if target < end - 300, clip.bounds.origin.y > end - 100 { pulledBack += 1 }
+        }
+        XCTAssertLessThanOrEqual(clip.bounds.origin.y, 0.5, "the top was never reached")
+        XCTAssertEqual(pulledBack, 0, "pulled back to the end \(pulledBack) times")
     }
 
     // Too few messages to scroll has no top to reach: earlier ones load

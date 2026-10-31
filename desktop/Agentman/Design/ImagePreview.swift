@@ -17,6 +17,80 @@ extension EnvironmentValues {
     @Entry var lightboxPlace: String?
 }
 
+/// Pictures made as small as where they show, decoded off the main thread
+/// and kept. A screenshot three thousand pixels wide, shown 120 points high,
+/// was decoded and scaled down on the main thread at every draw, and again
+/// each time its row scrolled back into view.
+enum Thumbnail {
+    nonisolated(unsafe) private static let cache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.totalCostLimit = 64 << 20
+        return cache
+    }()
+
+    static func key(_ parts: String...) -> String { parts.joined(separator: "\u{0}") }
+
+    /// One already made, for a row to start with rather than a placeholder
+    /// that changes its size as it scrolls.
+    static func cached(_ key: String) -> NSImage? { cache.object(forKey: key as NSString) }
+
+    /// A picture file, `height` points high at most.
+    static func file(_ path: String, height: CGFloat) async -> NSImage? {
+        let key = key(path, "\(Int(height))")
+        if let made = cached(key) { return made }
+        let made = await Task.detached(priority: .userInitiated) { () -> NSImage? in
+            guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil) else { return nil }
+            return small(source, height: height)
+        }.value
+        if let made { keep(made, key) }
+        return made
+    }
+
+    /// A picture already in memory, `height` points high at most.
+    static func image(_ image: NSImage, key: String, height: CGFloat) async -> NSImage? {
+        if let made = cached(key) { return made }
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
+        let made = await Task.detached(priority: .userInitiated) { small(cg, height: height) }.value
+        if let made { keep(made, key) }
+        return made ?? image
+    }
+
+    private static func keep(_ image: NSImage, _ key: String) {
+        let pixels = image.representations.first.map { $0.pixelsWide * $0.pixelsHigh } ?? 0
+        cache.setObject(image, forKey: key as NSString, cost: pixels * 4)
+    }
+
+    /// Twice the points, for a Retina screen; never larger than it was.
+    nonisolated private static func small(_ source: CGImageSource, height: CGFloat) -> NSImage? {
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let width = (properties?[kCGImagePropertyPixelWidth] as? CGFloat) ?? 0
+        let tall = (properties?[kCGImagePropertyPixelHeight] as? CGFloat) ?? 0
+        guard width > 0, tall > 0 else { return nil }
+        let scale = min(1, height * 2 / tall)
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(1, Int((max(width, tall) * scale).rounded())),
+        ]
+        guard let made = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return NSImage(cgImage: made, size: NSSize(width: CGFloat(made.width) / 2, height: CGFloat(made.height) / 2))
+    }
+
+    nonisolated private static func small(_ image: CGImage, height: CGFloat) -> NSImage? {
+        let scale = min(1, height * 2 / CGFloat(max(image.height, 1)))
+        let width = max(1, Int((CGFloat(image.width) * scale).rounded()))
+        let tall = max(1, Int((CGFloat(image.height) * scale).rounded()))
+        guard let context = CGContext(data: nil, width: width, height: tall, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: tall))
+        guard let made = context.makeImage() else { return nil }
+        return NSImage(cgImage: made, size: NSSize(width: CGFloat(width) / 2, height: CGFloat(tall) / 2))
+    }
+}
+
 /// An image an agent or Agentman read, as a short label and a thumbnail.
 /// Clicking the thumbnail opens it full window.
 struct ImageThumbnail: View {
@@ -30,8 +104,18 @@ struct ImageThumbnail: View {
     var carded = false
     /// The picture alone, for a row of them under one run of reads.
     var pictureOnly = false
+    /// The thumbnail; the picture itself is the store's, for the lightbox.
     @State private var image: NSImage?
     @State private var failed = false
+
+    init(sessionId: String, path: String, label: String, carded: Bool = false, pictureOnly: Bool = false) {
+        self.sessionId = sessionId
+        self.path = path
+        self.label = label
+        self.carded = carded
+        self.pictureOnly = pictureOnly
+        _image = State(initialValue: Thumbnail.cached(Thumbnail.key(sessionId, path, "120")))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: carded ? 8 : 7) {
@@ -46,11 +130,14 @@ struct ImageThumbnail: View {
             }
         }
         .task(id: path) {
+            guard image == nil else { return }
             // A daemon that has just started may not know the agent's files
             // yet; it is asked a few times before the thumbnail gives up.
             for attempt in 0..<4 {
                 if attempt > 0 { try? await Task.sleep(for: .seconds(1.5)) }
-                image = await store.manager.image(sessionId: sessionId, path: path)
+                if let full = await store.manager.image(sessionId: sessionId, path: path) {
+                    image = await Thumbnail.image(full, key: Thumbnail.key(sessionId, path, "120"), height: 120)
+                }
                 if image != nil || Task.isCancelled { break }
             }
             failed = image == nil
@@ -74,7 +161,10 @@ struct ImageThumbnail: View {
     @ViewBuilder private var picture: some View {
         if let image {
             Button {
-                store.lightbox = Lightbox(image: image, title: label, place: lightboxPlace)
+                Task {
+                    let full = await store.manager.image(sessionId: sessionId, path: path) ?? image
+                    store.lightbox = Lightbox(image: full, title: label, place: lightboxPlace)
+                }
             } label: {
                 Image(nsImage: image)
                     .resizable()
@@ -102,10 +192,12 @@ struct ImageThumbnail: View {
 
     /// The image file a path names, if it is one.
     static func imagePath(in text: String) -> String? {
-        guard let pattern = try? Regex(#"/[^\s"'`]+?\.(?i:png|jpe?g|gif|webp|heic|bmp|tiff?)"#),
-              let match = text.firstMatch(of: pattern) else { return nil }
+        guard let match = text.firstMatch(of: imagePattern) else { return nil }
         return String(text[match.range])
     }
+
+    /// Made once: making it took longer than most searches with it.
+    nonisolated(unsafe) private static let imagePattern = try! Regex(#"/[^\s"'`]+?\.(?i:png|jpe?g|gif|webp|heic|bmp|tiff?)"#)
 }
 
 /// The full-window view of an image, over everything; Escape, the button or
@@ -372,14 +464,21 @@ private struct SentFile: View {
     @Environment(AgentsStore.self) private var store
     @Environment(\.lightboxPlace) private var lightboxPlace
     let path: String
+    /// The thumbnail; the picture itself is read when it is opened.
     @State private var image: NSImage?
     @State private var missing = false
+
+    init(path: String) {
+        self.path = path
+        _image = State(initialValue: Thumbnail.cached(Thumbnail.key(path, "110")))
+    }
 
     var body: some View {
         Group {
             if let image {
                 Button {
-                    store.lightbox = Lightbox(image: image, title: (path as NSString).lastPathComponent, place: lightboxPlace)
+                    let full = NSImage(contentsOfFile: path) ?? image
+                    store.lightbox = Lightbox(image: full, title: (path as NSString).lastPathComponent, place: lightboxPlace)
                 } label: {
                     Image(nsImage: image)
                         .resizable()
@@ -402,7 +501,8 @@ private struct SentFile: View {
             }
         }
         .task(id: path) {
-            let loaded = await Task.detached { NSImage(contentsOfFile: path) }.value
+            guard image == nil else { return }
+            let loaded = await Thumbnail.file(path, height: 110)
             image = loaded
             missing = loaded == nil
         }

@@ -16,7 +16,7 @@ struct AgentThreadView: View {
     @State private var sending = false
     /// Whether the thread is scrolled to its end, so new messages follow
     /// on; scrolled up, nothing moves what the user is reading.
-    @State private var atEnd = true
+    @State private var following = Following()
     /// Bumped when the user sends, which always brings them to the end.
     @State private var followRequest = 0
     @State private var showFiles = true
@@ -184,7 +184,7 @@ struct AgentThreadView: View {
             }
             ScrollViewReader { proxy in
                 ScrollView(showsIndicators: false) {
-                    let items = ThreadItem.items(from: store.messages[session.id] ?? [])
+                    let items = store.threadItems(session.id)
                     LazyVStack(alignment: .leading, spacing: 24) {
                         if store.hasMore[session.id] == true {
                             LoadingEarlier()
@@ -230,36 +230,33 @@ struct AgentThreadView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .scrollIndicators(.never)
-                .modifier(FollowsEnd(atEnd: $atEnd, earlier: store.hasMore[session.id] == true ? { await store.loadOlder(session.id) } : nil))
+                .modifier(FollowsEnd(following: following, earlier: store.hasMore[session.id] == true ? { await store.loadOlder(session.id) } : nil))
                 .modifier(TopFade())
                 .overlay {
                     if isEmpty { EmptyThread(session: session) }
                 }
                 .overlay(alignment: .bottom) {
-                    if !atEnd, !isEmpty {
-                        JumpToLatest {
-                            withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("end", anchor: .bottom) }
-                        }
+                    JumpToLatestOverlay(following: following, hidden: isEmpty) {
+                        withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("end", anchor: .bottom) }
                     }
                 }
-                .animation(.easeOut(duration: 0.15), value: atEnd)
                 .overlay {
                     if dropping { DropTarget(label: "Drop images for \(session.name)") }
                 }
                 .onChange(of: store.messages[session.id]?.last?.id) { _, last in
-                    guard last != nil, atEnd else { return }
+                    guard last != nil, following.atEnd else { return }
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo("end", anchor: .bottom)
                     }
                 }
                 .onChange(of: session.question?.id) { _, id in
-                    guard id != nil, atEnd else { return }
+                    guard id != nil, following.atEnd else { return }
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo("end", anchor: .bottom)
                     }
                 }
                 .onChange(of: followRequest) { _, _ in
-                    atEnd = true
+                    following.atEnd = true
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo("end", anchor: .bottom)
                     }
@@ -1065,7 +1062,7 @@ struct ToolRun: View {
             let kind = ToolKind(running.tool?.name)
             return "\(kind.verb) \(ToolKind.tidy(running.tool?.summary ?? running.text ?? ""))…"
         }
-        if let title = store.toolTitles[AgentsStore.toolRunKey(calls)], !title.isEmpty {
+        if let title = store.toolTitle(calls).text, !title.isEmpty {
             return title
         }
         var counts: [ToolKind: Int] = [:]
