@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/source"
 )
 
 // deliver hands a message, and the images saved for it, to a session's agent.
@@ -20,7 +21,13 @@ import (
 // one, mapped first to wherever that agent reads images from when its adapter
 // has a preference (source.AttachmentPlacer).
 func (d *Daemon) deliver(ctx context.Context, sessionID, text string, paths []string) (protocol.InjectMode, error) {
+	text, skills := d.namingSkills(ctx, sessionID, text)
 	if len(paths) == 0 {
+		if len(skills) > 0 {
+			if mode, handled, err := d.registry.InjectWithSkills(ctx, sessionID, text, skills); handled {
+				return mode, err
+			}
+		}
 		return d.registry.Inject(ctx, sessionID, text)
 	}
 	if mode, handled, err := d.registry.InjectWithAttachments(ctx, sessionID, text, paths); handled {
@@ -33,6 +40,26 @@ func (d *Daemon) deliver(ctx context.Context, sessionID, text string, paths []st
 	// The paths lead, the way a person types them before saying what to look
 	// for. One line, so nothing submits early.
 	return d.registry.Inject(ctx, sessionID, strings.TrimSpace(strings.Join(placed, " ")+" "+text))
+}
+
+// namingSkills is a message with the skills it names in the form its
+// agent takes them (source.SkillText), and the ids of those an agent takes
+// beside the message.
+func (d *Daemon) namingSkills(ctx context.Context, sessionID, text string) (string, []string) {
+	if !strings.ContainsAny(text, "/$") {
+		return text, nil
+	}
+	d.mu.Lock()
+	session, ok := d.sessions[sessionID]
+	d.mu.Unlock()
+	if !ok {
+		return text, nil
+	}
+	commands, err := d.registry.Commands(ctx, sessionID)
+	if err != nil || len(commands) == 0 {
+		return text, nil
+	}
+	return source.SkillText(session.Kind, text, commands)
 }
 
 // placeAttachment returns the path to type for one saved image.

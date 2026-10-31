@@ -79,6 +79,14 @@ func (f *ocServiceFake) start(t *testing.T) *httptest.Server {
 				return
 			}
 			reply(map[string]any{"data": f.messages, "cursor": map[string]any{"next": "older"}})
+		case "/api/skill":
+			if r.URL.Query().Get("location[directory]") != "/w/app" {
+				reply(map[string]any{"data": []any{}})
+				return
+			}
+			reply(map[string]any{"location": map[string]string{"directory": "/w/app"}, "data": []map[string]string{
+				{"id": "frontend-design", "name": "Frontend Design", "content": "# Frontend Design"},
+			}})
 		case "/api/model":
 			reply(map[string]any{"data": []map[string]string{
 				{"id": "gpt-6", "modelID": "gpt-6", "providerID": "openai"},
@@ -115,6 +123,42 @@ func openCodeServiceSource(t *testing.T, url, password string) *OpenCodeSource {
 	src.serviceFile = file
 	src.findServers = src.findServices
 	return src
+}
+
+// The skills a message names go beside it, by id, when the service has
+// them for the folder; one it doesn't know is left to the words, since it
+// would fail the whole message.
+func TestOpenCodeServiceTakesTheSkillsAMessageNames(t *testing.T) {
+	fake := &ocServiceFake{}
+	server := fake.start(t)
+	src := openCodeServiceSource(t, server.URL, "secret")
+	ctx := context.Background()
+	if _, err := src.Discover(ctx); err != nil {
+		t.Fatal(err)
+	}
+	text := "Polish it with the frontend-design skill and the nope skill."
+	if mode, err := src.InjectWithSkills(ctx, "opencode:ses_1", text, []string{"frontend-design", "nope"}); err != nil || mode != protocol.InjectAPI {
+		t.Fatalf("inject: %v %v", mode, err)
+	}
+	post := fake.lastPost(t)
+	if post.path != "/api/session/ses_1/prompt" || post.body["text"] != text {
+		t.Fatalf("sent %+v", post)
+	}
+	skills, _ := post.body["skills"].([]any)
+	if len(skills) != 1 {
+		t.Fatalf("skills = %v", post.body["skills"])
+	}
+	if first, _ := skills[0].(map[string]any); first["id"] != "frontend-design" || first["name"] != "Frontend Design" {
+		t.Errorf("skill = %v", first)
+	}
+
+	// None it knows: the words alone.
+	if _, err := src.InjectWithSkills(ctx, "opencode:ses_1", "use the nope skill", []string{"nope"}); err != nil {
+		t.Fatal(err)
+	}
+	if post := fake.lastPost(t); post.body["skills"] != nil {
+		t.Errorf("sent an unknown skill: %v", post.body)
+	}
 }
 
 func TestOpenCodeServiceSessionsAndMessages(t *testing.T) {

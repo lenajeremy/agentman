@@ -469,6 +469,30 @@ type AttachmentInjector interface {
 // it cannot send structured images to, having delivered nothing.
 var ErrAttachmentsAsPaths = errors.New("source: this session takes images as paths")
 
+// SkillInjector is an agent that takes the skills a message names beside
+// it, rather than read from its words: OpenCode's service.
+type SkillInjector interface {
+	InjectWithSkills(ctx context.Context, sessionID, text string, skills []string) (protocol.InjectMode, error)
+}
+
+// InjectWithSkills delivers a message with the ids of the skills it names
+// through an adapter that takes them; handled is false for one that
+// doesn't, and the caller sends the words alone.
+func (r *Registry) InjectWithSkills(
+	ctx context.Context, sessionID, text string, skills []string,
+) (mode protocol.InjectMode, handled bool, err error) {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return protocol.InjectNone, false, err
+	}
+	injector, ok := s.(SkillInjector)
+	if !ok {
+		return protocol.InjectNone, false, nil
+	}
+	mode, err = injector.InjectWithSkills(ctx, sessionID, text, skills)
+	return mode, true, err
+}
+
 // InjectWithAttachments delivers a message with images through the owning
 // adapter's structured channel. handled is false when there is none — the
 // adapter does not implement AttachmentInjector, or declined this session
