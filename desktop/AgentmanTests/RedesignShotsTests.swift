@@ -300,7 +300,10 @@ final class RedesignShotsTests: XCTestCase {
                 fill.setFill()
                 frame.fill()
                 NSGraphicsContext.restoreGraphicsState()
+                NSGraphicsContext.saveGraphicsState()
+                frame.addClip()
                 over.draw(in: at)
+                NSGraphicsContext.restoreGraphicsState()
                 edge.setStroke()
                 frame.stroke()
                 return true
