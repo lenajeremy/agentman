@@ -549,7 +549,7 @@ func TestTheRequestIsShapedForTheModel(t *testing.T) {
 		names = append(names, tool.OfTool.Name)
 	}
 	if !slices.Equal(names, []string{"list_agents", "get_brief", "read_messages", "view_image", "list_changes", "file_diff",
-		"list_commits", "send_to_agent", "answer_question", "interrupt", "dismiss_card",
+		"list_commits", "send_to_agent", "start_agent", "end_agent", "reopen_agent", "answer_question", "interrupt", "dismiss_card",
 		"search_knowledge", "read_knowledge", "delete_note", "save_private_note", "delete_private_note", "suggest_note",
 		"list_keys", "give_key", "update_instructions",
 		"schedule_reminder", "watch_agent", "rename_agent", "list_schedules", "update_schedule", "cancel_schedule"}) {
