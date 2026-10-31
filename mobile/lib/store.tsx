@@ -76,6 +76,7 @@ import {
   DaemonEvent,
   DaemonInfo,
   Folder,
+  Usage,
   Message,
   Tool,
   Page,
@@ -197,6 +198,9 @@ interface Store {
    *  route to one the browser skips: a dot-directory, or anything outside the
    *  Mac user's home. */
   listFolders(): Promise<Folder[]>;
+  /** What the agents on the Mac spent over the last days days (0: all of
+   *  it), as the daemon sums it from their own records. */
+  usage(days: number): Promise<Usage>;
   /** The folder the list is narrowed to, or null for everything. */
   folderFilter: string | null;
   /** Narrow the list to one folder and its subtree, or clear it with null.
@@ -835,7 +839,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       case "directory_sessions":
       case "session_ended":
       case "session_started":
-      case "artifacts": {
+      case "artifacts":
+      case "usage": {
         if (replyTo) settleLaunchRequest(replyTo, event);
         break;
       }
@@ -1583,6 +1588,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               folders: event.folders ?? [],
             }),
             reject,
+            timer,
+          });
+        });
+      },
+
+      usage(days) {
+        return new Promise<Usage>((resolve, reject) => {
+          const id = clientRef.current?.send({ type: "usage", days });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          // The first read of a long range takes the Mac a few seconds.
+          const timer = setTimeout(() => settleLaunchRequest(id), 60_000);
+          launchRequests.current.set(id, {
+            resolve: (event) => event.usage ? resolve(event.usage) : reject(new Error("The Mac didn't say what the agents spent.")),
+            reject: (error) => reject(/unsupported request|usage covers/.test(error.message)
+              ? new Error("Update agentman on your Mac to see usage here.")
+              : error),
             timer,
           });
         });

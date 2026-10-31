@@ -134,6 +134,13 @@ export default function Settings() {
             </MotionPressable>
           </Appear>
 
+          <Appear delay={16}>
+            <Text style={styles.sectionLabel}>Usage</Text>
+            <View style={styles.card}>
+              <LinkRow icon="bar-chart-2" label="What the agents spent" onPress={() => router.push("/usage")} />
+            </View>
+          </Appear>
+
           {manager.supported ? (
             <Appear delay={18}>
               <Text style={styles.sectionLabel}>Agentman</Text>

@@ -266,7 +266,8 @@ export type RequestType =
   | "list_commands"
   | "command_panel"
   | "find_files"
-  | "attach_file";
+  | "attach_file"
+  | "usage";
 
 export interface Request {
   type: RequestType;
@@ -284,6 +285,8 @@ export interface Request {
   /** What this phone says about itself, for the Mac's list of devices: on
    *  register_push and on the session list asked for on connecting. */
   device?: DeviceInfo;
+  /** The range on usage: 1, 7, 30, 90, 180 or 365 days, or 0 for all of it. */
+  days?: number;
   /** An agent's own alerts on or off, on set_agent_alerts. */
   alerts?: boolean;
   /** Chooses an option on answer_question. */
@@ -434,7 +437,8 @@ export type EventType =
   | "commands"
   | "command_panel"
   | "files"
-  | "attached";
+  | "attached"
+  | "usage";
 
 export interface WorkspaceEntry { name: string; directory: boolean; size?: number }
 export interface WorkspaceChange {
@@ -535,6 +539,55 @@ export interface DeviceInfo {
   os?: string;
 }
 
+/** Tokens by kind: fresh input, input read from and written to the cache,
+ *  and output. The same shape carries dollars as a usage's cost. */
+export interface UsageTokens {
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+  output: number;
+}
+
+export interface UsageAgent {
+  kind: string;
+  sessions: number;
+  tokens: UsageTokens;
+  cost: number;
+}
+
+/** A bucket of the chart: an hour, day, week or month, from `start` (ms). */
+export interface UsageBucket {
+  start: number;
+  cost?: Record<string, number>;
+  tokens?: Record<string, number>;
+}
+
+export interface UsageModel {
+  model: string;
+  kind: string;
+  tokens: UsageTokens;
+  cost: number;
+  /** False for a model with no known price: its cost is left out. */
+  priced: boolean;
+}
+
+/** What the agents on the Mac spent over a range, from their own records. */
+export interface Usage {
+  days: number;
+  hourly?: boolean;
+  /** "hour", "day", "week" or "month"; absent from older Macs. */
+  unit?: string;
+  sessions: number;
+  tokens: UsageTokens;
+  cost: UsageTokens;
+  cacheSavings: number;
+  agents?: UsageAgent[] | null;
+  buckets?: UsageBucket[] | null;
+  models?: UsageModel[] | null;
+  /** Records that couldn't be read: usage may be short. */
+  skipped?: number;
+}
+
 export interface DaemonEvent {
   type: EventType;
   sessionId?: string;
@@ -572,6 +625,8 @@ export interface DaemonEvent {
   artifacts?: Artifact[];
   /** Rides on "sessions": which agentman the Mac runs, and what is newer. */
   daemon?: DaemonInfo;
+  /** What the agents spent, on "usage". */
+  usage?: Usage;
   /** One entry in Agentman's conversation, new or finished, on
    *  "manager_entry". */
   entry?: ManagerEntry;
@@ -849,7 +904,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     "manager_entry", "manager_delta", "manager_history", "manager_status",
     "manager_brief", "manager_schedules", "manager_settings",
     "manager_permission", "manager_reset", "knowledge", "keys",
-    "transcript", "voice_account", "commands", "command_panel", "files", "attached",
+    "transcript", "voice_account", "commands", "command_panel", "files", "attached", "usage",
   ] as const)) return null;
 
   switch (value.type) {
@@ -867,6 +922,9 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
       break;
     case "session_update":
       if (!isSession(value.session)) return null;
+      break;
+    case "usage":
+      if (!isUsage(value.usage)) return null;
       break;
     case "session_gone":
       if (!boundedString(value.sessionId, 512, true)) return null;
@@ -1071,6 +1129,33 @@ function isReleaseNote(value: unknown): value is ReleaseNote {
     (value.changes === undefined ||
       boundedArray(value.changes, 50, (change): change is string => boundedString(change, 1000))) &&
     optionalBoundedString(value.url, 2048);
+}
+
+function isTokens(value: unknown): value is UsageTokens {
+  return isRecord(value) && finiteNumber(value.input) && finiteNumber(value.cacheRead) &&
+    finiteNumber(value.cacheWrite) && finiteNumber(value.output);
+}
+
+function isNumberMap(value: unknown): boolean {
+  return value === undefined || (isRecord(value) && Object.keys(value).length <= 64 &&
+    Object.values(value).every(finiteNumber));
+}
+
+function isUsage(value: unknown): value is Usage {
+  return isRecord(value) &&
+    finiteNumber(value.days) && finiteNumber(value.sessions) &&
+    isTokens(value.tokens) && isTokens(value.cost) && finiteNumber(value.cacheSavings) &&
+    (value.hourly === undefined || typeof value.hourly === "boolean") &&
+    optionalBoundedString(value.unit, 16) &&
+    (value.skipped === undefined || finiteNumber(value.skipped)) &&
+    (value.agents === undefined || value.agents === null || boundedArray(value.agents, 64, (agent): agent is UsageAgent =>
+      isRecord(agent) && boundedString(agent.kind, 64, true) && finiteNumber(agent.sessions) &&
+      isTokens(agent.tokens) && finiteNumber(agent.cost))) &&
+    (value.buckets === undefined || value.buckets === null || boundedArray(value.buckets, 2000, (bucket): bucket is UsageBucket =>
+      isRecord(bucket) && finiteNumber(bucket.start) && isNumberMap(bucket.cost) && isNumberMap(bucket.tokens))) &&
+    (value.models === undefined || value.models === null || boundedArray(value.models, 1000, (model): model is UsageModel =>
+      isRecord(model) && boundedString(model.model, 256) && boundedString(model.kind, 64, true) &&
+      isTokens(model.tokens) && finiteNumber(model.cost) && typeof model.priced === "boolean"));
 }
 
 function isFolder(value: unknown): value is Folder {
