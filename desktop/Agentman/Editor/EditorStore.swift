@@ -26,6 +26,18 @@ enum GitMark: Sendable, Equatable {
         }
     }
 
+    /// What the letter means, for a tooltip and VoiceOver.
+    var word: String {
+        switch self {
+        case .modified: "Modified"
+        case .added: "Added"
+        case .untracked: "New, not tracked"
+        case .deleted: "Deleted"
+        case .renamed: "Renamed"
+        case .conflicted: "Conflicted"
+        }
+    }
+
     var tint: Color {
         switch self {
         case .modified, .renamed: Palette.gitModified

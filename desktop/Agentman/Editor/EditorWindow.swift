@@ -859,73 +859,258 @@ private struct NonTextView: View {
     }
 }
 
-/// No file open: how to find one, and what agents changed lately.
-private struct EditorEmpty: View {
+/// No file open: where you are, the few things worth doing from here, and
+/// what agents changed. Laid out as T3 Code lays out an empty page: a small
+/// stacked mark, a title and one line under it, then lists in rounded cards
+/// with quiet key caps. It appears after ⌘W closes the last tab, a key
+/// pressed many times a day, so it arrives without animation.
+struct EditorEmpty: View {
     let store: EditorStore
 
     var body: some View {
-        VStack(spacing: 18) {
-            VStack(spacing: 6) {
-                Image(systemName: "chevron.left.forwardslash.chevron.right")
-                    .font(.system(size: 26, weight: .light))
-                    .foregroundStyle(Palette.faint)
-                Text(store.name)
-                    .font(TextStyle.title)
-                    .foregroundStyle(Palette.text)
-                Text((store.root.path as NSString).abbreviatingWithTildeInPath)
-                    .font(TextStyle.caption)
-                    .foregroundStyle(Palette.faint)
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                shortcut("Go to File", "⌘P") { store.quickOpen = true }
-                shortcut("Save", "⌘S", action: nil)
-                shortcut("Close Tab", "⌘W", action: nil)
-                shortcut("Comment Lines", "⌘/", action: nil)
-            }
-            let changed = store.marks.filter { $0.value != .deleted }.keys.sorted().prefix(8)
-            if !changed.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Changed")
-                        .font(TextStyle.label)
-                        .foregroundStyle(Palette.faint)
-                    ForEach(Array(changed), id: \.self) { path in
-                        Button {
-                            store.open(path)
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(store.marks[path]?.letter ?? "")
-                                    .font(Fonts.mono(10.5, .medium))
-                                    .foregroundStyle(store.marks[path]?.tint ?? Palette.muted)
-                                    .frame(width: 12)
-                                Text(path)
-                                    .font(TextStyle.caption)
-                                    .foregroundStyle(Palette.textSecondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.head)
-                            }
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: 28) {
+                    header
+                    EmptyList {
+                        EmptyAction(symbol: "magnifyingglass", title: "Go to File…", keys: ["⌘", "P"]) {
+                            store.searchOpen = false
+                            store.quickOpen = true
                         }
-                        .buttonStyle(.plain)
+                        EmptyAction(symbol: "text.magnifyingglass", title: "Search in Folder…", keys: ["⇧", "⌘", "F"]) {
+                            store.showSearch()
+                        }
+                        EmptyAction(symbol: "terminal", title: store.showTerminal ? "Hide Terminal" : "Open Terminal", keys: ["⌃", "`"]) {
+                            store.showTerminal.toggle()
+                        }
+                        EmptyAction(symbol: "sidebar.right", title: store.showAgentPanel ? "Hide Agent Panel" : "Show Agent Panel", keys: ["⌘", "L"]) {
+                            store.showAgentPanel.toggle()
+                        }
+                    }
+                    if !changed.isEmpty {
+                        changes
                     }
                 }
-                .frame(width: 300, alignment: .leading)
+                .frame(maxWidth: 440)
+                .padding(.horizontal, 32)
+                .padding(.vertical, 48)
+                // Centred while it fits; scrolls from the top once it doesn't.
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height)
             }
+            .scrollIndicators(.automatic)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.paper)
     }
 
-    private func shortcut(_ title: String, _ keys: String, action: (() -> Void)?) -> some View {
-        HStack {
-            if let action {
-                Button(title, action: action).buttonStyle(.link)
-            } else {
-                Text(title).foregroundStyle(Palette.muted)
-            }
-            Spacer()
-            Text(keys).foregroundStyle(Palette.faint)
+    /// Where you are: the folder, by name, and where it is.
+    private var header: some View {
+        VStack(spacing: 0) {
+            EmptyMark(symbol: "chevron.left.forwardslash.chevron.right")
+                .padding(.bottom, 18)
+            Text(store.name)
+                .font(Fonts.sans(20, .semibold))
+                .tracking(-0.3)
+                .foregroundStyle(Palette.text)
+                .lineLimit(1)
+            Text((store.root.path as NSString).abbreviatingWithTildeInPath)
+                .font(Fonts.mono(11.5))
+                .foregroundStyle(Palette.faint)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+                .padding(.top, 5)
         }
-        .font(TextStyle.caption)
-        .frame(width: 220)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Files changed and not yet committed, by path.
+    private var changed: [String] {
+        store.marks.filter { $0.value != .deleted }.keys.sorted()
+    }
+
+    private var changes: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 11, weight: .medium))
+                Text("Changed")
+                    .font(Fonts.sans(12, .medium))
+                Spacer(minLength: 4)
+                Text(String(changed.count))
+                    .font(Fonts.sans(11.5))
+                    .monospacedDigit()
+                    .foregroundStyle(Palette.faint)
+            }
+            .foregroundStyle(Palette.muted)
+            .padding(.horizontal, 4)
+            EmptyList {
+                ForEach(changed.prefix(8), id: \.self) { path in
+                    EmptyFile(path: path, mark: store.marks[path]) { store.open(path) }
+                }
+                if changed.count > 8 {
+                    EmptyAction(symbol: "ellipsis", title: "\(changed.count - 8) more in Go to File", keys: []) {
+                        store.searchOpen = false
+                        store.quickOpen = true
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The empty page's mark: an icon on a small raised tile, with two ghost
+/// tiles fanned out behind it.
+private struct EmptyMark: View {
+    let symbol: String
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            tile.scaleEffect(0.84, anchor: .bottomLeading).rotationEffect(.degrees(-10), anchor: .bottomLeading).offset(x: -2)
+            tile.scaleEffect(0.84, anchor: .bottomTrailing).rotationEffect(.degrees(10), anchor: .bottomTrailing).offset(x: 2)
+            tile
+                .shadow(color: .black.opacity(0.06), radius: 1.5, y: 1)
+                .overlay {
+                    Image(systemName: symbol)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Palette.muted)
+                }
+        }
+        .frame(width: 44, height: 40)
+        .accessibilityHidden(true)
+    }
+
+    private var tile: some View {
+        RoundedRectangle(cornerRadius: 9, style: .continuous)
+            .fill(Palette.surface)
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Palette.line))
+            .frame(width: 38, height: 38)
+    }
+}
+
+/// Rows in one rounded card, a hairline between each.
+private struct EmptyList<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Group(subviews: content) { rows in
+                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                    if index > 0 {
+                        Rectangle().fill(Palette.line.opacity(0.7)).frame(height: 1)
+                    }
+                    row
+                }
+            }
+        }
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
+    }
+}
+
+/// A command in the list: what it does, and its keys.
+private struct EmptyAction: View {
+    let symbol: String
+    let title: String
+    let keys: [String]
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                    .frame(width: 16)
+                Text(title)
+                    .font(Fonts.sans(13, .medium))
+                    .foregroundStyle(Palette.text)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if !keys.isEmpty { KeyCaps(keys: keys) }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 38)
+        }
+        .buttonStyle(EmptyRowStyle())
+    }
+}
+
+/// A changed file: its icon, its name over its folder, and what git says.
+private struct EmptyFile: View {
+    let path: String
+    let mark: GitMark?
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 10) {
+                FileTypeIcon(name: (path as NSString).lastPathComponent, size: 15)
+                    .frame(width: 16)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text((path as NSString).lastPathComponent)
+                        .font(Fonts.sans(13, .medium))
+                        .foregroundStyle(Palette.text)
+                        .lineLimit(1)
+                    let folder = (path as NSString).deletingLastPathComponent
+                    Text(folder.isEmpty ? "Top of the folder" : folder)
+                        .font(Fonts.sans(11.5))
+                        .foregroundStyle(Palette.faint)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+                Spacer(minLength: 8)
+                if let mark {
+                    Text(mark.letter)
+                        .font(Fonts.mono(10.5, .medium))
+                        .foregroundStyle(mark.tint)
+                        .help(mark.word)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+        .buttonStyle(EmptyRowStyle())
+        .accessibilityLabel("\(path), \(mark?.word ?? "changed")")
+    }
+}
+
+/// A row in an empty page's list: tinted under the pointer, a step deeper
+/// while pressed. Instant both ways, as a list row is on the Mac.
+private struct EmptyRowStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Row(configuration: configuration)
+    }
+
+    private struct Row: View {
+        let configuration: Configuration
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .contentShape(Rectangle())
+                .background(Palette.fill.opacity(configuration.isPressed ? 0.85 : hovering ? 0.45 : 0))
+                .onHover { hovering = $0 }
+        }
+    }
+}
+
+/// A shortcut as key caps, one per key, as T3 Code draws them.
+struct KeyCaps: View {
+    let keys: [String]
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(Array(keys.enumerated()), id: \.offset) { _, key in
+                Text(key)
+                    .font(Fonts.sans(11, .medium))
+                    .foregroundStyle(Palette.muted)
+                    .frame(minWidth: 20, minHeight: 20)
+                    .padding(.horizontal, key.count > 1 ? 4 : 0)
+                    .background(Palette.text.opacity(0.07), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            }
+        }
+        .accessibilityLabel(keys.joined(separator: " "))
     }
 }
 
