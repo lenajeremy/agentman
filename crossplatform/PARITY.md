@@ -22,12 +22,14 @@ Swift that does it today.
 - [ ] Dock tile badge — Notifier.swift:90
 - [ ] AVAudioRecorder records 16 kHz mono WAV to a temp file; microphone permission prompt — VoiceRecorder.swift:24, VoiceRecorder.swift:35
 - [ ] FSEvents folder watcher feeds file changes to the LSP — FolderWatcher.swift:19
-- [ ] launchctl kickstart -k gui/<uid>/dev.agentman.serve (Restart Daemon) — AgentsStore.swift:1155
+- [x] launchctl kickstart -k gui/<uid>/dev.agentman.serve (Restart Daemon) — AgentsStore.swift:1155
+  - Differs: on Linux, where am serve isn't a launchd service, the failure alert says to run `am service restart`; against a test daemon (AGENTMAN_HOME) a service that doesn't exist is kicked, so a test never restarts the user's own.
 - [ ] git via /usr/bin/git with GIT_OPTIONAL_LOCKS=0 (branch, status, ls-files, show :path, rev-parse) — EditorStore.swift:835, AgentsStore.swift:296, FileMentions.swift:251, RightPanel.swift:1231
 - [ ] Connection to am serve; reconnects by itself (here: the loopback WebSocket, `~/.agentman/app.json`) — DaemonClient.swift:51
 - [ ] Real pty login shell (here: a pty am serve owns, `/app/terminal`) — TerminalSession.swift:54
 - [ ] Monaco page served to the editor (here: copied into `public/editor`) — MonacoView.swift:630
-- [ ] App active/inactive, screen lock/unlock and sleep notifications, for away detection — AgentsStore.swift:146
+- [x] App active/inactive, screen lock/unlock and sleep notifications, for away detection — AgentsStore.swift:146
+  - Differs: on Linux, active is any of the app's windows having the focus; the screen lock comes from logind or the desktop's screen saver over D-Bus.
 - [ ] Modal alerts (quit prompt, restart daemon) — AgentmanApp.swift:107, AgentsStore.swift:1138
 - [ ] Appearance override (light/dark/system) — SettingsView.swift:803
 - [ ] Bundled fonts — Theme.swift:99
@@ -36,18 +38,21 @@ Swift that does it today.
 - [ ] Fetch of HTTPS images, SVG included, for markdown documents — MarkdownView.swift:534
 
 ## 1. Windows & app shell
-- [ ] One main window "Agentman" that links open in (never a new window): min 1040×640, default 1560×980, hidden title bar — AgentmanApp.swift:28
-- [ ] Transparent full-size title bar; traffic-light inset 82pt, 16pt in full screen — EditorWindow.swift:1317
+- [x] One main window "Agentman" that links open in (never a new window): min 1040×640, default 1560×980, hidden title bar — AgentmanApp.swift:28
+  - Differs: a second launch hands its links to the first (Wails' single instance; a test run, or one on a test daemon, stays apart).
+- [x] Transparent full-size title bar; traffic-light inset 82pt, 16pt in full screen — EditorWindow.swift:1317
 - [ ] Editor windows: one per folder, restored after relaunch; a duplicate that macOS restores closes itself — AgentmanApp.swift:84, EditorWindow.swift:137
 - [ ] Settings window (800×580) — AgentmanApp.swift:94, SettingsView.swift:53
-- [ ] Held keys repeat (press-and-hold accents off, unless the user set it) — AgentmanApp.swift:21
-- [ ] File ▸ New Agent ⌘N — AgentmanApp.swift:43
-- [ ] View ▸ Toggle Sidebar ⌃⌘S — AgentmanApp.swift:47
-- [ ] View ▸ Cycle Appearance ⌥⇧⌘A (light → dark → system) — AgentmanApp.swift:53
-- [ ] App menu ▸ Restart Daemon… (confirm alert; failure alert with instructions) — AgentmanApp.swift:64, AgentsStore.swift:1137
-- [ ] Go ▸ Command Palette… ⌘K — AgentmanApp.swift:68
-- [ ] Go ▸ Agentman ⌥⌘0 — AgentmanApp.swift:73
-- [ ] Go ▸ What Happened While I Was Away (last summary, else the past hour) — AgentmanApp.swift:75
+- [x] Held keys repeat (press-and-hold accents off, unless the user set it) — AgentmanApp.swift:21
+- [x] File ▸ New Agent ⌘N — AgentmanApp.swift:43
+- [x] View ▸ Toggle Sidebar ⌃⌘S — AgentmanApp.swift:47
+  - Differs: Ctrl+Alt+S off macOS, where there is no ⌘ and Super belongs to the desktop. On Linux the menus are a menu bar in the window.
+- [x] View ▸ Cycle Appearance ⌥⇧⌘A (light → dark → system) — AgentmanApp.swift:53
+- [x] App menu ▸ Restart Daemon… (confirm alert; failure alert with instructions) — AgentmanApp.swift:64, AgentsStore.swift:1137
+  - Differs: in the File menu on Linux, which has no app menu.
+- [x] Go ▸ Command Palette… ⌘K — AgentmanApp.swift:68
+- [x] Go ▸ Agentman ⌥⌘0 — AgentmanApp.swift:73
+- [x] Go ▸ What Happened While I Was Away (last summary, else the past hour) — AgentmanApp.swift:75
 - [ ] Editor menus: Save group, Terminal, Editor (see §12) — EditorWindow.swift:1189
 - [ ] Quit with unsaved editor files asks: Save / Save All, Cancel, Don't Save; lists the paths when there are several — AgentmanApp.swift:102
 - [ ] Drafts written to disk at quit — AgentsStore.swift:143
@@ -55,13 +60,13 @@ Swift that does it today.
 - [ ] Dock badge shows the unread Agentman count — AgentsStore.swift:906
 - [ ] Detail area: Agentman (default), New Agent, an agent thread, or "This agent has ended" with Back to Agentman — ContentView.swift:96, ContentView.swift:140
 - [ ] Overlays over the window: toasts, note suggestion popup, command palette, away summary, lightbox — ContentView.swift:41
-- [ ] agentman:// routes (any other scheme is ignored) — AgentsStore.swift:306
-  - [ ] agentman://agent/<percent-encoded id> opens the agent — AgentsStore.swift:309
-  - [ ] agentman://new opens New Agent — AgentsStore.swift:314
-  - [ ] agentman://home and agentman://home/conversation open Agentman — AgentsStore.swift:316
-  - [ ] agentman://terminal?folder= opens that folder's editor with its terminal — ContentView.swift:117
-  - [ ] agentman://edit?folder=&file=&agent=here opens the editor at the file; agent=here shows the folder's agent in the panel — ContentView.swift:122
-  - [ ] agentman://settings[/general|notifications|permissions|personality|knowledge|keys|languages] — ContentView.swift:129
+- [x] agentman:// routes (any other scheme is ignored) — AgentsStore.swift:306
+  - [x] agentman://agent/<percent-encoded id> opens the agent — AgentsStore.swift:309
+  - [x] agentman://new opens New Agent — AgentsStore.swift:314
+  - [x] agentman://home and agentman://home/conversation open Agentman — AgentsStore.swift:316
+  - [x] agentman://terminal?folder= opens that folder's editor with its terminal — ContentView.swift:117
+  - [x] agentman://edit?folder=&file=&agent=here opens the editor at the file; agent=here shows the folder's agent in the panel — ContentView.swift:122
+  - [x] agentman://settings[/general|notifications|permissions|personality|knowledge|keys|languages] — ContentView.swift:129
 - [ ] Launch env vars (here: `AGENTMAN_OPEN` as a query, see scripts/teststack/README.md) — ContentView.swift:76
   - [ ] AGENTMAN_OPEN (a link), AGENTMAN_FOLDER (folder filter), AGENTMAN_RENAMING (row in rename), AGENTMAN_LIGHTBOX (image path) — ContentView.swift:77
   - [ ] AGENTMAN_AWAY=<minutes> shows the away summary after 4 s — AgentsStore.swift:176

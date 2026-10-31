@@ -16,8 +16,21 @@ let route: Route = query.get("agent") ? { kind: "agent", id: query.get("agent")!
 const listeners = new Set<() => void>();
 
 export function go(next: Route) {
+  if (next.kind === route.kind && (next.kind !== "agent" || (route.kind === "agent" && next.id === route.id))
+    && (next.kind !== "new" || (route.kind === "new" && !!next.worktree === !!route.worktree))) return;
   route = next;
   for (const l of listeners) l();
+}
+
+/** Where the main window is now, for code outside React. */
+export function getRoute(): Route {
+  return route;
+}
+
+/** Told each time the main window goes somewhere else. */
+export function onRouteChange(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
 }
 
 export function useRoute(): Route {
@@ -65,9 +78,12 @@ export function openLink(link: string) {
       if (folder) void openEditor({ folder, file: url.searchParams.get("file") ?? "", agentHere: url.searchParams.get("agent") === "here" });
       break;
     }
-    case "settings":
-      void openSettings(parts[1] ?? "");
+    case "settings": {
+      // A page it has, else the last one shown.
+      const pages = ["general", "notifications", "permissions", "personality", "knowledge", "keys", "languages"];
+      void openSettings(pages.includes(parts[1] ?? "") ? parts[1] : "");
       break;
+    }
   }
 }
 

@@ -8,6 +8,8 @@ import { platform } from "./host";
 import { MainWindow } from "./MainWindow";
 import { SettingsWindow } from "./settings/SettingsWindow";
 import "./nav";
+import "./shell/native";
+import "./notify/onScreen";
 
 const view = new URLSearchParams(location.search).get("view");
 

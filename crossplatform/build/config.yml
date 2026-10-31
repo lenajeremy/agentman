@@ -67,6 +67,13 @@ dev_mode:
       type: primary
       exit_policy: shutdown
 
+# Links the app opens (agentman://agent/<id>, agentman://new, …), as the
+# Mac app's. Only the production Info.plist carries the scheme, so a
+# development build never takes the user's links.
+protocols:
+  - scheme: agentman
+    description: Agentman links
+
 # File Associations
 # More information at: https://v3.wails.io/noit/done/yet
 fileAssociations:
