@@ -5,7 +5,8 @@ import XCTest
 
 /// The image viewer: the pictures a conversation's arrows go through, ←
 /// and → moving between them, a picture fitted and zoomed, and, with
-/// TEST_RUNNER_AGENTMAN_SHOTS=<folder>, the viewer.
+/// TEST_RUNNER_AGENTMAN_SHOTS=<folder>, the viewer and an image file in the
+/// editor.
 @MainActor
 final class ImageViewerTests: XCTestCase {
     func testAPictureFitsAndZoomsWithinBounds() {
@@ -105,7 +106,33 @@ final class ImageViewerTests: XCTestCase {
             let alone = Lightbox(image: pictures[0], title: "screen-1.png")
             try Self.capture(LightboxView(box: alone), size: CGSize(width: 1100, height: 720), dark: dark,
                              to: out.appendingPathComponent("viewer-one-\(look).png"))
+
+            // A large picture in an editor pane fits it.
+            var zoom: CGFloat = 1
+            let editor = ZoomableImage(image: Self.screen("A 2880 × 1800 screenshot", .systemIndigo, size: CGSize(width: 2880, height: 1800)),
+                                       zoom: Binding(get: { zoom }, set: { zoom = $0 }))
+                .padding(24)
+                .background(Palette.paper)
+            try Self.capture(editor, size: CGSize(width: 820, height: 560), dark: dark, to: out.appendingPathComponent("editor-image-\(look).png"))
+
+            // And in the right panel's Files.
+            let session = try JSONDecoder().decode(Session.self, from: Data(#"{"id":"a","kind":"claude","name":"x","cwd":"/tmp","state":"idle"}"#.utf8))
+            try Self.capture(FileLoader(session: session, path: "shots/home.png"), size: CGSize(width: 420, height: 560), dark: dark,
+                             store: AgentsStore(client: Self.serving(Self.screen("Home", .systemPink, size: CGSize(width: 2880, height: 1800)))),
+                             to: out.appendingPathComponent("panel-image-\(look).png"))
         }
+    }
+
+    /// A stand-in daemon that reads every file as this picture.
+    private static func serving(_ image: NSImage) -> DaemonClient {
+        let client = DaemonClient(socketPath: "/nonexistent/agentman-viewer.sock")
+        let png = NSBitmapImageRep(data: image.tiffRepresentation!)!.representation(using: .png, properties: [:])!.base64EncodedString()
+        client.answer = { request in
+            guard request.type == .readFile else { return nil }
+            let event: [String: Any] = ["type": "workspace", "workspace": ["kind": "file", "sessionId": "a", "path": request.path ?? "", "image": png]]
+            return try? JSONDecoder().decode(DaemonEvent.self, from: JSONSerialization.data(withJSONObject: event))
+        }
+        return client
     }
 
     // MARK: - Helpers
