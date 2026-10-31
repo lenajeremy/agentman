@@ -345,13 +345,15 @@ Swift that does it today.
 - [x] Start: makes the worktree first, then starts the agent, opens it once listed, clears filters — NewAgentView.swift:262, AgentsStore.swift:490
 - [x] "New Worktree from…" in a thread opens this page with the namer up — NewAgentView.swift:138
   - Note: the thread calls newWorktreeFrom(folder) from src/NewAgentView.tsx.
-- [ ] Command palette ⌘K: fuzzy search, ↑↓, Return, Esc or click outside closes, "Nothing matches" — CommandPalette.swift:7, PaletteView.swift:22
-  - [ ] Ask Agentman: "…" (first for a question, 4+ words or no match; needs a key) — CommandPalette.swift:51
-  - [ ] For the agent open now: Open its folder in the Editor, Open a Terminal, Rename… — CommandPalette.swift:77
-  - [ ] Every agent (needs-you first, folder and state as detail) — CommandPalette.swift:92
-  - [ ] New Agent ⌘N, Agentman, What Happened While I Was Away, Show agents that need you / working / idle / all — CommandPalette.swift:107
-  - [ ] Open a Folder in the Editor… ⌘O; for 8 recent folders, Open in the Editor and Open a Terminal — CommandPalette.swift:129
-  - [ ] Settings ⌘, and each Settings page; Light / Dark / Match the Mac — CommandPalette.swift:147
+- [x] Command palette ⌘K: fuzzy search, ↑↓, Return, Esc or click outside closes, "Nothing matches" — CommandPalette.swift:7, PaletteView.swift:22
+  - [x] Ask Agentman: "…" (first for a question, 4+ words or no match; needs a key) — CommandPalette.swift:51
+  - [x] For the agent open now: Open its folder in the Editor, Open a Terminal, Rename… — CommandPalette.swift:77
+    - Note: Open a Terminal sends the window an "agentman:show-terminal" event ({ folder }) for the right panel and terminal to show it, as RightPanel.showTerminal does.
+  - [x] Every agent (needs-you first, folder and state as detail) — CommandPalette.swift:92
+  - [x] New Agent ⌘N, Agentman, What Happened While I Was Away, Show agents that need you / working / idle / all — CommandPalette.swift:107
+  - [x] Open a Folder in the Editor… ⌘O; for 8 recent folders, Open in the Editor and Open a Terminal — CommandPalette.swift:129
+  - [x] Settings ⌘, and each Settings page; Light / Dark / Match the Mac — CommandPalette.swift:147
+    - Differs: shortcuts read "Ctrl+N" off macOS.
 
 ## 11. Notifications
 - [ ] Kinds: agent finished, agent needs you, Agentman (replies, briefs, what agents tell it), note suggestions — NotificationPolicy.swift:6
@@ -456,6 +458,7 @@ Swift that does it today.
   - Differs: off macOS, Lucide icons stand in, as SF Symbols may not be used there.
 - [x] Loader ring animation; stops with Reduce Motion — Loader.swift:8
 - [ ] Two-finger swipe to dismiss cards — SwipeToDismiss.swift:9
-- [ ] Fuzzy matcher (name before path, word starts, letters together) for palettes, @ and the tree filter — EditorStore.swift:865
+- [x] Fuzzy matcher (name before path, word starts, letters together) for palettes, @ and the tree filter — EditorStore.swift:865
+  - Note: src/palette/fuzzy.ts, for the editor's palettes, @ and the tree filter too.
 - [ ] On reconnect: reload sessions and Agentman, follow open threads again — AgentsStore.swift:740
 - [ ] Settings kept across launches (here: `src/prefs.ts`, same key names): drafts, sidebarChoices, sidebarWidth/Hidden/WorkingOpen/ArchivedOpen, appearance, settingsTab, rightPanelOpen/Tab/Tabs/Width, terminalDock, bottomTerminalOpen/Height, diffSplit/Wrap/IgnoreWhitespace/FileTree, newAgentKind/Folder, editorVim, editorFontSize, terminalHeight, agentPanelOpen/Width, managerLastRead, notify*, mutedFolders, quiet*, awaySummary, awayMinutes — AgentsStore.swift:73, RightPanel.swift:21, NotificationPolicy.swift:17

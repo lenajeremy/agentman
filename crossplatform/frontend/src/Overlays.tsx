@@ -4,10 +4,12 @@
 // each.
 
 import { Lightbox } from "./LightboxView";
+import { CommandPalette } from "./palette/CommandPalette";
 
 export function Overlays() {
   return (
     <>
+      <CommandPalette />
       <Lightbox />
     </>
   );
