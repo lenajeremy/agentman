@@ -13,7 +13,7 @@ final class FileChip: NSTextAttachmentCell {
     private let textFont: NSFont
 
     static let iconSize: CGFloat = 14
-    static let gap: CGFloat = 4
+    static let gap: CGFloat = 2
 
     init(path: String, font: NSFont) {
         self.path = path
@@ -102,8 +102,9 @@ enum FileTags {
                 return Text("\(line)\(words)")
             case .file(let path, let directory):
                 let name = (path as NSString).lastPathComponent
-                // A no-break space: the icon never ends a line its name begins.
-                let tag = Text("\(Text(Image(nsImage: icon(name, directory: directory))).baselineOffset(-2))\u{00A0}\(name)")
+                // A narrow no-break space: close, and the icon never ends a
+                // line its name begins.
+                let tag = Text("\(Text(Image(nsImage: icon(name, directory: directory))).baselineOffset(-2))\u{202F}\(name)")
                     .foregroundStyle(Palette.mention)
                 return Text("\(line)\(tag)")
             }
