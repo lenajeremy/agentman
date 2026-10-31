@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -87,6 +88,29 @@ type codexRPCError struct {
 }
 
 func (e *codexRPCError) Error() string { return "codex app-server: " + e.Message }
+
+// codexUnsupported reports that the daemon could not take a call as written:
+// it does not know the method, or the parameters are not the shape it
+// expects. The protocol is experimental and Codex updates itself, so a
+// daemon newer or older than this was written against can say either, and
+// the caller goes the way it went before the daemon. Codex 0.166 answers
+// both with -32600 and a message beginning "Invalid request:" ("unknown
+// variant `…`", "invalid type: …"), and the same code with other messages
+// for a thread it cannot act on, which is a real answer; -32601 is
+// JSON-RPC's own code for an unknown method.
+func codexUnsupported(err error) bool {
+	var refused *codexRPCError
+	if !errors.As(err, &refused) {
+		return false
+	}
+	return refused.Code == -32601 || refused.Code == -32600 && strings.HasPrefix(refused.Message, "Invalid request:")
+}
+
+// codexFallBack reports whether a failed call should send the caller the
+// way it went before the daemon: the daemon went away, or cannot take it.
+func codexFallBack(err error) bool {
+	return errors.Is(err, errCodexAppServerDown) || codexUnsupported(err)
+}
 
 // codexRPCMessage is one message in either direction. A method with an id is
 // a request from the daemon (an approval, a question), which waits for an

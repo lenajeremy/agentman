@@ -51,7 +51,7 @@ func (s *CodexSource) StartThread(ctx context.Context, dir, prompt string) (stri
 		Thread codexWireThread `json:"thread"`
 	}
 	if err := server.call(ctx, "thread/start", map[string]any{"cwd": dir}, &started); err != nil {
-		if errors.Is(err, errCodexAppServerDown) {
+		if codexFallBack(err) {
 			return "", ErrNoCodexDaemon
 		}
 		return "", fmt.Errorf("source: Codex did not start the session: %w", err)

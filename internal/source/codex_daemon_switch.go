@@ -33,6 +33,9 @@ func (s *CodexSource) switchThroughDaemon(ctx context.Context, sessionID string,
 	params := settings(threads[thread])
 	params["threadId"] = thread
 	if err := server.call(ctx, "thread/settings/update", params, nil); err != nil {
+		if codexFallBack(err) {
+			return false, nil // the terminal's pickers, as before
+		}
 		return true, fmt.Errorf("source: Codex did not take the change: %w", err)
 	}
 	return true, nil
