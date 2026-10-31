@@ -145,6 +145,10 @@ type Session struct {
 	// Claude's /clear starts a new one there, and /resume switches to
 	// another. The apps follow from the old conversation's thread to this.
 	Previous string `json:"previous,omitempty"`
+	// FolderIcon is the picture the agent's folder is known by — its
+	// favicon, logo.png or icon.png — relative to Cwd, for the apps to show
+	// in place of the folder's initials. Empty when the folder has none.
+	FolderIcon string `json:"folderIcon,omitempty"`
 
 	// AgentPID is the agent's own process, when the adapter knows it. It
 	// never leaves the machine: it is only how the daemon tells which
@@ -242,7 +246,8 @@ func (s Session) SameAs(other Session) bool {
 		s.AgentPID == other.AgentPID &&
 		s.Question.sameAs(other.Question) && SameServers(s.Servers, other.Servers) &&
 		slices.Equal(s.Queued, other.Queued) && slices.Equal(s.QueuedMessageIDs, other.QueuedMessageIDs) &&
-		s.CanSendQueued == other.CanSendQueued && s.Previous == other.Previous
+		s.CanSendQueued == other.CanSendQueued && s.Previous == other.Previous &&
+		s.FolderIcon == other.FolderIcon
 }
 
 // SameServers reports whether two server lists are identical, in order.
