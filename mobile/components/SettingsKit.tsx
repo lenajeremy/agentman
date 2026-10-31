@@ -1,6 +1,6 @@
 import Feather from "@expo/vector-icons/Feather";
 import { useRouter } from "expo-router";
-import { useRef, type ReactNode } from "react";
+import { useRef, type ComponentRef, type ReactNode } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -42,7 +42,7 @@ export function SettingsPage({
   const { color } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const scroller = useRef<ScrollView>(null);
+  const scroller = useRef<ComponentRef<typeof ScrollView>>(null);
   const scroll = simulatorScroll();
   return (
     <KeyboardAvoidingView
