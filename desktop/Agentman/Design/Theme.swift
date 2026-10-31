@@ -50,6 +50,8 @@ enum Palette {
     static let working = Color(light: 0x3268F5, dark: 0x578CFF)
     static let workingText = Color(light: 0x1F35C7, dark: 0x9DAAFF)
     static let workingWash = Color(light: 0xEEF1FF, dark: 0x1A1F3D)
+    /// The loader's colours, flowing one into the next.
+    static let loader = [working, Color(light: 0xF0407F, dark: 0xFF5C9A)]
     /// An agent needs you.
     static let needsYou = Color(light: 0xFF6A2B, dark: 0xFF7D45)
     static let needsYouText = Color(light: 0xC2451A, dark: 0xFF9A6C)

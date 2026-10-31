@@ -1047,7 +1047,7 @@ struct ToolRun: View {
 
     @ViewBuilder private var statusIcon: some View {
         if calls.last?.tool?.status == "running" {
-            ProgressView().controlSize(.mini).frame(width: 11, height: 11)
+            Loader()
         } else {
             Image(systemName: "wrench.and.screwdriver")
                 .font(.system(size: 10, weight: .medium))
@@ -1124,7 +1124,7 @@ private struct ToolCallRow: View {
         Group {
             switch call.tool?.status {
             case "running":
-                ProgressView().controlSize(.mini).frame(width: 11, height: 11)
+                Loader()
             case "error":
                 Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.error)
             default:
@@ -1142,7 +1142,7 @@ private struct ToolCallRow: View {
             Group {
                 switch call.tool?.status {
                 case "running":
-                    ProgressView().controlSize(.mini).frame(width: 11, height: 11)
+                    Loader()
                 case "error":
                     Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.error)
                 default:
