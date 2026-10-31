@@ -279,6 +279,7 @@ struct AgentThreadView: View {
                     .padding(.bottom, 6)
                     .frame(maxWidth: Self.column)
                     .frame(maxWidth: .infinity)
+                    .environment(\.imageGallery, ThreadItem.pictures(in: items))
                 }
                 .scrollIndicators(.never)
                 .modifier(FollowsEnd(following: following, earlier: store.hasMore[session.id] == true ? { await store.loadOlder(session.id) } : nil))
@@ -1001,6 +1002,21 @@ enum ThreadItem: Identifiable {
         case .message(let message), .image(let message, _): message.id
         case .tools(let calls, _), .images(let calls, _, _): calls.last?.id ?? ""
         }
+    }
+
+    /// The pictures the agent looked at, in order, each once: what the
+    /// image viewer's arrows go through.
+    static func pictures(in items: [ThreadItem]) -> [String] {
+        var seen = Set<String>()
+        var paths: [String] = []
+        for item in items {
+            switch item {
+            case .image(_, let path): if seen.insert(path).inserted { paths.append(path) }
+            case .images(_, let run, _): for path in run where seen.insert(path).inserted { paths.append(path) }
+            default: break
+            }
+        }
+        return paths
     }
 
     static func items(from messages: [Message]) -> [ThreadItem] {
