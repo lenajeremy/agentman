@@ -40,29 +40,29 @@ struct WorkspacePanel: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 9) {
-                        Image(systemName: "desktopcomputer").foregroundStyle(Palette.muted)
-                        Text("This Mac")
-                        Spacer()
-                        ChromeButton(symbol: "folder", help: "Show project in Finder") {
+                    CardRow("This Mac", symbol: "desktopcomputer") {
+                        Button {
                             NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: session.cwd)
+                        } label: {
+                            Image(systemName: "folder")
+                                .frame(width: 20, height: 20)
+                                .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
+                        .help("Show the folder in Finder")
                     }
-                    .padding(.bottom, 3)
                     if FileManager.default.fileExists(atPath: session.cwd) {
-                        workspaceRow("Open in editor", symbol: "arrow.up.right.square") {
+                        CardRow("Open in editor", symbol: "arrow.up.right.square", action: {
                             EditorOpener.open(folder: session.cwd, with: openWindow)
-                        }
-                        workspaceRow("Open terminal", symbol: "terminal") { RightPanel.showTerminal() }
+                        })
+                        CardRow("Open terminal", symbol: "terminal", action: { RightPanel.showTerminal() })
                     }
                 }
-                .padding(16)
+                .cardSection()
                 Divider().overlay(Palette.line)
                 VStack(alignment: .leading, spacing: 0) {
                     if let branch {
-                        Label(branch, systemImage: "point.3.connected.trianglepath.dotted")
-                            .lineLimit(1).truncationMode(.middle)
-                            .padding(.vertical, 7)
+                        CardRow(branch, symbol: "arrow.triangle.branch")
                         // Not from a daemon too old to read where the branch stands.
                         if var git {
                             // The changes as last listed, read more often than the branch.
@@ -70,48 +70,46 @@ struct WorkspacePanel: View {
                             GitActionsRow(session: session, state: git, changes: changes, hidden: hidden) { reread += 1 }
                         }
                     }
-                    workspaceRow("History", symbol: "clock.arrow.circlepath") { RightPanel.show(.history) }
-                    Button { RightPanel.show(.diff) } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "doc.badge.plus").frame(width: 16)
-                            Text("Changes")
-                            Spacer(minLength: 8)
-                            Text("+\(changes.reduce(0) { $0 + ($1.added ?? 0) })")
-                                .foregroundStyle(Palette.ok)
-                            Text("−\(changes.reduce(0) { $0 + ($1.removed ?? 0) })")
-                                .foregroundStyle(Palette.errorText)
+                    CardRow("History", symbol: "clock.arrow.circlepath", action: { RightPanel.show(.history) })
+                    let added = changes.reduce(0) { $0 + ($1.added ?? 0) }
+                    let removed = changes.reduce(0) { $0 + ($1.removed ?? 0) }
+                    CardRow("Changes", symbol: "plusminus", action: { RightPanel.show(.diff) }) {
+                        // Nothing to count, nothing shown.
+                        if added + removed > 0 {
+                            HStack(spacing: 6) {
+                                Text("+\(added)").foregroundStyle(Palette.ok)
+                                Text("−\(removed)").foregroundStyle(Palette.errorText)
+                            }
+                            .font(Fonts.mono(11))
                         }
-                        .foregroundStyle(Palette.muted)
-                        .padding(.vertical, 7)
                     }
-                    .buttonStyle(.plain)
-                    workspaceRow("Files", symbol: "folder") { RightPanel.show(.files) }
+                    CardRow("Files", symbol: "folder", action: { RightPanel.show(.files) })
                     if (session.artifacts ?? 0) > 0 {
-                        workspaceRow("Plans", symbol: "doc.text", opens: true) { show(.plans) }
+                        CardRow("Plans", symbol: "doc.text", action: { show(.plans) }) {
+                            Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(Palette.faint)
+                                .frame(width: 20)
+                        }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                .cardSection()
                 let siblings = store.sessions.filter { $0.cwd == session.cwd && $0.id != session.id && $0.state != .ended }
                 if !siblings.isEmpty {
                     Divider().overlay(Palette.line)
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 0) {
                         Text("In this project · \(siblings.count)")
                             .font(Fonts.sans(11))
-                            .foregroundStyle(Palette.muted)
+                            .foregroundStyle(Palette.faint)
+                            .padding(.horizontal, CardRowMetrics.inset)
+                            .frame(height: 24, alignment: .leading)
                         ForEach(Array(siblings.prefix(6))) { sibling in
-                            Button { store.selection = .agent(sibling.id) } label: {
-                                HStack(spacing: 10) {
-                                    AgentMark(kind: sibling.kind, size: 14)
-                                    Text(sibling.name).lineLimit(1)
-                                    Spacer(minLength: 4)
-                                    Circle().fill(Palette.dot(sibling.state)).frame(width: 5, height: 5)
-                                }
+                            CardRow(sibling.name, action: { store.selection = .agent(sibling.id) }) {
+                                AgentMark(kind: sibling.kind, size: 14)
+                            } trailing: {
+                                Circle().fill(Palette.dot(sibling.state)).frame(width: 6, height: 6).frame(width: 20)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
-                    .padding(16)
+                    .cardSection()
                 }
             }
         }
@@ -169,22 +167,6 @@ struct WorkspacePanel: View {
     private func show(_ selected: WorkspaceTab) {
         tab = selected
         expanded = true
-    }
-
-    /// A row that does something at once, or, with `opens`, shows a list.
-    private func workspaceRow(_ title: String, symbol: String, opens: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: symbol).frame(width: 16)
-                Text(title)
-                Spacer(minLength: 4)
-                if opens { Image(systemName: "chevron.right").font(.system(size: 9)) }
-            }
-            .foregroundStyle(Palette.muted)
-            .padding(.vertical, 7)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 
     private func push(_ route: WorkspaceRoute) { stack.append(route) }
@@ -891,5 +873,82 @@ private struct ArtifactView: View {
             busy = false
             if problem == nil { outcome = approve ? "Approved" : "Sent your changes" }
         }
+    }
+}
+
+/// How the workspace card's rows sit: each the same height, its icon in a
+/// column of its own, its words at one inset, so the card reads as one list.
+enum CardRowMetrics {
+    static let height: CGFloat = 30
+    /// From a section's edge to a row's icon, and to a heading.
+    static let inset: CGFloat = 8
+    static let icon: CGFloat = 16
+    static let gap: CGFloat = 10
+}
+
+/// A row of the workspace card: an icon, its words, and what goes at its
+/// end. A row that does something lights up under the pointer.
+struct CardRow<Icon: View, Trailing: View>: View {
+    let title: String
+    var action: (() -> Void)?
+    let icon: Icon
+    let trailing: Trailing
+    @State private var hovering = false
+
+    init(_ title: String, action: (() -> Void)? = nil, @ViewBuilder icon: () -> Icon, @ViewBuilder trailing: () -> Trailing) {
+        self.title = title
+        self.action = action
+        self.icon = icon()
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        if let action {
+            Button(action: action) { content }
+                .buttonStyle(.plain)
+                .onHover { hovering = $0 }
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
+        HStack(spacing: CardRowMetrics.gap) {
+            icon
+                .foregroundStyle(Palette.muted)
+                .frame(width: CardRowMetrics.icon)
+            Text(title)
+                .foregroundStyle(Palette.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 6)
+            trailing.foregroundStyle(Palette.muted)
+        }
+        .font(Fonts.sans(12))
+        .padding(.horizontal, CardRowMetrics.inset)
+        .frame(height: CardRowMetrics.height)
+        .background(hovering ? Palette.fill.opacity(0.6) : .clear, in: RoundedRectangle(cornerRadius: 7))
+        .contentShape(Rectangle())
+    }
+}
+
+extension CardRow where Icon == Image {
+    init(_ title: String, symbol: String, action: (() -> Void)? = nil, @ViewBuilder trailing: () -> Trailing) {
+        self.init(title, action: action, icon: { Image(systemName: symbol) }, trailing: trailing)
+    }
+}
+
+extension CardRow where Icon == Image, Trailing == EmptyView {
+    init(_ title: String, symbol: String, action: (() -> Void)? = nil) {
+        self.init(title, symbol: symbol, action: action) { EmptyView() }
+    }
+}
+
+extension View {
+    /// A section of the workspace card: its rows, inset alike.
+    func cardSection() -> some View {
+        padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

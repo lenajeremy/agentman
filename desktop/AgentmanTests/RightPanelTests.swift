@@ -578,6 +578,49 @@ final class RightPanelTests: XCTestCase {
         try render(size: CGSize(width: 1500, height: 900), dark: true, store: try store(cwd: cwd), to: out.appendingPathComponent("bottom-terminal-split-dark.png"))
     }
 
+    /// The workspace card alone: as it was reported, on a branch with a
+    /// push waiting and nothing changed, and with changes to commit.
+    func testRenderTheCard() throws {
+        guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"].map(URL.init(fileURLWithPath:)) else {
+            throw XCTSkip("for screenshots")
+        }
+        let cwd = try project()
+        for (name, changed) in [("card-push", false), ("card-changes", true)] {
+            let client = DaemonClient(socketPath: "/nonexistent/agentman-card.sock")
+            client.answer = { request in
+                var event: [String: Any]
+                switch request.type {
+                case .gitStatus:
+                    event = ["type": "git", "git": ["sessionId": "a", "branch": "feat/agentman-attention", "defaultBranch": "main",
+                                                    "remote": "origin", "upstream": "origin/feat/agentman-attention",
+                                                    "ahead": changed ? 0 : 2, "behind": 0, "aheadOfDefault": 9, "changes": changed ? 2 : 0]]
+                case .listChanges:
+                    event = ["type": "workspace", "workspace": ["kind": "changes", "sessionId": "a", "changes": changed
+                        ? [["path": "a.go", "status": " M", "added": 12, "removed": 3], ["path": "b.go", "status": "??", "added": 40]] : []]]
+                default:
+                    return nil
+                }
+                let data = try! JSONSerialization.data(withJSONObject: event)
+                return try? JSONDecoder().decode(DaemonEvent.self, from: data)
+            }
+            let store = AgentsStore(client: client)
+            let now = Int64(Date().timeIntervalSince1970 * 1000)
+            let json = """
+            {"type":"sessions","sessions":[
+             {"id":"a","kind":"claude","name":"Redesign the sidebar","cwd":"\(cwd)","state":"idle","inject":"tmux","lastActivityAt":\(now)},
+             {"id":"b","kind":"codex","name":"agentman","cwd":"\(cwd)","state":"idle","inject":"tmux","lastActivityAt":\(now)}
+            ]}
+            """
+            store.apply(try JSONDecoder().decode(DaemonEvent.self, from: Data(json.utf8)))
+            let session = try XCTUnwrap(store.sessions.first { $0.id == "a" })
+            for dark in [false, true] {
+                try renderView(WorkspacePanel(session: session, tab: .constant(.changes)).environment(store).padding(20),
+                               size: CGSize(width: 320, height: 470), dark: dark,
+                               to: out.appendingPathComponent("\(name)-\(dark ? "dark" : "light").png"))
+            }
+        }
+    }
+
     func testRenderThePanel() throws {
         guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
         let shots = URL(fileURLWithPath: out)

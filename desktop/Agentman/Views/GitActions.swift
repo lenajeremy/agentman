@@ -87,21 +87,17 @@ struct GitActionsRow: View {
 
     var body: some View {
         let action = GitAction.quick(state)
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Button { start(action) } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: action.symbol).frame(width: 16)
-                        Text(running ?? action.label)
-                        Spacer(minLength: 4)
-                        if running != nil { ProgressView().controlSize(.mini) }
-                    }
-                    .padding(.vertical, 7)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(running != nil || { if case .idle = action { true } else { false } }())
-                .help({ if case .idle(_, let hint) = action { hint } else { action.label } }())
+        let idle: Bool = { if case .idle = action { true } else { false } }()
+        VStack(alignment: .leading, spacing: 2) {
+            CardRow(running ?? action.label, action: idle || running != nil ? nil : { start(action) }) {
+                Image(systemName: action.symbol)
+            } trailing: {
+                if running != nil { ProgressView().controlSize(.mini) }
+                // Room for the menu laid over the row's end.
+                Color.clear.frame(width: 20, height: 20)
+            }
+            .help({ if case .idle(_, let hint) = action { hint } else { action.label } }())
+            .overlay(alignment: .trailing) {
                 Menu {
                     Button { committing = .commit } label: { Label("Commit…", systemImage: "checkmark.circle") }
                         .disabled((state?.changes ?? 0) == 0 || state?.branch == nil)
@@ -110,15 +106,20 @@ struct GitActionsRow: View {
                     Button { confirming = .createPR } label: { Label("Create PR", systemImage: "arrow.triangle.pull") }
                         .disabled(!GitAction.canCreatePR(state))
                 } label: {
-                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Palette.faint)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
                 }
-                .menuStyle(.borderlessButton)
+                .menuStyle(.button)
+                .buttonStyle(.plain)
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .disabled(running != nil || state == nil)
-                .help("Git actions")
+                .padding(.trailing, CardRowMetrics.inset)
+                .help("Commit, push or open a pull request")
             }
-            .foregroundStyle(Palette.muted)
             if let outcome {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(outcome.text)
@@ -138,6 +139,9 @@ struct GitActionsRow: View {
                     .help("Dismiss")
                 }
                 .font(TextStyle.caption)
+                // Under the row's words, not its icon.
+                .padding(.leading, CardRowMetrics.inset + CardRowMetrics.icon + CardRowMetrics.gap)
+                .padding(.trailing, CardRowMetrics.inset)
                 .padding(.bottom, 6)
                 .task(id: outcome) {
                     guard !outcome.failed else { return }
