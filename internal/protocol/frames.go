@@ -204,7 +204,9 @@ type Request struct {
 	// Before is a cursor from a previous page; empty means newest.
 	Before string `json:"before,omitempty"`
 	Limit  int    `json:"limit,omitempty"`
-	Text   string `json:"text,omitempty"`
+	// Days is how far back ReqUsage looks.
+	Days int    `json:"days,omitempty"`
+	Text string `json:"text,omitempty"`
 	// OptionKey selects an option on ReqAnswer.
 	QuestionID string `json:"questionId,omitempty"`
 	OptionKey  string `json:"optionKey,omitempty"`
@@ -367,6 +369,7 @@ type Event struct {
 	Git       *GitState        `json:"git,omitempty"`
 	Worktree  *Worktree        `json:"worktree,omitempty"`
 	Worktrees []Worktree       `json:"worktrees,omitempty"`
+	Usage     *Usage           `json:"usage,omitempty"`
 	// Directory names only; the app never needs the Mac's absolute home path.
 	Directories []string `json:"directories,omitempty"`
 	Path        string   `json:"path,omitempty"`

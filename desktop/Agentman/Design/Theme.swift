@@ -54,6 +54,25 @@ enum Palette {
     static let mention = Color(light: 0x16707E, dark: 0x7FCCDA)
     /// A skill named in a message.
     static let skillTag = Color(light: 0x8A3FB0, dark: 0xD3A2F2)
+    /// Each agent's colour on the usage page.
+    static func agent(_ kind: String) -> Color {
+        switch kind {
+        case "claude": Color(light: 0xD97757, dark: 0xE8896A)
+        case "codex": Color(light: 0x1A1A1A, dark: 0xE4E4E4)
+        case "opencode": Color(light: 0x3E8EBF, dark: 0x6BB3E0)
+        case "antigravity": Color(light: 0x7C5CE6, dark: 0xA48BF5)
+        case "kiro": Color(light: 0x9A4FE0, dark: 0xBE8BF2)
+        case "cursor", "cursor-cli": Color(light: 0x5B6170, dark: 0xB4B8C2)
+        default: Color(light: 0x8A8D94, dark: 0x9EA1A8)
+        }
+    }
+    /// The kinds of tokens on the usage page, output the strongest.
+    static let tokenInput = Color(light: 0x7D787C, dark: 0x8E8A8D)
+    static let tokenCacheRead = Color(light: 0xB9B5B8, dark: 0x4F4C4E)
+    static let tokenCacheWrite = Color(light: 0x585256, dark: 0xB4B0B3)
+    static let tokenOutput = Color(light: 0x1E1A1D, dark: 0xECE8EB)
+    /// The chosen part of a segmented switch, over `fill`.
+    static let segment = Color(light: 0xFFFFFF, dark: 0x363636)
     /// The loader's colours, flowing one into the next.
     static let loader = [working, Color(light: 0xF0407F, dark: 0xFF5C9A)]
     /// An agent needs you.

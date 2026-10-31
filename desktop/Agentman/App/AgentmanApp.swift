@@ -72,6 +72,7 @@ struct AgentmanApp: App {
                 .keyboardShortcut("k", modifiers: .command)
                 Button("Agentman") { openWindow(id: "main"); store.selection = .manager }
                     .keyboardShortcut("0", modifiers: [.command, .option])
+                Button("Usage") { openWindow(id: "main"); store.selection = .usage }
                 Button("What Happened While I Was Away") {
                     openWindow(id: "main")
                     store.showAway(since: store.away.last?.since ?? Date().addingTimeInterval(-3600))

@@ -55,6 +55,7 @@ enum RequestType: String, Codable, Sendable {
     case createWorktree = "create_worktree"
     case listWorktrees = "list_worktrees"
     case removeWorktree = "remove_worktree"
+    case usage
     case startSession = "start_session"
     case listFolders = "list_folders"
     case directorySessions = "directory_sessions"
@@ -110,6 +111,8 @@ struct DaemonRequest: Codable, Sendable {
     var sessionId: String?
     var before: String?
     var limit: Int?
+    /// How far back a usage request looks: 1, 7, 30 or 90 days.
+    var days: Int?
     var text: String?
     var questionId: String?
     var optionKey: String?
@@ -200,6 +203,7 @@ struct DaemonEvent: Codable, Sendable {
     var git: GitState?
     var worktree: Worktree?
     var worktrees: [Worktree]?
+    var usage: Usage?
 
     // Agentman, the manager.
     var entry: ManagerEntry?
@@ -414,6 +418,59 @@ struct Key: Codable, Sendable, Hashable, Identifiable {
 /// or its history.
 /// An agent's branch as the git actions need it, and, after one, what it did.
 /// One of a repository's working folders.
+/// What the agents on the Mac spent over a stretch of time, from their own
+/// records: tokens by kind, and what the API would have charged for them.
+struct Usage: Codable, Sendable, Equatable {
+    struct Tokens: Codable, Sendable, Equatable {
+        var input: Int64
+        var cacheRead: Int64
+        var cacheWrite: Int64
+        var output: Int64
+        var total: Int64 { input + cacheRead + cacheWrite + output }
+    }
+    struct Cost: Codable, Sendable, Equatable {
+        var input: Double
+        var cacheRead: Double
+        var cacheWrite: Double
+        var output: Double
+        var total: Double { input + cacheRead + cacheWrite + output }
+    }
+    struct Agent: Codable, Sendable, Equatable {
+        var kind: String
+        var sessions: Int
+        var tokens: Tokens
+        var cost: Double
+    }
+    /// A day of the chart, an hour over the last day.
+    struct Bucket: Codable, Sendable, Equatable {
+        /// Milliseconds since 1970.
+        var start: Int64
+        var cost: [String: Double]?
+        var tokens: [String: Int64]?
+        var date: Date { Date(timeIntervalSince1970: Double(start) / 1000) }
+    }
+    struct Model: Codable, Sendable, Equatable {
+        var model: String
+        var kind: String
+        var tokens: Tokens
+        var cost: Double
+        /// False for a model with no known price: its cost is left out.
+        var priced: Bool
+    }
+
+    var days: Int
+    var hourly: Bool?
+    var sessions: Int
+    var tokens: Tokens
+    var cost: Cost
+    var cacheSavings: Double
+    var agents: [Agent]?
+    var buckets: [Bucket]?
+    var models: [Model]?
+    /// Records that couldn't be read: usage may be short.
+    var skipped: Int?
+}
+
 struct Worktree: Codable, Sendable, Hashable, Identifiable {
     /// The folder, absolute.
     var path: String

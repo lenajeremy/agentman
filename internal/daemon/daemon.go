@@ -23,6 +23,7 @@ import (
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/push"
 	"github.com/lenajeremy/agentman/internal/source"
+	"github.com/lenajeremy/agentman/internal/usage"
 )
 
 // discoverInterval is how often the session list is refreshed.
@@ -84,6 +85,9 @@ type Transport interface {
 // Daemon wires discovery, hooks, and subscriptions together.
 type Daemon struct {
 	registry *source.Registry
+	// usage reads what the agents spent, for ReqUsage.
+	usage     *usage.Scanner
+	usageOnce sync.Once
 	// mentions is each folder's files, for `@` in a message box.
 	mentions mentionIndex
 	// files joins the parts of files sent to agents from a phone.
@@ -401,6 +405,7 @@ func (d *Daemon) Run(ctx context.Context, hooks <-chan hook.Event) error {
 	defer d.stopPendingTurns()
 
 	d.refresh(ctx, true)
+	go d.warmUsage(ctx)
 
 	d.mu.Lock()
 	watcher, sharer := d.serverWatcher, d.sharer
@@ -1247,6 +1252,9 @@ func (d *Daemon) HandleFrom(
 	case protocol.ReqCreateWorktree, protocol.ReqListWorktrees, protocol.ReqRemoveWorktree:
 		return d.worktrees(ctx, req)
 
+	case protocol.ReqUsage:
+		return d.usageSummary(ctx, req)
+
 	case protocol.ReqRenameSession:
 		return d.renameSession(req)
 
@@ -1442,6 +1450,8 @@ func validateRequest(req protocol.Request) error {
 		return validateCommit(req.Text, req.Paths)
 	case protocol.ReqCreateWorktree, protocol.ReqListWorktrees, protocol.ReqRemoveWorktree:
 		return validateWorktree(req)
+	case protocol.ReqUsage:
+		return validateUsage(req)
 	case protocol.ReqCommitFiles, protocol.ReqCommitDiff:
 		if !commitHash.MatchString(req.Commit) {
 			return fmt.Errorf("daemon: that is not a commit")

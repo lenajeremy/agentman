@@ -109,6 +109,8 @@ struct ContentView: View {
                 }
             case .newAgent:
                 NewAgentView()
+            case .usage:
+                UsageView()
             case .manager, nil:
                 ManagerChatView()
             }
