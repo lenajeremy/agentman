@@ -100,6 +100,13 @@ struct AgentmanApp: App {
 
 /// Asks before quitting with unsaved edits in the editor.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        // A comparison run of a Debug build: nothing shows (TestSnapshot.swift).
+        MainActor.assumeIsolated { TestSnapshot.start() }
+        #endif
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         MainActor.assumeIsolated {
             let unsaved = EditorRegistry.shared.unsaved
