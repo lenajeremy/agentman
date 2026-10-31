@@ -184,6 +184,152 @@ final class RedesignShotsTests: XCTestCase {
         }
     }
 
+    /// The preview of a file, shown over a sent message where the pointer
+    /// rests on its tag: the window and the popover, each captured as it is
+    /// drawn and put together where the popover opened. Then the preview of
+    /// a picture and a folder.
+    func testRenderFilePreview() throws {
+        guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
+        let root = try folder("site")
+        let code = """
+        import { describe, expect, it } from "vitest"
+        import { renderSurface } from "../src/surface"
+
+        describe("surface", () => {
+        \tit("lays out the header before the panels", async () => {
+        \t\tconst surface = await renderSurface({ width: 1280 })
+        \t\texpect(surface.header.bottom).toBeLessThan(surface.panels.top)
+        \t})
+
+        \tit("keeps the settings panel in view", async () => {
+        \t\tconst surface = await renderSurface({ width: 720 })
+        \t\texpect(surface.settings.visible).toBe(true)
+        \t})
+        })
+
+        """
+        let pictures = ["src/surface.test.ts": code, "src/components/SettingsPanels.tsx": "export function SettingsPanels() {}\n",
+                        "docs/intro.md": "x", "docs/setup.md": "x", "docs/images/x.png": "x"]
+        for (file, text) in pictures {
+            let url = root.appendingPathComponent(file)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: url)
+        }
+        let logo = NSImage(size: NSSize(width: 480, height: 300), flipped: false) { rect in
+            NSColor(calibratedRed: 0.2, green: 0.4, blue: 0.96, alpha: 1).setFill(); rect.fill()
+            NSColor.white.setFill()
+            NSBezierPath(roundedRect: rect.insetBy(dx: 150, dy: 90), xRadius: 24, yRadius: 24).fill()
+            return true
+        }
+        try NSBitmapImageRep(data: logo.tiffRepresentation!)!.representation(using: .png, properties: [:])!
+            .write(to: root.appendingPathComponent("logo.png"))
+
+        let text = "Fix the flaky test in @src/surface.test.ts and align the header with @src/components/SettingsPanels.tsx before shipping."
+        for dark in [false, true] {
+            let look = dark ? "dark" : "light"
+            let page = VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                MessageRow(message: Message(id: "u", sessionId: "a", role: .user, ts: 1, text: text))
+            }
+            .environment(\.threadFolder, root.path)
+            .frame(width: 640)
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Palette.paper)
+            let size = CGSize(width: 688, height: 520)
+            let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: 200, y: 200), size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.alphaValue = 0
+            window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            window.contentView = NSHostingView(rootView: page.environment(try store().0).frame(width: size.width, height: size.height))
+            window.orderFrontRegardless()
+            RunLoop.main.run(until: Date().addingTimeInterval(1))
+            let content = try XCTUnwrap(window.contentView)
+            func views<T: NSView>(_ type: T.Type, in view: NSView) -> [T] {
+                ((view as? T).map { [$0] } ?? []) + view.subviews.flatMap { views(type, in: $0) }
+            }
+            let tagged = try XCTUnwrap(views(TaggedTextView.self, in: content).first)
+            let layout = try XCTUnwrap(tagged.layoutManager), container = try XCTUnwrap(tagged.textContainer)
+            layout.ensureLayout(for: container)
+            let chip = (tagged.string as NSString).range(of: "\u{FFFC}").location
+            let rect = layout.boundingRect(forGlyphRange: NSRange(location: layout.glyphIndexForCharacter(at: chip), length: 1), in: container)
+            let point = tagged.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+            tagged.mouseMoved(with: try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [], timestamp: 0,
+                                                                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0)))
+            RunLoop.main.run(until: Date().addingTimeInterval(ChipHover.delay + 0.8))
+            let popover = try XCTUnwrap(tagged.hover.popover, "No preview")
+            let shown = try XCTUnwrap(popover.contentViewController?.view.window)
+            shown.appearance = window.appearance
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            let card = try XCTUnwrap(popover.contentViewController?.view)
+            let cardFrame = shown.convertToScreen(card.convert(card.bounds, to: nil))
+            let at = NSRect(x: cardFrame.minX - window.frame.minX, y: cardFrame.minY - window.frame.minY,
+                            width: cardFrame.width, height: cardFrame.height)
+
+            // The window, with the preview over it where the popover opened.
+            // Offscreen, AppKit draws a popover's blur and frame as white,
+            // so the same card is drawn in a window of its own, on a plain
+            // frame that stands in for the popover's.
+            let scale: CGFloat = 2
+            let base = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: base)
+            // About a popover's own colours in this look.
+            let fill = dark ? NSColor(white: 0.12, alpha: 1) : NSColor(white: 1, alpha: 1)
+            let edge = dark ? NSColor(white: 0.24, alpha: 1) : NSColor(white: 0.88, alpha: 1)
+            let cardWindow = NSWindow(contentRect: NSRect(origin: .zero, size: at.size), styleMask: [.borderless], backing: .buffered, defer: false)
+            cardWindow.isReleasedWhenClosed = false
+            cardWindow.alphaValue = 0
+            cardWindow.appearance = window.appearance
+            cardWindow.contentView = NSHostingView(rootView: FilePreviewCard(url: root.appendingPathComponent("src/surface.test.ts"), base: root.path)
+                .frame(width: at.width, height: at.height).background(Color(nsColor: fill)))
+            cardWindow.orderFrontRegardless()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+            let cardView = try XCTUnwrap(cardWindow.contentView)
+            let over = try XCTUnwrap(cardView.bitmapImageRepForCachingDisplay(in: cardView.bounds))
+            cardView.cacheDisplay(in: cardView.bounds, to: over)
+            cardWindow.orderOut(nil)
+            let picture = NSImage(size: size, flipped: false) { _ in
+                base.draw(in: NSRect(origin: .zero, size: size))
+                let frame = NSBezierPath(roundedRect: at, xRadius: 10, yRadius: 10)
+                NSGraphicsContext.saveGraphicsState()
+                let shadow = NSShadow()
+                shadow.shadowColor = .black.withAlphaComponent(0.25)
+                shadow.shadowBlurRadius = 16
+                shadow.shadowOffset = NSSize(width: 0, height: -4)
+                shadow.set()
+                fill.setFill()
+                frame.fill()
+                NSGraphicsContext.restoreGraphicsState()
+                over.draw(in: at)
+                edge.setStroke()
+                frame.stroke()
+                return true
+            }
+            let rep = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
+                                                     bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                                     colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+            rep.size = size
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+            NSAppearance(named: dark ? .darkAqua : .aqua)?.performAsCurrentDrawingAppearance {
+                picture.draw(in: NSRect(origin: .zero, size: size))
+            }
+            NSGraphicsContext.restoreGraphicsState()
+            try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+                .write(to: URL(fileURLWithPath: out).appendingPathComponent("file-preview-\(look).png"))
+            tagged.hover.close()
+            window.orderOut(nil)
+
+            // A picture's preview, and a folder's.
+            for (name, path) in [("picture", "logo.png"), ("folder", "docs")] {
+                try render(FilePreviewCard(url: root.appendingPathComponent(path), base: root.path).background(Palette.surface)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Palette.paper),
+                           size: CGSize(width: 480, height: name == "picture" ? 270 : 170), dark: dark, store: try store().0,
+                           to: URL(fileURLWithPath: out).appendingPathComponent("file-preview-\(name)-\(look).png"))
+            }
+        }
+    }
+
     private func renderEditor(_ shots: URL) throws {
         let key = "agentPanelOpen"
         let was = UserDefaults.standard.object(forKey: key)

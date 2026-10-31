@@ -217,6 +217,8 @@ final class MessageTextView: NSTextView {
     var slash: SlashCommands?
     /// Focus asked for before the box was in a window, given when it is.
     private var wantsFocus = false
+    /// A file chip shows its file while the pointer rests on it.
+    lazy var hover = ChipHover(self) { [weak self] in self?.mentions?.root.path }
 
     func takeFocus() {
         guard let window else {
@@ -228,6 +230,7 @@ final class MessageTextView: NSTextView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if window != nil { hover.track() } else { hover.close() }
         if wantsFocus, window != nil {
             wantsFocus = false
             takeFocus()
@@ -236,7 +239,18 @@ final class MessageTextView: NSTextView {
 
     // MARK: Keys
 
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        hover.moved(event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        hover.close()
+    }
+
     override func keyDown(with event: NSEvent) {
+        hover.close()
         // The commands for `/`, as the files for `@`.
         if let slash, slash.isOpen, !slash.results.isEmpty, !hasMarkedText() {
             switch event.keyCode {

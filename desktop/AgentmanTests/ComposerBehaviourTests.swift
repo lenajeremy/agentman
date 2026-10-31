@@ -225,6 +225,107 @@ final class ComposerBehaviourTests: XCTestCase {
         XCTAssertEqual(FileTags.segments("See @src/a.ts", folder: nil), [.text("See @src/a.ts")], "No folder to find it in")
     }
 
+    // MARK: - File previews
+
+    private func files(_ files: [String: String]) throws -> URL {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        for (path, text) in files {
+            let url = root.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: url)
+        }
+        return root
+    }
+
+    func testAPreviewShowsTheStartOfAFile() throws {
+        let long = (1...40).map { "line \($0)" }.joined(separator: "\n")
+        let root = try files(["a.ts": "let a = 1\n\tindented\n", "long.txt": long, "empty.txt": "", "src/b.ts": "x"])
+        try Data([0x50, 0x00, 0x51]).write(to: root.appendingPathComponent("blob.bin"))
+        XCTAssertEqual(FilePreview.read(root.appendingPathComponent("a.ts")), .text(["let a = 1", "    indented", ""], more: false))
+        guard case .text(let lines, let more) = FilePreview.read(root.appendingPathComponent("long.txt")) else { return XCTFail("not text") }
+        XCTAssertEqual(lines.count, FilePreview.lines)
+        XCTAssertTrue(more)
+        XCTAssertEqual(FilePreview.read(root.appendingPathComponent("blob.bin")), .nothing("This file isn't text."))
+        XCTAssertEqual(FilePreview.read(root.appendingPathComponent("empty.txt")), .nothing("An empty file."))
+        XCTAssertEqual(FilePreview.read(root.appendingPathComponent("gone.txt")), .nothing("This file isn't there any more."))
+        XCTAssertEqual(FilePreview.read(root), .folder(["a.ts", "blob.bin", "empty.txt", "long.txt", "src/"], more: 0))
+    }
+
+    /// Rests the pointer on the first tag in a text view, then moves it off.
+    private func restOnTag(_ text: NSTextView, hover: ChipHover) throws -> (shown: Bool, closed: Bool) {
+        let layout = try XCTUnwrap(text.layoutManager), container = try XCTUnwrap(text.textContainer)
+        let storage = try XCTUnwrap(text.textStorage)
+        layout.ensureLayout(for: container)
+        var index = -1
+        storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length)) { value, range, stop in
+            if value != nil { index = range.location; stop.pointee = true }
+        }
+        XCTAssertGreaterThanOrEqual(index, 0, "No tag")
+        let glyph = layout.glyphIndexForCharacter(at: index)
+        let rect = layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container)
+        let origin = text.textContainerOrigin
+        func move(to point: NSPoint) {
+            let inWindow = text.convert(point, to: nil)
+            text.mouseMoved(with: NSEvent.mouseEvent(with: .mouseMoved, location: inWindow, modifierFlags: [], timestamp: 0,
+                                                     windowNumber: text.window?.windowNumber ?? 0, context: nil,
+                                                     eventNumber: 0, clickCount: 0, pressure: 0)!)
+        }
+        move(to: NSPoint(x: rect.midX + origin.x, y: rect.midY + origin.y))
+        RunLoop.main.run(until: Date().addingTimeInterval(ChipHover.delay + 0.3))
+        let shown = hover.popover?.isShown == true
+        move(to: NSPoint(x: text.bounds.maxX - 2, y: text.bounds.maxY - 2))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        return (shown, hover.popover == nil)
+    }
+
+    // Resting the pointer on a file's tag in the box shows the file; moving
+    // off takes it away.
+    func testRestingOnATagInTheBoxShowsItsFile() throws {
+        let root = try files(["src/util/format.ts": "export const format = 1\n"])
+        let mentions = FileMentions(root: root, files: { ["src/util/format.ts"] }, suggested: { [] }, load: {})
+        let draft = Draft()
+        draft.text = "fix @src/util/format.ts please"
+        show(Box(draft: draft).environment(\.fileMentions, mentions))
+        window.orderFrontRegardless()
+        let text = try XCTUnwrap(find(MessageScrollView.self, in: host)?.documentView as? MessageTextView)
+        XCTAssertEqual(text.hover.url("src/util/format.ts")?.path, root.appendingPathComponent("src/util/format.ts").path)
+        let (shown, closed) = try restOnTag(text, hover: text.hover)
+        XCTAssertTrue(shown, "Resting on the tag shows the file")
+        XCTAssertTrue(closed, "Moving off takes it away")
+    }
+
+    // A sent message's tags show their files too; the conversation still
+    // scrolls under the pointer; a right-click copies the message with its
+    // paths.
+    func testASentMessagesTagsShowTheirFiles() throws {
+        let root = try files(["README.md": "# Agentman\n"])
+        let rows = VStack(alignment: .trailing, spacing: 12) {
+            TaggedText(text: "Read @README.md first", folder: root.path)
+            ForEach(0..<60, id: \.self) { Text("Row \($0)") }
+        }
+        show(ScrollView { rows.frame(width: 540) }.frame(width: 560, height: 400))
+        window.orderFrontRegardless()
+        let text = try XCTUnwrap(find(TaggedTextView.self, in: host))
+        XCTAssertEqual(text.string, "Read \u{FFFC} first")
+        let (shown, closed) = try restOnTag(text, hover: text.hover)
+        XCTAssertTrue(shown, "Resting on the tag shows the file")
+        XCTAssertTrue(closed, "Moving off takes it away")
+
+        let click = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                                     windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let item = try XCTUnwrap(text.menu(for: click)?.items.first)
+        XCTAssertEqual(item.title, "Copy")
+        XCTAssertEqual(item.representedObject as? String, "Read @README.md first", "A copy holds the path")
+
+        let scroll = try XCTUnwrap(find(NSScrollView.self, in: host))
+        let before = scroll.contentView.bounds.origin.y
+        let wheel = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -80, wheel2: 0, wheel3: 0))
+        text.scrollWheel(with: try XCTUnwrap(NSEvent(cgEvent: wheel)))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertGreaterThan(scroll.contentView.bounds.origin.y, before + 20, "The wheel over the message scrolls the conversation")
+    }
+
     // An error over the box, short or long, then dismissed: the same text
     // view, the same draft, the focus where it was.
     func testAnErrorOverTheBoxComesAndGoesWithoutTheDraft() throws {

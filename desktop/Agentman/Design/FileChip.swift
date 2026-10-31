@@ -15,12 +15,12 @@ final class FileChip: NSTextAttachmentCell {
     static let iconSize: CGFloat = 14
     static let gap: CGFloat = 2
 
-    init(path: String, font: NSFont) {
+    init(path: String, directory: Bool = false, font: NSFont) {
         self.path = path
         textFont = font
         let name = (path as NSString).lastPathComponent
         label = NSAttributedString(string: name, attributes: [.font: font, .foregroundColor: NSColor(Palette.mention)])
-        icon = NSImage(named: FileIcon.asset(name))
+        icon = NSImage(named: FileIcon.asset(name, directory: directory))
         super.init(textCell: "")
     }
 
@@ -28,10 +28,10 @@ final class FileChip: NSTextAttachmentCell {
     required init(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     /// The chip for a path, with the box's own text attributes about it.
-    static func text(_ path: String, attributes: [NSAttributedString.Key: Any]) -> NSAttributedString {
+    static func text(_ path: String, directory: Bool = false, attributes: [NSAttributedString.Key: Any]) -> NSAttributedString {
         let font = attributes[.font] as? NSFont ?? .systemFont(ofSize: NSFont.systemFontSize)
         let attachment = NSTextAttachment()
-        attachment.attachmentCell = FileChip(path: path, font: font)
+        attachment.attachmentCell = FileChip(path: path, directory: directory, font: font)
         let chip = NSMutableAttributedString(attachment: attachment)
         chip.addAttributes(attributes, range: NSRange(location: 0, length: chip.length))
         return chip
@@ -91,24 +91,10 @@ enum FileTags {
 
     private static let word = try! NSRegularExpression(pattern: #"(?<![^\s])@([^\s@]+)"#)
     @MainActor private static var cache: [String: [Segment]] = [:]
-    @MainActor private static var icons: [String: NSImage] = [:]
 
-    @MainActor static func text(_ text: String, folder: String?) -> Text {
-        let parts = segments(text, folder: folder)
-        guard parts.contains(where: { if case .file = $0 { true } else { false } }) else { return Text(text) }
-        return parts.reduce(Text("")) { line, part in
-            switch part {
-            case .text(let words):
-                return Text("\(line)\(words)")
-            case .file(let path, let directory):
-                let name = (path as NSString).lastPathComponent
-                // A narrow no-break space: close, and the icon never ends a
-                // line its name begins.
-                let tag = Text("\(Text(Image(nsImage: icon(name, directory: directory))).baselineOffset(-2))\u{202F}\(name)")
-                    .foregroundStyle(Palette.mention)
-                return Text("\(line)\(tag)")
-            }
-        }
+    /// Whether the text names a file.
+    @MainActor static func namesFiles(_ text: String, folder: String?) -> Bool {
+        segments(text, folder: folder).contains { if case .file = $0 { true } else { false } }
     }
 
     /// The text cut into words and files, remembered: a conversation draws
@@ -153,18 +139,5 @@ enum FileTags {
         }
         var directory: ObjCBool = false
         return FileManager.default.fileExists(atPath: full, isDirectory: &directory) ? directory.boolValue : nil
-    }
-
-    /// The file's icon at the size of the words around it.
-    @MainActor private static func icon(_ name: String, directory: Bool) -> NSImage {
-        let asset = FileIcon.asset(name, directory: directory)
-        if let icon = icons[asset] { return icon }
-        let source = NSImage(named: asset)
-        let icon = NSImage(size: NSSize(width: FileChip.iconSize, height: FileChip.iconSize), flipped: false) { rect in
-            source?.draw(in: rect)
-            return true
-        }
-        icons[asset] = icon
-        return icon
     }
 }

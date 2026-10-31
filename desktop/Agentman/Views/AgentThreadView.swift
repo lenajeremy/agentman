@@ -943,12 +943,7 @@ private struct LongText: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            FileTags.text(text, folder: folder)
-                .font(TextStyle.body)
-                .foregroundStyle(Palette.text)
-                .lineSpacing(5)
-                .textSelection(.enabled)
-                .lineLimit(long && !open ? 8 : nil)
+            TaggedText(text: text, folder: folder, lineLimit: long && !open ? 8 : nil)
             if long {
                 Button(open ? "Show less" : "Show more") {
                     withAnimation(.easeOut(duration: 0.15)) { open.toggle() }
@@ -1380,9 +1375,7 @@ private struct QueuedBubble: View {
         HStack {
             Spacer(minLength: 80)
             VStack(alignment: .trailing, spacing: 4) {
-                FileTags.text(text, folder: folder)
-                    .font(TextStyle.body)
-                    .foregroundStyle(Palette.textSecondary)
+                TaggedText(text: text, folder: folder, color: Palette.textSecondary, lineSpacing: 0, selectable: false)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(
