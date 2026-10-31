@@ -693,6 +693,10 @@ func (s *CodexSource) Answer(ctx context.Context, sessionID string, answer proto
 	if handled, err := s.answerThroughDaemon(ctx, session, answer); handled {
 		return err
 	}
+	// A question Codex asked without waiting; see codex_asks.go.
+	if handled, err := s.answerAsk(ctx, session, answer); handled {
+		return err
+	}
 	if session.tmuxName == "" {
 		return fmt.Errorf("source: only sessions started with `am codex` can be answered")
 	}
