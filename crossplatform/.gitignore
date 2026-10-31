@@ -13,3 +13,4 @@ build/android/gen/
 frontend/public/editor
 frontend/public/fonts
 frontend/public/assets
+frontend/src/editor/fileIconMap.json
