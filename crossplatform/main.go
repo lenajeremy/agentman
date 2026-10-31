@@ -23,6 +23,7 @@ func main() {
 		Description: "Every coding agent on this computer, in one window",
 		Services: append([]application.Service{
 			application.NewService(&Daemon{}),
+			application.NewService(&Windows{}),
 		}, newHost().services()...),
 		Assets: application.AssetOptions{
 			Handler: withSymbols(application.AssetFileServerFS(assets)),

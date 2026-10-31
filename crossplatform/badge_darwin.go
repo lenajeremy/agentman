@@ -9,7 +9,9 @@ import (
 
 var dockService = dock.New()
 
-func badgeServices() []application.Service { return []application.Service{application.NewService(dockService)} }
+func badgeServices() []application.Service {
+	return []application.Service{application.NewService(dockService)}
+}
 
 func setBadge(label string) error {
 	if label == "" {

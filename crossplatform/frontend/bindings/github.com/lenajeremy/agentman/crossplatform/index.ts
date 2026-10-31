@@ -3,11 +3,14 @@
 
 import * as Daemon from "./daemon.js";
 import * as Host from "./host.js";
+import * as Windows from "./windows.js";
 export {
     Daemon,
-    Host
+    Host,
+    Windows
 };
 
 export {
+    EditorOptions,
     Endpoint
 } from "./models.js";

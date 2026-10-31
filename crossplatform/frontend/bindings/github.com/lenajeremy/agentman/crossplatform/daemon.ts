@@ -27,14 +27,6 @@ export function Endpoint(): $CancellablePromise<$models.Endpoint> {
 }
 
 /**
- * OpenEditor opens an agent's folder in an editor window of its own, as the
- * Mac app does. file, if given, opens in it.
- */
-export function OpenEditor(sessionID: string, file: string): $CancellablePromise<void> {
-    return $Call.ByID(2741787209, sessionID, file);
-}
-
-/**
  * Platform names the system the shell runs on, for what the screens show
  * differently: ⌘ or Ctrl, and room for macOS's window buttons.
  */

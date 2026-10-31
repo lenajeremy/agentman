@@ -2,7 +2,7 @@
 // shell can change (Wails today) without the screens changing. In a plain
 // browser, while the screens are developed, the Vite server stands in.
 
-import { Daemon, Host } from "../bindings/github.com/lenajeremy/agentman/crossplatform";
+import { Daemon, Host, Windows } from "../bindings/github.com/lenajeremy/agentman/crossplatform";
 import { Events } from "@wailsio/runtime";
 
 export interface Endpoint {
@@ -34,11 +34,30 @@ export async function platform(): Promise<Platform> {
   return platformCache;
 }
 
-/** An agent's folder in an editor window of its own. */
-export async function openEditor(sessionId: string, file = ""): Promise<void> {
-  if (inShell) return Daemon.OpenEditor(sessionId, file);
-  const q = new URLSearchParams({ view: "editor", session: sessionId, ...(file ? { file } : {}) });
+export interface EditorOptions {
+  folder: string;
+  sessionId?: string;
+  file?: string;
+  terminal?: boolean;
+  agentHere?: boolean;
+}
+
+/** A folder in an editor window of its own, as the Mac app's editor scenes. */
+export async function openEditor(opts: EditorOptions): Promise<void> {
+  const full = { sessionId: "", file: "", terminal: false, agentHere: false, ...opts };
+  if (inShell) return Windows.OpenEditor(full);
+  const q = new URLSearchParams({ view: "editor", folder: full.folder });
+  if (full.sessionId) q.set("session", full.sessionId);
+  if (full.file) q.set("file", full.file);
+  if (full.terminal) q.set("terminal", "1");
+  if (full.agentHere) q.set("agent", "here");
   window.open(`/?${q}`, "_blank", "width=1200,height=800");
+}
+
+/** The Settings window, on a page ("" for the last one shown). */
+export async function openSettings(page = ""): Promise<void> {
+  if (inShell) return Windows.OpenSettings(page);
+  window.open(`/?view=settings${page ? `&page=${page}` : ""}`, "_blank", "width=800,height=580");
 }
 
 // What the system does for the screens (host.go). In a browser, while the

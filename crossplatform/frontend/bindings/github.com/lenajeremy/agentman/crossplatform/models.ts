@@ -6,6 +6,54 @@
 import { Create as $Create } from "@wailsio/runtime";
 
 /**
+ * EditorOptions says what an editor window opens on.
+ */
+export class EditorOptions {
+    /**
+     * Folder is the project; SessionID an agent working in it.
+     */
+    "folder": string;
+    "sessionId": string;
+
+    /**
+     * File opens at once; Terminal shows the terminal; AgentHere shows the
+     * folder's agent in the agent panel.
+     */
+    "file": string;
+    "terminal": boolean;
+    "agentHere": boolean;
+
+    /** Creates a new EditorOptions instance. */
+    constructor($$source: Partial<EditorOptions> = {}) {
+        if (!("folder" in $$source)) {
+            this["folder"] = "";
+        }
+        if (!("sessionId" in $$source)) {
+            this["sessionId"] = "";
+        }
+        if (!("file" in $$source)) {
+            this["file"] = "";
+        }
+        if (!("terminal" in $$source)) {
+            this["terminal"] = false;
+        }
+        if (!("agentHere" in $$source)) {
+            this["agentHere"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new EditorOptions instance from a string or object.
+     */
+    static createFrom($$source: any = {}): EditorOptions {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new EditorOptions($$parsedSource as Partial<EditorOptions>);
+    }
+}
+
+/**
  * Endpoint is what ~/.agentman/app.json holds.
  */
 export class Endpoint {
