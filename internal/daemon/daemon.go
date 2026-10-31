@@ -1241,6 +1241,9 @@ func (d *Daemon) HandleFrom(
 		protocol.ReqListBranches:
 		return d.history(ctx, req)
 
+	case protocol.ReqGitStatus, protocol.ReqGitCommit, protocol.ReqGitPush, protocol.ReqGitCreatePR:
+		return d.gitAction(ctx, req)
+
 	case protocol.ReqRenameSession:
 		return d.renameSession(req)
 
@@ -1365,7 +1368,9 @@ func validateRequest(req protocol.Request) error {
 		req.Type == protocol.ReqCommitDiff || req.Type == protocol.ReqListBranches ||
 		req.Type == protocol.ReqRenameSession || req.Type == protocol.ReqSetAgentAlerts ||
 		req.Type == protocol.ReqListCommands || req.Type == protocol.ReqCommandPanel ||
-		req.Type == protocol.ReqFindFiles || req.Type == protocol.ReqAttachFile
+		req.Type == protocol.ReqFindFiles || req.Type == protocol.ReqAttachFile ||
+		req.Type == protocol.ReqGitStatus || req.Type == protocol.ReqGitCommit ||
+		req.Type == protocol.ReqGitPush || req.Type == protocol.ReqGitCreatePR
 	if requiresSession && (req.SessionID == "" || len(req.SessionID) > maxSessionIDBytes) {
 		return fmt.Errorf("daemon: invalid session id")
 	}
@@ -1428,6 +1433,10 @@ func validateRequest(req protocol.Request) error {
 		return nil
 	case protocol.ReqListBranches:
 		return nil
+	case protocol.ReqGitStatus, protocol.ReqGitPush, protocol.ReqGitCreatePR:
+		return nil
+	case protocol.ReqGitCommit:
+		return validateCommit(req.Text, req.Paths)
 	case protocol.ReqCommitFiles, protocol.ReqCommitDiff:
 		if !commitHash.MatchString(req.Commit) {
 			return fmt.Errorf("daemon: that is not a commit")

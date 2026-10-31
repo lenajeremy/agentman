@@ -14,6 +14,14 @@ struct WorkspacePanel: View {
 
     @State private var expanded = false
     @State private var changes: [WorkspaceChange] = []
+    /// Files holding secrets that changed, left out of the list.
+    @State private var hidden = 0
+    @State private var git: GitState?
+    /// Bumped after a git action, to read everything again.
+    @State private var reread = 0
+    /// What the branch was last read for: it is read again when a turn
+    /// begins or ends, or after a git action, not at every step.
+    @State private var gitReadFor: GitRead?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -56,9 +64,15 @@ struct WorkspacePanel: View {
                     if let branch {
                         Label(branch, systemImage: "point.3.connected.trianglepath.dotted")
                             .padding(.vertical, 10)
+                        // Not from a daemon too old to read where the branch stands.
+                        if var git {
+                            // The changes as last listed, read more often than the branch.
+                            let _ = (git.changes = changes.count + hidden)
+                            GitActionsRow(session: session, state: git, changes: changes, hidden: hidden) { reread += 1 }
+                        }
                     }
                     workspaceRow("History", symbol: "clock.arrow.circlepath", opens: true) { show(.history) }
-                    Button { show(.changes) } label: {
+                    Button { RightPanel.show(.diff) } label: {
                         HStack(spacing: 10) {
                             Image(systemName: "doc.badge.plus").frame(width: 16)
                             Text("Changes")
@@ -72,7 +86,7 @@ struct WorkspacePanel: View {
                         .padding(.vertical, 10)
                     }
                     .buttonStyle(.plain)
-                    workspaceRow("Files", symbol: "folder", opens: true) { show(.files) }
+                    workspaceRow("Files", symbol: "folder") { RightPanel.show(.files) }
                     if (session.artifacts ?? 0) > 0 {
                         workspaceRow("Plans", symbol: "doc.text", opens: true) { show(.plans) }
                     }
@@ -112,11 +126,21 @@ struct WorkspacePanel: View {
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Palette.line))
         // Again as the agent works: a turn changes files long before it ends.
         // A burst of activity asks once, a second after it settles.
-        .task(id: Refresh(state: session.state, activity: session.lastActivityAt)) {
+        .task(id: Refresh(state: session.state, activity: session.lastActivityAt, reread: reread)) {
             if changes.isEmpty == false || branch != nil { try? await Task.sleep(for: .seconds(1)) }
             guard !Task.isCancelled else { return }
-            branch = try? await store.workspace(.listCommits, session: session.id).branch
-            changes = (try? await store.workspace(.listChanges, session: session.id).changes) ?? []
+            let read = GitRead(state: session.state, reread: reread)
+            if gitReadFor != read {
+                gitReadFor = read
+                let state = try? await store.git(.gitStatus, session: session.id)
+                if state != git { git = state }
+                // A daemon from before the git actions names the branch here.
+                let name = state != nil ? state?.branch : try? await store.workspace(.listCommits, session: session.id).branch
+                if name != branch { branch = name }
+            }
+            let listed = try? await store.workspace(.listChanges, session: session.id)
+            if (listed?.changes ?? []) != changes { changes = listed?.changes ?? [] }
+            if (listed?.hidden ?? 0) != hidden { hidden = listed?.hidden ?? 0 }
         }
         .task {
             let open = ProcessInfo.processInfo.environment["AGENTMAN_FILES_OPEN"] ?? ""
@@ -131,6 +155,12 @@ struct WorkspacePanel: View {
     private struct Refresh: Equatable {
         let state: SessionState
         let activity: Int64?
+        let reread: Int
+    }
+
+    private struct GitRead: Equatable {
+        let state: SessionState
+        let reread: Int
     }
 
     /// The summary beside the thread; a list, a diff or a file, wider.
@@ -339,23 +369,11 @@ private struct ChangeRow: View {
         .contentShape(Rectangle())
     }
 
-    static func mark(_ status: String) -> String {
-        switch status {
-        case "added": "A"
-        case "deleted": "D"
-        case "renamed": "R"
-        case "untracked": "?"
-        default: "M"
-        }
-    }
+    // git's "XY" codes: these read every change as modified when they
+    // matched words the daemon never sends.
+    static func mark(_ status: String) -> String { ChangeStatus.letter(status) }
 
-    static func tint(_ status: String) -> Color {
-        switch status {
-        case "added", "untracked": Palette.ok
-        case "deleted": Palette.errorText
-        default: Palette.codeNumber
-        }
-    }
+    static func tint(_ status: String) -> Color { ChangeStatus.tint(status) }
 }
 
 /// A path as its file's name, with the folder it is in dimmed before it.

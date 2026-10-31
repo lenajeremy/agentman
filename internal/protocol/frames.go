@@ -167,6 +167,18 @@ const (
 	// calls did and why. Steps are the run's calls, with their titles; Text
 	// is what the agent said just before them.
 	ReqToolsTitle RequestType = "tools_title"
+	// The right panel's git actions, in the folder of the session named by
+	// SessionID. ReqGitStatus reads the branch and how it stands against its
+	// upstream and the default branch. ReqGitCommit commits the files in
+	// Paths with the message in Text; an empty Text has Agentman write one.
+	// ReqGitPush pushes the branch, setting its upstream the first time.
+	// ReqGitCreatePR pushes what isn't pushed and opens a pull request with
+	// the GitHub CLI. Each is answered with EvtGit, the branch as it stands
+	// after, and what was done.
+	ReqGitStatus   RequestType = "git_status"
+	ReqGitCommit   RequestType = "git_commit"
+	ReqGitPush     RequestType = "git_push"
+	ReqGitCreatePR RequestType = "git_create_pr"
 )
 
 // Request is anything the app asks of the daemon.
@@ -244,6 +256,12 @@ type Request struct {
 	// Ref is the branch ReqListCommits reads, in full — refs/heads/… or
 	// refs/remotes/… — as ReqListBranches reported it. Empty reads HEAD.
 	Ref string `json:"ref,omitempty"`
+	// Paths are the files ReqGitCommit commits, relative to the session's
+	// directory as ReqListChanges names them.
+	Paths []string `json:"paths,omitempty"`
+	// IgnoreWhitespace leaves changes to whitespace alone out of a
+	// ReqFileDiff, as `git diff -w` does.
+	IgnoreWhitespace bool `json:"ignoreWhitespace,omitempty"`
 	// Manager is the settings on ReqManagerSetSettings.
 	Manager *ManagerSettings `json:"manager,omitempty"`
 }
@@ -269,6 +287,7 @@ const (
 	EvtServerStopped  EventType = "server_stopped"
 	EvtError          EventType = "error"
 	EvtWorkspace      EventType = "workspace"
+	EvtGit            EventType = "git"
 	EvtDirectories    EventType = "directories"
 	EvtSessionStarted EventType = "session_started"
 	// EvtFolders answers ReqListFolders.
@@ -322,6 +341,7 @@ type Event struct {
 	Port      int              `json:"port,omitempty"`
 	Link      string           `json:"link,omitempty"`
 	Workspace *WorkspaceResult `json:"workspace,omitempty"`
+	Git       *GitState        `json:"git,omitempty"`
 	// Directory names only; the app never needs the Mac's absolute home path.
 	Directories []string `json:"directories,omitempty"`
 	Path        string   `json:"path,omitempty"`
@@ -412,6 +432,35 @@ type ReleaseNote struct {
 }
 
 // WorkspaceResult is a bounded, read-only view of one session's directory.
+// GitState is a session's branch as the right panel's git actions need it,
+// and, after one of them, what it did.
+type GitState struct {
+	SessionID string `json:"sessionId"`
+	// Branch is empty while HEAD is detached.
+	Branch string `json:"branch,omitempty"`
+	// DefaultBranch is the remote's default, else main or master.
+	DefaultBranch string `json:"defaultBranch,omitempty"`
+	// Upstream is the branch pushed to, as origin/name; empty before the
+	// first push.
+	Upstream string `json:"upstream,omitempty"`
+	// Ahead counts the commits not pushed: past the upstream, or on no
+	// remote at all before the first push. Behind, the upstream's not here.
+	Ahead          int `json:"ahead"`
+	Behind         int `json:"behind"`
+	AheadOfDefault int `json:"aheadOfDefault"`
+	// Remote is where a first push goes: origin, else the first remote.
+	Remote string `json:"remote,omitempty"`
+	// Changes counts the files changed and not committed.
+	Changes int `json:"changes"`
+	// Done says what an action did: "committed", "pushed" or "pr_created".
+	Done string `json:"done,omitempty"`
+	// Commit and Message are the commit made, its short hash and message.
+	Commit  string `json:"commit,omitempty"`
+	Message string `json:"message,omitempty"`
+	// URL is the pull request created, or the one already open.
+	URL string `json:"url,omitempty"`
+}
+
 type WorkspaceResult struct {
 	Kind      string            `json:"kind"`
 	SessionID string            `json:"sessionId"`

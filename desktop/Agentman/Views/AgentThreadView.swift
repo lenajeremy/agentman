@@ -16,7 +16,7 @@ struct AgentThreadView: View {
     @State private var sending = false
     /// Whether the thread is scrolled to its end, so new messages follow
     /// on; scrolled up, nothing moves what the user is reading.
-    @State private var atEnd = true
+    @State private var following = Following()
     /// Bumped when the user sends, which always brings them to the end.
     @State private var followRequest = 0
     @State private var showFiles = true
@@ -25,6 +25,10 @@ struct AgentThreadView: View {
     @State private var confirmEnd = false
     @State private var resuming = false
     @State private var filesTab: WorkspaceTab = .changes
+    /// The right panel: its diff and files, at the window's edge.
+    @AppStorage(RightPanel.openKey) private var panelOpen = false
+    @AppStorage(RightPanel.widthKey) private var panelWidth = RightPanel.defaultWidth
+    @State private var panelMaximised = false
     /// How many files the agent has changed since the last commit.
     @State private var changed = 0
     /// The agent's commands, for `/` in the box, where it takes them.
@@ -44,17 +48,42 @@ struct AgentThreadView: View {
         if inPanel {
             thread
         } else {
-            VStack(spacing: 0) {
-                threadHeader
-                HStack(alignment: .top, spacing: 0) {
-                    thread
-                    if showFiles {
-                        // Its own width: a summary beside the thread, wider
-                        // for a list, a diff or a file.
-                        WorkspacePanel(session: session, tab: $filesTab)
-                            .padding(.top, 12)
-                            .padding(.trailing, 12)
-                            .padding(.bottom, 20)
+            GeometryReader { geometry in
+                let width = RightPanel.clamp(panelWidth, available: geometry.size.width, room: Self.threadRoom)
+                // The card goes while the panel leaves too little room
+                // for it beside the conversation.
+                let cardFits = !panelOpen || geometry.size.width - width >= Self.threadRoom + WorkspacePanel.summaryWidth + 12
+                HStack(spacing: 0) {
+                    if !(panelOpen && panelMaximised) {
+                        VStack(spacing: 0) {
+                            threadHeader
+                            HStack(alignment: .top, spacing: 0) {
+                                thread
+                                if showFiles, cardFits {
+                                    // Its own width: a summary beside the thread, wider
+                                    // for a list, a diff or a file.
+                                    WorkspacePanel(session: session, tab: $filesTab)
+                                        .padding(.top, 12)
+                                        .padding(.trailing, 12)
+                                        .padding(.bottom, 20)
+                                }
+                            }
+                        }
+                    }
+                    if panelOpen {
+                        RightPanel(session: session, maximised: $panelMaximised) {
+                            panelOpen = false
+                            panelMaximised = false
+                        }
+                        .frame(width: panelMaximised ? nil : width)
+                        .frame(maxWidth: panelMaximised ? .infinity : nil)
+                        .overlay(alignment: .leading) {
+                            if !panelMaximised {
+                                PaneResizeHandle(width: $panelWidth, grows: -1, clamp: {
+                                    RightPanel.clamp($0, available: geometry.size.width, room: Self.threadRoom)
+                                }, reset: RightPanel.defaultWidth)
+                            }
+                        }
                     }
                 }
             }
@@ -76,6 +105,8 @@ struct AgentThreadView: View {
     /// The conversation's width at most, as T3 Code's: long lines read
     /// worse than short ones.
     static let column: CGFloat = 740
+    /// The least the conversation keeps beside the right panel.
+    static let threadRoom: CGFloat = 380
 
     private var threadHeader: some View {
         let folderExists = FileManager.default.fileExists(atPath: session.cwd)
@@ -99,6 +130,10 @@ struct AgentThreadView: View {
                     else { EditorOpener.openTerminal(folder: session.cwd, with: openWindow) }
                 }
             }
+            ChromeButton(symbol: "plus.forwardslash.minus", help: panelOpen ? "Close the diff (⇧⌘D)" : "Diff and files (⇧⌘D)", active: panelOpen) {
+                if panelOpen { panelOpen = false; panelMaximised = false } else { RightPanel.show(.diff) }
+            }
+            .keyboardShortcut("d", modifiers: [.command, .shift])
             ChromeButton(symbol: "sidebar.right", help: showFiles ? "Hide the workspace (⇧⌘E)" : "Files, changes and history (⇧⌘E)", active: showFiles) { showFiles.toggle() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
             if folderExists || Self.endable(session) {
@@ -133,10 +168,14 @@ struct AgentThreadView: View {
                 .frame(maxWidth: Self.column)
                 .frame(maxWidth: .infinity)
             }
-            if changed > 0, inPanel || !showFiles {
+            if changed > 0, inPanel || (!showFiles && !panelOpen) {
                 ChangedBar(count: changed) {
-                    filesTab = .changes
-                    showFiles = true
+                    if inPanel {
+                        filesTab = .changes
+                        showFiles = true
+                    } else {
+                        RightPanel.show(.diff)
+                    }
                 }
                 .padding(.horizontal, gutter)
                 .padding(.top, 10)
@@ -145,7 +184,7 @@ struct AgentThreadView: View {
             }
             ScrollViewReader { proxy in
                 ScrollView(showsIndicators: false) {
-                    let items = ThreadItem.items(from: store.messages[session.id] ?? [])
+                    let items = store.threadItems(session.id)
                     LazyVStack(alignment: .leading, spacing: 24) {
                         if store.hasMore[session.id] == true {
                             LoadingEarlier()
@@ -191,36 +230,33 @@ struct AgentThreadView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .scrollIndicators(.never)
-                .modifier(FollowsEnd(atEnd: $atEnd, earlier: store.hasMore[session.id] == true ? { await store.loadOlder(session.id) } : nil))
+                .modifier(FollowsEnd(following: following, earlier: store.hasMore[session.id] == true ? { await store.loadOlder(session.id) } : nil))
                 .modifier(TopFade())
                 .overlay {
                     if isEmpty { EmptyThread(session: session) }
                 }
                 .overlay(alignment: .bottom) {
-                    if !atEnd, !isEmpty {
-                        JumpToLatest {
-                            withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("end", anchor: .bottom) }
-                        }
+                    JumpToLatestOverlay(following: following, hidden: isEmpty) {
+                        withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("end", anchor: .bottom) }
                     }
                 }
-                .animation(.easeOut(duration: 0.15), value: atEnd)
                 .overlay {
                     if dropping { DropTarget(label: "Drop images for \(session.name)") }
                 }
                 .onChange(of: store.messages[session.id]?.last?.id) { _, last in
-                    guard last != nil, atEnd else { return }
+                    guard last != nil, following.atEnd else { return }
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo("end", anchor: .bottom)
                     }
                 }
                 .onChange(of: session.question?.id) { _, id in
-                    guard id != nil, atEnd else { return }
+                    guard id != nil, following.atEnd else { return }
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo("end", anchor: .bottom)
                     }
                 }
                 .onChange(of: followRequest) { _, _ in
-                    atEnd = true
+                    following.atEnd = true
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo("end", anchor: .bottom)
                     }
@@ -1011,7 +1047,7 @@ struct ToolRun: View {
 
     @ViewBuilder private var statusIcon: some View {
         if calls.last?.tool?.status == "running" {
-            ProgressView().controlSize(.mini).frame(width: 11, height: 11)
+            Loader()
         } else {
             Image(systemName: "wrench.and.screwdriver")
                 .font(.system(size: 10, weight: .medium))
@@ -1026,7 +1062,7 @@ struct ToolRun: View {
             let kind = ToolKind(running.tool?.name)
             return "\(kind.verb) \(ToolKind.tidy(running.tool?.summary ?? running.text ?? ""))…"
         }
-        if let title = store.toolTitles[AgentsStore.toolRunKey(calls)], !title.isEmpty {
+        if let title = store.toolTitle(calls).text, !title.isEmpty {
             return title
         }
         var counts: [ToolKind: Int] = [:]
@@ -1088,7 +1124,7 @@ private struct ToolCallRow: View {
         Group {
             switch call.tool?.status {
             case "running":
-                ProgressView().controlSize(.mini).frame(width: 11, height: 11)
+                Loader()
             case "error":
                 Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.error)
             default:
@@ -1106,7 +1142,7 @@ private struct ToolCallRow: View {
             Group {
                 switch call.tool?.status {
                 case "running":
-                    ProgressView().controlSize(.mini).frame(width: 11, height: 11)
+                    Loader()
                 case "error":
                     Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.error)
                 default:

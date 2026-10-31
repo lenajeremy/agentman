@@ -116,6 +116,36 @@ func TestWorkspaceShowsWorkingTreeDiffAndUntrackedFiles(t *testing.T) {
 	}
 }
 
+// The diff panel's whitespace button: a file whose only change is its
+// indentation shows that change, and nothing once whitespace is left out.
+func TestFileDiffCanLeaveOutWhitespace(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	git("config", "user.email", "test@example.com")
+	git("config", "user.name", "Test")
+	write(t, dir, "a.go", "func a() {\nreturn\n}\n")
+	git("add", "a.go")
+	git("commit", "-qm", "base")
+	write(t, dir, "a.go", "func a() {\n\treturn\n}\n")
+
+	d := workspaceDaemon(dir)
+	all := d.Handle(context.Background(), protocol.Request{Type: protocol.ReqFileDiff, SessionID: "codex:test", Path: "a.go"})
+	if all.Type != protocol.EvtWorkspace || !strings.Contains(all.Workspace.Diff, "+\treturn") {
+		t.Fatalf("whitespace change missing: %+v", all)
+	}
+	quiet := d.Handle(context.Background(), protocol.Request{Type: protocol.ReqFileDiff, SessionID: "codex:test", Path: "a.go", IgnoreWhitespace: true})
+	if quiet.Type != protocol.EvtWorkspace || strings.Contains(quiet.Workspace.Diff, "@@") {
+		t.Fatalf("whitespace change shown anyway: %+v", quiet)
+	}
+}
+
 func TestWorkspaceChangesStayRelativeToNestedSessionDirectory(t *testing.T) {
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "app")
@@ -370,7 +400,7 @@ func TestALargeNewFileDiffFitsWhatTheAppAccepts(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer root.Close()
-	diff, truncated, err := fileDiff(context.Background(), dir, root, "big.txt")
+	diff, truncated, err := fileDiff(context.Background(), dir, root, "big.txt", false)
 	if err != nil {
 		t.Fatal(err)
 	}

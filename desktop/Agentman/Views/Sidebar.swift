@@ -1,11 +1,14 @@
 import SwiftUI
 
-/// Agentman first, pinned above every agent, which are grouped by the
-/// folder they work in.
+/// The agents in sections: any pinned on top, then those still working,
+/// then those that came back to you (asking something first). The archived
+/// fold away at the foot, above Agentman's card.
 struct Sidebar: View {
     @Environment(\.windowHeaderLeading) private var headerLeading
     @Environment(AgentsStore.self) private var store
     @AppStorage(Sidebar.hiddenKey) private var hidden = false
+    @AppStorage("sidebarWorkingOpen") private var workingOpen = true
+    @AppStorage("sidebarArchivedOpen") private var archivedOpen = false
 
     // Its width as T3 Code's: dragged, kept, double-click for the default;
     // never so wide that the conversation is squeezed.
@@ -28,30 +31,21 @@ struct Sidebar: View {
                     .listRowSeparator(.hidden)
             }
 
-            ForEach(store.groups.flatMap(\.sessions)) { session in
-                AgentButton(session: session)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 2, leading: 10, bottom: 2, trailing: 10))
-                    .contextMenu {
-                        Button("Rename…") { store.renaming = session.id }
-                        Button("Show Project") { store.folderFilter = session.cwd }
-                        if let own = session.originalName {
-                            Button("Use the agent's own name, “\(own)”") {
-                                Task { await store.rename(session.id, to: "") }
-                            }
-                        }
-                        Divider()
-                        // Agentman speaks for the agents while it is on;
-                        // this one can speak for itself as well.
-                        if store.manager.on {
-                            Toggle("Notify Me About This Agent", isOn: Binding(
-                                get: { session.alerts == true },
-                                set: { on in Task { await store.setAlerts(session.id, on) } }
-                            ))
-                        }
-                        FolderMuteButton(folder: session.cwd)
-                    }
+            let sections = store.sidebar
+            if !sections.pinned.isEmpty {
+                SectionHeading(title: "Pinned")
+                ForEach(sections.pinned) { row($0) }
             }
+            if !sections.working.isEmpty {
+                SectionHeading(title: "Working", count: sections.working.count, open: $workingOpen)
+                if workingOpen {
+                    ForEach(sections.working) { row($0) }
+                }
+                if !sections.active.isEmpty { SectionRule() }
+            } else if !sections.pinned.isEmpty, !sections.active.isEmpty {
+                SectionRule()
+            }
+            ForEach(sections.active) { row($0) }
 
             // In a folder, the sessions that ran there and ended: read them,
             // or resume one.
@@ -109,12 +103,20 @@ struct Sidebar: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
+                shelves
                 AgentmanCard()
                 ConnectionFooter()
             }
             .background(Palette.sidebar)
         }
         .task { await store.loadFolders() }
+        // The branch under each agent's title, kept current as agents switch.
+        .task {
+            while !Task.isCancelled {
+                await store.readBranches()
+                try? await Task.sleep(for: .seconds(10))
+            }
+        }
         .overlay {
             if store.sessions.isEmpty, store.status == .connected {
                 ContentUnavailableView(
@@ -127,10 +129,74 @@ struct Sidebar: View {
         }
     }
 
+    /// The archived, at the foot of the list under a heading that folds
+    /// them away; open, as many as fit in a part of the sidebar, scrolling
+    /// past that.
+    @ViewBuilder private var shelves: some View {
+        let archived = store.sidebar.archived
+        if !archived.isEmpty {
+            VStack(spacing: 0) {
+                SectionHeading(title: "Archived", count: archived.count, open: $archivedOpen)
+                    .padding(.horizontal, SidebarMetrics.margin + SidebarMetrics.list)
+                if archivedOpen { shelf(archived) }
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private func shelf(_ sessions: [Session]) -> some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(sessions) { session in
+                    row(session, inList: false)
+                        .padding(.vertical, 2)
+                }
+            }
+        }
+        .scrollIndicators(.never)
+        .frame(maxHeight: min(CGFloat(sessions.count) * 80, 190))
+    }
+
+    private func row(_ session: Session, inList: Bool = true) -> some View {
+        AgentButton(session: session, inList: inList)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 2, leading: 10, bottom: 2, trailing: 10))
+            .contextMenu {
+                Button("Rename…") { store.renaming = session.id }
+                Button("Show Project") { store.folderFilter = session.cwd }
+                if let own = session.originalName {
+                    Button("Use the agent's own name, “\(own)”") {
+                        Task { await store.rename(session.id, to: "") }
+                    }
+                }
+                Divider()
+                if store.isPinned(session.id) {
+                    Button("Unpin") { store.unpin(session.id) }
+                } else {
+                    Button("Pin") { store.pin(session.id) }
+                }
+                if store.isArchived(session) {
+                    Button("Unarchive") { store.unarchive(session.id) }
+                } else {
+                    Button("Archive") { store.archive(session.id) }
+                }
+                Divider()
+                // Agentman speaks for the agents while it is on;
+                // this one can speak for itself as well.
+                if store.manager.on {
+                    Toggle("Notify Me About This Agent", isOn: Binding(
+                        get: { session.alerts == true },
+                        set: { on in Task { await store.setAlerts(session.id, on) } }
+                    ))
+                }
+                FolderMuteButton(folder: session.cwd)
+            }
+    }
+
     /// Up and down step through the agents, as they would a List's own
     /// selection; up from the first opens Agentman.
     private func move(_ direction: MoveCommandDirection) {
-        let ids = store.groups.flatMap(\.sessions).map(\.id)
+        let ids = store.sidebar.shown(working: workingOpen, archived: archivedOpen).map(\.id)
             + (store.folderFilter == nil ? [] : store.earlierHere.map(\.id))
         guard !ids.isEmpty, direction == .up || direction == .down else { return }
         guard case .agent(let current) = store.selection, let at = ids.firstIndex(of: current) else {
@@ -149,14 +215,19 @@ struct Sidebar: View {
 private struct AgentButton: View {
     @Environment(AgentsStore.self) private var store
     let session: Session
+    /// In the list, which draws a row's highlight; or at the sidebar's foot,
+    /// which doesn't.
+    var inList = true
     @State private var hovering = false
 
     var body: some View {
         AgentRow(session: session)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, inList ? 0 : SidebarMetrics.margin + SidebarMetrics.list)
             .contentShape(Rectangle())
             .onTapGesture { store.selection = .agent(session.id) }
             .onHover { hovering = $0 }
+            .background { if !inList { RowHighlight(selected: selected, hovering: hovering) } }
             .listRowBackground(RowHighlight(selected: selected, hovering: hovering))
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             .accessibilityAction { store.selection = .agent(session.id) }
@@ -196,6 +267,9 @@ private enum SidebarMetrics {
     /// The list's highlight stops this far from the sidebar's sides, and
     /// Agentman's card does too.
     static let margin: CGFloat = 10
+    /// The List's own room beside a row, inside the row's insets. What sits
+    /// below the List adds it to line up with the rows.
+    static let list: CGFloat = 8
 }
 
 /// Agentman, pinned at the top: its mark, what it has to say, and anything
@@ -309,25 +383,39 @@ struct AgentRow: View {
                 Text((session.cwd as NSString).lastPathComponent)
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                if let when = session.lastActivity {
-                    Text(Relative.short(when)).monospacedDigit()
-                }
+                status
             }
             .font(TextStyle.caption)
             .foregroundStyle(Palette.muted)
-            if store.renaming == session.id {
-                RenameField(session: session)
-            } else {
-                Text(session.name)
-                    .font(Fonts.sans(13.5, session.state == .waitingInput ? .medium : .regular))
-                    .foregroundStyle(session.state == .ended ? Palette.muted : Palette.text)
-                    .lineLimit(1)
-                    .help(session.originalName.map { "Renamed from “\($0)”" } ?? session.name)
-            }
             HStack(spacing: 5) {
-                Circle().fill(Palette.dot(session.state)).frame(width: 5, height: 5)
-                Text(detail).lineLimit(1)
-                    .foregroundStyle(detailColor)
+                if store.renaming == session.id {
+                    RenameField(session: session)
+                } else {
+                    Text(session.name)
+                        .font(Fonts.sans(13.5, session.state == .waitingInput ? .medium : .regular))
+                        .foregroundStyle(session.state == .ended || store.isArchived(session) ? Palette.muted : Palette.text)
+                        .lineLimit(1)
+                        .help(session.originalName.map { "Renamed from “\($0)”" } ?? session.name)
+                }
+                // With nothing under it, the agent's mark sits by its title.
+                if !detailLine {
+                    Spacer(minLength: 4)
+                    AgentMark(kind: session.kind, size: 14)
+                }
+            }
+            if detailLine {
+            HStack(spacing: 5) {
+                // What it asks while it needs you; otherwise its branch.
+                if waiting {
+                    Text(detail).lineLimit(1)
+                        .foregroundStyle(Palette.needsYouText)
+                } else if let branch = store.branches[session.cwd] {
+                    Text(branch)
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help("On branch \(branch)")
+                }
                 Spacer(minLength: 4)
                 if let servers = session.servers, !servers.isEmpty {
                     HStack(spacing: 3) {
@@ -343,34 +431,44 @@ struct AgentRow: View {
                 AgentMark(kind: session.kind, size: 14)
             }
             .font(TextStyle.caption)
+            }
         }
         .padding(.vertical, 8)
         .padding(.horizontal, SidebarMetrics.inset)
         .accessibilityElement(children: .combine)
     }
 
-    private var stateName: String {
-        switch session.state {
-        case .waitingInput: "Needs you"
-        case .busy: "Working"
-        case .idle: "Idle"
-        case .ended: "Ended"
-        case .unknown: "Unknown"
-        }
+    private var waiting: Bool { AgentsStore.filterState(session) == .waitingInput }
+
+    /// A third line, under the title: what it asks, its branch, its servers.
+    private var detailLine: Bool {
+        waiting || store.branches[session.cwd] != nil || !(session.servers ?? []).isEmpty
     }
 
+    /// What it asks, while it needs you.
     private var detail: String {
-        if session.state == .waitingInput {
-            return session.question?.title ?? session.question?.prompt ?? "Needs you"
-        }
-        return stateName
+        session.question?.title ?? session.question?.prompt ?? "Waiting for your answer"
     }
 
-    private var detailColor: Color {
-        switch session.state {
-        case .waitingInput: Palette.needsYouText
-        case .busy: Palette.workingText
-        default: Palette.muted
+    /// At the top right, as T3 Code has it: what it is doing while that
+    /// matters, otherwise how long since it last did anything.
+    @ViewBuilder private var status: some View {
+        if waiting {
+            HStack(spacing: 4) {
+                Circle().fill(Palette.dot(.waitingInput)).frame(width: 5, height: 5)
+                Text("Needs you")
+            }
+            .foregroundStyle(Palette.needsYouText)
+        } else if session.state == .busy {
+            HStack(spacing: 4) {
+                Loader(size: 9)
+                Text("Working")
+            }
+            .foregroundStyle(Palette.workingText)
+        } else if session.state == .ended {
+            Text("Ended")
+        } else if let when = session.lastActivity {
+            Text(Relative.short(when)).monospacedDigit()
         }
     }
 }
@@ -568,10 +666,15 @@ private struct FolderMuteButton: View {
     }
 }
 
-/// The sidebar's edge: drag to resize, double-click for the default width.
-struct SidebarResizeHandle: View {
+/// The line between two panes: drag to resize the pane it belongs to,
+/// double-click for its default width. The sidebar grows as its trailing
+/// edge moves right; the right panel, as its leading edge moves left.
+struct PaneResizeHandle: View {
     @Binding var width: Double
-    let window: CGFloat
+    /// 1 when dragging right widens the pane, -1 when it narrows it.
+    var grows: CGFloat = 1
+    let clamp: (Double) -> CGFloat
+    let reset: Double
     @State private var start: Double?
 
     var body: some View {
@@ -589,14 +692,73 @@ struct SidebarResizeHandle: View {
                     .gesture(
                         DragGesture(minimumDistance: 1, coordinateSpace: .global)
                             .onChanged { drag in
-                                let from = start ?? width
+                                let from = start ?? Double(clamp(width))
                                 start = from
-                                width = Double(Sidebar.clamp(from + drag.translation.width, window: window))
+                                width = Double(clamp(from + Double(drag.translation.width * grows)))
                             }
                             .onEnded { _ in start = nil }
                     )
-                    .onTapGesture(count: 2) { width = Sidebar.defaultWidth }
+                    .onTapGesture(count: 2) { width = reset }
             }
             .accessibilityHidden(true)
     }
 }
+
+/// A heading in the list of agents: a section's name, and for one that
+/// folds, how many are in it and a chevron that opens and closes it.
+private struct SectionHeading: View {
+    let title: String
+    var count: Int? = nil
+    var open: Binding<Bool>? = nil
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(Fonts.sans(12, .medium))
+                .foregroundStyle(hovering && open != nil ? Palette.text : Palette.muted)
+            Spacer(minLength: 4)
+            if let count {
+                Text(String(count))
+                    .font(TextStyle.label)
+                    .monospacedDigit()
+                    .foregroundStyle(Palette.faint)
+            }
+            if let open {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Palette.faint)
+                    .rotationEffect(.degrees(open.wrappedValue ? 90 : 0))
+            }
+        }
+        .padding(.horizontal, SidebarMetrics.inset)
+        .padding(.top, 12)
+        .padding(.bottom, 4)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard let open else { return }
+            withAnimation(.easeOut(duration: 0.15)) { open.wrappedValue.toggle() }
+        }
+        .onHover { hovering = $0 }
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10))
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(open == nil ? .isHeader : [.isHeader, .isButton])
+        .accessibilityValue(open.map { $0.wrappedValue ? "Open" : "Closed" } ?? "")
+    }
+}
+
+/// A hairline between the agents working and the rest.
+private struct SectionRule: View {
+    var body: some View {
+        Rectangle()
+            .fill(Palette.line)
+            .frame(height: 1)
+            .padding(.horizontal, SidebarMetrics.inset)
+            .padding(.vertical, 6)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10))
+            .accessibilityHidden(true)
+    }
+}
+

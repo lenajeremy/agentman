@@ -9,13 +9,6 @@ enum SidebarItem: Hashable {
     case agent(String)
 }
 
-/// The agents working in one folder.
-struct AgentGroup: Identifiable {
-    let id: String
-    let name: String
-    let sessions: [Session]
-}
-
 /// Everything the app knows about the agents on this Mac, kept current from
 /// the daemon's events.
 @MainActor
@@ -75,6 +68,7 @@ final class AgentsStore {
     var showPalette = false
     /// Unsent messages, by session, kept across launches.
     private(set) var drafts: [String: String] = (UserDefaults.standard.dictionary(forKey: "drafts") as? [String: String]) ?? [:]
+    @ObservationIgnored private var draftWrite: Task<Void, Never>?
 
     /// Keeps a session's unsent message, or forgets it once empty.
     func saveDraft(_ text: String, for sessionId: String) {
@@ -85,12 +79,34 @@ final class AgentsStore {
             let live = Set(sessions.map(\.id))
             drafts = drafts.filter { live.contains($0.key) }
         }
+        // Written once typing pauses, and at quit: a write wakes every view
+        // that keeps a setting, and at each key that redrew the panels
+        // beside the box.
+        draftWrite?.cancel()
+        draftWrite = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(0.8))
+            guard !Task.isCancelled else { return }
+            self?.writeDrafts()
+        }
+    }
+
+    func writeDrafts() {
         UserDefaults.standard.set(drafts, forKey: "drafts")
     }
 
     /// Agentman's titles for runs of tool calls, by the run's first and last
-    /// call; empty when there is none to be had.
-    var toolTitles: [String: String] = [:]
+    /// call: each run's its own, so a title arriving redraws that run alone.
+    /// One dictionary every run read redrew them all at each title, and a
+    /// run scrolled into view asks for its title.
+    @ObservationIgnored private var toolTitles: [String: ToolRunTitle] = [:]
+    /// Runs whose title has been asked for and not answered yet, and when a
+    /// run's asking last failed: asked again a minute later, not at every
+    /// scroll past it.
+    @ObservationIgnored private var titling: Set<String> = []
+    @ObservationIgnored private var titleFailed: [String: Date] = [:]
+    /// Each conversation's rows, made again only when its messages change:
+    /// not at every redraw while it scrolls.
+    @ObservationIgnored private var itemCache: [String: (messages: [Message], items: [ThreadItem])] = [:]
 
     let client: DaemonClient
     private var cursors: [String: String] = [:]
@@ -121,6 +137,9 @@ final class AgentsStore {
         appActive = NSApplication.shared.isActive
         notifier.start()
         let center = NotificationCenter.default
+        center.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.writeDrafts() }
+        }
         Task {
             for await _ in center.notifications(named: NSApplication.didBecomeActiveNotification) {
                 appActive = true
@@ -183,25 +202,97 @@ final class AgentsStore {
     var working: [Session] { sessions.filter { $0.state == .busy } }
     var idle: [Session] { sessions.filter { $0.state == .idle } }
 
-    /// Agents grouped by the folder they work in: the group with someone
-    /// waiting on you first, then the most recently active.
-    var groups: [AgentGroup] {
+    /// The sidebar's agents in sections: pinned, active, working, archived.
+    /// See SidebarSections. Search and the filters apply first.
+    var sidebar: SidebarSections {
         let query = search.trimmingCharacters(in: .whitespaces)
         let shown = sessions.filter { session in
-            (query.isEmpty || session.name.localizedCaseInsensitiveContains(query) || session.cwd.localizedCaseInsensitiveContains(query))
+            (query.isEmpty || session.name.localizedCaseInsensitiveContains(query) || session.cwd.localizedCaseInsensitiveContains(query)
+                || (branches[session.cwd]?.localizedCaseInsensitiveContains(query) ?? false))
                 && Self.inFolder(session.cwd, folderFilter)
                 && (stateFilter == nil || Self.filterState(session) == stateFilter)
         }
-        return Dictionary(grouping: shown, by: \.cwd)
-            .map { cwd, members in
-                AgentGroup(id: cwd, name: Self.folderName(cwd), sessions: members.sorted(by: Self.boardOrder))
-            }
-            .sorted { a, b in
-                let rankA = a.sessions.first?.state.rank ?? 9
-                let rankB = b.sessions.first?.state.rank ?? 9
-                if rankA != rankB { return rankA < rankB }
-                return (a.sessions.first?.lastActivityAt ?? 0) > (b.sessions.first?.lastActivityAt ?? 0)
-            }
+        return SidebarSections.make(shown, choices: sidebarChoices)
+    }
+
+    /// What the user chose for the sidebar: pins, and agents archived or
+    /// brought back by hand. Kept across launches.
+    private(set) var sidebarChoices = AgentsStore.loadSidebarChoices() {
+        didSet { saveSidebarChoices() }
+    }
+
+    func pin(_ id: String) {
+        sidebarChoices.pinned.removeAll { $0 == id }
+        sidebarChoices.pinned.append(id)
+        // A pinned agent is live work again.
+        sidebarChoices.archived[id] = nil
+        sidebarChoices.unarchived[id] = Date()
+    }
+
+    func unpin(_ id: String) {
+        sidebarChoices.pinned.removeAll { $0 == id }
+    }
+
+    /// Done with: out of the active list, its pin with it. The conversation
+    /// stays, and comes back if the agent works or asks again.
+    func archive(_ id: String) {
+        sidebarChoices.pinned.removeAll { $0 == id }
+        sidebarChoices.unarchived[id] = nil
+        sidebarChoices.archived[id] = Date()
+    }
+
+    /// Back to active work, and kept there until it next does something.
+    func unarchive(_ id: String) {
+        sidebarChoices.archived[id] = nil
+        sidebarChoices.unarchived[id] = Date()
+    }
+
+    func isPinned(_ id: String) -> Bool { sidebarChoices.pinned.contains(id) }
+
+    func isArchived(_ session: Session) -> Bool {
+        SidebarSections.isArchived(session, choices: sidebarChoices, now: .now)
+    }
+
+    private static let choicesKey = "sidebarChoices"
+
+    private static func loadSidebarChoices() -> SidebarSections.Choices {
+        let saved = UserDefaults.standard.dictionary(forKey: choicesKey) ?? [:]
+        func dates(_ key: String) -> [String: Date] {
+            ((saved[key] as? [String: Double]) ?? [:]).mapValues { Date(timeIntervalSince1970: $0) }
+        }
+        return SidebarSections.Choices(pinned: saved["pinned"] as? [String] ?? [], archived: dates("archived"), unarchived: dates("unarchived"))
+    }
+
+    private func saveSidebarChoices() {
+        // A bounded few: choices for agents long gone are let go.
+        let live = Set(sessions.map(\.id))
+        func trim(_ dates: [String: Date]) -> [String: Double] {
+            let kept = dates.count > 200 ? dates.filter { live.contains($0.key) } : dates
+            return kept.mapValues(\.timeIntervalSince1970)
+        }
+        UserDefaults.standard.set([
+            "pinned": sidebarChoices.pinned,
+            "archived": trim(sidebarChoices.archived),
+            "unarchived": trim(sidebarChoices.unarchived),
+        ], forKey: Self.choicesKey)
+    }
+
+    /// The branch checked out in each folder an agent works in, as T3 Code
+    /// shows it under a thread's title. Read every few seconds while the
+    /// sidebar shows; folders that aren't repositories have none.
+    private(set) var branches: [String: String] = [:]
+
+    func readBranches() async {
+        let folders = Set(sessions.filter { $0.state != .ended }.map(\.cwd))
+        var read: [String: String] = [:]
+        for folder in folders {
+            // Empty on a detached HEAD; a new repository's branch, before
+            // its first commit, is named all the same.
+            guard let branch = await Git.run(["branch", "--show-current"], in: URL(fileURLWithPath: folder))?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !branch.isEmpty else { continue }
+            read[folder] = branch
+        }
+        if read != branches { branches = read }
     }
 
     /// Opens what an agentman:// link names: agentman://agent/<session id>,
@@ -271,23 +362,45 @@ final class AgentsStore {
         return await perform(request, for: sessionId)
     }
 
+    /// A run of tool calls' title, which its row alone observes.
+    func toolTitle(_ calls: [Message]) -> ToolRunTitle {
+        let key = Self.toolRunKey(calls)
+        if let title = toolTitles[key] { return title }
+        let title = ToolRunTitle()
+        toolTitles[key] = title
+        return title
+    }
+
     /// Asks Agentman for a plain line saying what a finished run of tool
     /// calls did and why, once per run.
     func titleTools(_ calls: [Message], said: String) async {
         guard calls.count > 1, let first = calls.first else { return }
         let key = Self.toolRunKey(calls)
-        guard toolTitles[key] == nil else { return }
-        toolTitles[key] = ""
+        let title = toolTitle(calls)
+        guard title.text == nil, !titling.contains(key) else { return }
+        if let failed = titleFailed[key], Date().timeIntervalSince(failed) < 60 { return }
+        titling.insert(key)
+        defer { titling.remove(key) }
         var request = DaemonRequest(.toolsTitle, sessionId: first.sessionId)
         request.text = said
         request.steps = calls.compactMap(\.tool)
         if let reply = try? await client.request(request), reply.type == "tools_title",
-           let title = reply.preview, !title.isEmpty {
-            toolTitles[key] = title
+           let line = reply.preview, !line.isEmpty {
+            title.text = line
+            titleFailed[key] = nil
         } else {
-            // Asked again when the run is next shown or the Mac reconnects.
-            toolTitles[key] = nil
+            titleFailed[key] = Date()
         }
+    }
+
+    /// A conversation's rows, from its messages.
+    func threadItems(_ sessionId: String) -> [ThreadItem] {
+        let messages = self.messages[sessionId] ?? []
+        // Equal at once while the messages are the very same array.
+        if let cached = itemCache[sessionId], cached.messages == messages { return cached.items }
+        let items = ThreadItem.items(from: messages)
+        itemCache[sessionId] = (messages, items)
+        return items
     }
 
     nonisolated static func toolRunKey(_ calls: [Message]) -> String {
@@ -959,3 +1072,10 @@ enum DaemonRestart {
         }
     }
 }
+
+/// Agentman's line for one run of tool calls, once it has one.
+@MainActor @Observable
+final class ToolRunTitle {
+    var text: String?
+}
+

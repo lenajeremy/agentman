@@ -87,9 +87,14 @@ final class DaemonClient: @unchecked Sendable {
         }
     }
 
+    /// For tests: answers requests in place of am serve, where it returns
+    /// an event.
+    var answer: (@Sendable (DaemonRequest) -> DaemonEvent?)?
+
     /// Sends a request and waits for the daemon's answer to it.
     func request(_ request: DaemonRequest, timeout: TimeInterval = 30) async throws -> DaemonEvent {
-        try await withCheckedThrowingContinuation { continuation in
+        if let answer, let event = answer(request) { return event }
+        return try await withCheckedThrowingContinuation { continuation in
             queue.async { [self] in
                 let id = nextID()
                 do {

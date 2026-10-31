@@ -16,7 +16,7 @@ struct ManagerChatView: View {
     @State private var dropping = false
     /// Whether the conversation is scrolled to its end, so new messages
     /// follow on; scrolled up, nothing moves what the user is reading.
-    @State private var atEnd = true
+    @State private var following = Following()
     /// Bumped when the user sends, which always brings them to the end.
     @State private var followRequest = 0
 
@@ -109,19 +109,16 @@ struct ManagerChatView: View {
                         .frame(maxWidth: AgentThreadView.column)
                         .frame(maxWidth: .infinity)
                     }
-                    .modifier(FollowsEnd(atEnd: $atEnd, earlier: manager.hasOlder ? { await manager.loadOlder() } : nil))
+                    .modifier(FollowsEnd(following: following, earlier: manager.hasOlder ? { await manager.loadOlder() } : nil))
                     .scrollIndicators(.never)
                     .modifier(TopFade())
                     .overlay(alignment: .bottom) {
-                        if !atEnd, !entry {
-                            JumpToLatest {
-                                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("end", anchor: .bottom) }
-                            }
+                        JumpToLatestOverlay(following: following, hidden: entry) {
+                            withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("end", anchor: .bottom) }
                         }
                     }
-                    .animation(.easeOut(duration: 0.15), value: atEnd)
                     .onChange(of: scrollKey) { old, _ in
-                        guard !entry, atEnd else { return }
+                        guard !entry, following.atEnd else { return }
                         if old.hasPrefix("0-") {
                             // The first page: its end is only laid out once
                             // this update is done, and scrolling to it before
@@ -134,7 +131,7 @@ struct ManagerChatView: View {
                         }
                     }
                     .onChange(of: followRequest) { _, _ in
-                        atEnd = true
+                        following.atEnd = true
                         withAnimation(.easeOut(duration: 0.18)) {
                             proxy.scrollTo("end", anchor: .bottom)
                         }

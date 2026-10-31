@@ -5,20 +5,25 @@ import SwiftUI
 ///
 /// New messages and streamed text keep the view at the bottom when it is
 /// already at the bottom. Once the user scrolls up to read, growth anchors to
-/// the top instead, so what they are reading stays where it is, and `atEnd`
-/// turns false for the view's own follow-along to check.
+/// the top instead, so what they are reading stays where it is, and
+/// `following.atEnd` turns false for the view's own follow-along to check.
 ///
 /// With `earlier` set, scrolling near the top loads the messages before the
 /// first one shown. They arrive above it, and it stays exactly where the
 /// reader had it; the view marks it with `firstMessage(_:if:)`.
 struct FollowsEnd: ViewModifier {
-    @Binding var atEnd: Bool
+    let following: Following
     /// Loads earlier messages, when there are any to load.
     var earlier: (() async -> Void)? = nil
     /// Set while earlier messages arrive. SwiftUI scrolls back to the end
     /// when rows are inserted at the top of a view that started there, so
     /// that start is let go of meanwhile.
     @State private var prepending = false
+    /// Set once the reader has left the end: the conversation has opened,
+    /// and "start at the bottom" no longer applies. Left in force, it pulled
+    /// the reader back to the end when rows near the top were first laid
+    /// out and the conversation grew.
+    @State private var leftEnd = false
     @State private var position = ScrollPosition()
     @State private var first = FirstMessage()
 
@@ -36,8 +41,8 @@ struct FollowsEnd: ViewModifier {
             .environment(\.firstMessage, first)
             .coordinateSpace(.named(Self.space))
             .scrollPosition($position)
-            .defaultScrollAnchor(prepending ? nil : .bottom, for: .initialOffset)
-            .defaultScrollAnchor(atEnd ? .bottom : .top, for: .sizeChanges)
+            .defaultScrollAnchor(prepending || leftEnd ? nil : .bottom, for: .initialOffset)
+            .defaultScrollAnchor(following.atEnd ? .bottom : .top, for: .sizeChanges)
             .onScrollGeometryChange(for: Edge.self) { geometry in
                 Edge(height: geometry.contentSize.height, viewport: geometry.containerSize.height,
                      atEnd: geometry.visibleRect.maxY >= geometry.contentSize.height - Self.slack,
@@ -45,20 +50,21 @@ struct FollowsEnd: ViewModifier {
             } action: { old, new in
                 // Only the reader leaves the end: growth that lands before
                 // the view catches up mustn't stop it following.
-                var following = atEnd
+                var follows = following.atEnd
                 if new.atEnd {
-                    following = true
+                    follows = true
                 } else if new.height == old.height {
-                    following = false
+                    follows = false
                 }
-                if following != atEnd { atEnd = following }
+                if follows != following.atEnd { following.atEnd = follows }
+                if !follows, !leftEnd { leftEnd = true }
 
                 first.viewport = new.viewport
                 first.nearTop = new.nearTop
                 first.short = new.height > 0 && new.height <= new.viewport
                 // The reader, scrolled up, arriving at the top; never a view
                 // passing through it as it opens at the end.
-                if new.nearTop, !old.nearTop, !following {
+                if new.nearTop, !old.nearTop, !follows {
                     loadEarlier()
                 }
                 // Messages too few to scroll have no top to arrive at. A
@@ -100,6 +106,32 @@ struct FollowsEnd: ViewModifier {
         var viewport: CGFloat
         var atEnd: Bool
         var nearTop: Bool
+    }
+}
+
+/// Whether a conversation is at its end, kept apart from the view that
+/// shows it. As that view's own state, the whole conversation and the box
+/// under it were made again each time the reader left the end or came back,
+/// and the change animated everything in the scroll view with it.
+@MainActor @Observable
+final class Following {
+    var atEnd = true
+}
+
+/// The way back to the end, shown while the reader is up the conversation:
+/// it alone watches whether they are.
+struct JumpToLatestOverlay: View {
+    let following: Following
+    var hidden = false
+    var action: () -> Void
+
+    var body: some View {
+        ZStack {
+            if !following.atEnd, !hidden {
+                JumpToLatest(action: action)
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: following.atEnd)
     }
 }
 
