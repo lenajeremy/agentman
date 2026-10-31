@@ -5,7 +5,7 @@ without touching the user's daemon, tmux or Agentman.
 
 ```sh
 scripts/teststack/start.sh                 # am serve from this checkout, fake home, fake agents
-scripts/teststack/compare.sh /tmp/cmp      # both apps, same agent, same size: mac.png, new.png, pair.png
+scripts/teststack/compare.sh /tmp/cmp      # both apps, same agent, same size, nothing shown: mac.png, new.png, pair.png
 scripts/teststack/linux.sh /tmp/linux.png  # the app on Ubuntu (OrbStack machine agentman-linux)
 ```
 
@@ -20,4 +20,9 @@ scripts/teststack/linux.sh /tmp/linux.png  # the app on Ubuntu (OrbStack machine
   built into `$TMPDIR/amx/macbuild` on first use. It opens a screen with
   `AGENTMAN_OPEN=agentman://…`; the new app with `AGENTMAN_OPEN=<query>`
   (`agent=<id>`, `tab=terminal`, `view=editor&session=<id>&file=<path>`).
-- Screen captures need screen-recording access, so run these outside a sandbox.
+- Nothing may show on screen: someone is using this Mac. compare.sh runs both
+  apps as test runs (`AGENTMAN_TEST_SNAPSHOT=<file>`): never the active app,
+  windows transparent and behind everything, each draws its own picture and
+  quits. Never use `screencapture`, never launch either app any other way,
+  and never bring a window forward. The pictures have no traffic lights.
+- Each person or agent keeps their own files in a folder of their own.

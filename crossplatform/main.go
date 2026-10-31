@@ -18,7 +18,8 @@ import (
 var assets embed.FS
 
 func main() {
-	app := application.New(application.Options{
+	test := testMode()
+	options := application.Options{
 		Name:        "Agentman",
 		Description: "Every coding agent on this computer, in one window",
 		Services: append([]application.Service{
@@ -33,7 +34,7 @@ func main() {
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
-	})
+	}
 
 	width, height := 1280, 820
 	// AGENTMAN_SIZE=1560x980 sizes the first window, to compare it with
@@ -41,7 +42,15 @@ func main() {
 	if size := os.Getenv("AGENTMAN_SIZE"); size != "" {
 		_, _ = fmt.Sscanf(size, "%dx%d", &width, &height)
 	}
-	app.Window.NewWithOptions(window("Agentman", startURL(), width, height))
+	first := window("Agentman", startURL(), width, height)
+	if test != nil {
+		test.prepare(&options, &first)
+	}
+	app := application.New(options)
+	win := app.Window.NewWithOptions(first)
+	if test != nil {
+		test.start(app, win)
+	}
 
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
