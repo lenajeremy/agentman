@@ -184,6 +184,9 @@ func TestCodexFollowWithoutTheDaemonJoinsNothing(t *testing.T) {
 	defer cancel()
 	out := make(chan []protocol.Message, 64)
 	go src.Follow(ctx, "codex:x1", out)
+	// Follow reads from the end once it has started; a line written before
+	// then is history, not news.
+	awaitCodexAttached(t, path, out)
 	appendJSONL(t, path, codexAgentMessage("msg_9", "from the rollout"))
 	awaitRow(t, out, "msg_9", func(m protocol.Message) bool { return m.Text == "from the rollout" })
 	if joins, _ := joiner.counts(); joins != 0 {
