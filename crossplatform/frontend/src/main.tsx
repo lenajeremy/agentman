@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import { daemon } from "./daemon";
-import "./app.css";
+import "./styles/base.css";
 
 daemon.start();
 

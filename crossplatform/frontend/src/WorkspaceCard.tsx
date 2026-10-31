@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import type { Session } from "@shared/protocol";
 import { useStore } from "./store";
 import { Icon } from "./ui";
+import "./styles/workspace.css";
 
 function CardRow({ icon, sf, title, onClick, trailing }: { icon: LucideIcon; sf: string; title: string; onClick?: () => void; trailing?: ReactNode }) {
   return (

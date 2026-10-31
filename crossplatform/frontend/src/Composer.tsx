@@ -7,6 +7,7 @@ import { modelLabel } from "@shared/session-view";
 import { agentName, needsYou } from "./labels";
 import { sendMessage } from "./store";
 import { AgentMark, Icon, Spacer } from "./ui";
+import "./styles/composer.css";
 
 function placeholder(s: Session): string {
   const name = s.name || agentName(s.kind);

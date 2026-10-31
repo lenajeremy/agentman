@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Session, WorkspaceEntry } from "@shared/protocol";
 import { daemon } from "./daemon";
 import { editorTheme } from "./editorTheme";
+import "./styles/editor.css";
 
 type Pending = Map<number, (value: unknown) => void>;
 

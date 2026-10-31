@@ -7,6 +7,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { endpoint, platform } from "./host";
+import "./styles/terminal.css";
 
 export type TerminalTarget = { session: string } | { folder: string };
 

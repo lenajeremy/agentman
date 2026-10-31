@@ -1,0 +1,6 @@
+/* The terminal, under the conversation. */
+.terminal-panel { height: 42%; flex: none; position: relative; border-top: 1px solid var(--line); }
+.terminal { position: absolute; inset: 0; background: var(--paper); }
+.terminal-host { position: absolute; inset: 8px 0 0 12px; }
+.terminal .xterm, .terminal .xterm-viewport, .terminal .xterm-scrollable-element { background-color: var(--paper) !important; }
+.terminal-note { position: absolute; right: 16px; bottom: 12px; font-size: 12px; color: var(--muted); background: var(--fill); padding: 3px 10px; border-radius: 999px; }

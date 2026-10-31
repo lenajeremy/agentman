@@ -7,6 +7,7 @@ import type { Session } from "@shared/protocol";
 import { folderLabel, initials, needsYou, since } from "./labels";
 import { useStatus, useStore } from "./store";
 import { AgentMark, AppIcon, ChromeButton, Icon, Spacer } from "./ui";
+import "./styles/sidebar.css";
 
 function AgentRow({ session, branch, selected, onSelect }: { session: Session; branch?: string; selected: boolean; onSelect: () => void }) {
   const waiting = needsYou(session);

@@ -11,6 +11,7 @@ import { Markdown } from "./Markdown";
 import { runSummary, toolKind, type ToolKind } from "./labels";
 import { follow, loadOlder, useStore } from "./store";
 import { Icon } from "./ui";
+import "./styles/thread.css";
 
 const KIND_ICON: Record<ToolKind, [LucideIcon, string]> = {
   terminal: [SquareTerminal, "terminal"], read: [FileText, "doc.text"], edit: [Pencil, "pencil"], search: [Search, "magnifyingglass"],
