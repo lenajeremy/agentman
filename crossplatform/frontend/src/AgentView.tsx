@@ -34,8 +34,7 @@ export function AgentView({ session, platform }: { session: Session; platform: s
       />
       <div className="detail-body">
         <div className="conversation">
-          <div className="top-fade" />
-          <Thread session={session} stickToEnd={sent} />
+          <Thread session={session} stickToEnd={sent} card={card} panel={panel} onShowChanges={() => setPanel(true)} onReview={() => setCard(true)} />
           <Composer session={session} onSent={() => setSent((n) => n + 1)} />
         </div>
         {card && (

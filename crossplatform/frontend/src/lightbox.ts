@@ -6,6 +6,9 @@ import { useSyncExternalStore } from "react";
 export interface LightboxImage {
   /** Where to load it: a data: URL, or a URL the page can fetch. */
   src: string;
+  /** Or how to read it when it comes up, for a picture not read yet (src
+   *  then ""): null when it can't be read. */
+  load?: () => Promise<string | null>;
   title: string;
   /** For Copy Image and Show in Finder, when it is a file. */
   path?: string;
