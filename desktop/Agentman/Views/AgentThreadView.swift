@@ -179,7 +179,7 @@ struct AgentThreadView: View {
                     if folderExists {
                         Button("Open in Editor") { EditorOpener.open(folder: session.cwd, with: openWindow) }
                         if session.inject == "tmux" {
-                            Button("Show \(session.name)'s Own Terminal") { showAgentTerminal() }
+                            Button("Show the Agent's Own Terminal") { showAgentTerminal() }
                         }
                         if Worktrees.inRepository(session.cwd) {
                             Divider()
