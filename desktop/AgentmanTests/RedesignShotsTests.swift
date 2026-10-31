@@ -158,6 +158,30 @@ final class RedesignShotsTests: XCTestCase {
             try render(page, size: CGSize(width: 688, height: 300), dark: dark, store: try store().0,
                        to: URL(fileURLWithPath: out).appendingPathComponent("sent-tags-\(dark ? "dark" : "light").png"))
         }
+
+        // Files of many kinds, each icon in its own colours.
+        let kinds = ["notes.md", "src/main.rs", "server.go", "app.py", "package.json", "styles.css", "Dockerfile",
+                     "logo.png", "Sidebar.swift", "build.sh", "config.yaml", "index.html"]
+        for file in kinds {
+            let url = root.appendingPathComponent(file)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("x".utf8).write(to: url)
+        }
+        let many = "Compare " + kinds.map { "@" + $0 }.joined(separator: " ") + " and say what changed."
+        for dark in [false, true] {
+            let page = VStack(spacing: 28) {
+                MessageRow(message: Message(id: "u", sessionId: "a", role: .user, ts: 1, text: many))
+                Composer(text: .constant(many), attachments: nil, placeholder: "Message", enabled: true, onSend: {})
+                    .environment(\.fileMentions, FileMentions(root: root, files: { kinds }, suggested: { [] }, load: {}))
+            }
+            .environment(\.threadFolder, root.path)
+            .frame(width: 640)
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(Palette.paper)
+            try render(page, size: CGSize(width: 688, height: 400), dark: dark, store: try store().0,
+                       to: URL(fileURLWithPath: out).appendingPathComponent("sent-tag-kinds-\(dark ? "dark" : "light").png"))
+        }
     }
 
     private func renderEditor(_ shots: URL) throws {
