@@ -69,6 +69,25 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(UsageFormat.sessions(1694), "1,694 sessions")
     }
 
+    // Weeks and months are named as such; a daemon that predates units is
+    // read by its hours.
+    func testLongerRangesAreNamedByTheirBuckets() throws {
+        var usage = try XCTUnwrap(JSONDecoder().decode(DaemonEvent.self, from: Data(Self.sample.utf8)).usage)
+        XCTAssertEqual(UsageUnit(usage), .day)
+        usage.hourly = true
+        XCTAssertEqual(UsageUnit(usage), .hour)
+        usage.unit = "week"
+        XCTAssertEqual(UsageUnit(usage), .week)
+        let monday = try XCTUnwrap(Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 26)))
+        XCTAssertEqual(UsageUnit.week.adjective, "Weekly")
+        XCTAssertEqual(UsageUnit.week.noun, "Week")
+        XCTAssertTrue(UsageUnit.week.moment(monday).hasPrefix("Week of "))
+        XCTAssertTrue(UsageUnit.month.row(monday).contains("2026"))
+        XCTAssertTrue(UsageUnit.week.axis(monday, across: 364 * 86_400).contains("2026"), "a year's chart names years")
+        XCTAssertFalse(UsageUnit.day.axis(monday, across: 89 * 86_400).contains("2026"))
+        XCTAssertEqual(UsageView.ranges.map(UsageView.rangeTitle), ["24h", "7d", "30d", "90d", "6m", "1y", "All"])
+    }
+
     func testAgentmanUsageLinkOpensThePage() throws {
         let store = AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-usage.sock"))
         store.open(try XCTUnwrap(URL(string: "agentman://usage")))
@@ -101,7 +120,7 @@ final class UsageTests: XCTestCase {
         defer { ["usageDays", "usageMetric", "usageBreakdown"].forEach(defaults.removeObject) }
         for dark in [false, true] {
             let look = dark ? "dark" : "light"
-            for (days, metric) in [(30, "cost"), (90, "tokens"), (1, "cost")] where summaries[days] != nil {
+            for (days, metric) in [(30, "cost"), (90, "tokens"), (1, "cost"), (180, "cost"), (365, "cost"), (0, "tokens")] where summaries[days] != nil {
                 defaults.set(days, forKey: "usageDays")
                 defaults.set(metric, forKey: "usageMetric")
                 try render(UsageView(showing: summaries).background(Palette.paper), size: CGSize(width: 1240, height: 860), dark: dark,

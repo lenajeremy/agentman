@@ -99,22 +99,83 @@ func (s *Scanner) Records(ctx context.Context, since time.Time) ([]Record, int) 
 	return out, skippedClaude + skippedCodex + skippedArchived + skippedOpenCode + skippedAntigravity
 }
 
-// Summary sums the last days days.
+// Summary sums the last days days, or everything the records hold for 0.
 func (s *Scanner) Summary(ctx context.Context, days int, now time.Time) protocol.Usage {
-	from, step := Window(days, now)
+	if days == 0 {
+		records, skipped := s.Records(ctx, time.Time{})
+		first := now
+		for _, r := range records {
+			if r.At.Before(first) {
+				first = r.At
+			}
+		}
+		from, unit := AllTime(first, now)
+		return Summarize(records, s.prices.Catalog(ctx), days, from, unit, now, skipped)
+	}
+	from, unit := Window(days, now)
 	records, skipped := s.Records(ctx, from)
-	return Summarize(records, s.prices.Catalog(ctx), days, from, step, now, skipped)
+	return Summarize(records, s.prices.Catalog(ctx), days, from, unit, now, skipped)
 }
 
+// Unit is how wide a range's buckets are.
+type Unit string
+
+const (
+	Hour  Unit = "hour"
+	Day   Unit = "day"
+	Week  Unit = "week"
+	Month Unit = "month"
+)
+
 // Window is where a range of days begins, and how wide its buckets are:
-// the last day by the hour, longer ranges by local day, starting at the
-// midnight that makes days days with today.
-func Window(days int, now time.Time) (time.Time, time.Duration) {
-	if days <= 1 {
-		return now.Truncate(time.Hour).Add(-23 * time.Hour), time.Hour
-	}
+// the last day by the hour, up to six months by local day from the
+// midnight that makes days days with today, a year by week.
+func Window(days int, now time.Time) (time.Time, Unit) {
 	y, m, d := now.Date()
-	return time.Date(y, m, d-(days-1), 0, 0, 0, 0, now.Location()), 24 * time.Hour
+	switch {
+	case days <= 1:
+		return now.Truncate(time.Hour).Add(-23 * time.Hour), Hour
+	case days <= 180:
+		return time.Date(y, m, d-(days-1), 0, 0, 0, 0, now.Location()), Day
+	default:
+		return startOf(time.Date(y, m, d-(days-1), 0, 0, 0, 0, now.Location()), Week), Week
+	}
+}
+
+// AllTime is where everything begins, from the first record: by week, or
+// by month past two years.
+func AllTime(first, now time.Time) (time.Time, Unit) {
+	first = first.In(now.Location())
+	if now.Sub(first) > 2*365*24*time.Hour {
+		return startOf(first, Month), Month
+	}
+	return startOf(first, Week), Week
+}
+
+// startOf is the local start of the week (Monday) or month holding t.
+func startOf(t time.Time, unit Unit) time.Time {
+	y, m, d := t.Date()
+	if unit == Month {
+		return time.Date(y, m, 1, 0, 0, 0, 0, t.Location())
+	}
+	monday := (int(t.Weekday()) + 6) % 7
+	return time.Date(y, m, d-monday, 0, 0, 0, 0, t.Location())
+}
+
+// next is the start of the bucket after the one starting at t. Days, weeks
+// and months go by the calendar: a day can be 23 or 25 hours long.
+func next(t time.Time, unit Unit) time.Time {
+	y, m, d := t.Date()
+	switch unit {
+	case Hour:
+		return t.Add(time.Hour)
+	case Week:
+		return time.Date(y, m, d+7, 0, 0, 0, 0, t.Location())
+	case Month:
+		return time.Date(y, m+1, 1, 0, 0, 0, 0, t.Location())
+	default:
+		return time.Date(y, m, d+1, 0, 0, 0, 0, t.Location())
+	}
 }
 
 // readOpenCode reads OpenCode's assistant messages from its database with
@@ -180,20 +241,12 @@ func Cost(r Record, p Price) protocol.UsageCost {
 	}
 }
 
-// Summarize sums the records from from to now in buckets step wide.
-func Summarize(records []Record, catalog Catalog, days int, from time.Time, step time.Duration, now time.Time, skipped int) protocol.Usage {
-	u := protocol.Usage{Days: days, Hourly: step == time.Hour, Skipped: skipped}
-	// The buckets, local midnights apart for days (a day can be 23 or 25
-	// hours long), hours apart for the last day.
+// Summarize sums the records from from to now in buckets a unit wide.
+func Summarize(records []Record, catalog Catalog, days int, from time.Time, unit Unit, now time.Time, skipped int) protocol.Usage {
+	u := protocol.Usage{Days: days, Hourly: unit == Hour, Unit: string(unit), Skipped: skipped}
 	var starts []time.Time
-	for t := from; !t.After(now); {
+	for t := from; !t.After(now); t = next(t, unit) {
 		starts = append(starts, t)
-		if step == time.Hour {
-			t = t.Add(time.Hour)
-		} else {
-			y, m, d := t.Date()
-			t = time.Date(y, m, d+1, 0, 0, 0, 0, t.Location())
-		}
 	}
 	u.Buckets = make([]protocol.UsageBucket, len(starts))
 	for i, start := range starts {

@@ -10,12 +10,12 @@ import (
 	"github.com/lenajeremy/agentman/internal/usage"
 )
 
-// usageDays are the ranges ReqUsage takes.
-var usageDays = map[int]bool{1: true, 7: true, 30: true, 90: true}
+// usageDays are the ranges ReqUsage takes; 0 is all of it.
+var usageDays = map[int]bool{0: true, 1: true, 7: true, 30: true, 90: true, 180: true, 365: true}
 
 func validateUsage(req protocol.Request) error {
 	if !usageDays[req.Days] {
-		return fmt.Errorf("daemon: usage covers 1, 7, 30 or 90 days")
+		return fmt.Errorf("daemon: usage covers 1, 7, 30, 90, 180 or 365 days, or 0 for all of it")
 	}
 	return nil
 }

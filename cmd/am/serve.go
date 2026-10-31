@@ -327,15 +327,30 @@ func runServe(ctx context.Context, args []string) error {
 	// use, stopped when idle, and all stopped with am serve.
 	languages := lsp.NewHost(languageOptions(cfg, *configHome))
 	defer languages.Close()
+	// The phones and tablets that reach this Mac, for Agentman for Mac's
+	// Devices page, which hears of each change.
+	devicesPath := ""
+	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
+		devicesPath = filepath.Join(dir, "devices.json")
+	}
+	devices := daemon.NewDevices(devicesPath)
 	if local != nil {
+		devices.OnChange(func(list []protocol.Device) {
+			_ = local.Send(protocol.Event{Type: protocol.EvtDevices, Devices: list})
+		})
+		requests := deviceRequests(appRequests(agent.HandleFrom, languages, *configHome, agent.PaneFor), client, devices, relayURL)
 		go func() {
-			if err := local.Serve(ctx, appRequests(agent.HandleFrom, languages, *configHome, agent.PaneFor), agent.DisconnectSubscriber); err != nil {
+			if err := local.Serve(ctx, requests, agent.DisconnectSubscriber); err != nil {
 				fmt.Fprintf(os.Stderr, "am: %v\n", err)
 			}
 		}()
 	}
 	if client != nil {
-		client.OnDeviceDisconnected = agent.DisconnectSubscriber
+		client.OnDeviceSeen = devices.Seen
+		client.OnDeviceDisconnected = func(deviceID string) {
+			agent.DisconnectSubscriber(deviceID)
+			devices.Left(deviceID)
+		}
 	}
 
 	// Which agentman this is travels with every session list, and so does
@@ -458,7 +473,7 @@ func runServe(ctx context.Context, args []string) error {
 	}()
 
 	if client != nil {
-		go func() { _ = client.Run(ctx, agent.HandleFrom) }()
+		go func() { _ = client.Run(ctx, namingDevices(agent.HandleFrom, devices)) }()
 	}
 
 	fmt.Printf("%s\n\n", dim("ctrl-c to stop"))

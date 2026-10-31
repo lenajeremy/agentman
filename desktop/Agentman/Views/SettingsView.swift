@@ -35,6 +35,8 @@ struct SettingsView: View {
                     SettingsPageView(title: "Personality") { PersonalityPage(draft: $draft) }
                 case .notifications:
                     SettingsPageView(title: "Notifications") { NotificationsPage() }
+                case .devices:
+                    DevicesSettings()
                 case .knowledge:
                     KnowledgeSettings()
                 case .keys:
@@ -97,7 +99,7 @@ private struct SettingsTab: View {
 }
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general, notifications, permissions, personality, knowledge, keys, languages
+    case general, notifications, devices, permissions, personality, knowledge, keys, languages
 
     var id: String { rawValue }
 
@@ -105,6 +107,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .general: "General"
         case .notifications: "Notifications"
+        case .devices: "Devices"
         case .permissions: "Permissions"
         case .personality: "Personality"
         case .knowledge: "Knowledge"
@@ -117,6 +120,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .general: "gearshape"
         case .notifications: "bell.badge"
+        case .devices: "iphone"
         case .permissions: "checkmark.shield"
         case .personality: "text.bubble"
         case .knowledge: "book"

@@ -40,7 +40,7 @@ func TestUsageIsSummedFromTheAgentsRecords(t *testing.T) {
 	}
 
 	bad := d.Handle(context.Background(), protocol.Request{Type: protocol.ReqUsage, Days: 3})
-	if bad.Type != protocol.EvtError || !strings.Contains(bad.Error, "1, 7, 30 or 90") {
+	if bad.Type != protocol.EvtError || !strings.Contains(bad.Error, "1, 7, 30, 90, 180 or 365") {
 		t.Errorf("3 days = %+v", bad)
 	}
 }

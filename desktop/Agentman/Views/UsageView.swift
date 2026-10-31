@@ -25,7 +25,18 @@ struct UsageView: View {
         reads = usage.isEmpty
     }
 
-    static let ranges = [1, 7, 30, 90]
+    /// The ranges, in days; 0 is all of it.
+    static let ranges = [1, 7, 30, 90, 180, 365, 0]
+
+    static func rangeTitle(_ days: Int) -> String {
+        switch days {
+        case 0: "All"
+        case 1: "24h"
+        case 180: "6m"
+        case 365: "1y"
+        default: "\(days)d"
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,7 +51,7 @@ struct UsageView: View {
         HStack(spacing: 10) {
             Text("Usage").font(Fonts.sans(14, .semibold))
             Spacer()
-            Segments(options: Self.ranges, selection: $days) { $0 == 1 ? "Past 24h" : "\($0) days" }
+            Segments(options: Self.ranges, selection: $days, title: Self.rangeTitle)
             Segments(options: UsageMetric.allCases, selection: $metric) { $0.title }
             ChromeButton(symbol: "arrow.clockwise", help: "Read again") {
                 Task { await load() }
@@ -125,7 +136,7 @@ private struct NothingUsed: View {
             Image(systemName: "chart.xyaxis.line")
                 .font(.system(size: 26))
                 .foregroundStyle(Palette.faint)
-            Text(days == 1 ? "Nothing used in the past day" : "Nothing used in the past \(days) days")
+            Text(days == 0 ? "Nothing used yet" : days == 1 ? "Nothing used in the past day" : "Nothing used in the past \(days) days")
                 .font(TextStyle.title)
                 .foregroundStyle(Palette.text)
             Text("Usage is read from Claude Code, Codex, OpenCode and Antigravity's own records on this Mac.")
@@ -147,7 +158,7 @@ struct UsagePage: View {
     var pointing: Int?
 
     private var cost: Bool { metric == .cost }
-    private var hourly: Bool { usage.hourly == true }
+    private var unit: UsageUnit { UsageUnit(usage) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 34) {
@@ -243,7 +254,7 @@ struct UsagePage: View {
 
     private var chart: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text((hourly ? "Hourly " : "Daily ") + (cost ? "cost" : "processed tokens"))
+            Text(unit.adjective + (cost ? " cost" : " processed tokens"))
                 .font(Fonts.sans(14, .semibold))
                 .foregroundStyle(Palette.text)
             UsageChart(usage: usage, metric: metric, agents: agents.map(\.kind), pointing: pointing)
@@ -353,7 +364,7 @@ private struct UsageChart: View {
     }
 
     private var buckets: [Usage.Bucket] { usage.buckets ?? [] }
-    private var hourly: Bool { usage.hourly == true }
+    private var unit: UsageUnit { UsageUnit(usage) }
 
     private struct Point: Identifiable {
         var id: String { kind + String(date.timeIntervalSince1970) }
@@ -465,7 +476,7 @@ private struct UsageChart: View {
     }
 
     private func axisLabel(_ date: Date) -> some View {
-        Text(hourly ? date.formatted(.dateTime.hour()) : date.formatted(.dateTime.month(.abbreviated).day()).uppercased())
+        Text(unit.axis(date, across: (buckets.last?.date ?? date).timeIntervalSince(buckets.first?.date ?? date)))
             .font(Fonts.sans(10.5))
             .foregroundStyle(Palette.muted)
     }
@@ -473,7 +484,7 @@ private struct UsageChart: View {
     private func tooltip(_ bucket: Usage.Bucket) -> some View {
         let total = agents.reduce(0) { $0 + value(bucket, $1) }
         return VStack(alignment: .leading, spacing: 5) {
-            Text(hourly ? bucket.date.formatted(.dateTime.weekday(.abbreviated).hour()) : bucket.date.formatted(.dateTime.month(.abbreviated).day()))
+            Text(unit.moment(bucket.date))
                 .font(Fonts.sans(11.5))
                 .foregroundStyle(Palette.muted)
             ForEach(agents, id: \.self) { kind in
@@ -512,7 +523,7 @@ private struct UsageBreakdownTable: View {
     @Binding var breakdown: UsageBreakdown
 
     private var cost: Bool { metric == .cost }
-    private var hourly: Bool { usage.hourly == true }
+    private var unit: UsageUnit { UsageUnit(usage) }
 
     private struct Row: Identifiable {
         let id: String
@@ -552,10 +563,7 @@ private struct UsageBreakdownTable: View {
         }
     }
 
-    private func name(of date: Date) -> String {
-        hourly ? date.formatted(.dateTime.weekday(.abbreviated).hour())
-               : date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
-    }
+    private func name(of date: Date) -> String { unit.row(date) }
 
     private func share(_ row: Row) -> Double {
         cost ? fraction(row.cost ?? 0, of: usage.cost.total) : fraction(Double(row.tokens), of: Double(usage.tokens.total))
@@ -571,13 +579,13 @@ private struct UsageBreakdownTable: View {
                     .foregroundStyle(Palette.text)
                 Spacer()
                 Segments(options: UsageBreakdown.allCases, selection: $breakdown) {
-                    $0 == .model ? "Model" : hourly ? "Hour" : "Day"
+                    $0 == .model ? "Model" : unit.noun
                 }
             }
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
                     Text("#").frame(width: 30, alignment: .leading)
-                    Text(breakdown == .model ? "Model" : hourly ? "Hour" : "Day")
+                    Text(breakdown == .model ? "Model" : unit.noun)
                     Spacer(minLength: 12)
                     Text("Cost").frame(width: 100, alignment: .trailing)
                     Text("Share").frame(width: 70, alignment: .trailing)
@@ -737,6 +745,60 @@ private struct FlowRow: Layout {
 
 private func fraction(_ part: Double, of whole: Double) -> Double {
     whole > 0 ? part / whole : 0
+}
+
+/// How wide a summary's buckets are, and how the page names them.
+enum UsageUnit: String {
+    case hour, day, week, month
+
+    init(_ usage: Usage) {
+        self = usage.unit.flatMap(UsageUnit.init(rawValue:)) ?? (usage.hourly == true ? .hour : .day)
+    }
+
+    /// "Daily", for the chart's title.
+    var adjective: String {
+        switch self {
+        case .hour: "Hourly"
+        case .day: "Daily"
+        case .week: "Weekly"
+        case .month: "Monthly"
+        }
+    }
+
+    /// "Day", for the breakdown's switch and column.
+    var noun: String { rawValue.capitalized }
+
+    /// The chart's axis: hours, days, or months with the year when the
+    /// chart spans most of one.
+    func axis(_ date: Date, across span: TimeInterval) -> String {
+        switch self {
+        case .hour: date.formatted(.dateTime.hour())
+        case .month: date.formatted(.dateTime.month(.abbreviated).year()).uppercased()
+        case .day, .week:
+            span > 300 * 86_400 ? date.formatted(.dateTime.month(.abbreviated).year()).uppercased()
+                                : date.formatted(.dateTime.month(.abbreviated).day()).uppercased()
+        }
+    }
+
+    /// A bucket in the chart's tooltip.
+    func moment(_ date: Date) -> String {
+        switch self {
+        case .hour: date.formatted(.dateTime.weekday(.abbreviated).hour())
+        case .day: date.formatted(.dateTime.month(.abbreviated).day())
+        case .week: "Week of " + date.formatted(.dateTime.month(.abbreviated).day())
+        case .month: date.formatted(.dateTime.month(.wide).year())
+        }
+    }
+
+    /// A bucket in the breakdown.
+    func row(_ date: Date) -> String {
+        switch self {
+        case .hour: date.formatted(.dateTime.weekday(.abbreviated).hour())
+        case .day: date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+        case .week: "Week of " + date.formatted(.dateTime.day().month(.abbreviated).year())
+        case .month: date.formatted(.dateTime.month(.wide).year())
+        }
+    }
 }
 
 /// How the usage page writes its numbers.

@@ -74,16 +74,19 @@ func (l *logs) read(root string, since time.Time) ([]Record, int) {
 	}
 	var jobs []job
 	var states []*fileState
-	seen := map[string]bool{}
+	present := map[string]bool{}
 	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || !l.match(path) {
 			return nil
 		}
 		info, err := entry.Info()
-		if err != nil || info.ModTime().Before(since) {
+		if err != nil {
 			return nil
 		}
-		seen[path] = true
+		present[path] = true
+		if info.ModTime().Before(since) {
+			return nil
+		}
 		state := l.files[path]
 		if state == nil || info.Size() < state.size {
 			state = &fileState{}
@@ -120,9 +123,11 @@ func (l *logs) read(root string, since time.Time) ([]Record, int) {
 		out = append(out, state.records...)
 		skipped += state.skipped
 	}
-	// Logs gone, or past the range, are let go.
+	// Logs gone from this folder are let go. Those only past the range are
+	// kept, so a longer range asked for next reads only what changed.
+	prefix := filepath.Clean(root) + string(filepath.Separator)
 	for path := range l.files {
-		if !seen[path] {
+		if strings.HasPrefix(path, prefix) && !present[path] {
 			delete(l.files, path)
 		}
 	}

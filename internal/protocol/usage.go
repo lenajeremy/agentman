@@ -5,8 +5,8 @@ package protocol
 // agent's own records. The phone and the Mac draw the same summary.
 
 const (
-	// ReqUsage asks for the last Days days (1, 7, 30 or 90), answered with
-	// an EvtUsage.
+	// ReqUsage asks for the last Days days (1, 7, 30, 90, 180 or 365), or
+	// for everything the records hold with 0, answered with an EvtUsage.
 	ReqUsage RequestType = "usage"
 	EvtUsage EventType   = "usage"
 )
@@ -70,7 +70,11 @@ type ModelUsage struct {
 type Usage struct {
 	Days int `json:"days"`
 	// Hourly is true when the buckets are hours: over the last day.
-	Hourly   bool      `json:"hourly,omitempty"`
+	Hourly bool `json:"hourly,omitempty"`
+	// Unit is how wide the buckets are: "hour", "day", "week" (Monday to
+	// Sunday) or "month". Absent from daemons that predate it, whose
+	// buckets are hours when Hourly, else days.
+	Unit     string    `json:"unit,omitempty"`
 	Sessions int       `json:"sessions"`
 	Tokens   Tokens    `json:"tokens"`
 	Cost     UsageCost `json:"cost"`
