@@ -58,8 +58,9 @@ session 6f1c2a9e-3b7d-4c55-9a10-2d8e4f6b7c01 demo "$PID" transcript.py "${TURNS:
 
 # bugs: any live process will do for an agent that isn't in a pane.
 mkdir -p "$H/projects/bugs"
-pkill -f "sleep 86400 amx-bugs" 2>/dev/null || true
-(exec -a "sleep 86400 amx-bugs" sleep 86400) >/dev/null 2>&1 &
+# Named after this stack, so starting a second stack leaves the first's be.
+pkill -f "amx-bugs $T 86400" 2>/dev/null || true
+(exec -a "sleep 86400 amx-bugs $T" sleep 86400) >/dev/null 2>&1 &
 session 0b9d4e21-7c3a-4f6e-8d12-5a6b7c8d9e10 bugs "$!" quote-after-code.py
 
 pkill -f "$T/am serve" 2>/dev/null || true
