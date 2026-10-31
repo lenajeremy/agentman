@@ -6,12 +6,18 @@
 :root {
   --am-inverse: #101010; --am-on-inverse: #ffffff;
   --am-accent: #007aff;
+  /* A text field's placeholder, as macOS 26 draws it (not the message box's,
+     which draws its own in muted). */
+  --am-placeholder: rgba(0, 0, 0, 0.75);
 }
 @media (prefers-color-scheme: dark) {
-  :root { --am-inverse: #f2f2f2; --am-on-inverse: #000000; --am-accent: #0a84ff; }
+  :root { --am-inverse: #f2f2f2; --am-on-inverse: #000000; --am-accent: #0a84ff; --am-placeholder: rgba(255, 255, 255, 0.75); }
 }
 
 .am-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Text drawn as macOS draws it in an app, with its stems darkened, not
+   the thinner antialiased look a page asks for (base.css). */
+.am-page, .am-toasts, .am-note-popup, .am-popover { -webkit-font-smoothing: auto; }
 .am-spacer { flex: 1; }
 
 /* Header: "Agentman" 14 semibold, 16 either side, 32 high. */
@@ -95,14 +101,15 @@
 .am-box-note { height: 34px; padding-top: 14px; font-size: 12px; color: var(--muted); text-align: center; }
 .am-box-note b { font-weight: 600; }
 .am-key-note { display: inline-flex; gap: 4px; }
-.am-key-note a { color: var(--am-accent); text-decoration: none; }
+/* The link takes the note's colour (foregroundStyle(muted) over it). */
+.am-key-note a { color: inherit; text-decoration: none; }
 
 /* The key box: radius 26, 20 before the key icon, a 32 arrow button. */
 .am-keybox-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .am-keybox { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 8px 9px 20px; background: var(--surface); border-radius: 26px; box-shadow: 0 6px 36px rgba(0, 0, 0, 0.06), inset 0 0 0 1px var(--line); }
 .am-key-icon { color: var(--muted); }
 .am-key-field { flex: 1; min-width: 0; border: 0; outline: none; background: none; font-size: 15px; padding: 9px 0; line-height: 18px; color: var(--text); user-select: text; }
-.am-key-field::placeholder { color: var(--muted); opacity: 1; }
+.am-key-field::placeholder { color: var(--am-placeholder); opacity: 1; }
 .am-key-problem { font-size: 12px; color: var(--error-text); }
 
 /* The user's words: a bubble, fill, radius 18, 16 by 12, 80 clear on the left. */
@@ -195,7 +202,7 @@
 .am-compact-detail { display: block; font-family: var(--mono); font-size: 11px; color: var(--text-2); white-space: nowrap; overflow: hidden; padding: 4px 8px; background: color-mix(in srgb, var(--fill) 70%, transparent); border-radius: 6px; }
 .am-reply-field { display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; background: var(--fill); border-radius: 999px; }
 .am-reply-field input { flex: 1; min-width: 0; border: 0; outline: none; background: none; font-size: 12px; padding: 0; color: var(--text); user-select: text; }
-.am-reply-field input::placeholder { color: var(--text-2); opacity: 1; }
+.am-reply-field input::placeholder { color: var(--am-placeholder); opacity: 1; }
 .am-reply-send { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; flex: none; background: color-mix(in srgb, var(--am-inverse) 25%, transparent); color: var(--am-on-inverse); }
 .am-reply-send.can { background: var(--am-inverse); }
 .am-reply-send:disabled { opacity: 0.5; }

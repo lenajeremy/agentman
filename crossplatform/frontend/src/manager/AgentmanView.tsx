@@ -57,7 +57,12 @@ export function AgentmanView({ inPanel = false }: { inPanel?: boolean }) {
     const el = scroller.current;
     const end = endMark.current;
     if (!el) return;
-    const top = end ? end.offsetTop + end.offsetHeight - el.clientHeight : el.scrollHeight;
+    // The entry page stays at its top, as the Mac's does.
+    if (!end) {
+      el.scrollTop = 0;
+      return;
+    }
+    const top = end.offsetTop + end.offsetHeight - el.clientHeight;
     if (smooth) el.scrollTo({ top, behavior: "smooth" });
     else el.scrollTop = top;
   };

@@ -139,7 +139,7 @@ export function ManagerComposer({ text, setText, attachments, setAttachments, th
         <button
           className="am-round am-plus"
           style={{ width: size, height: size }}
-          disabled={disabled || attachments.length >= MAX_COUNT}
+          disabled={attachments.length >= MAX_COUNT}
           title="Attach images (or paste or drop them)"
           onClick={() => void pick().then(add)}
         >
@@ -160,7 +160,7 @@ export function ManagerComposer({ text, setText, attachments, setAttachments, th
         />
         <VoiceButton
           size={size}
-          enabled={!disabled}
+          enabled
           onText={(spoken) => {
             const trimmed = text.trim();
             setText(trimmed ? `${trimmed} ${spoken}` : spoken);
@@ -250,26 +250,30 @@ export function ManagerBox({ text, setText, attachments, setAttachments, sending
           <ManagerComposer text={text} setText={setText} attachments={attachments} setAttachments={setAttachments} thinking={false} sending={sending} large={large} onSend={onSend} onStop={() => {}} />
         )}
       </ComposerFeedback>
-      <div className="am-box-note">
-        {status === "offline" ? (
-          <span>am serve isn't running. Start it in a terminal with <b>am serve</b>.</span>
-        ) : status === "connecting" ? (
-          <span>Connecting…</span>
-        ) : keyNeeded ? (
-          <span className="am-key-note">
-            {gemini ? "Agentman runs on your Gemini API key, kept in your Keychain." : "Agentman runs on your Anthropic API key, kept in your Keychain."}
-            <a
-              href={gemini ? "https://aistudio.google.com/apikey" : "https://console.anthropic.com/settings/keys"}
-              onClick={(e) => {
-                e.preventDefault();
-                void openURL(e.currentTarget.href);
-              }}
-            >
-              Get a key
-            </a>
-          </span>
-        ) : null}
-      </div>
+      {/* With nothing to say, the note takes no room at all, as an empty
+          Group in SwiftUI. */}
+      {(status !== "connected" || keyNeeded) && (
+        <div className="am-box-note">
+          {status === "offline" ? (
+            <span>am serve isn't running. Start it in a terminal with <b>am serve</b>.</span>
+          ) : status === "connecting" ? (
+            <span>Connecting…</span>
+          ) : (
+            <span className="am-key-note">
+              {gemini ? "Agentman runs on your Gemini API key, kept in your Keychain." : "Agentman runs on your Anthropic API key, kept in your Keychain."}
+              <a
+                href={gemini ? "https://aistudio.google.com/apikey" : "https://console.anthropic.com/settings/keys"}
+                onClick={(e) => {
+                  e.preventDefault();
+                  void openURL(e.currentTarget.href);
+                }}
+              >
+                Get a key
+              </a>
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
