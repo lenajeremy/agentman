@@ -105,6 +105,32 @@ final class RedesignShotsTests: XCTestCase {
         try renderEditor(shots)
     }
 
+    /// The message box with a picture and a few lines in it, alone, to see
+    /// the room around its text.
+    func testRenderTheMessageBox() throws {
+        guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
+        let json = #"{"id":"a","kind":"claude","name":"Fix the sidebar","cwd":"/tmp","state":"idle","inject":"tmux","modes":["default","auto"],"mode":"auto"}"#
+        let session = try JSONDecoder().decode(Session.self, from: Data(json.utf8))
+        let picture = NSImage(size: CGSize(width: 220, height: 140), flipped: false) { rect in
+            NSColor.white.setFill(); rect.fill()
+            NSColor(white: 0.85, alpha: 1).setFill()
+            NSRect(x: rect.midX - 40, y: rect.midY - 6, width: 80, height: 12).fill()
+            return true
+        }
+        let text = "The problem is this is a bug. When you open the terminal in the chat page, switch to the terminal that shows "
+            + "below the chat, and then quit the terminal, you still see \"no terminals open in this folder\" and a \"new terminal\" button."
+        for dark in [false, true] {
+            let box = Composer(text: .constant(text), attachments: .constant([Attachment(image: picture, data: Data(), mime: "image/png")]),
+                               session: session, placeholder: "Message Fix the sidebar", enabled: true, onSend: {})
+                .frame(width: 640)
+                .padding(24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .background(Palette.paper)
+            try render(box, size: CGSize(width: 688, height: 300), dark: dark, store: try store().0,
+                       to: URL(fileURLWithPath: out).appendingPathComponent("message-box-\(dark ? "dark" : "light").png"))
+        }
+    }
+
     private func renderEditor(_ shots: URL) throws {
         let key = "agentPanelOpen"
         let was = UserDefaults.standard.object(forKey: key)

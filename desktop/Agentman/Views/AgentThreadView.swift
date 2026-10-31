@@ -1445,7 +1445,8 @@ struct Composer: View {
         VStack(alignment: .leading, spacing: 10) {
             if let attachments, !attachments.wrappedValue.isEmpty {
                 AttachmentStrip(attachments: attachments)
-                    .padding(.leading, 4)
+                    .padding(.leading, 5)
+                    .padding(.top, -4)
             }
             MessageField(
                 text: $text,
@@ -1461,7 +1462,7 @@ struct Composer: View {
             .opacity(enabled ? 1 : 0.6)
             .fixedSize(horizontal: false, vertical: true)
             .frame(minHeight: 36, alignment: .topLeading)
-            .padding(.horizontal, 6)
+            .padding(.horizontal, 5)
             // The things to do with a message, under it: attach on the left,
             // what the agent runs as, then send on the right.
             HStack(spacing: 6) {
@@ -1470,7 +1471,7 @@ struct Composer: View {
                         Image(systemName: "paperclip")
                             .font(.system(size: 14, weight: .regular))
                             .foregroundStyle(Palette.muted)
-                            .frame(width: 28, height: 28)
+                            .frame(width: 26, height: 28)
                     }
                     .buttonStyle(.plain)
                     .disabled(!enabled || attachments.wrappedValue.count >= Attachments.maxCount)
@@ -1511,9 +1512,11 @@ struct Composer: View {
                 sendButton
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
+        // The text 13 points in from the box's edge and 10 down: room
+        // enough, as Agentman's own box has.
+        .padding(.horizontal, 8)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
         .confirmationDialog(
             confirming.map { "Switch to \(SessionLabels.model($0))?" } ?? "",
             isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } })
