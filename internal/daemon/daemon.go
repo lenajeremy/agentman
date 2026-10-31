@@ -1244,6 +1244,9 @@ func (d *Daemon) HandleFrom(
 	case protocol.ReqGitStatus, protocol.ReqGitCommit, protocol.ReqGitPush, protocol.ReqGitCreatePR:
 		return d.gitAction(ctx, req)
 
+	case protocol.ReqCreateWorktree, protocol.ReqListWorktrees, protocol.ReqRemoveWorktree:
+		return d.worktrees(ctx, req)
+
 	case protocol.ReqRenameSession:
 		return d.renameSession(req)
 
@@ -1437,6 +1440,8 @@ func validateRequest(req protocol.Request) error {
 		return nil
 	case protocol.ReqGitCommit:
 		return validateCommit(req.Text, req.Paths)
+	case protocol.ReqCreateWorktree, protocol.ReqListWorktrees, protocol.ReqRemoveWorktree:
+		return validateWorktree(req)
 	case protocol.ReqCommitFiles, protocol.ReqCommitDiff:
 		if !commitHash.MatchString(req.Commit) {
 			return fmt.Errorf("daemon: that is not a commit")

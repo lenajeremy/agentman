@@ -165,6 +165,38 @@ func init() {
 			run:        runEndAgent,
 		},
 		{
+			name: "create_worktree",
+			description: "Make a git worktree of a repository, when the user asks: a folder of its own under ~/Agentman/Worktrees, " +
+				"on a new branch named after it from what the repository's folder has checked out, with its .env files copied in. " +
+				"Several agents can then work on one repository at once without stepping on each other: start them there with start_agent.",
+			properties: map[string]any{
+				"folder": map[string]any{"type": "string", "description": "The repository: a path such as ~/code/api, or an agent's name or id for its folder."},
+				"name":   map[string]any{"type": "string", "description": "A short name for the work, such as rate-limits; it names the folder and the branch."},
+			},
+			required: []string{"folder", "name"},
+			run:      runCreateWorktree,
+		},
+		{
+			name:        "list_worktrees",
+			description: "List a repository's worktrees: its own folder first, then the rest, marked when Agentman made them.",
+			properties: map[string]any{
+				"folder": map[string]any{"type": "string", "description": "The repository: a path, or an agent's name or id for its folder."},
+			},
+			required: []string{"folder"},
+			run:      runListWorktrees,
+		},
+		{
+			name: "remove_worktree",
+			description: "Remove a worktree Agentman made, when the user asks: its folder goes, its branch stays. " +
+				"One with uncommitted changes or an agent working in it is refused; set force only when the user has confirmed losing that.",
+			properties: map[string]any{
+				"worktree": map[string]any{"type": "string", "description": "The worktree's folder, as list_worktrees gives it."},
+				"force":    map[string]any{"type": "boolean", "description": "Remove it even with uncommitted changes or an agent in it. Only on the user's say-so."},
+			},
+			required: []string{"worktree"},
+			run:      runRemoveWorktree,
+		},
+		{
 			name:        "reopen_agent",
 			description: "Reopen an agent that has ended, in a terminal of its own, with its conversation as it was, when the user asks you to.",
 			properties:  map[string]any{"agent": agentProperty},
