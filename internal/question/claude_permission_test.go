@@ -76,3 +76,39 @@ func TestReadsTheFocusAndTheNoteRowOfClaudesPermissionPrompt(t *testing.T) {
 		t.Fatalf("with a note typed: %+v", typed)
 	}
 }
+
+// Claude Code counts down on a prompt it will block by itself if nobody
+// answers. The clock was read as part of the question, so every second was
+// a new one: a card and a notification every second or two, and the user's
+// answer refused as "no longer on screen" because the clock had moved on.
+func TestAPromptsCountdownIsNotPartOfTheQuestion(t *testing.T) {
+	pane := func(clock string) string {
+		return `────────────────────────────────────────────────────────────────────────────────
+ Bash command
+
+   rm -f "$T/$f"
+   Remove the test's socket files
+
+ Dangerous rm operation on possibly-empty variable path: "$T/$f"
+ ⚠ Claude Code will automatically block this request in ` + clock + `, to avoid holding up an unattended session
+
+ Do you want to proceed?
+   1. Yes
+ ❯ 2. No
+
+ Esc to cancel · Tab to amend`
+	}
+	first, later := Detect(pane("1:35")), Detect(pane("0:59"))
+	if first == nil || later == nil {
+		t.Fatal("the prompt was not detected")
+	}
+	if first.Detail != later.Detail || first.Prompt != later.Prompt || first.Title != later.Title {
+		t.Errorf("the question changed with the clock:\n%q\n%q", first.Detail, later.Detail)
+	}
+	if !strings.Contains(first.Detail, "will automatically block this request soon, to avoid") {
+		t.Errorf("detail = %q", first.Detail)
+	}
+	if !strings.Contains(first.Detail, `rm -f "$T/$f"`) || first.Prompt != "Do you want to proceed?" || len(first.Options) != 2 {
+		t.Errorf("question = %+v", first)
+	}
+}

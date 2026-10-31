@@ -168,6 +168,9 @@ func CodexQueued(pane string) bool {
 // the question's heading.
 var inputLine = regexp.MustCompile(`^\s*[❯›>]\s`)
 
+// countdown is the time left on a prompt that settles itself: "in 1:35".
+var countdown = regexp.MustCompile(`\bin \d{1,2}:\d{2}\b`)
+
 // maxScan bounds how much of a pane is examined. A prompt is always at the
 // bottom, so there is no reason to walk a long scrollback.
 const maxScan = 40
@@ -520,6 +523,13 @@ func detectMenu(lines []string) *Question {
 		// these prompts for you") is not part of what is being decided.
 		if strings.HasPrefix(trimmed, "Tip: ") {
 			continue
+		}
+		// Claude Code counts down on a prompt it will settle by itself if
+		// nobody answers ("will automatically block this request in 1:35").
+		// Read with the clock, each second was a new question: a fresh card
+		// and notification, and an answer turned away as no longer on screen.
+		if strings.Contains(trimmed, "automatically") {
+			trimmed = countdown.ReplaceAllString(trimmed, "soon")
 		}
 		context = append(context, trimmed)
 	}
