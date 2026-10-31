@@ -105,6 +105,9 @@ test("only a Claude or Codex the Mac types into takes commands", () => {
   assert.equal(takesCommands({ kind: "antigravity", inject: "tmux" }), true);
   assert.equal(takesCommands({ kind: "antigravity", inject: "none" }), false);
   assert.equal(takesCommands({ kind: "cursor", inject: "tmux" }), false);
+  // Kiro through its ACP server runs its own commands.
+  assert.equal(takesCommands({ kind: "kiro", inject: "api" }), true);
+  assert.equal(takesCommands({ kind: "kiro", inject: "none" }), false);
   assert.equal(takesCommands(undefined), false);
 });
 

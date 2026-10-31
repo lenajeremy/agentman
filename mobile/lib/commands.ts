@@ -12,10 +12,14 @@ type Ask = (request: Request, timeoutMs?: number) => Promise<DaemonEvent>;
 
 const commandKinds = new Set(["claude", "codex", "antigravity"]);
 
-/** Commands are typed into the agent's prompt, so only a Claude, Codex or
- *  Antigravity the Mac started in a terminal it can type into takes them. */
+/** Commands are typed into the agent's prompt, so a Claude, Codex or
+ *  Antigravity the Mac started in a terminal it can type into takes them;
+ *  so does a Kiro the Mac runs through Kiro's ACP server, which runs them
+ *  itself. */
 export function takesCommands(session: Pick<Session, "kind" | "inject"> | undefined): boolean {
-  return !!session && commandKinds.has(session.kind) && session.inject === "tmux";
+  if (!session) return false;
+  if (session.kind === "kiro") return session.inject === "api";
+  return commandKinds.has(session.kind) && session.inject === "tmux";
 }
 
 /** A name being typed after "/", or after "$" for an agent whose skills take

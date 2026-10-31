@@ -75,6 +75,7 @@ final class SlashCommandsTests: XCTestCase {
         // server, take skills.
         XCTAssertTrue(SlashCommands.takes(try decode(#"{"kind":"cursor-cli","inject":"tmux","# + base + "}")))
         XCTAssertTrue(SlashCommands.takes(try decode(#"{"kind":"kiro","inject":"tmux","# + base + "}")))
+        XCTAssertTrue(SlashCommands.takes(try decode(#"{"kind":"kiro","inject":"api","# + base + "}")))
         XCTAssertTrue(SlashCommands.takes(try decode(#"{"kind":"opencode","inject":"api","# + base + "}")))
         XCTAssertFalse(SlashCommands.takes(try decode(#"{"kind":"opencode","inject":"tmux","# + base + "}")))
     }

@@ -180,7 +180,10 @@ final class SlashCommands {
     /// server, take skills.
     static func takes(_ session: Session?) -> Bool {
         guard let session else { return false }
+        // OpenCode through its server, and Kiro through its ACP server,
+        // where Kiro runs its own commands too.
         if session.kind == "opencode" { return session.inject == "api" }
+        if session.kind == "kiro", session.inject == "api" { return true }
         return ["claude", "codex", "antigravity", "cursor-cli", "kiro"].contains(session.kind) && session.inject == "tmux"
     }
 
