@@ -1,0 +1,167 @@
+/* The Mac app's palette (desktop/Agentman/Design/Theme.swift), light and
+   dark, following the system. */
+@font-face { font-family: "Google Sans"; src: url("/fonts/GoogleSans.ttf"); font-weight: 400 700; font-style: normal; }
+@font-face { font-family: "Google Sans"; src: url("/fonts/GoogleSans-Italic.ttf"); font-weight: 400 700; font-style: italic; }
+@font-face { font-family: "Google Sans Code"; src: url("/fonts/GoogleSansCode.ttf"); font-weight: 300 800; }
+
+:root {
+  --paper: #fafafa;
+  --sidebar: #f5f5f5;
+  --surface: #ffffff;
+  --fill: #efefef;
+  --fill-strong: #e4e4e4;
+  --line: #e5e5e5;
+  --tool-card: #f5f5f5;
+  --tool-edge: #e8e8e8;
+  --text: #101010;
+  --text-2: #3c3c3c;
+  --muted: #737373;
+  --faint: #999999;
+  --working: #3268f5;
+  --working-text: #1f35c7;
+  --needs-you: #ff6a2b;
+  --ok: #12a66a;
+  --error: #e5484d;
+  --selection: #3268f540;
+  --sans: "Google Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Ubuntu, sans-serif;
+  --mono: "Google Sans Code", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #000000;
+    --sidebar: #050505;
+    --surface: #0d0d0d;
+    --fill: #202020;
+    --fill-strong: #303030;
+    --line: #242424;
+    --tool-card: #0d0d0d;
+    --tool-edge: #202020;
+    --text: #f2f2f2;
+    --text-2: #d0d0d0;
+    --muted: #a0a0a0;
+    --faint: #737373;
+    --working: #578cff;
+    --working-text: #9daaff;
+    --needs-you: #ff7d45;
+    --ok: #2bc784;
+    --error: #ff6b70;
+    --selection: #578cff40;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: var(--paper);
+  color: var(--text);
+  font: 14px/1.55 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: default; }
+
+.drag { --wails-draggable: drag; }
+.no-drag { --wails-draggable: no-drag; }
+
+.app { display: flex; height: 100%; }
+
+/* Sidebar */
+.sidebar { width: 260px; flex: none; display: flex; flex-direction: column; background: var(--sidebar); border-right: 1px solid var(--line); }
+.sidebar-head { height: 48px; flex: none; display: flex; align-items: flex-end; padding: 0 16px 8px; font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; }
+html[data-platform="darwin"] .sidebar-head { padding-left: 88px; align-items: center; padding-bottom: 0; height: 44px; }
+.sidebar-list { flex: 1; overflow-y: auto; padding: 6px 8px 16px; display: flex; flex-direction: column; gap: 14px; }
+.group { display: flex; flex-direction: column; gap: 1px; }
+.group-name { font-size: 11.5px; font-weight: 600; color: var(--faint); padding: 0 8px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 7px; text-align: left; }
+.agent:hover { background: var(--fill); }
+.agent.selected { background: var(--fill-strong); }
+.agent-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent-kind { font-size: 11px; color: var(--faint); }
+
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--faint); }
+.dot.busy { background: var(--working); }
+.dot.waiting_input { background: var(--needs-you); }
+
+/* Main */
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.main-head { height: 44px; flex: none; display: flex; align-items: center; gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--line); }
+.title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.title-name { font-weight: 600; white-space: nowrap; }
+.title-folder { color: var(--faint); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tabs { display: flex; gap: 2px; background: var(--fill); padding: 2px; border-radius: 8px; }
+.tabs button { padding: 3px 12px; border-radius: 6px; font-size: 12.5px; color: var(--muted); }
+.tabs button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px #0000001a; }
+.main-body { flex: 1; min-height: 0; position: relative; }
+
+.status { height: 26px; flex: none; display: flex; align-items: center; gap: 7px; padding: 0 14px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--muted); }
+.status .spacer { flex: 1; }
+.conn { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.conn.connected { background: var(--ok); }
+.conn.offline { background: var(--error); }
+
+.empty { color: var(--faint); padding: 12px 8px; font-size: 13px; }
+.empty.big { position: absolute; inset: 0; display: grid; place-items: center; }
+.faint { color: var(--faint); }
+
+/* Thread */
+.thread { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.thread-scroll { flex: 1; overflow-y: auto; user-select: text; }
+.thread-column { max-width: 760px; margin: 0 auto; padding: 24px 24px 32px; display: flex; flex-direction: column; gap: 10px; }
+.older { align-self: center; font-size: 12.5px; color: var(--working-text); padding: 4px 10px; border-radius: 6px; }
+.older:hover { background: var(--fill); }
+.user-row { display: flex; justify-content: flex-end; }
+.bubble { max-width: 78%; background: var(--fill); border-radius: 16px; padding: 8px 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.system { color: var(--faint); font-size: 12.5px; text-align: center; }
+.tool { display: flex; align-items: baseline; gap: 8px; align-self: flex-start; max-width: 100%; background: var(--tool-card); border: 1px solid var(--tool-edge); border-radius: 999px; padding: 2px 12px; font-size: 12.5px; color: var(--muted); }
+.tool-name { white-space: nowrap; }
+.tool-summary { font-family: var(--mono); font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tool.error .tool-name { color: var(--error); }
+
+.md { overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 10px; }
+.md h1, .md h2, .md h3, .md h4 { margin: 16px 0 8px; line-height: 1.3; }
+.md h1 { font-size: 20px; } .md h2 { font-size: 17px; } .md h3, .md h4 { font-size: 15px; }
+.md code { font-family: var(--mono); font-size: 12.5px; background: var(--fill); padding: 1px 5px; border-radius: 4px; }
+.md pre.code { background: var(--tool-card); border: 1px solid var(--tool-edge); border-radius: 10px; padding: 10px 14px; overflow-x: auto; margin: 0 0 10px; }
+.md pre.code code { background: none; padding: 0; font-size: 12.5px; line-height: 1.5; }
+.md blockquote { margin: 0 0 10px; padding-left: 12px; border-left: 3px solid var(--line); color: var(--text-2); }
+.md .md-list { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.md .md-list li { display: flex; gap: 8px; }
+.md .marker { flex: none; min-width: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.md .item { flex: 1; min-width: 0; }
+.md .item > p:last-child { margin-bottom: 0; }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
+.md a { color: var(--working-text); }
+.md .table-wrap { overflow-x: auto; margin: 0 0 10px; }
+.md table { border-collapse: collapse; font-size: 13px; }
+.md th, .md td { border: 1px solid var(--line); padding: 4px 10px; }
+.md th { background: var(--fill); font-weight: 600; }
+.md .centered { text-align: center; }
+
+.composer { flex: none; display: flex; align-items: flex-end; gap: 8px; max-width: 760px; width: calc(100% - 48px); margin: 0 auto 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 8px 8px 8px 14px; }
+.composer textarea { flex: 1; resize: none; border: 0; outline: none; background: none; color: var(--text); font: inherit; max-height: 200px; field-sizing: content; padding: 3px 0; }
+.send { width: 28px; height: 28px; border-radius: 50%; background: var(--text); color: var(--paper); font-size: 15px; font-weight: 700; }
+.send:disabled { background: var(--fill-strong); color: var(--faint); }
+
+/* Terminal */
+.terminal { position: absolute; inset: 0; background: var(--paper); padding: 8px 0 0 12px; }
+.terminal-host { position: absolute; inset: 8px 0 0 12px; }
+/* xterm paints its viewport black whatever the theme; the page shows through. */
+.terminal .xterm, .terminal .xterm-viewport, .terminal .xterm-scrollable-element { background-color: var(--paper) !important; }
+.terminal-note { position: absolute; right: 16px; bottom: 12px; font-size: 12px; color: var(--muted); background: var(--fill); padding: 3px 10px; border-radius: 999px; }
+
+/* Editor */
+.editor { position: absolute; inset: 0; display: flex; }
+.files { width: 220px; flex: none; border-right: 1px solid var(--line); overflow-y: auto; padding: 8px 6px; display: flex; flex-direction: column; gap: 1px; background: var(--sidebar); }
+.files-path { font-size: 11.5px; font-weight: 600; color: var(--faint); padding: 2px 8px 6px; }
+.file { text-align: left; padding: 3px 8px; border-radius: 6px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file:hover { background: var(--fill); }
+.file.dir { color: var(--text-2); }
+.file.open { background: var(--fill-strong); }
+.files-note { margin-top: auto; padding: 8px; font-size: 11px; color: var(--faint); }
+.monaco { flex: 1; min-width: 0; border: 0; background: var(--paper); }
