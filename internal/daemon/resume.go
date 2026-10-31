@@ -111,6 +111,18 @@ func (d *Daemon) resumeSession(ctx context.Context, sessionID string) (string, e
 	if session.Cwd == "" {
 		return "", errors.New("daemon: this session did not record a working directory")
 	}
+	// Kiro carries on through its ACP server, as a session started from here
+	// does; a pane only where that server cannot run.
+	if session.Kind == protocol.KindKiro {
+		id, err := resumeKiroACP(ctx, d.registry, session.ID, session.Cwd)
+		if err == nil {
+			d.resumes.remember(sessionID, id, time.Now())
+			return id, nil
+		}
+		if !errors.Is(err, source.ErrNoKiroACP) {
+			return "", err
+		}
+	}
 	naming := func(native, pane string) (string, string) {
 		return d.registry.ResumedSession(session.ID, native, pane)
 	}
@@ -120,6 +132,11 @@ func (d *Daemon) resumeSession(ctx context.Context, sessionID string) (string, e
 	}
 	d.resumes.remember(sessionID, id, time.Now())
 	return id, nil
+}
+
+// resumeKiroACP is a variable so a test can resume without Kiro.
+var resumeKiroACP = func(ctx context.Context, registry *source.Registry, sessionID, cwd string) (string, error) {
+	return registry.ResumeKiroACP(ctx, sessionID, cwd)
 }
 
 // resumeGrace is how long a resume that has answered stands in for the session

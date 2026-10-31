@@ -120,11 +120,20 @@ func (s *KiroSource) Commands(ctx context.Context, sessionID string) ([]protocol
 	if err != nil {
 		return nil, err
 	}
-	return listSkills(s.home, session.meta.Cwd, kiroSkillFolders), nil
+	skills := listSkills(s.home, session.meta.Cwd, kiroSkillFolders)
+	if st, owned := s.acpOwned(sessionID); owned {
+		return append(s.acpCommands(st), skills...), nil
+	}
+	return skills, nil
 }
 
-// CommandPanel implements CommandSource: Kiro's list is skills only.
-func (s *KiroSource) CommandPanel(context.Context, string, string) (protocol.CommandPanel, error) {
+// CommandPanel implements CommandSource: a session run through Kiro's ACP
+// server answers its panel commands (/context, /usage...) as data; one in
+// a terminal lists skills only.
+func (s *KiroSource) CommandPanel(ctx context.Context, sessionID, command string) (protocol.CommandPanel, error) {
+	if st, owned := s.acpOwned(sessionID); owned {
+		return s.panelACP(ctx, st, command)
+	}
 	return protocol.CommandPanel{}, errNoPanels
 }
 

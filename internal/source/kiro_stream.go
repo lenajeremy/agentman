@@ -162,6 +162,15 @@ func isKiroSpinner(line string) bool {
 func (s *KiroSource) streamingReply(
 	ctx context.Context, session kiroSession, p *parser.KiroParser,
 ) (text, id string, ts int64, ok bool) {
+	// A session run through Kiro's ACP server says what it is writing; see
+	// kiro_acp.go.
+	if reply, owned := s.acpReply(session.meta.ID); owned {
+		promptID, texts, nextTs := p.TurnState()
+		if strings.TrimSpace(reply) == "" || !p.AwaitingReply() || promptID == "" {
+			return "", "", 0, false
+		}
+		return reply, parser.KiroTextID(promptID, texts+1), nextTs, true
+	}
 	if session.tmuxName == "" || s.captureScrollback == nil || !p.AwaitingReply() {
 		return "", "", 0, false
 	}

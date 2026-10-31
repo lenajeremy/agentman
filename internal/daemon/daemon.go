@@ -720,6 +720,12 @@ func (d *Daemon) applyHookStateLocked(session protocol.Session, now time.Time) p
 	if !ok {
 		return session
 	}
+	// A session Agentman runs through an agent's ACP server knows its own
+	// state from the server; a hook only says it later, and less.
+	if session.Kind == protocol.KindKiro && session.Inject == protocol.InjectAPI {
+		delete(d.hookStates, session.ID)
+		return session
+	}
 	// A parsed question is more specific than Claude's ambiguous Stop=idle
 	// hook. Never hide it behind an older lifecycle state.
 	if session.Question != nil || session.State == protocol.StateWaitingInput {
