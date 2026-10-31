@@ -55,7 +55,7 @@ struct WorkspacePanel: View {
                         CardRow("Open in editor", symbol: "arrow.up.right.square", action: {
                             EditorOpener.open(folder: session.cwd, with: openWindow)
                         })
-                        CardRow("Open terminal", symbol: "terminal", action: { RightPanel.showTerminal() })
+                        CardRow("Open terminal", symbol: "terminal", action: { RightPanel.showTerminal(in: session.cwd) })
                     }
                 }
                 .cardSection()

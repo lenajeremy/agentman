@@ -51,6 +51,13 @@ struct AgentThreadView: View {
     /// Claude Code in tmux reads the messages it is holding on Ctrl-X
     /// Ctrl-S, so they can be sent now rather than when the step ends.
     private var canSendNow: Bool { session.kind == "claude" && session.inject == "tmux" }
+    /// The terminal under the conversation shows while it is kept there and
+    /// this folder has a shell open.
+    private var bottomTerminalShows: Bool { Self.showsBottomTerminal(kept: bottomTerminal, folder: session.cwd) }
+
+    static func showsBottomTerminal(kept: Bool, folder: String) -> Bool {
+        kept && FileManager.default.fileExists(atPath: folder) && !EditorRegistry.shared.store(for: folder).terminals.isEmpty
+    }
 
     var body: some View {
         if inPanel {
@@ -76,7 +83,9 @@ struct AgentThreadView: View {
                                         .padding(.bottom, 20)
                                 }
                             }
-                            if bottomTerminal, FileManager.default.fileExists(atPath: session.cwd) {
+                            // While the folder has a shell: its last one
+                            // ending closes it.
+                            if bottomTerminalShows {
                                 let tallest = max(geometry.size.height - 260, 160)
                                 PanelDivider(height: $bottomTerminalHeight, maximum: tallest)
                                     .padding(.vertical, -3)
@@ -155,15 +164,15 @@ struct AgentThreadView: View {
             // agent's own live terminal is in the menu beside it.
             if folderExists {
                 let inPanelTab = panelOpen && panelTab == .terminal
-                let showing = bottomTerminal || inPanelTab
+                let showing = bottomTerminalShows || inPanelTab
                 ChromeButton(symbol: "terminal", help: showing ? "Close the terminal (⌃`)" : "Terminal in this folder (⌃`)", active: showing) {
-                    if bottomTerminal {
+                    if bottomTerminalShows {
                         bottomTerminal = false
                     } else if inPanelTab {
                         panelOpen = false
                         panelMaximised = false
                     } else {
-                        RightPanel.showTerminal()
+                        RightPanel.showTerminal(in: session.cwd)
                     }
                 }
                 .keyboardShortcut("`", modifiers: .control)
@@ -410,7 +419,7 @@ struct AgentThreadView: View {
             case .success(let terminal):
                 // In this window's panel, beside the folder's shells.
                 EditorRegistry.shared.store(for: session.cwd).showAgentTerminal(terminal, title: session.name)
-                RightPanel.showTerminal()
+                RightPanel.showTerminal(in: session.cwd)
             case .failure(let problem):
                 store.actionError[session.id] = problem.message
             }
