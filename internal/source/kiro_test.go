@@ -689,3 +689,25 @@ func TestKiroModeAndContextReachTheSession(t *testing.T) {
 		}
 	}
 }
+
+// A message with an @word can open Kiro's file menu, found by its footer;
+// an e-mail address or a lone @ can't.
+func TestKiroFileMenuIsClosedOnlyWhenAnAtWordCanOpenIt(t *testing.T) {
+	for text, want := range map[string]bool{
+		"Read @notes and say hi": true,
+		"@README.md first":       true,
+		"mail me@example.com":    false,
+		"meet @ noon":            false,
+		"no mentions here":       false,
+	} {
+		if got := kiroMentions(text); got != want {
+			t.Errorf("kiroMentions(%q) = %v", text, got)
+		}
+	}
+	if !kiroFileMenu("› Read @notes\n@notes.md\n esc to cancel · ↵ to select\n") {
+		t.Error("the file menu's footer wasn't seen")
+	}
+	if kiroFileMenu("› Read @notes\n search_notes requires approval\n esc to close · ↑↓ to navigate · ↵ to select\n") {
+		t.Error("an approval menu read as the file menu")
+	}
+}
