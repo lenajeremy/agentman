@@ -50,6 +50,8 @@ enum Palette {
     static let working = Color(light: 0x3268F5, dark: 0x578CFF)
     static let workingText = Color(light: 0x1F35C7, dark: 0x9DAAFF)
     static let workingWash = Color(light: 0xEEF1FF, dark: 0x1A1F3D)
+    /// A file named with `@` in a message box.
+    static let mention = Color(light: 0x16707E, dark: 0x7FCCDA)
     /// The loader's colours, flowing one into the next.
     static let loader = [working, Color(light: 0xF0407F, dark: 0xFF5C9A)]
     /// An agent needs you.

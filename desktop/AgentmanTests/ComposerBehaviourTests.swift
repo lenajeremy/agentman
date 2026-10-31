@@ -120,6 +120,92 @@ final class ComposerBehaviourTests: XCTestCase {
         XCTAssertEqual(field.frame.height, two, accuracy: 2, "Two lines again")
     }
 
+    // A file named with @ shows as its icon and name, one piece the caret
+    // steps over and Backspace takes whole; the draft, what is sent and a
+    // copy keep its path. A path still being typed stays letters.
+    func testAFileNamedWithAtIsAChip() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = ["src/util/format.ts", "README.md"]
+        for file in files {
+            let url = root.appendingPathComponent(file)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("x".utf8).write(to: url)
+        }
+        let mentions = FileMentions(root: root, files: { files }, suggested: { [] }, load: {})
+        let draft = Draft()
+        show(Box(draft: draft).environment(\.fileMentions, mentions))
+        let field = try XCTUnwrap(find(MessageScrollView.self, in: host))
+        let text = try XCTUnwrap(field.documentView as? MessageTextView)
+        window.makeFirstResponder(text)
+        func chips() -> [String] {
+            var paths: [String] = []
+            text.textStorage?.enumerateAttribute(.attachment, in: NSRange(location: 0, length: text.textStorage?.length ?? 0)) { value, _, _ in
+                if let chip = (value as? NSTextAttachment)?.attachmentCell as? FileChip { paths.append(chip.path) }
+            }
+            return paths
+        }
+
+        // Picked from the list.
+        text.insertText("fix @form", replacementRange: text.selectedRange())
+        XCTAssertTrue(mentions.isOpen)
+        mentions.choose()
+        settle()
+        XCTAssertEqual(chips(), ["src/util/format.ts"])
+        XCTAssertEqual(text.string, "fix \u{FFFC} ", "One character in the box")
+        XCTAssertEqual(draft.text, "fix @src/util/format.ts ", "The path in the draft")
+
+        // Typed in full: letters while the caret ends it, a chip after.
+        settle()
+        text.insertText("and @README.md", replacementRange: text.selectedRange())
+        XCTAssertEqual(chips(), ["src/util/format.ts"])
+        settle()
+        text.insertText(" now", replacementRange: text.selectedRange())
+        settle()
+        XCTAssertEqual(chips(), ["src/util/format.ts", "README.md"])
+        XCTAssertEqual(draft.text, "fix @src/util/format.ts and @README.md now")
+        XCTAssertEqual(text.selectedRange().location, (text.string as NSString).length, "The caret stays at the end")
+
+        // A copy holds the paths.
+        let board = NSPasteboard(name: NSPasteboard.Name("agentman-test-" + UUID().uuidString))
+        defer { board.releaseGlobally() }
+        text.selectAll(nil)
+        XCTAssertTrue(text.writeSelection(to: board, types: [.string]))
+        XCTAssertEqual(board.string(forType: .string), "fix @src/util/format.ts and @README.md now")
+
+        // Backspace after a chip takes it whole. Undo and redo find every
+        // step where it was: offscreen, with no events between them, the
+        // steps are one, so undo takes the box back to empty.
+        text.setSelectedRange(NSRange(location: 5, length: 0))
+        text.deleteBackward(nil)
+        XCTAssertEqual(draft.text, "fix  and @README.md now")
+        let undo = try XCTUnwrap(text.undoManager)
+        undo.undo()
+        XCTAssertEqual(draft.text, "")
+        undo.redo()
+        XCTAssertEqual(draft.text, "fix  and @README.md now")
+        XCTAssertEqual(chips(), ["README.md"])
+
+        // A draft set from outside, as one waiting for the user's return.
+        draft.text = "Explain @src/util/format.ts to me"
+        settle()
+        XCTAssertEqual(chips(), ["src/util/format.ts"])
+        XCTAssertEqual(text.plainText, "Explain @src/util/format.ts to me")
+
+        // The box measures a chip as wide as it draws: lines of them wrap
+        // where the text view wraps them, and the box is as tall.
+        draft.text = Array(repeating: "@src/util/format.ts", count: 12).joined(separator: " ")
+        settle()
+        let layout = try XCTUnwrap(text.layoutManager), container = try XCTUnwrap(text.textContainer)
+        layout.ensureLayout(for: container)
+        var lines = 0
+        layout.enumerateLineFragments(forGlyphRange: layout.glyphRange(for: container)) { _, _, _, _, _ in lines += 1 }
+        XCTAssertGreaterThan(lines, 1, "Twelve chips wrap")
+        let font = MessageField.font(14)
+        let line = ceil(font.ascender - font.descender + font.leading + MessageField.lineSpacing)
+        XCTAssertEqual(field.frame.height, line * CGFloat(lines), accuracy: 3, "As tall as its lines")
+    }
+
     // An error over the box, short or long, then dismissed: the same text
     // view, the same draft, the focus where it was.
     func testAnErrorOverTheBoxComesAndGoesWithoutTheDraft() throws {
