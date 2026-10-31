@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
@@ -26,6 +27,10 @@ type Scanner struct {
 	// openCodeDB is OpenCode's database, read on each ask: small, and
 	// indexed by time.
 	openCodeDB string
+	// antigravity reads agy's conversations, one database each, under
+	// antigravityRoots.
+	antigravity      *antigravityReader
+	antigravityRoots []string
 }
 
 func NewScanner(home string, prices *Prices) *Scanner {
@@ -34,12 +39,45 @@ func NewScanner(home string, prices *Prices) *Scanner {
 		data = filepath.Join(home, ".local", "share")
 	}
 	return &Scanner{
-		home:       home,
-		claude:     newLogs(isClaudeLog, parseClaude),
-		codex:      newLogs(isCodexLog, parseCodex),
-		prices:     prices,
-		openCodeDB: filepath.Join(data, "opencode", "opencode.db"),
+		home:             home,
+		claude:           newLogs(isClaudeLog, parseClaude),
+		codex:            newLogs(isCodexLog, parseCodex),
+		prices:           prices,
+		openCodeDB:       filepath.Join(data, "opencode", "opencode.db"),
+		antigravity:      newAntigravityReader(),
+		antigravityRoots: antigravityRoots(home),
 	}
+}
+
+// antigravityRoots are where agy and its IDE keep their conversations, or
+// the folders ANTIGRAVITY_DATA_DIR names, comma-separated.
+func antigravityRoots(home string) []string {
+	roots := []string{
+		filepath.Join(home, ".gemini", "antigravity"), filepath.Join(home, ".gemini", "antigravity-cli"),
+		filepath.Join(home, ".gemini", "antigravity-ide"), filepath.Join(home, ".gemini", "antigravity-backup"),
+		filepath.Join(home, ".config", "antigravity"),
+	}
+	if set := os.Getenv("ANTIGRAVITY_DATA_DIR"); strings.TrimSpace(set) != "" {
+		roots = nil
+		for _, root := range strings.Split(set, ",") {
+			if root = strings.TrimSpace(root); root != "" {
+				roots = append(roots, root)
+			}
+		}
+	}
+	// One folder linked under two names is read once.
+	seen := map[string]bool{}
+	var out []string
+	for _, root := range roots {
+		if real, err := filepath.EvalSymlinks(root); err == nil {
+			root = real
+		}
+		if !seen[root] {
+			seen[root] = true
+			out = append(out, root)
+		}
+	}
+	return out
 }
 
 // Records reads every agent's calls since since.
@@ -56,7 +94,9 @@ func (s *Scanner) Records(ctx context.Context, since time.Time) ([]Record, int) 
 	out = append(out, archived...)
 	opencode, skippedOpenCode := readOpenCode(ctx, s.openCodeDB, since)
 	out = append(out, opencode...)
-	return out, skippedClaude + skippedCodex + skippedArchived + skippedOpenCode
+	antigravity, skippedAntigravity := s.antigravity.read(ctx, s.antigravityRoots, since)
+	out = append(out, antigravity...)
+	return out, skippedClaude + skippedCodex + skippedArchived + skippedOpenCode + skippedAntigravity
 }
 
 // Summary sums the last days days.
