@@ -10,7 +10,9 @@
 #
 # mac link is what the Mac app opens (AGENTMAN_OPEN), default
 # agentman://agent/<agent id>; app query is the cross-platform app's
-# AGENTMAN_OPEN, default agent=<agent id>. Run start.sh first. Captures need
+# AGENTMAN_OPEN, default agent=<agent id>. MAC_ENV="K=V …" passes more
+# environment to the Mac app (AGENTMAN_FILES=changes); MAC_DEFAULTS="key=-type:value …"
+# sets its defaults first (rightPanelOpen=-bool:true). Run start.sh first. Captures need
 # screen recording access (outside a sandbox). Crop with
 #   sips -c <h> <w> --cropOffset <y> <x> in.png --out out.png   (offsets >= 1)
 set -euo pipefail
@@ -52,7 +54,13 @@ trap 'rm -rf "$LOCK"' EXIT
 # The Mac window opens at the size it last had; set it, as the new app's is.
 W=${SIZE%x*}; HGT=${SIZE#*x}
 defaults write dev.agentman.mac.debug "NSWindow Frame main" "0 0 $W $HGT 0 0 1920 1080" 2>/dev/null || true
-open -g -n --env AGENTMAN_SOCKET="$H/.agentman/am.sock" --env "AGENTMAN_OPEN=$MAC_LINK" "$MAC_APP" \
+for d in ${MAC_DEFAULTS:-}; do
+  value=${d#*=}
+  defaults write dev.agentman.mac.debug "${d%%=*}" "${value%%:*}" "${value#*:}"
+done
+MAC_ENV_ARGS=()
+for kv in ${MAC_ENV:-}; do MAC_ENV_ARGS+=(--env "$kv"); done
+open -g -n --env AGENTMAN_SOCKET="$H/.agentman/am.sock" --env "AGENTMAN_OPEN=$MAC_LINK" ${MAC_ENV_ARGS[@]+"${MAC_ENV_ARGS[@]}"} "$MAC_APP" \
   --args -ApplePersistenceIgnoreState YES
 AGENTMAN_HOME=$H AGENTMAN_SIZE=$SIZE AGENTMAN_OPEN="$APP_QUERY" nohup "$NEW_APP" > "$T/app.log" 2>&1 &
 NEW_PID=$!
