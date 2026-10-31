@@ -110,6 +110,10 @@ struct CommandPalette: View {
         commands.append(Command(item: PaletteItem(id: "agentman", title: "Agentman", detail: "the conversation", icon: "bubble.left.and.text.bubble.right")) {
             store.selection = .manager
         })
+        commands.append(Command(item: PaletteItem(id: "usage", title: "Usage", detail: "what the agents spent", icon: "chart.xyaxis.line"),
+                                keywords: "cost tokens spend money") {
+            store.selection = .usage
+        })
         commands.append(Command(item: PaletteItem(id: "away", title: "What Happened While I Was Away", icon: "clock.arrow.circlepath"),
                                 keywords: "summary catch up") {
             store.showAway(since: store.away.last?.since ?? Date().addingTimeInterval(-3600))

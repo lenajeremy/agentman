@@ -487,6 +487,7 @@ private struct ConnectionFooter: View {
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)
             Spacer()
+            UsageButton()
             AppearanceMenu()
         }
         .padding(.horizontal, 16)
@@ -515,6 +516,25 @@ private struct ConnectionFooter: View {
         case .unavailable(let reason):
             return "\(reason). Run am serve."
         }
+    }
+}
+
+/// Opens the usage page, beside the appearance switch.
+private struct UsageButton: View {
+    @Environment(AgentsStore.self) private var store
+
+    var body: some View {
+        let open = store.selection == .usage
+        Button { store.selection = .usage } label: {
+            Image(systemName: "chart.xyaxis.line")
+                .font(.system(size: 13))
+                .foregroundStyle(open ? Palette.text : Palette.muted)
+                .frame(width: 22, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Usage: what the agents spent")
+        .accessibilityLabel("Usage")
     }
 }
 
