@@ -6,6 +6,12 @@ import SwiftUI
 /// its end, over the shell in front.
 struct TerminalPanel: View {
     let store: EditorStore
+    /// Hides it: under the editor, and under the conversation. In the main
+    /// window's side panel it closes like the panel's other tabs instead.
+    var hide: (() -> Void)?
+    /// Moves it, in the main window, between under the conversation and the
+    /// side panel.
+    var move: TerminalMove?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,7 +39,12 @@ struct TerminalPanel: View {
                     if let session = store.activeTerminal { store.closeTerminal(session) }
                 }
                 .disabled(store.activeTerminal == nil)
-                iconButton("chevron.down", help: "Hide the terminal (⌃`)") { store.showTerminal = false }
+                if let move {
+                    iconButton(move.symbol, help: move.help, action: move.action)
+                }
+                if let hide {
+                    iconButton("chevron.down", help: "Hide the terminal (⌃`)", action: hide)
+                }
             }
             .padding(.horizontal, 12)
             .frame(height: 32)
@@ -61,6 +72,20 @@ struct TerminalPanel: View {
         }
         .buttonStyle(.plain)
         .help(help)
+    }
+}
+
+/// Where a terminal in the main window can go instead, and how.
+struct TerminalMove {
+    let symbol: String
+    let help: String
+    let action: () -> Void
+
+    @MainActor static let toBottom = TerminalMove(symbol: "rectangle.bottomhalf.inset.filled", help: "Move the terminal under the conversation") {
+        RightPanel.dockTerminal(.bottom)
+    }
+    @MainActor static let toSide = TerminalMove(symbol: "rectangle.righthalf.inset.filled", help: "Move the terminal into the side panel") {
+        RightPanel.dockTerminal(.side)
     }
 }
 

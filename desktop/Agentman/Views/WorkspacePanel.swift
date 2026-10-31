@@ -53,9 +53,7 @@ struct WorkspacePanel: View {
                         workspaceRow("Open in editor", symbol: "arrow.up.right.square") {
                             EditorOpener.open(folder: session.cwd, with: openWindow)
                         }
-                        workspaceRow("Open terminal", symbol: "terminal") {
-                            EditorOpener.openTerminal(folder: session.cwd, with: openWindow)
-                        }
+                        workspaceRow("Open terminal", symbol: "terminal") { RightPanel.showTerminal() }
                     }
                 }
                 .padding(16)

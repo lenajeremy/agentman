@@ -81,7 +81,7 @@ struct CommandPalette: View {
                 EditorOpener.open(folder: folder, with: openWindow)
             })
             commands.append(Command(item: PaletteItem(id: "here-terminal", title: "Open a Terminal for \(session.name)", icon: "terminal")) {
-                EditorOpener.openTerminal(folder: folder, with: openWindow)
+                RightPanel.showTerminal()
             })
             commands.append(Command(item: PaletteItem(id: "here-rename", title: "Rename \(session.name)…", icon: "pencil")) {
                 store.renaming = id

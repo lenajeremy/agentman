@@ -28,6 +28,10 @@ struct AgentThreadView: View {
     /// The right panel: its diff and files, at the window's edge.
     @AppStorage(RightPanel.openKey) private var panelOpen = false
     @AppStorage(RightPanel.widthKey) private var panelWidth = RightPanel.defaultWidth
+    @AppStorage(RightPanel.tabKey) private var panelTab: RightPanelTab = .diff
+    /// The terminal under the conversation, and how tall it was dragged.
+    @AppStorage(RightPanel.bottomTerminalKey) private var bottomTerminal = false
+    @AppStorage("bottomTerminalHeight") private var bottomTerminalHeight = 260.0
     @State private var panelMaximised = false
     /// How many files the agent has changed since the last commit.
     @State private var changed = 0
@@ -67,6 +71,16 @@ struct AgentThreadView: View {
                                         .padding(.trailing, 12)
                                         .padding(.bottom, 20)
                                 }
+                            }
+                            if bottomTerminal, FileManager.default.fileExists(atPath: session.cwd) {
+                                let tallest = max(geometry.size.height - 260, 160)
+                                PanelDivider(height: $bottomTerminalHeight, maximum: tallest)
+                                    .padding(.vertical, -3)
+                                    .zIndex(1)
+                                FolderTerminal(folder: session.cwd, hide: { bottomTerminal = false }, move: .toSide)
+                                    .equatable()
+                                    .id(session.cwd)
+                                    .frame(height: min(max(bottomTerminalHeight, 120), tallest))
                             }
                         }
                     }
@@ -121,14 +135,22 @@ struct AgentThreadView: View {
                     .menuStyle(.borderlessButton)
                     .fixedSize()
             }
-            // An agent Agentman runs in tmux shows its own live terminal;
-            // any other, a shell in its folder.
+            // A shell in the agent's folder, in this window's panel; the
+            // agent's own live terminal is in the menu beside it.
             if folderExists {
-                ChromeButton(symbol: "terminal",
-                             help: session.inject == "tmux" ? "\(session.name)'s own terminal, live" : "Open a terminal in its folder") {
-                    if session.inject == "tmux" { showAgentTerminal() }
-                    else { EditorOpener.openTerminal(folder: session.cwd, with: openWindow) }
+                let inPanelTab = panelOpen && panelTab == .terminal
+                let showing = bottomTerminal || inPanelTab
+                ChromeButton(symbol: "terminal", help: showing ? "Close the terminal (⌃`)" : "Terminal in this folder (⌃`)", active: showing) {
+                    if bottomTerminal {
+                        bottomTerminal = false
+                    } else if inPanelTab {
+                        panelOpen = false
+                        panelMaximised = false
+                    } else {
+                        RightPanel.showTerminal()
+                    }
                 }
+                .keyboardShortcut("`", modifiers: .control)
             }
             ChromeButton(symbol: "plus.forwardslash.minus", help: panelOpen ? "Close the diff (⇧⌘D)" : "Diff and files (⇧⌘D)", active: panelOpen) {
                 if panelOpen { panelOpen = false; panelMaximised = false } else { RightPanel.show(.diff) }
@@ -140,6 +162,9 @@ struct AgentThreadView: View {
                 Menu {
                     if folderExists {
                         Button("Open in Editor") { EditorOpener.open(folder: session.cwd, with: openWindow) }
+                        if session.inject == "tmux" {
+                            Button("Show \(session.name)'s Own Terminal") { showAgentTerminal() }
+                        }
                     }
                     if Self.endable(session) { Button("End Session…") { confirmEnd = true } }
                 } label: { Image(systemName: "ellipsis").frame(width: 24, height: 26) }
@@ -339,7 +364,9 @@ struct AgentThreadView: View {
         Task {
             switch await store.terminal(for: session.id) {
             case .success(let terminal):
-                EditorOpener.openAgentTerminal(folder: session.cwd, terminal: terminal, title: session.name, with: openWindow)
+                // In this window's panel, beside the folder's shells.
+                EditorRegistry.shared.store(for: session.cwd).showAgentTerminal(terminal, title: session.name)
+                RightPanel.showTerminal()
             case .failure(let problem):
                 store.actionError[session.id] = problem.message
             }

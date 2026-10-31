@@ -3,13 +3,13 @@ import SwiftUI
 
 /// What the right panel shows, a tab each.
 enum RightPanelTab: String, CaseIterable, Identifiable {
-    case diff, files, history
+    case diff, files, history, terminal
     var id: String { rawValue }
     var title: String {
-        switch self { case .diff: "Diff"; case .files: "Files"; case .history: "History" }
+        switch self { case .diff: "Diff"; case .files: "Files"; case .history: "History"; case .terminal: "Terminal" }
     }
     var symbol: String {
-        switch self { case .diff: "doc.text"; case .files: "folder"; case .history: "clock.arrow.circlepath" }
+        switch self { case .diff: "doc.text"; case .files: "folder"; case .history: "clock.arrow.circlepath"; case .terminal: "terminal" }
     }
 }
 
@@ -48,6 +48,47 @@ struct RightPanel: View {
         defaults.set(true, forKey: openKey)
     }
 
+    /// Where the main window's terminal opens: under the conversation, or
+    /// as a tab of this panel.
+    enum TerminalDock: String { case bottom, side }
+    static let terminalDockKey = "terminalDock"
+    static let bottomTerminalKey = "bottomTerminalOpen"
+
+    /// Opens the terminal where the user keeps it, under the conversation
+    /// unless they moved it into this panel.
+    static func showTerminal() {
+        let defaults = UserDefaults.standard
+        if TerminalDock(rawValue: defaults.string(forKey: terminalDockKey) ?? "") == .side {
+            show(.terminal)
+        } else {
+            dockTerminal(.bottom)
+        }
+    }
+
+    /// Moves the terminal, and keeps it open there. It shows in one place
+    /// at a time: its shells are views, and a view has one window spot.
+    static func dockTerminal(_ dock: TerminalDock) {
+        let defaults = UserDefaults.standard
+        defaults.set(dock.rawValue, forKey: terminalDockKey)
+        switch dock {
+        case .side:
+            defaults.set(false, forKey: bottomTerminalKey)
+            show(.terminal)
+        case .bottom:
+            var tabs = tabs(defaults.string(forKey: tabsKey) ?? RightPanelTab.diff.rawValue)
+            tabs.removeAll { $0 == .terminal }
+            if tabs.isEmpty {
+                defaults.set(false, forKey: openKey)
+                tabs = [.diff]
+            }
+            defaults.set(tabs.map(\.rawValue).joined(separator: ","), forKey: tabsKey)
+            if defaults.string(forKey: tabKey) == RightPanelTab.terminal.rawValue {
+                defaults.set(tabs[0].rawValue, forKey: tabKey)
+            }
+            defaults.set(true, forKey: bottomTerminalKey)
+        }
+    }
+
     /// The panel's width in a window this wide: what it was dragged to, but
     /// never so wide the conversation has under `room` left.
     static func clamp(_ width: Double, available: CGFloat, room: CGFloat) -> CGFloat {
@@ -64,7 +105,9 @@ struct RightPanel: View {
                 }
                 Menu {
                     ForEach(RightPanelTab.allCases) { item in
-                        Button { Self.show(item) } label: { Label(item.title, systemImage: item.symbol) }
+                        Button {
+                            if item == .terminal { Self.dockTerminal(.side) } else { Self.show(item) }
+                        } label: { Label(item.title, systemImage: item.symbol) }
                     }
                 } label: {
                     Image(systemName: "plus").font(.system(size: 11, weight: .medium))
@@ -99,6 +142,8 @@ struct RightPanel: View {
                 HistoryPanel(sessionID: session.id, cwd: session.cwd, state: session.state, activity: session.lastActivityAt)
                     .equatable()
                     .id(session.id)
+            case .terminal:
+                FolderTerminal(folder: session.cwd, move: .toBottom).equatable().id(session.cwd)
             }
         }
         .background(Palette.paper)
@@ -1007,6 +1052,50 @@ private struct ChangedFilesTree: View {
 }
 
 // MARK: - Files
+
+// MARK: - Terminal
+
+/// The Terminal tab: shells in the agent's folder, in the main window, so a
+/// terminal no longer means switching to the editor. They are the folder's
+/// own, the ones its editor shows, and an agent's live terminal opens here
+/// in a tab of its own.
+struct FolderTerminal: View, Equatable {
+    let folder: String
+    var hide: (() -> Void)?
+    var move: TerminalMove?
+
+    nonisolated static func == (a: FolderTerminal, b: FolderTerminal) -> Bool { a.folder == b.folder }
+
+    var body: some View {
+        let store = EditorRegistry.shared.store(for: folder)
+        Group {
+            if !FileManager.default.fileExists(atPath: folder) {
+                note("This folder isn't on this Mac any more.")
+            } else if store.terminals.isEmpty {
+                VStack(spacing: 10) {
+                    Text("No terminal open in this folder.")
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.muted)
+                    Button("New Terminal") { store.newTerminal() }
+                        .controlSize(.small)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                TerminalPanel(store: store, hide: hide, move: move)
+            }
+        }
+        .onAppear {
+            if store.terminals.isEmpty, FileManager.default.fileExists(atPath: folder) { store.newTerminal() }
+        }
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(text)
+            .font(TextStyle.caption)
+            .foregroundStyle(Palette.muted)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
 
 /// The Files tab: the whole project as a tree, as the editor has it, with
 /// what git says changed and what it ignores dimmed; a search across every
