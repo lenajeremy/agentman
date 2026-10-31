@@ -168,6 +168,21 @@ struct EditorWindow: View {
                 if part.hasPrefix("mark:") { store.marked = Set(part.dropFirst(5).split(separator: ",").map(String.init)) }
             }
         }
+        #if DEBUG
+        .onAppear {
+            // For comparisons with the cross-platform app (Debug builds):
+            // the Markdown file in front rendered, Go to File, or a search.
+            guard let editor = ProcessInfo.processInfo.environment["AGENTMAN_EDITOR"] else { return }
+            for part in editor.split(separator: ";").map(String.init) {
+                if part == "preview" { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { store.togglePreview() } }
+                if part == "goto" { store.quickOpen = true }
+                if part.hasPrefix("search:") {
+                    store.searchQuery = String(part.dropFirst(7))
+                    store.showSearch()
+                }
+            }
+        }
+        #endif
         .onDisappear {
             if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
             keyMonitor = nil
