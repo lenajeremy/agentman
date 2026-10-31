@@ -9,9 +9,14 @@ interface State {
   messages: Record<string, Message[]>;
   hasMore: Record<string, boolean>;
   version?: string;
+  /** The branch checked out in each folder, from am serve (not a git of our own). */
+  branches: Record<string, string>;
+  /** Lines added and removed in each agent's folder. */
+  changes: Record<string, { added: number; removed: number }>;
 }
 
-let state: State = { sessions: [], messages: {}, hasMore: {} };
+let state: State = { sessions: [], messages: {}, hasMore: {}, branches: {}, changes: {} };
+const asked = new Set<string>();
 const subscribers = new Set<() => void>();
 const subscribed = new Set<string>();
 
@@ -31,6 +36,7 @@ function apply(event: AppEvent) {
   switch (event.type) {
     case "sessions":
       set({ sessions: event.sessions ?? [], version: event.daemon?.version });
+      for (const session of event.sessions ?? []) void workspace(session);
       break;
     case "session_update": {
       const updated = event.session;
@@ -100,3 +106,24 @@ export function loadOlder(sessionId: string) {
 export function sendMessage(sessionId: string, text: string) {
   return daemon.request({ type: "send_message", sessionId, text, clientId: crypto.randomUUID() });
 }
+
+/** The folder's branch and changes, asked once per agent per connection. */
+async function workspace(session: Session) {
+  if (asked.has(session.id)) return;
+  asked.add(session.id);
+  try {
+    const commits = await daemon.request({ type: "list_commits", sessionId: session.id, limit: 1 });
+    const branch = commits.workspace?.branch;
+    if (branch) set({ branches: { ...state.branches, [session.cwd]: branch } });
+    const changed = await daemon.request({ type: "list_changes", sessionId: session.id });
+    const list = changed.workspace?.changes ?? [];
+    const totals = list.reduce((t, c) => ({ added: t.added + (c.added ?? 0), removed: t.removed + (c.removed ?? 0) }), { added: 0, removed: 0 });
+    set({ changes: { ...state.changes, [session.id]: totals } });
+  } catch {
+    asked.delete(session.id);
+  }
+}
+
+daemon.onStatus((status) => {
+  if (status !== "connected") asked.clear();
+});

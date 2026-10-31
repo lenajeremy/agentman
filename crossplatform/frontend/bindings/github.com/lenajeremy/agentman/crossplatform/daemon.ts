@@ -10,7 +10,7 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wailsio/runtime";
+import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -21,7 +21,17 @@ import * as $models from "./models.js";
  * call: the token changes each time am serve starts.
  */
 export function Endpoint(): $CancellablePromise<$models.Endpoint> {
-    return $Call.ByID(2127333913);
+    return $Call.ByID(2127333913).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
+ * OpenEditor opens an agent's folder in an editor window of its own, as the
+ * Mac app does. file, if given, opens in it.
+ */
+export function OpenEditor(sessionID: string, file: string): $CancellablePromise<void> {
+    return $Call.ByID(2741787209, sessionID, file);
 }
 
 /**
@@ -31,3 +41,6 @@ export function Endpoint(): $CancellablePromise<$models.Endpoint> {
 export function Platform(): $CancellablePromise<string> {
     return $Call.ByID(2001714371);
 }
+
+// Private type creation functions
+const $$createType0 = $models.Endpoint.createFrom;

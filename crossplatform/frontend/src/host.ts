@@ -32,3 +32,10 @@ export async function platform(): Promise<Platform> {
   document.documentElement.dataset.platform = platformCache;
   return platformCache;
 }
+
+/** An agent's folder in an editor window of its own. */
+export async function openEditor(sessionId: string, file = ""): Promise<void> {
+  if (inShell) return Daemon.OpenEditor(sessionId, file);
+  const q = new URLSearchParams({ view: "editor", session: sessionId, ...(file ? { file } : {}) });
+  window.open(`/?${q}`, "_blank", "width=1200,height=800");
+}

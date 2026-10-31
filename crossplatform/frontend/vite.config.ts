@@ -9,6 +9,19 @@ import { join, resolve } from "node:path";
 // markdown, parsers) is shared, not copied. Its bare imports (marked)
 // resolve from here, as mobile/node_modules may not be installed.
 const shared = resolve(__dirname, "../../mobile/lib");
+const components = resolve(__dirname, "../../mobile/components");
+
+// The phone's agent marks name their one picture (Antigravity's) with
+// React Native's require(); here it becomes an asset URL.
+function nativeRequire(): Plugin {
+  return {
+    name: "agentman-native-require",
+    transform(code, id) {
+      if (!id.endsWith("agentMarks.ts")) return null;
+      return code.replace(/require\(("[^"]+")\)/g, "new URL($1, import.meta.url).href");
+    },
+  };
+}
 
 // In a browser, with no Wails shell to ask, the page reads am serve's app
 // endpoint from here: the screens can be built and tested in Chrome against
@@ -39,13 +52,14 @@ export default defineConfig({
     host: "127.0.0.1",
     port: Number(process.env.WAILS_VITE_PORT) || 9245,
     strictPort: true,
-    fs: { allow: [resolve(__dirname, ".."), shared] },
+    fs: { allow: [resolve(__dirname, ".."), shared, components, resolve(__dirname, "../../mobile/assets")] },
   },
   resolve: {
     alias: {
       "@shared": shared,
+      "@marks": resolve(components, "agentMarks.ts"),
       marked: resolve(__dirname, "node_modules/marked"),
     },
   },
-  plugins: [react(), wails("./bindings"), devEndpoint()],
+  plugins: [react(), wails("./bindings"), devEndpoint(), nativeRequire()],
 });

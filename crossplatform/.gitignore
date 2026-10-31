@@ -12,3 +12,4 @@ build/android/gen/
 # Copied from desktop/ by frontend/scripts/editor.mjs
 frontend/public/editor
 frontend/public/fonts
+frontend/public/assets

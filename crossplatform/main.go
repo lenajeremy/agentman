@@ -7,6 +7,7 @@ package main
 
 import (
 	"embed"
+	"fmt"
 	"log"
 	"os"
 
@@ -31,23 +32,35 @@ func main() {
 		},
 	})
 
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:     "Agentman",
-		Width:     1280,
-		Height:    820,
-		MinWidth:  760,
-		MinHeight: 480,
-		Mac: application.MacWindow{
-			InvisibleTitleBarHeight: 40,
-			Backdrop:                application.MacBackdropTranslucent,
-			TitleBar:                application.MacTitleBarHiddenInset,
-		},
-		BackgroundColour: application.NewRGB(17, 17, 19),
-		URL:              startURL(),
-	})
+	width, height := 1280, 820
+	// AGENTMAN_SIZE=1560x980 sizes the first window, to compare it with
+	// the Mac app's at the same size.
+	if size := os.Getenv("AGENTMAN_SIZE"); size != "" {
+		_, _ = fmt.Sscanf(size, "%dx%d", &width, &height)
+	}
+	app.Window.NewWithOptions(window("Agentman", startURL(), width, height))
 
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// window is how every window looks: no title bar, the page under the
+// traffic lights, as the Mac app's windows are.
+func window(title, url string, width, height int) application.WebviewWindowOptions {
+	return application.WebviewWindowOptions{
+		Title:     title,
+		Width:     width,
+		Height:    height,
+		MinWidth:  640,
+		MinHeight: 420,
+		Mac: application.MacWindow{
+			InvisibleTitleBarHeight: 32,
+			Backdrop:                application.MacBackdropNormal,
+			TitleBar:                application.MacTitleBarHidden,
+		},
+		BackgroundColour: application.NewRGB(250, 250, 250),
+		URL:              url,
 	}
 }
 

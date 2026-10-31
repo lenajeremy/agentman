@@ -1,105 +1,125 @@
-// One agent's conversation: its words in markdown, its tool steps as quiet
-// one-line rows, the user's messages as bubbles, and a box to write to it.
+// One agent's conversation, as AgentThreadView.swift draws it: replies in
+// markdown with a copy button, runs of tool calls folded into one line, and
+// the user's messages as bubbles.
 
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronRight, Copy, FileText, Globe, ListChecks, Pencil, Search, SquareTerminal, Users, Wrench, CircleX } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { Message, Session } from "@shared/protocol";
+import { groupTools, runFinished } from "@shared/toolgroups";
 import { Markdown } from "./Markdown";
-import { follow, loadOlder, sendMessage, useStore } from "./store";
+import { runSummary, toolKind, type ToolKind } from "./labels";
+import { follow, loadOlder, useStore } from "./store";
+import { Icon } from "./ui";
 
-function ToolRow({ message }: { message: Message }) {
+const KIND_ICON: Record<ToolKind, LucideIcon> = {
+  terminal: SquareTerminal, read: FileText, edit: Pencil, search: Search, web: Globe, task: Users, plan: ListChecks, other: Wrench,
+};
+
+function CallRow({ message }: { message: Message }) {
   const tool = message.tool!;
+  const [open, setOpen] = useState(false);
+  const failed = tool.status === "error";
+  const title = tool.title || [tool.name, tool.summary].filter(Boolean).join(" ");
   return (
-    <div className={`tool ${tool.status ?? ""}`}>
-      <span className="tool-name">{tool.title || tool.name}</span>
-      {tool.summary && !tool.title && <span className="tool-summary">{tool.summary}</span>}
+    <div className="call">
+      <div className="call-row" onClick={() => setOpen(!open)}>
+        <span className={`call-icon ${failed ? "failed" : ""}`}>
+          {tool.status === "running" ? <span className="loader small" /> : <Icon icon={failed ? CircleX : KIND_ICON[toolKind(tool.name)]} size={11} weight="medium" />}
+        </span>
+        <span className="call-title">{title}</span>
+      </div>
+      {open && tool.summary && <div className="call-detail mono">{tool.summary}</div>}
     </div>
   );
 }
 
-function Row({ message }: { message: Message }) {
-  if (message.tool) return <ToolRow message={message} />;
-  if (!message.text) return null;
-  if (message.role === "user") {
-    return (
-      <div className="user-row">
-        <div className="bubble">{message.text}</div>
-      </div>
-    );
-  }
-  if (message.role === "system") return <div className="system">{message.text}</div>;
-  return <Markdown text={message.text} />;
+function ToolRun({ calls }: { calls: Message[] }) {
+  const [open, setOpen] = useState(false);
+  const failed = calls.filter((c) => c.tool?.status === "error").length;
+  const running = !runFinished(calls);
+  return (
+    <div className="tool-run">
+      <button className="run-toggle" onClick={() => setOpen(!open)}>
+        {running ? <span className="loader small" /> : <Icon icon={Wrench} size={11} weight="medium" />}
+        <span className="run-summary">{runSummary(calls)}</span>
+        {failed > 0 && <span className="run-failed">· {failed} failed</span>}
+        <Icon icon={ChevronRight} size={10} weight="semibold" className={`run-chevron ${open ? "open" : ""}`} />
+      </button>
+      {open && (
+        <div className="run-calls">
+          {calls.map((c) => <CallRow key={c.id} message={c} />)}
+        </div>
+      )}
+    </div>
+  );
 }
 
-export function Thread({ session }: { session: Session }) {
+function Reply({ message }: { message: Message }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    await navigator.clipboard.writeText(message.text ?? "");
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <div className={`reply ${message.isSidechain ? "sidechain" : ""}`}>
+      <div className="reply-body"><Markdown text={message.text ?? ""} /></div>
+      <button className={`copy ${copied ? "copied" : ""}`} onClick={() => void copy()} aria-label="Copy">
+        <Icon icon={copied ? Check : Copy} size={12} />
+      </button>
+    </div>
+  );
+}
+
+function Bubble({ text }: { text: string }) {
+  const long = text.length > 700 || text.split("\n").length > 10;
+  const [more, setMore] = useState(false);
+  return (
+    <div className="user-row">
+      <div className="bubble-col">
+        <div className={`bubble ${long && !more ? "clamped" : ""}`}>{text}</div>
+        {long && <button className="show-more" onClick={() => setMore(!more)}>{more ? "Show less" : "Show more"}</button>}
+      </div>
+    </div>
+  );
+}
+
+export function Thread({ session, stickToEnd }: { session: Session; stickToEnd: number }) {
   const { messages, hasMore } = useStore();
   const list = messages[session.id] ?? [];
+  const items = useMemo(() => groupTools(list), [list]);
   const scroller = useRef<HTMLDivElement>(null);
   const atEnd = useRef(true);
-  const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
 
   useEffect(() => follow(session.id), [session.id]);
   useEffect(() => {
     atEnd.current = true;
-  }, [session.id]);
+  }, [session.id, stickToEnd]);
 
-  // Stay at the end while the conversation grows, unless the user scrolled up.
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && atEnd.current) el.scrollTop = el.scrollHeight;
-  }, [list.length, session.id]);
+  }, [items.length, session.id, stickToEnd]);
 
   const onScroll = () => {
     const el = scroller.current;
-    if (!el) return;
-    atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-  };
-
-  const send = async () => {
-    const text = draft.trim();
-    if (!text || sending) return;
-    setSending(true);
-    try {
-      await sendMessage(session.id, text);
-      setDraft("");
-      atEnd.current = true;
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      void send();
-    }
+    if (el) atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   };
 
   return (
-    <div className="thread">
-      <div className="thread-scroll" ref={scroller} onScroll={onScroll}>
-        <div className="thread-column">
-          {hasMore[session.id] && (
-            <button className="older" onClick={() => loadOlder(session.id)}>Show earlier messages</button>
-          )}
-          {list.length === 0 && <div className="empty">No messages yet</div>}
-          {list.map((m) => (
-            <Row key={m.id} message={m} />
-          ))}
-        </div>
-      </div>
-      <div className="composer">
-        <textarea
-          id="composer"
-          value={draft}
-          placeholder={`Message ${session.name || "the agent"}`}
-          rows={1}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={onKey}
-        />
-        <button className="send" disabled={!draft.trim() || sending} onClick={() => void send()} aria-label="Send">
-          ↑
-        </button>
+    <div className="thread-scroll" ref={scroller} onScroll={onScroll}>
+      <div className="thread-column">
+        {hasMore[session.id] && <button className="older" onClick={() => loadOlder(session.id)}>Show earlier messages</button>}
+        {items.map((item) => {
+          if (item.kind === "tools") return <ToolRun key={item.key} calls={item.calls} />;
+          const m = item.message;
+          if (m.role === "tool" && m.tool) return <div key={m.id} className="tool-run single"><CallRow message={m} /></div>;
+          if (!m.text) return null;
+          if (m.role === "user") return <Bubble key={m.id} text={m.text} />;
+          if (m.role === "system") return <div key={m.id} className="system">{m.text}</div>;
+          return <Reply key={m.id} message={m} />;
+        })}
       </div>
     </div>
   );

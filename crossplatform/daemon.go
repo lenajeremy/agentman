@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // Daemon tells the screens where am serve is. am serve writes its app
@@ -49,6 +52,16 @@ func (d *Daemon) Endpoint() (Endpoint, error) {
 // Platform names the system the shell runs on, for what the screens show
 // differently: ⌘ or Ctrl, and room for macOS's window buttons.
 func (d *Daemon) Platform() string { return runtime.GOOS }
+
+// OpenEditor opens an agent's folder in an editor window of its own, as the
+// Mac app does. file, if given, opens in it.
+func (d *Daemon) OpenEditor(sessionID, file string) {
+	q := url.Values{"view": {"editor"}, "session": {sessionID}}
+	if file != "" {
+		q.Set("file", file)
+	}
+	application.Get().Window.NewWithOptions(window("Editor", "/?"+q.Encode(), 1200, 800))
+}
 
 // endpointFile is ~/.agentman/app.json, or the one under AGENTMAN_HOME, the
 // home a test daemon was given with -config-home.

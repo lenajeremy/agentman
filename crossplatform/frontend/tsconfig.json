@@ -17,8 +17,9 @@
     "types": ["vite/client"],
     "paths": {
       "@shared/*": ["../../mobile/lib/*"],
+      "@marks": ["../../mobile/components/agentMarks.ts"],
       "marked": ["./node_modules/marked"]
     }
   },
-  "include": ["src", "bindings", "../../mobile/lib/protocol.ts", "../../mobile/lib/markdown.ts"]
+  "include": ["src", "bindings"]
 }

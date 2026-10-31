@@ -54,7 +54,7 @@ function blocks(list: Block[], key = ""): ReactNode[] {
           </pre>
         );
       case "quote":
-        return <blockquote key={k}>{blocks(block.blocks, k)}</blockquote>;
+        return <blockquote key={k}><div className="quote-body">{blocks(block.blocks, k)}</div></blockquote>;
       case "list":
         return (
           <ul key={k} className="md-list">

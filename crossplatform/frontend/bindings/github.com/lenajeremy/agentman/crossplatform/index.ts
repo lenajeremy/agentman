@@ -6,6 +6,6 @@ export {
     Daemon
 };
 
-export type {
+export {
     Endpoint
 } from "./models.js";

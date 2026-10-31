@@ -9,7 +9,7 @@
 // window (src/Editor.tsx) instead.
 
 import { execFileSync } from 'node:child_process'
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -39,4 +39,27 @@ const entry = '<script type="module" src="main.js"></script>'
 if (!html.includes(entry)) throw new Error('editor page: no main.js entry to put the shim before')
 await writeFile(page, html.replace(entry, `<script src="host-shim.js"></script>\n${entry}`))
 await cp(join(here, 'host-shim.js'), join(out, 'host-shim.js'))
+// Inter, for interface text where SF Pro isn't available (Linux, Windows).
+await cp(join(desktop, '../site/fonts/inter-latin-variable.woff2'), join(appFonts, 'inter-latin-variable.woff2'))
+await cp(join(desktop, '../site/fonts/OFL-Inter.txt'), join(appFonts, 'OFL-Inter.txt'))
 console.log('editor page copied to public/editor')
+
+// The Mac app's pictures, as they are: the Agentman mark, the agents' marks
+// and the file icons, so both apps draw the same ones.
+const assets = join(desktop, 'Agentman/Resources/Assets.xcassets')
+const pictures = join(here, '../public/assets')
+await rm(pictures, { recursive: true, force: true })
+await mkdir(join(pictures, 'files'), { recursive: true })
+await mkdir(join(pictures, 'agents'), { recursive: true })
+for (const set of await readdir(assets)) {
+  if (!set.endsWith('.imageset')) continue
+  const name = set.slice(0, -'.imageset'.length)
+  const files = (await readdir(join(assets, set))).filter((f) => f !== 'Contents.json')
+  for (const file of files) {
+    const ext = file.slice(file.lastIndexOf('.'))
+    if (name === 'AgentmanBrand') await cp(join(assets, set, file), join(pictures, `agentman${ext}`))
+    else if (name.startsWith('Agent-')) await cp(join(assets, set, file), join(pictures, 'agents', `${name.slice(6)}${ext}`))
+    else if (name.startsWith('FileIcon-')) await cp(join(assets, set, file), join(pictures, 'files', `${name.slice(9)}${ext}`))
+  }
+}
+console.log('pictures copied to public/assets')
