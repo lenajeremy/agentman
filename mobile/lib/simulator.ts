@@ -24,3 +24,14 @@ export function simulatorAppearance(): "light" | "dark" | null {
   const value = Settings.get("AGENTMAN_APPEARANCE");
   return value === "light" || value === "dark" ? value : null;
 }
+
+/**
+ * How far down a settings page a simulator started with `-AGENTMAN_SCROLL
+ * <points>` opens it, for screenshots of what lies below the fold; 0
+ * otherwise.
+ */
+export function simulatorScroll(): number {
+  if (Platform.OS !== "ios" || Constants.isDevice) return 0;
+  const value = Number(Settings.get("AGENTMAN_SCROLL"));
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}

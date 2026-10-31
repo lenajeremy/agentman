@@ -1,6 +1,6 @@
 import Feather from "@expo/vector-icons/Feather";
 import { useRouter } from "expo-router";
-import type { ReactNode } from "react";
+import { useRef, type ComponentRef, type ReactNode } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useStyles, useTheme } from "../lib/appearance";
+import { simulatorScroll } from "../lib/simulator";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { ContentColumn } from "./ContentColumn";
 import { MotionPressable } from "./MotionPressable";
@@ -41,12 +42,18 @@ export function SettingsPage({
   const { color } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const scroller = useRef<ComponentRef<typeof ScrollView>>(null);
+  const scroll = simulatorScroll();
   return (
     <KeyboardAvoidingView
       style={[styles.page, { paddingTop: insets.top }]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
+        ref={scroller}
+        // A simulator started for screenshots opens partway down, once the
+        // page is tall enough to.
+        onContentSizeChange={scroll ? () => scroller.current?.scrollTo({ y: scroll, animated: false }) : undefined}
         contentContainerStyle={{ paddingBottom: insets.bottom + space.xl }}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"

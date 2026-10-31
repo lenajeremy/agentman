@@ -239,8 +239,9 @@ type Request struct {
 	// from an app that predates the choice, which keeps whatever the phone
 	// last chose, or the defaults for a phone that never chose.
 	Notify *NotifyPrefs `json:"notify,omitempty"`
-	// Device is what a phone says about itself on ReqRegisterPush, for the
-	// Mac's list of devices. Absent from apps that predate it.
+	// Device is what a phone says about itself, for the Mac's list of
+	// devices: on the session list it asks for as it connects, and on
+	// ReqRegisterPush. Absent from apps that predate it.
 	Device *DeviceInfo `json:"device,omitempty"`
 	// Alerts is the choice on ReqSetAgentAlerts.
 	Alerts *bool `json:"alerts,omitempty"`
