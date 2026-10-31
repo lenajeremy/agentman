@@ -606,3 +606,31 @@ func TestTheReportSaysWhereEachServerComesFrom(t *testing.T) {
 		t.Error("the download is still there")
 	}
 }
+
+// The cross-platform app loads the same editor page from its own origin,
+// which am serve lets in; the token is still needed, and other pages are not.
+func TestTheEndpointLetsInOriginsItWasToldTo(t *testing.T) {
+	h := newHarness(t, Options{AllowOrigin: func(origin string) bool { return origin == "wails://wails" }})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	base, _, _ := strings.Cut(h.url, "?")
+	dial := func(url, origin string) bool {
+		conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: http.Header{"Origin": {origin}}})
+		if err == nil {
+			conn.CloseNow()
+		}
+		return err == nil
+	}
+	if !dial(h.url, "wails://wails") {
+		t.Error("the app's origin was refused")
+	}
+	if !dial(h.url, Origin) {
+		t.Error("the Mac editor's origin was refused")
+	}
+	if dial(base+"?token=nope", "wails://wails") {
+		t.Error("the app's origin got in without the token")
+	}
+	if dial(h.url, "https://example.com") {
+		t.Error("another page got in")
+	}
+}
