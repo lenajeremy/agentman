@@ -358,3 +358,111 @@ func TestMuseDiscoverMarksTerminalSessionsReadOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestMuseApprovalBecomesAQuestionAndIsDecided(t *testing.T) {
+	source, fake := startFakeMuse(t, t.TempDir())
+	fake.answers["approval/listPending"] = func(json.RawMessage) (any, *museRPCError) {
+		return map[string]any{"approvals": []any{map[string]any{
+			"approvalId": "ap1", "toolName": "bash", "subject": map[string]any{"kind": "exec", "command": "rm -rf build"},
+			"currentRequirementId": map[string]any{"approvalId": "ap1", "sourceIndex": 2},
+			"availableChoices": []any{
+				map[string]any{"choiceId": "allow_once", "label": "Allow once"},
+				map[string]any{"choiceId": "deny", "label": "Deny"},
+			},
+		}}, "userInputs": []any{}}, nil
+	}
+	var decided map[string]any
+	fake.answers["approval/decide"] = func(params json.RawMessage) (any, *museRPCError) {
+		_ = json.Unmarshal(params, &decided)
+		return map[string]any{"status": "accepted"}, nil
+	}
+	question, err := source.CurrentQuestion(context.Background(), "muse:s")
+	if err != nil || question == nil {
+		t.Fatalf("question: %v %v", question, err)
+	}
+	if question.Prompt != "Run this command?" || question.Detail != "rm -rf build" || len(question.Options) != 2 || question.Options[0].Key != "allow_once" {
+		t.Fatalf("approval card: %+v", question)
+	}
+	if err := source.Answer(context.Background(), "muse:s", protocol.QuestionAnswer{QuestionID: question.ID, OptionKey: "deny"}); err != nil {
+		t.Fatal(err)
+	}
+	requirement, _ := decided["requirementId"].(map[string]any)
+	if decided["approvalId"] != "ap1" || decided["choiceId"] != "deny" || requirement["sourceIndex"] != float64(2) || decided["commandId"] == "" {
+		t.Fatalf("approval/decide params: %v", decided)
+	}
+}
+
+func TestMuseQuestionsAreAskedOneAtATimeAndAnsweredTogether(t *testing.T) {
+	source, fake := startFakeMuse(t, t.TempDir())
+	fake.answers["approval/listPending"] = func(json.RawMessage) (any, *museRPCError) {
+		return map[string]any{"approvals": []any{}, "userInputs": []any{map[string]any{
+			"userInputId": "in1",
+			"questions": []any{
+				map[string]any{"id": "q1", "header": "Limit", "question": "Per user or per key?", "selection": map[string]any{"mode": "single"},
+					"options": []any{map[string]any{"label": "Per user"}, map[string]any{"label": "Per key"}}},
+				map[string]any{"id": "q2", "header": "Window", "question": "Which window?", "selection": map[string]any{"mode": "single"},
+					"options": []any{map[string]any{"label": "1 minute"}, map[string]any{"label": "1 hour"}}},
+			},
+		}}}, nil
+	}
+	var answered map[string]any
+	fake.answers["userInput/answer"] = func(params json.RawMessage) (any, *museRPCError) {
+		_ = json.Unmarshal(params, &answered)
+		return map[string]any{"status": "accepted"}, nil
+	}
+	first, _ := source.CurrentQuestion(context.Background(), "muse:s")
+	if first == nil || first.Prompt != "Per user or per key?" || first.Options[1].Key != "Per key" {
+		t.Fatalf("first: %+v", first)
+	}
+	if err := source.Answer(context.Background(), "muse:s", protocol.QuestionAnswer{QuestionID: first.ID, OptionKey: "Per user"}); err != nil {
+		t.Fatal(err)
+	}
+	if answered != nil {
+		t.Fatal("nothing should be sent until every question has an answer")
+	}
+	second, _ := source.CurrentQuestion(context.Background(), "muse:s")
+	if second == nil || second.Prompt != "Which window?" {
+		t.Fatalf("second: %+v", second)
+	}
+	if err := source.Answer(context.Background(), "muse:s", protocol.QuestionAnswer{QuestionID: second.ID, OptionKey: "1 minute", Text: "but allow bursts"}); err != nil {
+		t.Fatal(err)
+	}
+	answers, _ := answered["answers"].([]any)
+	if answered["userInputId"] != "in1" || len(answers) != 2 {
+		t.Fatalf("userInput/answer: %v", answered)
+	}
+	last := answers[1].(map[string]any)
+	if answers[0].(map[string]any)["selectedLabel"] != "Per user" || last["selectedLabel"] != "1 minute" || last["freeText"] != "but allow bursts" {
+		t.Fatalf("answers: %v", answers)
+	}
+}
+
+func TestMuseAnsweringATerminalsApprovalSaysSo(t *testing.T) {
+	source, fake := startFakeMuse(t, t.TempDir())
+	inUse := &museRPCError{Code: -32021, Message: "in use"}
+	inUse.Data.Kind = "sessionInUse"
+	fake.answers["approval/decide"] = func(json.RawMessage) (any, *museRPCError) { return nil, inUse }
+	fake.answers["session/resume"] = func(json.RawMessage) (any, *museRPCError) { return nil, inUse }
+	err := source.Answer(context.Background(), "muse:s", protocol.QuestionAnswer{QuestionID: "approval:ap1:0", OptionKey: "allow"})
+	if err != errMuseInTerminal {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestMuseNeverAsksAboutATerminalsSession(t *testing.T) {
+	home := t.TempDir()
+	source, fake := startFakeMuse(t, home)
+	fake.answers["approval/listPending"] = func(json.RawMessage) (any, *museRPCError) {
+		t.Error("a terminal's session must not be asked about")
+		return map[string]any{}, nil
+	}
+	registry := filepath.Join(home, "runtime", "muse", "sessions")
+	_ = os.MkdirAll(registry, 0o755)
+	_ = os.WriteFile(filepath.Join(registry, "t.json"), []byte(`{"session_id":"t","process_generation_hint":"pid=`+strconv.Itoa(os.Getpid())+`"}`), 0o644)
+	if question, err := source.CurrentQuestion(context.Background(), "muse:t"); question != nil || err != nil {
+		t.Fatalf("got %v %v", question, err)
+	}
+	if err := source.Answer(context.Background(), "muse:t", protocol.QuestionAnswer{QuestionID: "input:i:q", OptionKey: "x"}); err != errMuseInTerminal {
+		t.Fatalf("answer: %v", err)
+	}
+}

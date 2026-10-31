@@ -30,9 +30,10 @@ const (
 )
 
 type MuseSource struct {
-	host  *museHost
-	home  string // Muse's data directory; for the live registry
-	holds museHolds
+	host    *museHost
+	home    string // Muse's data directory; for the live registry
+	holds   museHolds
+	answers museAnswers
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -147,6 +148,14 @@ func (s *MuseSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 		var read museRead
 		if s.host.call(ctx, "session/read", map[string]any{"sessionId": id, "excludeItems": true}, &read) == nil {
 			found = append(found, museToSession(read.Session, true))
+		}
+	}
+	// What a waiting agent asks, for the apps' question card.
+	for i := range found {
+		if found[i].State == protocol.StateWaitingInput {
+			if question, err := s.CurrentQuestion(ctx, found[i].ID); err == nil {
+				found[i].Question = question
+			}
 		}
 	}
 	return found, nil
