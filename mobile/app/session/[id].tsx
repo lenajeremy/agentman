@@ -19,6 +19,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import Animated, { Easing, FadeOut, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AgentIcon } from "../../components/AgentIcon";
@@ -98,6 +99,20 @@ type Row =
  */
 const HEADER_HEIGHT = space.sm + 36 + space.md + 4;
 
+/** Points of scroll within which the foot of the thread, and the Working
+ *  line under the last message, are still on screen. */
+const AT_LATEST = 40;
+/** How a Working label comes and goes: a short fade with a small drift. */
+const STATE_IN = () => {
+  "worklet";
+  const timing = { duration: 220, easing: Easing.out(Easing.cubic) };
+  return {
+    initialValues: { opacity: 0, transform: [{ translateX: 6 }] },
+    animations: { opacity: withTiming(1, timing), transform: [{ translateX: withTiming(0, timing) }] },
+  };
+};
+const STATE_OUT = FadeOut.duration(160);
+
 export default function SessionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const sessionId = decodeURIComponent(String(id));
@@ -109,6 +124,8 @@ export default function SessionScreen() {
   const { height: viewportHeight } = useWindowDimensions();
   const listRef = useRef<FlatList<Row>>(null);
   const [scrolledAway, setScrolledAway] = useState(false);
+  /** The foot of the thread is on screen, its Working line with it. */
+  const [atLatest, setAtLatest] = useState(true);
   const [draft, setDraft] = useState("");
   const images = useAttachments(store.credentials);
   // The confirmation for a copy made from a message's menu. Held here rather
@@ -871,22 +888,30 @@ export default function SessionScreen() {
                   <Text style={[styles.subtitle, styles.subtitlePath]} numberOfLines={1}>
                     {folderName(session.cwd)}
                   </Text>
-                  <Text style={[styles.subtitle, styles.subtitleModel]}>{"  ·  "}</Text>
-                  <View
-                    style={styles.stateLine}
-                    accessible
-                    accessibilityRole="text"
-                    accessibilityLabel={state.label}
-                  >
-                    {displayState === "busy" ? (
-                      <Loader size={10} />
-                    ) : (
-                      <View style={[styles.stateDotSmall, { backgroundColor: state.color }]} />
-                    )}
-                    <Text style={[styles.subtitle, styles.subtitleModel, { color: state.text }]}>
-                      {state.label}
-                    </Text>
-                  </View>
+                  {/* "Working" says it twice when the feed's own Working line
+                      is on screen under the last message, so up here it only
+                      shows while the reader is further up the thread. */}
+                  {displayState === "busy" && atLatest ? null : (
+                    <Animated.View
+                      key={displayState}
+                      entering={STATE_IN}
+                      exiting={STATE_OUT}
+                      style={styles.stateLine}
+                      accessible
+                      accessibilityRole="text"
+                      accessibilityLabel={state.label}
+                    >
+                      <Text style={[styles.subtitle, styles.subtitleModel]}>{"  ·  "}</Text>
+                      {displayState === "busy" ? (
+                        <Loader size={10} />
+                      ) : (
+                        <View style={[styles.stateDotSmall, { backgroundColor: state.color }]} />
+                      )}
+                      <Text style={[styles.subtitle, styles.subtitleModel, { color: state.text }]}>
+                        {state.label}
+                      </Text>
+                    </Animated.View>
+                  )}
                 </View>
               </>
             ) : (
@@ -1060,8 +1085,11 @@ export default function SessionScreen() {
           maintainVisibleContentPosition={KEEP_READING}
           // Inverted, so how far up the reader is counts from the latest.
           onScroll={(event) => {
-            const away = event.nativeEvent.contentOffset.y > SCROLL_AWAY;
+            const offset = event.nativeEvent.contentOffset.y;
+            const away = offset > SCROLL_AWAY;
             if (away !== scrolledAway) setScrolledAway(away);
+            const latest = offset < AT_LATEST;
+            if (latest !== atLatest) setAtLatest(latest);
           }}
           scrollEventThrottle={64}
           keyExtractor={(row) =>
@@ -1111,9 +1139,9 @@ export default function SessionScreen() {
           // where a "still working" indicator belongs, under the last message.
           ListHeaderComponent={
             session?.state === "busy" ? (
-              <View style={styles.thinking}>
+              <Animated.View style={styles.thinking} entering={STATE_IN} exiting={STATE_OUT}>
                 <Thinking />
-              </View>
+              </Animated.View>
             ) : undefined
           }
           // With the list inverted, the "end" is the oldest message.
