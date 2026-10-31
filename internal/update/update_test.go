@@ -118,17 +118,30 @@ func TestTheCheckerReportsOnlyChanges(t *testing.T) {
 	}
 }
 
-func TestTheUpgradeCommandMatchesHowAmWasInstalled(t *testing.T) {
-	for path, want := range map[string]string{
-		"/opt/homebrew/Caskroom/agentman/0.14.1/am":                                   "brew upgrade --cask lenajeremy/agentman/agentman",
-		"/home/linuxbrew/.linuxbrew/Caskroom/agentman/0.14.1/am":                      "brew upgrade --cask lenajeremy/agentman/agentman",
-		"/usr/local/lib/node_modules/agentman/node_modules/agentman-linux-x64/bin/am": "npm install -g agentman@latest",
-		"/usr/local/bin/am":      "curl -fsSL https://agentman-nu.vercel.app/install | sh",
-		"/home/me/.local/bin/am": "curl -fsSL https://agentman-nu.vercel.app/install | sh",
+// am upgrade upgrades the way am came: Homebrew's cask, npm's package, or
+// otherwise the release archive the install script downloads.
+func TestHowAmWasInstalledIsReadFromWhereItIs(t *testing.T) {
+	for path, want := range map[string]How{
+		"/opt/homebrew/Caskroom/agentman/0.14.1/am":                                   Homebrew,
+		"/home/linuxbrew/.linuxbrew/Caskroom/agentman/0.14.1/am":                      Homebrew,
+		"/usr/local/lib/node_modules/agentman/node_modules/agentman-linux-x64/bin/am": Npm,
+		"/usr/local/bin/am":          Downloaded,
+		"/home/me/.local/bin/am":     Downloaded,
+		"/Users/me/.agentman/bin/am": Downloaded,
 	} {
-		if got := UpgradeCommand(path); got != want {
-			t.Errorf("UpgradeCommand(%q) = %q, want %q", path, got, want)
+		if got := HowInstalled(path); got != want {
+			t.Errorf("HowInstalled(%q) = %v, want %v", path, got, want)
 		}
+	}
+}
+
+func TestReleasesAreToldFromBuildsAndOrdered(t *testing.T) {
+	if !IsRelease("0.31.0") || !IsRelease("v0.31.0") || IsRelease("0.30.0-dev+history-tab") || IsRelease("dev") {
+		t.Error("IsRelease misjudged a version")
+	}
+	if !Before("0.30.0", "0.31.0") || !Before("0.9.9", "0.10.0") || Before("0.31.0", "0.31.0") ||
+		Before("0.31.0", "0.30.0") || Before("0.30.0-dev", "0.31.0") {
+		t.Error("Before misordered releases")
 	}
 }
 

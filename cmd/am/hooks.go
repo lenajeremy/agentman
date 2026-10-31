@@ -394,7 +394,7 @@ func runDoctor(ctx context.Context, args []string) error {
 		case err != nil:
 			warn("version", version+", could not check for a newer one: "+err.Error())
 		case status.Behind > 0:
-			warn("version", describeBehind(status)+" — "+update.UpgradeCommand(installedPath()))
+			warn("version", describeBehind(status)+" — "+update.UpgradeCommand)
 		default:
 			check(true, "version", version+", the latest")
 		}

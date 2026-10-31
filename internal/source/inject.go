@@ -85,6 +85,9 @@ func (s *ClaudeSource) Inject(ctx context.Context, sessionID, text string) (prot
 		lock := s.paneLock(session.tmuxName)
 		lock.Lock()
 		defer lock.Unlock()
+		if err := s.clearInfoPanel(ctx, session.tmuxName); err != nil {
+			return protocol.InjectNone, err
+		}
 		if err := rejectSendIntoLiveQuestion(ctx, s.capturePane, session.tmuxName); err != nil {
 			return protocol.InjectNone, err
 		}
@@ -112,6 +115,13 @@ func (s *ClaudeSource) Interrupt(ctx context.Context, sessionID string) error {
 	}
 	if session.tmuxName == "" {
 		return fmt.Errorf("source: only sessions started with `am claude` can be interrupted")
+	}
+	// A panel open over a turn would take the keypress instead of the turn.
+	lock := s.paneLock(session.tmuxName)
+	lock.Lock()
+	defer lock.Unlock()
+	if err := s.clearInfoPanel(ctx, session.tmuxName); err != nil {
+		return err
 	}
 	return tmux.Interrupt(ctx, session.tmuxName)
 }
@@ -350,7 +360,7 @@ func (s *ClaudeSource) captureQuestion(ctx context.Context, tmuxName string) (*q
 		return nil, err
 	}
 	found := question.Detect(pane)
-	if found == nil {
+	if found == nil || claudeInfoPanel(pane) {
 		return nil, errNoAnswerableQuestion
 	}
 	return found, nil
