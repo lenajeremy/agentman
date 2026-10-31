@@ -611,9 +611,15 @@ func TestABriefIsWrittenFromWhatIsNewAndToldOnce(t *testing.T) {
 	// Something new, but the same news: briefed again, not told again.
 	messages = append(messages, protocol.Message{ID: "3", Role: protocol.RoleAssistant, Ts: 3, Text: "Also tidied the CSS."})
 	h.m.writeBrief(context.Background(), "claude:a")
+	// What is briefed is only what is new; the user's earlier word to the
+	// agent comes along, short, as what they already said.
 	raw, _ := json.Marshal(model.request(1).Messages)
-	if strings.Contains(string(raw), "fix the header") || !strings.Contains(string(raw), "tidied the CSS") {
-		t.Fatalf("the second brief read %s, want only what is new", raw)
+	written, said, _ := strings.Cut(string(raw), "What the user has already said")
+	if strings.Contains(written, "fix the header") || !strings.Contains(written, "tidied the CSS") {
+		t.Fatalf("the second brief read %s, want only what is new", written)
+	}
+	if !strings.Contains(said, "fix the header") {
+		t.Fatalf("the user's earlier word to the agent is missing: %s", said)
 	}
 	if posted := h.entries(); len(posted) != 1 {
 		t.Fatalf("the same news was told %d times", len(posted))
@@ -663,5 +669,71 @@ func TestAgentsAreFoundByIDOrName(t *testing.T) {
 	h.agents.sessions = append(h.agents.sessions, protocol.Session{ID: "claude:c", Name: "site-2"})
 	if _, err := h.m.resolveAgent(map[string]any{"agent": "sit"}); err == nil || !strings.Contains(err.Error(), "several") {
 		t.Errorf("an ambiguous name = %v", err)
+	}
+}
+
+// A need the user already answered isn't asked again: told to the agent,
+// to Agentman, and answered on a card, "push?" asked a second time brings
+// no card, and one line, once, says why.
+func TestANeedTheUserAlreadyAnsweredIsNotAskedAgain(t *testing.T) {
+	brief := func(needsYou, heldBack string) string {
+		raw, _ := json.Marshal(map[string]any{
+			"summary": "site's tests pass; it asks whether to push.", "goal": "Ship the header", "done": []string{"Tests pass"},
+			"now": "", "blocked": "", "needsYou": needsYou, "heldBack": heldBack, "files": []string{}, "notable": false,
+		})
+		return textReply(string(raw))
+	}
+	held := "asks whether to push; you told it to push when tests pass"
+	model := &scriptedModel{replies: []string{brief("", held), brief("", held)}}
+	h := newHarness(t, model, true)
+	now := time.Now().UnixMilli()
+	h.m.addEntry(protocol.ManagerEntry{Role: "user", Text: "site can push to main once its tests pass", Ts: now - 30*60_000})
+	h.m.addEntry(protocol.ManagerEntry{Role: "card", Text: "site needs you: Push to main?", SessionID: "claude:a", Ts: now - 20*60_000,
+		Card: &protocol.ManagerCard{ID: "c-old", Kind: protocol.CardNeedsYou, State: protocol.CardAnswered, SessionID: "claude:a",
+			AgentName: "site", Title: "Push to main?", Outcome: "You said: yes, push"}})
+	messages := []protocol.Message{
+		{ID: "1", Role: protocol.RoleUser, Ts: now - 40*60_000, Text: "Fix the header, then push when the tests pass."},
+		{ID: "2", Role: protocol.RoleAssistant, Ts: now - 10*60_000, Text: "Fixed the header."},
+	}
+	h.agents.answer = func(req protocol.Request) protocol.Event {
+		return protocol.Event{Type: protocol.EvtPage, Page: &protocol.Page{SessionID: req.SessionID, Messages: messages}}
+	}
+	h.m.briefs.put(protocol.Brief{SessionID: "claude:a", Summary: "fixing the header"}, "1")
+	messages = append(messages, protocol.Message{ID: "3", Role: protocol.RoleAssistant, Ts: now, Text: "Tests pass. Push to main?"})
+
+	h.m.writeBrief(context.Background(), "claude:a")
+	raw, _ := json.Marshal(model.request(0).Messages)
+	for _, said := range []string{"push when the tests pass", "site can push to main once its tests pass", `Push to main?\", answered: You said: yes, push`} {
+		if !strings.Contains(string(raw), said) {
+			t.Errorf("the brief was not given %q:\n%s", said, raw)
+		}
+	}
+	var cards, lines int
+	for _, entry := range h.entries() {
+		switch {
+		case entry.Card != nil && entry.Card.State == protocol.CardOpen:
+			cards++
+		case entry.Tool == "held_back":
+			lines++
+			if entry.Text != "Didn't ask you for site: "+held {
+				t.Errorf("line = %q", entry.Text)
+			}
+		}
+	}
+	if cards != 0 || lines != 1 {
+		t.Fatalf("%d cards and %d lines, want no card and one line", cards, lines)
+	}
+
+	// Briefed again, the same need held back is not said again.
+	messages = append(messages, protocol.Message{ID: "4", Role: protocol.RoleAssistant, Ts: now + 1, Text: "Waiting for your go-ahead to push."})
+	h.m.writeBrief(context.Background(), "claude:a")
+	lines = 0
+	for _, entry := range h.entries() {
+		if entry.Tool == "held_back" {
+			lines++
+		}
+	}
+	if lines != 1 {
+		t.Fatalf("the held-back need was said %d times", lines)
 	}
 }

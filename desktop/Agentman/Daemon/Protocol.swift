@@ -83,6 +83,7 @@ enum RequestType: String, Codable, Sendable {
     case managerSchedules = "manager_schedules"
     case managerScheduleCancel = "manager_schedule_cancel"
     case managerCheckPermission = "manager_check_permission"
+    case managerViewing = "manager_viewing"
     case keysList = "keys_list"
     case keySet = "key_set"
     case keyDelete = "key_delete"
@@ -145,6 +146,8 @@ struct DaemonRequest: Codable, Sendable {
     var language: LanguageChange?
     /// An agent's own alerts on or off, on set_agent_alerts.
     var alerts: Bool?
+    /// The agents in front of the user, on manager_viewing.
+    var viewing: [String]?
     /// One part of a recording to write out, on transcribe.
     var voice: VoiceClip?
     /// One part of a file sent to an agent, on "attach_file".

@@ -54,6 +54,11 @@ func (m *Manager) takeQuestion(ctx context.Context, session protocol.Session) {
 		}
 		d.reason = "approving it failed: " + err.Error()
 	}
+	// The user is looking at this agent: its question is in front of them.
+	if m.viewed(session.ID) {
+		m.holdQuestion(session.ID, q.ID)
+		return
+	}
 	m.postQuestionCardLocked(session, d, "")
 }
 

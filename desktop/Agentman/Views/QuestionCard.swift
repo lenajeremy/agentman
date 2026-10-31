@@ -72,6 +72,12 @@ struct QuestionReply: Sendable {
 
 /// A question's options as buttons, with a note for an option that takes
 /// one, ticks for several, and a box for a typed answer.
+extension EnvironmentValues {
+    /// Choices drawn small, for a card in a toast or in Agentman's chat:
+    /// smaller type and rows, an option's description left out.
+    @Entry var compactChoices = false
+}
+
 struct QuestionChoices: View {
     let question: Question
     /// The option Agentman would pick, marked for the user to confirm.
@@ -83,9 +89,10 @@ struct QuestionChoices: View {
     @State private var noting: QuestionOption?
     @State private var checked: Set<String> = []
     @State private var busy = false
+    @Environment(\.compactChoices) private var compact
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: compact ? 6 : 12) {
             if question.multiple == true {
                 multipleChoice
             } else if let option = noting {
@@ -98,9 +105,10 @@ struct QuestionChoices: View {
                 HStack {
                     TextField(typedPrompt, text: $note)
                         .textFieldStyle(.roundedBorder)
-                        .font(TextStyle.body)
+                        .font(compact ? TextStyle.caption : TextStyle.body)
                         .onSubmit { send(QuestionReply(text: note)) }
                     Button("Send") { send(QuestionReply(text: note)) }
+                        .controlSize(compact ? .small : .regular)
                         .disabled(note.trimmingCharacters(in: .whitespaces).isEmpty || busy)
                 }
             }
@@ -109,7 +117,7 @@ struct QuestionChoices: View {
     }
 
     private var singleChoice: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: compact ? 2 : 4) {
             ForEach(Array(question.options.enumerated()), id: \.element.id) { index, option in
                 OptionRow(
                     number: index + 1, option: option,
@@ -224,25 +232,26 @@ private struct OptionRow: View {
     var leading = false
     let action: () -> Void
     @State private var hovering = false
+    @Environment(\.compactChoices) private var compact
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: compact ? 8 : 10) {
                 Text("\(number)")
                     .font(TextStyle.label)
                     .monospacedDigit()
                     .foregroundStyle(Palette.muted)
-                    .frame(width: 20, height: 20)
-                    .background(Palette.fill, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .frame(width: compact ? 17 : 20, height: compact ? 17 : 20)
+                    .background(Palette.fill, in: RoundedRectangle(cornerRadius: compact ? 5 : 6, style: .continuous))
                     .alignmentGuide(.firstTextBaseline) { $0[.firstTextBaseline] }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(option.label)
-                        .font(TextStyle.body)
+                        .font(compact ? TextStyle.caption : TextStyle.body)
                         .foregroundStyle(Palette.text)
-                        .lineSpacing(4)
+                        .lineSpacing(compact ? 2 : 4)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
-                    if let description = option.description, !description.isEmpty {
+                    if !compact, let description = option.description, !description.isEmpty {
                         Text(description)
                             .font(TextStyle.caption)
                             .foregroundStyle(Palette.muted)
@@ -250,7 +259,12 @@ private struct OptionRow: View {
                     }
                 }
                 Spacer(minLength: 8)
-                if pick {
+                if pick, compact {
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Palette.workingText)
+                        .help("Agentman's pick")
+                } else if pick {
                     Label("Agentman's pick", systemImage: "sparkle")
                         .font(TextStyle.label)
                         .foregroundStyle(Palette.workingText)
@@ -264,11 +278,11 @@ private struct OptionRow: View {
                         .foregroundStyle(Palette.faint)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.horizontal, compact ? 8 : 12)
+            .padding(.vertical, compact ? 5 : 10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous)
                     .fill(hovering ? Palette.fillStrong : (leading || pick ? Palette.fill : Color.clear))
             )
             .contentShape(Rectangle())

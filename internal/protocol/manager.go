@@ -55,6 +55,12 @@ const (
 	// "network"), Text (the command, path or URL) and Path (the agent's
 	// folder). It is answered with EvtManagerPermission.
 	ReqManagerCheckPermission RequestType = "manager_check_permission"
+	// ReqManagerViewing says which agents' threads are in front of the user
+	// in one app (Viewing, empty for none; ClientID names the app). It lasts
+	// two minutes unless said again, so an app keeps saying it while it
+	// holds. Agentman puts up no card and pushes nothing for an agent the
+	// user is looking at. Answered with EvtManagerViewing.
+	ReqManagerViewing RequestType = "manager_viewing"
 )
 
 const (
@@ -66,7 +72,9 @@ const (
 	// EvtManagerHistory answers ReqManagerHistory, in Entries.
 	EvtManagerHistory EventType = "manager_history"
 	// EvtManagerStatus says what Agentman is doing, and whether it can.
-	EvtManagerStatus EventType = "manager_status"
+	// EvtManagerViewing acknowledges ReqManagerViewing.
+	EvtManagerViewing EventType = "manager_viewing"
+	EvtManagerStatus  EventType = "manager_status"
 	// EvtManagerSettings answers the settings requests.
 	EvtManagerSettings EventType = "manager_settings"
 	// EvtManagerBrief is an agent's brief, new or updated; on

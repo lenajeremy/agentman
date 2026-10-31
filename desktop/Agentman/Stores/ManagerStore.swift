@@ -346,6 +346,11 @@ final class ManagerStore {
 
     // MARK: - Events
 
+    /// The entry with this ID, as it is now.
+    func entry(_ id: String) -> ManagerEntry? {
+        entries.last { $0.id == id }
+    }
+
     func apply(_ event: DaemonEvent) {
         switch event.type {
         case "manager_entry":

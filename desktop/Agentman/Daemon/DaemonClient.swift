@@ -82,6 +82,10 @@ final class DaemonClient: @unchecked Sendable {
 
     /// Sends a request whose answer does not matter, such as subscribe.
     func send(_ request: DaemonRequest) {
+        if let answer {
+            _ = answer(request)
+            return
+        }
         queue.async { [self] in
             try? write(request, id: nextID())
         }

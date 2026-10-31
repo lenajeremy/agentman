@@ -67,7 +67,7 @@ func systemPrompt(settings protocol.ManagerSettings) string {
 
 // briefPrompt is for the brief model, which reads the newest part of one
 // agent's conversation and updates the brief on it.
-const briefPrompt = `You keep a brief on one AI coding agent for its user, who runs many agents and cannot read them all. You are given the previous brief, if any, and what the agent and the user wrote since.
+const briefPrompt = `You keep a brief on one AI coding agent for its user, who runs many agents and cannot read them all. You are given the previous brief, if any, what the agent and the user wrote since, and what the user has already said that bears on what the agent needs.
 
 Update the brief:
 - summary: one or two sentences on where things stand now, for someone glancing at it.
@@ -75,7 +75,8 @@ Update the brief:
 - done: the meaningful things it finished, newest first, at most five, each short.
 - now: what it is doing at this moment, or empty if it is waiting or finished.
 - blocked: what stops it, if anything.
-- needsYou: what it needs from the user — an answer, an approval, a decision — or empty.
+- needsYou: what it needs from the user now — an answer, an approval, a decision — that the user has not already given. Leave it empty when the user already answered it or said how to handle it (to the agent, to you, or on a card), or put away a card for the same thing: the agent asking again is not a new need. Leave it empty too when the agent only offers more ("want me to also…?") and can stop where it is.
+- heldBack: when you left needsYou empty for one of those reasons, what the agent asked and what the user already said, in a line ("asks whether to push; you told it to push when tests pass"). Otherwise empty.
 - files: the files it is working on, at most eight paths.
 - notable: true only if the user would want to hear about this now: it finished something substantial, it is stuck, it needs the user, or something went wrong. Routine progress is not notable.
 

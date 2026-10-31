@@ -37,6 +37,8 @@ struct ContentView: View {
             }
             .animation(.easeOut(duration: 0.18), value: sidebarHidden)
         }
+        // Agentman's news, small, over whatever is open.
+        .overlay { AgentmanToasts() }
         .environment(\.windowHeaderLeading, headerLeading)
         .background(Palette.paper)
         .background(WindowReader { window in
