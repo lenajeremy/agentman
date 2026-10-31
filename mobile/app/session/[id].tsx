@@ -38,6 +38,7 @@ import { groupTools } from "../../lib/toolgroups";
 import { readImage } from "../../lib/imagepath";
 import { sentMessageParts, splitSentMessage } from "../../lib/sentimages";
 import { MotionPressable } from "../../components/MotionPressable";
+import { FolderInitials, FolderPicture, useFolderIcon } from "../../components/FolderBadge";
 import { Loader } from "../../components/Loader";
 import { Pulse } from "../../components/Pulse";
 import { QuestionCard } from "../../components/QuestionCard";
@@ -700,6 +701,7 @@ export default function SessionScreen() {
 
   const displayState = effectiveState ?? session?.state ?? "ended";
   const state = stateStyle(displayState, color);
+  const folderPicture = useFolderIcon(sessionId, session?.cwd ?? "", session?.folderIcon);
   const chip = session
     ? statusChip(session.mode, session.contextPercent, modeChoices !== null)
     : null;
@@ -864,10 +866,16 @@ export default function SessionScreen() {
           </MotionPressable>
           {/* Whose chat this is, in the shape the agents list already uses:
               the logo is read before the name is, and the same tile on both
-              screens says this is the row you tapped. */}
+              screens says this is the row you tapped. A folder with a logo of
+              its own takes the tile, and the agent's mark moves to the line
+              under the name, where the folder's initials would be. */}
           {session ? (
             <View style={styles.agentTile}>
-              <AgentIcon kind={session.kind} size={20} />
+              {folderPicture ? (
+                <FolderPicture uri={folderPicture} size={38} />
+              ) : (
+                <AgentIcon kind={session.kind} size={20} />
+              )}
             </View>
           ) : null}
           <View style={styles.headerBody}>
@@ -881,9 +889,11 @@ export default function SessionScreen() {
                     opened say the same thing in the same place. */}
                 <View style={styles.subtitleRow}>
                   <View style={styles.folderBadge}>
-                    <Text style={styles.folderBadgeText}>
-                      {folderName(session.cwd).slice(0, 2).toUpperCase()}
-                    </Text>
+                    {folderPicture ? (
+                      <AgentIcon kind={session.kind} size={14} />
+                    ) : (
+                      <FolderInitials cwd={session.cwd} size={16} />
+                    )}
                   </View>
                   <Text style={[styles.subtitle, styles.subtitlePath]} numberOfLines={1}>
                     {folderName(session.cwd)}
@@ -2103,6 +2113,7 @@ const makeStyles = (c: Palette) =>
       height: 38,
       marginRight: space.xs,
       borderRadius: radius.md,
+      overflow: "hidden",
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: c.fill,
@@ -2217,16 +2228,7 @@ const makeStyles = (c: Palette) =>
     stateDot: { marginRight: 6 },
     stateLine: { flexDirection: "row", alignItems: "center", gap: 5, flexShrink: 0 },
     stateDotSmall: { width: 6, height: 6, borderRadius: 3 },
-    folderBadge: {
-      width: 16,
-      height: 16,
-      marginRight: 6,
-      borderRadius: 4,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: c.workingWash,
-    },
-    folderBadgeText: { ...font.sansBold, fontSize: 7.5, color: c.workingText },
+    folderBadge: { width: 16, height: 16, marginRight: 6, alignItems: "center", justifyContent: "center" },
 
     note: {
       flexDirection: "row",
