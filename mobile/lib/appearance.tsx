@@ -19,6 +19,7 @@ import {
   resolveScheme,
   Scheme,
 } from "./appearance-policy";
+import { simulatorAppearance } from "./simulator";
 import { Palette, palettes } from "./theme";
 
 interface Theme {
@@ -75,7 +76,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     void AsyncStorage.setItem(APPEARANCE_STORAGE_KEY, next).catch(() => {});
   }, []);
 
-  const scheme = resolveScheme(preference, system);
+  const scheme = simulatorAppearance() ?? resolveScheme(preference, system);
   const value = useMemo<Theme>(
     () => ({ color: palettes[scheme], scheme, preference, ready, setPreference }),
     [scheme, preference, ready, setPreference],

@@ -13,3 +13,14 @@ export function simulatorRoute(): string | null {
   const route = Settings.get("AGENTMAN_OPEN");
   return typeof route === "string" && route.startsWith("/") ? route : null;
 }
+
+/**
+ * The appearance a simulator was started in with `-AGENTMAN_APPEARANCE
+ * light|dark`, for screenshots of both themes; null otherwise. The app keeps
+ * its own setting, so the simulator's appearance alone does not change it.
+ */
+export function simulatorAppearance(): "light" | "dark" | null {
+  if (Platform.OS !== "ios" || Constants.isDevice) return null;
+  const value = Settings.get("AGENTMAN_APPEARANCE");
+  return value === "light" || value === "dark" ? value : null;
+}

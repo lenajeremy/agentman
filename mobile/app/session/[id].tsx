@@ -19,6 +19,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import Animated, { Easing, FadeOut, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AgentIcon } from "../../components/AgentIcon";
@@ -37,6 +38,8 @@ import { groupTools } from "../../lib/toolgroups";
 import { readImage } from "../../lib/imagepath";
 import { sentMessageParts, splitSentMessage } from "../../lib/sentimages";
 import { MotionPressable } from "../../components/MotionPressable";
+import { FolderInitials, FolderPicture, useFolderIcon } from "../../components/FolderBadge";
+import { Loader } from "../../components/Loader";
 import { Pulse } from "../../components/Pulse";
 import { QuestionCard } from "../../components/QuestionCard";
 import { Thinking } from "../../components/Thinking";
@@ -50,7 +53,7 @@ import { OutputViewer } from "../../components/OutputViewer";
 import { type Frame } from "../../lib/message-menu";
 import { artifactsButtonLabel } from "../../lib/artifacts";
 import { canEnd, shouldResume } from "../../lib/resume";
-import { modeLabel, modelLabel, showsInFeed, statusChip } from "../../lib/session-view";
+import { folderName, modeLabel, modelLabel, showsInFeed, statusChip } from "../../lib/session-view";
 import {
   defaultScopeWarning,
   switchChoices,
@@ -97,6 +100,20 @@ type Row =
  */
 const HEADER_HEIGHT = space.sm + 36 + space.md + 4;
 
+/** Points of scroll within which the foot of the thread, and the Working
+ *  line under the last message, are still on screen. */
+const AT_LATEST = 40;
+/** How a Working label comes and goes: a short fade with a small drift. */
+const STATE_IN = () => {
+  "worklet";
+  const timing = { duration: 220, easing: Easing.out(Easing.cubic) };
+  return {
+    initialValues: { opacity: 0, transform: [{ translateX: 6 }] },
+    animations: { opacity: withTiming(1, timing), transform: [{ translateX: withTiming(0, timing) }] },
+  };
+};
+const STATE_OUT = FadeOut.duration(160);
+
 export default function SessionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const sessionId = decodeURIComponent(String(id));
@@ -108,6 +125,8 @@ export default function SessionScreen() {
   const { height: viewportHeight } = useWindowDimensions();
   const listRef = useRef<FlatList<Row>>(null);
   const [scrolledAway, setScrolledAway] = useState(false);
+  /** The foot of the thread is on screen, its Working line with it. */
+  const [atLatest, setAtLatest] = useState(true);
   const [draft, setDraft] = useState("");
   const images = useAttachments(store.credentials);
   // The confirmation for a copy made from a message's menu. Held here rather
@@ -682,6 +701,7 @@ export default function SessionScreen() {
 
   const displayState = effectiveState ?? session?.state ?? "ended";
   const state = stateStyle(displayState, color);
+  const folderPicture = useFolderIcon(sessionId, session?.cwd ?? "", session?.folderIcon);
   const chip = session
     ? statusChip(session.mode, session.contextPercent, modeChoices !== null)
     : null;
@@ -846,10 +866,16 @@ export default function SessionScreen() {
           </MotionPressable>
           {/* Whose chat this is, in the shape the agents list already uses:
               the logo is read before the name is, and the same tile on both
-              screens says this is the row you tapped. */}
+              screens says this is the row you tapped. A folder with a logo of
+              its own takes the tile, and the agent's mark moves to the line
+              under the name, where the folder's initials would be. */}
           {session ? (
             <View style={styles.agentTile}>
-              <AgentIcon kind={session.kind} size={20} />
+              {folderPicture ? (
+                <FolderPicture uri={folderPicture} size={38} />
+              ) : (
+                <AgentIcon kind={session.kind} size={20} />
+              )}
             </View>
           ) : null}
           <View style={styles.headerBody}>
@@ -858,35 +884,44 @@ export default function SessionScreen() {
             </Text>
             {session ? (
               <>
+                {/* The agents list's first line: the folder, then what the
+                    agent is doing now, so the row you tapped and the page it
+                    opened say the same thing in the same place. */}
                 <View style={styles.subtitleRow}>
-                  {/* A colour, not a word: the dot pulses while the agent runs,
-                      which says "working" faster than the word did, and the
-                      word survives as its label. */}
-                  <View
-                    style={styles.stateDot}
-                    accessible
-                    accessibilityRole="text"
-                    accessibilityLabel={state.label}
-                  >
-                    <Pulse state={displayState} size={6} inline />
+                  <View style={styles.folderBadge}>
+                    {folderPicture ? (
+                      <AgentIcon kind={session.kind} size={14} />
+                    ) : (
+                      <FolderInitials cwd={session.cwd} size={16} />
+                    )}
                   </View>
-                  {/* Which agent and which project: the two facts this line is
-                      read for. The model and mode used to share it, and at
-                      phone width that left the folder as "…ts/northstar" and
-                      the mode as "kir…" — four facts, none of them whole. */}
-                  <Text style={[styles.subtitle, styles.subtitleModel]} numberOfLines={1}>
-                    {agentLabel(session.kind).name}
+                  <Text style={[styles.subtitle, styles.subtitlePath]} numberOfLines={1}>
+                    {folderName(session.cwd)}
                   </Text>
-                  <Text style={[styles.subtitle, styles.subtitleModel]}>{" · "}</Text>
-                  {/* Truncated from the front: a path's last segment is the one
-                      that says which project this is. */}
-                  <Text
-                    style={[styles.subtitle, styles.subtitlePath]}
-                    numberOfLines={1}
-                    ellipsizeMode="head"
-                  >
-                    {shortPath(session.cwd)}
-                  </Text>
+                  {/* "Working" says it twice when the feed's own Working line
+                      is on screen under the last message, so up here it only
+                      shows while the reader is further up the thread. */}
+                  {displayState === "busy" && atLatest ? null : (
+                    <Animated.View
+                      key={displayState}
+                      entering={STATE_IN}
+                      exiting={STATE_OUT}
+                      style={styles.stateLine}
+                      accessible
+                      accessibilityRole="text"
+                      accessibilityLabel={state.label}
+                    >
+                      <Text style={[styles.subtitle, styles.subtitleModel]}>{"  ·  "}</Text>
+                      {displayState === "busy" ? (
+                        <Loader size={10} />
+                      ) : (
+                        <View style={[styles.stateDotSmall, { backgroundColor: state.color }]} />
+                      )}
+                      <Text style={[styles.subtitle, styles.subtitleModel, { color: state.text }]}>
+                        {state.label}
+                      </Text>
+                    </Animated.View>
+                  )}
                 </View>
               </>
             ) : (
@@ -1060,8 +1095,11 @@ export default function SessionScreen() {
           maintainVisibleContentPosition={KEEP_READING}
           // Inverted, so how far up the reader is counts from the latest.
           onScroll={(event) => {
-            const away = event.nativeEvent.contentOffset.y > SCROLL_AWAY;
+            const offset = event.nativeEvent.contentOffset.y;
+            const away = offset > SCROLL_AWAY;
             if (away !== scrolledAway) setScrolledAway(away);
+            const latest = offset < AT_LATEST;
+            if (latest !== atLatest) setAtLatest(latest);
           }}
           scrollEventThrottle={64}
           keyExtractor={(row) =>
@@ -1111,9 +1149,9 @@ export default function SessionScreen() {
           // where a "still working" indicator belongs, under the last message.
           ListHeaderComponent={
             session?.state === "busy" ? (
-              <View style={styles.thinking}>
+              <Animated.View style={styles.thinking} entering={STATE_IN} exiting={STATE_OUT}>
                 <Thinking />
-              </View>
+              </Animated.View>
             ) : undefined
           }
           // With the list inverted, the "end" is the oldest message.
@@ -1322,6 +1360,7 @@ export default function SessionScreen() {
                     belongs where the message is written, not in the header. */}
                   {session?.model || switching?.kind === "model" ? (
                     <ModelButton
+                      agent={session?.kind}
                       model={modelLabel(
                         (switching?.kind === "model" ? switching.value : session?.model) ?? "",
                       )}
@@ -1451,7 +1490,10 @@ function ModelButton({
   onPress,
   disabled,
   kind = "Model",
+  agent,
 }: {
+  /** The agent's kind, whose mark leads the model's name, as on the Mac. */
+  agent?: string;
   model: string;
   pending: boolean;
   onPress?: () => void;
@@ -1463,6 +1505,7 @@ function ModelButton({
   const { color } = useTheme();
   const body = (
     <>
+      {agent ? <AgentIcon kind={agent} size={14} /> : null}
       <Text style={[styles.modelText, pending && styles.switchPending]} numberOfLines={1}>
         {pending ? `${model}…` : model}
       </Text>
@@ -2070,6 +2113,7 @@ const makeStyles = (c: Palette) =>
       height: 38,
       marginRight: space.xs,
       borderRadius: radius.md,
+      overflow: "hidden",
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: c.fill,
@@ -2093,7 +2137,7 @@ const makeStyles = (c: Palette) =>
     workspaceLabel: {
       flex: 1,
       color: c.text,
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.caption,
     },
     // A count on the overflow control, so a running server is still visible
@@ -2111,7 +2155,7 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.working,
     },
     serverDotText: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: scaled(9.5),
       lineHeight: scaled(12),
       color: "#FFFFFF",
@@ -2131,19 +2175,19 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.needsYou,
     },
     reviewBadgeText: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: scaled(9.5),
       lineHeight: scaled(12),
       color: c.onAccent,
     },
     title: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: scaled(16),
       color: c.text,
     },
     subtitleRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
     subtitle: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.label,
       color: c.muted,
     },
@@ -2174,7 +2218,7 @@ const makeStyles = (c: Palette) =>
     switchButtonPrimary: { backgroundColor: c.inverse },
     switchButtonSecondary: { backgroundColor: c.surface, borderWidth: 1, borderColor: c.fillStrong },
     switchButtonDisabled: { opacity: 0.4 },
-    switchButtonLabel: { fontFamily: font.sansBold, fontSize: size.caption, color: c.text },
+    switchButtonLabel: { ...font.sansBold, fontSize: size.caption, color: c.text },
     switchButtonLabelPrimary: { color: c.onInverse },
     // No box around it. This was a 28pt touch target from when the dot was a
     // control in the top row; on a line of text it centred a six point dot in
@@ -2182,6 +2226,9 @@ const makeStyles = (c: Palette) =>
     // fact now, not a control, so it occupies exactly itself and starts where
     // the title starts.
     stateDot: { marginRight: 6 },
+    stateLine: { flexDirection: "row", alignItems: "center", gap: 5, flexShrink: 0 },
+    stateDotSmall: { width: 6, height: 6, borderRadius: 3 },
+    folderBadge: { width: 16, height: 16, marginRight: 6, alignItems: "center", justifyContent: "center" },
 
     note: {
       flexDirection: "row",
@@ -2204,7 +2251,7 @@ const makeStyles = (c: Palette) =>
     },
     noteText: {
       flex: 1,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       lineHeight: scaled(18),
       color: c.textSecondary,
@@ -2224,14 +2271,14 @@ const makeStyles = (c: Palette) =>
     },
     spinner: { marginVertical: space.lg },
     startOfSession: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       color: c.faint,
       textAlign: "center",
       marginBottom: space.lg,
     },
     emptyFeed: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.body,
       color: c.faint,
       textAlign: "center",
@@ -2244,21 +2291,20 @@ const makeStyles = (c: Palette) =>
       alignSelf: "flex-end",
       maxWidth: "84%",
       backgroundColor: c.fill,
-      borderRadius: radius.xl,
-      borderBottomRightRadius: 6,
-      paddingHorizontal: 14,
+      borderRadius: 18,
+      paddingHorizontal: 15,
       paddingVertical: 10,
     },
     userText: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.reading,
       color: c.text,
       lineHeight: scaled(23),
     },
     summaryHeader: { flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 4 },
-    summaryLabel: { fontFamily: font.sans, fontSize: size.caption, color: c.muted },
+    summaryLabel: { ...font.sans, fontSize: size.caption, color: c.muted },
     summaryText: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       lineHeight: scaled(19),
       color: c.muted,
@@ -2271,7 +2317,7 @@ const makeStyles = (c: Palette) =>
     assistantRow: { gap: space.xs },
     sidechain: {
       alignSelf: "flex-start",
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: scaled(11),
       color: c.muted,
       backgroundColor: c.fill,
@@ -2282,7 +2328,7 @@ const makeStyles = (c: Palette) =>
     },
 
     systemText: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       color: c.faint,
       textAlign: "center",
@@ -2294,10 +2340,10 @@ const makeStyles = (c: Palette) =>
     pendingFooterLabel: { flexShrink: 1, marginTop: 0 },
     sendNow: { justifyContent: "center" },
     sendNowPressed: { opacity: 0.5 },
-    sendNowText: { fontFamily: font.sansMedium, fontSize: size.label, color: c.workingText },
+    sendNowText: { ...font.sansMedium, fontSize: size.label, color: c.workingText },
     pendingFailed: { opacity: 1, backgroundColor: c.errorWash },
     pendingStatus: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.label,
       color: c.muted,
       marginTop: space.xs,
@@ -2333,20 +2379,15 @@ const makeStyles = (c: Palette) =>
     // a sentence needs.
     field: {
       backgroundColor: c.surface,
-      borderRadius: radius.xxl,
+      borderRadius: 20,
       borderWidth: 1,
       borderColor: c.line,
       paddingLeft: 6,
       paddingRight: 6,
       paddingTop: 4,
       paddingBottom: 6,
-      shadowColor: c.shadow,
-      shadowOpacity: 0.06,
-      shadowRadius: 16,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: 2,
     },
-    fieldFocused: { borderColor: c.working },
+    fieldFocused: { borderColor: c.fillStrong },
     fieldDisabled: { opacity: 0.55 },
     // Inset so the text starts where the + under it does.
     input: {
@@ -2355,7 +2396,7 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: 10,
       paddingTop: space.sm,
       paddingBottom: space.xs,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.body,
       color: c.text,
     },
@@ -2371,21 +2412,21 @@ const makeStyles = (c: Palette) =>
     modelButton: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 3,
+      gap: 5,
       height: 32,
       maxWidth: 200,
       paddingHorizontal: 10,
       borderRadius: radius.pill,
     },
     modelButtonPressed: { backgroundColor: c.fill },
-    modelText: { flexShrink: 1, fontFamily: font.sansMedium, fontSize: scaled(13), color: c.muted },
-    contextText: { fontFamily: font.sans, fontSize: scaled(12), color: c.faint, fontVariant: ["tabular-nums"] },
+    modelText: { flexShrink: 1, ...font.sansMedium, fontSize: scaled(13), color: c.muted },
+    contextText: { ...font.sans, fontSize: scaled(12), color: c.faint, fontVariant: ["tabular-nums"] },
     // A wrapper so the long press has something to land on: the gesture cannot
     // be attached to the TextInput itself without swallowing taps that should
     // place the caret.
     inputWrap: {},
     attachError: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.label,
       color: c.errorText,
       paddingHorizontal: space.md,
@@ -2408,5 +2449,5 @@ const makeStyles = (c: Palette) =>
       alignItems: "center",
       justifyContent: "center",
     },
-    sendDisabled: { backgroundColor: c.fill },
+    sendDisabled: { backgroundColor: c.fillStrong },
   });

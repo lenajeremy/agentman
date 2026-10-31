@@ -71,5 +71,5 @@ export function Wordmark({ size = 22 }: { size?: number }) {
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     row: { flexDirection: "row", alignItems: "center", gap: 10 },
-    name: { fontFamily: font.sansBold, fontSize: scaled(18), letterSpacing: -0.4, color: c.text },
+    name: { ...font.sansBold, fontSize: scaled(18), letterSpacing: -0.4, color: c.text },
   });

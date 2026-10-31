@@ -317,7 +317,7 @@ function Row({
         <Text
           style={[
             styles.rowValue,
-            mono && { fontFamily: font.mono },
+            mono && { ...font.mono },
             tint ? { color: tint } : null,
           ]}
           numberOfLines={2}
@@ -345,7 +345,7 @@ const makeStyles = (c: Palette) =>
       borderColor: c.line,
     },
     title: {
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.display,
       letterSpacing: -1.2,
       color: c.text,
@@ -354,7 +354,7 @@ const makeStyles = (c: Palette) =>
     },
 
     sectionLabel: {
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.caption,
       color: c.muted,
       marginLeft: space.xxs,
@@ -368,7 +368,7 @@ const makeStyles = (c: Palette) =>
       borderWidth: 1,
       borderColor: c.line,
     },
-    body: { fontFamily: font.sans, fontSize: size.caption, color: c.muted, lineHeight: scaled(19) },
+    body: { ...font.sans, fontSize: size.caption, color: c.muted, lineHeight: scaled(19) },
 
     row: {
       minHeight: 56,
@@ -378,7 +378,7 @@ const makeStyles = (c: Palette) =>
       gap: space.md,
       paddingVertical: space.md,
     },
-    rowLabel: { fontFamily: font.sansMedium, fontSize: size.body, color: c.text },
+    rowLabel: { ...font.sansMedium, fontSize: size.body, color: c.text },
     valueWrap: {
       flex: 1,
       flexDirection: "row",
@@ -390,7 +390,7 @@ const makeStyles = (c: Palette) =>
     rowValue: {
       flexShrink: 1,
       textAlign: "right",
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       color: c.muted,
     },
@@ -425,8 +425,8 @@ const makeStyles = (c: Palette) =>
       shadowOffset: { width: 0, height: 2 },
       elevation: 1,
     },
-    segmentLabel: { fontFamily: font.sansMedium, fontSize: size.caption, color: c.muted },
-    segmentLabelActive: { fontFamily: font.sansBold, color: c.text },
+    segmentLabel: { ...font.sansMedium, fontSize: size.caption, color: c.muted },
+    segmentLabelActive: { ...font.sansBold, color: c.text },
 
     privacyCard: {
       flexDirection: "row",
@@ -445,11 +445,11 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.fill,
     },
     privacyCopy: { flex: 1, gap: space.xs },
-    privacyTitle: { fontFamily: font.sansBold, fontSize: size.body, color: c.text },
+    privacyTitle: { ...font.sansBold, fontSize: size.body, color: c.text },
     privacyLink: { alignSelf: "flex-start", justifyContent: "center", minHeight: 24, marginTop: space.xs },
     // Cobalt, the brand and the colour of anything tappable. Green said
     // "connected", which is not what a policy link means.
-    privacyLinkText: { fontFamily: font.sansMedium, fontSize: size.label, color: c.workingText },
+    privacyLinkText: { ...font.sansMedium, fontSize: size.label, color: c.workingText },
 
     unpair: {
       minHeight: 52,
@@ -459,9 +459,9 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.errorWash,
       marginTop: space.xl,
     },
-    unpairText: { fontFamily: font.sansBold, fontSize: size.body, color: c.errorText },
+    unpairText: { ...font.sansBold, fontSize: size.body, color: c.errorText },
     unpairHint: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.label,
       color: c.faint,
       textAlign: "center",
@@ -477,5 +477,5 @@ const makeStyles = (c: Palette) =>
       marginTop: space.xxl,
       opacity: 0.55,
     },
-    signatureText: { fontFamily: font.sansBold, fontSize: size.caption, color: c.text },
+    signatureText: { ...font.sansBold, fontSize: size.caption, color: c.text },
   });

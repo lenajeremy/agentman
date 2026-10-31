@@ -111,5 +111,5 @@ const makeStyles = (c: Palette) =>
       gap: 6,
       alignSelf: "flex-end",
     },
-    goneText: { fontFamily: font.sans, fontSize: size.caption, color: c.muted },
+    goneText: { ...font.sans, fontSize: size.caption, color: c.muted },
   });

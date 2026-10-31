@@ -130,5 +130,5 @@ const makeStyles = (c: Palette) =>
     recording: { backgroundColor: c.errorText, paddingHorizontal: 12 },
     row: { flexDirection: "row", alignItems: "center", gap: 7 },
     stop: { width: 9, height: 9, borderRadius: 2, backgroundColor: "#FFFFFF" },
-    time: { fontFamily: font.monoMedium, fontSize: scaled(12), color: "#FFFFFF" },
+    time: { ...font.monoMedium, fontSize: scaled(12), color: "#FFFFFF" },
   });

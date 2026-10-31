@@ -655,13 +655,13 @@ const makeStyles = (c: Palette) =>
     // whole job is showing as many rows as possible.
     title: {
       color: c.text,
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.title,
       letterSpacing: -0.3,
     },
     subtitle: {
       color: c.muted,
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: scaled(11),
       marginTop: 1,
     },
@@ -686,7 +686,7 @@ const makeStyles = (c: Palette) =>
     tabActive: { backgroundColor: c.inverse },
     tabText: {
       color: c.muted,
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.caption,
     },
     tabTextActive: { color: c.onInverse },
@@ -699,8 +699,8 @@ const makeStyles = (c: Palette) =>
       paddingRight: space.lg,
     },
     crumbItem: { flexDirection: "row", alignItems: "center", gap: 3 },
-    crumb: { color: c.workingText, fontFamily: font.mono, fontSize: scaled(12) },
-    crumbCurrent: { color: c.text, fontFamily: font.monoMedium },
+    crumb: { color: c.workingText, ...font.mono, fontSize: scaled(12) },
+    crumbCurrent: { color: c.text, ...font.monoMedium },
 
     toolRow: { flexDirection: "row", gap: space.sm, marginTop: space.md },
     branch: {
@@ -720,7 +720,7 @@ const makeStyles = (c: Palette) =>
     branchName: {
       flexShrink: 1,
       color: c.textSecondary,
-      fontFamily: font.monoMedium,
+      ...font.monoMedium,
       fontSize: scaled(12),
     },
     search: {
@@ -742,13 +742,13 @@ const makeStyles = (c: Palette) =>
       left: 0,
       right: 0,
       color: c.faint,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
     },
     searchInput: {
       height: "100%",
       color: c.text,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       lineHeight: scaled(18),
       paddingVertical: 0,
@@ -776,9 +776,9 @@ const makeStyles = (c: Palette) =>
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: c.line,
     },
-    rowName: { flex: 1, color: c.text, fontFamily: font.mono, fontSize: scaled(13) },
-    rowFolder: { fontFamily: font.monoMedium },
-    rowMeta: { color: c.faint, fontFamily: font.mono, fontSize: scaled(11) },
+    rowName: { flex: 1, color: c.text, ...font.mono, fontSize: scaled(13) },
+    rowFolder: { ...font.monoMedium },
+    rowMeta: { color: c.faint, ...font.mono, fontSize: scaled(11) },
 
     viewing: {
       flexDirection: "row",
@@ -790,7 +790,7 @@ const makeStyles = (c: Palette) =>
     viewingText: {
       flexShrink: 1,
       color: c.faint,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: scaled(11.5),
     },
     older: {
@@ -805,7 +805,7 @@ const makeStyles = (c: Palette) =>
     },
     olderText: {
       color: c.text,
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.caption,
     },
 
@@ -816,20 +816,20 @@ const makeStyles = (c: Palette) =>
     },
     empty: {
       color: c.muted,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       textAlign: "center",
     },
     error: {
       color: c.errorText,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.body,
       paddingVertical: space.md,
     },
     center: { marginTop: space.xl },
     note: {
       color: c.faint,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: scaled(11.5),
       marginTop: space.md,
       lineHeight: scaled(16),

@@ -119,13 +119,13 @@ const makeStyles = (c: Palette) =>
     },
     title: { flex: 1, minWidth: 0 },
     titleText: {
-      fontFamily: font.monoMedium,
+      ...font.monoMedium,
       fontSize: size.caption,
       color: c.text,
     },
     titleMeta: {
       marginTop: 1,
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: size.label,
       color: c.faint,
     },

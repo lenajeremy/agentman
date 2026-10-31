@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Appear } from "../components/Appear";
 import { AgentIcon } from "../components/AgentIcon";
 import { AgentmanCard } from "../components/AgentmanCard";
+import { Loader } from "../components/Loader";
 import { ContentColumn } from "../components/ContentColumn";
 import { EmptyIllustration } from "../components/Illustrations";
 import { MotionPressable } from "../components/MotionPressable";
@@ -454,7 +455,12 @@ function AgentRow({
         ]}
       >
         <AgentIcon kind={session.kind} size={20} />
-        {displayState !== "idle" && displayState !== "ended" ? (
+        {displayState === "busy" ? (
+          // The Mac's working ring, on a disc cut out of the avatar's corner.
+          <View style={styles.avatarLoader}>
+            <Loader size={12} />
+          </View>
+        ) : displayState !== "idle" && displayState !== "ended" ? (
           <View style={styles.avatarPulse}>
             <Pulse state={displayState} size={7} />
           </View>
@@ -758,7 +764,7 @@ const makeStyles = (c: Palette) =>
     },
     chipDot: { width: 7, height: 7, borderRadius: 4 },
     chipText: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.caption,
       color: c.textSecondary,
     },
@@ -773,7 +779,7 @@ const makeStyles = (c: Palette) =>
       borderColor: c.line,
     },
     title: {
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.display,
       letterSpacing: -1.2,
       color: c.text,
@@ -801,12 +807,12 @@ const makeStyles = (c: Palette) =>
     },
     stateChipOn: { backgroundColor: c.inverse, borderColor: c.inverse },
     stateChipValue: {
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.caption,
       fontVariant: ["tabular-nums"],
     },
     stateChipLabel: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       color: c.muted,
     },
@@ -837,12 +843,12 @@ const makeStyles = (c: Palette) =>
     filterOn: { backgroundColor: c.workingWash, borderColor: c.workingSoft },
     filterLabel: {
       flexShrink: 1,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.body,
       color: c.textSecondary,
     },
     filterLabelOn: {
-      fontFamily: font.monoMedium,
+      ...font.monoMedium,
       fontSize: size.caption,
       color: c.workingText,
     },
@@ -864,8 +870,8 @@ const makeStyles = (c: Palette) =>
       marginTop: space.xl,
       marginBottom: space.sm,
     },
-    groupLabel: { fontFamily: font.sansBold, fontSize: size.caption },
-    groupCount: { fontFamily: font.mono, fontSize: size.label, color: c.faint },
+    groupLabel: { ...font.sansBold, fontSize: size.caption },
+    groupCount: { ...font.mono, fontSize: size.label, color: c.faint },
 
     card: {
       borderRadius: radius.xl,
@@ -896,13 +902,13 @@ const makeStyles = (c: Palette) =>
     },
     pillDot: { width: 6, height: 6, borderRadius: 3 },
     pillLabel: {
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: scaled(11.5),
       color: c.needsYouText,
     },
     askName: {
       flex: 1,
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.caption,
       color: c.textSecondary,
     },
@@ -945,7 +951,18 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.fill,
     },
     serversLine: { flexDirection: "row", alignItems: "center", gap: 5 },
-    serversText: { fontFamily: font.mono, fontSize: scaled(12), color: c.muted },
+    serversText: { ...font.mono, fontSize: scaled(12), color: c.muted },
+    avatarLoader: {
+      position: "absolute",
+      right: -5,
+      bottom: -5,
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+    },
     avatarPulse: {
       position: "absolute",
       right: -8,
@@ -955,18 +972,18 @@ const makeStyles = (c: Palette) =>
     rowTop: { flexDirection: "row", alignItems: "baseline", gap: space.sm },
     name: {
       flex: 1,
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.body,
       color: c.text,
     },
-    age: { fontFamily: font.sans, fontSize: size.label, color: c.faint },
+    age: { ...font.sans, fontSize: size.label, color: c.faint },
     metaRow: { flexDirection: "row", alignItems: "center" },
     // The model holds its width and the path gives way from its front: a
     // path's last segment is the one that says which project this is.
     metaPath: { flexShrink: 1 },
-    meta: { fontFamily: font.sans, fontSize: size.caption, color: c.muted },
+    meta: { ...font.sans, fontSize: size.caption, color: c.muted },
     needsYouNote: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.caption,
       color: c.needsYouText,
       marginTop: space.xxs,
@@ -993,12 +1010,12 @@ const makeStyles = (c: Palette) =>
     },
     bannerCopy: { flex: 1 },
     bannerText: {
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.caption,
       color: c.text,
     },
     bannerHint: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       color: c.muted,
       marginTop: 2,
@@ -1020,14 +1037,14 @@ const makeStyles = (c: Palette) =>
       marginBottom: space.md,
     },
     emptyTitle: {
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: scaled(26),
       letterSpacing: -0.8,
       color: c.text,
       textAlign: "center",
     },
     emptyBody: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.body,
       color: c.muted,
       lineHeight: scaled(22),
@@ -1047,15 +1064,15 @@ const makeStyles = (c: Palette) =>
       borderWidth: 1,
       borderColor: c.line,
     },
-    commandPrompt: { fontFamily: font.mono, fontSize: scaled(14), color: c.faint },
-    commandText: { fontFamily: font.mono, fontSize: scaled(14), color: c.text },
+    commandPrompt: { ...font.mono, fontSize: scaled(14), color: c.faint },
+    commandText: { ...font.mono, fontSize: scaled(14), color: c.text },
     emptyHint: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       color: c.faint,
       marginTop: space.xs,
     },
-    inlineMono: { fontFamily: font.mono, color: c.muted },
+    inlineMono: { ...font.mono, color: c.muted },
     secondaryButton: {
       marginTop: space.sm,
       minHeight: 44,
@@ -1068,7 +1085,7 @@ const makeStyles = (c: Palette) =>
       borderColor: c.fillStrong,
     },
     secondaryButtonText: {
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.body,
       color: c.text,
     },
@@ -1095,12 +1112,12 @@ const makeStyles = (c: Palette) =>
     },
     undoText: {
       flex: 1,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.body,
       color: c.onInverse,
     },
     undoAction: {
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.body,
       color: c.inverseAccent,
     },

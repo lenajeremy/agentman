@@ -120,8 +120,8 @@ const makeStyles = (c: Palette) =>
       marginBottom: space.sm,
     },
     firstDay: { marginTop: space.xs },
-    dayLabel: { color: c.muted, fontFamily: font.sansBold, fontSize: size.caption },
-    dayCount: { color: c.faint, fontFamily: font.mono, fontSize: size.label },
+    dayLabel: { color: c.muted, ...font.sansBold, fontSize: size.caption },
+    dayCount: { color: c.faint, ...font.mono, fontSize: size.label },
 
     list: {
       borderWidth: 1,
@@ -144,7 +144,7 @@ const makeStyles = (c: Palette) =>
     main: { flex: 1, minWidth: 0, gap: 5 },
     subject: {
       color: c.text,
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: scaled(14.5),
       lineHeight: scaled(20),
       letterSpacing: -0.1,
@@ -153,11 +153,11 @@ const makeStyles = (c: Palette) =>
     byline: {
       flexShrink: 1,
       color: c.muted,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: scaled(12),
     },
-    dot: { color: c.faint, fontFamily: font.sans, fontSize: scaled(12) },
-    time: { color: c.faint, fontFamily: font.mono, fontSize: scaled(11) },
+    dot: { color: c.faint, ...font.sans, fontSize: scaled(12) },
+    time: { color: c.faint, ...font.mono, fontSize: scaled(11) },
 
     // Stacked and right-aligned, so hashes and counts form two tidy columns
     // down the list however long each subject runs.
@@ -168,9 +168,9 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.sm - 2,
       backgroundColor: c.fill,
     },
-    hash: { color: c.muted, fontFamily: font.mono, fontSize: scaled(11) },
+    hash: { color: c.muted, ...font.mono, fontSize: scaled(11) },
     counts: { flexDirection: "row", alignItems: "center", gap: 6 },
-    count: { fontFamily: font.monoMedium, fontSize: scaled(11.5) },
+    count: { ...font.monoMedium, fontSize: scaled(11.5) },
     countLarge: { fontSize: size.caption },
     countAdded: { color: c.ok },
     countRemoved: { color: c.errorText },

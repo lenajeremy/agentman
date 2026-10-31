@@ -64,10 +64,10 @@ export default function NotesSettings() {
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     empty: { alignItems: "center", gap: space.sm, paddingVertical: space.xl, paddingHorizontal: space.md },
-    emptyText: { fontFamily: font.sans, fontSize: size.caption, lineHeight: scaled(19), color: c.muted, textAlign: "center" },
+    emptyText: { ...font.sans, fontSize: size.caption, lineHeight: scaled(19), color: c.muted, textAlign: "center" },
     note: { flexDirection: "row", alignItems: "center", gap: space.md, paddingVertical: space.md },
     words: { flex: 1, gap: 4 },
-    title: { fontFamily: font.sansMedium, fontSize: size.body, color: c.text },
+    title: { ...font.sansMedium, fontSize: size.body, color: c.text },
     meta: { flexDirection: "row", alignItems: "center", gap: 5 },
-    metaText: { fontFamily: font.sans, fontSize: size.label, color: c.muted },
+    metaText: { ...font.sans, fontSize: size.label, color: c.muted },
   });

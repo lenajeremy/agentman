@@ -375,11 +375,7 @@ struct AgentRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 7) {
-                Text(String((Worktrees.parts(of: session.cwd)?.repo ?? (session.cwd as NSString).lastPathComponent).prefix(2)).uppercased())
-                    .font(Fonts.sans(8, .bold))
-                    .foregroundStyle(Palette.workingText)
-                    .frame(width: 16, height: 16)
-                    .background(Palette.workingWash, in: RoundedRectangle(cornerRadius: 4))
+                FolderMark(session: session)
                 Text(Worktrees.label(session.cwd))
                     .lineLimit(1)
                 Spacer(minLength: 4)
@@ -782,3 +778,43 @@ private struct SectionRule: View {
     }
 }
 
+/// Which folder an agent works in: the folder's own logo when the daemon
+/// found one, otherwise its first two letters on the brand wash.
+struct FolderMark: View {
+    let session: Session
+    var size: CGFloat = 16
+
+    var body: some View {
+        if let image = FolderLogos.image(cwd: session.cwd, icon: session.folderIcon) {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size / 4, style: .continuous))
+                .accessibilityHidden(true)
+        } else {
+            Text(String((Worktrees.parts(of: session.cwd)?.repo ?? (session.cwd as NSString).lastPathComponent).prefix(2)).uppercased())
+                .font(Fonts.sans(8, .bold))
+                .foregroundStyle(Palette.workingText)
+                .frame(width: size, height: size)
+                .background(Palette.workingWash, in: RoundedRectangle(cornerRadius: size / 4))
+        }
+    }
+}
+
+/// Folder logos, read from disk once each: the daemon names the file, and
+/// it is on this Mac. A file that cannot be read is remembered as none.
+@MainActor
+enum FolderLogos {
+    private static var loaded: [String: NSImage?] = [:]
+
+    static func image(cwd: String, icon: String?) -> NSImage? {
+        guard let icon, !icon.isEmpty, !icon.contains("..") else { return nil }
+        let path = (cwd as NSString).appendingPathComponent(icon)
+        if let known = loaded[path] { return known }
+        let image = NSImage(contentsOfFile: path)
+        loaded[path] = image
+        return image
+    }
+}

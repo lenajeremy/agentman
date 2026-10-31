@@ -85,6 +85,9 @@ type Transport interface {
 // Daemon wires discovery, hooks, and subscriptions together.
 type Daemon struct {
 	registry *source.Registry
+	// folderIcons is each folder's favicon or logo, for the apps to show
+	// beside its agents in place of initials.
+	folderIcons *folderIcons
 	// usage reads what the agents spent, for ReqUsage.
 	usage     *usage.Scanner
 	usageOnce sync.Once
@@ -226,6 +229,7 @@ func New(registry *source.Registry, sink Transport) *Daemon {
 		questionRetryDelay: discoverInterval,
 		pushedQuestions:    map[string]string{},
 		serverLists:        map[string][]protocol.Server{},
+		folderIcons:        newFolderIcons(),
 		serverScanInterval: serverScanInterval,
 		seen:               newSeenPaths(),
 		launches:           map[string]string{},
@@ -456,6 +460,12 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 	}
 
 	found = normalizeDiscoveredSessions(found)
+	// Outside the lock: a folder not looked at for a while is searched.
+	if d.folderIcons != nil {
+		for i := range found {
+			found[i].FolderIcon = d.folderIcons.lookup(found[i].Cwd)
+		}
+	}
 	d.mu.Lock()
 	previous := d.sessions
 	current := make(map[string]protocol.Session, len(found))

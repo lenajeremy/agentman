@@ -868,6 +868,9 @@ struct Session: Codable, Sendable, Identifiable, Hashable {
     /// /clear starts a new one there, and /resume switches to another. A
     /// thread showing that one follows to this.
     var previous: String?
+    /// The folder's logo (its favicon, logo.png or icon.png), relative to
+    /// cwd, shown in place of its initials. Absent when it has none.
+    var folderIcon: String?
 
     static func == (lhs: Session, rhs: Session) -> Bool {
         lhs.id == rhs.id && lhs.state == rhs.state && lhs.name == rhs.name &&
@@ -875,7 +878,7 @@ struct Session: Codable, Sendable, Identifiable, Hashable {
             lhs.model == rhs.model && lhs.queued == rhs.queued && lhs.mode == rhs.mode &&
             lhs.modes == rhs.modes && lhs.models == rhs.models && lhs.originalName == rhs.originalName &&
             lhs.artifacts == rhs.artifacts && lhs.artifactsToReview == rhs.artifactsToReview &&
-            lhs.servers == rhs.servers
+            lhs.servers == rhs.servers && lhs.folderIcon == rhs.folderIcon
     }
 
     func hash(into hasher: inout Hasher) { hasher.combine(id) }

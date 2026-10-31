@@ -126,6 +126,9 @@ export interface Session {
    *  /clear starts a new one there, and /resume switches to another. A thread
    *  showing that one follows to this. */
   previous?: string;
+  /** The folder's logo (its favicon, logo.png or icon.png), relative to cwd,
+   *  shown in place of its initials. Absent when it has none. */
+  folderIcon?: string;
 }
 
 /** A local web server an agent started, which the phone can open. */

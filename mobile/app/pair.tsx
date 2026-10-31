@@ -368,24 +368,24 @@ const makeStyles = (c: Palette) =>
       borderColor: c.line,
     },
     title: {
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: scaled(30),
       lineHeight: scaled(34),
       letterSpacing: -1,
       color: c.text,
       marginTop: space.xl,
     },
-    ledeCode: { fontFamily: font.mono, fontSize: scaled(14), color: c.text },
+    ledeCode: { ...font.mono, fontSize: scaled(14), color: c.text },
     lede: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.body,
       color: c.muted,
       lineHeight: scaled(22),
       marginTop: space.sm,
     },
-    commandPrompt: { fontFamily: font.mono, fontSize: scaled(14), color: c.faint },
+    commandPrompt: { ...font.mono, fontSize: scaled(14), color: c.faint },
 
-    guideTitle: { fontFamily: font.sansBold, fontSize: size.caption, color: c.muted },
+    guideTitle: { ...font.sansBold, fontSize: size.caption, color: c.muted },
     guide: {
       marginTop: space.sm,
       backgroundColor: c.surface,
@@ -405,10 +405,10 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.fill,
       marginTop: 1,
     },
-    stepNumberText: { fontFamily: font.mono, fontSize: scaled(13), color: c.textSecondary },
+    stepNumberText: { ...font.mono, fontSize: scaled(13), color: c.textSecondary },
     stepCopy: { flex: 1, minWidth: 0, gap: 3 },
-    stepTitle: { fontFamily: font.sansBold, fontSize: size.body, color: c.text },
-    stepDetail: { fontFamily: font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.muted },
+    stepTitle: { ...font.sansBold, fontSize: size.body, color: c.text },
+    stepDetail: { ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.muted },
     stepCommand: {
       flexDirection: "row",
       alignItems: "center",
@@ -419,9 +419,9 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.lg,
       backgroundColor: c.fill,
     },
-    stepCommandText: { flex: 1, fontFamily: font.mono, fontSize: scaled(13), color: c.text },
+    stepCommandText: { flex: 1, ...font.mono, fontSize: scaled(13), color: c.text },
     guideLink: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start" },
-    guideLinkText: { fontFamily: font.sansMedium, fontSize: size.caption, color: c.textSecondary },
+    guideLinkText: { ...font.sansMedium, fontSize: size.caption, color: c.textSecondary },
 
     actions: { gap: space.xs, marginTop: space.sm },
     primaryButton: {
@@ -434,14 +434,14 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.inverse,
       paddingHorizontal: space.xl,
     },
-    primaryButtonText: { fontFamily: font.sansBold, fontSize: scaled(16), color: c.onInverse },
+    primaryButtonText: { ...font.sansBold, fontSize: scaled(16), color: c.onInverse },
     buttonDisabled: { opacity: 0.35 },
     textButton: {
       minHeight: 44,
       alignItems: "center",
       justifyContent: "center",
     },
-    textButtonLabel: { fontFamily: font.sansMedium, fontSize: size.body, color: c.textSecondary },
+    textButtonLabel: { ...font.sansMedium, fontSize: size.body, color: c.textSecondary },
 
     card: {
       backgroundColor: c.surface,
@@ -453,7 +453,7 @@ const makeStyles = (c: Palette) =>
     },
     field: { gap: space.sm },
     fieldLabel: {
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.caption,
       color: c.muted,
     },
@@ -463,7 +463,7 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.lg,
       paddingHorizontal: space.lg,
       paddingVertical: space.md,
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: size.body,
       color: c.text,
       borderWidth: 1,
@@ -480,11 +480,11 @@ const makeStyles = (c: Palette) =>
       padding: space.md,
       backgroundColor: c.errorWash,
     },
-    error: { flex: 1, fontFamily: font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.errorText },
+    error: { flex: 1, ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.errorText },
 
     disclosure: { marginTop: "auto", alignItems: "center", paddingTop: space.sm },
     footnote: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.label,
       color: c.faint,
       lineHeight: scaled(17),
@@ -499,5 +499,5 @@ const makeStyles = (c: Palette) =>
     },
     // Cobalt, like every other tappable thing. Green reads as a status, and
     // a policy link is not one.
-    policyLinkText: { fontFamily: font.sansMedium, fontSize: size.label, color: c.workingText },
+    policyLinkText: { ...font.sansMedium, fontSize: size.label, color: c.workingText },
   });

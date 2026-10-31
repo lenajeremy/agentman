@@ -161,7 +161,7 @@ const makeStyles = (c: Palette) =>
     },
     backdropText: {
       color: "#fff",
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: scaled(15),
     },
   });

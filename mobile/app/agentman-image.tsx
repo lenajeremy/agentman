@@ -82,7 +82,7 @@ const styles = StyleSheet.create({
     textAlignVertical: "center",
     paddingTop: "70%",
     paddingHorizontal: space.xl,
-    fontFamily: font.sans,
+    ...font.sans,
     fontSize: size.body,
     color: "rgba(255, 255, 255, 0.7)",
   },
@@ -105,5 +105,5 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(255, 255, 255, 0.14)",
   },
-  title: { flex: 1, fontFamily: font.sansMedium, fontSize: size.body, color: "#FFFFFF" },
+  title: { flex: 1, ...font.sansMedium, fontSize: size.body, color: "#FFFFFF" },
 });

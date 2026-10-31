@@ -108,7 +108,7 @@ export default function KeyEditor() {
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
-    valueNote: { fontFamily: font.sans, fontSize: size.label, lineHeight: scaled(17), color: c.muted, marginTop: space.md, marginHorizontal: space.xs },
+    valueNote: { ...font.sans, fontSize: size.label, lineHeight: scaled(17), color: c.muted, marginTop: space.md, marginHorizontal: space.xs },
     delete: {
       minHeight: 48,
       marginTop: space.xl,
@@ -117,5 +117,5 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
       backgroundColor: c.errorWash,
     },
-    deleteText: { fontFamily: font.sansBold, fontSize: size.body, color: c.errorText },
+    deleteText: { ...font.sansBold, fontSize: size.body, color: c.errorText },
   });

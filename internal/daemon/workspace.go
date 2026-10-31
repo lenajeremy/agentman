@@ -255,6 +255,27 @@ func readDisplayable(f *os.File, info os.FileInfo) (text, image, mime string, so
 	n, _ := f.Read(head[:])
 	mime = http.DetectContentType(head[:n])
 	_, _ = f.Seek(0, io.SeekStart)
+	// A favicon: shown as the PNG of its largest picture. It goes without a
+	// description of the file it was made from: the apps accept those only
+	// for formats they can save, and drop the whole reply otherwise.
+	if mime == "image/x-icon" || mime == "image/vnd.microsoft.icon" {
+		if info.Size() > maxImageInput {
+			return "", "", "", nil, false, errPreviewTooLarge
+		}
+		raw, err := io.ReadAll(io.LimitReader(f, maxImageInput+1))
+		if err != nil {
+			return "", "", "", nil, false, err
+		}
+		picture, err := iconPNG(raw)
+		if err != nil {
+			return "", "", "", nil, false, err
+		}
+		data, previewMime, _, err := previewImage(bytes.NewReader(picture), "image/png")
+		if err != nil {
+			return "", "", "", nil, false, err
+		}
+		return "", base64.StdEncoding.EncodeToString(data), previewMime, nil, false, nil
+	}
 	if _, previewable := readableImages[mime]; previewable {
 		if info.Size() > maxImageInput {
 			return "", "", "", nil, false, errPreviewTooLarge

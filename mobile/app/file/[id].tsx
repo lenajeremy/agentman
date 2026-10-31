@@ -619,12 +619,12 @@ const makeStyles = (c: Palette) =>
       overflow: "hidden",
     },
     saveTitle: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.caption,
       color: "#FFFFFF",
     },
     saveDetail: {
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: scaled(11),
       color: "rgba(255, 255, 255, 0.62)",
       marginTop: 1,
@@ -639,19 +639,19 @@ const makeStyles = (c: Palette) =>
     },
     saveFill: { height: 3, backgroundColor: "#FFFFFF" },
     saveError: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       color: "#FFFFFF",
       textAlign: "center",
     },
     photoHeading: { flex: 1 },
     photoTitle: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.caption,
       color: "#FFFFFF",
     },
     photoPath: {
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: scaled(11),
       color: "rgba(255, 255, 255, 0.55)",
       marginTop: 1,
@@ -665,8 +665,8 @@ const makeStyles = (c: Palette) =>
       paddingBottom: space.md,
     },
     heading: { flex: 1 },
-    title: { color: c.text, fontFamily: font.sansBold, fontSize: size.title },
-    path: { color: c.muted, fontFamily: font.mono, fontSize: scaled(11) },
+    title: { color: c.text, ...font.sansBold, fontSize: size.title },
+    path: { color: c.muted, ...font.mono, fontSize: scaled(11) },
     iconButton: {
       width: 40,
       height: 40,
@@ -692,7 +692,7 @@ const makeStyles = (c: Palette) =>
     tabActive: { backgroundColor: c.inverse },
     tabText: {
       color: c.muted,
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.caption,
     },
     tabTextActive: { color: c.onInverse },
@@ -700,9 +700,9 @@ const makeStyles = (c: Palette) =>
     message: { paddingHorizontal: space.lg, paddingTop: space.md },
     // A document reads on the page, with the margins a page has.
     document: { paddingHorizontal: space.xl, paddingTop: space.lg },
-    error: { color: c.errorText, fontFamily: font.sans, fontSize: size.body },
-    empty: { color: c.muted, fontFamily: font.sans, fontSize: size.body },
-    note: { color: c.muted, fontFamily: font.sans, fontSize: size.caption },
+    error: { color: c.errorText, ...font.sans, fontSize: size.body },
+    empty: { color: c.muted, ...font.sans, fontSize: size.body },
+    note: { color: c.muted, ...font.sans, fontSize: size.caption },
     spacer: { flex: 1 },
     wrapToggle: {
       flexDirection: "row",
@@ -714,7 +714,7 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.fill,
     },
     wrapToggleOn: { backgroundColor: c.inverse },
-    wrapLabel: { color: c.muted, fontFamily: font.sansMedium, fontSize: scaled(12) },
+    wrapLabel: { color: c.muted, ...font.sansMedium, fontSize: scaled(12) },
     wrapLabelOn: { color: c.onInverse },
 
     statBar: {
@@ -724,13 +724,13 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: space.lg,
       paddingBottom: space.sm,
     },
-    statAdd: { color: c.ok, fontFamily: font.monoMedium, fontSize: scaled(12) },
+    statAdd: { color: c.ok, ...font.monoMedium, fontSize: scaled(12) },
     statRemove: {
       color: c.errorText,
-      fontFamily: font.monoMedium,
+      ...font.monoMedium,
       fontSize: scaled(12),
     },
-    statNote: { color: c.faint, fontFamily: font.sans, fontSize: scaled(11.5) },
+    statNote: { color: c.faint, ...font.sans, fontSize: scaled(11.5) },
     inlineStat: {
       flexDirection: "row",
       alignItems: "center",
@@ -743,7 +743,7 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.sm - 2,
       backgroundColor: c.fill,
     },
-    statHashText: { color: c.muted, fontFamily: font.mono, fontSize: scaled(11) },
+    statHashText: { color: c.muted, ...font.mono, fontSize: scaled(11) },
 
     diffFrame: {
       backgroundColor: c.surface,
@@ -762,7 +762,7 @@ const makeStyles = (c: Palette) =>
       width: 30,
       textAlign: "right",
       paddingRight: 6,
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: scaled(10.5),
       lineHeight: scaled(19),
       color: c.faint,
@@ -770,7 +770,7 @@ const makeStyles = (c: Palette) =>
     diffMark: {
       width: 14,
       textAlign: "center",
-      fontFamily: font.monoMedium,
+      ...font.monoMedium,
       fontSize: scaled(12),
       lineHeight: scaled(19),
       color: c.faint,
@@ -778,7 +778,7 @@ const makeStyles = (c: Palette) =>
     markAdd: { color: c.ok },
     markRemove: { color: c.errorText },
     diffLine: {
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: scaled(12),
       lineHeight: scaled(19),
       color: c.text,
@@ -794,5 +794,5 @@ const makeStyles = (c: Palette) =>
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderColor: c.workingSoft,
     },
-    hunkText: { color: c.workingText, fontFamily: font.mono, fontSize: scaled(11) },
+    hunkText: { color: c.workingText, ...font.mono, fontSize: scaled(11) },
   });

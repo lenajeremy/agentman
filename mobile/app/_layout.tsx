@@ -3,7 +3,7 @@ import * as Notifications from "expo-notifications";
 import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
-import { Platform, View } from "react-native";
+import { LogBox, Platform, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -74,6 +74,10 @@ function SimulatorLaunch() {
   }, [router]);
   return null;
 }
+
+// A simulator started on a route is taking pictures: the development
+// warnings' toast would sit over the bottom of every one.
+if (simulatorRoute()) LogBox.ignoreAllLogs();
 
 export default function RootLayout() {
   // Google Sans and Google Sans Code, bundled: the same faces as the Mac.

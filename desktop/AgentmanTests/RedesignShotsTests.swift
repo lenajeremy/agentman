@@ -105,6 +105,38 @@ final class RedesignShotsTests: XCTestCase {
         try renderEditor(shots)
     }
 
+    /// The sidebar with a folder that has a logo of its own beside one that
+    /// has none, in light and dark.
+    func testRenderFolderLogos() throws {
+        guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
+        let site = try folder("site")
+        let logo = NSImage(size: NSSize(width: 64, height: 64), flipped: false) { rect in
+            NSColor(srgbRed: 0.98, green: 0.42, blue: 0.17, alpha: 1).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: 14, yRadius: 14).fill()
+            NSColor.white.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 18, dy: 18)).fill()
+            return true
+        }
+        let png = try XCTUnwrap(NSBitmapImageRep(data: XCTUnwrap(logo.tiffRepresentation))?.representation(using: .png, properties: [:]))
+        try FileManager.default.createDirectory(at: site.appendingPathComponent("public"), withIntermediateDirectories: true)
+        try png.write(to: site.appendingPathComponent("public/logo.png"))
+        let api = try folder("api").path
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let sessions = """
+        {"type":"sessions","sessions":[
+         {"id":"a","kind":"claude","name":"Fix Safari sign-in","cwd":"\(site.path)","state":"busy","inject":"tmux","lastActivityAt":\(now - 60_000),"folderIcon":"public/logo.png"},
+         {"id":"b","kind":"codex","name":"Rate limit the uploads","cwd":"\(api)","state":"idle","inject":"tmux","lastActivityAt":\(now - 600_000)}
+        ]}
+        """
+        for dark in [false, true] {
+            let store = AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-shots.sock"))
+            store.apply(try JSONDecoder().decode(DaemonEvent.self, from: Data(sessions.utf8)))
+            store.selection = .agent("a")
+            try render(ContentView(), size: CGSize(width: 1040, height: 400), dark: dark, store: store,
+                       to: URL(fileURLWithPath: out).appendingPathComponent("folder-logos-\(dark ? "dark" : "light").png"))
+        }
+    }
+
     /// The message box with a picture and a few lines in it, alone, to see
     /// the room around its text.
     func testRenderTheMessageBox() throws {

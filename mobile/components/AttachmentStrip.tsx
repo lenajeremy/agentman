@@ -89,8 +89,8 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.fill,
     },
     fileWords: { flexShrink: 1, gap: 1 },
-    fileName: { fontFamily: font.sansMedium, fontSize: scaled(13), color: c.text },
-    fileSize: { fontFamily: font.sans, fontSize: scaled(11.5), color: c.muted },
+    fileName: { ...font.sansMedium, fontSize: scaled(13), color: c.text },
+    fileSize: { ...font.sans, fontSize: scaled(11.5), color: c.muted },
     remove: {
       position: "absolute",
       top: 0,

@@ -1,57 +1,59 @@
+import type { TextStyle } from "react-native";
+
 /**
- * Design tokens.
+ * Design tokens, the Mac app's (desktop/Agentman/Design/Theme.swift) carried
+ * to the phone so the two read as one product.
  *
- * The app answers one question: "what are my agents doing, and does one of
- * them need me?" Colour carries that answer, so each state owns one hue and
- * nothing decorative competes with it:
+ * Neutral surfaces keep the conversation in focus. Colour is reserved for
+ * agent state and actions, and each state owns one hue:
  *
  *   working      — cobalt, which is also the brand
  *   needs you    — tangerine, the one colour that asks for a tap
  *   idle         — no colour at all; nothing is happening, so nothing glows
  *
- * The ground is a warm off-white rather than pure white, so white cards read as
- * objects without needing heavy borders. Cards are separated by fill and a
- * hairline, not by shadows stacked on shadows.
- *
- * Light is the default. Dark is the same system inverted, with the state
- * colours lifted so they keep their contrast on a dark ground.
+ * The greys are true neutrals, as on the Mac, and dark is a true black page
+ * with near-black cards, so the phone and the Mac side by side are the same
+ * paper and the same ink. Tokens the Mac has no need for (a camera scrim, the
+ * undo bar's accent) are derived from its values.
  */
 const light = {
   /** Page background. */
-  paper: "#F5F5F2",
+  paper: "#FAFAFA",
   /** Cards and sheets. */
   surface: "#FFFFFF",
   /** Tiles, code, secondary controls. */
-  fill: "#EDECE8",
+  fill: "#EFEFEF",
   /** Borders on controls, pressed fills. */
-  fillStrong: "#E4E3DE",
+  fillStrong: "#E4E4E4",
   /** Hairlines and card edges. */
-  line: "#E3E2DD",
+  line: "#E5E5E5",
   /** A tool call's soft card, a step greyer than the page, as on the Mac;
    *  its edge; and the well its output sits in. */
-  toolCard: "#EEEEEA",
-  toolCardEdge: "#E5E4DF",
-  toolWell: "#F8F8F5",
+  toolCard: "#F5F5F5",
+  toolCardEdge: "#E8E8E8",
+  toolWell: "#FAFAFA",
 
-  text: "#0F1012",
+  text: "#101010",
   /** Body copy that should not compete with titles. */
-  textSecondary: "#34363B",
+  textSecondary: "#3C3C3C",
   /** Secondary text: paths, timestamps, tool summaries. */
-  muted: "#6A6D75",
+  muted: "#737373",
   /** Tertiary: labels, placeholders, counts. */
-  faint: "#9C9EA5",
+  faint: "#999999",
 
   /** Primary buttons are ink pills; this is their fill and label. */
-  inverse: "#0F1012",
+  inverse: "#101010",
   onInverse: "#FFFFFF",
   /** An accent that stays legible on the inverse fill (the undo bar). */
   inverseAccent: "#9DAAFF",
 
   /** An agent is working. Also the brand colour. */
-  working: "#2E4BFF",
+  working: "#3268F5",
   workingText: "#1F35C7",
   workingWash: "#EEF1FF",
   workingSoft: "#D9DFFF",
+  /** The working ring's second colour, which it flows into and back from. */
+  loaderPink: "#F0407F",
   /** An agent is blocked on the user — the most actionable state there is. */
   needsYou: "#FF6A2B",
   needsYouText: "#C2451A",
@@ -70,37 +72,38 @@ const light = {
   onAccent: "#FFFFFF",
 
   /** Dims the page behind a sheet. */
-  scrim: "rgba(15, 16, 18, 0.32)",
+  scrim: "rgba(16, 16, 16, 0.32)",
   /** Controls drawn over the camera, which is dark whatever the theme. */
-  cameraScrim: "rgba(10, 11, 13, 0.62)",
-  shadow: "#0F1012",
+  cameraScrim: "rgba(10, 10, 10, 0.62)",
+  shadow: "#101010",
 };
 
 export type Palette = { [K in keyof typeof light]: string };
 
 const dark: Palette = {
-  paper: "#0E0F11",
-  surface: "#17181B",
-  fill: "#202226",
-  fillStrong: "#2C2E33",
-  line: "#25272C",
-  toolCard: "#17181B",
-  toolCardEdge: "#212327",
-  toolWell: "#0F1012",
+  paper: "#000000",
+  surface: "#0D0D0D",
+  fill: "#202020",
+  fillStrong: "#303030",
+  line: "#242424",
+  toolCard: "#0D0D0D",
+  toolCardEdge: "#202020",
+  toolWell: "#101010",
 
-  text: "#F2F3F5",
-  textSecondary: "#D2D4D9",
-  muted: "#9A9DA5",
-  faint: "#6E717A",
+  text: "#F2F2F2",
+  textSecondary: "#D0D0D0",
+  muted: "#A0A0A0",
+  faint: "#737373",
 
-  inverse: "#F2F3F5",
-  onInverse: "#0E0F11",
-  inverseAccent: "#2E4BFF",
+  inverse: "#F2F2F2",
+  onInverse: "#000000",
+  inverseAccent: "#3268F5",
 
-  working: "#6B80FF",
+  working: "#578CFF",
   workingText: "#9DAAFF",
   workingWash: "#1A1F3D",
   workingSoft: "#28305E",
+  loaderPink: "#FF5C9A",
   needsYou: "#FF7D45",
   needsYouText: "#FF9A6C",
   needsYouWash: "#2E1B12",
@@ -114,7 +117,7 @@ const dark: Palette = {
   onAccent: "#FFFFFF",
 
   scrim: "rgba(0, 0, 0, 0.5)",
-  cameraScrim: "rgba(10, 11, 13, 0.62)",
+  cameraScrim: "rgba(10, 10, 10, 0.62)",
   shadow: "#000000",
 };
 
@@ -122,22 +125,25 @@ export const palettes: Record<"light" | "dark", Palette> = { light, dark };
 
 /**
  * Google Sans for everything a person wrote or reads as interface; Google
- * Sans Code for machine-authored text, as on the Mac. Paths, session ids, shell commands and agent names
- * are strings a program produced, and setting them in mono says so at a
- * glance.
+ * Sans Code for machine-authored text, as on the Mac. Paths, session ids,
+ * shell commands and agent names are strings a program produced, and setting
+ * them in mono says so at a glance.
+ *
+ * Each face is a style fragment, spread into a style (`...font.sansMedium`),
+ * so a later style that sets another face replaces it whole.
  *
  * Italics are faces of their own. iOS does not slant a custom font for
  * fontStyle: "italic", so emphasis set that way rendered upright.
  */
 export const font = {
-  sans: "GoogleSans-Regular",
-  sansItalic: "GoogleSans-Italic",
-  sansMedium: "GoogleSans-Medium",
-  sansBold: "GoogleSans-SemiBold",
-  sansBoldItalic: "GoogleSans-SemiBoldItalic",
-  mono: "GoogleSansCode-Regular",
-  monoMedium: "GoogleSansCode-Medium",
-} as const;
+  sans: { fontFamily: "GoogleSans-Regular" },
+  sansItalic: { fontFamily: "GoogleSans-Italic" },
+  sansMedium: { fontFamily: "GoogleSans-Medium" },
+  sansBold: { fontFamily: "GoogleSans-SemiBold" },
+  sansBoldItalic: { fontFamily: "GoogleSans-SemiBoldItalic" },
+  mono: { fontFamily: "GoogleSansCode-Regular" },
+  monoMedium: { fontFamily: "GoogleSansCode-Medium" },
+} as const satisfies Record<string, TextStyle>;
 
 /**
  * Every text size in the app is this much larger than it is written: the

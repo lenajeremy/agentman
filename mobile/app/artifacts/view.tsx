@@ -334,11 +334,11 @@ const makeStyles = (c: Palette) =>
     heading: { flex: 1, minWidth: 0 },
     title: {
       color: c.text,
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.title,
       letterSpacing: -0.3,
     },
-    subtitle: { color: c.muted, fontFamily: font.mono, fontSize: scaled(11), marginTop: 1 },
+    subtitle: { color: c.muted, ...font.mono, fontSize: scaled(11), marginTop: 1 },
     iconButton: {
       width: 36,
       height: 36,
@@ -363,8 +363,8 @@ const makeStyles = (c: Palette) =>
     markdown: { paddingHorizontal: space.lg },
     center: { marginTop: space.xl },
     message: { paddingHorizontal: space.lg, paddingTop: space.md },
-    error: { color: c.errorText, fontFamily: font.sans, fontSize: size.body, lineHeight: scaled(21) },
-    note: { color: c.muted, fontFamily: font.sans, fontSize: size.caption },
+    error: { color: c.errorText, ...font.sans, fontSize: size.body, lineHeight: scaled(21) },
+    note: { color: c.muted, ...font.sans, fontSize: size.caption },
 
     // The session's question sheet, reused: docked, rounded on top, and on the
     // surface colour so it reads as something to act on rather than more page.
@@ -392,9 +392,9 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.needsYouWash,
     },
     pillDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: c.needsYou },
-    pillLabel: { fontFamily: font.sansBold, fontSize: size.label, color: c.needsYouText },
+    pillLabel: { ...font.sansBold, fontSize: size.label, color: c.needsYouText },
     prompt: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.body,
       lineHeight: scaled(21),
       color: c.textSecondary,
@@ -405,15 +405,15 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.lg,
       backgroundColor: c.fill,
       color: c.text,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.body,
       paddingHorizontal: space.lg,
       paddingTop: space.md,
       paddingBottom: space.md,
       textAlignVertical: "top",
     },
-    failed: { fontFamily: font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.errorText },
-    offline: { fontFamily: font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.muted },
+    failed: { ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.errorText },
+    offline: { ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.muted },
     buttons: { flexDirection: "row", gap: space.sm },
     button: {
       flex: 1,
@@ -426,7 +426,7 @@ const makeStyles = (c: Palette) =>
     buttonPrimary: { backgroundColor: c.inverse },
     buttonSecondary: { backgroundColor: c.surface, borderWidth: 1, borderColor: c.fillStrong },
     buttonDisabled: { opacity: 0.4 },
-    buttonLabel: { fontFamily: font.sansBold, fontSize: size.body, color: c.text },
+    buttonLabel: { ...font.sansBold, fontSize: size.body, color: c.text },
     buttonLabelPrimary: { color: c.onInverse },
     sent: {
       flexDirection: "row",
@@ -439,7 +439,7 @@ const makeStyles = (c: Palette) =>
     },
     sentText: {
       flex: 1,
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.caption,
       lineHeight: scaled(18),
       color: c.text,

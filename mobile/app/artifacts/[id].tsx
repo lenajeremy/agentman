@@ -223,11 +223,11 @@ const makeStyles = (c: Palette) =>
     heading: { flex: 1, minWidth: 0 },
     title: {
       color: c.text,
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.title,
       letterSpacing: -0.3,
     },
-    subtitle: { color: c.muted, fontFamily: font.mono, fontSize: scaled(11), marginTop: 1 },
+    subtitle: { color: c.muted, ...font.mono, fontSize: scaled(11), marginTop: 1 },
     iconButton: {
       width: 36,
       height: 36,
@@ -273,18 +273,18 @@ const makeStyles = (c: Palette) =>
     rowTitle: {
       flex: 1,
       color: c.text,
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.body,
     },
-    rowTime: { color: c.faint, fontFamily: font.mono, fontSize: scaled(11) },
+    rowTime: { color: c.faint, ...font.mono, fontSize: scaled(11) },
     rowSummary: {
       color: c.muted,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       lineHeight: scaled(18),
     },
     rowMeta: { flexDirection: "row", alignItems: "center", gap: space.sm, marginTop: 1 },
-    rowName: { flexShrink: 1, color: c.faint, fontFamily: font.mono, fontSize: scaled(11) },
+    rowName: { flexShrink: 1, color: c.faint, ...font.mono, fontSize: scaled(11) },
     // The same pill a question wears: the agent is waiting on you.
     reviewPill: {
       flexDirection: "row",
@@ -296,25 +296,25 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.needsYouWash,
     },
     reviewDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: c.needsYou },
-    reviewLabel: { color: c.needsYouText, fontFamily: font.sansBold, fontSize: scaled(11) },
+    reviewLabel: { color: c.needsYouText, ...font.sansBold, fontSize: scaled(11) },
 
     emptyWrap: { alignItems: "center", gap: space.sm, paddingVertical: space.xxl },
     empty: {
       color: c.muted,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       textAlign: "center",
     },
     error: {
       color: c.errorText,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.body,
       paddingVertical: space.md,
     },
     center: { marginTop: space.xl },
     note: {
       color: c.faint,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: scaled(11.5),
       marginTop: space.md,
       lineHeight: scaled(16),

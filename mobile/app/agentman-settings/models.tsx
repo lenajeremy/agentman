@@ -87,6 +87,6 @@ const makeStyles = (c: Palette) =>
   StyleSheet.create({
     choice: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: space.md, paddingVertical: space.sm },
     words: { flex: 1, gap: 2 },
-    name: { fontFamily: font.sansMedium, fontSize: size.body, color: c.text },
-    noKey: { fontFamily: font.sans, fontSize: size.label, color: c.faint },
+    name: { ...font.sansMedium, fontSize: size.body, color: c.text },
+    noKey: { ...font.sans, fontSize: size.label, color: c.faint },
   });

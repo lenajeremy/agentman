@@ -3,11 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, {
   Easing,
-  cancelAnimation,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
-  withRepeat,
   withTiming,
 } from "react-native-reanimated";
 
@@ -21,6 +19,7 @@ import { Message } from "../lib/protocol";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { toolIcon } from "../lib/tool-icon";
 import { MotionPressable } from "./MotionPressable";
+import { Loader } from "./Loader";
 import { OutputViewer } from "./OutputViewer";
 import { SeenImage } from "./SeenImage";
 
@@ -43,40 +42,16 @@ const LINE = 20;
  * commands lined up down the whole feed.
  */
 function StatusTile({ status, name }: { status?: string; name: string }) {
-  const spin = useSharedValue(0);
-  const reduceMotion = useReducedMotion();
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
   const running = status === "running";
   const failed = status === "error";
 
-  useEffect(() => {
-    if (!running || reduceMotion) {
-      cancelAnimation(spin);
-      spin.value = 0;
-      return;
-    }
-    spin.value = withRepeat(
-      withTiming(1, { duration: 900, easing: Easing.linear }),
-      -1,
-      false,
-    );
-    return () => cancelAnimation(spin);
-  }, [reduceMotion, running, spin]);
-
-  const spinStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${spin.value * 360}deg` }],
-  }));
-
-  // An open arc reads as motion the moment it turns; a filled dot would not.
+  // The Mac's working ring, which holds still itself when asked to.
   if (running) {
     return (
       <View style={[styles.tile, styles.tileRunning]}>
-        {reduceMotion ? (
-          <View style={styles.runningDot} />
-        ) : (
-          <Animated.View style={[styles.arc, spinStyle]} />
-        )}
+        <Loader size={11} />
       </View>
     );
   }
@@ -527,21 +502,6 @@ const makeStyles = (c: Palette) =>
     },
     tileRunning: { backgroundColor: c.workingWash },
     tileFailed: { backgroundColor: c.errorWash },
-    runningDot: {
-      width: 6,
-      height: 6,
-      borderRadius: 3,
-      backgroundColor: c.working,
-    },
-    arc: {
-      width: 10,
-      height: 10,
-      borderRadius: 5,
-      borderWidth: 1.5,
-      borderColor: c.working,
-      // One transparent edge turns a ring into an arc, so rotation is visible.
-      borderTopColor: "transparent",
-    },
 
     // The name is the repeated word down the feed and the target is the part
     // that differs, so the target gets the weight and the name steps back.
@@ -550,7 +510,7 @@ const makeStyles = (c: Palette) =>
     // names (WebFetch, TodoWrite) simply push past it rather than truncate.
     name: {
       minWidth: 46,
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: size.label,
       lineHeight: LINE,
       color: c.muted,
@@ -560,7 +520,7 @@ const makeStyles = (c: Palette) =>
     // of standing in a column down the screen's edge.
     title: {
       flexShrink: 1,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.label,
       lineHeight: LINE,
       color: c.textSecondary,
@@ -569,13 +529,13 @@ const makeStyles = (c: Palette) =>
     // flex lets a long target truncate instead of pushing the chevron off.
     target: {
       flex: 1,
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: size.caption,
       lineHeight: LINE,
       color: c.textSecondary,
     },
     targetDim: { color: c.faint },
-    chevron: { fontFamily: font.mono, fontSize: size.body, lineHeight: LINE, color: c.faint },
+    chevron: { ...font.mono, fontSize: size.body, lineHeight: LINE, color: c.faint },
 
     body: {
       marginLeft: TILE + 8 + space.xs,
@@ -590,7 +550,7 @@ const makeStyles = (c: Palette) =>
       paddingVertical: space.xxs,
     },
     commandText: {
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: scaled(12),
       lineHeight: scaled(18),
       color: c.textSecondary,
@@ -606,7 +566,7 @@ const makeStyles = (c: Palette) =>
     },
     outputFailed: { backgroundColor: c.errorWash },
     outputText: {
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: scaled(12),
       lineHeight: scaled(18),
       color: c.muted,
@@ -628,7 +588,7 @@ const makeStyles = (c: Palette) =>
     },
     imageLinkText: {
       flex: 1,
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.caption,
       color: c.text,
     },
@@ -641,13 +601,13 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: space.xxs,
     },
     moreText: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.label,
       color: c.working,
     },
     fullRow: { flexDirection: "row", alignItems: "center", gap: space.xs },
     fullText: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.label,
       color: c.muted,
     },
