@@ -82,7 +82,12 @@ export function useStore(): State {
 
 export function useStatus(): { status: Status; detail: string } {
   const [s, setS] = useState({ status: daemon.status, detail: daemon.detail });
-  useEffect(() => daemon.onStatus((status, detail = "") => setS({ status, detail })), []);
+  useEffect(() => {
+    const off = daemon.onStatus((status, detail = "") => setS({ status, detail }));
+    // The connection may have opened between the first render and now.
+    setS({ status: daemon.status, detail: daemon.detail });
+    return off;
+  }, []);
   return s;
 }
 
