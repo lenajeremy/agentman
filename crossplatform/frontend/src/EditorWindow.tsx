@@ -11,7 +11,7 @@ import { EditorPanes } from "./Editor";
 import { AgentPanel, ColumnDivider, PANEL_MIN } from "./editor/AgentPanel";
 import { EditorAlerts } from "./editor/Alerts";
 import { commandFor, onMenuCommand, runCommand } from "./editor/commands";
-import { inShell } from "./editor/fs";
+import { files, inShell } from "./editor/fs";
 import { MonacoBridge } from "./editor/monaco";
 import { GoToFile, GoToText } from "./editor/Palette";
 import { StatusBar } from "./editor/StatusBar";
@@ -45,6 +45,12 @@ function FolderEditor({ folder }: { folder: string }) {
   const [terminalHeight, setTerminalHeight] = usePref("terminalHeight", 260);
   const [panelWidth, setPanelWidth] = usePref("agentPanelWidth", 400);
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
+  const [vim] = usePref("editorVim", false);
+
+  // Editor ▸ Vim Mode ticked as the setting is.
+  useEffect(() => {
+    void files.setVimMenu(vim);
+  }, [vim]);
 
   useEffect(() => {
     store.monaco = bridge;

@@ -48,6 +48,7 @@ func main() {
 		test.prepare(&options, &first)
 	}
 	app := application.New(options)
+	setEditorMenus(app)
 	win := app.Window.NewWithOptions(first)
 	if test != nil {
 		test.start(app, win)

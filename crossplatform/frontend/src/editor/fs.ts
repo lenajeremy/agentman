@@ -99,6 +99,7 @@ export const files = {
   search: (root: string, query: string, options: SearchOptions, list: string[], edited: Record<string, string>, id: number) =>
     call<SearchResults>("Search", root, query, options, list, edited, id),
   home: () => call<string>("Home").catch(() => ""),
+  setVimMenu: (on: boolean) => call<void>("SetVimMenu", on).catch(() => undefined),
   watch: (root: string) => call<void>("Watch", root).catch(() => undefined),
 };
 
