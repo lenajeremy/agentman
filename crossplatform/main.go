@@ -27,9 +27,10 @@ func main() {
 			application.NewService(&Windows{}),
 			application.NewService(&Menus{}),
 			application.NewService(&Files{}),
+			application.NewService(&EditorFiles{}),
 		}, newHost().services()...),
 		Assets: application.AssetOptions{
-			Handler: withSymbols(application.AssetFileServerFS(assets)),
+			Handler: withSymbols(withEditorFiles(application.AssetFileServerFS(assets))),
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
