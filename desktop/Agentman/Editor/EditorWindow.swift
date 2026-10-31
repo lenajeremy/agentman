@@ -823,17 +823,14 @@ private struct MarkdownPreview: View {
 /// A file the editor shows but doesn't edit: an image, or one it can't.
 private struct NonTextView: View {
     let document: EditorDocument
+    @State private var zoom: CGFloat = 1
 
     var body: some View {
         Group {
             if document.kind == .image, let image = document.image {
-                ScrollView([.vertical, .horizontal]) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: max(image.size.width, 120), maxHeight: max(image.size.height, 120))
-                        .padding(24)
-                }
+                // Fitted to the pane, never past its own size; it zooms.
+                ZoomableImage(image: image, zoom: $zoom)
+                    .padding(24)
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: document.kind == .missing ? "questionmark.folder" : "doc.badge.ellipsis")

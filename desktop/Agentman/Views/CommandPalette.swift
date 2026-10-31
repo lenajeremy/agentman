@@ -81,7 +81,7 @@ struct CommandPalette: View {
                 EditorOpener.open(folder: folder, with: openWindow)
             })
             commands.append(Command(item: PaletteItem(id: "here-terminal", title: "Open a Terminal for \(session.name)", icon: "terminal")) {
-                RightPanel.showTerminal()
+                RightPanel.showTerminal(in: folder)
             })
             commands.append(Command(item: PaletteItem(id: "here-rename", title: "Rename \(session.name)…", icon: "pencil")) {
                 store.renaming = id
@@ -109,6 +109,10 @@ struct CommandPalette: View {
         })
         commands.append(Command(item: PaletteItem(id: "agentman", title: "Agentman", detail: "the conversation", icon: "bubble.left.and.text.bubble.right")) {
             store.selection = .manager
+        })
+        commands.append(Command(item: PaletteItem(id: "usage", title: "Usage", detail: "what the agents spent", icon: "chart.xyaxis.line"),
+                                keywords: "cost tokens spend money") {
+            store.selection = .usage
         })
         commands.append(Command(item: PaletteItem(id: "away", title: "What Happened While I Was Away", icon: "clock.arrow.circlepath"),
                                 keywords: "summary catch up") {

@@ -104,6 +104,42 @@ func (s *OpenCodeSource) findServices(ctx context.Context) []string {
 
 // servicePassword is the password of the OpenCode 2 service at base, when
 // base is one.
+// serviceSkills is the skills OpenCode 2's service has for a folder, by id.
+// A folder it hasn't seen yet can list none at first, so an empty list is
+// asked for again, briefly.
+func (s *OpenCodeSource) serviceSkills(ctx context.Context, base, password string, location url.Values) map[string]string {
+	known := map[string]string{}
+	for attempt := 0; attempt < 3; attempt++ {
+		var listed struct {
+			Data []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"data"`
+		}
+		// Each skill comes with its whole text: a long list.
+		if _, err := s.send(ctx, http.MethodGet, base+openCodePath("/api/skill", location), openCodeServiceUser, password,
+			nil, &listed, maxOpenCodeSkillList); err != nil {
+			return known
+		}
+		for _, skill := range listed.Data {
+			known[skill.ID] = skill.Name
+		}
+		if len(known) > 0 {
+			return known
+		}
+		select {
+		case <-ctx.Done():
+			return known
+		case <-time.After(700 * time.Millisecond):
+		}
+	}
+	return known
+}
+
+// maxOpenCodeSkillList bounds the service's skill list, every skill's text
+// in it.
+const maxOpenCodeSkillList = 16 << 20
+
 func (s *OpenCodeSource) servicePassword(base string) (string, bool) {
 	s.scanMu.Lock()
 	defer s.scanMu.Unlock()
@@ -295,6 +331,8 @@ func (s *OpenCodeSource) doService(
 				ProviderID string `json:"providerID"`
 				ModelID    string `json:"modelID"`
 			} `json:"model"`
+			// The ids of the skills the message names (InjectWithSkills).
+			Skills []string `json:"skills"`
 		}
 		if err := reshape(body, &prompt); err != nil {
 			return nil, err
@@ -314,8 +352,22 @@ func (s *OpenCodeSource) doService(
 				return nil, err
 			}
 		}
-		return nil, call(http.MethodPost, "/api/session/"+openCodeSegment(id)+"/prompt", nil,
-			map[string]string{"text": strings.Join(texts, "\n")}, nil)
+		payload := map[string]any{"text": strings.Join(texts, "\n")}
+		if len(prompt.Skills) > 0 {
+			// Only skills the service has for the folder: one it doesn't
+			// know fails the whole message. The words name it anyway.
+			known := s.serviceSkills(ctx, base, password, location)
+			var attach []map[string]string
+			for _, skill := range prompt.Skills {
+				if name, ok := known[skill]; ok {
+					attach = append(attach, map[string]string{"id": skill, "name": name})
+				}
+			}
+			if len(attach) > 0 {
+				payload["skills"] = attach
+			}
+		}
+		return nil, call(http.MethodPost, "/api/session/"+openCodeSegment(id)+"/prompt", nil, payload, nil)
 	}
 
 	if id, ok := sessionCall(http.MethodPost, "abort"); ok {

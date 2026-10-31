@@ -112,6 +112,7 @@ func scanCodexSkills(home, cwd string) []protocol.Command {
 	if cwd != "" {
 		root := repoRoot(cwd)
 		for dir := filepath.Clean(cwd); ; dir = filepath.Dir(dir) {
+			out = append(out, scanSkillDir(filepath.Join(dir, ".codex", "skills"), "project", "")...)
 			out = append(out, scanSkillDir(filepath.Join(dir, ".agents", "skills"), "project", "")...)
 			if dir == root || dir == filepath.Dir(dir) {
 				break
@@ -212,7 +213,7 @@ func codexSkillListing(text, cwd string) []protocol.Command {
 				path = filepath.Join(roots[alias], rest)
 			}
 		}
-		out = append(out, protocol.Command{Name: m[1], Description: description, Source: codexSkillSource(m[1], path, cwd)})
+		out = append(out, protocol.Command{Name: m[1], Description: description, Source: codexSkillSource(m[1], path, cwd), Skill: true, Path: path})
 	}
 	return out
 }

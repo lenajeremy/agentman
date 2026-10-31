@@ -6,6 +6,7 @@ import Observation
 enum SidebarItem: Hashable {
     case manager
     case newAgent
+    case usage
     case agent(String)
 }
 
@@ -313,6 +314,8 @@ final class AgentsStore {
             }
         case "new":
             selection = .newAgent
+        case "usage":
+            selection = .usage
         case "home":
             selection = .manager
         default:

@@ -55,7 +55,7 @@ struct WorkspacePanel: View {
                         CardRow("Open in editor", symbol: "arrow.up.right.square", action: {
                             EditorOpener.open(folder: session.cwd, with: openWindow)
                         })
-                        CardRow("Open terminal", symbol: "terminal", action: { RightPanel.showTerminal() })
+                        CardRow("Open terminal", symbol: "terminal", action: { RightPanel.showTerminal(in: session.cwd) })
                     }
                 }
                 .cardSection()
@@ -591,7 +591,7 @@ struct FileTypeIcon: View {
     }
 }
 
-private struct FileLoader: View {
+struct FileLoader: View {
     @Environment(AgentsStore.self) private var store
     let session: Session
     let path: String
@@ -599,14 +599,21 @@ private struct FileLoader: View {
     var body: some View {
         Loaded(load: { try await store.workspace(.readFile, session: session.id, path: path) }) { result in
             if let image = result.image, let data = Data(base64Encoded: image), let picture = NSImage(data: data) {
-                ScrollView([.vertical, .horizontal]) {
-                    Image(nsImage: picture)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: max(picture.size.width, 200))
-                        .padding(16)
-                        .onTapGesture { store.lightbox = Lightbox(image: picture, title: (path as NSString).lastPathComponent) }
-                }
+                // Fitted to the panel, never past its own size; a click opens
+                // it full window, where it zooms.
+                Image(nsImage: picture)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(maxWidth: picture.size.width, maxHeight: picture.size.height)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(16)
+                    .contentShape(Rectangle())
+                    .onTapGesture { store.lightbox = Lightbox(image: picture, title: (path as NSString).lastPathComponent) }
+                    .help("Open full window")
+                    .contextMenu {
+                        Button("Copy Image") { ImageClipboard.copy(picture) }
+                    }
             } else if let text = result.text {
                 VStack(spacing: 0) {
                     FileBar(session: session, path: path, lines: text.reduce(into: 1) { if $1 == "\n" { $0 += 1 } }, copy: text)

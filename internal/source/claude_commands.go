@@ -152,10 +152,11 @@ func claudeCommands(home, cwd, transcript string) []protocol.Command {
 		add(c)
 	}
 	for _, c := range claudeBundledSkills {
-		c.Source = "bundled"
+		c.Source, c.Skill = "bundled", true
 		addAll([]protocol.Command{c})
 	}
 	for _, c := range readSkillListing(transcript) {
+		c.Skill = true
 		addAll([]protocol.Command{c})
 	}
 	return out
@@ -247,7 +248,8 @@ func scanSkillDir(dir, source, plugin string) []protocol.Command {
 		if !isDirEntry(dir, entry) || strings.HasPrefix(entry.Name(), ".") || (plugin == "" && entry.Name() == "synced") {
 			continue
 		}
-		file, ok := readSkillFile(filepath.Join(dir, entry.Name(), "SKILL.md"))
+		path := filepath.Join(dir, entry.Name(), "SKILL.md")
+		file, ok := readSkillFile(path)
 		if !ok || !file.userInvocable {
 			continue
 		}
@@ -255,7 +257,7 @@ func scanSkillDir(dir, source, plugin string) []protocol.Command {
 		if name == "" {
 			name = entry.Name()
 		}
-		out = append(out, file.command(withPlugin(plugin, name), source))
+		out = append(out, file.skill(withPlugin(plugin, name), source, path))
 	}
 	return out
 }
@@ -404,7 +406,7 @@ func claudePluginCommands(home, cwd, root string, enabled map[string]bool) []pro
 			if own == "" {
 				own = filepath.Base(install)
 			}
-			out = append(out, file.command(withPlugin(name, own), "plugin"))
+			out = append(out, file.skill(withPlugin(name, own), "plugin", filepath.Join(install, "SKILL.md")))
 		}
 		for _, dir := range pluginDirs(install, "skills", manifest.Skills) {
 			out = append(out, scanSkillDir(dir, "plugin", name)...)
@@ -458,6 +460,13 @@ type skillFile struct {
 
 func (f skillFile) command(name, source string) protocol.Command {
 	return protocol.Command{Name: name, Description: f.description, ArgumentHint: f.hint, Source: source}
+}
+
+// skill is the menu's entry for a skill, read from the SKILL.md at path.
+func (f skillFile) skill(name, source, path string) protocol.Command {
+	c := f.command(name, source)
+	c.Skill, c.Path = true, path
+	return c
 }
 
 // readSkillFile reads a skill's frontmatter: name, description and

@@ -42,6 +42,7 @@ final class SlashCommandsTests: XCTestCase {
         let slash = SlashCommands { [commands] in .success(commands) }
         let field = NSTextView()
         slash.textView = field
+        field.string = "/comp"
         slash.update(text: "/comp")
         for _ in 0..<50 where slash.results.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertTrue(slash.isOpen)
@@ -70,6 +71,54 @@ final class SlashCommandsTests: XCTestCase {
         XCTAssertFalse(SlashCommands.takes(try decode(#"{"kind":"antigravity","inject":"none","# + base + "}")))
         XCTAssertFalse(SlashCommands.takes(try decode(#"{"kind":"cursor","inject":"tmux","# + base + "}")))
         XCTAssertFalse(SlashCommands.takes(nil))
+        // Cursor's Agent CLI and Kiro in a terminal, and OpenCode through its
+        // server, take skills.
+        XCTAssertTrue(SlashCommands.takes(try decode(#"{"kind":"cursor-cli","inject":"tmux","# + base + "}")))
+        XCTAssertTrue(SlashCommands.takes(try decode(#"{"kind":"kiro","inject":"tmux","# + base + "}")))
+        XCTAssertTrue(SlashCommands.takes(try decode(#"{"kind":"opencode","inject":"api","# + base + "}")))
+        XCTAssertFalse(SlashCommands.takes(try decode(#"{"kind":"opencode","inject":"tmux","# + base + "}")))
+    }
+
+    // Further into a message, after a space, "/" offers the skills alone; a
+    // pick goes in as a chip, which is sent as its prefix and name. A path
+    // offers nothing, and a list that couldn't be read says nothing there.
+    func testMidSentenceTheMenuOffersSkillsAsChips() async throws {
+        let skills = commands + [
+            SlashCommand(name: "frontend-design", description: "Design UI", source: "personal", skill: true, path: nil),
+            SlashCommand(name: "review", source: "project", skill: true, path: nil),
+        ]
+        let slash = SlashCommands { .success(skills) }
+        let field = MessageTextView(usingTextLayoutManager: false)
+        field.slash = slash
+        slash.textView = field
+        field.string = "Fix the header with /front"
+        slash.update(text: field.string, caret: (field.string as NSString).length)
+        for _ in 0..<50 where slash.results.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(slash.isOpen)
+        XCTAssertTrue(slash.skillsOnly)
+        XCTAssertEqual(slash.results.map(\.name), ["frontend-design"])
+        slash.choose()
+        XCTAssertEqual(field.string, "Fix the header with \u{FFFC} ", "One chip and a space")
+        XCTAssertEqual(field.plainText, "Fix the header with /frontend-design ")
+
+        // Only skills mid-sentence; commands only at the start.
+        field.string = "then /comp"
+        slash.update(text: field.string, caret: 10)
+        XCTAssertFalse(slash.isOpen, "a command isn't offered mid-sentence")
+        field.string = "/comp"
+        slash.update(text: field.string, caret: 5)
+        XCTAssertEqual(slash.results.map(\.name), ["compact"])
+        // The caret elsewhere in the message: the word it ends.
+        field.string = "use /rev and more"
+        slash.update(text: field.string, caret: 8)
+        XCTAssertEqual(slash.results.map(\.name), ["review"])
+        slash.update(text: field.string, caret: 9)
+        XCTAssertFalse(slash.isOpen)
+
+        let failing = SlashCommands { .failure(TerminalProblem(message: "no list")) }
+        failing.update(text: "a /path", caret: 7)
+        for _ in 0..<20 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertFalse(failing.isOpen, "no problem shown for a slash mid-sentence")
     }
 
     private let codex: [SlashCommand] = [
@@ -92,6 +141,7 @@ final class SlashCommandsTests: XCTestCase {
         let slash = SlashCommands(triggers: ["/", "$"]) { [codex] in .success(codex) }
         let field = NSTextView()
         slash.textView = field
+        field.string = "$image"
         slash.update(text: "$image")
         for _ in 0..<50 where slash.results.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(slash.results.map(\.label), ["$imagegen"])

@@ -503,9 +503,12 @@ final class RightPanelTests: XCTestCase {
         let cwd = try project()
         let editor = EditorRegistry.shared.store(for: cwd)
         defer { for terminal in editor.terminals { editor.closeTerminal(terminal) } }
-        set([RightPanel.openKey: true, RightPanel.tabsKey: "diff,terminal", RightPanel.tabKey: "terminal",
+        set([RightPanel.openKey: true, RightPanel.tabsKey: "diff", RightPanel.tabKey: "diff",
              RightPanel.widthKey: 620.0, Sidebar.hiddenKey: false, RightPanel.terminalDockKey: "side",
              RightPanel.bottomTerminalKey: false])
+        // As the terminal button does it.
+        RightPanel.showTerminal(in: cwd)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: RightPanel.tabKey), "terminal")
         let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"].map(URL.init(fileURLWithPath:))
             ?? FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
@@ -536,6 +539,38 @@ final class RightPanelTests: XCTestCase {
         RightPanel.dockTerminal(.side)
         XCTAssertFalse(UserDefaults.standard.bool(forKey: RightPanel.bottomTerminalKey))
         XCTAssertEqual(UserDefaults.standard.string(forKey: RightPanel.tabKey), "terminal")
+    }
+
+    // Only asking for a terminal starts a shell: a conversation in a folder
+    // without one shows none under it, even with the terminal kept there,
+    // and the folder's last shell ending takes the terminal away, rather
+    // than leaving "No terminal open" under the conversation.
+    func testATerminalStartsOnlyWhenAskedFor() throws {
+        let cwd = try project()
+        let editor = EditorRegistry.shared.store(for: cwd)
+        defer { for terminal in editor.terminals { editor.closeTerminal(terminal) } }
+        set([RightPanel.openKey: false, Sidebar.hiddenKey: false, RightPanel.terminalDockKey: "bottom",
+             RightPanel.bottomTerminalKey: true])
+        let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"].map(URL.init(fileURLWithPath:))
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+
+        try render(size: CGSize(width: 1300, height: 800), dark: false, store: try store(cwd: cwd),
+                   to: out.appendingPathComponent("bottom-terminal-other-folder-light.png"))
+        XCTAssertTrue(editor.terminals.isEmpty, "Going to the conversation started a shell")
+        XCTAssertFalse(AgentThreadView.showsBottomTerminal(kept: true, folder: cwd))
+
+        RightPanel.showTerminal(in: cwd)
+        XCTAssertEqual(editor.terminals.count, 1)
+        XCTAssertTrue(AgentThreadView.showsBottomTerminal(kept: true, folder: cwd))
+        RightPanel.showTerminal(in: cwd)
+        XCTAssertEqual(editor.terminals.count, 1, "Asking again shows the one there")
+
+        editor.closeTerminal(editor.terminals[0])
+        XCTAssertFalse(AgentThreadView.showsBottomTerminal(kept: true, folder: cwd))
+        try render(size: CGSize(width: 1300, height: 800), dark: false, store: try store(cwd: cwd),
+                   to: out.appendingPathComponent("bottom-terminal-closed-light.png"))
+        XCTAssertTrue(editor.terminals.isEmpty)
     }
 
     // A tab split in two: a second shell beside the first, closed again

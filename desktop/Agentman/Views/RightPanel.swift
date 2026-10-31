@@ -54,15 +54,26 @@ struct RightPanel: View {
     static let terminalDockKey = "terminalDock"
     static let bottomTerminalKey = "bottomTerminalOpen"
 
-    /// Opens the terminal where the user keeps it, under the conversation
-    /// unless they moved it into this panel.
-    static func showTerminal() {
+    /// Opens a terminal in this folder where the user keeps it, under the
+    /// conversation unless they moved it into this panel, starting a shell
+    /// there if it has none.
+    static func showTerminal(in folder: String) {
+        startTerminal(in: folder)
         let defaults = UserDefaults.standard
         if TerminalDock(rawValue: defaults.string(forKey: terminalDockKey) ?? "") == .side {
             show(.terminal)
         } else {
             dockTerminal(.bottom)
         }
+    }
+
+    /// A shell in the folder, unless one is open there already. Only asking
+    /// for a terminal starts one: going to another folder's conversation
+    /// doesn't.
+    static func startTerminal(in folder: String) {
+        guard FileManager.default.fileExists(atPath: folder) else { return }
+        let store = EditorRegistry.shared.store(for: folder)
+        if store.terminals.isEmpty { store.newTerminal() }
     }
 
     /// Moves the terminal, and keeps it open there. It shows in one place
@@ -106,7 +117,12 @@ struct RightPanel: View {
                 Menu {
                     ForEach(RightPanelTab.allCases) { item in
                         Button {
-                            if item == .terminal { Self.dockTerminal(.side) } else { Self.show(item) }
+                            if item == .terminal {
+                                Self.startTerminal(in: session.cwd)
+                                Self.dockTerminal(.side)
+                            } else {
+                                Self.show(item)
+                            }
                         } label: { Label(item.title, systemImage: item.symbol) }
                     }
                 } label: {
@@ -1083,9 +1099,6 @@ struct FolderTerminal: View, Equatable {
             } else {
                 TerminalPanel(store: store, hide: hide, move: move)
             }
-        }
-        .onAppear {
-            if store.terminals.isEmpty, FileManager.default.fileExists(atPath: folder) { store.newTerminal() }
         }
     }
 

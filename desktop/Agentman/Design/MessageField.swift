@@ -32,7 +32,8 @@ struct MessageField: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let textView = MessageTextView()
+        // TextKit 1, whose attachment cells draw the file chips.
+        let textView = MessageTextView(usingTextLayoutManager: false)
         textView.delegate = context.coordinator
         textView.isRichText = false
         textView.importsGraphics = false
@@ -66,9 +67,9 @@ struct MessageField: NSViewRepresentable {
         context.coordinator.parent = self
         guard let textView = context.coordinator.textView else { return }
         update(textView)
-        if textView.string != text {
+        if textView.plainText != text {
             textView.string = text
-            textView.styleMentions()
+            textView.makeChips(all: true, notify: false)
             textView.needsDisplay = true
         }
         // Focus follows the binding when it is set from outside, never
@@ -112,15 +113,16 @@ struct MessageField: NSViewRepresentable {
         let width = max(proposal.width ?? 200, 40)
         let font = Self.font(fontSize)
         let line = ceil(font.ascender - font.descender + font.leading + Self.lineSpacing)
-        var string = context.coordinator.textView?.string ?? text
-        // A last empty line counts, as the text view shows it.
-        if string.isEmpty || string.hasSuffix("\n") { string += " " }
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = Self.lineSpacing
-        let used = (string as NSString).boundingRect(
+        // The text with its file chips, each as wide as it draws.
+        let measured = NSMutableAttributedString(attributedString: context.coordinator.textView?.textStorage ?? NSAttributedString(string: text))
+        // A last empty line counts, as the text view shows it.
+        if measured.length == 0 || measured.string.hasSuffix("\n") { measured.append(NSAttributedString(string: " ")) }
+        measured.addAttributes([.font: font, .paragraphStyle: paragraph], range: NSRange(location: 0, length: measured.length))
+        let used = measured.boundingRect(
             with: NSSize(width: width, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: font, .paragraphStyle: paragraph]
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
         ).height
         return CGSize(width: width, height: min(max(ceil(used), line), line * CGFloat(maxLines)))
     }
@@ -139,14 +141,29 @@ struct MessageField: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView else { return }
-            parent.text = textView.string
-            textView.styleMentions()
+            parent.text = textView.plainText
+            // Once AppKit is done with the change: in the middle of it, the
+            // step typing leaves to undo would still count the letters a
+            // chip replaced.
+            DispatchQueue.main.async { [weak textView] in textView?.makeChips() }
             followMention()
-            parent.slash?.update(text: textView.string)
+            followSlash()
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
             followMention()
+            followSlash()
+        }
+
+        /// Opens or closes the commands for `/` as the caret moves.
+        private func followSlash() {
+            guard let textView, let slash = parent.slash else { return }
+            let selection = textView.selectedRange()
+            if selection.length == 0, !textView.hasMarkedText() {
+                slash.update(text: textView.string, caret: selection.location)
+            } else {
+                slash.dismiss()
+            }
         }
 
         /// Opens or closes the files for `@` as the caret moves.
@@ -158,17 +175,6 @@ struct MessageField: NSViewRepresentable {
             } else {
                 mentions.dismiss()
             }
-        }
-
-        /// Backspace or Delete at a file chip takes the whole chip.
-        func textView(_ textView: NSTextView, shouldChangeTextIn range: NSRange, replacementString: String?) -> Bool {
-            guard let mentions = parent.mentions, replacementString?.isEmpty == true, range.length <= 1 else { return true }
-            for chip in mentions.chips(in: textView.string)
-            where NSIntersectionRange(chip.range, range).length > 0 && chip.range != range {
-                textView.insertText("", replacementRange: chip.range)
-                return false
-            }
-            return true
         }
 
         func focusChanged(_ now: Bool) {
@@ -223,6 +229,8 @@ final class MessageTextView: NSTextView {
     var slash: SlashCommands?
     /// Focus asked for before the box was in a window, given when it is.
     private var wantsFocus = false
+    /// A file chip shows its file while the pointer rests on it.
+    lazy var hover = ChipHover(self) { [weak self] in self?.mentions?.root.path }
 
     func takeFocus() {
         guard let window else {
@@ -234,6 +242,7 @@ final class MessageTextView: NSTextView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if window != nil { hover.track() } else { hover.close() }
         if wantsFocus, window != nil {
             wantsFocus = false
             takeFocus()
@@ -242,7 +251,18 @@ final class MessageTextView: NSTextView {
 
     // MARK: Keys
 
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        hover.moved(event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        hover.close()
+    }
+
     override func keyDown(with event: NSEvent) {
+        hover.close()
         // The commands for `/`, as the files for `@`.
         if let slash, slash.isOpen, !slash.results.isEmpty, !hasMarkedText() {
             switch event.keyCode {
@@ -288,11 +308,13 @@ final class MessageTextView: NSTextView {
     override func paste(_ sender: Any?) {
         if takeImages(from: .general) { return }
         super.paste(sender)
+        makeChips(all: true)
     }
 
     override func pasteAsPlainText(_ sender: Any?) {
         if takeImages(from: .general) { return }
         super.pasteAsPlainText(sender)
+        makeChips(all: true)
     }
 
     override func pasteAsRichText(_ sender: Any?) {
@@ -384,33 +406,98 @@ final class MessageTextView: NSTextView {
 
     // MARK: File chips
 
-    /// The `@path` of each file named in the text, in the brand colour;
-    /// drawBackground puts the chip behind it. Layout attributes only: the
-    /// text stays plain.
-    func styleMentions() {
-        guard let layoutManager else { return }
-        let all = NSRange(location: 0, length: (string as NSString).length)
-        layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: all)
-        guard let mentions else { return }
-        for chip in mentions.chips(in: string) {
-            layoutManager.addTemporaryAttribute(.foregroundColor, value: NSColor(Palette.workingText), forCharacterRange: chip.range)
-        }
-        needsDisplay = true
-    }
+    /// The text as it is sent: each chip as `@` and its path.
+    var plainText: String { textStorage.map(FileChip.plain) ?? string }
 
-    override func drawBackground(in rect: NSRect) {
-        super.drawBackground(in: rect)
-        guard let mentions, let layoutManager, let textContainer, string.contains("@") else { return }
-        NSColor(Palette.working).withAlphaComponent(0.13).setFill()
-        let origin = textContainerOrigin
-        for chip in mentions.chips(in: string) {
-            let glyphs = layoutManager.glyphRange(forCharacterRange: chip.range, actualCharacterRange: nil)
-            layoutManager.enumerateEnclosingRects(forGlyphRange: glyphs, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
-                                                  in: textContainer) { box, _ in
-                let chipBox = box.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -3, dy: 0.5)
-                NSBezierPath(roundedRect: chipBox, xRadius: 5, yRadius: 5).fill()
+    private var chipping = false
+
+    /// Draws each `@path` naming a file in the folder as a chip: its icon
+    /// and name. Not the word the caret ends, still being typed, unless
+    /// `all`: text set or pasted in. `notify` keeps the change undoable and
+    /// tells the box's delegate, as typing does.
+    func makeChips(all: Bool = false, notify: Bool = true) {
+        guard let storage = textStorage, !chipping, !hasMarkedText() else { return }
+        let caret = selectedRange()
+        let typing = { (range: NSRange) in
+            !all && caret.length == 0 && caret.location >= range.location && caret.location <= NSMaxRange(range)
+        }
+        let attributes = typingAttributes.filter { $0.key != .attachment }
+        var tags: [(range: NSRange, chip: NSAttributedString)] = []
+        if let mentions, string.contains("@") {
+            for chip in mentions.chips(in: string) where !typing(chip.range) {
+                tags.append((chip.range, FileChip.text(chip.path, attributes: attributes)))
             }
         }
+        // A skill's name typed in full: the agent's skills, as `/` lists them.
+        if let skills = slash?.skills, !skills.isEmpty {
+            for found in skillWords(skills) where !typing(found.range) {
+                tags.append((found.range, SkillChip.text(found.command, attributes: attributes)))
+            }
+        }
+        tags.sort { $0.range.location < $1.range.location }
+        let found = tags.map(\.range)
+        let chips = tags.map(\.chip)
+        guard !found.isEmpty else { return }
+        // Its own step to undo: typing before and after doesn't run into it.
+        if notify { breakUndoCoalescing() }
+        if notify, !shouldChangeText(inRanges: found.map { NSValue(range: $0) }, replacementStrings: chips.map(\.string)) { return }
+        chipping = true
+        storage.beginEditing()
+        for (range, text) in zip(found, chips).reversed() {
+            storage.replaceCharacters(in: range, with: text)
+        }
+        storage.endEditing()
+        // The caret keeps its place among the letters around the chips.
+        let before = found.filter { NSMaxRange($0) <= caret.location }.reduce(0) { $0 + $1.length - 1 }
+        setSelectedRange(NSRange(location: max(caret.location - before, 0), length: 0))
+        if notify {
+            didChangeText()
+            breakUndoCoalescing()
+        }
+        chipping = false
+    }
+
+    /// The skills named in the text by their prefix and name, where.
+    private func skillWords(_ skills: [SlashCommand]) -> [(range: NSRange, command: SlashCommand)] {
+        let known = Dictionary(skills.map { ($0.label, $0) }, uniquingKeysWith: { first, _ in first })
+        let ns = string as NSString
+        var found: [(NSRange, SlashCommand)] = []
+        for match in Self.skillWord.matches(in: string, range: NSRange(location: 0, length: ns.length)) {
+            var range = match.range
+            var word = ns.substring(with: range)
+            while known[word] == nil, let last = word.last, ".,;:!?)]}'\"".contains(last) {
+                word.removeLast()
+                range.length -= 1
+            }
+            if let command = known[word] { found.append((range, command)) }
+        }
+        return found
+    }
+
+    nonisolated(unsafe) private static let skillWord = try! NSRegularExpression(pattern: #"(?<![^\s])([/$][A-Za-z0-9][A-Za-z0-9._:\-]*)"#)
+
+    /// Puts a skill picked from the list in place of the `/` and the letters
+    /// typed, as a chip with a space after it.
+    func insertSkill(_ command: SlashCommand, replacing range: NSRange) {
+        guard let storage = textStorage, NSMaxRange(range) <= storage.length else { return }
+        let attributes = typingAttributes.filter { $0.key != .attachment }
+        let chip = NSMutableAttributedString(attributedString: SkillChip.text(command, attributes: attributes))
+        chip.append(NSAttributedString(string: " ", attributes: attributes))
+        breakUndoCoalescing()
+        guard shouldChangeText(in: range, replacementString: chip.string) else { return }
+        storage.replaceCharacters(in: range, with: chip)
+        setSelectedRange(NSRange(location: range.location + chip.length, length: 0))
+        didChangeText()
+        breakUndoCoalescing()
+    }
+
+    /// A copy holds the paths the chips stand for.
+    override func writeSelection(to pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+        guard type == .string, let storage = textStorage, storage.containsAttachments else {
+            return super.writeSelection(to: pboard, type: type)
+        }
+        let text = selectedRanges.map { FileChip.plain(storage.attributedSubstring(from: $0.rangeValue)) }.joined(separator: "\n")
+        return pboard.setString(text, forType: .string)
     }
 
     override func draw(_ dirtyRect: NSRect) {

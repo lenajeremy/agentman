@@ -38,7 +38,11 @@ struct ContentView: View {
             .animation(.easeOut(duration: 0.18), value: sidebarHidden)
         }
         // Agentman's news, small, over whatever is open.
-        .overlay { AgentmanToasts() }
+        .overlayPreferenceValue(MessageBoxFrame.self) { box in
+            GeometryReader { proxy in
+                AgentmanToasts(messageBox: box.map { proxy[$0] })
+            }
+        }
         .environment(\.windowHeaderLeading, headerLeading)
         .background(Palette.paper)
         .background(WindowReader { window in
@@ -105,6 +109,8 @@ struct ContentView: View {
                 }
             case .newAgent:
                 NewAgentView()
+            case .usage:
+                UsageView()
             case .manager, nil:
                 ManagerChatView()
             }

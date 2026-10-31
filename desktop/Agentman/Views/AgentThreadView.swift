@@ -51,6 +51,13 @@ struct AgentThreadView: View {
     /// Claude Code in tmux reads the messages it is holding on Ctrl-X
     /// Ctrl-S, so they can be sent now rather than when the step ends.
     private var canSendNow: Bool { session.kind == "claude" && session.inject == "tmux" }
+    /// The terminal under the conversation shows while it is kept there and
+    /// this folder has a shell open.
+    private var bottomTerminalShows: Bool { Self.showsBottomTerminal(kept: bottomTerminal, folder: session.cwd) }
+
+    static func showsBottomTerminal(kept: Bool, folder: String) -> Bool {
+        kept && FileManager.default.fileExists(atPath: folder) && !EditorRegistry.shared.store(for: folder).terminals.isEmpty
+    }
 
     var body: some View {
         if inPanel {
@@ -76,7 +83,9 @@ struct AgentThreadView: View {
                                         .padding(.bottom, 20)
                                 }
                             }
-                            if bottomTerminal, FileManager.default.fileExists(atPath: session.cwd) {
+                            // While the folder has a shell: its last one
+                            // ending closes it.
+                            if bottomTerminalShows {
                                 let tallest = max(geometry.size.height - 260, 160)
                                 PanelDivider(height: $bottomTerminalHeight, maximum: tallest)
                                     .padding(.vertical, -3)
@@ -155,15 +164,15 @@ struct AgentThreadView: View {
             // agent's own live terminal is in the menu beside it.
             if folderExists {
                 let inPanelTab = panelOpen && panelTab == .terminal
-                let showing = bottomTerminal || inPanelTab
+                let showing = bottomTerminalShows || inPanelTab
                 ChromeButton(symbol: "terminal", help: showing ? "Close the terminal (⌃`)" : "Terminal in this folder (⌃`)", active: showing) {
-                    if bottomTerminal {
+                    if bottomTerminalShows {
                         bottomTerminal = false
                     } else if inPanelTab {
                         panelOpen = false
                         panelMaximised = false
                     } else {
-                        RightPanel.showTerminal()
+                        RightPanel.showTerminal(in: session.cwd)
                     }
                 }
                 .keyboardShortcut("`", modifiers: .control)
@@ -279,6 +288,9 @@ struct AgentThreadView: View {
                     .padding(.bottom, 6)
                     .frame(maxWidth: Self.column)
                     .frame(maxWidth: .infinity)
+                    .environment(\.imageGallery, ThreadItem.pictures(in: items))
+                    .environment(\.threadFolder, session.cwd)
+                    .environment(\.threadSkills, slash?.skills ?? [])
                 }
                 .scrollIndicators(.never)
                 .modifier(FollowsEnd(following: following, earlier: store.hasMore[session.id] == true ? { await store.loadOlder(session.id) } : nil))
@@ -340,6 +352,7 @@ struct AgentThreadView: View {
             .modifier(ComposerFeedback(message: store.actionError[session.id]) {
                 store.actionError[session.id] = nil
             })
+            .anchorPreference(key: MessageBoxFrame.self, value: .bounds) { $0 }
             .padding(.horizontal, gutter)
             .padding(.top, 4)
             .padding(.bottom, 20)
@@ -363,6 +376,8 @@ struct AgentThreadView: View {
             }
             let id = session.id
             slash = SlashCommands(triggers: SlashCommands.triggers(for: session)) { [store] in await store.commands(for: id) }
+            // Read now, for the skills the conversation's messages name.
+            slash?.prefetch()
         }
         .sheet(item: Binding(get: { panel.map(PanelItem.init) }, set: { panel = $0?.panel })) { item in
             CommandPanelSheet(panel: item.panel)
@@ -409,7 +424,7 @@ struct AgentThreadView: View {
             case .success(let terminal):
                 // In this window's panel, beside the folder's shells.
                 EditorRegistry.shared.store(for: session.cwd).showAgentTerminal(terminal, title: session.name)
-                RightPanel.showTerminal()
+                RightPanel.showTerminal(in: session.cwd)
             case .failure(let problem):
                 store.actionError[session.id] = problem.message
             }
@@ -925,18 +940,15 @@ extension MessageRow {
 /// A user's message, clipped to a few lines when it is long, with the way
 /// to read the rest.
 private struct LongText: View {
+    @Environment(\.threadFolder) private var folder
+    @Environment(\.threadSkills) private var skills
     let text: String
     @State private var open = false
     private var long: Bool { text.count > 700 || text.filter(\.isNewline).count > 10 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(text)
-                .font(TextStyle.body)
-                .foregroundStyle(Palette.text)
-                .lineSpacing(5)
-                .textSelection(.enabled)
-                .lineLimit(long && !open ? 8 : nil)
+            TaggedText(text: text, folder: folder, skills: skills, lineLimit: long && !open ? 8 : nil)
             if long {
                 Button(open ? "Show less" : "Show more") {
                     withAnimation(.easeOut(duration: 0.15)) { open.toggle() }
@@ -1001,6 +1013,21 @@ enum ThreadItem: Identifiable {
         case .message(let message), .image(let message, _): message.id
         case .tools(let calls, _), .images(let calls, _, _): calls.last?.id ?? ""
         }
+    }
+
+    /// The pictures the agent looked at, in order, each once: what the
+    /// image viewer's arrows go through.
+    static func pictures(in items: [ThreadItem]) -> [String] {
+        var seen = Set<String>()
+        var paths: [String] = []
+        for item in items {
+            switch item {
+            case .image(_, let path): if seen.insert(path).inserted { paths.append(path) }
+            case .images(_, let run, _): for path in run where seen.insert(path).inserted { paths.append(path) }
+            default: break
+            }
+        }
+        return paths
     }
 
     static func items(from messages: [Message]) -> [ThreadItem] {
@@ -1341,6 +1368,8 @@ enum ToolKind: Hashable {
 /// A message the agent has not read yet: held until its current step ends,
 /// or queued until its turn does.
 private struct QueuedBubble: View {
+    @Environment(\.threadFolder) private var folder
+    @Environment(\.threadSkills) private var skills
     let text: String
     let note: String
     /// Hurries the agent's queue, where the agent can be: Claude Code in
@@ -1352,9 +1381,7 @@ private struct QueuedBubble: View {
         HStack {
             Spacer(minLength: 80)
             VStack(alignment: .trailing, spacing: 4) {
-                Text(text)
-                    .font(TextStyle.body)
-                    .foregroundStyle(Palette.textSecondary)
+                TaggedText(text: text, folder: folder, skills: skills, color: Palette.textSecondary, lineSpacing: 0, selectable: false)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(
@@ -1420,7 +1447,8 @@ struct Composer: View {
         VStack(alignment: .leading, spacing: 10) {
             if let attachments, !attachments.wrappedValue.isEmpty {
                 AttachmentStrip(attachments: attachments)
-                    .padding(.leading, 4)
+                    .padding(.leading, 5)
+                    .padding(.top, -4)
             }
             MessageField(
                 text: $text,
@@ -1436,7 +1464,7 @@ struct Composer: View {
             .opacity(enabled ? 1 : 0.6)
             .fixedSize(horizontal: false, vertical: true)
             .frame(minHeight: 36, alignment: .topLeading)
-            .padding(.horizontal, 6)
+            .padding(.horizontal, 5)
             // The things to do with a message, under it: attach on the left,
             // what the agent runs as, then send on the right.
             HStack(spacing: 6) {
@@ -1445,7 +1473,7 @@ struct Composer: View {
                         Image(systemName: "paperclip")
                             .font(.system(size: 14, weight: .regular))
                             .foregroundStyle(Palette.muted)
-                            .frame(width: 28, height: 28)
+                            .frame(width: 26, height: 28)
                     }
                     .buttonStyle(.plain)
                     .disabled(!enabled || attachments.wrappedValue.count >= Attachments.maxCount)
@@ -1486,9 +1514,11 @@ struct Composer: View {
                 sendButton
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
+        // The text 13 points in from the box's edge and 10 down: room
+        // enough, as Agentman's own box has.
+        .padding(.horizontal, 8)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
         .confirmationDialog(
             confirming.map { "Switch to \(SessionLabels.model($0))?" } ?? "",
             isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } })
