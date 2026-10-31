@@ -1521,6 +1521,17 @@ func openCodeModel(response []ocMessage) string {
 
 // Inject implements Injector.
 func (s *OpenCodeSource) Inject(ctx context.Context, sessionID, text string) (protocol.InjectMode, error) {
+	return s.inject(ctx, sessionID, text, nil)
+}
+
+// InjectWithSkills implements SkillInjector: OpenCode 2's service attaches a
+// skill sent by its id beside the message, and reads none in its words. An
+// OpenCode 1 server takes the words alone, which name the skill.
+func (s *OpenCodeSource) InjectWithSkills(ctx context.Context, sessionID, text string, skills []string) (protocol.InjectMode, error) {
+	return s.inject(ctx, sessionID, text, skills)
+}
+
+func (s *OpenCodeSource) inject(ctx context.Context, sessionID, text string, skills []string) (protocol.InjectMode, error) {
 	s.mu.RLock()
 	session, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
@@ -1535,6 +1546,9 @@ func (s *OpenCodeSource) Inject(ctx context.Context, sessionID, text string) (pr
 	// per-session model to set (see opencode_switch.go).
 	if model, ok := s.chosenModel(sessionID); ok {
 		body["model"] = map[string]string{"providerID": model.providerID, "modelID": model.modelID}
+	}
+	if _, service := s.servicePassword(session.baseURL); service && len(skills) > 0 {
+		body["skills"] = skills
 	}
 	query := url.Values{}
 	if session.directory != "" {

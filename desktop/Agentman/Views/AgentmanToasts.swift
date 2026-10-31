@@ -7,20 +7,33 @@ import SwiftUI
 /// card stays until it is answered, answered anywhere else, or put away.
 struct AgentmanToasts: View {
     @Environment(AgentsStore.self) private var store
-    /// Room left at the window's foot for a conversation's message box.
-    static let clearance: CGFloat = 132
+    /// Where the conversation's message box is in the window, if one shows.
+    var messageBox: CGRect?
+
+    static let width: CGFloat = 340
+    static let margin: CGFloat = 16
+
+    /// Room under the toasts: the window's margin, or, where they would
+    /// cover the message box and its send button, enough to clear it.
+    static func bottom(in size: CGSize, messageBox: CGRect?) -> CGFloat {
+        guard let box = messageBox else { return margin }
+        let left = size.width - margin - width
+        guard box.maxX > left, box.maxY > size.height - margin - 40 else { return margin }
+        return size.height - box.minY + 12
+    }
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 8) {
-            ForEach(store.toasts) { toast in
-                ToastView(toast: toast)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+        GeometryReader { proxy in
+            VStack(alignment: .trailing, spacing: 8) {
+                ForEach(store.toasts) { toast in
+                    ToastView(toast: toast)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
+            .padding(.trailing, Self.margin)
+            .padding(.bottom, Self.bottom(in: proxy.size, messageBox: messageBox))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         }
-        .padding(.trailing, 16)
-        // Above the message box, whose send button they would cover.
-        .padding(.bottom, Self.clearance)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .animation(.spring(duration: 0.3, bounce: 0.15), value: store.toasts.map(\.id))
     }
 }
@@ -45,7 +58,7 @@ private struct ToastView: View {
                 NewsToast(entry: entry) { store.dismissToast(toast.id) }
             }
         }
-        .frame(width: 340)
+        .frame(width: AgentmanToasts.width)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.line))
         .shadow(color: .black.opacity(0.14), radius: 14, y: 6)
@@ -125,5 +138,14 @@ private struct NewsToast: View {
             store.selection = .manager
         }
         close()
+    }
+}
+
+/// Where the conversation's message box is, for what floats over the
+/// window to keep clear of it.
+struct MessageBoxFrame: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = value ?? nextValue()
     }
 }

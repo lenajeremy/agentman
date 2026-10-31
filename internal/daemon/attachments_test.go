@@ -294,3 +294,33 @@ func TestAPhonesImagesReachAgentmanAsBytes(t *testing.T) {
 		t.Fatalf("five images were taken: %+v", too)
 	}
 }
+
+// skillfulSource lists one skill, as a Claude with it installed does.
+type skillfulSource struct{ injectingSource }
+
+func (s *skillfulSource) Commands(context.Context, string) ([]protocol.Command, error) {
+	return []protocol.Command{{Name: "compact"}, {Name: "frontend-design", Skill: true}}, nil
+}
+
+func (s *skillfulSource) CommandPanel(context.Context, string, string) (protocol.CommandPanel, error) {
+	return protocol.CommandPanel{}, errors.New("none")
+}
+
+// A skill named mid-sentence reaches the agent in its own form: for
+// Claude, with a space after it, which Claude needs to point the model at
+// the skill.
+func TestASkillNamedMidSentenceIsSentInTheAgentsForm(t *testing.T) {
+	src := &skillfulSource{}
+	agent, _ := agentWithSource(t, src)
+	agent.refresh(context.Background(), true)
+	event := agent.Handle(context.Background(), protocol.Request{
+		Type: protocol.ReqSendMessage, SessionID: "claude:s1", ClientID: "c1",
+		Text: "Use /frontend-design, then ship it. Not /compact.",
+	})
+	if event.Type == protocol.EvtError {
+		t.Fatalf("send: %s", event.Error)
+	}
+	if got := src.injected(); got != "Use /frontend-design , then ship it. Not /compact." {
+		t.Errorf("typed %q", got)
+	}
+}

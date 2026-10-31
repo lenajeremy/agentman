@@ -263,6 +263,42 @@ func SendAfter(ctx context.Context, name, key, text string) error {
 	return sendLocked(ctx, name, text)
 }
 
+// SendClosingMenu is Send for a prompt where words typed can open a menu
+// that takes the Enter meant to send them: an @word naming a file opens
+// Kiro's file menu, which stays open to the end of the line, and Enter
+// then swaps the rest of the message for the file. Once the words are
+// typed, while open reports the menu on screen, Escape closes it (only it:
+// the words stay), then Enter sends them. Escape is pressed only when the
+// menu shows, since with nothing open it can stop the agent's turn.
+func SendClosingMenu(ctx context.Context, name, text string, open func(pane string) bool) error {
+	if !Available() {
+		return ErrNotInstalled
+	}
+	if strings.TrimSpace(text) == "" {
+		return errors.New("tmux: refusing to send an empty message")
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	if _, err := run(ctx, "send-keys", "-t", name, "C-u"); err != nil {
+		return fmt.Errorf("tmux: could not clear the prompt: %w", err)
+	}
+	if err := typeLocked(ctx, name, text); err != nil {
+		return err
+	}
+	// The menu draws a moment after the keys that open it.
+	if awaitPaneFor(ctx, name, open, 6, 50*time.Millisecond) == nil {
+		if _, err := run(ctx, "send-keys", "-t", name, "Escape"); err != nil {
+			return fmt.Errorf("tmux: could not close the menu: %w", err)
+		}
+		closed := func(pane string) bool { return !open(pane) }
+		if err := awaitPaneFor(ctx, name, closed, 10, 50*time.Millisecond); err != nil {
+			return errors.New("tmux: the message opened a menu that didn't close, so it wasn't sent")
+		}
+	}
+	return submitLocked(ctx, name)
+}
+
 // sendLocked is Send for a caller that already holds the pane's action lock.
 func sendLocked(ctx context.Context, name, text string) error {
 	// Clear whatever is already in the prompt box first.

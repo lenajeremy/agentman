@@ -1,20 +1,73 @@
 import AppKit
 import SwiftUI
 
-/// An image opened full window: what an agent or Agentman looked at.
+/// Copies a picture to the clipboard, as PNG and TIFF so any app can take
+/// it: right-click Copy Image wherever a picture shows.
+enum ImageClipboard {
+    /// The clipboard written to; tests use one of their own.
+    @MainActor static var pasteboard = NSPasteboard.general
+
+    @MainActor static func copy(_ image: NSImage) {
+        guard let tiff = image.tiffRepresentation else { return }
+        let item = NSPasteboardItem()
+        if let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+            item.setData(png, forType: .png)
+        }
+        item.setData(tiff, forType: .tiff)
+        pasteboard.clearContents()
+        pasteboard.writeObjects([item])
+    }
+}
+
+/// Images opened full window: what an agent or Agentman looked at, one
+/// shown at a time, the rest a key or an arrow away.
 struct Lightbox: Identifiable {
+    /// One picture it can show: its name, and how to read it in full when
+    /// it comes up.
+    struct Picture {
+        let title: String
+        let load: @MainActor () async -> NSImage?
+    }
+
     let id = UUID()
-    let image: NSImage
-    let title: String
+    let pictures: [Picture]
+    /// The one shown first.
+    let start: Int
     /// The window it opens over: an editor's folder for its agent panel,
     /// nil for Agentman's own window.
     var place: String?
+
+    init(pictures: [Picture], start: Int = 0, place: String? = nil) {
+        self.pictures = pictures
+        self.start = min(max(start, 0), max(pictures.count - 1, 0))
+        self.place = place
+    }
+
+    /// One image, on its own.
+    init(image: NSImage, title: String, place: String? = nil) {
+        self.init(pictures: [Picture(title: title) { image }], place: place)
+    }
+
+    /// Image files, from the one at path.
+    static func files(_ paths: [String], from path: String, place: String? = nil) -> Lightbox {
+        let paths = paths.contains(path) ? paths : [path]
+        return Lightbox(pictures: paths.map { path in
+            Picture(title: (path as NSString).lastPathComponent) { NSImage(contentsOfFile: path) }
+        }, start: paths.firstIndex(of: path) ?? 0, place: place)
+    }
 }
 
 extension EnvironmentValues {
     /// Which window an image opened here should show over: an editor's
     /// folder in its agent panel, nil in Agentman's window.
     @Entry var lightboxPlace: String?
+    /// The pictures an agent looked at in the conversation, in order, so
+    /// one opened full window leads on to the others.
+    @Entry var imageGallery: [String] = []
+    /// The conversation's folder, where the files its messages name are.
+    @Entry var threadFolder: String?
+    /// The skills the conversation's agent has, which its messages name.
+    @Entry var threadSkills: [SlashCommand] = []
 }
 
 /// Pictures made as small as where they show, decoded off the main thread
@@ -96,6 +149,7 @@ enum Thumbnail {
 struct ImageThumbnail: View {
     @Environment(AgentsStore.self) private var store
     @Environment(\.lightboxPlace) private var lightboxPlace
+    @Environment(\.imageGallery) private var gallery
     let sessionId: String
     let path: String
     let label: String
@@ -162,8 +216,16 @@ struct ImageThumbnail: View {
         if let image {
             Button {
                 Task {
+                    // Opened when this one is read, then the arrows go
+                    // through the conversation's other pictures.
                     let full = await store.manager.image(sessionId: sessionId, path: path) ?? image
-                    store.lightbox = Lightbox(image: full, title: label, place: lightboxPlace)
+                    let paths = gallery.contains(path) ? gallery : [path]
+                    let manager = store.manager, sessionId = sessionId
+                    store.lightbox = Lightbox(pictures: paths.map { each in
+                        Lightbox.Picture(title: (each as NSString).lastPathComponent) {
+                            each == path ? full : await manager.image(sessionId: sessionId, path: each)
+                        }
+                    }, start: paths.firstIndex(of: path) ?? 0, place: lightboxPlace)
                 }
             } label: {
                 Image(nsImage: image)
@@ -176,6 +238,11 @@ struct ImageThumbnail: View {
             }
             .buttonStyle(.plain)
             .help("Open full window")
+            .contextMenu {
+                Button("Copy Image") {
+                    Task { ImageClipboard.copy(await store.manager.image(sessionId: sessionId, path: path) ?? image) }
+                }
+            }
         } else if !failed {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(Palette.fill)
@@ -200,33 +267,65 @@ struct ImageThumbnail: View {
     nonisolated(unsafe) private static let imagePattern = try! Regex(#"/[^\s"'`]+?\.(?i:png|jpe?g|gif|webp|heic|bmp|tiff?)"#)
 }
 
-/// The full-window view of an image, over everything; Escape, the button or
-/// a click outside the image closes it.
+/// The full-window view of images, over everything: ← and →, or the arrows
+/// at its sides, go through them; the picture zooms (see ZoomableImage);
+/// Escape, the button or a click beside the picture closes it.
 struct LightboxView: View {
     @Environment(AgentsStore.self) private var store
     let box: Lightbox
+    @State private var index: Int
+    /// The picture showing, and which one it is: the last one stays up
+    /// while the next is read.
+    @State private var image: NSImage?
+    @State private var shown: Int?
+    @State private var zoom: CGFloat = 1
+
+    init(box: Lightbox) {
+        self.box = box
+        _index = State(initialValue: box.start)
+    }
+
+    private var count: Int { box.pictures.count }
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.82)
+            Color.black.opacity(0.85)
                 .ignoresSafeArea()
-                .onTapGesture { store.lightbox = nil }
-            VStack(spacing: 14) {
-                Image(nsImage: box.image)
-                    .resizable()
-                    .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .shadow(color: .black.opacity(0.4), radius: 30, y: 10)
-                Text(box.title)
-                    .font(TextStyle.caption)
-                    .foregroundStyle(.white.opacity(0.75))
+                .onTapGesture { close() }
+            VStack(spacing: 12) {
+                Group {
+                    if let image {
+                        ZoomableImage(image: image, zoom: $zoom, onTapBeside: close)
+                    } else if shown == index {
+                        Text("This image can't be read.")
+                            .font(TextStyle.body)
+                            .foregroundStyle(.white.opacity(0.7))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .contentShape(Rectangle())
+                            .onTapGesture { close() }
+                    } else {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { close() }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                caption
             }
-            .padding(48)
+            .padding(.horizontal, count > 1 ? 80 : 40)
+            .padding(.top, 60)
+            .padding(.bottom, 22)
+            if count > 1 {
+                HStack {
+                    arrow("chevron.left", help: "Previous Image (←)", enabled: index > 0) { move(-1) }
+                    Spacer()
+                    arrow("chevron.right", help: "Next Image (→)", enabled: index < count - 1) { move(1) }
+                }
+                .padding(.horizontal, 20)
+            }
         }
         .overlay(alignment: .topTrailing) {
-            Button {
-                store.lightbox = nil
-            } label: {
+            Button(action: close) {
                 Image(systemName: "xmark")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
@@ -238,7 +337,72 @@ struct LightboxView: View {
             .help("Close (Esc)")
             .padding(18)
         }
+        .background {
+            // ← and →, wherever the keyboard is.
+            Group {
+                Button("Previous Image") { move(-1) }.keyboardShortcut(.leftArrow, modifiers: [])
+                Button("Next Image") { move(1) }.keyboardShortcut(.rightArrow, modifiers: [])
+            }
+            .opacity(0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .task(id: index) {
+            guard index < count else { return }
+            let loaded = await box.pictures[index].load()
+            guard !Task.isCancelled else { return }
+            zoom = 1
+            image = loaded
+            shown = index
+        }
         .transition(.opacity)
+    }
+
+    /// Its name, where it is in the run, and a spinner while the next is read.
+    private var caption: some View {
+        HStack(spacing: 10) {
+            if count > 0 {
+                Text(box.pictures[index].title)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            if count > 1 {
+                Text("\(index + 1) of \(count)")
+                    .monospacedDigit()
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            if shown != index {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(.white)
+            }
+        }
+        .font(TextStyle.caption)
+        .foregroundStyle(.white.opacity(0.75))
+        .frame(height: 16)
+    }
+
+    private func close() { store.lightbox = nil }
+
+    private func move(_ by: Int) {
+        let next = index + by
+        guard next >= 0, next < count else { return }
+        index = next
+    }
+
+    private func arrow(_ symbol: String, help: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(.white.opacity(0.15), in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .opacity(enabled ? 1 : 0.25)
+        .disabled(!enabled)
+        .help(help)
     }
 }
 
@@ -250,7 +414,7 @@ struct SentImages: View {
     var body: some View {
         HStack(spacing: 8) {
             ForEach(names, id: \.self) { name in
-                SentImage(name: name)
+                SentImage(name: name, group: names)
             }
         }
     }
@@ -260,13 +424,19 @@ private struct SentImage: View {
     @Environment(AgentsStore.self) private var store
     @Environment(\.lightboxPlace) private var lightboxPlace
     let name: String
+    /// The message's images, which the arrows go through.
+    var group: [String] = []
     @State private var image: NSImage?
 
     var body: some View {
         Group {
             if let image {
                 Button {
-                    store.lightbox = Lightbox(image: image, title: "Sent to Agentman", place: lightboxPlace)
+                    let names = group.contains(name) ? group : [name]
+                    let manager = store.manager
+                    store.lightbox = Lightbox(pictures: names.map { each in
+                        Lightbox.Picture(title: "Sent to Agentman") { await manager.keptImage(each) }
+                    }, start: names.firstIndex(of: name) ?? 0, place: lightboxPlace)
                 } label: {
                     Image(nsImage: image)
                         .resizable()
@@ -278,6 +448,9 @@ private struct SentImage: View {
                 }
                 .buttonStyle(.plain)
                 .help("Open full window")
+                .contextMenu {
+                    Button("Copy Image") { ImageClipboard.copy(image) }
+                }
             } else {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Palette.fill)
@@ -454,7 +627,7 @@ struct SentFiles: View {
     var body: some View {
         HStack(spacing: 8) {
             ForEach(paths, id: \.self) { path in
-                SentFile(path: path)
+                SentFile(path: path, group: paths)
             }
         }
     }
@@ -464,12 +637,15 @@ private struct SentFile: View {
     @Environment(AgentsStore.self) private var store
     @Environment(\.lightboxPlace) private var lightboxPlace
     let path: String
+    /// The message's images, which the arrows go through.
+    var group: [String] = []
     /// The thumbnail; the picture itself is read when it is opened.
     @State private var image: NSImage?
     @State private var missing = false
 
-    init(path: String) {
+    init(path: String, group: [String] = []) {
         self.path = path
+        self.group = group
         _image = State(initialValue: Thumbnail.cached(Thumbnail.key(path, "110")))
     }
 
@@ -477,8 +653,7 @@ private struct SentFile: View {
         Group {
             if let image {
                 Button {
-                    let full = NSImage(contentsOfFile: path) ?? image
-                    store.lightbox = Lightbox(image: full, title: (path as NSString).lastPathComponent, place: lightboxPlace)
+                    store.lightbox = .files(group, from: path, place: lightboxPlace)
                 } label: {
                     Image(nsImage: image)
                         .resizable()
@@ -490,6 +665,9 @@ private struct SentFile: View {
                 }
                 .buttonStyle(.plain)
                 .help("Open full window")
+                .contextMenu {
+                    Button("Copy Image") { ImageClipboard.copy(NSImage(contentsOfFile: path) ?? image) }
+                }
             } else if missing {
                 Label("Image no longer kept", systemImage: "photo")
                     .font(TextStyle.caption)

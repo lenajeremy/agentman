@@ -367,6 +367,10 @@ private struct BlockView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
             }
+            // A scroll view and a quote's bar both stretch to any height, so
+            // without this a code block above a quote shared its height with
+            // the quote: the code was cut off and the bar ran on below it.
+            .fixedSize(horizontal: false, vertical: true)
             .background(Palette.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         case .quote(let blocks):
             HStack(alignment: .top, spacing: 10) {
@@ -378,6 +382,7 @@ private struct BlockView: View {
                 }
                 .opacity(0.85)
             }
+            .fixedSize(horizontal: false, vertical: true)
         case .list(let ordered, let start, let items):
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in

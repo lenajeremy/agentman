@@ -787,10 +787,36 @@ func (s *KiroSource) Inject(ctx context.Context, sessionID, text string) (protoc
 	// Mid-turn, Kiro reads typed text as steering for the running turn rather
 	// than as a new prompt. That is the right behaviour for a message sent
 	// while the agent works, so nothing needs to wait for the turn to end.
-	if err := tmux.Send(ctx, session.tmuxName, text); err != nil {
+	send := tmux.Send
+	if kiroMentions(text) {
+		// An @word naming a file opens Kiro's file menu, and it stays open
+		// to the end of the line: Enter would swap the rest of the message
+		// for the file and send nothing.
+		send = func(ctx context.Context, name, text string) error {
+			return tmux.SendClosingMenu(ctx, name, text, kiroFileMenu)
+		}
+	}
+	if err := send(ctx, session.tmuxName, text); err != nil {
 		return protocol.InjectNone, err
 	}
 	return protocol.InjectTmux, nil
+}
+
+// kiroMentions is whether a message has an @word that can open Kiro's file
+// menu: an @ at the start or after a space.
+func kiroMentions(text string) bool {
+	for _, word := range strings.Fields(text) {
+		if strings.HasPrefix(word, "@") && len(word) > 1 {
+			return true
+		}
+	}
+	return false
+}
+
+// kiroFileMenu is whether Kiro's file menu shows under the prompt, by its
+// footer (2.37): "esc to cancel · ↵ to select".
+func kiroFileMenu(pane string) bool {
+	return strings.Contains(pane, "esc to cancel · ↵ to select")
 }
 
 // Interrupt implements Interrupter.
