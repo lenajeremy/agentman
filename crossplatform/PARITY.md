@@ -336,13 +336,15 @@ Swift that does it today.
 - [ ] Languages ▸ Node.js remove; message for an am serve too old — LanguagesSettings.swift:45, LanguagesSettings.swift:147
 
 ## 10. New agent / command palette / worktree flows
-- [ ] New Agent page: "What should we work on?", task box (may be empty), Return starts — NewAgentView.swift:34
-- [ ] Agent menu: Claude Code, Codex, Cursor CLI, OpenCode, Kiro, Antigravity (choice kept) — NewAgentView.swift:157
-- [ ] Where menu: 10 recent folders, "Worktrees of <repo>" ("(the repository)" on the main one), New Worktree…, Choose a folder… — NewAgentView.swift:185
-- [ ] Worktree namer popover: name suggested from the task's first 4 words, cleaned into a branch name; Cancel / Use — NewAgentView.swift:319, NewAgentView.swift:132
-- [ ] Line under the box: "Starts in …" / "Starting X …" / the error; the folder must be inside home — NewAgentView.swift:83, AgentsStore.swift:467
-- [ ] Start: makes the worktree first, then starts the agent, opens it once listed, clears filters — NewAgentView.swift:262, AgentsStore.swift:490
-- [ ] "New Worktree from…" in a thread opens this page with the namer up — NewAgentView.swift:138
+- [x] New Agent page: "What should we work on?", task box (may be empty), Return starts — NewAgentView.swift:34
+- [x] Agent menu: Claude Code, Codex, Cursor CLI, OpenCode, Kiro, Antigravity (choice kept) — NewAgentView.swift:157
+- [x] Where menu: 10 recent folders, "Worktrees of <repo>" ("(the repository)" on the main one), New Worktree…, Choose a folder… — NewAgentView.swift:185
+- [x] Worktree namer popover: name suggested from the task's first 4 words, cleaned into a branch name; Cancel / Use — NewAgentView.swift:319, NewAgentView.swift:132
+  - Differs: drawn by the page as a card with an arrow, not an NSPopover.
+- [x] Line under the box: "Starts in …" / "Starting X …" / the error; the folder must be inside home — NewAgentView.swift:83, AgentsStore.swift:467
+- [x] Start: makes the worktree first, then starts the agent, opens it once listed, clears filters — NewAgentView.swift:262, AgentsStore.swift:490
+- [x] "New Worktree from…" in a thread opens this page with the namer up — NewAgentView.swift:138
+  - Note: the thread calls newWorktreeFrom(folder) from src/NewAgentView.tsx.
 - [ ] Command palette ⌘K: fuzzy search, ↑↓, Return, Esc or click outside closes, "Nothing matches" — CommandPalette.swift:7, PaletteView.swift:22
   - [ ] Ask Agentman: "…" (first for a question, 4+ words or no match; needs a key) — CommandPalette.swift:51
   - [ ] For the agent open now: Open its folder in the Editor, Open a Terminal, Rename… — CommandPalette.swift:77

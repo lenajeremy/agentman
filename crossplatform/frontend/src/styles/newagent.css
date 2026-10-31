@@ -1,0 +1,39 @@
+/* New Agent (Views/NewAgentView.swift): the title, a box up to 640 wide
+   (surface, radius 24, a hairline, a soft shadow), the line under it; 22
+   apart, centred, at least 40 above and 80 below, 32 from the sides. */
+:root { --on-inverse: #ffffff; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --on-inverse: #000000; } }
+:root[data-theme="dark"] { --on-inverse: #000000; }
+.new-agent { -webkit-font-smoothing: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 22px; padding: 0 32px; background: var(--paper); line-height: 1.193; }
+.new-agent-spacer { flex: 1 1 0; }
+.new-agent-spacer.top { min-height: 40px; }
+.new-agent-spacer.bottom { min-height: 80px; }
+.new-agent-title { font-size: 28px; font-weight: 500; color: var(--text); text-align: center; }
+.new-agent-box { width: 100%; max-width: 640px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); border-radius: 24px; box-shadow: inset 0 0 0 1px var(--line), 0 6px 18px rgb(0 0 0 / 0.06); }
+/* The message field's own look: 15pt, lines 3 apart, 8 from the box's sides. */
+.new-agent-field { display: block; width: calc(100% - 16px); margin: 6px 8px 0; padding: 0; border: 0; outline: none; resize: none; background: none; font: 15px/21px var(--sans); color: var(--text); overflow-y: auto; }
+/* NSTextView sets its 3pt of line spacing under each line; CSS shares it above and below. */
+.new-agent-field { margin: 4.5px 8px 1.5px; }
+.new-agent-field::placeholder { color: var(--muted); opacity: 1; }
+.new-agent-row { display: flex; align-items: center; gap: 6px; }
+.pill { height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 15px; background: var(--fill); color: var(--text-2); font-size: 12px; white-space: nowrap; }
+.pill-chevron { color: var(--faint); }
+.pill-anchor { position: relative; display: flex; }
+.start-button { width: 32px; height: 32px; border-radius: 50%; background: var(--text); color: var(--on-inverse); display: grid; place-items: center; flex: none; }
+.start-button.disabled { background: color-mix(in srgb, var(--text) 25%, transparent); }
+.start-button .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--on-inverse) 35%, transparent); border-top-color: var(--on-inverse); animation: spin 0.8s linear infinite; }
+.new-agent-line { font-size: 12px; color: var(--muted); text-align: center; max-width: 640px; }
+.new-agent-line.problem { color: var(--error-text); }
+
+/* The worktree namer: a popover under the where menu, 300 wide. */
+.namer { position: absolute; top: calc(100% + 12px); left: 50%; transform: translateX(-50%); width: 300px; padding: 14px; display: flex; flex-direction: column; gap: 10px; z-index: 30; background: var(--surface); border-radius: 10px; box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.18), 0 8px 24px rgb(0 0 0 / 0.18); text-align: left; }
+.namer-arrow { position: absolute; top: -7px; left: calc(50% - 7px); width: 14px; height: 14px; background: var(--surface); transform: rotate(45deg); box-shadow: -0.5px -0.5px 0 0 rgb(0 0 0 / 0.12); border-radius: 2px 0 0 0; }
+.namer-title { font-size: 14px; font-weight: 500; color: var(--text); }
+.namer-field { height: 22px; padding: 0 6px; font-size: 13px; color: var(--text); background: var(--surface); border: 0; border-radius: 5px; outline: none; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.15); }
+.namer-field:focus { box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.15), 0 0 0 3px color-mix(in srgb, var(--working) 45%, transparent); }
+.namer-text { font-size: 12px; color: var(--muted); }
+.namer-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+/* A push button as macOS draws one; the default one blue. */
+.mac-button { height: 24px; min-width: 64px; padding: 0 14px; border-radius: 6px; font-size: 13px; color: rgb(var(--primary) / 0.85); background: rgb(var(--primary) / 0.085); }
+.mac-button.default { color: #fff; background: #0a7aff; }
+.mac-button:disabled { opacity: 0.45; }
