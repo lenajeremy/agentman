@@ -22,21 +22,28 @@ struct TerminalPanel: View {
                     .padding(.trailing, 8)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 2) {
-                        ForEach(store.terminals) { session in
-                            TerminalTab(store: store, session: session, active: session.id == store.activeTerminalID)
+                        ForEach(store.terminals.filter { !store.isSplitHalf($0.id) }) { session in
+                            TerminalTab(store: store, session: session, active: session.id == store.activeTerminalID,
+                                        split: store.splitPartner(of: session.id) != nil)
                         }
                     }
                 }
                 Spacer(minLength: 8)
-                if let session = store.activeTerminal, session.exited {
+                if let session = focused, session.exited {
                     Button("Restart") { session.restart() }
                         .controlSize(.small)
                 }
                 iconButton("plus", help: "New terminal (⌃⇧`)") { store.newTerminal() }
-                iconButton("eraser", help: "Clear (⌘K in the terminal)") { store.activeTerminal?.clear() }
+                if store.splitPartner(of: store.activeTerminalID) == nil {
+                    iconButton("square.split.2x1", help: "Split the terminal: a new shell beside this one") { store.splitTerminal() }
+                        .disabled(store.activeTerminal == nil)
+                } else {
+                    iconButton("square.split.2x1.fill", help: "Close the shell on the right") { store.unsplitTerminal() }
+                }
+                iconButton("eraser", help: "Clear (⌘K in the terminal)") { focused?.clear() }
                     .disabled(store.activeTerminal == nil)
                 iconButton("trash", help: "Stop this shell and close it") {
-                    if let session = store.activeTerminal { store.closeTerminal(session) }
+                    if let session = focused { store.closeTerminal(session) }
                 }
                 .disabled(store.activeTerminal == nil)
                 if let move {
@@ -51,15 +58,34 @@ struct TerminalPanel: View {
             .background(Palette.paper)
             .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 1) }
 
-            ZStack {
-                Palette.paper
-                ForEach(store.terminals) { session in
-                    TerminalHost(session: session, visible: session.id == store.activeTerminalID)
-                        .padding(.leading, 10)
-                        .padding(.top, 6)
+            // Every shell keeps its place here, shown or not, so none is
+            // made again when tabs change; a split tab shows two side by side.
+            GeometryReader { geometry in
+                let right = store.splitPartner(of: store.activeTerminalID)?.id
+                let half = right == nil ? geometry.size.width : (geometry.size.width - 1) / 2
+                ZStack(alignment: .topLeading) {
+                    Palette.paper
+                    ForEach(store.terminals) { session in
+                        let isRight = session.id == right
+                        TerminalHost(session: session, visible: session.id == store.activeTerminalID || isRight)
+                            .padding(.leading, 10)
+                            .padding(.top, 6)
+                            .frame(width: half, height: geometry.size.height)
+                            .offset(x: isRight ? half + 1 : 0)
+                    }
+                    if right != nil {
+                        Rectangle().fill(Palette.line).frame(width: 1, height: geometry.size.height).offset(x: half)
+                    }
                 }
             }
         }
+    }
+
+    /// The shell with the keyboard, of the one or two showing; else the
+    /// one in front.
+    private var focused: TerminalSession? {
+        let showing = [store.activeTerminal, store.splitPartner(of: store.activeTerminalID)].compactMap { $0 }
+        return showing.first { $0.view.window?.firstResponder === $0.view } ?? store.activeTerminal
     }
 
     private func iconButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
@@ -93,11 +119,13 @@ private struct TerminalTab: View {
     let store: EditorStore
     let session: TerminalSession
     let active: Bool
+    /// Split in two, a shell beside it.
+    var split = false
     @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "terminal")
+            Image(systemName: split ? "square.split.2x1" : "terminal")
                 .font(.system(size: 10))
                 .foregroundStyle(session.exited ? Palette.faint : Palette.muted)
             Text(session.title)
@@ -110,6 +138,8 @@ private struct TerminalTab: View {
                     .foregroundStyle(Palette.faint)
             }
             Button {
+                // A split tab closes whole, both its shells.
+                if let right = store.splitPartner(of: session.id) { store.closeTerminal(right) }
                 store.closeTerminal(session)
             } label: {
                 Image(systemName: "xmark")

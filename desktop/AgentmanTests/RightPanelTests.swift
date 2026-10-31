@@ -538,6 +538,46 @@ final class RightPanelTests: XCTestCase {
         XCTAssertEqual(UserDefaults.standard.string(forKey: RightPanel.tabKey), "terminal")
     }
 
+    // A tab split in two: a second shell beside the first, closed again
+    // by the split button, and a split left behind as one shell when
+    // either half is stopped.
+    func testATerminalSplitsInTwo() throws {
+        let cwd = try project()
+        let editor = EditorRegistry.shared.store(for: cwd)
+        defer { for terminal in editor.terminals { editor.closeTerminal(terminal) } }
+        editor.newTerminal()
+        let left = try XCTUnwrap(editor.activeTerminal)
+        editor.splitTerminal()
+        let right = try XCTUnwrap(editor.splitPartner(of: left.id))
+        XCTAssertEqual(editor.terminals.count, 2)
+        XCTAssertTrue(editor.isSplitHalf(right.id), "The right half has no tab of its own")
+        XCTAssertEqual(editor.activeTerminalID, left.id)
+        editor.splitTerminal()
+        XCTAssertEqual(editor.terminals.count, 2, "A split tab doesn't split again")
+
+        editor.unsplitTerminal()
+        XCTAssertEqual(editor.terminals.map(\.id), [left.id])
+        XCTAssertNil(editor.splitPartner(of: left.id))
+
+        // Stopping the left half leaves the right one as the tab.
+        editor.splitTerminal()
+        let other = try XCTUnwrap(editor.splitPartner(of: left.id))
+        editor.newTerminal()
+        let third = try XCTUnwrap(editor.activeTerminal)
+        editor.activeTerminalID = left.id
+        editor.closeTerminal(left)
+        XCTAssertEqual(editor.activeTerminalID, other.id)
+        XCTAssertFalse(editor.isSplitHalf(other.id))
+        XCTAssertEqual(Set(editor.terminals.map(\.id)), [other.id, third.id])
+
+        // How it looks, under the conversation.
+        guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"].map(URL.init(fileURLWithPath:)) else { return }
+        editor.splitTerminal()
+        set([RightPanel.openKey: false, RightPanel.bottomTerminalKey: true, RightPanel.terminalDockKey: "bottom", Sidebar.hiddenKey: false])
+        try render(size: CGSize(width: 1500, height: 900), dark: false, store: try store(cwd: cwd), to: out.appendingPathComponent("bottom-terminal-split-light.png"))
+        try render(size: CGSize(width: 1500, height: 900), dark: true, store: try store(cwd: cwd), to: out.appendingPathComponent("bottom-terminal-split-dark.png"))
+    }
+
     func testRenderThePanel() throws {
         guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
         let shots = URL(fileURLWithPath: out)
