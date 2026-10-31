@@ -265,6 +265,16 @@ func runServe(ctx context.Context, args []string) error {
 			return fmt.Errorf("save hook listener address: %w", err)
 		}
 	}
+	// The cross-platform app reaches the daemon over a WebSocket on this
+	// listener, as it cannot open am.sock from a web view or from Windows.
+	appToken, err := daemon.NewAppToken()
+	if err != nil {
+		_ = listener.Close()
+		return fmt.Errorf("make the app token: %w", err)
+	}
+	apps := newAppGateway(appToken)
+	hookServer.Mount("/app", http.HandlerFunc(apps.protocol))
+	hookServer.Mount("/app/terminal", http.HandlerFunc(apps.terminal))
 	hookErrs := make(chan error, 1)
 	go func() { hookErrs <- hookServer.Serve(ctx, listener) }()
 	fmt.Printf("%s\n", dim("hooks      listening on "+addr))
@@ -354,6 +364,17 @@ func runServe(ctx context.Context, args []string) error {
 				fmt.Fprintf(os.Stderr, "am: %v\n", err)
 			}
 		}()
+		// Only the daemon that owns am.sock speaks for this config to apps.
+		apps.serve(ctx, local, agent.PaneFor)
+		if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
+			endpoint := daemon.AppEndpoint{URL: "ws://" + addr + "/app", Terminal: "ws://" + addr + "/app/terminal", Token: appToken}
+			if path, err := daemon.WriteAppEndpoint(dir, endpoint); err != nil {
+				fmt.Printf("%s\n", dim("app        "+err.Error()))
+			} else {
+				defer os.Remove(path)
+				fmt.Printf("%s\n", dim("app        WebSocket on "+endpoint.URL+" ("+collapseHome(path)+")"))
+			}
+		}
 	}
 	if client != nil {
 		client.OnDeviceSeen = devices.Seen
