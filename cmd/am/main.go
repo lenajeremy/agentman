@@ -260,6 +260,11 @@ func buildRegistryWithConfigHome(configHome string) (*source.Registry, error) {
 	}
 	registry.Add(antigravity)
 
+	// Meta Muse is followed through its own protocol (MSP), over a
+	// `muse serve --join` the long-running daemon keeps open; elsewhere it
+	// stays quiet. See source.MuseSource.
+	registry.Add(source.NewMuseSource())
+
 	return registry, nil
 }
 

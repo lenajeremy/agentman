@@ -278,6 +278,17 @@ func (r *Registry) ConnectCodex(version string) {
 	}
 }
 
+// ConnectMuse starts the Muse adapter's connection to Muse. Only the
+// long-running daemon does this; see MuseSource.Connect.
+func (r *Registry) ConnectMuse() {
+	r.mu.RLock()
+	s := r.sources[protocol.KindMuse]
+	r.mu.RUnlock()
+	if connector, ok := s.(interface{ Connect() }); ok {
+		connector.Connect()
+	}
+}
+
 // StartCodexThread starts a Codex conversation on Codex's shared daemon, for
 // the daemon to open a terminal on; ErrNoCodexDaemon when it cannot, and the
 // launch opens Codex in a pane as before. See CodexSource.StartThread.
