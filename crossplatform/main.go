@@ -24,6 +24,8 @@ func main() {
 		Services: append([]application.Service{
 			application.NewService(&Daemon{}),
 			application.NewService(&Windows{}),
+			application.NewService(&Menus{}),
+			application.NewService(&Files{}),
 		}, newHost().services()...),
 		Assets: application.AssetOptions{
 			Handler: withSymbols(application.AssetFileServerFS(assets)),
