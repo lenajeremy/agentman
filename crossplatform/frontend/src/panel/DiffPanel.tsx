@@ -359,6 +359,24 @@ function SectionNote({ text, width }: { text: string; width: number }) {
   return <div className="section-note" style={{ width }}>{text}</div>;
 }
 
+/** The last word kept with the one before it (and any marks after it), as
+ *  Apple's text pushes a lone word on the last line down with its neighbour:
+ *  the spaces between them become ones that don't break. Same length, so the
+ *  changed words' offsets still hold. */
+function glueLastWords(text: string, from: number): string {
+  const spaces: number[] = [];
+  for (let i = from; i < text.length; i++) if (text[i] === " ") spaces.push(i);
+  if (!spaces.length) return text;
+  // Words after the last space that holds a letter or digit on its right.
+  const wordAfter = (s: number) => /[\p{L}\p{N}]/u.test(text.slice(s + 1, spaces[spaces.indexOf(s) + 1] ?? text.length));
+  let k = spaces.length - 1;
+  while (k >= 0 && !wordAfter(spaces[k])) k--;
+  if (k < 0) return text;
+  const chars = text.split("");
+  for (let n = k; n < spaces.length; n++) chars[spaces[n]] = " ";
+  return chars.join("");
+}
+
 /** Text that may wrap after a slash, as the Mac's text breaks a path. */
 function breakable(text: string): React.ReactNode {
   if (!text.includes("/")) return text;
@@ -378,7 +396,7 @@ const LineText = memo(function LineText({ line, path }: { line: Line; path: stri
   const source = line.row.text || " ";
   const indent = /^[ \t]*/.exec(source)![0];
   const shown = indent.replace(/\t/g, "    ").replace(/ /g, " ");
-  const raw = shown + source.slice(indent.length);
+  const raw = glueLastWords(shown + source.slice(indent.length), shown.length);
   const shift = shown.length - indent.length;
   const language = raw.length <= 1500 ? languageFor(path) : null;
   // Where the changed words are, in the shown text.
