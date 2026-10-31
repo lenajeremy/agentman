@@ -35,7 +35,7 @@ func newFakeMuse(t *testing.T) *fakeMuse {
 	return f
 }
 
-func (f *fakeMuse) transport(ctx context.Context) (io.WriteCloser, io.Reader, func(), error) {
+func (f *fakeMuse) transport(ctx context.Context) (io.WriteCloser, io.Reader, func(), int, error) {
 	toMuse, fromAgentman := io.Pipe()
 	toAgentman, fromMuse := io.Pipe()
 	f.mu.Lock()
@@ -68,7 +68,7 @@ func (f *fakeMuse) transport(ctx context.Context) (io.WriteCloser, io.Reader, fu
 			f.send(reply)
 		}
 	}()
-	return fromAgentman, toAgentman, func() { _ = fromAgentman.Close(); _ = fromMuse.Close() }, nil
+	return fromAgentman, toAgentman, func() { _ = fromAgentman.Close(); _ = fromMuse.Close() }, 0, nil
 }
 
 func (f *fakeMuse) send(message any) {
@@ -160,8 +160,8 @@ func TestMuseDiscoverListsRecentAndTerminalSessions(t *testing.T) {
 }
 
 func TestMuseDiscoverIsQuietWithoutAConnection(t *testing.T) {
-	source := newMuseSourceWith(newMuseHost(func(context.Context) (io.WriteCloser, io.Reader, func(), error) {
-		return nil, nil, nil, io.EOF
+	source := newMuseSourceWith(newMuseHost(func(context.Context) (io.WriteCloser, io.Reader, func(), int, error) {
+		return nil, nil, nil, 0, io.EOF
 	}), t.TempDir())
 	began := time.Now()
 	sessions, err := source.Discover(context.Background())
@@ -238,5 +238,123 @@ func TestMuseCommandIDIsAVersion7UUID(t *testing.T) {
 	id := museCommandID()
 	if len(id) != 36 || id[14] != '7' || (id[19] != '8' && id[19] != '9' && id[19] != 'a' && id[19] != 'b') {
 		t.Fatalf("not a UUIDv7: %s", id)
+	}
+}
+
+func (f *fakeMuse) callsOf(method string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, call := range f.calls {
+		if call == method {
+			n++
+		}
+	}
+	return n
+}
+
+func waitFor(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for !ok() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestMuseSendTakesTheSessionAndLetsItGoWhenDone(t *testing.T) {
+	source, fake := startFakeMuse(t, t.TempDir())
+	var turn map[string]any
+	fake.answers["session/resume"] = func(json.RawMessage) (any, *museRPCError) { return map[string]any{"viewCursor": "v"}, nil }
+	fake.answers["turn/start"] = func(params json.RawMessage) (any, *museRPCError) {
+		_ = json.Unmarshal(params, &turn)
+		return map[string]any{"status": "accepted", "disposition": "started"}, nil
+	}
+	fake.answers["session/read"] = func(json.RawMessage) (any, *museRPCError) {
+		return map[string]any{"session": map[string]any{"sessionId": "s", "status": "running"}}, nil
+	}
+	fake.answers["session/leave"] = func(params json.RawMessage) (any, *museRPCError) {
+		var leave struct {
+			CommandID string `json:"commandId"`
+		}
+		_ = json.Unmarshal(params, &leave)
+		go fake.notify("session/leaveCompleted", map[string]any{"sessionId": "s", "commandId": leave.CommandID, "outcome": "left"})
+		return map[string]any{"status": "accepted"}, nil
+	}
+
+	mode, err := source.Inject(context.Background(), "muse:s", "fix the login page")
+	if err != nil || mode != protocol.InjectAPI {
+		t.Fatalf("send: %v %v", mode, err)
+	}
+	if turn["sessionId"] != "s" || turn["ifBusy"] != "queue" {
+		t.Fatalf("turn/start params: %v", turn)
+	}
+	if input, _ := turn["input"].([]any); len(input) != 1 || input[0].(map[string]any)["text"] != "fix the login page" {
+		t.Fatalf("turn input: %v", turn["input"])
+	}
+	if !source.holding("s") {
+		t.Fatal("Agentman should drive the session while its turn runs")
+	}
+	// A second message while it works is queued on the same hold.
+	if _, err := source.Inject(context.Background(), "muse:s", "and the checkout"); err != nil {
+		t.Fatal(err)
+	}
+	if fake.callsOf("session/resume") != 1 {
+		t.Fatalf("resumed %d times, want once", fake.callsOf("session/resume"))
+	}
+	fake.notify("session/statusChanged", map[string]any{"sessionId": "s", "status": "running"})
+	fake.notify("session/statusChanged", map[string]any{"sessionId": "s", "status": "idle"})
+	waitFor(t, "the session to be let go", func() bool { return fake.called("session/leave") && !source.holding("s") })
+}
+
+func TestMuseSendToATerminalsSessionSaysSo(t *testing.T) {
+	source, fake := startFakeMuse(t, t.TempDir())
+	inUse := &museRPCError{Code: -32021, Message: "session s is already in use"}
+	inUse.Data.Kind = "sessionInUse"
+	fake.answers["session/resume"] = func(json.RawMessage) (any, *museRPCError) { return nil, inUse }
+	fake.answers["turn/interrupt"] = func(json.RawMessage) (any, *museRPCError) { return nil, inUse }
+	if _, err := source.Inject(context.Background(), "muse:s", "hello"); err != errMuseInTerminal {
+		t.Fatalf("got %v, want the terminal message", err)
+	}
+	if source.holding("s") {
+		t.Fatal("a refused take must not be held")
+	}
+	if err := source.Interrupt(context.Background(), "muse:s"); err != errMuseInTerminal {
+		t.Fatalf("stop: got %v", err)
+	}
+}
+
+func TestMuseDiscoverMarksTerminalSessionsReadOnly(t *testing.T) {
+	home := t.TempDir()
+	source, fake := startFakeMuse(t, home)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	fake.answers["session/list"] = func(json.RawMessage) (any, *museRPCError) {
+		return map[string]any{"sessions": []any{
+			map[string]any{"sessionId": "mine", "status": "notLoaded", "workspaceRoot": "/a", "updatedAt": now},
+			map[string]any{"sessionId": "theirs", "status": "idle", "workspaceRoot": "/b", "updatedAt": now},
+		}}, nil
+	}
+	registry := filepath.Join(home, "runtime", "muse", "sessions")
+	_ = os.MkdirAll(registry, 0o755)
+	_ = os.WriteFile(filepath.Join(registry, "theirs.json"), []byte(`{"session_id":"theirs","process_generation_hint":"pid=`+strconv.Itoa(os.Getpid())+`"}`), 0o644)
+	sessions, _ := source.Discover(context.Background())
+	for _, session := range sessions {
+		want := protocol.InjectAPI
+		if session.NativeID == "theirs" {
+			want = protocol.InjectNone
+		}
+		if session.Inject != want {
+			t.Errorf("%s: inject %s, want %s", session.NativeID, session.Inject, want)
+		}
+	}
+	// Agentman's own `muse serve` hosting a session is not a terminal.
+	source.host.child.Store(int64(os.Getpid()))
+	sessions, _ = source.Discover(context.Background())
+	for _, session := range sessions {
+		if session.Inject != protocol.InjectAPI {
+			t.Errorf("%s should take messages when only Agentman hosts it", session.NativeID)
+		}
 	}
 }

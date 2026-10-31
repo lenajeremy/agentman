@@ -71,11 +71,17 @@ type museMessage struct {
 }
 
 // museTransport starts one connection: what to write to, what to read from,
-// and how to end it. Tests replace it with an in-memory host.
-type museTransport func(ctx context.Context) (io.WriteCloser, io.Reader, func(), error)
+// how to end it, and the process it runs in (0 for none). Tests replace it
+// with an in-memory host.
+type museTransport func(ctx context.Context) (io.WriteCloser, io.Reader, func(), int, error)
 
 type museHost struct {
 	start museTransport
+
+	// child is the `muse serve` process of the current connection. With no
+	// daemon running it hosts what Agentman takes, and lists those sessions
+	// in Muse's live registry as a terminal would; they are not a terminal's.
+	child atomic.Int64
 
 	mu        sync.Mutex
 	conn      *museConn
@@ -105,24 +111,24 @@ func newMuseHost(start museTransport) *museHost {
 
 // museServe starts `muse serve --join`, or reports that Muse is not
 // installed.
-func museServe(ctx context.Context) (io.WriteCloser, io.Reader, func(), error) {
+func museServe(ctx context.Context) (io.WriteCloser, io.Reader, func(), int, error) {
 	binary, err := museBinary()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	cmd := exec.CommandContext(ctx, binary, "serve", "--join")
 	// Muse writes diagnostics there; nothing reads them, so they go nowhere.
 	cmd.Stderr = io.Discard
 	in, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	out, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	stop := func() {
 		_ = in.Close()
@@ -135,7 +141,7 @@ func museServe(ctx context.Context) (io.WriteCloser, io.Reader, func(), error) {
 			<-done
 		}
 	}
-	return in, out, stop, nil
+	return in, out, stop, cmd.Process.Pid, nil
 }
 
 // museBinary finds Muse's launcher: on PATH, else where its installer puts it.
@@ -175,11 +181,12 @@ func (h *museHost) run(ctx context.Context) {
 
 // connect runs one connection to its end.
 func (h *museHost) connect(ctx context.Context) error {
-	in, out, stop, err := h.start(ctx)
+	in, out, stop, pid, err := h.start(ctx)
 	if err != nil {
 		return err
 	}
-	defer stop()
+	h.child.Store(int64(pid))
+	defer func() { h.child.Store(0); stop() }()
 	conn := &museConn{in: in}
 	read := make(chan struct{})
 	go func() {

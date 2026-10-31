@@ -30,8 +30,9 @@ const (
 )
 
 type MuseSource struct {
-	host *museHost
-	home string // Muse's data directory, from initialize; for the live registry
+	host  *museHost
+	home  string // Muse's data directory; for the live registry
+	holds museHolds
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -61,8 +62,18 @@ func (s *MuseSource) Connect() {
 	go s.host.run(ctx)
 }
 
-// Close ends the connection.
+// Close lets go of any session Agentman is driving, so a terminal can open
+// it, and ends the connection.
 func (s *MuseSource) Close() {
+	s.holds.mu.Lock()
+	held := make([]string, 0, len(s.holds.held))
+	for native := range s.holds.held {
+		held = append(held, native)
+	}
+	s.holds.mu.Unlock()
+	for _, native := range held {
+		s.letGo(native)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.cancel != nil {
@@ -125,6 +136,9 @@ func (s *MuseSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 		}
 		seen[session.SessionID] = true
 		found = append(found, museToSession(session, open[session.SessionID]))
+		if s.holding(session.SessionID) {
+			found[len(found)-1].Inject = protocol.InjectAPI
+		}
 	}
 	for id := range open {
 		if seen[id] {
@@ -149,8 +163,12 @@ func museToSession(session museSession, inTerminal bool) protocol.Session {
 		StartedAt:      museMillis(session.CreatedAt),
 		LastActivityAt: max(museMillis(session.UpdatedAt), museMillis(session.LastActivity)),
 		State:          protocol.StateIdle,
-		// Sending arrives with the next step; until then Muse threads are read.
-		Inject: protocol.InjectNone,
+		// Agentman sends by taking the session for a turn; while a terminal
+		// drives it, Muse refuses, so the apps show it to read.
+		Inject: protocol.InjectAPI,
+	}
+	if inTerminal {
+		meta.Inject = protocol.InjectNone
 	}
 	switch {
 	case museAttention(session.Attention):
@@ -222,7 +240,8 @@ func (s *MuseSource) openInTerminal() map[string]bool {
 		if json.Unmarshal(data, &record) != nil || record.SessionID == "" {
 			continue
 		}
-		if pid := musePid(record.Process); pid > 0 && syscall.Kill(pid, 0) == nil {
+		pid := musePid(record.Process)
+		if pid > 0 && int64(pid) != s.host.child.Load() && syscall.Kill(pid, 0) == nil {
 			open[record.SessionID] = true
 		}
 	}
