@@ -35,6 +35,8 @@ func (f *fakeJoiner) leave(_ context.Context, threadID string) error {
 	return nil
 }
 
+func (f *fakeJoiner) adopted(threadID string) {}
+
 func (f *fakeJoiner) counts() (int, int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

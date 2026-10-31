@@ -428,6 +428,14 @@ func (s *codexAppServer) join(ctx context.Context, threadID string, thread any) 
 	return nil
 }
 
+// adopted records a thread this connection joined by starting it, so it is
+// rejoined after a reconnect and left like one joined with join.
+func (s *codexAppServer) adopted(threadID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.joined[threadID] = true
+}
+
 // leave stops following a thread. The thread itself carries on.
 func (s *codexAppServer) leave(ctx context.Context, threadID string) error {
 	s.mu.Lock()

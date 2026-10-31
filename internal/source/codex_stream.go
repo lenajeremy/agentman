@@ -33,6 +33,8 @@ const codexJoinTimeout = 5 * time.Second
 type codexJoiner interface {
 	join(ctx context.Context, threadID string, thread any) error
 	leave(ctx context.Context, threadID string) error
+	// adopted records a join the connection made by starting the thread.
+	adopted(threadID string)
 }
 
 // codexStreams hands each thread's live events to the follows watching it.
@@ -72,6 +74,22 @@ func (st *codexStreams) open(ctx context.Context, threadID string) (*codexStream
 // question) is all that is wanted. See holdWaiting.
 func (st *codexStreams) hold(ctx context.Context, threadID string) (*codexStream, error) {
 	return st.join(ctx, threadID, false)
+}
+
+// adopt counts a join the connection already has: starting a thread joins
+// the client that started it. Closing the stream lets it go like any other.
+func (st *codexStreams) adopt(threadID string) *codexStream {
+	st.joinMu.Lock()
+	defer st.joinMu.Unlock()
+	st.server.adopted(threadID)
+	stream := &codexStream{thread: threadID}
+	st.mu.Lock()
+	if st.subs[threadID] == nil {
+		st.subs[threadID] = map[*codexStream]bool{}
+	}
+	st.subs[threadID][stream] = true
+	st.mu.Unlock()
+	return stream
 }
 
 func (st *codexStreams) join(ctx context.Context, threadID string, feed bool) (*codexStream, error) {
