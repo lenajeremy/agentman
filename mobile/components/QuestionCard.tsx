@@ -532,24 +532,24 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.needsYouWash,
     },
     pillDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: c.needsYou },
-    pillLabel: { fontFamily: font.sansBold, fontSize: size.label, color: c.needsYouText },
+    pillLabel: { ...font.sansBold, fontSize: size.label, color: c.needsYouText },
 
     title: {
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.heading,
       lineHeight: scaled(27),
       letterSpacing: -0.5,
       color: c.text,
     },
     compactTitle: {
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.title,
       letterSpacing: -0.3,
       color: c.text,
     },
     // Machine text, set in mono like every other command in the app.
     detail: {
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: size.caption,
       color: c.text,
       lineHeight: scaled(19),
@@ -561,13 +561,13 @@ const makeStyles = (c: Palette) =>
       paddingVertical: 10,
     },
     prompt: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.body,
       lineHeight: scaled(21),
       color: c.textSecondary,
     },
     compactPrompt: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       lineHeight: scaled(18),
       color: c.muted,
@@ -587,7 +587,7 @@ const makeStyles = (c: Palette) =>
     // Fixed square: flex-basis must be set too, or web keeps the 0% basis
     // from `flex: 1` above and collapses it.
     quickMore: { flexGrow: 0, flexShrink: 0, flexBasis: 44, width: 44, paddingHorizontal: 0 },
-    quickLabel: { fontFamily: font.sansBold, fontSize: size.body, color: c.text },
+    quickLabel: { ...font.sansBold, fontSize: size.body, color: c.text },
     quickLabelPrimary: { color: c.onInverse },
 
     options: { gap: space.sm, marginTop: space.xs },
@@ -619,16 +619,16 @@ const makeStyles = (c: Palette) =>
     // light ink in dark).
     optionKeyWrapPrimary: { backgroundColor: "rgba(128,128,128,0.22)" },
     optionKey: {
-      fontFamily: font.monoMedium,
+      ...font.monoMedium,
       fontSize: size.label,
       color: c.muted,
     },
     optionKeyPrimary: { color: c.onInverse },
     optionCopy: { flex: 1, gap: space.xxs },
-    optionLabel: { fontFamily: font.sansMedium, fontSize: size.body, color: c.text },
-    optionLabelPrimary: { fontFamily: font.sansBold, color: c.onInverse },
+    optionLabel: { ...font.sansMedium, fontSize: size.body, color: c.text },
+    optionLabelPrimary: { ...font.sansBold, color: c.onInverse },
     optionDescription: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       lineHeight: scaled(18),
       color: c.muted,
@@ -641,12 +641,12 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.fill,
     },
     previewEyebrow: {
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.label,
       color: c.muted,
     },
     previewText: {
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: size.caption,
       lineHeight: scaled(19),
       color: c.text,
@@ -665,7 +665,7 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.lg,
       backgroundColor: c.fill,
       color: c.text,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.body,
       paddingHorizontal: space.lg,
       paddingVertical: 14,
@@ -682,7 +682,7 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.md,
       backgroundColor: c.surface,
       color: c.text,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.body,
       paddingHorizontal: space.md,
       paddingTop: space.sm + 2,
@@ -697,7 +697,7 @@ const makeStyles = (c: Palette) =>
     },
     noteHint: {
       flex: 1,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.label,
       lineHeight: scaled(16),
       color: c.muted,
@@ -711,7 +711,7 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
       backgroundColor: c.inverse,
     },
-    noteSendLabel: { fontFamily: font.sansBold, fontSize: size.body, color: c.onInverse },
+    noteSendLabel: { ...font.sansBold, fontSize: size.body, color: c.onInverse },
     submit: {
       minHeight: 52,
       alignItems: "center",
@@ -723,7 +723,7 @@ const makeStyles = (c: Palette) =>
     submitDisabled: { opacity: 0.35 },
     submitLabel: {
       color: c.onInverse,
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.body,
     },
     answerStatus: {
@@ -741,7 +741,7 @@ const makeStyles = (c: Palette) =>
     },
     answerStatusText: {
       flex: 1,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       lineHeight: scaled(18),
       color: c.muted,

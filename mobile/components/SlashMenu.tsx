@@ -85,9 +85,9 @@ const makeStyles = (c: Palette) =>
       elevation: 3,
     },
     row: { paddingHorizontal: space.md, paddingVertical: 7, gap: 1 },
-    name: { fontFamily: font.monoMedium, fontSize: size.caption, color: c.text },
-    hint: { fontFamily: font.mono, color: c.faint },
-    description: { fontFamily: font.sans, fontSize: scaled(12.5), color: c.muted, lineHeight: scaled(17) },
+    name: { ...font.monoMedium, fontSize: size.caption, color: c.text },
+    hint: { ...font.mono, color: c.faint },
+    description: { ...font.sans, fontSize: scaled(12.5), color: c.muted, lineHeight: scaled(17) },
     loading: { flexDirection: "row", alignItems: "center", gap: space.sm, padding: space.md },
-    note: { fontFamily: font.sans, fontSize: size.caption, color: c.muted, padding: space.md },
+    note: { ...font.sans, fontSize: size.caption, color: c.muted, padding: space.md },
   });

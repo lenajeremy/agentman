@@ -56,5 +56,5 @@ export default function PersonalitySettings() {
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     reset: { alignSelf: "flex-end", marginTop: space.sm, marginRight: space.xs },
-    resetText: { fontFamily: font.sansMedium, fontSize: size.label, color: c.workingText },
+    resetText: { ...font.sansMedium, fontSize: size.label, color: c.workingText },
   });

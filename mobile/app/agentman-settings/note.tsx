@@ -106,7 +106,7 @@ export default function NoteEditor() {
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
-    title: { fontFamily: font.sansMedium, fontSize: size.body },
+    title: { ...font.sansMedium, fontSize: size.body },
     delete: {
       minHeight: 48,
       marginTop: space.xl,
@@ -115,5 +115,5 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
       backgroundColor: c.errorWash,
     },
-    deleteText: { fontFamily: font.sansBold, fontSize: size.body, color: c.errorText },
+    deleteText: { ...font.sansBold, fontSize: size.body, color: c.errorText },
   });

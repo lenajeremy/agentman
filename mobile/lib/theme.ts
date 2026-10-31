@@ -1,3 +1,5 @@
+import type { TextStyle } from "react-native";
+
 /**
  * Design tokens.
  *
@@ -122,22 +124,25 @@ export const palettes: Record<"light" | "dark", Palette> = { light, dark };
 
 /**
  * Google Sans for everything a person wrote or reads as interface; Google
- * Sans Code for machine-authored text, as on the Mac. Paths, session ids, shell commands and agent names
- * are strings a program produced, and setting them in mono says so at a
- * glance.
+ * Sans Code for machine-authored text, as on the Mac. Paths, session ids,
+ * shell commands and agent names are strings a program produced, and setting
+ * them in mono says so at a glance.
+ *
+ * Each face is a style fragment, spread into a style (`...font.sansMedium`),
+ * so a later style that sets another face replaces it whole.
  *
  * Italics are faces of their own. iOS does not slant a custom font for
  * fontStyle: "italic", so emphasis set that way rendered upright.
  */
 export const font = {
-  sans: "GoogleSans-Regular",
-  sansItalic: "GoogleSans-Italic",
-  sansMedium: "GoogleSans-Medium",
-  sansBold: "GoogleSans-SemiBold",
-  sansBoldItalic: "GoogleSans-SemiBoldItalic",
-  mono: "GoogleSansCode-Regular",
-  monoMedium: "GoogleSansCode-Medium",
-} as const;
+  sans: { fontFamily: "GoogleSans-Regular" },
+  sansItalic: { fontFamily: "GoogleSans-Italic" },
+  sansMedium: { fontFamily: "GoogleSans-Medium" },
+  sansBold: { fontFamily: "GoogleSans-SemiBold" },
+  sansBoldItalic: { fontFamily: "GoogleSans-SemiBoldItalic" },
+  mono: { fontFamily: "GoogleSansCode-Regular" },
+  monoMedium: { fontFamily: "GoogleSansCode-Medium" },
+} as const satisfies Record<string, TextStyle>;
 
 /**
  * Every text size in the app is this much larger than it is written: the

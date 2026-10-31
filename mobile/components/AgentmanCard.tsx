@@ -74,8 +74,8 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.surface,
     },
     words: { flex: 1, gap: 2 },
-    name: { fontFamily: font.sansMedium, fontSize: size.body, color: c.text },
-    summary: { fontFamily: font.sans, fontSize: size.caption, color: c.muted },
+    name: { ...font.sansMedium, fontSize: size.body, color: c.text },
+    summary: { ...font.sans, fontSize: size.caption, color: c.muted },
     attention: { color: c.needsYouText },
     badge: {
       minWidth: 22,
@@ -86,5 +86,5 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
       backgroundColor: c.working,
     },
-    badgeText: { fontFamily: font.sansMedium, fontSize: size.label, color: c.onAccent },
+    badgeText: { ...font.sansMedium, fontSize: size.label, color: c.onAccent },
   });

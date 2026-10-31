@@ -171,7 +171,7 @@ const makeStyles = (c: Palette) =>
     scroll: { flexGrow: 0 },
     cardRight: { right: space.lg },
     title: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.label,
       lineHeight: scaled(16),
       color: c.muted,
@@ -190,8 +190,8 @@ const makeStyles = (c: Palette) =>
     rowDivided: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line },
     rowPressed: { backgroundColor: c.fill },
     rowDisabled: { opacity: 0.4 },
-    label: { flex: 1, fontFamily: font.sansMedium, fontSize: size.caption, color: c.text },
-    labelMono: { fontFamily: font.monoMedium, fontSize: scaled(12.5) },
+    label: { flex: 1, ...font.sansMedium, fontSize: size.caption, color: c.text },
+    labelMono: { ...font.monoMedium, fontSize: scaled(12.5) },
     labelDestructive: { color: c.errorText },
-    detail: { fontFamily: font.monoMedium, fontSize: size.label, color: c.faint },
+    detail: { ...font.monoMedium, fontSize: size.label, color: c.faint },
   });

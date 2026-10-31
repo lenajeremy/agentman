@@ -550,7 +550,7 @@ const makeStyles = (c: Palette) =>
     // names (WebFetch, TodoWrite) simply push past it rather than truncate.
     name: {
       minWidth: 46,
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: size.label,
       lineHeight: LINE,
       color: c.muted,
@@ -560,7 +560,7 @@ const makeStyles = (c: Palette) =>
     // of standing in a column down the screen's edge.
     title: {
       flexShrink: 1,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.label,
       lineHeight: LINE,
       color: c.textSecondary,
@@ -569,13 +569,13 @@ const makeStyles = (c: Palette) =>
     // flex lets a long target truncate instead of pushing the chevron off.
     target: {
       flex: 1,
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: size.caption,
       lineHeight: LINE,
       color: c.textSecondary,
     },
     targetDim: { color: c.faint },
-    chevron: { fontFamily: font.mono, fontSize: size.body, lineHeight: LINE, color: c.faint },
+    chevron: { ...font.mono, fontSize: size.body, lineHeight: LINE, color: c.faint },
 
     body: {
       marginLeft: TILE + 8 + space.xs,
@@ -590,7 +590,7 @@ const makeStyles = (c: Palette) =>
       paddingVertical: space.xxs,
     },
     commandText: {
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: scaled(12),
       lineHeight: scaled(18),
       color: c.textSecondary,
@@ -606,7 +606,7 @@ const makeStyles = (c: Palette) =>
     },
     outputFailed: { backgroundColor: c.errorWash },
     outputText: {
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: scaled(12),
       lineHeight: scaled(18),
       color: c.muted,
@@ -628,7 +628,7 @@ const makeStyles = (c: Palette) =>
     },
     imageLinkText: {
       flex: 1,
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.caption,
       color: c.text,
     },
@@ -641,13 +641,13 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: space.xxs,
     },
     moreText: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.label,
       color: c.working,
     },
     fullRow: { flexDirection: "row", alignItems: "center", gap: space.xs },
     fullText: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.label,
       color: c.muted,
     },

@@ -224,17 +224,17 @@ const makeStyles = (c: Palette) =>
     // reading as several new lines.
     row: { flexDirection: "row", alignItems: "flex-start", paddingRight: space.md },
     gutter: {
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: scaled(11),
       lineHeight: scaled(20),
       color: c.faint,
       textAlign: "right",
       paddingRight: space.sm,
     },
-    code: { fontFamily: font.mono, fontSize: scaled(12.5), lineHeight: scaled(20), color: c.text },
+    code: { ...font.mono, fontSize: scaled(12.5), lineHeight: scaled(20), color: c.text },
     codeWrap: { flex: 1 },
     more: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: scaled(12),
       color: c.muted,
       padding: space.md,

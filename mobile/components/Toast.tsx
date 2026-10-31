@@ -79,5 +79,5 @@ const makeStyles = (c: Palette) =>
       elevation: 10,
       zIndex: 10,
     },
-    text: { fontFamily: font.sansMedium, fontSize: size.caption, color: c.onInverse },
+    text: { ...font.sansMedium, fontSize: size.caption, color: c.onInverse },
   });

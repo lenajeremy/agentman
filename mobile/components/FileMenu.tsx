@@ -89,7 +89,7 @@ const makeStyles = (c: Palette) =>
       elevation: 3,
     },
     label: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.label,
       color: c.faint,
       paddingHorizontal: space.md,
@@ -97,8 +97,8 @@ const makeStyles = (c: Palette) =>
       paddingBottom: 2,
     },
     row: { flexDirection: "row", alignItems: "center", gap: space.sm, paddingHorizontal: space.md, paddingVertical: 9 },
-    name: { fontFamily: font.sansMedium, fontSize: size.caption, color: c.text, flexShrink: 0, maxWidth: "60%" },
-    folder: { flex: 1, fontFamily: font.sans, fontSize: scaled(12), color: c.faint },
+    name: { ...font.sansMedium, fontSize: size.caption, color: c.text, flexShrink: 0, maxWidth: "60%" },
+    folder: { flex: 1, ...font.sans, fontSize: scaled(12), color: c.faint },
     loading: { flexDirection: "row", alignItems: "center", gap: space.sm, padding: space.md },
-    note: { fontFamily: font.sans, fontSize: size.caption, color: c.muted, padding: space.md },
+    note: { ...font.sans, fontSize: size.caption, color: c.muted, padding: space.md },
   });

@@ -182,8 +182,8 @@ const styles = StyleSheet.create({
   },
   close: { width: 28, height: 28, alignItems: "center", justifyContent: "center" },
   title: { flex: 1 },
-  titleText: { fontFamily: font.monoMedium, fontSize: size.caption, color: term.text },
-  titleMeta: { fontFamily: font.sans, fontSize: scaled(11), color: term.dim, marginTop: 1 },
+  titleText: { ...font.monoMedium, fontSize: size.caption, color: term.text },
+  titleMeta: { ...font.sans, fontSize: scaled(11), color: term.dim, marginTop: 1 },
   toggle: {
     width: 30,
     height: 28,
@@ -201,12 +201,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: term.rule,
   },
-  commandLine: { fontFamily: font.mono, fontSize: scaled(12.5), lineHeight: scaled(19), color: term.text },
+  commandLine: { ...font.mono, fontSize: scaled(12.5), lineHeight: scaled(19), color: term.text },
   prompt: { color: term.prompt },
 
   scroll: { flex: 1 },
   scrollInner: { paddingTop: space.md },
   lines: { paddingHorizontal: space.lg },
   linesWrapped: { gap: 3 },
-  line: { fontFamily: font.mono, fontSize: scaled(12.5), lineHeight: scaled(19) },
+  line: { ...font.mono, fontSize: scaled(12.5), lineHeight: scaled(19) },
 });

@@ -85,5 +85,5 @@ const makeStyles = (c: Palette) =>
       // read as one signal in different places.
       backgroundColor: c.working,
     },
-    label: { fontFamily: font.sansMedium, fontSize: size.caption, color: c.muted },
+    label: { ...font.sansMedium, fontSize: size.caption, color: c.muted },
   });

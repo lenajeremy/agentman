@@ -160,7 +160,7 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
     },
     tileRunning: { backgroundColor: c.workingWash },
-    line: { flexShrink: 1, fontFamily: font.sans, fontSize: size.caption, color: c.textSecondary, lineHeight: scaled(20) },
+    line: { flexShrink: 1, ...font.sans, fontSize: size.caption, color: c.textSecondary, lineHeight: scaled(20) },
     failed: { color: c.errorText },
     // Opened, the steps hang from a thin rule under the run's icon, as a
     // list of what it was made of.

@@ -38,5 +38,5 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.lg,
       backgroundColor: c.toolCard,
     },
-    name: { flexShrink: 1, fontFamily: font.sansMedium, fontSize: scaled(13), color: c.text },
+    name: { flexShrink: 1, ...font.sansMedium, fontSize: scaled(13), color: c.text },
   });

@@ -52,8 +52,8 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.toolCard,
     },
     tile: { width: 22, height: 20, alignItems: "center", justifyContent: "center" },
-    text: { flexShrink: 1, fontFamily: font.sans, fontSize: size.caption, lineHeight: scaled(20), color: c.textSecondary },
-    outcomeText: { flexShrink: 0, marginLeft: -4, fontFamily: font.sans, fontSize: size.caption, lineHeight: scaled(20) },
+    text: { flexShrink: 1, ...font.sans, fontSize: size.caption, lineHeight: scaled(20), color: c.textSecondary },
+    outcomeText: { flexShrink: 0, marginLeft: -4, ...font.sans, fontSize: size.caption, lineHeight: scaled(20) },
     outcome: { color: c.faint },
     failed: { color: c.errorText },
   });

@@ -271,5 +271,5 @@ const makeStyles = (c: Palette) =>
     },
     rowDivided: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line },
     rowPressed: { backgroundColor: c.fill },
-    label: { flex: 1, fontFamily: font.sansMedium, fontSize: size.body, color: c.text },
+    label: { flex: 1, ...font.sansMedium, fontSize: size.body, color: c.text },
   });

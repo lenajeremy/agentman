@@ -2093,7 +2093,7 @@ const makeStyles = (c: Palette) =>
     workspaceLabel: {
       flex: 1,
       color: c.text,
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.caption,
     },
     // A count on the overflow control, so a running server is still visible
@@ -2111,7 +2111,7 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.working,
     },
     serverDotText: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: scaled(9.5),
       lineHeight: scaled(12),
       color: "#FFFFFF",
@@ -2131,19 +2131,19 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.needsYou,
     },
     reviewBadgeText: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: scaled(9.5),
       lineHeight: scaled(12),
       color: c.onAccent,
     },
     title: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: scaled(16),
       color: c.text,
     },
     subtitleRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
     subtitle: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.label,
       color: c.muted,
     },
@@ -2174,7 +2174,7 @@ const makeStyles = (c: Palette) =>
     switchButtonPrimary: { backgroundColor: c.inverse },
     switchButtonSecondary: { backgroundColor: c.surface, borderWidth: 1, borderColor: c.fillStrong },
     switchButtonDisabled: { opacity: 0.4 },
-    switchButtonLabel: { fontFamily: font.sansBold, fontSize: size.caption, color: c.text },
+    switchButtonLabel: { ...font.sansBold, fontSize: size.caption, color: c.text },
     switchButtonLabelPrimary: { color: c.onInverse },
     // No box around it. This was a 28pt touch target from when the dot was a
     // control in the top row; on a line of text it centred a six point dot in
@@ -2204,7 +2204,7 @@ const makeStyles = (c: Palette) =>
     },
     noteText: {
       flex: 1,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       lineHeight: scaled(18),
       color: c.textSecondary,
@@ -2224,14 +2224,14 @@ const makeStyles = (c: Palette) =>
     },
     spinner: { marginVertical: space.lg },
     startOfSession: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       color: c.faint,
       textAlign: "center",
       marginBottom: space.lg,
     },
     emptyFeed: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.body,
       color: c.faint,
       textAlign: "center",
@@ -2250,15 +2250,15 @@ const makeStyles = (c: Palette) =>
       paddingVertical: 10,
     },
     userText: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.reading,
       color: c.text,
       lineHeight: scaled(23),
     },
     summaryHeader: { flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 4 },
-    summaryLabel: { fontFamily: font.sans, fontSize: size.caption, color: c.muted },
+    summaryLabel: { ...font.sans, fontSize: size.caption, color: c.muted },
     summaryText: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       lineHeight: scaled(19),
       color: c.muted,
@@ -2271,7 +2271,7 @@ const makeStyles = (c: Palette) =>
     assistantRow: { gap: space.xs },
     sidechain: {
       alignSelf: "flex-start",
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: scaled(11),
       color: c.muted,
       backgroundColor: c.fill,
@@ -2282,7 +2282,7 @@ const makeStyles = (c: Palette) =>
     },
 
     systemText: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       color: c.faint,
       textAlign: "center",
@@ -2294,10 +2294,10 @@ const makeStyles = (c: Palette) =>
     pendingFooterLabel: { flexShrink: 1, marginTop: 0 },
     sendNow: { justifyContent: "center" },
     sendNowPressed: { opacity: 0.5 },
-    sendNowText: { fontFamily: font.sansMedium, fontSize: size.label, color: c.workingText },
+    sendNowText: { ...font.sansMedium, fontSize: size.label, color: c.workingText },
     pendingFailed: { opacity: 1, backgroundColor: c.errorWash },
     pendingStatus: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.label,
       color: c.muted,
       marginTop: space.xs,
@@ -2355,7 +2355,7 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: 10,
       paddingTop: space.sm,
       paddingBottom: space.xs,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.body,
       color: c.text,
     },
@@ -2378,14 +2378,14 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.pill,
     },
     modelButtonPressed: { backgroundColor: c.fill },
-    modelText: { flexShrink: 1, fontFamily: font.sansMedium, fontSize: scaled(13), color: c.muted },
-    contextText: { fontFamily: font.sans, fontSize: scaled(12), color: c.faint, fontVariant: ["tabular-nums"] },
+    modelText: { flexShrink: 1, ...font.sansMedium, fontSize: scaled(13), color: c.muted },
+    contextText: { ...font.sans, fontSize: scaled(12), color: c.faint, fontVariant: ["tabular-nums"] },
     // A wrapper so the long press has something to land on: the gesture cannot
     // be attached to the TextInput itself without swallowing taps that should
     // place the caret.
     inputWrap: {},
     attachError: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.label,
       color: c.errorText,
       paddingHorizontal: space.md,

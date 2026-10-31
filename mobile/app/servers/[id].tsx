@@ -314,7 +314,7 @@ const makeStyles = (c: Palette) =>
       borderColor: c.line,
     },
     title: {
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.display,
       letterSpacing: -1.2,
       color: c.text,
@@ -327,7 +327,7 @@ const makeStyles = (c: Palette) =>
       marginTop: space.xs,
       marginBottom: space.lg,
     },
-    sessionName: { flex: 1, fontFamily: font.mono, fontSize: scaled(12), color: c.muted },
+    sessionName: { flex: 1, ...font.mono, fontSize: scaled(12), color: c.muted },
 
     offline: {
       flexDirection: "row",
@@ -338,7 +338,7 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.errorWash,
       marginBottom: space.md,
     },
-    offlineText: { flex: 1, fontFamily: font.sans, fontSize: size.caption, color: c.errorText },
+    offlineText: { flex: 1, ...font.sans, fontSize: size.caption, color: c.errorText },
 
     list: { gap: space.sm },
     card: {
@@ -367,8 +367,8 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.fill,
     },
     cardBody: { flex: 1, gap: 3 },
-    serverName: { fontFamily: font.sansMedium, fontSize: size.body, color: c.text },
-    serverMeta: { fontFamily: font.mono, fontSize: scaled(12), color: c.muted },
+    serverName: { ...font.sansMedium, fontSize: size.body, color: c.text },
+    serverMeta: { ...font.mono, fontSize: scaled(12), color: c.muted },
     openPill: {
       flexDirection: "row",
       alignItems: "center",
@@ -379,7 +379,7 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.inverse,
     },
     openPillDisabled: { opacity: 0.35 },
-    openLabel: { fontFamily: font.sansMedium, fontSize: size.caption, color: c.onInverse },
+    openLabel: { ...font.sansMedium, fontSize: size.caption, color: c.onInverse },
 
     // A bordered square rather than a filled pill: it sits next to the filled
     // "Open" without competing with it for the eye.
@@ -403,7 +403,7 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.sm,
       backgroundColor: c.errorWash,
     },
-    errorText: { flex: 1, fontFamily: font.sans, fontSize: size.caption, color: c.errorText },
+    errorText: { flex: 1, ...font.sans, fontSize: size.caption, color: c.errorText },
 
     linkRow: {
       flexDirection: "row",
@@ -416,7 +416,7 @@ const makeStyles = (c: Palette) =>
       borderTopColor: c.line,
       backgroundColor: c.fill,
     },
-    link: { flex: 1, fontFamily: font.mono, fontSize: scaled(12), color: c.textSecondary },
+    link: { flex: 1, ...font.mono, fontSize: scaled(12), color: c.textSecondary },
     linkAction: {
       width: 32,
       height: 32,
@@ -440,16 +440,16 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.fill,
       marginBottom: space.xs,
     },
-    emptyTitle: { fontFamily: font.sansBold, fontSize: size.title, color: c.text },
+    emptyTitle: { ...font.sansBold, fontSize: size.title, color: c.text },
     emptyBody: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       lineHeight: scaled(19),
       color: c.muted,
       textAlign: "center",
     },
     footnote: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.label,
       lineHeight: scaled(17),
       color: c.faint,

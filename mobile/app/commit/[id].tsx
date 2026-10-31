@@ -334,13 +334,13 @@ const makeStyles = (c: Palette) =>
     heading: { flex: 1, minWidth: 0 },
     title: {
       color: c.text,
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.title,
       letterSpacing: -0.3,
     },
     subtitle: {
       color: c.muted,
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: scaled(11),
       marginTop: 1,
     },
@@ -358,7 +358,7 @@ const makeStyles = (c: Palette) =>
     content: { paddingHorizontal: space.lg, paddingTop: space.md },
     subject: {
       color: c.text,
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: scaled(20),
       lineHeight: scaled(26),
       letterSpacing: -0.4,
@@ -384,13 +384,13 @@ const makeStyles = (c: Palette) =>
     },
     monogramText: {
       color: c.muted,
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: scaled(12),
       letterSpacing: 0.3,
     },
     authorText: { flex: 1, minWidth: 0, gap: 1 },
-    author: { color: c.text, fontFamily: font.sansMedium, fontSize: scaled(14) },
-    when: { color: c.muted, fontFamily: font.sans, fontSize: scaled(12) },
+    author: { color: c.text, ...font.sansMedium, fontSize: scaled(14) },
+    when: { color: c.muted, ...font.sans, fontSize: scaled(12) },
     hashChip: {
       flexDirection: "row",
       alignItems: "center",
@@ -403,13 +403,13 @@ const makeStyles = (c: Palette) =>
       borderColor: c.line,
     },
     hashChipCopied: { backgroundColor: c.okWash, borderColor: c.okWash },
-    hash: { color: c.textSecondary, fontFamily: font.monoMedium, fontSize: scaled(12) },
-    hashCopied: { color: c.ok, fontFamily: font.sansMedium },
+    hash: { color: c.textSecondary, ...font.monoMedium, fontSize: scaled(12) },
+    hashCopied: { color: c.ok, ...font.sansMedium },
 
     bodyBlock: { marginTop: space.lg },
     body: {
       color: c.textSecondary,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.body - 0.5,
       lineHeight: BODY_LINE,
     },
@@ -434,7 +434,7 @@ const makeStyles = (c: Palette) =>
     },
     readMoreText: {
       color: c.workingText,
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.caption,
     },
 
@@ -455,14 +455,14 @@ const makeStyles = (c: Palette) =>
     },
     trailerKey: {
       color: c.faint,
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: scaled(10.5),
       letterSpacing: 0.6,
       textTransform: "uppercase",
     },
     trailerValue: {
       color: c.textSecondary,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: scaled(13.5),
       lineHeight: scaled(19),
     },
@@ -476,7 +476,7 @@ const makeStyles = (c: Palette) =>
     },
     summaryLabel: {
       color: c.muted,
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.caption,
     },
     // How the change splits between lines added and lines removed, at a
@@ -499,14 +499,14 @@ const makeStyles = (c: Palette) =>
     mergeText: {
       flex: 1,
       color: c.faint,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: scaled(11.5),
       lineHeight: scaled(16),
     },
 
     center: { marginTop: space.xl },
     failure: { alignItems: "flex-start", gap: space.md, paddingVertical: space.md },
-    error: { color: c.errorText, fontFamily: font.sans, fontSize: size.body },
+    error: { color: c.errorText, ...font.sans, fontSize: size.body },
     retry: {
       flexDirection: "row",
       alignItems: "center",
@@ -516,10 +516,10 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.pill,
       backgroundColor: c.fill,
     },
-    retryText: { color: c.text, fontFamily: font.sansMedium, fontSize: size.caption },
+    retryText: { color: c.text, ...font.sansMedium, fontSize: size.caption },
     note: {
       color: c.faint,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: scaled(11.5),
       marginTop: space.md,
       lineHeight: scaled(16),

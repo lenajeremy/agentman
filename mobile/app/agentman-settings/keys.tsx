@@ -60,10 +60,10 @@ export default function KeysSettings() {
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
-    empty: { fontFamily: font.sans, fontSize: size.caption, color: c.faint, paddingVertical: space.lg },
+    empty: { ...font.sans, fontSize: size.caption, color: c.faint, paddingVertical: space.lg },
     key: { flexDirection: "row", alignItems: "center", gap: space.md, paddingVertical: space.md },
     words: { flex: 1, gap: 3 },
-    name: { fontFamily: font.mono, fontSize: size.caption, color: c.text },
-    meta: { fontFamily: font.sans, fontSize: size.label, color: c.muted },
+    name: { ...font.mono, fontSize: size.caption, color: c.text },
+    meta: { ...font.sans, fontSize: size.label, color: c.muted },
     dot: { width: 7, height: 7, borderRadius: 4 },
   });

@@ -245,12 +245,12 @@ const makeStyles = (c: Palette) =>
       marginHorizontal: space.sm,
     },
     scanEyebrow: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.label,
       color: "rgba(255,255,255,0.72)",
     },
     overlayTitle: {
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: size.title,
       color: ON_CAMERA,
     },
@@ -258,7 +258,7 @@ const makeStyles = (c: Palette) =>
     scanCentre: { width: "100%", alignItems: "center", gap: space.lg },
     scanHint: {
       maxWidth: 290,
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.caption,
       lineHeight: scaled(18),
       textAlign: "center",
@@ -317,14 +317,14 @@ const makeStyles = (c: Palette) =>
     },
 
     title: {
-      fontFamily: font.sansBold,
+      ...font.sansBold,
       fontSize: scaled(28),
       letterSpacing: -0.8,
       color: c.text,
       textAlign: "center",
     },
     body: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.body,
       color: c.muted,
       lineHeight: scaled(22),
@@ -340,7 +340,7 @@ const makeStyles = (c: Palette) =>
       paddingVertical: space.sm,
     },
     error: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.caption,
       color: "#FF9A9E",
       lineHeight: scaled(18),
@@ -356,13 +356,13 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
       marginTop: space.xl,
     },
-    buttonText: { fontFamily: font.sansBold, fontSize: scaled(16), color: c.onInverse },
+    buttonText: { ...font.sansBold, fontSize: scaled(16), color: c.onInverse },
     secondaryButton: {
       paddingVertical: space.md,
       paddingHorizontal: space.lg,
       marginTop: space.xs,
     },
-    link: { fontFamily: font.sansMedium, fontSize: size.body, color: c.textSecondary },
+    link: { ...font.sansMedium, fontSize: size.body, color: c.textSecondary },
     dismiss: {
       minHeight: 48,
       justifyContent: "center",
@@ -370,7 +370,7 @@ const makeStyles = (c: Palette) =>
       borderRadius: radius.pill,
       backgroundColor: c.cameraScrim,
     },
-    dismissText: { fontFamily: font.sansBold, fontSize: size.body, color: ON_CAMERA },
+    dismissText: { ...font.sansBold, fontSize: size.body, color: ON_CAMERA },
   });
 
 function Corner({ style }: { style: StyleProp<ViewStyle> }) {

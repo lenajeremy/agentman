@@ -629,12 +629,12 @@ function makeStyles(c: Palette) {
   return StyleSheet.create({
     body: { gap: space.sm },
     text: {
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.reading,
       color: c.text,
       lineHeight: READING_LINE,
     },
-    heading: { fontFamily: font.sansBold, marginTop: space.xs, letterSpacing: -0.2 },
+    heading: { ...font.sansBold, marginTop: space.xs, letterSpacing: -0.2 },
     heading1: { fontSize: size.title },
     // A document's: more air between blocks, and headings that rank.
     documentBody: { gap: space.md },
@@ -663,7 +663,7 @@ function makeStyles(c: Palette) {
       borderColor: c.line,
       backgroundColor: c.surface,
     },
-    pictureChipText: { fontFamily: font.sansMedium, fontSize: size.label, color: c.muted, flexShrink: 1 },
+    pictureChipText: { ...font.sansMedium, fontSize: size.label, color: c.muted, flexShrink: 1 },
     // Thematic breaks separate sections, so they need the air a paragraph gap
     // does not give on its own.
     rule: {
@@ -671,7 +671,7 @@ function makeStyles(c: Palette) {
       backgroundColor: c.line,
       marginVertical: space.sm,
     },
-    bold: { fontFamily: font.sansBold },
+    bold: { ...font.sansBold },
     link: { color: c.workingText, textDecorationLine: "underline" },
     // A chip rather than a raw highlight: without the inset the background sits
     // flush against the glyphs and reads as a sharp block mid-sentence.
@@ -692,17 +692,17 @@ function makeStyles(c: Palette) {
       transform: [{ translateY: 3 }],
     },
     inlineCode: {
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: size.caption,
       color: c.textSecondary,
       lineHeight: scaled(18),
     },
     // The fallback keeps the old flat highlight, which wraps.
     inlineCodeFlat: { backgroundColor: c.fill },
-    italic: { fontFamily: font.sansItalic },
-    boldItalic: { fontFamily: font.sansBoldItalic },
+    italic: { ...font.sansItalic },
+    boldItalic: { ...font.sansBoldItalic },
     strike: { textDecorationLine: "line-through" },
-    math: { fontFamily: font.mono, fontSize: size.caption },
+    math: { ...font.mono, fontSize: size.caption },
     codeFrame: {
       backgroundColor: c.fill,
       borderRadius: radius.md,
@@ -718,7 +718,7 @@ function makeStyles(c: Palette) {
     // The language is the one thing a reader wants confirmed at a glance, and
     // it is machine text, so it is set as such rather than as a label.
     codeLanguage: {
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: size.label,
       color: c.faint,
     },
@@ -730,7 +730,7 @@ function makeStyles(c: Palette) {
       paddingHorizontal: space.xs,
     },
     codeAction: {
-      fontFamily: font.sansMedium,
+      ...font.sansMedium,
       fontSize: size.label,
       color: c.muted,
     },
@@ -746,7 +746,7 @@ function makeStyles(c: Palette) {
     listRow: { flexDirection: "row", alignItems: "flex-start", gap: space.sm },
     marker: {
       minWidth: 16,
-      fontFamily: font.mono,
+      ...font.mono,
       fontSize: size.caption,
       color: c.faint,
       lineHeight: READING_LINE,
@@ -773,15 +773,15 @@ function makeStyles(c: Palette) {
     tableCell: {
       paddingHorizontal: space.md,
       paddingVertical: space.sm,
-      fontFamily: font.sans,
+      ...font.sans,
       fontSize: size.caption,
       lineHeight: scaled(19),
       color: c.text,
     },
-    tableHeadCell: { fontFamily: font.sansMedium, color: c.muted },
+    tableHeadCell: { ...font.sansMedium, color: c.muted },
 
     truncated: {
-      fontFamily: font.sansItalic,
+      ...font.sansItalic,
       fontSize: size.caption,
       color: c.faint,
     },
