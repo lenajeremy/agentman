@@ -426,7 +426,7 @@ const PairRow = memo(function PairRow({ old, now, path, digits, wrap, width }: {
 }) {
   const half = Math.max((width - 1) / 2, 0);
   const side = (line: Line | undefined, isOld: boolean) => {
-    if (!line) return <div className="pair-side empty" style={{ width: half }} />;
+    if (!line) return <div className="pair-side blank" style={{ width: half }} />;
     const number = isOld ? line.row.oldNumber : line.row.newNumber;
     return (
       <div className={`pair-side ${line.row.kind}`} style={{ width: half }}>

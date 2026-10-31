@@ -44,6 +44,15 @@ if (query.get("panel")) {
   }
 }
 if (query.get("dock") === "side" || query.get("dock") === "bottom") setPref(DOCK_KEY, query.get("dock"));
+// ?prefs=diffSplit:true,diffWrap:false, as MAC_DEFAULTS sets the Mac's.
+for (const pair of (query.get("prefs") ?? "").split(",").filter(Boolean)) {
+  const [key, raw] = pair.split(":");
+  try {
+    setPref(key, JSON.parse(raw));
+  } catch {
+    setPref(key, raw);
+  }
+}
 
 /** The tabs open, in order. */
 export function parseTabs(raw: string): PanelTab[] {
