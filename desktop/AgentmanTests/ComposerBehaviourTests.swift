@@ -326,6 +326,44 @@ final class ComposerBehaviourTests: XCTestCase {
         XCTAssertGreaterThan(scroll.contentView.bounds.origin.y, before + 20, "The wheel over the message scrolls the conversation")
     }
 
+    // A skill's name typed in full becomes a chip once the caret leaves it,
+    // sent as its prefix and name; resting on it shows the skill; a sent
+    // message naming it shows the chip too.
+    func testASkillNamedInAMessageIsAChipThatPreviews() throws {
+        let root = try files(["skills/frontend-design/SKILL.md": "---\nname: frontend-design\ndescription: Design UI\n---\n# Frontend Design\n\nUse bold type.\n"])
+        let skills = [SlashCommand(name: "frontend-design", description: "Design UI", source: "personal", skill: true,
+                                   path: root.appendingPathComponent("skills/frontend-design/SKILL.md").path)]
+        let slash = SlashCommands { .success(skills) }
+        slash.prefetch()
+        for _ in 0..<50 where slash.skills.isEmpty { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        let draft = Draft()
+        show(Composer(text: Binding(get: { draft.text }, set: { draft.text = $0 }), placeholder: "Message", enabled: true,
+                      slash: slash, onSend: {})
+            .frame(width: 540).fixedSize(horizontal: false, vertical: true))
+        window.orderFrontRegardless()
+        let text = try XCTUnwrap(find(MessageScrollView.self, in: host)?.documentView as? MessageTextView)
+        window.makeFirstResponder(text)
+
+        text.insertText("Use /frontend-design", replacementRange: text.selectedRange())
+        settle()
+        XCTAssertFalse(text.string.contains("\u{FFFC}"), "Still being typed")
+        text.insertText(" to fix it", replacementRange: text.selectedRange())
+        settle()
+        XCTAssertEqual(text.string, "Use \u{FFFC} to fix it")
+        XCTAssertEqual(draft.text, "Use /frontend-design to fix it", "Sent as its prefix and name")
+
+        let (shown, closed) = try restOnTag(text, hover: text.hover)
+        XCTAssertTrue(shown, "Resting on the skill shows it")
+        XCTAssertTrue(closed)
+        XCTAssertEqual(SkillPreviewCard.instructions(skills[0].path), ["# Frontend Design", "", "Use bold type."])
+
+        show(TaggedText(text: "Use /frontend-design to fix it, not /usr/bin", folder: nil, skills: skills).frame(width: 540))
+        let sent = try XCTUnwrap(find(TaggedTextView.self, in: host))
+        XCTAssertEqual(sent.string, "Use \u{FFFC} to fix it, not /usr/bin")
+        XCTAssertEqual(SkillChip.title("frontend-design"), "Frontend Design")
+        XCTAssertEqual(SkillChip.title("vercel:deploy"), "Vercel Deploy")
+    }
+
     // An error over the box, short or long, then dismissed: the same text
     // view, the same draft, the focus where it was.
     func testAnErrorOverTheBoxComesAndGoesWithoutTheDraft() throws {

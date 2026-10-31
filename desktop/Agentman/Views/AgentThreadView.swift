@@ -290,6 +290,7 @@ struct AgentThreadView: View {
                     .frame(maxWidth: .infinity)
                     .environment(\.imageGallery, ThreadItem.pictures(in: items))
                     .environment(\.threadFolder, session.cwd)
+                    .environment(\.threadSkills, slash?.skills ?? [])
                 }
                 .scrollIndicators(.never)
                 .modifier(FollowsEnd(following: following, earlier: store.hasMore[session.id] == true ? { await store.loadOlder(session.id) } : nil))
@@ -375,6 +376,8 @@ struct AgentThreadView: View {
             }
             let id = session.id
             slash = SlashCommands(triggers: SlashCommands.triggers(for: session)) { [store] in await store.commands(for: id) }
+            // Read now, for the skills the conversation's messages name.
+            slash?.prefetch()
         }
         .sheet(item: Binding(get: { panel.map(PanelItem.init) }, set: { panel = $0?.panel })) { item in
             CommandPanelSheet(panel: item.panel)
@@ -938,13 +941,14 @@ extension MessageRow {
 /// to read the rest.
 private struct LongText: View {
     @Environment(\.threadFolder) private var folder
+    @Environment(\.threadSkills) private var skills
     let text: String
     @State private var open = false
     private var long: Bool { text.count > 700 || text.filter(\.isNewline).count > 10 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            TaggedText(text: text, folder: folder, lineLimit: long && !open ? 8 : nil)
+            TaggedText(text: text, folder: folder, skills: skills, lineLimit: long && !open ? 8 : nil)
             if long {
                 Button(open ? "Show less" : "Show more") {
                     withAnimation(.easeOut(duration: 0.15)) { open.toggle() }
@@ -1365,6 +1369,7 @@ enum ToolKind: Hashable {
 /// or queued until its turn does.
 private struct QueuedBubble: View {
     @Environment(\.threadFolder) private var folder
+    @Environment(\.threadSkills) private var skills
     let text: String
     let note: String
     /// Hurries the agent's queue, where the agent can be: Claude Code in
@@ -1376,7 +1381,7 @@ private struct QueuedBubble: View {
         HStack {
             Spacer(minLength: 80)
             VStack(alignment: .trailing, spacing: 4) {
-                TaggedText(text: text, folder: folder, color: Palette.textSecondary, lineSpacing: 0, selectable: false)
+                TaggedText(text: text, folder: folder, skills: skills, color: Palette.textSecondary, lineSpacing: 0, selectable: false)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(

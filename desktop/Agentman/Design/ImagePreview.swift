@@ -66,6 +66,8 @@ extension EnvironmentValues {
     @Entry var imageGallery: [String] = []
     /// The conversation's folder, where the files its messages name are.
     @Entry var threadFolder: String?
+    /// The skills the conversation's agent has, which its messages name.
+    @Entry var threadSkills: [SlashCommand] = []
 }
 
 /// Pictures made as small as where they show, decoded off the main thread

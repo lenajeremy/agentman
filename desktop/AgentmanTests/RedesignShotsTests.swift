@@ -333,6 +333,85 @@ final class RedesignShotsTests: XCTestCase {
         }
     }
 
+    /// Skills named in a message: the "/" list mid-sentence, offering skills
+    /// alone; a message naming a file and a skill, as typed and as sent; and
+    /// the glance at a skill the pointer rests on.
+    func testRenderSkillTags() throws {
+        guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
+        let root = try folder("site")
+        let skillFile = root.appendingPathComponent("skills/frontend-design/SKILL.md")
+        for (path, text) in [
+            "src/surface.test.ts": "x",
+            "skills/frontend-design/SKILL.md": """
+            ---
+            name: frontend-design
+            description: Create distinctive, production-grade frontend interfaces with high design quality.
+            ---
+            # Frontend Design
+
+            Commit to a bold aesthetic direction before writing any code.
+            - Typography: pick a characterful display face and a refined body face.
+            - Colour: a dominant colour with sharp accents beats an even palette.
+            - Motion: one well-orchestrated page load beats scattered effects.
+
+            Match the implementation's complexity to the vision.
+            """,
+        ] {
+            let url = root.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: url)
+        }
+        let skills = [
+            SlashCommand(name: "frontend-design", description: "Create distinctive, production-grade frontend interfaces with high design quality.",
+                         source: "personal", skill: true, path: skillFile.path),
+            SlashCommand(name: "frontend-review", description: "Review a page for layout and accessibility problems", source: "project", skill: true, path: nil),
+            SlashCommand(name: "vercel:deploy", description: "Deploy to Vercel", source: "plugin", skill: true, path: nil),
+            SlashCommand(name: "compact", source: "builtin"),
+        ]
+        let mentions = FileMentions(root: root, files: { ["src/surface.test.ts"] }, suggested: { [] }, load: {})
+        func waitedSlash() -> SlashCommands {
+            let slash = SlashCommands { .success(skills) }
+            slash.prefetch()
+            for _ in 0..<50 where slash.skills.isEmpty { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+            return slash
+        }
+        let sent = "Fix the flaky test in @src/surface.test.ts and polish the header with /frontend-design before shipping."
+        for dark in [false, true] {
+            let look = dark ? "dark" : "light"
+
+            // The list, mid-sentence: skills alone.
+            let typing = "Fix the flaky test in @src/surface.test.ts and polish the header with /front"
+            let menu = waitedSlash()
+            menu.update(text: typing, caret: (typing as NSString).length)
+            let typed = VStack {
+                Spacer(minLength: 0)
+                Composer(text: .constant(typing), attachments: nil, placeholder: "Message", enabled: true, slash: menu, onSend: {})
+                    .environment(\.fileMentions, mentions)
+            }
+            .frame(width: 640).padding(24).frame(maxWidth: .infinity, maxHeight: .infinity).background(Palette.paper)
+            try render(typed, size: CGSize(width: 688, height: 380), dark: dark, store: try store().0,
+                       to: URL(fileURLWithPath: out).appendingPathComponent("skill-menu-\(look).png"))
+
+            // As typed and as sent.
+            let both = VStack(spacing: 28) {
+                MessageRow(message: Message(id: "u", sessionId: "a", role: .user, ts: 1, text: sent))
+                Composer(text: .constant(sent), attachments: nil, placeholder: "Message", enabled: true, slash: waitedSlash(), onSend: {})
+                    .environment(\.fileMentions, mentions)
+            }
+            .environment(\.threadFolder, root.path)
+            .environment(\.threadSkills, skills)
+            .frame(width: 640).padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(Palette.paper)
+            try render(both, size: CGSize(width: 688, height: 300), dark: dark, store: try store().0,
+                       to: URL(fileURLWithPath: out).appendingPathComponent("skill-tags-\(look).png"))
+
+            // The glance at a skill.
+            try render(SkillPreviewCard(command: skills[0]).background(dark ? Color(white: 0.12) : Color.white)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Palette.paper),
+                       size: CGSize(width: 480, height: 270), dark: dark, store: try store().0,
+                       to: URL(fileURLWithPath: out).appendingPathComponent("skill-preview-\(look).png"))
+        }
+    }
+
     private func renderEditor(_ shots: URL) throws {
         let key = "agentPanelOpen"
         let was = UserDefaults.standard.object(forKey: key)

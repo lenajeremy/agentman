@@ -4,7 +4,9 @@ import SwiftUI
 /// `/` and a few letters at the start of a message box: the agent's commands
 /// that match, as its own terminal would offer them, to pick from with the
 /// arrow keys, Return or Tab, or the pointer. A pick goes into the box, with
-/// a space after it when the command takes something.
+/// a space after it when the command takes something. Further into a
+/// message, after a space, `/` offers the agent's skills alone, which a
+/// message can name anywhere; a skill picked goes in as a chip.
 @MainActor @Observable
 final class SlashCommands {
     /// Everything the agent offers, once asked for.
@@ -21,6 +23,10 @@ final class SlashCommands {
     @ObservationIgnored private let triggers: Set<Character>
     /// What opened it.
     private(set) var prefix: Character = "/"
+    /// Opened after the message's start: skills only.
+    private(set) var skillsOnly = false
+    /// Where the `/` and the name being typed are, for a pick to replace.
+    @ObservationIgnored private var range = NSRange(location: NSNotFound, length: 0)
 
     static let shown = 9
 
@@ -29,39 +35,65 @@ final class SlashCommands {
         self.load = load
     }
 
-    var isOpen: Bool { query != nil && (!results.isEmpty || problem != nil) }
+    var isOpen: Bool { query != nil && (!results.isEmpty || (problem != nil && !skillsOnly)) }
+
+    /// The skills among the commands, for the chips a sent message shows.
+    var skills: [SlashCommand] { commands.filter { $0.skill == true } }
 
     /// Follows the box: open while all it holds is `/` (or a `$` it takes)
     /// and a name being typed.
     func update(text: String) {
-        guard let first = text.first, triggers.contains(first), !text.contains(where: \.isWhitespace) else { return dismiss() }
+        update(text: text, caret: (text as NSString).length)
+    }
+
+    /// Follows the box as the caret moves: open while the caret ends a word
+    /// that starts with `/` (or a `$` it takes): at the message's start, the
+    /// agent's commands and skills; after a space, its skills.
+    func update(text: String, caret: Int) {
+        let ns = text as NSString
+        guard caret <= ns.length, caret == ns.length || Self.isSpace(ns.character(at: caret)) else { return dismiss() }
+        var start = caret
+        while start > 0, !Self.isSpace(ns.character(at: start - 1)) { start -= 1 }
+        let word = ns.substring(with: NSRange(location: start, length: caret - start))
+        guard let first = word.first, triggers.contains(first) else { return dismiss() }
         prefix = first
-        query = String(text.dropFirst())
+        skillsOnly = start > 0
+        range = NSRange(location: start, length: caret - start)
+        query = String(word.dropFirst())
         refresh()
-        // Asked for when first needed, and again after a minute, as skills
-        // come and go.
-        if askedAt.map({ Date().timeIntervalSince($0) > 60 }) ?? true {
-            askedAt = Date()
-            Task {
-                switch await load() {
-                case .success(let list):
-                    commands = list
-                    problem = nil
-                case .failure(let failure):
-                    askedAt = nil
-                    problem = failure.message.contains("unsupported request")
-                        ? "Update agentman on your Mac to use commands here."
-                        : failure.message
-                }
-                refresh()
+        prefetch()
+    }
+
+    /// Asks for the list when first needed, and again after a minute, as
+    /// skills come and go.
+    func prefetch() {
+        guard askedAt.map({ Date().timeIntervalSince($0) > 60 }) ?? true else { return }
+        askedAt = Date()
+        Task {
+            switch await load() {
+            case .success(let list):
+                commands = list
+                problem = nil
+            case .failure(let failure):
+                askedAt = nil
+                problem = failure.message.contains("unsupported request")
+                    ? "Update agentman on your Mac to use commands here."
+                    : failure.message
             }
+            refresh()
         }
+    }
+
+    private static func isSpace(_ unit: unichar) -> Bool {
+        guard let scalar = UnicodeScalar(unit) else { return false }
+        return CharacterSet.whitespacesAndNewlines.contains(scalar)
     }
 
     func dismiss() {
         query = nil
         results = []
         selected = 0
+        range = NSRange(location: NSNotFound, length: 0)
     }
 
     func move(_ by: Int) {
@@ -69,21 +101,27 @@ final class SlashCommands {
         selected = (selected + by + results.count) % results.count
     }
 
-    /// Puts the highlighted command, or the one clicked, in the box.
+    /// Puts the highlighted command, or the one clicked, in the box: a
+    /// skill as a chip, a command as its words.
     func choose(_ index: Int? = nil) {
         let index = index ?? selected
-        guard results.indices.contains(index), let textView else { return dismiss() }
+        guard results.indices.contains(index), let textView, range.location != NSNotFound,
+              NSMaxRange(range) <= (textView.string as NSString).length else { return dismiss() }
         let command = results[index]
-        // A skill is followed by what it is for.
-        let picked = command.label + (command.argumentHint?.isEmpty == false || command.prefix == "$" ? " " : "")
-        let all = NSRange(location: 0, length: (textView.string as NSString).length)
-        textView.insertText(picked, replacementRange: all)
+        let replace = range
         dismiss()
+        if command.skill == true, let box = textView as? MessageTextView {
+            box.insertSkill(command, replacing: replace)
+            return
+        }
+        // A skill is followed by what it is for.
+        let picked = command.label + (command.argumentHint?.isEmpty == false || command.prefix == "$" || command.skill == true ? " " : "")
+        textView.insertText(picked, replacementRange: replace)
     }
 
     private func refresh() {
         guard let query else { return }
-        results = Array(Self.match(commands, query, prefix: prefix).prefix(60))
+        results = Array(Self.match(skillsOnly ? skills : commands, query, prefix: prefix).prefix(60))
         selected = min(selected, max(results.count - 1, 0))
     }
 
@@ -138,9 +176,12 @@ final class SlashCommands {
 
     /// Commands are typed into the agent's prompt, so only a Claude, Codex or
     /// Antigravity the Mac started in a terminal it can type into takes them.
+    /// Cursor's Agent CLI and Kiro in a terminal, and OpenCode through its
+    /// server, take skills.
     static func takes(_ session: Session?) -> Bool {
         guard let session else { return false }
-        return ["claude", "codex", "antigravity"].contains(session.kind) && session.inject == "tmux"
+        if session.kind == "opencode" { return session.inject == "api" }
+        return ["claude", "codex", "antigravity", "cursor-cli", "kiro"].contains(session.kind) && session.inject == "tmux"
     }
 
     /// What opens a session's list: Codex's skills are typed with "$".

@@ -9,6 +9,8 @@ struct TaggedText: View {
     let text: String
     /// Where the paths it names are, when they aren't given in full.
     let folder: String?
+    /// The skills it can name, the conversation's agent's.
+    var skills: [SlashCommand] = []
     var color = Palette.text
     var lineSpacing: CGFloat = 5
     var selectable = true
@@ -16,8 +18,8 @@ struct TaggedText: View {
     var lineLimit: Int?
 
     var body: some View {
-        if FileTags.namesFiles(text, folder: folder) {
-            TaggedTextField(text: text, folder: folder, color: color, lineSpacing: lineSpacing,
+        if FileTags.namesTags(text, folder: folder, skills: skills) {
+            TaggedTextField(text: text, folder: folder, skills: skills, color: color, lineSpacing: lineSpacing,
                             selectable: selectable, lineLimit: lineLimit)
         } else if selectable {
             plain.textSelection(.enabled)
@@ -38,6 +40,7 @@ struct TaggedText: View {
 private struct TaggedTextField: NSViewRepresentable {
     let text: String
     let folder: String?
+    let skills: [SlashCommand]
     let color: Color
     let lineSpacing: CGFloat
     let selectable: Bool
@@ -83,12 +86,14 @@ private struct TaggedTextField: NSViewRepresentable {
             .paragraphStyle: paragraph,
         ]
         let made = NSMutableAttributedString()
-        for part in FileTags.segments(text, folder: folder) {
+        for part in FileTags.segments(text, folder: folder, skills: skills) {
             switch part {
             case .text(let words):
                 made.append(NSAttributedString(string: words, attributes: attributes))
             case .file(let path, let directory):
                 made.append(FileChip.text(path, directory: directory, attributes: attributes))
+            case .skill(let command):
+                made.append(SkillChip.text(command, attributes: attributes))
             }
         }
         return made

@@ -147,11 +147,23 @@ struct MessageField: NSViewRepresentable {
             // chip replaced.
             DispatchQueue.main.async { [weak textView] in textView?.makeChips() }
             followMention()
-            parent.slash?.update(text: textView.string)
+            followSlash()
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
             followMention()
+            followSlash()
+        }
+
+        /// Opens or closes the commands for `/` as the caret moves.
+        private func followSlash() {
+            guard let textView, let slash = parent.slash else { return }
+            let selection = textView.selectedRange()
+            if selection.length == 0, !textView.hasMarkedText() {
+                slash.update(text: textView.string, caret: selection.location)
+            } else {
+                slash.dismiss()
+            }
         }
 
         /// Opens or closes the files for `@` as the caret moves.
@@ -404,31 +416,79 @@ final class MessageTextView: NSTextView {
     /// `all`: text set or pasted in. `notify` keeps the change undoable and
     /// tells the box's delegate, as typing does.
     func makeChips(all: Bool = false, notify: Bool = true) {
-        guard let mentions, let storage = textStorage, !chipping, !hasMarkedText(), string.contains("@") else { return }
+        guard let storage = textStorage, !chipping, !hasMarkedText() else { return }
         let caret = selectedRange()
-        let found = mentions.chips(in: string).filter { chip in
-            all || caret.length > 0 || caret.location < chip.range.location || caret.location > NSMaxRange(chip.range)
+        let typing = { (range: NSRange) in
+            !all && caret.length == 0 && caret.location >= range.location && caret.location <= NSMaxRange(range)
         }
-        guard !found.isEmpty else { return }
         let attributes = typingAttributes.filter { $0.key != .attachment }
-        let chips = found.map { FileChip.text($0.path, attributes: attributes) }
+        var tags: [(range: NSRange, chip: NSAttributedString)] = []
+        if let mentions, string.contains("@") {
+            for chip in mentions.chips(in: string) where !typing(chip.range) {
+                tags.append((chip.range, FileChip.text(chip.path, attributes: attributes)))
+            }
+        }
+        // A skill's name typed in full: the agent's skills, as `/` lists them.
+        if let skills = slash?.skills, !skills.isEmpty {
+            for found in skillWords(skills) where !typing(found.range) {
+                tags.append((found.range, SkillChip.text(found.command, attributes: attributes)))
+            }
+        }
+        tags.sort { $0.range.location < $1.range.location }
+        let found = tags.map(\.range)
+        let chips = tags.map(\.chip)
+        guard !found.isEmpty else { return }
         // Its own step to undo: typing before and after doesn't run into it.
         if notify { breakUndoCoalescing() }
-        if notify, !shouldChangeText(inRanges: found.map { NSValue(range: $0.range) }, replacementStrings: chips.map(\.string)) { return }
+        if notify, !shouldChangeText(inRanges: found.map { NSValue(range: $0) }, replacementStrings: chips.map(\.string)) { return }
         chipping = true
         storage.beginEditing()
-        for (chip, text) in zip(found, chips).reversed() {
-            storage.replaceCharacters(in: chip.range, with: text)
+        for (range, text) in zip(found, chips).reversed() {
+            storage.replaceCharacters(in: range, with: text)
         }
         storage.endEditing()
         // The caret keeps its place among the letters around the chips.
-        let before = found.filter { NSMaxRange($0.range) <= caret.location }.reduce(0) { $0 + $1.range.length - 1 }
+        let before = found.filter { NSMaxRange($0) <= caret.location }.reduce(0) { $0 + $1.length - 1 }
         setSelectedRange(NSRange(location: max(caret.location - before, 0), length: 0))
         if notify {
             didChangeText()
             breakUndoCoalescing()
         }
         chipping = false
+    }
+
+    /// The skills named in the text by their prefix and name, where.
+    private func skillWords(_ skills: [SlashCommand]) -> [(range: NSRange, command: SlashCommand)] {
+        let known = Dictionary(skills.map { ($0.label, $0) }, uniquingKeysWith: { first, _ in first })
+        let ns = string as NSString
+        var found: [(NSRange, SlashCommand)] = []
+        for match in Self.skillWord.matches(in: string, range: NSRange(location: 0, length: ns.length)) {
+            var range = match.range
+            var word = ns.substring(with: range)
+            while known[word] == nil, let last = word.last, ".,;:!?)]}'\"".contains(last) {
+                word.removeLast()
+                range.length -= 1
+            }
+            if let command = known[word] { found.append((range, command)) }
+        }
+        return found
+    }
+
+    nonisolated(unsafe) private static let skillWord = try! NSRegularExpression(pattern: #"(?<![^\s])([/$][A-Za-z0-9][A-Za-z0-9._:\-]*)"#)
+
+    /// Puts a skill picked from the list in place of the `/` and the letters
+    /// typed, as a chip with a space after it.
+    func insertSkill(_ command: SlashCommand, replacing range: NSRange) {
+        guard let storage = textStorage, NSMaxRange(range) <= storage.length else { return }
+        let attributes = typingAttributes.filter { $0.key != .attachment }
+        let chip = NSMutableAttributedString(attributedString: SkillChip.text(command, attributes: attributes))
+        chip.append(NSAttributedString(string: " ", attributes: attributes))
+        breakUndoCoalescing()
+        guard shouldChangeText(in: range, replacementString: chip.string) else { return }
+        storage.replaceCharacters(in: range, with: chip)
+        setSelectedRange(NSRange(location: range.location + chip.length, length: 0))
+        didChangeText()
+        breakUndoCoalescing()
     }
 
     /// A copy holds the paths the chips stand for.

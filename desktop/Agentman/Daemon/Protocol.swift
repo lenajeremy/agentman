@@ -306,6 +306,10 @@ struct SlashCommand: Codable, Sendable, Equatable, Hashable {
     var source: String?
     /// Sent without arguments, it answers in a panel of the terminal.
     var panel: Bool?
+    /// A skill rather than a command: a message can name it anywhere.
+    var skill: Bool?
+    /// A skill's SKILL.md on this Mac, for a glance at it.
+    var path: String?
 }
 
 /// One part of a file sent to an agent, joined and kept by the daemon.

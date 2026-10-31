@@ -137,6 +137,111 @@ struct FilePreviewCard: View {
     }
 }
 
+/// A glance at a skill named in a message, shown while the pointer rests on
+/// its tag: what it is for, where it comes from, and how its instructions
+/// begin.
+struct SkillPreviewCard: View {
+    let command: SlashCommand
+    let lines: [String]
+
+    init(command: SlashCommand) {
+        self.command = command
+        lines = Self.instructions(command.path)
+    }
+
+    /// The start of a skill's instructions, without its frontmatter.
+    static func instructions(_ path: String?) -> [String] {
+        guard let path, let handle = FileHandle(forReadingAtPath: path) else { return [] }
+        defer { try? handle.close() }
+        let data = (try? handle.read(upToCount: FilePreview.bytes)) ?? Data()
+        var text = String(decoding: data, as: UTF8.self).replacingOccurrences(of: "\r\n", with: "\n")
+        if text.hasPrefix("---\n"), let end = text.range(of: "\n---", range: text.index(text.startIndex, offsetBy: 4)..<text.endIndex) {
+            text = String(text[end.upperBound...])
+        }
+        var lines: [String] = []
+        for line in text.replacingOccurrences(of: "\t", with: "    ").components(separatedBy: "\n") {
+            let blank = line.trimmingCharacters(in: .whitespaces).isEmpty
+            // No leading blank lines, and one blank line at most between.
+            if blank, lines.isEmpty || lines.last?.isEmpty == true { continue }
+            lines.append(blank ? "" : line)
+            if lines.count == 10 { break }
+        }
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        return lines
+    }
+
+    private var origin: String? {
+        switch command.source {
+        case "personal": "Your skill"
+        case "project": "This project's skill"
+        case "plugin": "From a plugin"
+        case "bundled": "Comes with the agent"
+        case "managed": "From your organization"
+        default: nil
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                if let icon = SkillChip.icon() {
+                    Image(nsImage: icon)
+                }
+                Text(SkillChip.title(command.name))
+                    .font(TextStyle.captionMedium)
+                    .foregroundStyle(Palette.text)
+                    .lineLimit(1)
+                Text(command.label)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.faint)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if let origin {
+                    Text(origin)
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.faint)
+                }
+            }
+            if let description = command.description, !description.isEmpty {
+                Text(description)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !lines.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                        Text(line.isEmpty ? " " : line)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+                .font(TextStyle.caption)
+                .foregroundStyle(Palette.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(Palette.fill.opacity(0.6), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+        }
+        .padding(12)
+        .frame(width: 480, alignment: .leading)
+    }
+}
+
+/// What a tag under the pointer stands for.
+enum HoverTag: Equatable {
+    case file(String)
+    case skill(SlashCommand)
+
+    var key: String {
+        switch self {
+        case .file(let path): "file:" + path
+        case .skill(let command): "skill:" + command.label
+        }
+    }
+}
+
 /// Shows a file's preview while the pointer rests on its tag in a text
 /// view, and takes it away when the pointer moves off, a key is pressed or
 /// the text scrolls. The text view passes on its mouse movement.
@@ -170,14 +275,14 @@ final class ChipHover {
     func moved(_ event: NSEvent) {
         guard let textView else { return }
         let point = textView.convert(event.locationInWindow, from: nil)
-        guard let (path, rect) = chip(at: point) else {
+        guard let (tag, rect) = tag(at: point) else {
             close()
             return
         }
-        if path == shown || path == pending { return }
+        if tag.key == shown || tag.key == pending { return }
         close()
-        pending = path
-        let work = DispatchWorkItem { [weak self] in self?.show(path, at: rect) }
+        pending = tag.key
+        let work = DispatchWorkItem { [weak self] in self?.show(tag, at: rect) }
         waiting = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.delay, execute: work)
     }
@@ -192,7 +297,7 @@ final class ChipHover {
     }
 
     /// The tag under a point in the text view, and where it is drawn.
-    func chip(at point: NSPoint) -> (path: String, rect: NSRect)? {
+    func tag(at point: NSPoint) -> (tag: HoverTag, rect: NSRect)? {
         guard let textView, let layout = textView.layoutManager, let container = textView.textContainer,
               let storage = textView.textStorage, storage.containsAttachments else { return nil }
         let origin = textView.textContainerOrigin
@@ -204,9 +309,12 @@ final class ChipHover {
         guard rect.contains(inside) else { return nil }
         let index = layout.characterIndexForGlyph(at: glyph)
         guard index < storage.length,
-              let chip = (storage.attribute(.attachment, at: index, effectiveRange: nil) as? NSTextAttachment)?.attachmentCell as? FileChip
+              let cell = (storage.attribute(.attachment, at: index, effectiveRange: nil) as? NSTextAttachment)?.attachmentCell
         else { return nil }
-        return (chip.path, rect.offsetBy(dx: origin.x, dy: origin.y))
+        let drawn = rect.offsetBy(dx: origin.x, dy: origin.y)
+        if let chip = cell as? FileChip { return (.file(chip.path), drawn) }
+        if let chip = cell as? SkillChip { return (.skill(chip.command), drawn) }
+        return nil
     }
 
     /// Where a tag's file is.
@@ -216,10 +324,18 @@ final class ChipHover {
         return URL(fileURLWithPath: folder).appendingPathComponent(path)
     }
 
-    private func show(_ path: String, at rect: NSRect) {
+    private func show(_ tag: HoverTag, at rect: NSRect) {
         pending = nil
-        guard let textView, textView.window != nil, let url = url(path) else { return }
-        let host = NSHostingController(rootView: FilePreviewCard(url: url, base: folder()))
+        guard let textView, textView.window != nil else { return }
+        let card: AnyView
+        switch tag {
+        case .file(let path):
+            guard let url = url(path) else { return }
+            card = AnyView(FilePreviewCard(url: url, base: folder()))
+        case .skill(let command):
+            card = AnyView(SkillPreviewCard(command: command))
+        }
+        let host = NSHostingController(rootView: card)
         host.sizingOptions = .preferredContentSize
         let popover = NSPopover()
         popover.contentViewController = host
@@ -227,6 +343,6 @@ final class ChipHover {
         popover.animates = false
         popover.show(relativeTo: rect, of: textView, preferredEdge: .minY)
         self.popover = popover
-        shown = path
+        shown = tag.key
     }
 }
