@@ -229,6 +229,61 @@ final class DaemonSetupTests: XCTestCase {
                        .failed(DaemonSetup.Failure(message: "am setup stopped without saying why.", step: nil, log: "/l")))
     }
 
+    // MARK: Settings
+
+    func testWhatSettingsSaysOfAmServe() {
+        let bundled = AmVersion(version: "0.39.0", apiLevel: 1)
+        func status(_ daemon: DaemonInfo?, managed: AmVersion? = AmVersion(version: "0.39.0"), allowed: Bool = true) -> DaemonSetup.ServeStatus {
+            DaemonSetup.serveStatus(daemon: daemon, bundled: bundled, managed: managed, allowed: allowed)
+        }
+        // None running: the app can set one up; without its am, as before.
+        XCTAssertEqual(status(nil).action, .setUp("Set Up"))
+        XCTAssertEqual(status(nil, allowed: false), DaemonSetup.ServeStatus(version: "Not connected"))
+
+        let current = status(DaemonInfo(version: "0.39.0", apiLevel: 1, install: "managed", latest: "0.39.0", behind: 0, upgrade: "am upgrade"))
+        XCTAssertEqual(current.detail, "Run by Agentman for Mac from ~/.agentman/bin/am. Up to date.")
+        XCTAssertNil(current.action)
+
+        // Behind the newest release: am upgrade, from here.
+        let behind = status(DaemonInfo(version: "0.39.0", apiLevel: 1, install: "managed", latest: "0.40.0", behind: 1, upgrade: "am upgrade"))
+        XCTAssertEqual(behind.detail, "Run by Agentman for Mac from ~/.agentman/bin/am. 0.40.0 is out.")
+        XCTAssertEqual(behind.action, .upgrade)
+
+        // Behind the app: am setup brings it to the app's.
+        let older = status(DaemonInfo(version: "0.38.0", apiLevel: 1, install: "managed"), managed: AmVersion(version: "0.38.0"))
+        XCTAssertEqual(older.detail, "Run by Agentman for Mac from ~/.agentman/bin/am. This app carries 0.39.0.")
+        XCTAssertEqual(older.action, .setUp("Upgrade"))
+
+        // Too old for the app, from Homebrew: the app's copy takes over.
+        let tooOld = status(DaemonInfo(version: "0.37.0", install: "homebrew"), managed: nil)
+        XCTAssertEqual(tooOld.detail, "Installed with Homebrew. Too old for this version of the app; the app's own copy takes its place.")
+        XCTAssertEqual(tooOld.action, .setUp("Upgrade"))
+
+        // Homebrew's, current for the app but behind its release: Homebrew
+        // upgrades it, from a terminal, as before.
+        let brew = status(DaemonInfo(version: "0.39.0", apiLevel: 1, install: "homebrew", latest: "0.40.0", behind: 1,
+                                     upgrade: "brew upgrade --cask lenajeremy/agentman/agentman"), managed: nil)
+        XCTAssertEqual(brew.detail, "0.40.0 is out. Run brew upgrade --cask lenajeremy/agentman/agentman in a terminal.")
+        XCTAssertEqual(brew.action, .copy("brew upgrade --cask lenajeremy/agentman/agentman"))
+
+        // A newer daemon than the app is left be.
+        let newer = status(DaemonInfo(version: "0.41.0", apiLevel: 2, install: "managed", latest: "0.41.0", behind: 0),
+                           managed: AmVersion(version: "0.41.0"))
+        XCTAssertNil(newer.action)
+    }
+
+    func testUpgradingTheAppsCopy() async throws {
+        let am = FakeAm(setup: [], status: 1, error: "am: upgrade: couldn't find out what the latest release is: no network")
+        try manage("0.39.0", am: am)
+        let setup = setup(am: am, automatic: false)
+        await setup.upgrade()
+        XCTAssertEqual(am.runs, [[home.appendingPathComponent(".agentman/bin/am").path, "upgrade"]])
+        XCTAssertEqual(setup.upgradeProblem, "Couldn't find out what the latest release is: no network")
+        XCTAssertFalse(setup.upgrading)
+        XCTAssertEqual(setup.serveStatus(daemon: DaemonInfo(version: "0.39.0", apiLevel: 1, install: "managed"), connected: true).problem,
+                       setup.upgradeProblem)
+    }
+
     // MARK: Never on this Mac
 
     func testNothingRunsWithoutLeave() async throws {
@@ -311,6 +366,62 @@ final class DaemonSetupTests: XCTestCase {
             }
             defaults.removeObject(forKey: DaemonSetup.welcomedKey)
         }
+    }
+
+    /// Settings' am serve row in each state it can be in.
+    func testRenderServeRow() async throws {
+        guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
+        let managedPath = home.appendingPathComponent(".agentman/bin/am").path
+        try manage("0.39.0", am: FakeAm(setup: []))
+        func state(_ label: String, daemon: DaemonInfo?, managed: String? = "0.39.0", allowed: Bool = true,
+                   am: FakeAm = FakeAm(setup: [])) -> (String, AgentsStore) {
+            if let managed { am.versions[managedPath] = AmVersion(version: managed, apiLevel: 1, install: "managed", managed: true) }
+            let store = AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-setup.sock"),
+                                    setup: setup(am: am, automatic: false, allowed: allowed))
+            if let daemon {
+                store.statusChanged(.connected)
+                var event = DaemonEvent(type: "sessions")
+                event.sessions = []
+                event.daemon = daemon
+                store.apply(event)
+            }
+            return (label, store)
+        }
+        let busy = FakeAm(setup: [], hold: true)
+        let failing = FakeAm(setup: [], status: 1, error: "am: upgrade: couldn't find out what the latest release is: Get \"https://api.github.com/repos/lenajeremy/agentman/releases/latest\": dial tcp: lookup api.github.com: no such host")
+        let states = [
+            state("Nothing running", daemon: nil, managed: nil),
+            state("The app's, up to date", daemon: DaemonInfo(version: "0.39.0", apiLevel: 1, install: "managed", latest: "0.39.0", behind: 0)),
+            state("The app's, a newer release out", daemon: DaemonInfo(version: "0.39.0", apiLevel: 1, install: "managed", latest: "0.40.0", behind: 1, upgrade: "am upgrade")),
+            state("The app's, behind the app", daemon: DaemonInfo(version: "0.38.0", apiLevel: 1, install: "managed", latest: "0.38.0", behind: 0), managed: "0.38.0"),
+            state("Homebrew's, too old for the app", daemon: DaemonInfo(version: "0.37.0", install: "homebrew"), managed: nil),
+            state("Homebrew's, a newer release out", daemon: DaemonInfo(version: "0.39.0", apiLevel: 1, install: "homebrew", latest: "0.40.0", behind: 1,
+                                                                        upgrade: "brew upgrade --cask lenajeremy/agentman/agentman"), managed: nil),
+            state("Upgrading", daemon: DaemonInfo(version: "0.39.0", apiLevel: 1, install: "managed", latest: "0.40.0", behind: 1), am: busy),
+            state("The upgrade failed", daemon: DaemonInfo(version: "0.39.0", apiLevel: 1, install: "managed", latest: "0.40.0", behind: 1), am: failing),
+            state("Without the app's am (a Debug build, or am alone)", daemon: nil, managed: nil, allowed: false),
+        ]
+        for (_, store) in states { await store.setup.readVersions() }
+        XCTAssertEqual(states[3].1.setup.managed?.version, "0.38.0")
+        let upgrading = Task { await states[6].1.setup.upgrade() }
+        await until { states[6].1.setup.upgrading }
+        await states[7].1.setup.upgrade()
+        for dark in [false, true] {
+            let page = VStack(alignment: .leading, spacing: 18) {
+                ForEach(Array(states.enumerated()), id: \.offset) { _, state in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(state.0).font(TextStyle.label).foregroundStyle(Palette.faint).padding(.leading, 4)
+                        SettingsSection { DaemonServeRow() }
+                            .environment(state.1)
+                    }
+                }
+            }
+            .padding(24)
+            try render(page, size: CGSize(width: 620, height: 1180), dark: dark, store: states[0].1,
+                       to: URL(fileURLWithPath: out).appendingPathComponent("about-serve-\(dark ? "dark" : "light").png"))
+        }
+        busy.release()
+        await upgrading.value
     }
 
     private func store(_ am: FakeAm) -> AgentsStore {

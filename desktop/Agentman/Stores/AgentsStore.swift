@@ -801,7 +801,8 @@ final class AgentsStore {
 
     // MARK: - Daemon events
 
-    private func statusChanged(_ status: DaemonClient.Status) {
+    /// Internal rather than private so tests can say how the connection is.
+    func statusChanged(_ status: DaemonClient.Status) {
         self.status = status
         setup.connectionChanged(status)
         guard status == .connected else { return }

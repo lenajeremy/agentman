@@ -931,9 +931,6 @@ private struct EditorSection: View {
 
 /// Which app and which am serve, and whether a newer one is out.
 private struct AboutSection: View {
-    @Environment(AgentsStore.self) private var store
-    @State private var copied = false
-
     var body: some View {
         let app = Bundle.main.infoDictionary
         let version = (app?["CFBundleShortVersionString"] as? String) ?? "?"
@@ -942,29 +939,8 @@ private struct AboutSection: View {
             SettingsRow(title: "Agentman for Mac") {
                 Text("\(version) (\(build))").font(TextStyle.caption).foregroundStyle(Palette.muted)
             }
-            SettingsRow(title: "am serve", detail: updateDetail, divider: false) {
-                HStack(spacing: 8) {
-                    Text(store.daemonInfo?.version ?? "Not connected")
-                        .font(TextStyle.caption)
-                        .foregroundStyle(Palette.muted)
-                    if let upgrade = store.daemonInfo?.upgrade, (store.daemonInfo?.behind ?? 0) > 0 {
-                        Button(copied ? "Copied" : "Copy upgrade command") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(upgrade, forType: .string)
-                            copied = true
-                        }
-                    }
-                }
-            }
+            DaemonServeRow()
         }
-    }
-
-    private var updateDetail: String? {
-        guard let info = store.daemonInfo else { return nil }
-        if let latest = info.latest, (info.behind ?? 0) > 0 {
-            return "\(latest) is out. Run \(info.upgrade ?? "the upgrade") in a terminal."
-        }
-        return info.latest == nil ? nil : "Up to date."
     }
 }
 

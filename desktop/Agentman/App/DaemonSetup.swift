@@ -39,11 +39,14 @@ final class DaemonSetup {
         var socket: String { (home as NSString).appendingPathComponent(".agentman/am.sock") }
         var log: String { (home as NSString).appendingPathComponent(".agentman/serve.log") }
 
-        /// This app's.
+        /// This app's. Under tests, a home that isn't there, so not even a
+        /// look reaches the user's own ~/.agentman.
         static var app: Paths {
             let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/am").path
-            return Paths(bundled: FileManager.default.isExecutableFile(atPath: bundled) ? bundled : nil,
-                         home: NSHomeDirectory())
+            let home = AgentmanApp.underTests
+                ? (NSTemporaryDirectory() as NSString).appendingPathComponent("agentman-tests-no-home")
+                : NSHomeDirectory()
+            return Paths(bundled: FileManager.default.isExecutableFile(atPath: bundled) ? bundled : nil, home: home)
         }
     }
 
@@ -96,6 +99,9 @@ final class DaemonSetup {
     private(set) var bundled: AmVersion?
     private(set) var managed: AmVersion?
     private(set) var note: Note?
+    /// am upgrade, run on the app's copy from Settings, and why it failed.
+    private(set) var upgrading = false
+    private(set) var upgradeProblem: String?
 
     let runner: any AmRunner
     let paths: Paths
@@ -255,10 +261,11 @@ final class DaemonSetup {
     /// shown step by step on the screen when it is open, and in the footer's
     /// note when it isn't.
     func run() async {
-        guard allowed, let am = paths.bundled, !running else { return }
+        guard allowed, let am = paths.bundled, !running, !upgrading else { return }
         let quiet = !showsScreen
         phase = .running
         steps = []
+        upgradeProblem = nil
         if quiet { show(.updating) }
         let (lines, sink) = AsyncStream.makeStream(of: String.self)
         let runner = runner
@@ -349,6 +356,107 @@ final class DaemonSetup {
     func dismissNote() {
         noteClear?.cancel()
         note = nil
+    }
+
+    // MARK: - Upgrading
+
+    /// am upgrade on the copy the app manages, for a daemon behind the
+    /// newest release rather than behind the app: the release put in its
+    /// place and the service restarted on it. A newer daemon than the app is
+    /// fine; the app never puts an older am over it.
+    func upgrade() async {
+        guard allowed, !upgrading, !running, FileManager.default.isExecutableFile(atPath: paths.managed) else { return }
+        upgrading = true
+        upgradeProblem = nil
+        let exit = await runner.run(paths.managed, ["upgrade"]) { _ in }
+        upgrading = false
+        if !exit.succeeded {
+            let said = Self.plain(exit.error)
+            upgradeProblem = said.isEmpty ? "am upgrade didn't work." : said
+        }
+        await readVersions()
+    }
+
+    /// What Settings says of am serve, and what it offers to do about it.
+    struct ServeStatus: Equatable {
+        enum Action: Equatable {
+            /// am setup from the am the app carries, under this label: Set
+            /// Up, or Upgrade for a daemon behind the app.
+            case setUp(String)
+            /// am upgrade on the app's copy: the newest release.
+            case upgrade
+            /// A command to run in a terminal, for a daemon the app doesn't
+            /// run.
+            case copy(String)
+        }
+
+        /// The daemon's version, or that there is none.
+        var version: String
+        var detail: String?
+        var action: Action?
+        /// What is under way, if anything.
+        var busy: String?
+        var problem: String?
+    }
+
+    func serveStatus(daemon: DaemonInfo?, connected: Bool) -> ServeStatus {
+        var failure: String?
+        if case .failed(let failed) = phase { failure = failed.message }
+        return Self.serveStatus(daemon: connected ? daemon : nil, bundled: bundled, managed: managed, allowed: allowed,
+                                busy: running ? "Setting up…" : upgrading ? "Upgrading…" : nil,
+                                problem: upgradeProblem ?? failure)
+    }
+
+    nonisolated static func serveStatus(daemon: DaemonInfo?, bundled: AmVersion?, managed: AmVersion?, allowed: Bool,
+                                        busy: String? = nil, problem: String? = nil,
+                                        required: Int = requiredDaemonAPILevel) -> ServeStatus {
+        var status = ServeStatus(version: "Not connected", busy: busy, problem: problem)
+        guard let daemon else {
+            if allowed {
+                status.detail = "Not running. Set it up to start it in the background at login."
+                status.action = .setUp("Set Up")
+            }
+            return status
+        }
+        status.version = daemon.version
+        let place = Self.place(daemon.install)
+        let managedDaemon = daemon.install == "managed"
+        if (daemon.apiLevel ?? 0) < required {
+            if allowed {
+                status.detail = place + ". Too old for this version of the app" +
+                    (managedDaemon ? "." : "; the app's own copy takes its place.")
+                status.action = .setUp("Upgrade")
+            } else {
+                status.detail = place + ". Too old for this version of the app: run \(daemon.upgrade ?? "am upgrade") in a terminal."
+                status.action = daemon.upgrade.map { ServeStatus.Action.copy($0) }
+            }
+        } else if managedDaemon, allowed, let managed, let bundled, Release.before(managed.version, bundled.version) {
+            status.detail = place + ". This app carries \(bundled.version)."
+            status.action = .setUp("Upgrade")
+        } else if let latest = daemon.latest, (daemon.behind ?? 0) > 0 {
+            if managedDaemon, allowed {
+                status.detail = place + ". \(latest) is out."
+                status.action = .upgrade
+            } else {
+                status.detail = "\(latest) is out. Run \(daemon.upgrade ?? "the upgrade") in a terminal."
+                status.action = daemon.upgrade.map { ServeStatus.Action.copy($0) }
+            }
+        } else {
+            status.detail = place + (daemon.latest == nil ? "." : ". Up to date.")
+        }
+        return status
+    }
+
+    /// Where the daemon's am came from, as DaemonInfo.install says it.
+    nonisolated static func place(_ install: String?) -> String {
+        switch install {
+        case "managed": "Run by Agentman for Mac from ~/.agentman/bin/am"
+        case "app": "Run from inside the app"
+        case "homebrew": "Installed with Homebrew"
+        case "npm": "Installed with npm"
+        case "download": "Installed with the install script, or by hand"
+        default: "An am from before this app"
+        }
     }
 }
 
