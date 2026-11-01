@@ -66,4 +66,6 @@ test("models read as people say them, and names already meant for people are kep
   assert.equal(modelLabel("auto"), "Auto");
   assert.equal(modelLabel("Gemini 3.8 Pro (High)"), "Gemini 3.8 Pro (High)");
   assert.equal(modelLabel("Opus 5.5"), "Opus 5.5");
+  assert.equal(modelLabel("muse-spark-1.3-contributor"), "Muse Spark 1.3");
+  assert.equal(modelLabel("muse-wonder-1.0"), "Muse Wonder 1.0");
 });

@@ -36,6 +36,7 @@ type MuseSource struct {
 	holds      museHolds
 	answers    museAnswers
 	foreground museForeground
+	catalog    museCatalog
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -43,7 +44,9 @@ type MuseSource struct {
 
 // NewMuseSource returns the adapter; Connect starts its connection.
 func NewMuseSource() *MuseSource {
-	return newMuseSourceWith(newMuseHost(museServe), "")
+	s := newMuseSourceWith(newMuseHost(museServe), "")
+	s.catalog.fetch = s.fetchCatalog
+	return s
 }
 
 func newMuseSourceWith(host *museHost, home string) *MuseSource {
@@ -150,6 +153,7 @@ func (s *MuseSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 		if meta.State == protocol.StateBusy && s.foregroundDone(session.SessionID) {
 			meta.State = protocol.StateIdle
 		}
+		s.offerModels(&meta)
 		found = append(found, meta)
 	}
 	for id := range open {

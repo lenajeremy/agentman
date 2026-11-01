@@ -728,3 +728,69 @@ func TestMuseAgentIsDoneWhenItsAnswerIs(t *testing.T) {
 	fake.notify("turn/started", map[string]any{"sessionId": "s", "turnId": "t2"})
 	waitFor(t, "the next turn to count as working", func() bool { return state() == protocol.StateBusy })
 }
+
+// The apps can switch a Muse session to another of Muse's models: Agentman
+// lists Muse's catalog in the session's own mode (contributor here), takes
+// the session for the switch, and reads it back.
+func TestMuseModelsAreListedAndSwitched(t *testing.T) {
+	source, fake := startFakeMuse(t, t.TempDir())
+	var mu sync.Mutex
+	model := "muse-spark-1.3-contributor"
+	var asked map[string]any
+	fake.answers["model/list"] = func(json.RawMessage) (any, *museRPCError) {
+		return map[string]any{"providerId": "meta", "source": "providerCatalog", "models": []any{
+			map[string]any{"modelId": "muse-wonder-1.0", "providerId": "meta", "profileId": nil},
+			map[string]any{"modelId": "muse-wonder-1.0-contributor", "providerId": "meta", "profileId": "tbh"},
+			map[string]any{"modelId": "muse-spark-1.3", "providerId": "meta", "profileId": nil},
+			map[string]any{"modelId": "muse-spark-1.3-contributor", "providerId": "meta", "profileId": "tbh"},
+		}}, nil
+	}
+	fake.answers["session/list"] = func(json.RawMessage) (any, *museRPCError) {
+		mu.Lock()
+		defer mu.Unlock()
+		return map[string]any{"sessions": []any{map[string]any{"sessionId": "s", "kind": "root", "status": "idle", "modelId": model,
+			"updatedAt": time.Now().UTC().Format(time.RFC3339)}}}, nil
+	}
+	fake.answers["session/resume"] = func(json.RawMessage) (any, *museRPCError) { return map[string]any{}, nil }
+	fake.answers["session/setModel"] = func(params json.RawMessage) (any, *museRPCError) {
+		mu.Lock()
+		defer mu.Unlock()
+		_ = json.Unmarshal(params, &asked)
+		model = asked["model"].(map[string]any)["modelId"].(string)
+		return map[string]any{"status": "accepted"}, nil
+	}
+	fake.answers["session/read"] = func(json.RawMessage) (any, *museRPCError) {
+		mu.Lock()
+		defer mu.Unlock()
+		return map[string]any{"session": map[string]any{"sessionId": "s", "status": "idle", "modelId": model}}, nil
+	}
+
+	var offered protocol.Session
+	waitFor(t, "Muse's models to be offered", func() bool {
+		sessions, _ := source.Discover(context.Background())
+		if len(sessions) == 1 && len(sessions[0].Models) > 0 {
+			offered = sessions[0]
+			return true
+		}
+		return false
+	})
+	if offered.ModelScope != protocol.ModelScopeSession || len(offered.Models) != 2 ||
+		offered.Models[0] != "muse-wonder-1.0-contributor" || offered.Models[1] != "muse-spark-1.3-contributor" {
+		t.Fatalf("offered: %+v (%s)", offered.Models, offered.ModelScope)
+	}
+	if err := source.SetModel(context.Background(), "muse:s", "muse-wonder-1.0-contributor"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	selection, _ := asked["model"].(map[string]any)
+	mu.Unlock()
+	if selection["modelId"] != "muse-wonder-1.0-contributor" || selection["providerId"] != "meta" || selection["profileId"] != "tbh" || asked["sessionId"] != "s" {
+		t.Fatalf("setModel params: %v", asked)
+	}
+	if !fake.called("session/resume") {
+		t.Fatal("a switch needs the session taken first")
+	}
+	if err := source.SetModel(context.Background(), "muse:s", "gpt-9"); err == nil {
+		t.Fatal("a model Muse doesn't offer must be refused")
+	}
+}

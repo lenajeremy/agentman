@@ -34,6 +34,11 @@ enum SessionLabels {
             let rest = m.2.map { " " + $0.split(separator: "-").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ") } ?? ""
             return "GPT-\(m.1)\(rest)"
         }
+        // Meta Muse: muse-spark-1.3-contributor is "Muse Spark 1.3", as Muse's
+        // terminal says it (contributor is the account's mode, not a model).
+        if let m = raw.wholeMatch(of: /(?i)muse-([a-z]+)-(\d+(?:\.\d+)*)(?:-contributor)?/) {
+            return "Muse " + m.1.prefix(1).uppercased() + m.1.dropFirst().lowercased() + " \(m.2)"
+        }
         if raw == "auto" { return "Auto" }
         return raw
     }

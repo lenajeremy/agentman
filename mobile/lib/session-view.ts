@@ -85,6 +85,12 @@ export function modelLabel(model: string): string {
     const rest = gpt[2] ? " " + gpt[2].split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ") : "";
     return `GPT-${gpt[1]}${rest}`;
   }
+  // Meta Muse: muse-spark-1.3-contributor is "Muse Spark 1.3", as Muse's
+  // terminal says it (contributor is the account's mode, not a model).
+  const muse = raw.match(/^muse-([a-z]+)-(\d+(?:\.\d+)*)(?:-contributor)?$/i);
+  if (muse) {
+    return `Muse ${muse[1].charAt(0).toUpperCase()}${muse[1].slice(1).toLowerCase()} ${muse[2]}`;
+  }
   if (raw === "auto") return "Auto";
   return raw;
 }
