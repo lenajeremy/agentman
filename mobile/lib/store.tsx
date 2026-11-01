@@ -77,6 +77,7 @@ import {
   DaemonInfo,
   Folder,
   Usage,
+  Limits,
   SearchResults,
   Message,
   Tool,
@@ -202,6 +203,9 @@ interface Store {
   /** What the agents on the Mac spent over the last days days (0: all of
    *  it), as the daemon sums it from their own records. */
   usage(days: number): Promise<Usage>;
+  /** What is left of each agent's plan on the Mac. The Mac keeps its answer
+   *  for a couple of minutes; force reads the limits again. */
+  limits(force?: boolean): Promise<Limits>;
   /** Finds words in what was said in every conversation on the Mac, the
    *  best message of each; with a session, every match there, in order. */
   search(query: string, sessionId?: string): Promise<SearchResults>;
@@ -849,7 +853,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       case "session_ended":
       case "session_started":
       case "artifacts":
-      case "usage": {
+      case "usage":
+      case "limits": {
         if (replyTo) settleLaunchRequest(replyTo, event);
         break;
       }
@@ -1616,6 +1621,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             resolve: (event) => event.usage ? resolve(event.usage) : reject(new Error("The Mac didn't say what the agents spent.")),
             reject: (error) => reject(/unsupported request|usage covers/.test(error.message)
               ? new Error("Update agentman on your Mac to see usage here.")
+              : error),
+            timer,
+          });
+        });
+      },
+
+      limits(force) {
+        return new Promise<Limits>((resolve, reject) => {
+          const id = clientRef.current?.send(force ? { type: "limits", force: true } : { type: "limits" });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          // Asking Claude Code takes the Mac a second or two.
+          const timer = setTimeout(() => settleLaunchRequest(id), 60_000);
+          launchRequests.current.set(id, {
+            resolve: (event) => event.limits ? resolve(event.limits) : reject(new Error("The Mac didn't say what is left of the plans.")),
+            reject: (error) => reject(/unsupported request/.test(error.message)
+              ? new Error("Update agentman on your Mac to see plan limits here.")
               : error),
             timer,
           });

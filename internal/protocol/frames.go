@@ -286,7 +286,7 @@ type Request struct {
 	// directory as ReqListChanges names them.
 	Paths []string `json:"paths,omitempty"`
 	// Force removes a worktree with uncommitted changes or an agent in it,
-	// on ReqRemoveWorktree.
+	// on ReqRemoveWorktree, and reads plan limits again on ReqLimits.
 	Force bool `json:"force,omitempty"`
 	// IgnoreWhitespace leaves changes to whitespace alone out of a
 	// ReqFileDiff or a ReqCommitDiff, as `git diff -w` does.
@@ -384,6 +384,7 @@ type Event struct {
 	Worktree  *Worktree        `json:"worktree,omitempty"`
 	Worktrees []Worktree       `json:"worktrees,omitempty"`
 	Usage     *Usage           `json:"usage,omitempty"`
+	Limits    *Limits          `json:"limits,omitempty"`
 	PairCode  *PairCode        `json:"pairCode,omitempty"`
 	Devices   []Device         `json:"devices,omitempty"`
 	Search    *SearchResults   `json:"search,omitempty"`
