@@ -257,7 +257,7 @@ export function QuestionCard({
       {question.prompt ? <Text style={styles.prompt}>{question.prompt}</Text> : null}
 
       <View style={styles.options}>
-        {question.options.map((option) => {
+        {question.options.map((option, index) => {
           // The CLI's own highlighted choice is its default. Marking it
           // helps, but nothing is preselected here — a tap is a decision.
           const isSelected = selected.includes(option.key);
@@ -299,9 +299,13 @@ export function QuestionCard({
                       }
                 }
               >
+                {/* Its place in the list, as the Mac shows it. The key is what
+                    the answer sends: a menu number for a terminal agent, but
+                    the whole label or an id for agents answered over an API,
+                    which squeezed the label out of its own row. */}
                 <View style={[styles.optionKeyWrap, primary && styles.optionKeyWrapPrimary]}>
                   <Text style={[styles.optionKey, primary && styles.optionKeyPrimary]}>
-                    {option.key}
+                    {index + 1}
                   </Text>
                 </View>
                 <View style={styles.optionCopy}>
@@ -321,6 +325,7 @@ export function QuestionCard({
                     name={noteOpen ? "chevron-up" : "message-square"}
                     size={15}
                     color={primary ? color.onInverse : color.muted}
+                    style={styles.noteIcon}
                   />
                 ) : isSelected ? (
                   <View style={[styles.checkMark, primary && styles.checkMarkPrimary]}>
@@ -591,13 +596,15 @@ const makeStyles = (c: Palette) =>
     quickLabelPrimary: { color: c.onInverse },
 
     options: { gap: space.sm, marginTop: space.xs },
+    // The number sits on the label's first line, not halfway down a long
+    // description; a one-line option is as tall as before and stays even.
     option: {
       flexDirection: "row",
-      alignItems: "center",
+      alignItems: "flex-start",
       gap: space.md,
       minHeight: 54,
       paddingHorizontal: space.lg,
-      paddingVertical: 10,
+      paddingVertical: 15,
       borderRadius: radius.lg,
       backgroundColor: c.surface,
       borderWidth: 1,
@@ -624,7 +631,8 @@ const makeStyles = (c: Palette) =>
       color: c.muted,
     },
     optionKeyPrimary: { color: c.onInverse },
-    optionCopy: { flex: 1, gap: space.xxs },
+    // Centres the label's first line on the 24-point number beside it.
+    optionCopy: { flex: 1, gap: space.xxs, paddingTop: 2 },
     optionLabel: { ...font.sansMedium, fontSize: size.body, color: c.text },
     optionLabelPrimary: { ...font.sansBold, color: c.onInverse },
     optionDescription: {
@@ -654,12 +662,14 @@ const makeStyles = (c: Palette) =>
     checkMark: {
       width: 22,
       height: 22,
+      marginTop: 1,
       borderRadius: 11,
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: c.working,
     },
     checkMarkPrimary: { backgroundColor: c.onInverse },
+    noteIcon: { marginTop: 4 },
     customInput: {
       minHeight: 54,
       borderRadius: radius.lg,
