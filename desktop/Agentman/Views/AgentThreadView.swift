@@ -23,6 +23,11 @@ struct AgentThreadView: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.detailHeaderLeading) private var headerLeading
     @State private var confirmEnd = false
+    @State private var confirmTakeOver = false
+    /// A move in flight, and whether its terminal is to be shown once the
+    /// session is in its pane.
+    @State private var moving = false
+    @State private var showTerminalWhenReady = false
     /// Removing the worktree the agent works in: asked first, then, if it
     /// holds work or an agent, asked again with why.
     @State private var confirmRemoveWorktree = false
@@ -114,6 +119,18 @@ struct AgentThreadView: View {
                     }
                 }
             }
+            .confirmationDialog("Take this session over from its terminal?", isPresented: $confirmTakeOver) {
+                Button("Take Over") { move() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Its terminal closes, and the conversation carries on here.")
+            }
+            .onChange(of: session.inject) { _, inject in
+                if showTerminalWhenReady, inject == "tmux" {
+                    showTerminalWhenReady = false
+                    showAgentTerminal()
+                }
+            }
             .confirmationDialog("End this session?", isPresented: $confirmEnd) {
                 Button("End session") { Task { store.actionError[session.id] = await store.end(session.id) } }
                 Button("Cancel", role: .cancel) {}
@@ -183,7 +200,7 @@ struct AgentThreadView: View {
             .keyboardShortcut("d", modifiers: [.command, .shift])
             ChromeButton(symbol: "sidebar.right", help: showFiles ? "Hide the workspace (⇧⌘E)" : "Files, changes and history (⇧⌘E)", active: showFiles) { showFiles.toggle() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
-            if folderExists || Self.endable(session) {
+            if folderExists || Self.endable(session) || session.handoff != nil {
                 Menu {
                     if folderExists {
                         Button("Open in Editor") { EditorOpener.open(folder: session.cwd, with: openWindow) }
@@ -200,6 +217,11 @@ struct AgentThreadView: View {
                                 Button("Remove This Worktree…") { confirmRemoveWorktree = true }
                             }
                         }
+                    }
+                    if let item = Self.handoffItem(session, moving: moving) {
+                        Divider()
+                        Button(item.title) { if item.confirms { confirmTakeOver = true } else { move() } }
+                            .disabled(!item.enabled)
                     }
                     if Self.endable(session) { Button("End Session…") { confirmEnd = true } }
                 } label: { Image(systemName: "ellipsis").frame(width: 24, height: 26) }
@@ -444,6 +466,38 @@ struct AgentThreadView: View {
     /// A session running in a terminal agentman can close and reopen.
     static func endable(_ session: Session) -> Bool {
         session.inject == "tmux" && resumableKinds.contains(session.kind)
+    }
+
+    /// The "…" menu's entry that moves the session: Open in Terminal for one
+    /// Agentman runs itself, Take Over for one in Agentman's pane. Only
+    /// between turns, as the daemon refuses mid-turn; Take Over asks first,
+    /// since it closes a terminal.
+    static func handoffItem(_ session: Session, moving: Bool) -> (title: String, enabled: Bool, confirms: Bool)? {
+        let working = session.state == .busy || session.question != nil || moving
+        switch session.handoff {
+        case "terminal":
+            return (working ? "Open in Terminal After This Turn" : "Open in Terminal", !working, false)
+        case "agentman":
+            return (working ? "Take Over After This Turn" : "Take Over from Terminal…", !working, true)
+        default:
+            return nil
+        }
+    }
+
+    /// Moves the session to the other side of its handoff. Into a terminal,
+    /// that terminal is shown once the session is in it.
+    private func move() {
+        guard !moving, let handoff = session.handoff else { return }
+        moving = true
+        Task {
+            let problem = await store.handoff(session.id)
+            moving = false
+            store.actionError[session.id] = problem
+            if problem == nil, handoff == "terminal" {
+                // The view's copy may predate the move; the store's is current.
+                if store.session(session.id)?.inject == "tmux" { showAgentTerminal() } else { showTerminalWhenReady = true }
+            }
+        }
     }
 
     private var isEmpty: Bool {
