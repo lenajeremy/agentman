@@ -408,6 +408,15 @@ func runDoctor(ctx context.Context, args []string) error {
 	} else {
 		check(true, "hook listener", "responding on "+listenAddr)
 	}
+	// Where Agentman for Mac manages the daemon, say so; for anyone else
+	// this section reads as it always did.
+	if managed, ok := managedBinary(); ok {
+		detail := collapseHome(managed) + ", the copy " + update.ManagingApp + " manages"
+		if marker, _ := update.ReadMarker(managed); marker.AppVersion != "" {
+			detail += " (installed by " + marker.AppVersion + ")"
+		}
+		check(true, "daemon's am", detail)
+	}
 	// Being behind is worth knowing, not a fault: the old version still works.
 	switch {
 	case version == "dev":
