@@ -2,6 +2,15 @@
   "url": "https://testflight.apple.com/join/UcJvsjED",
   "builds": [
     {
+      "build": 33,
+      "version": "0.8.0",
+      "date": "2026-11-01T03:47:20.185Z",
+      "changes": [
+        "Agent threads are calmer: the agent's work sits in small grey pills under its words, background tasks say what finished, and the mode moved down beside the model so the header is one row.",
+        "Pictures you send Agentman now show, and open full screen when tapped. You can paste a screenshot into Agentman's box, and close (or swipe away) its news cards."
+      ]
+    },
+    {
       "build": 32,
       "version": "0.7.0",
       "date": "2026-11-01T03:47:17.122Z",
