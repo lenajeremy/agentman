@@ -44,9 +44,7 @@ type MuseSource struct {
 
 // NewMuseSource returns the adapter; Connect starts its connection.
 func NewMuseSource() *MuseSource {
-	s := newMuseSourceWith(newMuseHost(museServe), "")
-	s.catalog.fetch = s.fetchCatalog
-	return s
+	return newMuseSourceWith(newMuseHost(museServe), "")
 }
 
 func newMuseSourceWith(host *museHost, home string) *MuseSource {
