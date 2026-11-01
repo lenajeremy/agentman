@@ -36,6 +36,12 @@ type Scanner struct {
 	// antigravityRoots.
 	antigravity      *antigravityReader
 	antigravityRoots []string
+	// muse reads Muse's session logs under museRoot; kiro Kiro's chats in
+	// kiroDir.
+	muse     *museReader
+	museRoot string
+	kiro     *kiroReader
+	kiroDir  string
 }
 
 func NewScanner(home string, prices *Prices) *Scanner {
@@ -51,6 +57,10 @@ func NewScanner(home string, prices *Prices) *Scanner {
 		openCodeDB:       filepath.Join(data, "opencode", "opencode.db"),
 		antigravity:      newAntigravityReader(),
 		antigravityRoots: antigravityRoots(home),
+		muse:             newMuseReader(),
+		museRoot:         filepath.Join(data, "muse", "sessions"),
+		kiro:             newKiroReader(),
+		kiroDir:          filepath.Join(home, ".kiro", "sessions", "cli"),
 	}
 }
 
@@ -103,7 +113,9 @@ func (s *Scanner) read(ctx context.Context, since time.Time, catalog Catalog, lo
 	}
 	opencode, skippedOpenCode := readOpenCode(ctx, s.openCodeDB, since)
 	antigravity, skippedAntigravity := s.antigravity.read(ctx, s.antigravityRoots, since)
-	others := spends(append(opencode, antigravity...), catalog)
+	muse, skippedMuse := s.muse.read(s.museRoot, since)
+	kiro, skippedKiro := s.kiro.read(s.kiroDir, since)
+	others := spends(slices.Concat(opencode, antigravity, muse, kiro), catalog)
 	for _, c := range others {
 		if first == 0 || c.at < first {
 			first = c.at
@@ -113,7 +125,7 @@ func (s *Scanner) read(ctx context.Context, since time.Time, catalog Catalog, lo
 	if first != 0 {
 		earliest = time.Unix(0, first)
 	}
-	return append(sums, others), earliest, skipped + skippedOpenCode + skippedAntigravity
+	return append(sums, others), earliest, skipped + skippedOpenCode + skippedAntigravity + skippedMuse + skippedKiro
 }
 
 // Summary sums the last days days, or everything the records hold for 0.
@@ -358,7 +370,7 @@ func summarize(sums [][]spend, catalog Catalog, days int, from time.Time, unit U
 				}
 				counted[s.key] = true
 				most := largest[s.key]
-				s.tokens, s.write1h, s.long, s.fast = most.tokens, most.write1h, most.long, most.fast
+				s.tokens, s.write1h, s.long, s.fast, s.credits = most.tokens, most.write1h, most.long, most.fast, most.credits
 			}
 			if s.at < start || s.at > end {
 				continue
@@ -384,6 +396,7 @@ func summarize(sums [][]spend, catalog Catalog, days int, from time.Time, unit U
 			}
 			a.Tokens = a.Tokens.Add(s.tokens)
 			a.Cost += spent.Total()
+			a.Credits += s.credits
 			sessions[sessionKey{l.agent, l.session}] = true
 
 			key := modelKey{l.agent, l.model}
@@ -394,12 +407,14 @@ func summarize(sums [][]spend, catalog Catalog, days int, from time.Time, unit U
 			}
 			m.Tokens = m.Tokens.Add(s.tokens)
 			m.Cost += spent.Total()
+			m.Credits += s.credits
 			if part := modePart(m, s); part != nil {
 				part.Tokens = part.Tokens.Add(s.tokens)
 				part.Cost += spent.Total()
 			}
 
 			u.Tokens = u.Tokens.Add(s.tokens)
+			u.Credits += s.credits
 			u.Cost.Input += spent.Input
 			u.Cost.CacheRead += spent.CacheRead
 			u.Cost.CacheWrite += spent.CacheWrite
@@ -408,6 +423,12 @@ func summarize(sums [][]spend, catalog Catalog, days int, from time.Time, unit U
 			if i := bucket(s.at); i >= 0 {
 				u.Buckets[i].Cost[l.agent] += spent.Total()
 				u.Buckets[i].Tokens[l.agent] += s.tokens.Total()
+				if s.credits > 0 {
+					if u.Buckets[i].Credits == nil {
+						u.Buckets[i].Credits = map[protocol.Kind]float64{}
+					}
+					u.Buckets[i].Credits[l.agent] += s.credits
+				}
 			}
 		}
 	}
