@@ -270,7 +270,9 @@ func Summarize(records []Record, catalog Catalog, days int, from time.Time, unit
 }
 
 // summarize sums what was spent from from to now in buckets a unit wide. A
-// call more than one log holds is counted where it is first found.
+// call more than one log holds is counted once, where it is first found,
+// with the largest counts any of them holds: one may hold only a reply's
+// first lines, written before its output was all counted.
 func summarize(sums [][]spend, catalog Catalog, days int, from time.Time, unit Unit, now time.Time, skipped int) protocol.Usage {
 	u := protocol.Usage{Days: days, Hourly: unit == Hour, Unit: string(unit), Skipped: skipped}
 	var starts []int64
@@ -298,31 +300,51 @@ func summarize(sums [][]spend, catalog Catalog, days int, from time.Time, unit U
 		Price
 		ok bool
 	}
+	type priceKey struct {
+		label *label
+		fast  bool
+	}
 	agents := map[protocol.Kind]*protocol.AgentUsage{}
 	models := map[modelKey]*protocol.ModelUsage{}
 	sessions := map[sessionKey]bool{}
-	prices := map[*label]priced{}
-	seen := map[uint64]bool{}
+	prices := map[priceKey]priced{}
+	largest := map[uint64]spend{}
+	for _, part := range sums {
+		for _, s := range part {
+			if s.key == 0 {
+				continue
+			}
+			if most, ok := largest[s.key]; ok {
+				most.grow(s)
+				largest[s.key] = most
+			} else {
+				largest[s.key] = s
+			}
+		}
+	}
+	counted := map[uint64]bool{}
 	start, end := from.UnixNano(), now.UnixNano()
 	for _, part := range sums {
 		for _, s := range part {
+			if s.key != 0 {
+				if counted[s.key] {
+					continue
+				}
+				counted[s.key] = true
+				most := largest[s.key]
+				s.tokens, s.write1h, s.long, s.fast = most.tokens, most.write1h, most.long, most.fast
+			}
 			if s.at < start || s.at > end {
 				continue
 			}
-			if s.key != 0 {
-				if seen[s.key] {
-					continue
-				}
-				seen[s.key] = true
-			}
 			l := s.label
-			price, found := prices[l]
+			price, found := prices[priceKey{l, s.fast}]
 			if !found {
 				price.Price, price.ok = catalog.Lookup(l.provider, l.model)
-				if l.mode == modeFast {
+				if s.fast {
 					price.Price = price.fast(l.model)
 				}
-				prices[l] = price
+				prices[priceKey{l, s.fast}] = price
 			}
 			var spent protocol.UsageCost
 			if price.ok {
@@ -346,7 +368,7 @@ func summarize(sums [][]spend, catalog Catalog, days int, from time.Time, unit U
 			}
 			m.Tokens = m.Tokens.Add(s.tokens)
 			m.Cost += spent.Total()
-			if part := modePart(m, l.mode); part != nil {
+			if part := modePart(m, s); part != nil {
 				part.Tokens = part.Tokens.Add(s.tokens)
 				part.Cost += spent.Total()
 			}
@@ -388,14 +410,14 @@ func summarize(sums [][]spend, catalog Catalog, days int, from time.Time, unit U
 	return u
 }
 
-// modePart is the part of a model's share its calls in a mode add to, made
-// when first needed: nil for calls made the usual way.
-func modePart(m *protocol.ModelUsage, mode string) *protocol.UsagePart {
+// modePart is the part of a model's share calls run fast or advising add
+// to, made when first needed: nil for calls made the usual way.
+func modePart(m *protocol.ModelUsage, s spend) *protocol.UsagePart {
 	var part **protocol.UsagePart
-	switch mode {
-	case modeFast:
+	switch {
+	case s.fast:
 		part = &m.Fast
-	case modeAdvisor:
+	case s.advisor:
 		part = &m.Advisor
 	default:
 		return nil

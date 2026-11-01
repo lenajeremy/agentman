@@ -426,29 +426,47 @@ func TestLongPromptsAreToldApartAtTheCatalogsLength(t *testing.T) {
 	}
 }
 
-// A reply whose lines run past a range's start counts from its first line in
-// the range: the lines before it, and what they said, are left out.
-func TestAReplyRunningPastARangesStartCountsFromItsLinesInIt(t *testing.T) {
+// A reply's output grows from line to line as it streams. It counts once,
+// at its first line's time, with the most its lines count: read at once or
+// a read between its lines, across a slot's edge or a range's start, and
+// with a copy in another log that holds only its first line.
+func TestAReplyCountsItsFinalOutputAtItsFirstLine(t *testing.T) {
+	ctx := context.Background()
 	now := time.Date(2026, 10, 31, 15, 30, 0, 0, time.Local)
 	start, _ := Window(7, now)
-	early := claudeLine("a", start.Add(-500*time.Millisecond).UTC().Format(time.RFC3339Nano), "claude-opus-5-5", 2, 0, 0, 0, 1)
-	late := claudeLine("a", start.Add(500*time.Millisecond).UTC().Format(time.RFC3339Nano), "claude-opus-5-5", 2, 0, 0, 0, 100)
-	for _, together := range []bool{true, false} {
+	line := func(id string, at time.Time, output int) string {
+		return claudeLine(id, at.UTC().Format(time.RFC3339Nano), "claude-opus-5-5", 2, 0, 0, 5000, output)
+	}
+	// a runs past the week's start; b, in the week, past an hour's end.
+	a := []string{line("a", start.Add(-time.Second), 8), line("a", start.Add(time.Second), 60), line("a", start.Add(2*time.Second), 100)}
+	day := start.AddDate(0, 0, 3)
+	b := []string{line("b", day.Add(59*time.Minute), 8), line("b", day.Add(61*time.Minute), 300)}
+	week := protocol.Tokens{Input: 2, CacheRead: 5000, Output: 300}
+	month := protocol.Tokens{Input: 4, CacheRead: 10000, Output: 400}
+	for _, apart := range []bool{false, true} {
 		home := t.TempDir()
 		path := filepath.Join(home, ".claude/projects/p/s.jsonl")
 		s := NewScanner(home, WithCatalog(prices))
-		if together {
-			write(t, path, early, late)
+		if apart {
+			write(t, path, a[0], b[0])
+			s.Summary(ctx, 30, now)
+			appendLines(t, path, a[1]+"\n")
+			s.Summary(ctx, 7, now)
+			appendLines(t, path, a[2]+"\n"+b[1]+"\n")
 		} else {
-			write(t, path, early)
-			s.Summary(context.Background(), 30, now)
-			appendLines(t, path, late+"\n")
+			write(t, path, append(a, b...)...)
 		}
-		if u := s.Summary(context.Background(), 7, now); u.Tokens != (protocol.Tokens{Input: 2, Output: 100}) {
-			t.Errorf("read together %v, the week: %+v", together, u.Tokens)
-		}
-		if u := s.Summary(context.Background(), 30, now); u.Tokens != (protocol.Tokens{Input: 2, Output: 1}) {
-			t.Errorf("read together %v, the month: %+v", together, u.Tokens)
+		for _, copied := range []bool{false, true} {
+			if copied {
+				write(t, filepath.Join(home, ".claude/projects/p/copy.jsonl"), a[0], b[0])
+			}
+			u := s.Summary(ctx, 7, now)
+			if u.Tokens != week || u.Buckets[3].Tokens[protocol.KindClaude] != week.Total() {
+				t.Errorf("apart %v, copied %v, the week: %+v, its fourth day %d", apart, copied, u.Tokens, u.Buckets[3].Tokens[protocol.KindClaude])
+			}
+			if u := s.Summary(ctx, 30, now); u.Tokens != month || math.Abs(u.Cost.Total()-(4*4+10000*0.2+400*20)/1e6) > 1e-12 {
+				t.Errorf("apart %v, copied %v, the month: %+v, $%v", apart, copied, u.Tokens, u.Cost.Total())
+			}
 		}
 	}
 }
@@ -512,5 +530,29 @@ func TestClaudesFastModeAndAdvisorsAreCountedAtTheirPrices(t *testing.T) {
 	}
 	if len(u.Models) != 3 || u.Sessions != 1 {
 		t.Errorf("%d models, %d sessions", len(u.Models), u.Sessions)
+	}
+}
+
+// A reply's first lines may not say its speed: one that turns out to have
+// run fast is charged as fast, though its first line was read and summed
+// before the line that says so was written.
+func TestAReplyIsFastWhenALaterLineSaysSo(t *testing.T) {
+	home := t.TempDir()
+	at := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	reply := func(speed string, output int) string {
+		return `{"type":"assistant","timestamp":"` + at + `","sessionId":"s1","requestId":"req_f","message":{"id":"msg_f","model":"claude-opus-5-5",` +
+			`"usage":{"input_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":` + itoa(output) + speed + `}}}`
+	}
+	path := filepath.Join(home, ".claude/projects/p/s.jsonl")
+	write(t, path, reply("", 8))
+	s := NewScanner(home, WithCatalog(prices))
+	if u := s.Summary(context.Background(), 7, time.Now()); math.Abs(u.Cost.Total()-(10*4+8*20)/1e6) > 1e-12 {
+		t.Fatalf("its first line: $%v", u.Cost.Total())
+	}
+	appendLines(t, path, reply(`,"speed":"fast"`, 500)+"\n")
+	u := s.Summary(context.Background(), 7, time.Now())
+	if want := 2 * (10*4 + 500*20) / 1e6; u.Tokens != (protocol.Tokens{Input: 10, Output: 500}) || math.Abs(u.Cost.Total()-want) > 1e-12 ||
+		len(u.Models) != 1 || u.Models[0].Fast == nil || u.Models[0].Fast.Tokens.Total() != 510 {
+		t.Errorf("its last line ran fast: %+v, $%v, %+v", u.Tokens, u.Cost.Total(), u.Models)
 	}
 }

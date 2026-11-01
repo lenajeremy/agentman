@@ -50,39 +50,54 @@ const (
 
 // What is kept of the logs is what the summaries need: a log's calls are
 // summed as they are read, by label and by the slot of time they fall in.
-// Only a call whose count depends on the range asked for is kept by itself:
-// one another log holds too, or one whose lines run from one slot into the
-// next.
+// Only a call that another log holds too is kept by itself, so that it is
+// counted once.
+//
+// A Claude reply is written over several lines as it streams, its output
+// growing from one line to the next, and its speed and iterations only on
+// the later lines: a reply counts once, at the time of its first line, with
+// the largest counts its lines, and the copies other logs hold, give.
 
-// label is what calls are summed by, besides their time: the agent, the
-// model, the session and the mode. Each is made once, however many sums
+// label is what calls are summed by, besides their time and mode: the
+// agent, the model and the session. Each is made once, however many sums
 // share it.
 type label struct {
 	agent    protocol.Kind
 	provider string // the catalog's provider: anthropic, openai, google
 	model    string
 	session  string
-	mode     string
 	// limit is the prompt length past which the model's price rises, by the
 	// catalog the label was made with: 0 for none.
 	limit int64
 }
 
-// spend is calls summed: one call, or a log's calls of one label in one
-// slot.
+// spend is calls summed: one call, or a log's calls of one label and mode in
+// one slot.
 type spend struct {
 	// at is when the call was made, or when its slot starts, in nanoseconds
 	// since 1970.
 	at    int64
 	label *label
 	// key names a call kept by itself, to count it once however many logs
-	// or lines hold it: 0 for sums.
+	// hold it: 0 for sums.
 	key     uint64
 	tokens  protocol.Tokens
 	write1h int64
 	// long is true for calls whose prompt passed their model's limit,
-	// charged the dearer price.
-	long bool
+	// charged the dearer price; fast for calls run in Claude's fast mode, and
+	// advisor for a model consulted during another's turn.
+	long, fast, advisor bool
+}
+
+// grow takes in another line or copy of the same call: the largest of each
+// count, as a reply's output grows from line to line.
+func (s *spend) grow(o spend) {
+	s.tokens = protocol.Tokens{
+		Input: max(s.tokens.Input, o.tokens.Input), CacheRead: max(s.tokens.CacheRead, o.tokens.CacheRead),
+		CacheWrite: max(s.tokens.CacheWrite, o.tokens.CacheWrite), Output: max(s.tokens.Output, o.tokens.Output),
+	}
+	s.write1h = max(s.write1h, o.write1h)
+	s.long, s.fast = s.long || o.long, s.fast || o.fast
 }
 
 // keySeed hashes call keys. The chance that two of the hundred thousand or
@@ -107,8 +122,8 @@ type labels struct {
 	catalog Catalog
 }
 
-func (ls *labels) get(agent protocol.Kind, provider, model, session, mode string) *label {
-	key := label{agent: agent, provider: provider, model: model, session: session, mode: mode}
+func (ls *labels) get(agent protocol.Kind, provider, model, session string) *label {
+	key := label{agent: agent, provider: provider, model: model, session: session}
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 	if l := ls.made[key]; l != nil {
@@ -166,6 +181,24 @@ func slot(at int64, loc *time.Location) int64 {
 	return (seconds - ((seconds%width)+width)%width) * int64(time.Second)
 }
 
+const quarterHour = int64(15 * time.Minute)
+
+// written is what a log keeps of a call with a key once it is summed: the
+// slot its first line fell in and whether it ran fast, and the most output
+// its lines have counted, so that a later line counting more adds only the
+// difference. A reply's lines don't change its other counts: on this Mac's
+// 69,000 replies written more than once, never.
+type written struct {
+	key uint64
+	// at is the start of the slot, in quarter hours since 1970, doubled,
+	// and one more for a call run fast.
+	at     int32
+	output int32
+}
+
+func (w written) slot() int64 { return int64(w.at>>1) * quarterHour }
+func (w written) fast() bool  { return w.at&1 == 1 }
+
 // fileState is what was read from one append-only log, so the next read
 // starts where this one stopped.
 type fileState struct {
@@ -175,28 +208,23 @@ type fileState struct {
 	skipped int
 	// first is when the log's earliest call was made, 0 before one.
 	first int64
-	// slots sums the log's calls by slot, label and length. calls are kept
-	// one by one instead where which line of a call counts depends on the
-	// range: those another log holds too, counted from the first log that
-	// holds them, and those whose lines fall in more than one slot (split),
-	// counted from the first line in the range, as when every line was kept.
+	// slots sums the log's calls by slot, label, mode and length; calls are
+	// those another log holds too, one by one, each counted once.
 	slots []spend
 	calls []spend
-	split []uint64
-	// keys are the keys of the log's calls, sorted, and quarters the quarter
-	// hour each was first written in: a call written again in it, on the
-	// next line or much later, adds nothing.
-	keys     []uint64
-	quarters []int32
+	// keys are the log's calls with a key, sorted by it.
+	keys []written
 	// fresh are this read's calls with a key, until it is known whether
-	// another log holds them too; added holds the quarter of each new key.
-	// reread is set when a call summed before turns out to be split.
+	// another log holds them too; added finds each by its key. reread is
+	// set when a call summed before has to be summed again.
 	fresh  []spend
-	added  map[uint64]int32
+	added  map[uint64]int
 	reread bool
-	// index finds a slot's sum while the log is read, and last is the label
-	// of the call read last: the next is likely the same.
+	// index finds a slot's sum, and held a call kept by itself, while the
+	// log is read; last is the label of the call read last: the next is
+	// likely the same.
 	index map[slotKey]int
+	held  map[uint64]int
 	last  *label
 	// Codex counts tokens as running totals: the last one seen, whether
 	// one has been, and the model the turn runs on.
@@ -206,47 +234,37 @@ type fileState struct {
 }
 
 type slotKey struct {
-	at    int64
-	label *label
-	long  bool
+	at                  int64
+	label               *label
+	long, fast, advisor bool
+}
+
+// slotOf finds the sum of a slot, making it if asked.
+func (s *fileState) slotOf(key slotKey, make bool) (int, bool) {
+	if s.index == nil {
+		s.index = map[slotKey]int{}
+		for i, sum := range s.slots {
+			s.index[slotKey{sum.at, sum.label, sum.long, sum.fast, sum.advisor}] = i
+		}
+	}
+	if i, ok := s.index[key]; ok || !make {
+		return i, ok
+	}
+	s.index[key] = len(s.slots)
+	s.slots = append(s.slots, spend{at: key.at, label: key.label, long: key.long, fast: key.fast, advisor: key.advisor})
+	return len(s.slots) - 1, true
 }
 
 // sum adds a call to its slot's sum.
 func (s *fileState) sum(c spend, loc *time.Location) {
-	c.at, c.key = slot(c.at, loc), 0
-	key := slotKey{c.at, c.label, c.long}
-	if s.index == nil {
-		s.index = make(map[slotKey]int, len(s.slots))
-		for i, sum := range s.slots {
-			s.index[slotKey{sum.at, sum.label, sum.long}] = i
-		}
-	}
-	if i, ok := s.index[key]; ok {
-		s.slots[i].tokens = s.slots[i].tokens.Add(c.tokens)
-		s.slots[i].write1h += c.write1h
-		return
-	}
-	s.index[key] = len(s.slots)
-	s.slots = append(s.slots, c)
+	i, _ := s.slotOf(slotKey{slot(c.at, loc), c.label, c.long, c.fast, c.advisor}, true)
+	s.slots[i].tokens = s.slots[i].tokens.Add(c.tokens)
+	s.slots[i].write1h += c.write1h
 }
 
-// quarter is the quarter hour a slot starts, counted from 1970.
-func quarter(slot int64) int32 { return int32(slot / int64(15*time.Minute)) }
-
-// written says in which quarter hour the log first wrote a call with this
-// key, if it holds one.
-func (s *fileState) written(key uint64) (int32, bool) {
-	if i, found := slices.BinarySearch(s.keys, key); found {
-		return s.quarters[i], true
-	}
-	q, found := s.added[key]
-	return q, found
-}
-
-// apart says whether a call is kept by itself rather than summed.
-func (s *fileState) apart(key uint64, shared []uint64) bool {
-	_, found := slices.BinarySearch(shared, key)
-	return found || slices.Contains(s.split, key)
+// find is where the log keeps a key, if it does.
+func (s *fileState) find(key uint64) (int, bool) {
+	return slices.BinarySearchFunc(s.keys, key, func(w written, key uint64) int { return cmp.Compare(w.key, key) })
 }
 
 // summed says whether the log summed a call with one of these keys (sorted)
@@ -255,45 +273,72 @@ func (s *fileState) summed(keys []uint64) bool {
 	if len(keys) == 0 {
 		return false
 	}
-	for _, key := range s.keys {
-		if _, found := slices.BinarySearch(keys, key); found &&
-			!slices.ContainsFunc(s.calls, func(c spend) bool { return c.key == key }) {
+	for _, w := range s.keys {
+		if _, found := slices.BinarySearch(keys, w.key); found &&
+			!slices.ContainsFunc(s.calls, func(c spend) bool { return c.key == w.key }) {
 			return true
 		}
 	}
 	return false
 }
 
-// settle sums this read's calls, keeping by itself each one shared or split,
-// and lets go of what was needed only while reading.
+// grow takes in a later line of a call the log holds already: a call kept
+// by itself takes its larger counts; a summed one adds to its slot the
+// output it counts past the most counted before. A summed call whose later
+// line says it ran fast when the first didn't is summed again, from a fresh
+// read of the log.
+func (s *fileState) grow(c spend, loc *time.Location) {
+	if i, ok := s.added[c.key]; ok {
+		s.fresh[i].grow(c)
+		return
+	}
+	if s.held == nil {
+		s.held = map[uint64]int{}
+		for i, call := range s.calls {
+			s.held[call.key] = i
+		}
+	}
+	if i, ok := s.held[c.key]; ok {
+		s.calls[i].grow(c)
+		return
+	}
+	i, _ := s.find(c.key)
+	w := &s.keys[i]
+	if c.tokens.Output <= int64(w.output) && (!c.fast || w.fast()) {
+		return
+	}
+	sum, ok := s.slotOf(slotKey{w.slot(), c.label, c.long, w.fast(), c.advisor}, false)
+	if !ok || c.fast && !w.fast() || slot(c.at, loc) < w.slot() {
+		s.reread = true
+		return
+	}
+	s.slots[sum].tokens.Output += c.tokens.Output - int64(w.output)
+	w.output = int32(c.tokens.Output)
+}
+
+// settle sums this read's calls, keeping by itself each one whose key is
+// shared, and lets go of what was needed only while reading.
 func (s *fileState) settle(shared []uint64, loc *time.Location) {
-	for _, c := range s.fresh {
-		if s.apart(c.key, shared) {
-			s.calls = append(s.calls, c)
-		} else {
-			s.sum(c, loc)
+	if len(s.fresh) > 0 {
+		keys := make([]written, 0, len(s.keys)+len(s.fresh))
+		keys = append(keys, s.keys...)
+		for _, c := range s.fresh {
+			at := int32(slot(c.at, loc)/quarterHour) * 2
+			if c.fast {
+				at++
+			}
+			keys = append(keys, written{key: c.key, at: at, output: int32(c.tokens.Output)})
+			if _, found := slices.BinarySearch(shared, c.key); found {
+				s.calls = append(s.calls, c)
+			} else {
+				s.sum(c, loc)
+			}
 		}
+		slices.SortFunc(keys, func(a, b written) int { return cmp.Compare(a.key, b.key) })
+		s.keys = keys
 	}
-	if len(s.added) > 0 {
-		type written struct {
-			key     uint64
-			quarter int32
-		}
-		all := make([]written, 0, len(s.keys)+len(s.added))
-		for i, key := range s.keys {
-			all = append(all, written{key, s.quarters[i]})
-		}
-		for key, q := range s.added {
-			all = append(all, written{key, q})
-		}
-		slices.SortFunc(all, func(a, b written) int { return cmp.Compare(a.key, b.key) })
-		s.keys, s.quarters = make([]uint64, len(all)), make([]int32, len(all))
-		for i, w := range all {
-			s.keys[i], s.quarters[i] = w.key, w.quarter
-		}
-	}
-	s.fresh, s.added, s.index, s.last = nil, nil, nil, nil
-	s.slots, s.calls, s.split = trim(s.slots), trim(s.calls), trim(s.split)
+	s.fresh, s.added, s.index, s.held, s.last = nil, nil, nil, nil, nil
+	s.slots, s.calls = trim(s.slots), trim(s.calls)
 }
 
 // trim is a slice kept for long, in an array its own size.
@@ -412,8 +457,8 @@ func (l *logs) read(root string, since time.Time, catalog Catalog, loc *time.Loc
 // settle sums the calls just read. One that another log holds too is kept
 // by itself, to be counted once; and when a call already summed turns out
 // to be held by another log as well (a session resumed in a new file
-// carries its earlier calls along), or to be split, its log is read again,
-// for the call to stand by itself.
+// carries its earlier calls along), its log is read again, for the call to
+// stand by itself.
 func (l *logs) settle() {
 	added, held := 0, 0
 	for _, s := range l.files {
@@ -425,7 +470,9 @@ func (l *logs) settle() {
 		// A key found twice among every log's keys is shared.
 		all := make([]uint64, 0, held+added)
 		for _, s := range l.files {
-			all = append(all, s.keys...)
+			for _, w := range s.keys {
+				all = append(all, w.key)
+			}
 			for key := range s.added {
 				all = append(all, key)
 			}
@@ -489,48 +536,39 @@ func (l *logs) readFrom(path string, state *fileState) {
 	}
 }
 
-// take adds a call to its log: summed at once when it has no key, and held
-// until it is known whether another log holds it too when it has, unless the
-// log wrote it already.
+// take adds a call to its log: summed at once when it has no key, held until
+// it is known whether another log holds it too when it has, and taken into
+// what the log holds of it when it is a later line of a call already there.
 func (l *logs) take(s *fileState, r Record) {
 	at := r.At.UnixNano()
 	if s.first == 0 || at < s.first {
 		s.first = at
 	}
 	lb := s.last
-	if lb == nil || lb.agent != r.Agent || lb.provider != r.Provider || lb.model != r.Model || lb.session != r.Session || lb.mode != r.Mode {
-		lb = l.labels.get(r.Agent, r.Provider, r.Model, r.Session, r.Mode)
+	if lb == nil || lb.agent != r.Agent || lb.provider != r.Provider || lb.model != r.Model || lb.session != r.Session {
+		lb = l.labels.get(r.Agent, r.Provider, r.Model, r.Session)
 		s.last = lb
 	}
-	c := spend{at: at, label: lb, tokens: r.Tokens, write1h: r.CacheWrite1h, long: lb.limit > 0 && r.Context > lb.limit}
-	key := hashKey(r.Key)
-	if key == 0 {
+	c := spend{
+		at: at, label: lb, tokens: r.Tokens, write1h: r.CacheWrite1h,
+		long: lb.limit > 0 && r.Context > lb.limit, fast: r.Mode == modeFast, advisor: r.Mode == modeAdvisor,
+	}
+	if c.key = hashKey(r.Key); c.key == 0 {
 		s.sum(c, l.loc)
 		return
 	}
-	c.key = key
-	q := quarter(slot(at, l.loc))
-	if first, held := s.written(key); held {
-		// Written again in the slot it was first written in, a call adds
-		// nothing. In another (its lines run past an hour's end), the line
-		// counted depends on where a range begins: its lines are kept by
-		// themselves, and the log read again if it summed the first.
-		if q == first {
-			return
-		}
-		if !slices.Contains(s.split, key) {
-			s.split = append(s.split, key)
-			if _, before := slices.BinarySearch(s.keys, key); before && !slices.ContainsFunc(s.calls, func(c spend) bool { return c.key == key }) {
-				s.reread = true
-			}
-		}
-		s.fresh = append(s.fresh, c)
+	if _, ok := s.added[c.key]; ok {
+		s.grow(c, l.loc)
+		return
+	}
+	if _, ok := s.find(c.key); ok {
+		s.grow(c, l.loc)
 		return
 	}
 	if s.added == nil {
-		s.added = map[uint64]int32{}
+		s.added = map[uint64]int{}
 	}
-	s.added[key] = q
+	s.added[c.key] = len(s.fresh)
 	s.fresh = append(s.fresh, c)
 }
 
@@ -539,10 +577,10 @@ func spends(records []Record, catalog Catalog) []spend {
 	made := &labels{catalog: catalog}
 	out := make([]spend, 0, len(records))
 	for _, r := range records {
-		lb := made.get(r.Agent, r.Provider, r.Model, r.Session, r.Mode)
+		lb := made.get(r.Agent, r.Provider, r.Model, r.Session)
 		out = append(out, spend{
 			at: r.At.UnixNano(), label: lb, key: hashKey(r.Key), tokens: r.Tokens, write1h: r.CacheWrite1h,
-			long: lb.limit > 0 && r.Context > lb.limit,
+			long: lb.limit > 0 && r.Context > lb.limit, fast: r.Mode == modeFast, advisor: r.Mode == modeAdvisor,
 		})
 	}
 	return out
