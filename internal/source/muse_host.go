@@ -63,6 +63,17 @@ func museInUse(err error) bool {
 	return errors.As(err, &rpc) && rpc.Data.Kind == "sessionInUse"
 }
 
+// museInternal reports Muse failing inside itself (JSON-RPC internal
+// error), as a read racing a session's unload does.
+func museInternal(err error) bool {
+	var rpc *museRPCError
+	return errors.As(err, &rpc) && (rpc.Code == -32603 || rpc.Data.Kind == "internal")
+}
+
+// museReadRetry is the pause before reading a session again after Muse
+// failed inside itself.
+const museReadRetry = 300 * time.Millisecond
+
 // museBusy reports Muse refusing a command because the session is mid-turn,
 // as it refuses to let go of one.
 func museBusy(err error) bool {

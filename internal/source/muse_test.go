@@ -669,3 +669,33 @@ func TestMuseDiscoverHiccupKeepsTheLastList(t *testing.T) {
 		t.Fatalf("after a failed read: %+v, %v", second, err)
 	}
 }
+
+// A read that races Muse unloading the session fails inside Muse once; the
+// thread is read again rather than the app showing that error.
+func TestMusePageRetriesAReadThatRacedAnUnload(t *testing.T) {
+	source, fake := startFakeMuse(t, t.TempDir())
+	var mu sync.Mutex
+	reads := 0
+	fake.answers["session/read"] = func(json.RawMessage) (any, *museRPCError) {
+		mu.Lock()
+		defer mu.Unlock()
+		reads++
+		if reads == 1 {
+			failed := &museRPCError{Code: -32603, Message: "internal error: read live session activity: runtime command channel is closed"}
+			failed.Data.Kind = "internal"
+			return nil, failed
+		}
+		return map[string]any{"session": map[string]any{"sessionId": "s"}, "history": map[string]any{"mode": "inline", "items": []any{
+			map[string]any{"itemId": "u1", "kind": "userMessage", "text": "hi"},
+		}}}, nil
+	}
+	page, err := source.Page(context.Background(), "muse:s", "", 0)
+	if err != nil || len(page.Messages) != 1 {
+		t.Fatalf("page: %+v, %v", page, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if reads != 2 {
+		t.Fatalf("read %d times, want 2", reads)
+	}
+}

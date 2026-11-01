@@ -309,7 +309,21 @@ func (s *MuseSource) read(ctx context.Context, sessionID string) ([]protocol.Mes
 func (s *MuseSource) readWithStatus(ctx context.Context, sessionID string) ([]protocol.Message, string, error) {
 	native := strings.TrimPrefix(sessionID, musePrefix)
 	var read museRead
-	if err := s.host.call(ctx, "session/read", map[string]any{"sessionId": native, "excludeItems": false}, &read); err != nil {
+	params := map[string]any{"sessionId": native, "excludeItems": false}
+	err := s.host.call(ctx, "session/read", params, &read)
+	// A read that lands while Muse unloads the session (Agentman has just
+	// let it go) fails inside Muse ("runtime command channel is closed");
+	// a moment later it reads from disk.
+	for attempt := 0; attempt < 2 && museInternal(err); attempt++ {
+		select {
+		case <-ctx.Done():
+			return nil, "", ctx.Err()
+		case <-time.After(museReadRetry):
+		}
+		read = museRead{}
+		err = s.host.call(ctx, "session/read", params, &read)
+	}
+	if err != nil {
 		return nil, "", err
 	}
 	messages := parser.MuseMessages(sessionID, read.History.Items)
