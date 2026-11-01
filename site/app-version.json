@@ -2,6 +2,17 @@
   "url": "https://testflight.apple.com/join/UcJvsjED",
   "builds": [
     {
+      "build": 35,
+      "version": "0.10.0",
+      "date": "2026-11-01T03:47:26.086Z",
+      "changes": [
+        "Attach any file to a message (a PDF, a log, a spreadsheet), not just images; the agent reads it on your Mac.",
+        "Type \"@\" in a message box to name one of the agent's files; it reads the file when your message arrives.",
+        "When an agent looks at several images in a row, they now show as one step with the pictures side by side, instead of one step per picture.",
+        "Type \"/\" in a Claude agent's message box to run its commands: /compact, /context, /rename, your skills and more. /usage and /status show their answer right here, and a thread follows /clear to the new conversation."
+      ]
+    },
+    {
       "build": 34,
       "version": "0.9.0",
       "date": "2026-11-01T03:47:23.034Z",
