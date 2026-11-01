@@ -43,7 +43,8 @@ func TestMuseMessagesKeepWhatAPersonReads(t *testing.T) {
 
 func TestMuseToolTitlesSayWhatHappened(t *testing.T) {
 	items := []MuseItem{
-		// Muse's model describes each command; history keeps no label.
+		// Muse's model describes each command; history keeps no label. A
+		// refused one keeps the words as given.
 		{ItemID: "b1", Kind: "toolCall", Tool: "bash", Status: "rejected",
 			Args: `{"command": "echo hello > note.txt", "description": "Write a note", "sandbox_permissions": "require_escalated"}`},
 		// A refused edit is not "Edited".
@@ -56,7 +57,7 @@ func TestMuseToolTitlesSayWhatHappened(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("rows: %+v", got)
 	}
-	if tool := got[0].Tool; tool.Title != "Wrote a note" || tool.Summary != "echo hello > note.txt" || tool.Status != protocol.ToolError {
+	if tool := got[0].Tool; tool.Title != "Write a note" || tool.Summary != "echo hello > note.txt" || tool.Status != protocol.ToolError {
 		t.Errorf("described command: %+v", tool)
 	}
 	if tool := got[1].Tool; tool.Title != "Edit a.go" {
@@ -78,5 +79,13 @@ func TestMuseTurnEndedNamesStopsAndFailures(t *testing.T) {
 	if row, ok := MuseTurnEnded("muse:s", MuseTurnEnd{TurnID: "t", Terminal: "failed", Reason: "model unavailable"}, 1); !ok ||
 		row.Text != "Muse turn failed: model unavailable" {
 		t.Errorf("failed turn: %+v", row)
+	}
+}
+
+func TestMuseFinishedCommandIsInThePastTense(t *testing.T) {
+	got := MuseMessages("muse:s", []MuseItem{{ItemID: "b", Kind: "toolCall", Tool: "bash", Status: "completed",
+		Args: `{"command": "echo approved > approved.txt", "description": "Write approval marker file"}`}})
+	if len(got) != 1 || got[0].Tool.Title != "Wrote approval marker file" {
+		t.Fatalf("finished command: %+v", got)
 	}
 }

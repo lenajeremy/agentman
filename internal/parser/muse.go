@@ -167,9 +167,14 @@ func museTool(item MuseItem) *protocol.Tool {
 	}
 	if tool.Title == "" {
 		// Muse's model describes each command it runs ("Write a note"), as
-		// Claude Code does.
+		// Claude Code does. A refused or failed step keeps those words as
+		// they are, rather than saying it "Wrote" anything.
 		own, _ := args["description"].(string)
-		tool.Title = DescribeTool(tool.Name, tool.Summary, own)
+		if own = strings.TrimSpace(own); own != "" && tool.Status == protocol.ToolError {
+			tool.Title = clip(own, 90)
+		} else {
+			tool.Title = DescribeTool(tool.Name, tool.Summary, own)
+		}
 	}
 	return tool
 }
