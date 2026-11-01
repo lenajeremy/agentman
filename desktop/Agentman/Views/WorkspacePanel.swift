@@ -92,25 +92,7 @@ struct WorkspacePanel: View {
                     }
                 }
                 .cardSection()
-                let siblings = store.sessions.filter { $0.cwd == session.cwd && $0.id != session.id && $0.state != .ended }
-                if !siblings.isEmpty {
-                    Divider().overlay(Palette.line)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("In this project · \(siblings.count)")
-                            .font(Fonts.sans(11))
-                            .foregroundStyle(Palette.faint)
-                            .padding(.horizontal, CardRowMetrics.inset)
-                            .frame(height: 24, alignment: .leading)
-                        ForEach(Array(siblings.prefix(6))) { sibling in
-                            CardRow(sibling.name, action: { store.selection = .agent(sibling.id) }) {
-                                AgentMark(kind: sibling.kind, size: 14)
-                            } trailing: {
-                                Circle().fill(Palette.dot(sibling.state)).frame(width: 6, height: 6).frame(width: 20)
-                            }
-                        }
-                    }
-                    .cardSection()
-                }
+                ProjectSiblings(session: session)
             }
         }
         .font(Fonts.sans(12))
@@ -146,6 +128,36 @@ struct WorkspacePanel: View {
         }
         .onChange(of: tab) { _, _ in stack = []; expanded = true }
         .onChange(of: session.id) { _, _ in stack = []; expanded = false }
+    }
+
+    /// The other agents working in the same folder, at the card's foot. A
+    /// view of its own, as it reads every agent's session: news of any agent
+    /// redraws it alone, not the card.
+    private struct ProjectSiblings: View {
+        @Environment(AgentsStore.self) private var store
+        let session: Session
+
+        var body: some View {
+            let siblings = store.sessions.filter { $0.cwd == session.cwd && $0.id != session.id && $0.state != .ended }
+            if !siblings.isEmpty {
+                Divider().overlay(Palette.line)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("In this project · \(siblings.count)")
+                        .font(Fonts.sans(11))
+                        .foregroundStyle(Palette.faint)
+                        .padding(.horizontal, CardRowMetrics.inset)
+                        .frame(height: 24, alignment: .leading)
+                    ForEach(Array(siblings.prefix(6))) { sibling in
+                        CardRow(sibling.name, action: { store.selection = .agent(sibling.id) }) {
+                            AgentMark(kind: sibling.kind, size: 14)
+                        } trailing: {
+                            Circle().fill(Palette.dot(sibling.state)).frame(width: 6, height: 6).frame(width: 20)
+                        }
+                    }
+                }
+                .cardSection()
+            }
+        }
     }
 
     /// What brings the branch and changes up to date.

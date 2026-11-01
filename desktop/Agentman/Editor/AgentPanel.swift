@@ -35,6 +35,7 @@ struct AgentPanel: View {
                         Color.clear.onAppear { editor.panelRoute = .agent(next) }
                     } else if let session = agents.session(id) {
                         AgentThreadView(session: session, inPanel: true)
+                            .equatable()
                             .id(id)
                             .onAppear { agents.showInPanel(id) }
                             .onDisappear { agents.hideFromPanel(id) }
