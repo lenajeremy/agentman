@@ -699,3 +699,32 @@ func TestMusePageRetriesAReadThatRacedAnUnload(t *testing.T) {
 		t.Fatalf("read %d times, want 2", reads)
 	}
 }
+
+// Muse holds a turn open after its answer for background reminder checks; the
+// agent reads as done from the answer, and as working again if a reminder
+// sends it back to work.
+func TestMuseAgentIsDoneWhenItsAnswerIs(t *testing.T) {
+	source, fake := startFakeMuse(t, t.TempDir())
+	fake.answers["session/list"] = func(json.RawMessage) (any, *museRPCError) {
+		return map[string]any{"sessions": []any{map[string]any{"sessionId": "s", "kind": "root", "status": "running", "workspaceRoot": "/code/app",
+			"updatedAt": time.Now().UTC().Format(time.RFC3339)}}}, nil
+	}
+	state := func() protocol.State {
+		sessions, _ := source.Discover(context.Background())
+		if len(sessions) != 1 {
+			t.Fatalf("sessions: %+v", sessions)
+		}
+		return sessions[0].State
+	}
+	if got := state(); got != protocol.StateBusy {
+		t.Fatalf("mid-turn: %v", got)
+	}
+	fake.notify("turn/foregroundCompleted", map[string]any{"sessionId": "s", "turnId": "t1", "blockingAgents": []string{"goal-reminder"}})
+	waitFor(t, "the answer to count as done", func() bool { return state() == protocol.StateIdle })
+	fake.notify("item/started", map[string]any{"sessionId": "s", "item": map[string]any{"itemId": "a2", "kind": "agentMessage"}})
+	waitFor(t, "a reminder's extra work to count as working", func() bool { return state() == protocol.StateBusy })
+	fake.notify("turn/foregroundCompleted", map[string]any{"sessionId": "s", "turnId": "t1", "blockingAgents": []string{"goal-reminder"}})
+	waitFor(t, "done again", func() bool { return state() == protocol.StateIdle })
+	fake.notify("turn/started", map[string]any{"sessionId": "s", "turnId": "t2"})
+	waitFor(t, "the next turn to count as working", func() bool { return state() == protocol.StateBusy })
+}

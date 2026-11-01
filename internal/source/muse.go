@@ -31,10 +31,11 @@ const (
 )
 
 type MuseSource struct {
-	host    *museHost
-	home    string // Muse's data directory; for the live registry
-	holds   museHolds
-	answers museAnswers
+	host       *museHost
+	home       string // Muse's data directory; for the live registry
+	holds      museHolds
+	answers    museAnswers
+	foreground museForeground
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -42,11 +43,13 @@ type MuseSource struct {
 
 // NewMuseSource returns the adapter; Connect starts its connection.
 func NewMuseSource() *MuseSource {
-	return &MuseSource{host: newMuseHost(museServe)}
+	return newMuseSourceWith(newMuseHost(museServe), "")
 }
 
 func newMuseSourceWith(host *museHost, home string) *MuseSource {
-	return &MuseSource{host: host, home: home}
+	s := &MuseSource{host: host, home: home}
+	host.listen(s.trackForeground)
+	return s
 }
 
 // Kind implements Source.
@@ -139,10 +142,15 @@ func (s *MuseSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 			continue
 		}
 		seen[session.SessionID] = true
-		found = append(found, museToSession(session, open[session.SessionID]))
+		meta := museToSession(session, open[session.SessionID])
 		if s.holding(session.SessionID) {
-			found[len(found)-1].Inject = protocol.InjectAPI
+			meta.Inject = protocol.InjectAPI
 		}
+		// The answer is in; Muse is only finishing its background checks.
+		if meta.State == protocol.StateBusy && s.foregroundDone(session.SessionID) {
+			meta.State = protocol.StateIdle
+		}
+		found = append(found, meta)
 	}
 	for id := range open {
 		if seen[id] {
