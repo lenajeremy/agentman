@@ -103,6 +103,9 @@ type OpenCodeSource struct {
 	// See opencode_service.go.
 	serviceFile string
 	services    map[string]string
+	// live streams what each service's turns are writing; see
+	// opencode_live.go.
+	live *openCodeLive
 
 	// models remembers each session's model; see modelCache. It matters more
 	// here than for the file-backed agents, because finding it costs an HTTP
@@ -185,6 +188,7 @@ func NewOpenCodeSource(baseURL string) *OpenCodeSource {
 		snapshotProcesses:  tmux.SnapshotProcessTree,
 		now:                time.Now,
 		serviceFile:        openCodeServiceFile(),
+		live:               newOpenCodeLive(),
 	}
 	source.findServers = source.scanServers
 	return source
@@ -647,6 +651,7 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 	// No server means OpenCode simply is not being used. Not an error, and it
 	// must stay cheap — this runs every second.
 	servers := s.findServers(ctx)
+	s.keepLive()
 	if len(servers) == 0 {
 		if len(previous) == 0 {
 			return nil, nil
@@ -1424,9 +1429,11 @@ func clipTitle(text string) string {
 
 // Follow implements Source.
 //
-// Polls rather than holding the SSE stream: the daemon already runs a
-// once-a-second loop, one extra local HTTP call is cheaper than managing a
-// long-lived stream's lifecycle, and messages are deduplicated by id anyway.
+// The saved messages are read every tick: they are what a session finally
+// says. A reply OpenCode 2's service is still writing is not in them (its
+// text is saved empty until it is finished), so its words and tools come
+// from the service's event stream as previews, sent the moment they change;
+// see opencode_live.go.
 func (s *OpenCodeSource) Follow(ctx context.Context, sessionID string, out chan<- []protocol.Message) error {
 	// Keyed by id, valued by a fingerprint of the content rather than a bare
 	// "seen" flag. OpenCode fills a message in as the model produces it, so the
@@ -1435,34 +1442,45 @@ func (s *OpenCodeSource) Follow(ctx context.Context, sessionID string, out chan<
 	// nothing-to-report froze every long answer at its first few words.
 	seen := map[string]openCodeSeenMessage{}
 	var generation uint64
+	live := newOpenCodeLiveFollow(sessionID)
 	// Prime from the current tail so the backlog is not replayed as new.
 	if page, err := s.Page(ctx, sessionID, "", 50); err == nil {
 		generation++
 		_ = updateOpenCodeSeen(seen, page.Messages, generation)
+		live.read(page.Messages)
 	}
+	route, _ := s.routeFor(sessionID)
+	changed, stop := s.live.watch(route.baseURL, route.nativeID)
+	defer stop()
+	previews := func() []protocol.Message { return s.live.rows(route.baseURL, route.nativeID, sessionID) }
 
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
 
 	for {
+		var batch []protocol.Message
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-changed:
+			batch = live.merge(nil, previews())
 		case <-ticker.C:
 			page, err := s.Page(ctx, sessionID, "", 20)
 			if err != nil {
 				continue
 			}
 			generation++
-			batch := updateOpenCodeSeen(seen, page.Messages, generation)
-			if len(batch) == 0 {
-				continue
-			}
-			select {
-			case out <- batch:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+			batch = updateOpenCodeSeen(seen, page.Messages, generation)
+			live.read(page.Messages)
+			batch = live.merge(batch, previews())
+		}
+		if len(batch) == 0 {
+			continue
+		}
+		select {
+		case out <- batch:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 }

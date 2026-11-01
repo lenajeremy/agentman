@@ -26,6 +26,10 @@ type ocServiceFake struct {
 	permissions []map[string]any
 	active      bool
 	posts       []ocServicePost
+	// events, when set, are sent on /api/event, and connected is told
+	// each time a stream opens.
+	events    chan string
+	connected chan struct{}
 }
 
 type ocServicePost struct {
@@ -40,6 +44,10 @@ func (f *ocServiceFake) start(t *testing.T) *httptest.Server {
 		if user, password, ok := r.BasicAuth(); !ok || user != "opencode" || password != "secret" {
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = io.WriteString(w, `{"_tag":"UnauthorizedError","message":"Authentication required"}`)
+			return
+		}
+		if r.URL.Path == "/api/event" {
+			f.serveEvents(w, r)
 			return
 		}
 		f.mu.Lock()
@@ -100,6 +108,29 @@ func (f *ocServiceFake) start(t *testing.T) *httptest.Server {
 	return server
 }
 
+// serveEvents streams f.events as server-sent events, as /api/event does.
+func (f *ocServiceFake) serveEvents(w http.ResponseWriter, r *http.Request) {
+	if f.events == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	_, _ = io.WriteString(w, ": heartbeat\n\n")
+	w.(http.Flusher).Flush()
+	if f.connected != nil {
+		f.connected <- struct{}{}
+	}
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event := <-f.events:
+			_, _ = io.WriteString(w, "data: "+event+"\n\n")
+			w.(http.Flusher).Flush()
+		}
+	}
+}
+
 func (f *ocServiceFake) lastPost(t *testing.T) ocServicePost {
 	t.Helper()
 	f.mu.Lock()
@@ -122,6 +153,7 @@ func openCodeServiceSource(t *testing.T, url, password string) *OpenCodeSource {
 	src := NewOpenCodeSource("")
 	src.serviceFile = file
 	src.findServers = src.findServices
+	t.Cleanup(src.live.stop)
 	return src
 }
 
