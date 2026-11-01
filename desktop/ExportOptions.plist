@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  How scripts/release-mac.sh exports the archive: signed with the Developer ID
+  certificate for distribution outside the App Store, which re-signs Sparkle's
+  helpers (Autoupdate, Updater.app, its XPC services) with it too, so the DMG
+  notarizes.
+-->
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>developer-id</string>
+	<key>teamID</key>
+	<string>N58PT393QS</string>
+	<key>signingStyle</key>
+	<string>manual</string>
+	<key>signingCertificate</key>
+	<string>Developer ID Application</string>
+</dict>
+</plist>
