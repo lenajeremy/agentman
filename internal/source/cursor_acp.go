@@ -1146,7 +1146,7 @@ func (s *CursorACPSource) Past(ctx context.Context, dir string, limit int) ([]pr
 	}
 	limit = limitOrDefault(limit)
 	_ = s.refreshRecords()
-	found := make([]protocol.Session, 0, limit)
+	var found []protocol.Session // sized by what is found; see limitOrDefault
 	for _, st := range s.states() {
 		st.mu.Lock()
 		record, busy := st.record, st.busy

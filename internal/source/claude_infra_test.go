@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -308,5 +309,17 @@ func TestClaudeRegistryKindDropsDaemonsWithoutAskingPs(t *testing.T) {
 		if pid == 1 || pid == 2 {
 			t.Errorf("asked ps about pid %d, which the registry already called a daemon", pid)
 		}
+	}
+}
+
+// The real reader, against this process: what isClaudeInfra reads is the
+// arguments ps would print, joined by spaces.
+func TestClaudeProcessArgsReadsALiveProcess(t *testing.T) {
+	args := claudeProcessArgs(context.Background(), []int{os.Getpid(), 0})
+	if got, want := args[os.Getpid()], strings.Join(os.Args, " "); got != want {
+		t.Fatalf("args = %q, want %q", got, want)
+	}
+	if _, ok := args[0]; ok {
+		t.Fatal("a pid that names no process was answered")
 	}
 }

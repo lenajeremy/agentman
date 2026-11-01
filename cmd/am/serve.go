@@ -195,6 +195,7 @@ func runServe(ctx context.Context, args []string) error {
 			return err
 		}
 	}
+	tuneCollector()
 	// Started by the service at login, am serve has none of the environment
 	// a terminal would have given it; the login shell's puts it back, for
 	// itself and every agent it starts.

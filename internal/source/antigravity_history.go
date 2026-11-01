@@ -47,7 +47,7 @@ func (s *AntigravitySource) Past(ctx context.Context, dir string, limit int) ([]
 	})
 
 	model := s.defaultModel()
-	found := make([]protocol.Session, 0, limit)
+	var found []protocol.Session // sized by what is found; see limitOrDefault
 	for _, conversation := range conversations {
 		if err := ctx.Err(); err != nil {
 			return nil, err

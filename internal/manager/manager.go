@@ -507,8 +507,19 @@ func (m *Manager) refreshKeys(ctx context.Context) {
 // model is the client Agentman's requests go through: it hands each one to
 // the engine its model runs on. It fails when the chat model's engine has
 // no key, since then Agentman cannot reply at all.
+//
+// An engine with a client already has its key, which setKey drops with the
+// client. Asking the Keychain again for every brief, title and reply ran
+// /usr/bin/security each time, for an answer client already keeps.
 func (m *Manager) model(ctx context.Context) (Model, error) {
-	if _, err := m.apiKey(ctx, providerOf(m.currentSettings().ChatModel)); err != nil {
+	provider := providerOf(m.currentSettings().ChatModel)
+	m.mu.Lock()
+	_, ready := m.clients[provider]
+	m.mu.Unlock()
+	if ready {
+		return engineRouter{m}, nil
+	}
+	if _, err := m.apiKey(ctx, provider); err != nil {
 		return nil, err
 	}
 	return engineRouter{m}, nil

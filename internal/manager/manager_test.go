@@ -125,11 +125,14 @@ func (f *fakeAgents) Request(_ context.Context, req protocol.Request) protocol.E
 type memorySecrets struct {
 	mu     sync.Mutex
 	values map[string]string
+	// gets counts reads; on a Mac each is a run of /usr/bin/security.
+	gets int
 }
 
 func (s *memorySecrets) Get(_ context.Context, name string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.gets++
 	if value, ok := s.values[name]; ok {
 		return value, nil
 	}
@@ -470,6 +473,36 @@ func TestTheKeyIsStoredAndNeverSentBack(t *testing.T) {
 	h.m.Handle(context.Background(), protocol.Request{Type: protocol.ReqManagerSetKey, Text: ""})
 	if _, err := h.secrets.Get(context.Background(), keyName); !errors.Is(err, secrets.ErrNotFound) {
 		t.Fatal("an empty key did not remove the stored one")
+	}
+}
+
+// Once an engine has a client, Agentman stops asking the Keychain for its
+// key on every request: on a Mac each ask is a run of /usr/bin/security. A
+// key removed in Settings is still noticed at once.
+func TestAgentmanAsksTheKeychainOnlyUntilItHasAClient(t *testing.T) {
+	h := newHarness(t, &scriptedModel{}, true)
+	ctx := context.Background()
+	if _, err := h.m.client(ctx, providerAnthropic); err != nil {
+		t.Fatal(err)
+	}
+	h.secrets.mu.Lock()
+	before := h.secrets.gets
+	h.secrets.mu.Unlock()
+	for range 5 {
+		if _, err := h.m.model(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.secrets.mu.Lock()
+	asked := h.secrets.gets - before
+	h.secrets.mu.Unlock()
+	if asked != 0 {
+		t.Fatalf("asked the Keychain %d times for a key the client already has", asked)
+	}
+
+	h.m.Handle(ctx, protocol.Request{Type: protocol.ReqManagerSetKey, Text: ""})
+	if _, err := h.m.model(ctx); err == nil {
+		t.Fatal("a key removed in Settings still let Agentman run")
 	}
 }
 
