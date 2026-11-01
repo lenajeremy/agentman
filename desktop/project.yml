@@ -27,6 +27,13 @@ packages:
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
     exactVersion: 1.11.2
+  # The app updates itself (App/AppUpdater.swift): it reads the appcast on
+  # the site, and checks what it downloads against the key in SUPublicEDKey.
+  # A binary package, so it brings the signing tools scripts/release-mac.sh
+  # uses (SourcePackages/artifacts/sparkle/Sparkle/bin).
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.10.1
 targets:
   Agentman:
     type: application
@@ -61,6 +68,7 @@ targets:
     dependencies:
       - package: Markdown
       - package: SwiftTerm
+      - package: Sparkle
     info:
       path: Agentman/Info.plist
       properties:
@@ -79,6 +87,14 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)
             CFBundleURLSchemes: [$(AGENTMAN_URL_SCHEME)]
+        # Updates (App/AppUpdater.swift): where Sparkle looks for a newer
+        # version, and the public half of the key every release is signed
+        # with. The private half never leaves the release Mac's login
+        # Keychain, where `generate_keys --account agentman` put it;
+        # scripts/release-mac.sh signs with it. Without SUEnableAutomaticChecks
+        # Sparkle asks once, on the second launch, whether to check by itself.
+        SUFeedURL: https://agentman-nu.vercel.app/appcast.xml
+        SUPublicEDKey: Wkd9F/65lovmZQN7p6GxBiG6sXy6LM7KPF3ILNAd8+k=
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.agentman.mac

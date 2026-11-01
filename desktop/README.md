@@ -59,6 +59,13 @@ open --env AGENTMAN_SOCKET=/tmp/am-test/.agentman/am.sock build/Build/Products/D
 
 The `socketPath` user default does the same.
 
+## Updates and releases
+
+Released copies update themselves with Sparkle (`App/AppUpdater.swift`), from
+the appcast on the site; Debug builds never do. `scripts/release-mac.sh` makes
+a release, and [docs/development.md](../docs/development.md#agentman-for-mac)
+says how.
+
 ## Links
 
 `agentman://agent/<session id>` opens an agent, and `agentman://home` opens
