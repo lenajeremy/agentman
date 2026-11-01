@@ -2,6 +2,7 @@ package parser
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -123,16 +124,41 @@ func museTool(item MuseItem) *protocol.Tool {
 	if item.Kind == "userShell" {
 		tool.Name = "Shell"
 	}
-	if item.DisplayLabel != nil {
-		label := item.DisplayLabel.Done
-		if tool.Status == protocol.ToolRunning {
-			label = firstNonEmpty(item.DisplayLabel.Active, label)
+	var args map[string]any
+	if strings.TrimSpace(item.Args) != "" {
+		_ = json.Unmarshal([]byte(item.Args), &args)
+	}
+	if item.Tool == "request_user_input" {
+		// The question itself is the card the user answered; the row says
+		// what was asked.
+		questions, _ := args["questions"].([]any)
+		tool.Title = "Asked a question"
+		if len(questions) > 1 {
+			tool.Title = fmt.Sprintf("Asked %d questions", len(questions))
 		}
-		tool.Title = strings.TrimSpace(firstNonEmpty(label, item.DisplayLabel.Neutral))
+		tool.Summary = claudeQuestionSummary(args)
+		return tool
 	}
 	// What it ran or touched: a command as typed, else the arguments' most
 	// telling value.
-	tool.Summary = strings.TrimSpace(firstNonEmpty(item.CommandText, museArgSummary(item.Args)))
+	tool.Summary = strings.TrimSpace(firstNonEmpty(item.CommandText, museArgSummary(args)))
+	if item.DisplayLabel != nil {
+		label := item.DisplayLabel.Done
+		switch tool.Status {
+		case protocol.ToolRunning:
+			label = firstNonEmpty(item.DisplayLabel.Active, label)
+		case protocol.ToolError:
+			// "Edited x" would claim what a refused or failed step never did.
+			label = firstNonEmpty(item.DisplayLabel.Neutral, label)
+		}
+		tool.Title = strings.TrimSpace(firstNonEmpty(label, item.DisplayLabel.Neutral))
+	}
+	if tool.Title == "" {
+		// Muse's model describes each command it runs ("Write a note"), as
+		// Claude Code does.
+		own, _ := args["description"].(string)
+		tool.Title = DescribeTool(tool.Name, tool.Summary, own)
+	}
 	return tool
 }
 
@@ -151,14 +177,7 @@ func museToolStatus(item MuseItem) protocol.ToolStatus {
 
 // museArgSummary picks the argument a reader looks for first: a path, a
 // command, a pattern, a URL; else nothing, rather than raw JSON.
-func museArgSummary(args string) string {
-	if strings.TrimSpace(args) == "" {
-		return ""
-	}
-	var fields map[string]any
-	if json.Unmarshal([]byte(args), &fields) != nil {
-		return ""
-	}
+func museArgSummary(fields map[string]any) string {
 	for _, key := range []string{"path", "file_path", "filePath", "command", "cmd", "pattern", "query", "url"} {
 		if value, ok := fields[key].(string); ok && strings.TrimSpace(value) != "" {
 			return value

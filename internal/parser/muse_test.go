@@ -40,3 +40,29 @@ func TestMuseMessagesKeepWhatAPersonReads(t *testing.T) {
 		t.Errorf("agent row: %+v", got[4])
 	}
 }
+
+func TestMuseToolTitlesSayWhatHappened(t *testing.T) {
+	items := []MuseItem{
+		// Muse's model describes each command; history keeps no label.
+		{ItemID: "b1", Kind: "toolCall", Tool: "bash", Status: "rejected",
+			Args: `{"command": "echo hello > note.txt", "description": "Write a note", "sandbox_permissions": "require_escalated"}`},
+		// A refused edit is not "Edited".
+		{ItemID: "e1", Kind: "toolCall", Tool: "edit_file", Status: "failed", Args: `{"path": "a.go"}`,
+			DisplayLabel: &MuseDisplayLabel{Active: "Editing a.go", Done: "Edited a.go", Neutral: "Edit a.go"}},
+		{ItemID: "q1", Kind: "toolCall", Tool: "request_user_input", Status: "completed",
+			Args: `{"questions": [{"id": "color", "header": "Color", "question": "Which colour should the button be?", "options": [{"label": "Blue"}, {"label": "Green"}]}, {"id": "extras", "header": "Extras", "question": "Which extras?", "options": [{"label": "Shadow"}, {"label": "Icon"}]}]}`},
+	}
+	got := MuseMessages("muse:s", items)
+	if len(got) != 3 {
+		t.Fatalf("rows: %+v", got)
+	}
+	if tool := got[0].Tool; tool.Title != "Wrote a note" || tool.Summary != "echo hello > note.txt" || tool.Status != protocol.ToolError {
+		t.Errorf("described command: %+v", tool)
+	}
+	if tool := got[1].Tool; tool.Title != "Edit a.go" {
+		t.Errorf("failed edit title: %+v", tool)
+	}
+	if tool := got[2].Tool; tool.Title != "Asked 2 questions" || tool.Summary != "Which colour should the button be? (+1 more)" {
+		t.Errorf("question row: %+v", tool)
+	}
+}
