@@ -147,6 +147,17 @@ func (s *OpenCodeSource) servicePassword(base string) (string, bool) {
 	return password, ok
 }
 
+// callService makes one call to OpenCode 2's own API, for what OpenCode 1
+// has no form of.
+func (s *OpenCodeSource) callService(ctx context.Context, base, method, path string, body, out any) error {
+	password, ok := s.servicePassword(base)
+	if !ok {
+		return errOpenCodeService
+	}
+	_, err := s.send(ctx, method, base+path, openCodeServiceUser, password, body, out, maxOpenCodeMetadataResponse)
+	return err
+}
+
 // errOpenCodeService is the answer to a request OpenCode 2 has nothing for.
 var errOpenCodeService = errors.New("opencode: not available from OpenCode 2's service")
 

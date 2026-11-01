@@ -69,6 +69,7 @@ type OpenCodeSource struct {
 	catalogs map[string]*openCodeCatalog
 	choices  map[string]openCodeChoice
 	reported map[string]string
+	agents   map[string]openCodeAgentList
 
 	baseURL string
 	client  *http.Client
@@ -241,6 +242,9 @@ type ocSession struct {
 	ID        string `json:"id"`
 	Title     string `json:"title"`
 	Directory string `json:"directory"`
+	// Agent is OpenCode 2's agent for the session, "build" or "plan": the
+	// mode its terminal app switches with tab.
+	Agent string `json:"agent"`
 	Model     struct {
 		ID         string `json:"id"`
 		ProviderID string `json:"providerID"`
@@ -758,6 +762,7 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 				Name: openCodeName(item), Cwd: directory, State: state,
 				Inject: protocol.InjectAPI, StartedAt: item.Time.Created,
 				LastActivityAt: updated, Model: model, Question: question,
+				Mode: item.Agent,
 			}
 			candidate := openCodeSession{
 				meta: meta, nativeID: item.ID, baseURL: base,
@@ -839,8 +844,10 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 		if session.baseURL == "" {
 			continue
 		}
-		// The models it can be switched to, and the one chosen from the phone.
+		// The models it can be switched to, and the one chosen from the phone;
+		// the modes, on OpenCode 2.
 		s.offerModels(ctx, id, &session)
+		s.offerModes(ctx, &session)
 		working := session.meta.State == protocol.StateBusy || session.meta.State == protocol.StateWaitingInput
 		if working {
 			if texts, rows, err := s.queuedFor(ctx, session); err == nil {

@@ -67,6 +67,7 @@ func (f *ocServiceFake) start(t *testing.T) *httptest.Server {
 		case "/api/session":
 			reply(map[string]any{"data": []map[string]any{
 				{"id": "ses_1", "projectID": "p", "title": "Fix the build", "location": map[string]string{"directory": "/w/app"},
+					"agent": "build",
 					"model": map[string]string{"id": "gpt-6", "providerID": "openai"},
 					"time":  map[string]float64{"created": now - 60000, "updated": now}},
 				{"id": "ses_child", "parentID": "ses_1", "projectID": "p", "title": "A subagent",
@@ -95,6 +96,13 @@ func (f *ocServiceFake) start(t *testing.T) *httptest.Server {
 			}
 			reply(map[string]any{"location": map[string]string{"directory": "/w/app"}, "data": []map[string]string{
 				{"id": "frontend-design", "name": "Frontend Design", "content": "# Frontend Design"},
+			}})
+		case "/api/agent":
+			reply(map[string]any{"data": []map[string]any{
+				{"id": "build", "name": "Build", "mode": "primary", "hidden": false},
+				{"id": "general", "name": "General", "mode": "subagent", "hidden": false},
+				{"id": "compaction", "name": "Compaction", "mode": "primary", "hidden": true},
+				{"id": "plan", "name": "Plan", "mode": "primary", "hidden": false},
 			}})
 		case "/api/command":
 			reply(map[string]any{"location": map[string]string{"directory": r.URL.Query().Get("location[directory]")}, "data": []map[string]string{
@@ -440,5 +448,35 @@ func TestOpenCodeServiceShowsCompaction(t *testing.T) {
 		if len(rows) != want || (want == 1 && (rows[0].Role != protocol.RoleSystem || rows[0].Text != "Context compacted")) {
 			t.Errorf("%s compaction = %+v", status, rows)
 		}
+	}
+}
+
+// OpenCode 2's sessions switch mode (Build or Plan) and model on the
+// service at once, and say which they are in.
+func TestOpenCodeServiceSwitchesModeAndModel(t *testing.T) {
+	fake := &ocServiceFake{}
+	server := fake.start(t)
+	src := openCodeServiceSource(t, server.URL, "secret")
+	ctx := context.Background()
+	sessions, err := src.Discover(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].Mode != "build" || !slices.Equal(sessions[0].Modes, []string{"build", "plan"}) {
+		t.Fatalf("sessions = %+v", sessions)
+	}
+	if err := src.SetMode(ctx, "opencode:ses_1", "plan"); err != nil {
+		t.Fatal(err)
+	}
+	if post := fake.lastPost(t); post.path != "/api/session/ses_1/agent" || post.body["agent"] != "plan" {
+		t.Fatalf("mode switch sent %+v", post)
+	}
+	if err := src.SetModel(ctx, "opencode:ses_1", "big-pickle"); err != nil {
+		t.Fatal(err)
+	}
+	post := fake.lastPost(t)
+	if model, _ := post.body["model"].(map[string]any); post.path != "/api/session/ses_1/model" ||
+		model["id"] != "big-pickle" || model["providerID"] != "opencode" {
+		t.Fatalf("model switch sent %+v", post)
 	}
 }
