@@ -126,6 +126,12 @@ export interface Session {
    *  /clear starts a new one there, and /resume switches to another. A thread
    *  showing that one follows to this. */
   previous?: string;
+  /** Where handoff_session would move this live session: "terminal" for one
+   *  Agentman runs itself (Kiro over ACP) into a terminal on the Mac (Open in
+   *  terminal), "agentman" for one in a pane Agentman started back into
+   *  Agentman (Take over). Only between turns. Absent from older daemons, and
+   *  for sessions that cannot move. */
+  handoff?: "terminal" | "agentman" | (string & {});
   /** The folder's logo (its favicon, logo.png or icon.png), relative to cwd,
    *  shown in place of its initials. Absent when it has none. */
   folderIcon?: string;
@@ -230,6 +236,7 @@ export type RequestType =
   | "directory_sessions"
   | "resume_session"
   | "end_session"
+  | "handoff_session"
   | "create_directory"
   | "list_artifacts"
   | "read_artifact"
@@ -1286,7 +1293,10 @@ function isSession(value: unknown): value is Session {
     (value.queuedMessageIds === undefined ||
       boundedArray(value.queuedMessageIds, MAX_QUEUED * 8, (id): id is string => boundedString(id, 512, true))) &&
     (value.canSendQueued === undefined || typeof value.canSendQueued === "boolean") &&
-    (value.previous === undefined || boundedString(value.previous, 512, true));
+    (value.previous === undefined || boundedString(value.previous, 512, true)) &&
+    // Any word, so a newer Mac's move does not hide the session; the menu
+    // offers only the moves it knows (handoffItem).
+    (value.handoff === undefined || boundedString(value.handoff, 32, true));
 }
 
 /** More waiting messages than anyone types ahead of an agent; past it the
