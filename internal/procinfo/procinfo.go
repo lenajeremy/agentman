@@ -1,12 +1,15 @@
-// Package procinfo reads the process table from the kernel itself.
+// Package procinfo reads the process table, and what a process holds open,
+// from the kernel itself.
 //
-// Discovery used to ask `ps` for the process table every second. ps is a
-// process of its own, setuid root on macOS, and each run cost more CPU than
-// the rest of a discovery sweep put together. The same answer is one sysctl
-// away, and a process's arguments one more.
+// Discovery used to ask `ps` for the process table every second, and `lsof`
+// for listening ports every three. Each is a process of its own — ps is
+// setuid root on macOS, which makes it dearer still — and between them they
+// cost several times the daemon's own CPU. The same answers are a handful of
+// system calls away: sysctl for the process table and a process's
+// arguments, proc_info for its sockets and working directory.
 //
 // Only macOS is read directly. Elsewhere Supported is false and the callers
-// keep asking ps.
+// keep asking ps; Linux finds listening ports through /proc already.
 package procinfo
 
 import "errors"
@@ -19,7 +22,7 @@ type Process struct {
 	PID  int
 	PPID int
 	// UID is the user the process runs as. Only the user's own processes
-	// can be asked for their arguments.
+	// can be asked for their arguments or sockets.
 	UID int
 	// Started is when the process began, in microseconds. A pid is reused
 	// once its process ends; the pid and its start time together name one
