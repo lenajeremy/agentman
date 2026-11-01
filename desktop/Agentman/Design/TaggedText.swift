@@ -16,11 +16,12 @@ struct TaggedText: View {
     var selectable = true
     /// Lines shown before it is cut short, nil for all of them.
     var lineLimit: Int?
+    @Environment(\.findHighlight) private var highlight
 
     var body: some View {
         if FileTags.namesTags(text, folder: folder, skills: skills) {
             TaggedTextField(text: text, folder: folder, skills: skills, color: color, lineSpacing: lineSpacing,
-                            selectable: selectable, lineLimit: lineLimit)
+                            selectable: selectable, lineLimit: lineLimit, highlight: highlight)
         } else if selectable {
             plain.textSelection(.enabled)
         } else {
@@ -29,7 +30,7 @@ struct TaggedText: View {
     }
 
     private var plain: some View {
-        Text(text)
+        Text(highlight?.mark(AttributedString(text)) ?? AttributedString(text))
             .font(TextStyle.body)
             .foregroundStyle(color)
             .lineSpacing(lineSpacing)
@@ -45,6 +46,7 @@ private struct TaggedTextField: NSViewRepresentable {
     let lineSpacing: CGFloat
     let selectable: Bool
     let lineLimit: Int?
+    let highlight: FindHighlight?
 
     func makeNSView(context: Context) -> TaggedTextView {
         // TextKit 1, whose attachment cells draw the tags.
@@ -94,6 +96,13 @@ private struct TaggedTextField: NSViewRepresentable {
                 made.append(FileChip.text(path, directory: directory, attributes: attributes))
             case .skill(let command):
                 made.append(SkillChip.text(command, attributes: attributes))
+            }
+        }
+        if let highlight {
+            let plain = made.string
+            for range in SearchWords.ranges(of: highlight.words, in: plain) {
+                made.addAttribute(.backgroundColor, value: NSColor(highlight.current ? Palette.findCurrent : Palette.findMatch),
+                                  range: NSRange(range, in: plain))
             }
         }
         return made

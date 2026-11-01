@@ -50,6 +50,10 @@ enum Palette {
     static let working = Color(light: 0x3268F5, dark: 0x578CFF)
     static let workingText = Color(light: 0x1F35C7, dark: 0x9DAAFF)
     static let workingWash = Color(light: 0xEEF1FF, dark: 0x1A1F3D)
+    /// Words found by a search, in a thread: every match, and the one
+    /// being looked at, as a browser's find marks them.
+    static let findMatch = Color(light: 0xFFEB99, dark: 0x5A4A0C)
+    static let findCurrent = Color(light: 0xFFB866, dark: 0x9A5A12)
     /// A file named with `@` in a message box.
     static let mention = Color(light: 0x16707E, dark: 0x7FCCDA)
     /// A skill named in a message.

@@ -36,6 +36,13 @@ final class AgentsStore {
     /// of them arrives in its conversation.
     private(set) var queued: [String: [String]] = [:]
     var search = ""
+    /// What the conversations said that matches `search`, for the sidebar:
+    /// the daemon's answer to the text as it was a moment ago.
+    var messageHits: MessageSearchResults?
+    /// Conversations that ended, opened from a search, so they can show.
+    var foundSessions: [String: Session] = [:]
+    /// A message to scroll to once its conversation shows, from a search.
+    var jump: ThreadJump?
     /// The status the sidebar shows, when it is filtered to one.
     var stateFilter: SessionState?
     /// The folder the sidebar shows, with its subfolders, when filtered.
@@ -193,7 +200,7 @@ final class AgentsStore {
     // MARK: - Reading
 
     func session(_ id: String) -> Session? {
-        sessions.first { $0.id == id } ?? pastSessions.first { $0.id == id }
+        sessions.first { $0.id == id } ?? pastSessions.first { $0.id == id } ?? foundSessions[id]
     }
 
     /// The conversation that took over from this one in its terminal, if one

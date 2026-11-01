@@ -1,5 +1,5 @@
 import Feather from "@expo/vector-icons/Feather";
-import { Redirect, useFocusEffect, useRouter } from "expo-router";
+import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -8,6 +8,7 @@ import {
   SectionList,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -24,8 +25,9 @@ import { QuestionCard } from "../components/QuestionCard";
 import { ROW_GAP, SwipeToDismiss } from "../components/SwipeToDismiss";
 import { useStyles, useTheme } from "../lib/appearance";
 import { canDismiss } from "../lib/dismissed";
-import { emptyBoard, folderLabel } from "../lib/folders";
-import { Session } from "../lib/protocol";
+import { emptyBoard, folderContains, folderLabel } from "../lib/folders";
+import { Session, type SearchHit, type SearchResults } from "../lib/protocol";
+import { markedSegments, markWords, searchable } from "../lib/search";
 import { sessionNeedsAnswer } from "../lib/question-alerts";
 import { useStore } from "../lib/store";
 import { useUpdates } from "../lib/updates-context";
@@ -60,6 +62,36 @@ export default function Agents() {
   useTicking(30_000);
   /** The row just swiped away, offered back for a few seconds. */
   const [undo, setUndo] = useState<{ id: string; name: string } | null>(null);
+  /** What is typed in the search box, and what the Mac found for it. A link
+   *  to the list can carry a search to start with, as ?q=. */
+  const { q } = useLocalSearchParams<{ q?: string }>();
+  const [query, setQuery] = useState(typeof q === "string" ? q : "");
+  const [found, setFound] = useState<SearchResults | null>(null);
+  const [searchProblem, setSearchProblem] = useState<string | null>(null);
+  const trimmed = query.trim();
+  const searching = trimmed.length > 0;
+
+  // What was said, a moment after typing stops: over the relay a search per
+  // key would queue up behind itself.
+  useEffect(() => {
+    setSearchProblem(null);
+    if (!searchable(trimmed)) {
+      setFound(null);
+      return;
+    }
+    let current = true;
+    const timer = setTimeout(() => {
+      store.search(trimmed).then(
+        (results) => { if (current) setFound(results); },
+        (error: Error) => { if (current) setSearchProblem(error.message); },
+      );
+    }, 300);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trimmed]);
   // Relative times ("3m") go stale while the screen sits open.
   const [, forceTick] = useState(0);
 
@@ -80,6 +112,13 @@ export default function Agents() {
   const groups = useMemo(
     () => groupByState(store.visibleSessions, color, store.stateFilter),
     [store.visibleSessions, color, store.stateFilter],
+  );
+  const results = useMemo(
+    () => searching
+      ? searchSections(store.visibleSessions, trimmed, found, color,
+        store.folderFilter ? (cwd: string) => folderContains(store.folderFilter!, store.folderRoot, cwd) : null)
+      : null,
+    [searching, store.visibleSessions, trimmed, found, color, store.folderFilter, store.folderRoot],
   );
   const hiddenCount = store.sessions.length - store.visibleSessions.length;
   const incompatible = store.connection === "incompatible";
@@ -124,7 +163,7 @@ export default function Agents() {
     <View style={[styles.page, { paddingTop: insets.top }]}>
       <SectionList
         style={styles.scroll}
-        sections={groups.map((group) => ({
+        sections={(results?.sections ?? groups).map((group) => ({
           ...group,
           data: group.sessions,
         }))}
@@ -133,6 +172,8 @@ export default function Agents() {
         initialNumToRender={12}
         windowSize={7}
         contentContainerStyle={{ paddingBottom: insets.bottom + space.xxl }}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -170,6 +211,17 @@ export default function Agents() {
               Agents
             </Text>
 
+            <SearchField value={query} onChange={setQuery} />
+
+            {searching ? (
+              <SearchStatus
+                problem={searchProblem}
+                pending={searchable(trimmed) && found?.query !== trimmed && !searchProblem}
+                indexing={found?.indexing === true}
+                empty={(results?.sections.length ?? 0) === 0}
+              />
+            ) : (
+            <>
             <AgentmanCard />
 
             {!store.daemonOnline ? (
@@ -201,6 +253,8 @@ export default function Agents() {
               ) : (
                 <EmptyState folder={store.folderFilter} />
               ))}
+            </>
+            )}
           </ContentColumn>
         }
         renderSectionHeader={({ section }) => (
@@ -216,7 +270,7 @@ export default function Agents() {
         renderItem={({ item: session, index, section }) => (
           <ContentColumn style={styles.gutter}>
             <SwipeToDismiss
-              enabled={canDismiss(session)}
+              enabled={!searching && canDismiss(session)}
               onDismiss={() => {
                 store.dismissSession(session.id);
                 setUndo({ id: session.id, name: session.name });
@@ -227,6 +281,8 @@ export default function Agents() {
                 session={session}
                 first={index === 0}
                 last={index === section.data.length - 1}
+                match={results?.hits.get(session.id)}
+                query={found?.query}
               />
             </SwipeToDismiss>
           </ContentColumn>
@@ -368,11 +424,16 @@ function AgentRow({
   session,
   first = true,
   last = true,
+  match,
+  query,
 }: {
   session: Session;
   /** Where the row sits in its section: a section reads as one card. */
   first?: boolean;
   last?: boolean;
+  /** What a search found in its conversation, which a tap opens at. */
+  match?: SearchHit;
+  query?: string;
 }) {
   const store = useStore();
   const router = useRouter();
@@ -381,9 +442,20 @@ function AgentRow({
   const needsYou = sessionNeedsAnswer(session);
   const displayState = effectiveSessionState(session);
   const agent = agentLabel(session.kind);
-  const open = () => router.push(`/session/${encodeURIComponent(session.id)}`);
+  const open = () => {
+    if (!match) {
+      router.push(`/session/${encodeURIComponent(session.id)}`);
+      return;
+    }
+    // One that ended, and is in no list, is kept so its screen can show it.
+    if (!store.sessions.some((other) => other.id === session.id)) store.rememberSession(session);
+    router.push(
+      `/session/${encodeURIComponent(session.id)}?message=${encodeURIComponent(match.messageId)}` +
+        `&find=${encodeURIComponent(query ?? "")}`,
+    );
+  };
 
-  if (session.question) {
+  if (session.question && !match) {
     // The one row that raises its voice: an agent that cannot continue
     // without the user. Simple prompts can be answered right here.
     const answerAction = store.actions.find(
@@ -513,9 +585,121 @@ function AgentRow({
         {needsYou ? (
           <Text style={styles.needsYouNote}>Waiting on your answer</Text>
         ) : null}
+        {match ? <SnippetLine hit={match} query={query ?? ""} /> : null}
       </View>
       <Feather name="chevron-right" size={18} color={color.faint} />
     </MotionPressable>
+  );
+}
+
+/** What was said that matched: who said it, then the line, its words in
+ *  the text colour and bold, as on the Mac and in T3 Code. */
+function SnippetLine({ hit, query }: { hit: SearchHit; query: string }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const user = hit.role === "user";
+  return (
+    <Text style={styles.snippet} numberOfLines={2}>
+      <Text style={{ color: user ? color.workingText : color.ok }}>{user ? "You: " : "Agent: "}</Text>
+      {markedSegments(hit.snippet, markWords(query)).map((segment, index) =>
+        segment.match ? (
+          <Text key={index} style={styles.snippetMatch}>
+            {segment.text}
+          </Text>
+        ) : (
+          segment.text
+        ),
+      )}
+    </Text>
+  );
+}
+
+/**
+ * Searching, the list is what matched: agents whose names or folders have
+ * the words, then the conversations found only by what was said in them,
+ * running or long over. A conversation is listed once, under its name when
+ * that matched, with what was said under it either way.
+ */
+function searchSections(
+  sessions: Session[],
+  query: string,
+  found: SearchResults | null,
+  color: Palette,
+  /** The folder filter, when one is chosen: it narrows what was said too. */
+  inFolder: ((cwd: string) => boolean) | null,
+) {
+  const needle = query.toLowerCase();
+  const named = sessions
+    .filter((session) => session.name.toLowerCase().includes(needle) || session.cwd.toLowerCase().includes(needle))
+    .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  const listed = new Set(named.map((session) => session.id));
+  const hits = new Map<string, SearchHit>();
+  const others: Session[] = [];
+  for (const hit of found?.hits ?? []) {
+    const session = hit.session;
+    if (!session || hits.has(session.id)) continue;
+    if (inFolder && !inFolder(session.cwd)) continue;
+    hits.set(session.id, hit);
+    if (!listed.has(session.id)) others.push(sessions.find((other) => other.id === session.id) ?? session);
+  }
+  const sections: { label: string; tint: string; rank: number; sessions: Session[] }[] = [];
+  if (named.length) sections.push({ label: "Agents", tint: color.muted, rank: 0, sessions: named });
+  if (others.length) sections.push({ label: "In messages", tint: color.muted, rank: 1, sessions: others });
+  return { sections, hits };
+}
+
+/** A search box over the list, as Mail and Messages have one. */
+function SearchField({ value, onChange }: { value: string; onChange(text: string): void }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  return (
+    <View style={styles.searchField}>
+      <Feather name="search" size={16} color={color.muted} />
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        placeholder="Search agents and messages"
+        placeholderTextColor={color.faint}
+        style={styles.searchInput}
+        returnKeyType="search"
+        autoCorrect={false}
+        autoCapitalize="none"
+        accessibilityLabel="Search agents and messages"
+      />
+      {value ? (
+        <MotionPressable hitSlop={10} onPress={() => onChange("")} pressedScale={0.9}
+          accessibilityRole="button" accessibilityLabel="Clear search">
+          <Feather name="x-circle" size={16} color={color.faint} />
+        </MotionPressable>
+      ) : null}
+    </View>
+  );
+}
+
+/** Under the box while searching: what is happening, or that nothing matched. */
+function SearchStatus({ problem, pending, indexing, empty }: {
+  problem: string | null;
+  pending: boolean;
+  indexing: boolean;
+  empty: boolean;
+}) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const line = problem
+    ? problem
+    : pending
+      ? "Searching messages…"
+      : indexing
+        ? "Your Mac is still reading older conversations, so more may turn up."
+        : empty
+          ? "Nothing matches."
+          : null;
+  if (!line) return null;
+  return (
+    <View style={styles.searchStatus}>
+      {pending ? <ActivityIndicator size="small" color={color.faint} /> : null}
+      <Text style={[styles.searchStatusText, problem ? { color: color.errorText } : null]}>{line}</Text>
+    </View>
   );
 }
 
@@ -982,6 +1166,41 @@ const makeStyles = (c: Palette) =>
     // path's last segment is the one that says which project this is.
     metaPath: { flexShrink: 1 },
     meta: { ...font.sans, fontSize: size.caption, color: c.muted },
+    snippet: {
+      ...font.sans,
+      fontSize: size.caption,
+      lineHeight: scaled(18),
+      color: c.muted,
+      marginTop: space.xs,
+    },
+    snippetMatch: { ...font.sansBold, color: c.text },
+    searchField: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      minHeight: 42,
+      marginTop: space.md,
+      paddingHorizontal: space.md,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.fillStrong,
+    },
+    searchInput: {
+      flex: 1,
+      ...font.sans,
+      fontSize: size.body,
+      color: c.text,
+      paddingVertical: space.sm,
+    },
+    searchStatus: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      marginTop: space.lg,
+      paddingHorizontal: space.xxs,
+    },
+    searchStatusText: { ...font.sans, fontSize: size.caption, color: c.muted, flexShrink: 1 },
     needsYouNote: {
       ...font.sansMedium,
       fontSize: size.caption,

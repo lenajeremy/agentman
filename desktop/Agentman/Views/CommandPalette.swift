@@ -9,6 +9,12 @@ struct CommandPalette: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
     @AppStorage("settingsTab") private var settingsTab = "general"
+    /// What is typed when it opens; tests open it with a search.
+    var query = ""
+    /// What the conversations said, for what was typed a moment ago.
+    @State private var said: MessageSearchResults?
+    @State private var searching: Task<Void, Never>?
+    @State private var typedQuery = ""
 
     /// One thing the palette can do.
     struct Command {
@@ -26,13 +32,55 @@ struct CommandPalette: View {
                 store.showPalette = false
                 if item.id.hasPrefix("ask:") {
                     ask(String(item.id.dropFirst(4)))
+                } else if let said, let hit = said.hits.first(where: { "said:" + $0.id == item.id }) {
+                    store.open(hit, query: said.query)
                 } else {
                     commands(for: "").first { $0.item.id == item.id }?.run()
                 }
             },
-            dismiss: { store.showPalette = false }
+            dismiss: { store.showPalette = false },
+            typed: search,
+            status: pending ? "Searching messages…" : nil,
+            query: query
         )
         .task { await store.loadFolders() }
+    }
+
+    /// The conversations are searched a moment after typing stops.
+    private func search(_ query: String) {
+        searching?.cancel()
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        typedQuery = trimmed
+        guard AgentsStore.searchable(trimmed) else {
+            said = nil
+            return
+        }
+        searching = Task {
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            let results = await store.searchMessages(trimmed, limit: 20)
+            guard !Task.isCancelled else { return }
+            said = results
+        }
+    }
+
+    private var pending: Bool {
+        AgentsStore.searchable(typedQuery) && said?.query != typedQuery
+    }
+
+    /// Conversations whose messages have the words, under the commands and
+    /// agents, leaving out an agent already listed by its name.
+    private func saidRows(listed: [PaletteItem]) -> [PaletteItem] {
+        guard let said else { return [] }
+        let shown = Set(listed.map(\.id))
+        return said.hits.compactMap { hit in
+            guard let session = hit.session, !shown.contains("agent:" + session.id) else { return nil }
+            let folder = (session.cwd as NSString).lastPathComponent
+            let when = hit.date.map { " · " + Relative.short($0) } ?? ""
+            return PaletteItem(id: "said:" + hit.id, title: session.name, detail: folder + when,
+                               icon: "text.bubble", snippet: SearchWords.snippet(hit, query: said.query),
+                               section: "In messages")
+        }
     }
 
     private func results(_ query: String) -> [PaletteItem] {
@@ -56,7 +104,7 @@ struct CommandPalette: View {
                 ranked.append(ask)
             }
         }
-        return ranked
+        return ranked + saidRows(listed: ranked)
     }
 
     private func ask(_ question: String) {

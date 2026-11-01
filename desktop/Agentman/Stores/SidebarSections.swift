@@ -10,6 +10,8 @@ nonisolated struct SidebarSections: Equatable, Sendable {
     var working: [Session] = []
     var archived: [Session] = []
 
+    var isEmpty: Bool { pinned.isEmpty && active.isEmpty && working.isEmpty && archived.isEmpty }
+
     /// An agent idle this long is archived by itself.
     static let archiveAfter: TimeInterval = 3 * 24 * 60 * 60
 
