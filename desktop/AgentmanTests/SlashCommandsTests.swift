@@ -258,9 +258,13 @@ final class SentFilesTests: XCTestCase {
 @MainActor
 final class DaemonRestartTests: XCTestCase {
     // A daemon that isn't the login service can't be kicked; the app says
-    // what to do instead of failing quietly.
+    // what to do instead of failing quietly: set it up again, from the app
+    // when it can, else with am setup in a terminal. launchctl itself never
+    // runs under tests, not even for a service that isn't there.
     func testRestartingAServiceThatIsNotThereSaysWhatToDo() async {
         let problem = await DaemonRestart.restart(service: "dev.agentman.no-such-service-\(UUID().uuidString.prefix(6))")
-        XCTAssertEqual(problem?.contains("am service restart"), true, problem ?? "nil")
+        XCTAssertEqual(problem, "Nothing is restarted under tests.")
+        XCTAssertTrue(DaemonRestart.notAService(canSetUp: false).contains("Run `am setup` in a terminal"))
+        XCTAssertTrue(DaemonRestart.notAService(canSetUp: true).contains("Set it up again"))
     }
 }

@@ -458,13 +458,9 @@ final class DaemonSetupTests: XCTestCase {
         XCTAssertFalse(store.setup.paths.home.hasPrefix(NSHomeDirectory() + "/"), "not even a look at the user's ~/.agentman")
     }
 
-    // Restart Daemon with no service to restart: the app offers to set it
-    // up again, on the screen; without its am it says how in a terminal.
-    func testRestartingWithoutAServiceOffersToSetUp() async {
-        XCTAssertTrue(DaemonRestart.notAService(canSetUp: true).contains("Set it up again"))
-        XCTAssertTrue(DaemonRestart.notAService(canSetUp: false).contains("am setup"))
-        let refused = await DaemonRestart.restart()
-        XCTAssertEqual(refused, "Nothing is restarted under tests.", "launchctl is never run under tests")
+    // Restart Daemon with no service to restart offers Set Up Again, which
+    // runs am setup on the screen (what it says is in DaemonRestartTests).
+    func testSettingUpAgainFromRestartDaemon() async {
 
         let am = FakeAm(setup: Self.goodRun)
         let setup = setup(am: am, automatic: false)
