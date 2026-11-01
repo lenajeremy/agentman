@@ -9,7 +9,7 @@ struct AgentmanApp: App {
     /// Unit tests run inside the app, as its host, and get none of it: no
     /// window, no daemon, no editor on the user's folders, and nothing
     /// restored from the user's own copy of the app.
-    static let underTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    nonisolated static let underTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
     init() {
         if Self.underTests {

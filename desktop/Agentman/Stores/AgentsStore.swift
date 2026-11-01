@@ -134,8 +134,13 @@ final class AgentsStore {
     private static let agentmanPanel = "agentman"
     private var started = false
 
-    init(client: DaemonClient = DaemonClient()) {
+    /// Keeping am serve right for this app: setting it up on first launch,
+    /// and again when it is missing or too old.
+    let setup: DaemonSetup
+
+    init(client: DaemonClient = DaemonClient(), setup: DaemonSetup? = nil) {
         self.client = client
+        self.setup = setup ?? DaemonSetup()
         manager = ManagerStore(client: client)
         manager.onNews = { [weak self] entry in self?.news(entry) }
         manager.onCardClosed = { [weak self] card in
@@ -798,6 +803,7 @@ final class AgentsStore {
 
     private func statusChanged(_ status: DaemonClient.Status) {
         self.status = status
+        setup.connectionChanged(status)
         guard status == .connected else { return }
         Task {
             if let event = try? await client.request(DaemonRequest(.listSessions)) {
@@ -829,6 +835,8 @@ final class AgentsStore {
             if let info = event.daemon {
                 daemonInfo = info
             }
+            // A daemon too old to say anything of itself is level 0.
+            setup.daemonReported(event.daemon ?? DaemonInfo(version: ""))
             followTakeovers()
         case "turn_complete":
             if let id = event.sessionId { away.record(.finished(event.preview), sessionId: id) }

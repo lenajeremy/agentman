@@ -4,9 +4,9 @@
 # signed as the app is. Xcode runs it at the end of each build of the app
 # (project.yml), before it signs the app around it.
 #
-# The app sets everything up with this am on first launch (App/DaemonSetup
-# .swift): am setup copies it to ~/.agentman/bin/am, which the login service
-# runs. It is never run or replaced in place, since anything changed inside
+# The app sets everything up with this am on first launch
+# (App/DaemonSetup.swift): am setup copies it to ~/.agentman/bin/am, which
+# the login service runs. It is never run or replaced in place, since anything changed inside
 # the app breaks the app's signature.
 #
 # Its version is the app's, stamped as GoReleaser stamps a release's

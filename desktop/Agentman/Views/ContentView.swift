@@ -73,6 +73,13 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.15), value: store.lightbox?.id)
+        // Setting up am serve: the welcome on first launch, and its steps.
+        .overlay {
+            if store.setup.showsScreen {
+                SetupScreen()
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: store.setup.showsScreen)
         .onOpenURL(perform: open)
         .task {
             // AGENTMAN_OPEN names a link to open at launch, so a copy started
