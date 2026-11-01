@@ -209,6 +209,13 @@ final class DaemonSetupTests: XCTestCase {
         XCTAssertTrue(failure.message.hasPrefix("launchctl bootstrap"), failure.message)
         XCTAssertEqual(failure.log, "/Users/me/.agentman/serve.log")
         XCTAssertEqual(setup.note, .failed(failure.message))
+
+        // Put right some other way, the note goes.
+        try manage("0.39.0", am: am)
+        setup.connectionChanged(.connected)
+        setup.daemonReported(DaemonInfo(version: "0.39.0", apiLevel: 1, install: "managed"))
+        await until { setup.note == nil }
+        XCTAssertEqual(am.runs.count, 1)
     }
 
     func testWhatARunComesTo() {

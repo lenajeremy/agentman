@@ -224,6 +224,9 @@ final class DaemonSetup {
         guard !running else { return }
         await readVersions()
         reasons = Self.reasons(bundled: bundled, managed: managed, daemon: daemon)
+        // Put right since, by the user or by am upgrade: the footer's
+        // failure goes.
+        if reasons.isEmpty, case .failed = note { dismissNote() }
         guard automatic, !reasons.isEmpty, !ranByItself, !showsScreen else { return }
         ranByItself = true
         if welcomed {
