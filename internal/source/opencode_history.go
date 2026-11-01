@@ -49,6 +49,12 @@ func (s *OpenCodeSource) Past(ctx context.Context, dir string, limit int) ([]pro
 		if model == "" {
 			model, _ = s.models.get(id)
 		}
+		// OpenCode 2's service takes a message for any of its sessions, however
+		// long it has been idle, and the session is live again from it.
+		inject := protocol.InjectNone
+		if _, service := s.servicePassword(item.base); service {
+			inject = protocol.InjectAPI
+		}
 		found = append(found, protocol.Session{
 			ID:             id,
 			Kind:           protocol.KindOpenCode,
@@ -56,7 +62,7 @@ func (s *OpenCodeSource) Past(ctx context.Context, dir string, limit int) ([]pro
 			Name:           openCodeName(item.session),
 			Cwd:            directory,
 			State:          protocol.StateEnded,
-			Inject:         protocol.InjectNone,
+			Inject:         inject,
 			StartedAt:      item.session.Time.Created,
 			LastActivityAt: openCodeUpdated(item.session),
 			Model:          model,

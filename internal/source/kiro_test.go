@@ -630,27 +630,82 @@ func TestKiroMarkedStateWaitsForTheReply(t *testing.T) {
 func TestKiroResumeIsNamedAsDiscoveryWillListIt(t *testing.T) {
 	home := t.TempDir()
 	pid := os.Getpid()
+	const chat = "9afec73d-0bce-4d68-91ff-95cfe36d542f"
 	paneName := tmux.NewName("kiro")
 	s := newTestKiro(t, home, fmt.Sprintf("%d 1 kiro-cli-chat\n", pid))
-	gotPane, gotID := s.ResumedSession("9afec73d-0bce-4d68-91ff-95cfe36d542f", paneName)
-	if gotPane != paneName || !regexp.MustCompile(`^agentman-[A-Za-z0-9_-]+$`).MatchString(gotPane) {
-		t.Fatalf("pane = %q, want the daemon's own %q", gotPane, paneName)
+	gotPane, gotID := s.ResumedSession(chat, paneName)
+	if !strings.HasPrefix(gotPane, "agentman-kiro-chat-"+chat+"-") || !regexp.MustCompile(`^agentman-[A-Za-z0-9_-]+$`).MatchString(gotPane) {
+		t.Fatalf("pane = %q, want one named for the chat", gotPane)
+	}
+	// The chat keeps its id: a thread open on it stays its thread.
+	if gotID != "kiro:"+chat {
+		t.Fatalf("id = %q, want the chat's own", gotID)
+	}
+
+	// Before Kiro has written anything, the bare pane is already that chat,
+	// with what was said in it.
+	writeKiroSession(t, home, chat, "/work", 0, kiroLinePrompt, kiroLineReply)
+	s.listPanes = func(context.Context) ([]tmux.Session, error) {
+		return []tmux.Session{{Name: gotPane, PanePID: pid, Cwd: "/work"}}, nil
+	}
+	s.snapshotProcesses = func(context.Context) (*tmux.ProcessTree, error) { return tmux.ProcessTreeFromTable(""), nil }
+	sessions := discoverKiro(t, s)
+	bare, ok := sessions[gotID]
+	if !ok || len(sessions) != 1 || bare.NativeID != chat || bare.Inject != protocol.InjectTmux {
+		t.Fatalf("the pane before Kiro's lock = %+v, listed %v", bare, sessions)
+	}
+	if page, err := s.Page(context.Background(), gotID, "", 10); err != nil || len(page.Messages) == 0 {
+		t.Errorf("the bare pane's thread = %+v %v, want the chat so far", page, err)
 	}
 
 	// The reopened Kiro writes its lock, under the pane the resume opened.
-	writeKiroSession(t, home, "9afec73d-0bce-4d68-91ff-95cfe36d542f", "/work", pid, kiroLinePrompt, kiroLineReply)
-	s.listPanes = func(context.Context) ([]tmux.Session, error) {
-		return []tmux.Session{{Name: paneName, PanePID: pid, Cwd: "/work"}}, nil
+	writeKiroSession(t, home, chat, "/work", pid, kiroLinePrompt, kiroLineReply)
+	s.snapshotProcesses = func(context.Context) (*tmux.ProcessTree, error) {
+		return tmux.ProcessTreeFromTable(fmt.Sprintf("%d 1 kiro-cli-chat\n", pid)), nil
 	}
-	sessions := discoverKiro(t, s)
-	if _, ok := sessions[gotID]; !ok || len(sessions) != 1 {
+	sessions = discoverKiro(t, s)
+	if session, ok := sessions[gotID]; !ok || len(sessions) != 1 || session.Previous != "" {
 		t.Errorf("resume named %q, discovery listed %v", gotID, sessions)
 	}
-	// Before Kiro has written anything, the bare pane goes by the same id.
-	s.snapshotProcesses = func(context.Context) (*tmux.ProcessTree, error) { return tmux.ProcessTreeFromTable(""), nil }
-	os.Remove(filepath.Join(home, ".kiro", "sessions", "cli", "9afec73d-0bce-4d68-91ff-95cfe36d542f.lock"))
-	if _, ok := discoverKiro(t, s)[gotID]; !ok {
-		t.Errorf("the pane before Kiro's lock is not %q", gotID)
+}
+
+// A pane opened for one chat that has moved on to another there (/chat new)
+// goes by the pane, and the chat it was opened for is the one it took over
+// from, so the thread follows it.
+func TestKiroChatPaneMovedOnToAnotherChat(t *testing.T) {
+	home := t.TempDir()
+	pid := os.Getpid()
+	const first, second = "9afec73d-0bce-4d68-91ff-95cfe36d542f", "1d6c56a8-75bc-43c9-b877-181e742d6a73"
+	s := newTestKiro(t, home, fmt.Sprintf("%d 1 kiro-cli-chat\n", pid))
+	pane, _ := s.ResumedSession(first, tmux.NewName("kiro"))
+	writeKiroSession(t, home, second, "/work", pid, kiroLinePrompt, kiroLineReply)
+	s.listPanes = func(context.Context) ([]tmux.Session, error) {
+		return []tmux.Session{{Name: pane, PanePID: pid, Cwd: "/work"}}, nil
+	}
+	sessions := discoverKiro(t, s)
+	session, ok := sessions["kiro:tmux-"+pane]
+	if !ok || len(sessions) != 1 || session.NativeID != second || session.Previous != "kiro:"+first {
+		t.Fatalf("listed %v", sessions)
+	}
+}
+
+// Kiro will not open a chat another process holds, so a pane opened for it
+// then sits there; it is listed as a pane of its own, not as that chat.
+func TestKiroChatPaneWhileTheChatIsHeldElsewhere(t *testing.T) {
+	home := t.TempDir()
+	pid := os.Getpid()
+	const chat = "9afec73d-0bce-4d68-91ff-95cfe36d542f"
+	s := newTestKiro(t, home, fmt.Sprintf("%d 1 kiro-cli-chat\n", pid))
+	pane, _ := s.ResumedSession(chat, tmux.NewName("kiro"))
+	writeKiroSession(t, home, chat, "/work", pid, kiroLinePrompt, kiroLineReply)
+	s.listPanes = func(context.Context) ([]tmux.Session, error) {
+		// Its process is not the one holding the chat.
+		return []tmux.Session{{Name: pane, PanePID: 70_000, Cwd: "/work"}}, nil
+	}
+	sessions := discoverKiro(t, s)
+	held, stuck := sessions["kiro:"+chat], sessions["kiro:tmux-"+pane]
+	if len(sessions) != 2 || held.Inject != protocol.InjectNone || stuck.Inject != protocol.InjectTmux || stuck.NativeID != "" {
+		t.Fatalf("listed %v", sessions)
 	}
 }
 

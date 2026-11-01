@@ -44,6 +44,9 @@ type AgentUsage struct {
 	Sessions int     `json:"sessions"`
 	Tokens   Tokens  `json:"tokens"`
 	Cost     float64 `json:"cost"`
+	// Credits are what an agent that bills in credits rather than tokens
+	// says its turns cost: Kiro, whose records hold no token counts.
+	Credits float64 `json:"credits,omitempty"`
 }
 
 // UsageBucket is a day (an hour, over the last day) of the chart: each
@@ -51,9 +54,10 @@ type AgentUsage struct {
 type UsageBucket struct {
 	// Start is when it begins, in milliseconds since 1970, local midnight
 	// for a day.
-	Start  int64            `json:"start"`
-	Cost   map[Kind]float64 `json:"cost,omitempty"`
-	Tokens map[Kind]int64   `json:"tokens,omitempty"`
+	Start   int64            `json:"start"`
+	Cost    map[Kind]float64 `json:"cost,omitempty"`
+	Tokens  map[Kind]int64   `json:"tokens,omitempty"`
+	Credits map[Kind]float64 `json:"credits,omitempty"`
 }
 
 // ModelUsage is one model's share, under the agent that used it.
@@ -64,6 +68,8 @@ type ModelUsage struct {
 	Cost   float64 `json:"cost"`
 	// Priced is false for a model with no known price: its cost is left out.
 	Priced bool `json:"priced"`
+	// Credits are what its turns cost, for an agent that bills in credits.
+	Credits float64 `json:"credits,omitempty"`
 	// Fast is the part of it Claude ran in fast mode, at a higher price,
 	// and Advisor the part spent advising another model during its turns.
 	// Both are in Tokens and Cost too; absent when there was none.
@@ -89,6 +95,9 @@ type Usage struct {
 	Sessions int       `json:"sessions"`
 	Tokens   Tokens    `json:"tokens"`
 	Cost     UsageCost `json:"cost"`
+	// Credits are what agents that bill in credits said their turns cost:
+	// a measure of its own, not part of Cost.
+	Credits float64 `json:"credits,omitempty"`
 	// CacheSavings is what reading from the cache saved over fresh input.
 	CacheSavings float64       `json:"cacheSavings"`
 	Agents       []AgentUsage  `json:"agents"`

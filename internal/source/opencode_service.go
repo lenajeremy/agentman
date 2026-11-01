@@ -147,6 +147,17 @@ func (s *OpenCodeSource) servicePassword(base string) (string, bool) {
 	return password, ok
 }
 
+// callService makes one call to OpenCode 2's own API, for what OpenCode 1
+// has no form of.
+func (s *OpenCodeSource) callService(ctx context.Context, base, method, path string, body, out any) error {
+	password, ok := s.servicePassword(base)
+	if !ok {
+		return errOpenCodeService
+	}
+	_, err := s.send(ctx, method, base+path, openCodeServiceUser, password, body, out, maxOpenCodeMetadataResponse)
+	return err
+}
+
 // errOpenCodeService is the answer to a request OpenCode 2 has nothing for.
 var errOpenCodeService = errors.New("opencode: not available from OpenCode 2's service")
 
@@ -245,6 +256,15 @@ func (s *OpenCodeSource) doService(
 			permissions = append(permissions, request.request())
 		}
 		return nil, answerAs(out, permissions)
+
+	case is(http.MethodGet, "command"):
+		var listed struct {
+			Data []ocCommand `json:"data"`
+		}
+		if err := call(http.MethodGet, "/api/command", location, nil, &listed); err != nil {
+			return nil, err
+		}
+		return nil, answerAs(out, listed.Data)
 
 	case is(http.MethodGet, "config", "providers"):
 		var models struct {
@@ -370,6 +390,22 @@ func (s *OpenCodeSource) doService(
 		return nil, call(http.MethodPost, "/api/session/"+openCodeSegment(id)+"/prompt", nil, payload, nil)
 	}
 
+	if id, ok := sessionCall(http.MethodPost, "command"); ok {
+		var command struct {
+			Command   string `json:"command"`
+			Arguments string `json:"arguments"`
+		}
+		if err := reshape(body, &command); err != nil {
+			return nil, err
+		}
+		return nil, call(http.MethodPost, "/api/session/"+openCodeSegment(id)+"/command", nil,
+			map[string]string{"name": command.Command, "text": command.Arguments}, nil)
+	}
+
+	if id, ok := sessionCall(http.MethodPost, "summarize"); ok {
+		return nil, call(http.MethodPost, "/api/session/"+openCodeSegment(id)+"/compact", nil, map[string]any{}, nil)
+	}
+
 	if id, ok := sessionCall(http.MethodPost, "abort"); ok {
 		return nil, call(http.MethodPost, "/api/session/"+openCodeSegment(id)+"/interrupt", nil, nil, nil)
 	}
@@ -460,8 +496,9 @@ func openCodeServiceSessions(listed []json.RawMessage) []ocSession {
 
 // openCodeServiceMessage is one of OpenCode 2's messages in OpenCode 1's
 // shape: what the person sent, what the model answered and the tools it
-// ran, and a shell command run from the prompt. The rest (switches of
-// model or agent, system notes, compaction) is OpenCode's bookkeeping.
+// ran, a shell command run from the prompt, and a finished compaction (as
+// the role "compaction", which only OpenCode 2 has). The rest (switches of
+// model or agent, system notes) is OpenCode's bookkeeping.
 func openCodeServiceMessage(raw json.RawMessage) (ocMessage, bool) {
 	var message struct {
 		ID   string `json:"id"`
@@ -513,6 +550,12 @@ func openCodeServiceMessage(raw json.RawMessage) (ocMessage, bool) {
 			}
 			out.Parts = append(out.Parts, part)
 		}
+	case "compaction":
+		// /compact, or OpenCode compacting on its own, once it is done.
+		if message.Status != "completed" {
+			return ocMessage{}, false
+		}
+		out.Info.Role = "compaction"
 	case "shell":
 		// A command run from the prompt with !, as a tool the person ran.
 		out.Info.Role = "assistant"

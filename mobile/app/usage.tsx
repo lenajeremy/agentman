@@ -14,7 +14,8 @@ import type { Limits, Usage, UsageAgent } from "../lib/protocol";
 import { useStore } from "../lib/store";
 import { agentLabel, font, Palette, radius, scaled, size, space } from "../lib/theme";
 import {
-  agentColor, axisLabel, axisMoney, bucketValue, fraction, kindColors, modelNote, momentLabel, money, monotonePath,
+  agentColor, axisLabel, axisMoney, bucketValue, credits, creditsOnly, CREDITS_NOTE, fraction, kindColors, modelNote,
+  momentLabel, money, monotonePath,
   niceAxis, percent, RANGES, rangeTitle, rowLabel, sessions, tokens, unitAdjective, unitNoun, unitOf,
   type Metric,
 } from "../lib/usage";
@@ -223,6 +224,8 @@ function AgentRow({ agent, usage, metric, dark }: { agent: UsageAgent; usage: Us
   const cost = metric === "cost";
   const all = (t: Usage["tokens"]) => t.input + t.cacheRead + t.cacheWrite + t.output;
   const share = cost ? fraction(agent.cost, all(usage.cost)) : fraction(all(agent.tokens), all(usage.tokens));
+  // Kiro counts credits, not tokens: its row says those instead.
+  const spent = creditsOnly(agent);
   return (
     <View style={styles.agentRow}>
       <View style={styles.agentLine}>
@@ -230,10 +233,14 @@ function AgentRow({ agent, usage, metric, dark }: { agent: UsageAgent; usage: Us
         <AgentIcon kind={agent.kind} size={16} />
         <Text style={styles.agentName} numberOfLines={1}>{agentLabel(agent.kind).name}</Text>
         <Text style={styles.agentSessions} numberOfLines={1}>{sessions(agent.sessions)}</Text>
-        <Text style={styles.agentValue}>{cost ? money(agent.cost) : tokens(all(agent.tokens))}</Text>
+        <Text style={styles.agentValue}>
+          {spent !== undefined ? credits(spent) : cost ? money(agent.cost) : tokens(all(agent.tokens))}
+        </Text>
       </View>
       <Text style={styles.agentShare}>
-        {percent(share)} of {cost ? "cost" : "tokens"} · {cost ? `${tokens(all(agent.tokens))} tokens` : money(agent.cost)}
+        {spent !== undefined
+          ? CREDITS_NOTE
+          : `${percent(share)} of ${cost ? "cost" : "tokens"} · ${cost ? `${tokens(all(agent.tokens))} tokens` : money(agent.cost)}`}
       </Text>
     </View>
   );

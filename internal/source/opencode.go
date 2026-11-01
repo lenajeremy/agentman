@@ -69,6 +69,7 @@ type OpenCodeSource struct {
 	catalogs map[string]*openCodeCatalog
 	choices  map[string]openCodeChoice
 	reported map[string]string
+	agents   map[string]openCodeAgentList
 
 	baseURL string
 	client  *http.Client
@@ -103,6 +104,9 @@ type OpenCodeSource struct {
 	// See opencode_service.go.
 	serviceFile string
 	services    map[string]string
+	// live streams what each service's turns are writing; see
+	// opencode_live.go.
+	live *openCodeLive
 
 	// models remembers each session's model; see modelCache. It matters more
 	// here than for the file-backed agents, because finding it costs an HTTP
@@ -185,6 +189,7 @@ func NewOpenCodeSource(baseURL string) *OpenCodeSource {
 		snapshotProcesses:  tmux.SnapshotProcessTree,
 		now:                time.Now,
 		serviceFile:        openCodeServiceFile(),
+		live:               newOpenCodeLive(),
 	}
 	source.findServers = source.scanServers
 	return source
@@ -237,7 +242,10 @@ type ocSession struct {
 	ID        string `json:"id"`
 	Title     string `json:"title"`
 	Directory string `json:"directory"`
-	Model     struct {
+	// Agent is OpenCode 2's agent for the session, "build" or "plan": the
+	// mode its terminal app switches with tab.
+	Agent string `json:"agent"`
+	Model struct {
 		ID         string `json:"id"`
 		ProviderID string `json:"providerID"`
 	} `json:"model"`
@@ -647,6 +655,7 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 	// No server means OpenCode simply is not being used. Not an error, and it
 	// must stay cheap — this runs every second.
 	servers := s.findServers(ctx)
+	s.keepLive()
 	if len(servers) == 0 {
 		if len(previous) == 0 {
 			return nil, nil
@@ -753,6 +762,7 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 				Name: openCodeName(item), Cwd: directory, State: state,
 				Inject: protocol.InjectAPI, StartedAt: item.Time.Created,
 				LastActivityAt: updated, Model: model, Question: question,
+				Mode: item.Agent,
 			}
 			candidate := openCodeSession{
 				meta: meta, nativeID: item.ID, baseURL: base,
@@ -834,8 +844,10 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 		if session.baseURL == "" {
 			continue
 		}
-		// The models it can be switched to, and the one chosen from the phone.
+		// The models it can be switched to, and the one chosen from the phone;
+		// the modes, on OpenCode 2.
 		s.offerModels(ctx, id, &session)
+		s.offerModes(ctx, &session)
 		working := session.meta.State == protocol.StateBusy || session.meta.State == protocol.StateWaitingInput
 		if working {
 			if texts, rows, err := s.queuedFor(ctx, session); err == nil {
@@ -1280,6 +1292,12 @@ func openCodeWaiting(sessionID string, messages []ocMessage) (texts, rows []stri
 // openCodeMessages flattens one API message into the normalized feed.
 func openCodeMessages(sessionID string, message ocMessage) []protocol.Message {
 	ts := message.Info.Time.Created
+	if message.Info.Role == "compaction" {
+		return []protocol.Message{{
+			ID: message.Info.ID + ":compaction", SessionID: sessionID,
+			Role: protocol.RoleSystem, Ts: ts, Text: "Context compacted",
+		}}
+	}
 	role := protocol.RoleAssistant
 	if message.Info.Role == "user" {
 		role = protocol.RoleUser
@@ -1424,9 +1442,11 @@ func clipTitle(text string) string {
 
 // Follow implements Source.
 //
-// Polls rather than holding the SSE stream: the daemon already runs a
-// once-a-second loop, one extra local HTTP call is cheaper than managing a
-// long-lived stream's lifecycle, and messages are deduplicated by id anyway.
+// The saved messages are read every tick: they are what a session finally
+// says. A reply OpenCode 2's service is still writing is not in them (its
+// text is saved empty until it is finished), so its words and tools come
+// from the service's event stream as previews, sent the moment they change;
+// see opencode_live.go.
 func (s *OpenCodeSource) Follow(ctx context.Context, sessionID string, out chan<- []protocol.Message) error {
 	// Keyed by id, valued by a fingerprint of the content rather than a bare
 	// "seen" flag. OpenCode fills a message in as the model produces it, so the
@@ -1435,34 +1455,45 @@ func (s *OpenCodeSource) Follow(ctx context.Context, sessionID string, out chan<
 	// nothing-to-report froze every long answer at its first few words.
 	seen := map[string]openCodeSeenMessage{}
 	var generation uint64
+	live := newOpenCodeLiveFollow(sessionID)
 	// Prime from the current tail so the backlog is not replayed as new.
 	if page, err := s.Page(ctx, sessionID, "", 50); err == nil {
 		generation++
 		_ = updateOpenCodeSeen(seen, page.Messages, generation)
+		live.read(page.Messages)
 	}
+	route, _ := s.routeFor(sessionID)
+	changed, stop := s.live.watch(route.baseURL, route.nativeID)
+	defer stop()
+	previews := func() []protocol.Message { return s.live.rows(route.baseURL, route.nativeID, sessionID) }
 
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
 
 	for {
+		var batch []protocol.Message
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-changed:
+			batch = live.merge(nil, previews())
 		case <-ticker.C:
 			page, err := s.Page(ctx, sessionID, "", 20)
 			if err != nil {
 				continue
 			}
 			generation++
-			batch := updateOpenCodeSeen(seen, page.Messages, generation)
-			if len(batch) == 0 {
-				continue
-			}
-			select {
-			case out <- batch:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+			batch = updateOpenCodeSeen(seen, page.Messages, generation)
+			live.read(page.Messages)
+			batch = live.merge(batch, previews())
+		}
+		if len(batch) == 0 {
+			continue
+		}
+		select {
+		case out <- batch:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 }
@@ -1532,11 +1563,17 @@ func (s *OpenCodeSource) InjectWithSkills(ctx context.Context, sessionID, text s
 }
 
 func (s *OpenCodeSource) inject(ctx context.Context, sessionID, text string, skills []string) (protocol.InjectMode, error) {
-	s.mu.RLock()
-	session, ok := s.sessions[sessionID]
-	s.mu.RUnlock()
-	if !ok {
+	// A session idle past openCodeIdleWindow is in a folder's history rather
+	// than on the board, and its server still takes messages for it.
+	session, ok := s.routeFor(sessionID)
+	if !ok || session.baseURL == "" {
 		return protocol.InjectNone, fmt.Errorf("source: unknown opencode session %q", sessionID)
+	}
+	if ran, err := s.runCommand(ctx, session, text); ran || err != nil {
+		if err != nil {
+			return protocol.InjectNone, err
+		}
+		return protocol.InjectAPI, nil
 	}
 
 	body := map[string]any{

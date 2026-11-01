@@ -242,6 +242,11 @@ interface Store {
   /** Close the pane a session runs in. The transcript survives, so it stays
    *  in its folder's history and can be resumed again. */
   endSession(sessionId: string): Promise<void>;
+  /** Move a session to the other side of its handoff: into a terminal pane
+   *  on the Mac, or from Agentman's pane back into Agentman. The same
+   *  conversation carries on there; resolves with the id it goes by now.
+   *  Rejects with the Mac's reason, mid-turn for one. */
+  handoffSession(sessionId: string): Promise<string>;
   /** Hear from this agent itself, or not, on every device, even while
    *  Agentman speaks for the agents. Returns the problem, if any. */
   setAgentAlerts(sessionId: string, on: boolean): Promise<string | null>;
@@ -1710,6 +1715,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
           launchRequests.current.set(id, {
             resolve: () => resolve(), reject, timer,
+          });
+        });
+      },
+
+      handoffSession(sessionId) {
+        return new Promise<string>((resolve, reject) => {
+          const id = clientRef.current?.send({ type: "handoff_session", sessionId });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          // A move waits for one side to let go of the chat before the other
+          // opens: a few seconds, rarely more.
+          const timer = setTimeout(() => settleLaunchRequest(id), 45_000);
+          launchRequests.current.set(id, {
+            resolve: (event) => resolve(event.sessionId ?? sessionId), reject, timer,
           });
         });
       },

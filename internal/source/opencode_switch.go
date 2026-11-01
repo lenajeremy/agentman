@@ -2,8 +2,10 @@ package source
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -11,11 +13,17 @@ import (
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
 
-// OpenCode picks a model per message: prompt_async takes a model as
+// OpenCode 1 picks a model per message: prompt_async takes a model as
 // {providerID, modelID}, and a session has no model of its own to set (PATCH
 // /session takes none). Its own TUI works the same way, keeping the choice on
 // its side. So a switch from the phone is remembered here and sent with every
-// message after it, and only those messages use it.
+// message after it, and only those messages use it. OpenCode 2's sessions
+// have a model of their own, so there a switch is made at once
+// (POST /api/session/{id}/model), and its terminal app shows it too.
+//
+// OpenCode 2's sessions have an agent as well, which is their mode: Build,
+// which changes things, or Plan, which only reads. Its terminal app switches
+// it with tab; the phone with POST /api/session/{id}/agent.
 //
 // The models offered are the ones OpenCode's configured providers carry,
 // from GET /config/providers — the providers the user has connected, not the
@@ -190,12 +198,102 @@ func (s *OpenCodeSource) SetModel(ctx context.Context, sessionID, model string) 
 	if !ok {
 		return fmt.Errorf("source: %q is not one of OpenCode's models", model)
 	}
+	if _, service := s.servicePassword(session.baseURL); service {
+		if err := s.callService(ctx, session.baseURL, http.MethodPost,
+			"/api/session/"+openCodeSegment(session.nativeID)+"/model",
+			map[string]any{"model": map[string]string{"id": ref.modelID, "providerID": ref.providerID}}, nil); err != nil {
+			return err
+		}
+	}
 	s.switchMu.Lock()
 	defer s.switchMu.Unlock()
 	if s.choices == nil {
 		s.choices = map[string]openCodeChoice{}
 	}
 	s.choices[sessionID] = openCodeChoice{name: model, ref: ref, reported: s.reported[sessionID]}
+	return nil
+}
+
+// openCodeAgentList is a service's modes, fetched at most every few minutes.
+type openCodeAgentList struct {
+	fetched time.Time
+	names   []string
+}
+
+// agentsFor lists the agents a person switches an OpenCode 2 session
+// between: the primary ones it shows. Its subagents (general, explore) run
+// inside a turn, and the hidden ones (title, summary, compaction) are its
+// own.
+func (s *OpenCodeSource) agentsFor(ctx context.Context, base string) ([]string, error) {
+	s.switchMu.Lock()
+	cached, ok := s.agents[base]
+	s.switchMu.Unlock()
+	if ok && time.Since(cached.fetched) < openCodeCatalogTTL {
+		return cached.names, nil
+	}
+	var listed struct {
+		Data []struct {
+			ID     string `json:"id"`
+			Mode   string `json:"mode"`
+			Hidden bool   `json:"hidden"`
+		} `json:"data"`
+	}
+	if err := s.callService(ctx, base, http.MethodGet, "/api/agent", nil, &listed); err != nil {
+		if ok {
+			return cached.names, nil
+		}
+		return nil, err
+	}
+	var names []string
+	for _, agent := range listed.Data {
+		if agent.ID != "" && agent.Mode != "subagent" && !agent.Hidden {
+			names = append(names, agent.ID)
+		}
+	}
+	s.switchMu.Lock()
+	if s.agents == nil {
+		s.agents = map[string]openCodeAgentList{}
+	}
+	s.agents[base] = openCodeAgentList{fetched: time.Now(), names: names}
+	s.switchMu.Unlock()
+	return names, nil
+}
+
+// offerModes lists the modes an OpenCode 2 session can be switched to. A
+// session new enough to have had no turn reports no agent yet; it is offered
+// them all, with none current.
+func (s *OpenCodeSource) offerModes(ctx context.Context, session *openCodeSession) {
+	if _, service := s.servicePassword(session.baseURL); !service {
+		return
+	}
+	names, err := s.agentsFor(ctx, session.baseURL)
+	if err == nil && (session.meta.Mode == "" || slices.Contains(names, session.meta.Mode)) {
+		session.meta.Modes = names
+	}
+}
+
+// SetMode implements ModeSetter: OpenCode 2 switches the session's agent,
+// and its terminal app follows.
+func (s *OpenCodeSource) SetMode(ctx context.Context, sessionID, mode string) error {
+	s.mu.RLock()
+	session, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("source: unknown opencode session %q", sessionID)
+	}
+	if err := s.callService(ctx, session.baseURL, http.MethodPost,
+		"/api/session/"+openCodeSegment(session.nativeID)+"/agent", map[string]string{"agent": mode}, nil); err != nil {
+		if errors.Is(err, errOpenCodeService) {
+			return fmt.Errorf("source: OpenCode 1 can't switch modes from the phone")
+		}
+		return err
+	}
+	s.mu.Lock()
+	if current, ok := s.sessions[sessionID]; ok {
+		current.meta.Mode = mode
+		s.sessions[sessionID] = current
+	}
+	s.mu.Unlock()
 	return nil
 }
 

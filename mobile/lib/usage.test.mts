@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  axisLabel, axisMoney, bucketValue, modelNote, momentLabel, money, monotonePath, niceAxis, percent, RANGES, rangeTitle,
-  rowLabel, sessions, tokens, unitOf,
+  agentColor, axisLabel, axisMoney, bucketValue, credits, creditsOnly, modelNote, momentLabel, money, monotonePath, niceAxis,
+  percent, RANGES, rangeTitle, rowLabel, sessions, tokens, unitOf,
 } from "./usage.ts";
 import { decodeDaemonEvent } from "./protocol.ts";
 
@@ -95,4 +95,28 @@ test("a model says what ran in fast mode and what went to advising", () => {
   assert.equal(modelNote({ priced: false, fast: part(0, 950) }, "cost"), "950 in fast mode", "no price: its tokens");
   assert.equal(modelNote({ priced: true }, "cost"), undefined);
   assert.equal(modelNote({ priced: true, fast: null, advisor: null }, "cost"), undefined);
+});
+
+// Kiro counts credits, not tokens: its row and its model say those, and an
+// agent with tokens or a cost never reads as credits. Muse has a colour.
+test("Kiro shows its credits", () => {
+  const none = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
+  assert.equal(creditsOnly({ tokens: none, cost: 0, credits: 6.5686 }), 6.5686);
+  assert.equal(creditsOnly({ tokens: { ...none, output: 1 }, cost: 0, credits: 1 }), undefined);
+  assert.equal(creditsOnly({ tokens: none, cost: 0 }), undefined);
+  assert.equal(credits(6.5686), "6.57 credits");
+  assert.equal(credits(1), "1.00 credit");
+  assert.equal(credits(0.001), "<0.01 credits");
+  assert.equal(modelNote({ priced: false, credits: 6.5686 }, "cost"), "6.57 credits");
+  assert.notEqual(agentColor("muse", false), agentColor("unknown", false));
+
+  const usage = {
+    days: 7, unit: "day", sessions: 1, credits: 6.5,
+    tokens: none, cost: none, cacheSavings: 0,
+    agents: [{ kind: "kiro", sessions: 1, tokens: none, cost: 0, credits: 6.5 }],
+    buckets: [{ start: 1761868800000, credits: { kiro: 6.5 } }],
+    models: [{ model: "auto", kind: "kiro", tokens: none, cost: 0, priced: false, credits: 6.5 }],
+  };
+  assert.equal(decodeDaemonEvent({ type: "usage", usage })?.usage?.agents?.[0].credits, 6.5);
+  assert.equal(decodeDaemonEvent({ type: "usage", usage: { ...usage, credits: "6.5" } }), null);
 });

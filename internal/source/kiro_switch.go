@@ -200,6 +200,9 @@ func (s *KiroSource) offerSwitches(session *protocol.Session) {
 
 // SetMode implements ModeSetter: it swaps the session's agent.
 func (s *KiroSource) SetMode(ctx context.Context, sessionID, mode string) error {
+	if st, owned := s.acpOwned(sessionID); owned {
+		return s.setModeACP(ctx, st, mode)
+	}
 	if !kiroAgentNamePattern.MatchString(mode) {
 		return fmt.Errorf("source: %q is not a Kiro agent name", mode)
 	}
@@ -211,6 +214,9 @@ func (s *KiroSource) SetMode(ctx context.Context, sessionID, mode string) error 
 // SetModel implements ModelSetter: it switches the session's model, for this
 // session alone.
 func (s *KiroSource) SetModel(ctx context.Context, sessionID, model string) error {
+	if st, owned := s.acpOwned(sessionID); owned {
+		return s.setModelACP(ctx, st, model)
+	}
 	if !kiroModelPattern.MatchString(model) {
 		return fmt.Errorf("source: %q is not a Kiro model id", model)
 	}

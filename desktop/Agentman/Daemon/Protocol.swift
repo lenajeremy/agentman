@@ -65,6 +65,7 @@ enum RequestType: String, Codable, Sendable {
     case directorySessions = "directory_sessions"
     case resumeSession = "resume_session"
     case endSession = "end_session"
+    case handoffSession = "handoff_session"
     case listArtifacts = "list_artifacts"
     case readArtifact = "read_artifact"
     case reviewArtifact = "review_artifact"
@@ -503,6 +504,9 @@ struct Usage: Codable, Sendable, Equatable {
         var sessions: Int
         var tokens: Tokens
         var cost: Double
+        /// What an agent that bills in credits (Kiro) says its turns cost,
+        /// not part of the cost. Absent for the rest, and from older daemons.
+        var credits: Double?
     }
     /// A day of the chart, an hour over the last day.
     struct Bucket: Codable, Sendable, Equatable {
@@ -510,6 +514,7 @@ struct Usage: Codable, Sendable, Equatable {
         var start: Int64
         var cost: [String: Double]?
         var tokens: [String: Int64]?
+        var credits: [String: Double]?
         var date: Date { Date(timeIntervalSince1970: Double(start) / 1000) }
     }
     struct Model: Codable, Sendable, Equatable {
@@ -524,6 +529,8 @@ struct Usage: Codable, Sendable, Equatable {
         /// too. Absent when there was none, and from older daemons.
         var fast: Part?
         var advisor: Part?
+        /// Its turns' cost in credits, for an agent that bills in them.
+        var credits: Double?
     }
     /// Part of a model's share.
     struct Part: Codable, Sendable, Equatable {
@@ -539,6 +546,8 @@ struct Usage: Codable, Sendable, Equatable {
     var sessions: Int
     var tokens: Tokens
     var cost: Cost
+    /// Credits agents that bill in them spent: a measure of its own.
+    var credits: Double?
     var cacheSavings: Double
     var agents: [Agent]?
     var buckets: [Bucket]?
@@ -946,6 +955,11 @@ struct Session: Codable, Sendable, Identifiable, Hashable {
     /// /clear starts a new one there, and /resume switches to another. A
     /// thread showing that one follows to this.
     var previous: String?
+    /// Where it can be moved: "terminal" for one Agentman runs itself (Kiro
+    /// over ACP) into a terminal (Open in Terminal), "agentman" for one in a
+    /// pane Agentman started back into Agentman (Take Over). Only between
+    /// turns.
+    var handoff: String?
     /// The folder's logo (its favicon, logo.png or icon.png), relative to
     /// cwd, shown in place of its initials. Absent when it has none.
     var folderIcon: String?
@@ -956,7 +970,8 @@ struct Session: Codable, Sendable, Identifiable, Hashable {
             lhs.model == rhs.model && lhs.queued == rhs.queued && lhs.mode == rhs.mode &&
             lhs.modes == rhs.modes && lhs.models == rhs.models && lhs.originalName == rhs.originalName &&
             lhs.artifacts == rhs.artifacts && lhs.artifactsToReview == rhs.artifactsToReview &&
-            lhs.servers == rhs.servers && lhs.folderIcon == rhs.folderIcon
+            lhs.servers == rhs.servers && lhs.folderIcon == rhs.folderIcon &&
+            lhs.inject == rhs.inject && lhs.handoff == rhs.handoff
     }
 
     func hash(into hasher: inout Hasher) { hasher.combine(id) }

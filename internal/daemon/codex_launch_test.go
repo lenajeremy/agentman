@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/source"
 	"github.com/lenajeremy/agentman/internal/tmux"
 )
@@ -56,5 +57,38 @@ func TestACodexLaunchOpensATerminalOnTheDaemonsConversation(t *testing.T) {
 	}
 	if !strings.HasSuffix(opened.name, "-resume-"+thread) || id != "codex:tmux-"+opened.name {
 		t.Fatalf("pane %q, id %q", opened.name, id)
+	}
+}
+
+// A Kiro launched from the phone runs through Kiro's ACP server, and an
+// ended one reopened carries on there too; where that server cannot run,
+// each falls back to a pane.
+func TestAKiroLaunchAndResumeGoThroughACP(t *testing.T) {
+	previousStart, previousResume := startKiroACP, resumeKiroACP
+	t.Cleanup(func() { startKiroACP, resumeKiroACP = previousStart, previousResume })
+	var started, resumed string
+	startKiroACP = func(_ context.Context, _ *source.Registry, dir, prompt string) (string, error) {
+		started = dir + "|" + prompt
+		return "kiro:6f1d2c3b-4a5e-4f60-8b7c-9d0e1f2a3b4c", nil
+	}
+	resumeKiroACP = func(_ context.Context, _ *source.Registry, sessionID, cwd string) (string, error) {
+		resumed = sessionID + "|" + cwd
+		return sessionID, nil
+	}
+	kiro, _ := source.NewKiroSource(t.TempDir())
+	d, _ := agentWithSource(t, kiro)
+	dir := t.TempDir()
+	id, err := d.startKiroSession(context.Background(), dir, "hello")
+	if err != nil || id != "kiro:6f1d2c3b-4a5e-4f60-8b7c-9d0e1f2a3b4c" || started != dir+"|hello" {
+		t.Fatalf("launch = %q %v (%q)", id, err, started)
+	}
+	if !tmux.Available() {
+		return // resuming checks for tmux before it names anything
+	}
+	const sid = "7a2e3d4c-5b6f-4a70-9c8d-0e1f2a3b4c5d"
+	d.folders.remember([]protocol.Session{{ID: "kiro:" + sid, Kind: protocol.KindKiro, NativeID: sid, Cwd: dir, State: protocol.StateEnded}})
+	id, err = d.resumeSession(context.Background(), "kiro:"+sid)
+	if err != nil || id != "kiro:"+sid || resumed != "kiro:"+sid+"|"+dir {
+		t.Fatalf("resume = %q %v (%q)", id, err, resumed)
 	}
 }

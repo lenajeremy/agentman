@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,10 @@ type ocServiceFake struct {
 	permissions []map[string]any
 	active      bool
 	posts       []ocServicePost
+	// events, when set, are sent on /api/event, and connected is told
+	// each time a stream opens.
+	events    chan string
+	connected chan struct{}
 }
 
 type ocServicePost struct {
@@ -40,6 +45,10 @@ func (f *ocServiceFake) start(t *testing.T) *httptest.Server {
 		if user, password, ok := r.BasicAuth(); !ok || user != "opencode" || password != "secret" {
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = io.WriteString(w, `{"_tag":"UnauthorizedError","message":"Authentication required"}`)
+			return
+		}
+		if r.URL.Path == "/api/event" {
+			f.serveEvents(w, r)
 			return
 		}
 		f.mu.Lock()
@@ -58,8 +67,11 @@ func (f *ocServiceFake) start(t *testing.T) *httptest.Server {
 		case "/api/session":
 			reply(map[string]any{"data": []map[string]any{
 				{"id": "ses_1", "projectID": "p", "title": "Fix the build", "location": map[string]string{"directory": "/w/app"},
+					"agent": "build",
 					"model": map[string]string{"id": "gpt-6", "providerID": "openai"},
 					"time":  map[string]float64{"created": now - 60000, "updated": now}},
+				{"id": "ses_old", "projectID": "p", "title": "Last week's fix", "location": map[string]string{"directory": "/w/app"},
+					"time": map[string]float64{"created": now - 8*24*3600e3, "updated": now - 7*24*3600e3}},
 				{"id": "ses_child", "parentID": "ses_1", "projectID": "p", "title": "A subagent",
 					"location": map[string]string{"directory": "/w/app"}, "time": map[string]float64{"created": now, "updated": now}},
 			}, "cursor": map[string]any{}})
@@ -87,6 +99,18 @@ func (f *ocServiceFake) start(t *testing.T) *httptest.Server {
 			reply(map[string]any{"location": map[string]string{"directory": "/w/app"}, "data": []map[string]string{
 				{"id": "frontend-design", "name": "Frontend Design", "content": "# Frontend Design"},
 			}})
+		case "/api/agent":
+			reply(map[string]any{"data": []map[string]any{
+				{"id": "build", "name": "Build", "mode": "primary", "hidden": false},
+				{"id": "general", "name": "General", "mode": "subagent", "hidden": false},
+				{"id": "compaction", "name": "Compaction", "mode": "primary", "hidden": true},
+				{"id": "plan", "name": "Plan", "mode": "primary", "hidden": false},
+			}})
+		case "/api/command":
+			reply(map[string]any{"location": map[string]string{"directory": r.URL.Query().Get("location[directory]")}, "data": []map[string]string{
+				{"name": "init", "description": "guided AGENTS.md setup"},
+				{"name": "review", "description": "review changes [commit|branch|pr], defaults to uncommitted"},
+			}})
 		case "/api/model":
 			reply(map[string]any{"data": []map[string]string{
 				{"id": "gpt-6", "modelID": "gpt-6", "providerID": "openai"},
@@ -98,6 +122,29 @@ func (f *ocServiceFake) start(t *testing.T) *httptest.Server {
 	}))
 	t.Cleanup(server.Close)
 	return server
+}
+
+// serveEvents streams f.events as server-sent events, as /api/event does.
+func (f *ocServiceFake) serveEvents(w http.ResponseWriter, r *http.Request) {
+	if f.events == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	_, _ = io.WriteString(w, ": heartbeat\n\n")
+	w.(http.Flusher).Flush()
+	if f.connected != nil {
+		f.connected <- struct{}{}
+	}
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event := <-f.events:
+			_, _ = io.WriteString(w, "data: "+event+"\n\n")
+			w.(http.Flusher).Flush()
+		}
+	}
 }
 
 func (f *ocServiceFake) lastPost(t *testing.T) ocServicePost {
@@ -122,6 +169,7 @@ func openCodeServiceSource(t *testing.T, url, password string) *OpenCodeSource {
 	src := NewOpenCodeSource("")
 	src.serviceFile = file
 	src.findServers = src.findServices
+	t.Cleanup(src.live.stop)
 	return src
 }
 
@@ -343,5 +391,127 @@ func TestOpenCodeMajorVersion(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	if got := OpenCodeMajorVersion(context.Background()); got != 0 {
 		t.Errorf("without opencode: %d", got)
+	}
+}
+
+// OpenCode 2's own commands are in the "/" menu with /compact, and a message
+// that starts with one runs it; any other "/" is words.
+func TestOpenCodeServiceRunsItsCommands(t *testing.T) {
+	fake := &ocServiceFake{}
+	server := fake.start(t)
+	src := openCodeServiceSource(t, server.URL, "secret")
+	ctx := context.Background()
+	if _, err := src.Discover(ctx); err != nil {
+		t.Fatal(err)
+	}
+	commands, err := src.Commands(ctx, "opencode:ses_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, command := range commands {
+		if !command.Skill {
+			names = append(names, command.Name)
+		}
+	}
+	if !slices.Equal(names, []string{"init", "review", "compact"}) {
+		t.Fatalf("commands = %q", names)
+	}
+
+	for _, tc := range []struct {
+		text, path string
+		body       map[string]any
+	}{
+		{"/review the branch", "/api/session/ses_1/command", map[string]any{"name": "review", "text": "the branch"}},
+		{"/init", "/api/session/ses_1/command", map[string]any{"name": "init", "text": ""}},
+		{"/compact", "/api/session/ses_1/compact", map[string]any{}},
+		{"/etc/hosts is wrong", "/api/session/ses_1/prompt", map[string]any{"text": "/etc/hosts is wrong"}},
+	} {
+		if mode, err := src.Inject(ctx, "opencode:ses_1", tc.text); err != nil || mode != protocol.InjectAPI {
+			t.Fatalf("%q: %v %v", tc.text, mode, err)
+		}
+		post := fake.lastPost(t)
+		if post.path != tc.path || fmt.Sprint(post.body) != fmt.Sprint(tc.body) {
+			t.Errorf("%q sent %s %v, want %s %v", tc.text, post.path, post.body, tc.path, tc.body)
+		}
+	}
+}
+
+// A finished compaction is a note in the conversation, as other agents'
+// are; one under way is not yet.
+func TestOpenCodeServiceShowsCompaction(t *testing.T) {
+	for status, want := range map[string]int{"completed": 1, "running": 0} {
+		raw := `{"type":"compaction","id":"msg_c","time":{"created":5},"status":"` + status + `","reason":"manual","summary":"## Objective"}`
+		message, ok := openCodeServiceMessage(json.RawMessage(raw))
+		var rows []protocol.Message
+		if ok {
+			rows = openCodeMessages("opencode:ses_1", message)
+		}
+		if len(rows) != want || (want == 1 && (rows[0].Role != protocol.RoleSystem || rows[0].Text != "Context compacted")) {
+			t.Errorf("%s compaction = %+v", status, rows)
+		}
+	}
+}
+
+// OpenCode 2's sessions switch mode (Build or Plan) and model on the
+// service at once, and say which they are in.
+func TestOpenCodeServiceSwitchesModeAndModel(t *testing.T) {
+	fake := &ocServiceFake{}
+	server := fake.start(t)
+	src := openCodeServiceSource(t, server.URL, "secret")
+	ctx := context.Background()
+	sessions, err := src.Discover(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].Mode != "build" || !slices.Equal(sessions[0].Modes, []string{"build", "plan"}) {
+		t.Fatalf("sessions = %+v", sessions)
+	}
+	if err := src.SetMode(ctx, "opencode:ses_1", "plan"); err != nil {
+		t.Fatal(err)
+	}
+	if post := fake.lastPost(t); post.path != "/api/session/ses_1/agent" || post.body["agent"] != "plan" {
+		t.Fatalf("mode switch sent %+v", post)
+	}
+	if err := src.SetModel(ctx, "opencode:ses_1", "big-pickle"); err != nil {
+		t.Fatal(err)
+	}
+	post := fake.lastPost(t)
+	if model, _ := post.body["model"].(map[string]any); post.path != "/api/session/ses_1/model" ||
+		model["id"] != "big-pickle" || model["providerID"] != "opencode" {
+		t.Fatalf("model switch sent %+v", post)
+	}
+}
+
+// A session idle for days is in its folder's history, not on the board,
+// and OpenCode 2's service still takes a message for it, which makes it
+// live again.
+func TestOpenCodeServiceOldSessionsTakeMessages(t *testing.T) {
+	fake := &ocServiceFake{}
+	server := fake.start(t)
+	src := openCodeServiceSource(t, server.URL, "secret")
+	ctx := context.Background()
+	sessions, err := src.Discover(ctx)
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("board = %+v, %v", sessions, err)
+	}
+	past, err := src.Past(ctx, "/w/app", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var old *protocol.Session
+	for i := range past {
+		if past[i].ID == "opencode:ses_old" {
+			old = &past[i]
+		}
+	}
+	if old == nil || old.Inject != protocol.InjectAPI {
+		t.Fatalf("history = %+v", past)
+	}
+	if mode, err := src.Inject(ctx, old.ID, "carry on"); err != nil || mode != protocol.InjectAPI {
+		t.Fatalf("inject: %v %v", mode, err)
+	}
+	if post := fake.lastPost(t); post.path != "/api/session/ses_old/prompt" || post.body["text"] != "carry on" {
+		t.Fatalf("sent %+v", post)
 	}
 }

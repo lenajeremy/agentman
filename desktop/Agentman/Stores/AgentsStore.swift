@@ -709,6 +709,21 @@ final class AgentsStore {
         }
     }
 
+    /// Moves a session to the other side of its handoff: into a pane of its
+    /// own, or from Agentman's pane back into Agentman, on the same
+    /// conversation. Returns the problem, if any.
+    func handoff(_ sessionId: String) async -> String? {
+        do {
+            let reply = try await client.request(DaemonRequest(.handoffSession, sessionId: sessionId))
+            if reply.type == "error" {
+                return Self.plainProblem(reply.error, or: "It couldn't be moved.")
+            }
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
     /// Switches a session's mode or model to one it offers. Returns the
     /// problem, if any, in words about the switch.
     func switchSession(_ sessionId: String, model: Bool, to value: String) async -> String? {

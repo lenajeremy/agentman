@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,6 +36,12 @@ type Scanner struct {
 	// antigravityRoots.
 	antigravity      *antigravityReader
 	antigravityRoots []string
+	// muse reads Muse's session logs under museRoot; kiro Kiro's chats in
+	// kiroDir.
+	muse     *museReader
+	museRoot string
+	kiro     *kiroReader
+	kiroDir  string
 }
 
 func NewScanner(home string, prices *Prices) *Scanner {
@@ -50,6 +57,10 @@ func NewScanner(home string, prices *Prices) *Scanner {
 		openCodeDB:       filepath.Join(data, "opencode", "opencode.db"),
 		antigravity:      newAntigravityReader(),
 		antigravityRoots: antigravityRoots(home),
+		muse:             newMuseReader(),
+		museRoot:         filepath.Join(data, "muse", "sessions"),
+		kiro:             newKiroReader(),
+		kiroDir:          filepath.Join(home, ".kiro", "sessions", "cli"),
 	}
 }
 
@@ -102,7 +113,9 @@ func (s *Scanner) read(ctx context.Context, since time.Time, catalog Catalog, lo
 	}
 	opencode, skippedOpenCode := readOpenCode(ctx, s.openCodeDB, since)
 	antigravity, skippedAntigravity := s.antigravity.read(ctx, s.antigravityRoots, since)
-	others := spends(append(opencode, antigravity...), catalog)
+	muse, skippedMuse := s.muse.read(s.museRoot, since)
+	kiro, skippedKiro := s.kiro.read(s.kiroDir, since)
+	others := spends(slices.Concat(opencode, antigravity, muse, kiro), catalog)
 	for _, c := range others {
 		if first == 0 || c.at < first {
 			first = c.at
@@ -112,7 +125,7 @@ func (s *Scanner) read(ctx context.Context, since time.Time, catalog Catalog, lo
 	if first != 0 {
 		earliest = time.Unix(0, first)
 	}
-	return append(sums, others), earliest, skipped + skippedOpenCode + skippedAntigravity
+	return append(sums, others), earliest, skipped + skippedOpenCode + skippedAntigravity + skippedMuse + skippedKiro
 }
 
 // Summary sums the last days days, or everything the records hold for 0.
@@ -207,12 +220,37 @@ func readOpenCode(ctx context.Context, db string, since time.Time) ([]Record, in
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	query := `select session_id as s, time_created as t, json_extract(data,'$.modelID') as m, json_extract(data,'$.providerID') as p,` +
-		` json_extract(data,'$.tokens.input') as i, json_extract(data,'$.tokens.output') as o, json_extract(data,'$.tokens.reasoning') as r,` +
-		` json_extract(data,'$.tokens.cache.read') as cr, json_extract(data,'$.tokens.cache.write') as cw` +
-		` from message where time_created >= ` + strconv.FormatInt(since.UnixMilli(), 10) +
-		` and json_extract(data,'$.role') = 'assistant'`
-	out, err := exec.CommandContext(ctx, bin, "-readonly", "-json", "file:"+db+"?mode=ro", query).Output()
+	tables, err := exec.CommandContext(ctx, bin, "-readonly", "file:"+db+"?mode=ro",
+		`select name from sqlite_master where type = 'table' and name in ('message', 'session_message')`).Output()
+	if err != nil {
+		return nil, 1
+	}
+	has := func(name string) bool { return slices.Contains(strings.Fields(string(tables)), name) }
+	after := strconv.FormatInt(since.UnixMilli(), 10)
+	// OpenCode 2 keeps a session's messages in session_message, and copied
+	// the ones from before into it under the same ids; OpenCode 1 kept them
+	// in message. A reply in both is read from session_message.
+	var parts []string
+	if has("session_message") {
+		parts = append(parts, `select session_id as s, time_created as t, json_extract(data,'$.model.id') as m, json_extract(data,'$.model.providerID') as p,`+
+			` json_extract(data,'$.tokens.input') as i, json_extract(data,'$.tokens.output') as o, json_extract(data,'$.tokens.reasoning') as r,`+
+			` json_extract(data,'$.tokens.cache.read') as cr, json_extract(data,'$.tokens.cache.write') as cw`+
+			` from session_message where type = 'assistant' and time_created >= `+after)
+	}
+	if has("message") {
+		old := `select session_id as s, time_created as t, json_extract(data,'$.modelID') as m, json_extract(data,'$.providerID') as p,` +
+			` json_extract(data,'$.tokens.input') as i, json_extract(data,'$.tokens.output') as o, json_extract(data,'$.tokens.reasoning') as r,` +
+			` json_extract(data,'$.tokens.cache.read') as cr, json_extract(data,'$.tokens.cache.write') as cw` +
+			` from message where time_created >= ` + after + ` and json_extract(data,'$.role') = 'assistant'`
+		if has("session_message") {
+			old += ` and id not in (select id from session_message)`
+		}
+		parts = append(parts, old)
+	}
+	if len(parts) == 0 {
+		return nil, 0
+	}
+	out, err := exec.CommandContext(ctx, bin, "-readonly", "-json", "file:"+db+"?mode=ro", strings.Join(parts, " union all ")).Output()
 	if err != nil || len(out) == 0 {
 		return nil, 0
 	}
@@ -332,7 +370,7 @@ func summarize(sums [][]spend, catalog Catalog, days int, from time.Time, unit U
 				}
 				counted[s.key] = true
 				most := largest[s.key]
-				s.tokens, s.write1h, s.long, s.fast = most.tokens, most.write1h, most.long, most.fast
+				s.tokens, s.write1h, s.long, s.fast, s.credits = most.tokens, most.write1h, most.long, most.fast, most.credits
 			}
 			if s.at < start || s.at > end {
 				continue
@@ -358,6 +396,7 @@ func summarize(sums [][]spend, catalog Catalog, days int, from time.Time, unit U
 			}
 			a.Tokens = a.Tokens.Add(s.tokens)
 			a.Cost += spent.Total()
+			a.Credits += s.credits
 			sessions[sessionKey{l.agent, l.session}] = true
 
 			key := modelKey{l.agent, l.model}
@@ -368,12 +407,14 @@ func summarize(sums [][]spend, catalog Catalog, days int, from time.Time, unit U
 			}
 			m.Tokens = m.Tokens.Add(s.tokens)
 			m.Cost += spent.Total()
+			m.Credits += s.credits
 			if part := modePart(m, s); part != nil {
 				part.Tokens = part.Tokens.Add(s.tokens)
 				part.Cost += spent.Total()
 			}
 
 			u.Tokens = u.Tokens.Add(s.tokens)
+			u.Credits += s.credits
 			u.Cost.Input += spent.Input
 			u.Cost.CacheRead += spent.CacheRead
 			u.Cost.CacheWrite += spent.CacheWrite
@@ -382,6 +423,12 @@ func summarize(sums [][]spend, catalog Catalog, days int, from time.Time, unit U
 			if i := bucket(s.at); i >= 0 {
 				u.Buckets[i].Cost[l.agent] += spent.Total()
 				u.Buckets[i].Tokens[l.agent] += s.tokens.Total()
+				if s.credits > 0 {
+					if u.Buckets[i].Credits == nil {
+						u.Buckets[i].Credits = map[protocol.Kind]float64{}
+					}
+					u.Buckets[i].Credits[l.agent] += s.credits
+				}
 			}
 		}
 	}

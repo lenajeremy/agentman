@@ -41,6 +41,9 @@ type Record struct {
 	// Claude's fast mode, charged more, or modeAdvisor for a model consulted
 	// during another's turn.
 	Mode string
+	// Credits are what the call cost for an agent that bills in credits
+	// (Kiro), whatever its tokens.
+	Credits float64
 }
 
 const (
@@ -83,6 +86,7 @@ type spend struct {
 	key     uint64
 	tokens  protocol.Tokens
 	write1h int64
+	credits float64
 	// long is true for calls whose prompt passed their model's limit,
 	// charged the dearer price; fast for calls run in Claude's fast mode, and
 	// advisor for a model consulted during another's turn.
@@ -97,6 +101,7 @@ func (s *spend) grow(o spend) {
 		CacheWrite: max(s.tokens.CacheWrite, o.tokens.CacheWrite), Output: max(s.tokens.Output, o.tokens.Output),
 	}
 	s.write1h = max(s.write1h, o.write1h)
+	s.credits = max(s.credits, o.credits)
 	s.long, s.fast = s.long || o.long, s.fast || o.fast
 }
 
@@ -260,6 +265,7 @@ func (s *fileState) sum(c spend, loc *time.Location) {
 	i, _ := s.slotOf(slotKey{slot(c.at, loc), c.label, c.long, c.fast, c.advisor}, true)
 	s.slots[i].tokens = s.slots[i].tokens.Add(c.tokens)
 	s.slots[i].write1h += c.write1h
+	s.slots[i].credits += c.credits
 }
 
 // find is where the log keeps a key, if it does.
@@ -579,7 +585,7 @@ func spends(records []Record, catalog Catalog) []spend {
 	for _, r := range records {
 		lb := made.get(r.Agent, r.Provider, r.Model, r.Session)
 		out = append(out, spend{
-			at: r.At.UnixNano(), label: lb, key: hashKey(r.Key), tokens: r.Tokens, write1h: r.CacheWrite1h,
+			at: r.At.UnixNano(), label: lb, key: hashKey(r.Key), tokens: r.Tokens, write1h: r.CacheWrite1h, credits: r.Credits,
 			long: lb.limit > 0 && r.Context > lb.limit, fast: r.Mode == modeFast, advisor: r.Mode == modeAdvisor,
 		})
 	}

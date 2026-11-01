@@ -146,6 +146,8 @@ func (d *Daemon) startLocalSession(ctx context.Context, req protocol.Request) (s
 		id, err = startOpenCodeSession(ctx, dir, req.Text)
 	} else if req.Kind == protocol.KindCodex {
 		id, err = d.startCodexSession(ctx, dir, req.Text)
+	} else if req.Kind == protocol.KindKiro {
+		id, err = d.startKiroSession(ctx, dir, req.Text)
 	} else if req.Kind == protocol.KindMuse {
 		id, err = d.registry.LaunchMuse(ctx, dir, req.Text)
 	} else {
@@ -180,6 +182,22 @@ func (d *Daemon) startCodexSession(ctx context.Context, dir, prompt string) (str
 		return d.registry.ResumedSession(sessionID, native, pane)
 	}
 	return startResumedSession(ctx, protocol.KindCodex, dir, resume, naming)
+}
+
+// startKiroSession starts Kiro through its ACP server, which streams the
+// reply and sends its prompts, modes, models and commands as data; a pane
+// only where that server cannot run. See source.KiroSource.StartACPSession.
+func (d *Daemon) startKiroSession(ctx context.Context, dir, prompt string) (string, error) {
+	id, err := startKiroACP(ctx, d.registry, dir, prompt)
+	if errors.Is(err, source.ErrNoKiroACP) {
+		return startTerminalSession(ctx, protocol.KindKiro, dir, prompt)
+	}
+	return id, err
+}
+
+// startKiroACP is a variable so a test can launch without Kiro.
+var startKiroACP = func(ctx context.Context, registry *source.Registry, dir, prompt string) (string, error) {
+	return registry.StartKiroACP(ctx, dir, prompt)
 }
 
 // startCodexThread is a variable so a test can launch without Codex.

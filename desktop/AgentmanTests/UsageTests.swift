@@ -107,6 +107,26 @@ final class UsageTests: XCTestCase {
         XCTAssertNil(UsageFormat.note(try XCTUnwrap(usage.models?.first), cost: true))
     }
 
+    // Kiro counts credits, not tokens: its row and its model say those, and an
+    // agent with tokens or a cost never reads as credits.
+    func testKiroShowsItsCredits() throws {
+        let kiro = try JSONDecoder().decode(Usage.Agent.self, from: Data("""
+        {"kind":"kiro","sessions":5,"tokens":{"input":0,"cacheRead":0,"cacheWrite":0,"output":0},"cost":0,"credits":6.5686}
+        """.utf8))
+        XCTAssertEqual(UsageFormat.creditsOnly(kiro), 6.5686)
+        XCTAssertEqual(UsageFormat.credits(6.5686), "6.57 credits")
+        XCTAssertEqual(UsageFormat.credits(1), "1.00 credit")
+        XCTAssertEqual(UsageFormat.credits(0.001), "<0.01 credits")
+        let claude = try XCTUnwrap(JSONDecoder().decode(DaemonEvent.self, from: Data(Self.sample.utf8)).usage?.agents?.first)
+        XCTAssertNil(UsageFormat.creditsOnly(claude))
+        let model = try JSONDecoder().decode(Usage.Model.self, from: Data("""
+        {"model":"auto","kind":"kiro","tokens":{"input":0,"cacheRead":0,"cacheWrite":0,"output":0},"cost":0,"priced":false,"credits":6.5686}
+        """.utf8))
+        XCTAssertEqual(UsageFormat.note(model, cost: true), "6.57 credits")
+        XCTAssertNil(try XCTUnwrap(JSONDecoder().decode(DaemonEvent.self, from: Data(Self.sample.utf8)).usage).credits,
+                     "older daemons say nothing of credits")
+    }
+
     func testAgentmanUsageLinkOpensThePage() throws {
         let store = AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-usage.sock"))
         store.open(try XCTUnwrap(URL(string: "agentman://usage")))

@@ -146,6 +146,13 @@ type Session struct {
 	// Claude's /clear starts a new one there, and /resume switches to
 	// another. The apps follow from the old conversation's thread to this.
 	Previous string `json:"previous,omitempty"`
+	// Handoff is where handoff_session would move this live session, when it
+	// can be moved: HandoffTerminal for one Agentman runs itself (over Kiro's
+	// ACP server) into a terminal pane ("Open in terminal"), HandoffAgentman
+	// for one in a pane Agentman started back into Agentman ("Take over").
+	// One process holds a conversation at a time, so a move closes this side
+	// first, and is refused mid-turn.
+	Handoff string `json:"handoff,omitempty"`
 	// FolderIcon is the picture the agent's folder is known by — its
 	// favicon, logo.png or icon.png — relative to Cwd, for the apps to show
 	// in place of the folder's initials. Empty when the folder has none.
@@ -156,6 +163,12 @@ type Session struct {
 	// listening ports that agent's commands opened.
 	AgentPID int `json:"-"`
 }
+
+// Where a session can be handed off to; see Session.Handoff.
+const (
+	HandoffTerminal = "terminal"
+	HandoffAgentman = "agentman"
+)
 
 // Model scopes: what switching a session's model touches.
 const (
@@ -248,7 +261,7 @@ func (s Session) SameAs(other Session) bool {
 		s.Question.sameAs(other.Question) && SameServers(s.Servers, other.Servers) &&
 		slices.Equal(s.Queued, other.Queued) && slices.Equal(s.QueuedMessageIDs, other.QueuedMessageIDs) &&
 		s.CanSendQueued == other.CanSendQueued && s.Previous == other.Previous &&
-		s.FolderIcon == other.FolderIcon
+		s.Handoff == other.Handoff && s.FolderIcon == other.FolderIcon
 }
 
 // SameServers reports whether two server lists are identical, in order.

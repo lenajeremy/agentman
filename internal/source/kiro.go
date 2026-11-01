@@ -63,8 +63,19 @@ type KiroSource struct {
 	// is only a description.
 	sendKeys func(context.Context, string, ...string) error
 	sendText func(context.Context, string, string) error
+	// killPane closes one of Agentman's panes, for a move into Agentman.
+	killPane func(context.Context, string) error
 	// models is Kiro's model list, fetched in the background; see kiro_switch.go.
 	models *kiroModelCatalog
+	// acp is the sessions run through Kiro's ACP server, and acpDial starts
+	// one (kiroACPDial when nil); see kiro_acp.go.
+	acp     kiroACP
+	acpDial func(cwd string, handle func(acpEnvelope)) (*acpClient, error)
+
+	// moves are the sessions being moved between a pane and ACP; see
+	// kiro_handoff.go.
+	movesMu sync.Mutex
+	moves   map[string]kiroMove
 
 	mu       sync.RWMutex
 	sessions map[string]kiroSession
@@ -91,6 +102,9 @@ type kiroSession struct {
 	transcript string
 	tmuxName   string
 	status     kiroStatus
+	// held says Kiro holds the chat's lock in this session's pane: it has
+	// opened the chat there, rather than still starting.
+	held bool
 }
 
 type kiroLock struct {
@@ -152,6 +166,7 @@ func NewKiroSource(home string) (*KiroSource, error) {
 		captureScrollback: tmux.CaptureScrollback,
 		sendKeys:          tmux.SendKeys,
 		sendText:          tmux.Send,
+		killPane:          tmux.Kill,
 		models:            &kiroModelCatalog{fetch: kiroListModels},
 		sessions:          map[string]kiroSession{},
 		metas:             map[string]kiroMetaEntry{},
@@ -235,15 +250,12 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 		}
 
 		id := string(protocol.KindKiro) + ":" + native
-		tmuxName := ""
+		tmuxName, previous := "", ""
 		for _, pane := range panes {
 			if !claimed[pane.Name] && processes.OwnsPID(pane.PanePID, lock.PID) {
 				tmuxName = pane.Name
 				claimed[pane.Name] = true
-				// Key a pane-backed session on the pane. A phone launch knows
-				// the pane before Kiro has chosen a session id, so this is
-				// the only id that stays the same across that moment.
-				id = string(protocol.KindKiro) + ":" + tmuxID(pane.Name)
+				id, previous = kiroPaneSessionID(pane.Name, native)
 				break
 			}
 		}
@@ -258,6 +270,7 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 			Cwd:       meta.Cwd,
 			State:     s.transcriptState(transcript),
 			Inject:    protocol.InjectNone,
+			Previous:  previous,
 			StartedAt: parseRFC3339Millis(meta.CreatedAt, lock.StartedAt),
 			// Kiro's shell tool runs commands under this process, so a dev
 			// server started by the agent descends from it.
@@ -279,7 +292,7 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 		status.apply(&session)
 		s.offerSwitches(&session)
 		found = append(found, session)
-		next[id] = kiroSession{meta: session, transcript: transcript, tmuxName: tmuxName, status: status}
+		next[id] = kiroSession{meta: session, transcript: transcript, tmuxName: tmuxName, status: status, held: tmuxName != ""}
 	}
 
 	// A pane with no session yet: Kiro is starting, or sitting at its first
@@ -288,7 +301,13 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 		if claimed[pane.Name] {
 			continue
 		}
-		id := string(protocol.KindKiro) + ":" + tmuxID(pane.Name)
+		id, _ := kiroPaneSessionID(pane.Name, "")
+		chat := kiroPaneChat(pane.Name)
+		if _, held := s.acpOwned(id); held || next[id].meta.ID != "" {
+			// Its chat is open somewhere else, so Kiro will not open it here:
+			// the pane is a pane of its own, not that chat.
+			id, chat = string(protocol.KindKiro)+":"+tmuxID(pane.Name), ""
+		}
 		started := pane.Created.UnixMilli()
 		if pane.Created.IsZero() {
 			started = time.Now().UnixMilli()
@@ -298,12 +317,27 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 			State: protocol.StateIdle, Inject: protocol.InjectTmux,
 			StartedAt: started, LastActivityAt: started, AgentPID: pane.PanePID,
 		}
+		// A pane opened to carry on a chat is that chat while Kiro starts:
+		// its thread keeps showing what was said.
+		transcript := ""
+		if chat != "" {
+			base := filepath.Join(s.sessionsDir(), chat)
+			session.NativeID, transcript = chat, base+".jsonl"
+			if meta, ok := s.readMeta(base + ".json"); ok {
+				session.Name = kiroName(meta)
+			}
+		}
 		status := s.applyPane(ctx, &session, pane.Name, "", kiroStatus{})
 		status.apply(&session)
 		s.offerSwitches(&session)
 		found = append(found, session)
-		next[id] = kiroSession{meta: session, tmuxName: pane.Name, status: status}
+		next[id] = kiroSession{meta: session, transcript: transcript, tmuxName: pane.Name, status: status}
 	}
+
+	// Sessions run through Kiro's ACP server are Agentman's to drive.
+	found = s.applyACP(found, next)
+	s.applyHandoff(found, next)
+	found = s.applyMoves(found)
 
 	s.mu.Lock()
 	s.sessions = next
@@ -679,6 +713,8 @@ func (s *KiroSource) Follow(ctx context.Context, sessionID string, out chan<- []
 
 	// The reply being written, as last read off the pane; see kiro_stream.go.
 	var stream kiroStreamPreview
+	// The calls an ACP session is running; see kiro_acp.go.
+	var calls kiroACPFollow
 
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
@@ -717,6 +753,10 @@ func (s *KiroSource) Follow(ctx context.Context, sessionID string, out chan<- []
 		batch = stream.update(batch, sessionID, func() (string, string, int64, bool) {
 			return s.streamingReply(ctx, current, p)
 		})
+		if live := s.acpTools(sessionID); len(live) > 0 || len(calls.sent) > 0 {
+			_, _, nextTs := p.TurnState()
+			batch = calls.merge(batch, live, nextTs)
+		}
 		if path != "" {
 			batch = append(batch, children.read(ctx, s, p.SubagentCalls(), time.Now())...)
 		}
@@ -773,6 +813,12 @@ func (preview *kiroStreamPreview) update(
 
 // Inject implements Injector.
 func (s *KiroSource) Inject(ctx context.Context, sessionID, text string) (protocol.InjectMode, error) {
+	if st, owned := s.acpOwned(sessionID); owned {
+		if err := s.sendACP(ctx, st, text); err != nil {
+			return protocol.InjectNone, err
+		}
+		return protocol.InjectAPI, nil
+	}
 	session, err := s.session(sessionID)
 	if err != nil {
 		return protocol.InjectNone, err
@@ -821,6 +867,9 @@ func kiroFileMenu(pane string) bool {
 
 // Interrupt implements Interrupter.
 func (s *KiroSource) Interrupt(ctx context.Context, sessionID string) error {
+	if st, owned := s.acpOwned(sessionID); owned {
+		return s.interruptACP(st)
+	}
 	session, err := s.session(sessionID)
 	if err != nil {
 		return err
@@ -833,6 +882,9 @@ func (s *KiroSource) Interrupt(ctx context.Context, sessionID string) error {
 
 // Answer implements Answerer.
 func (s *KiroSource) Answer(ctx context.Context, sessionID string, answer protocol.QuestionAnswer) error {
+	if st, owned := s.acpOwned(sessionID); owned {
+		return s.answerACP(st, answer)
+	}
 	session, err := s.session(sessionID)
 	if err != nil {
 		return err
@@ -850,6 +902,14 @@ func (s *KiroSource) Answer(ctx context.Context, sessionID string, answer protoc
 
 // CurrentQuestion implements QuestionInspector.
 func (s *KiroSource) CurrentQuestion(ctx context.Context, sessionID string) (*protocol.Question, error) {
+	if st, owned := s.acpOwned(sessionID); owned {
+		s.acp.mu.Lock()
+		defer s.acp.mu.Unlock()
+		if st.pending == nil {
+			return nil, nil
+		}
+		return st.pending.question, nil
+	}
 	session, err := s.session(sessionID)
 	if err != nil || session.tmuxName == "" {
 		return nil, err

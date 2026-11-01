@@ -730,6 +730,12 @@ func (d *Daemon) applyHookStateLocked(session protocol.Session, now time.Time) p
 	if !ok {
 		return session
 	}
+	// A session Agentman runs through an agent's ACP server knows its own
+	// state from the server; a hook only says it later, and less.
+	if session.Kind == protocol.KindKiro && session.Inject == protocol.InjectAPI {
+		delete(d.hookStates, session.ID)
+		return session
+	}
 	// A parsed question is more specific than Claude's ambiguous Stop=idle
 	// hook. Never hide it behind an older lifecycle state.
 	if session.Question != nil || session.State == protocol.StateWaitingInput {
@@ -1092,6 +1098,13 @@ func (d *Daemon) HandleFrom(
 		}
 		return protocol.Event{Type: protocol.EvtSessionStarted, SessionID: id}
 
+	case protocol.ReqHandoffSession:
+		id, err := d.handoffSession(ctx, req.SessionID)
+		if err != nil {
+			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
+		}
+		return protocol.Event{Type: protocol.EvtSessionStarted, SessionID: id}
+
 	case protocol.ReqReleaseSession:
 		if err := d.registry.Release(ctx, req.SessionID, req.Stop); err != nil {
 			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
@@ -1339,6 +1352,7 @@ func requestMutatesSession(kind protocol.RequestType) bool {
 		// Resume and end start or stop a process. Run concurrently, two resumes
 		// of one session each launched their own.
 		kind == protocol.ReqResumeSession || kind == protocol.ReqEndSession || kind == protocol.ReqReleaseSession ||
+		kind == protocol.ReqHandoffSession ||
 		kind == protocol.ReqReviewArtifact || kind == protocol.ReqSetMode || kind == protocol.ReqSetModel ||
 		// After a send, in order, so a message just sent is in the queue
 		// before the keys that send the queue are pressed.
@@ -1444,7 +1458,7 @@ func validateRequest(req protocol.Request) error {
 		return nil
 	case protocol.ReqDirectorySessions:
 		return validateFolderPath(req.Path)
-	case protocol.ReqResumeSession, protocol.ReqEndSession, protocol.ReqReleaseSession:
+	case protocol.ReqResumeSession, protocol.ReqEndSession, protocol.ReqReleaseSession, protocol.ReqHandoffSession:
 		if req.SessionID == "" || len(req.SessionID) > 512 {
 			return fmt.Errorf("daemon: invalid session")
 		}

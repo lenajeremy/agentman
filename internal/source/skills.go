@@ -120,24 +120,38 @@ func (s *KiroSource) Commands(ctx context.Context, sessionID string) ([]protocol
 	if err != nil {
 		return nil, err
 	}
-	return listSkills(s.home, session.meta.Cwd, kiroSkillFolders), nil
+	skills := listSkills(s.home, session.meta.Cwd, kiroSkillFolders)
+	if st, owned := s.acpOwned(sessionID); owned {
+		return append(s.acpCommands(st), skills...), nil
+	}
+	return skills, nil
 }
 
-// CommandPanel implements CommandSource: Kiro's list is skills only.
-func (s *KiroSource) CommandPanel(context.Context, string, string) (protocol.CommandPanel, error) {
+// CommandPanel implements CommandSource: a session run through Kiro's ACP
+// server answers its panel commands (/context, /usage...) as data; one in
+// a terminal lists skills only.
+func (s *KiroSource) CommandPanel(ctx context.Context, sessionID, command string) (protocol.CommandPanel, error) {
+	if st, owned := s.acpOwned(sessionID); owned {
+		return s.panelACP(ctx, st, command)
+	}
 	return protocol.CommandPanel{}, errNoPanels
 }
 
-// Commands lists the skills an OpenCode session can be told to use.
+// Commands lists what an OpenCode session can be told to do: OpenCode 2's
+// own commands (its built-in /init and /review, and the user's), /compact,
+// and the skills. An OpenCode 1 server lists skills only.
 func (s *OpenCodeSource) Commands(ctx context.Context, sessionID string) ([]protocol.Command, error) {
-	s.mu.RLock()
-	session, ok := s.sessions[sessionID]
-	s.mu.RUnlock()
+	session, ok := s.routeFor(sessionID)
 	if !ok {
 		return nil, fmt.Errorf("source: unknown opencode session %q", sessionID)
 	}
 	home, _ := os.UserHomeDir()
-	return listSkills(home, session.meta.Cwd, openCodeSkillFolders), nil
+	skills := listSkills(home, session.directory, openCodeSkillFolders)
+	commands, err := s.openCodeCommands(ctx, session)
+	if err != nil {
+		return skills, nil
+	}
+	return append(commands, skills...), nil
 }
 
 // CommandPanel implements CommandSource: OpenCode's list is skills only.

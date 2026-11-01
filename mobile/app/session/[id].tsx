@@ -56,6 +56,7 @@ import { FileMenu } from "../../components/FileMenu";
 import { OutputViewer } from "../../components/OutputViewer";
 import { type Frame } from "../../lib/message-menu";
 import { artifactsButtonLabel } from "../../lib/artifacts";
+import { simulatorOpensSessionMenu } from "../../lib/simulator";
 import { canEnd, shouldResume } from "../../lib/resume";
 import { folderName, modeLabel, modelLabel, modeWord, showsInFeed, statusChip } from "../../lib/session-view";
 import {
@@ -73,6 +74,7 @@ import { commandSend, listCommands, matchCommands, menuQuery as commandMenu, pic
 import { findFiles, mentionAt, withMention } from "../../lib/mentions";
 import { withFiles } from "../../lib/files";
 import { sessionNeedsAnswer } from "../../lib/question-alerts";
+import { Handoff, handoffError, handoffItem } from "../../lib/handoff";
 import { useStyles, useTheme } from "../../lib/appearance";
 import { PendingSend, useStore } from "../../lib/store";
 import { addSpoken } from "../../lib/voice";
@@ -564,6 +566,14 @@ export default function SessionScreen() {
     interruptAction?.status === "delivered";
 
   const [menuOpen, setMenuOpen] = useState(false);
+  // For screenshots in the simulator (lib/simulator): the menu open once the
+  // session has arrived.
+  const sessionArrived = session !== undefined;
+  useEffect(() => {
+    if (!sessionArrived || !simulatorOpensSessionMenu()) return;
+    const timer = setTimeout(() => setMenuOpen(true), 800);
+    return () => clearTimeout(timer);
+  }, [sessionArrived, sessionId]);
   // Opening a read-only session reopens it on the Mac.
   //
   // Most of what a folder holds has already ended, and every CLI can reopen
@@ -630,6 +640,29 @@ export default function SessionScreen() {
   const [changedFiles, setChangedFiles] = useState<number | null>(null);
   const menuServers = session?.servers?.length ?? 0;
 
+  // Moving a session between Agentman and a terminal on the Mac. The thread
+  // stays: the conversation carries on on the other side, under the same id
+  // or followed to its new one. Where it is going while it moves; the session
+  // itself stops offering a move until it arrives.
+  const [moving, setMoving] = useState<Handoff | null>(null);
+  const [moveError, setMoveError] = useState("");
+  useEffect(() => {
+    setMoving(null);
+    setMoveError("");
+  }, [sessionId]);
+  const requestHandoff = (to: Handoff) => {
+    if (!session || moving) return;
+    setMoving(to);
+    setMoveError("");
+    store
+      .handoffSession(session.id)
+      .then((id) => {
+        if (id && id !== session.id) router.replace(`/session/${encodeURIComponent(id)}`);
+      })
+      .catch((err: Error) => setMoveError(handoffError(err.message)))
+      .finally(() => setMoving(null));
+  };
+
   // Built here rather than in the header so every entry sits beside the action
   // it performs. An idle session simply has fewer rows — which is a popover
   // shrinking, not a control changing shape.
@@ -667,6 +700,18 @@ export default function SessionScreen() {
         label: alerts ? "Stop notifying me about it" : "Notify me about this agent",
         icon: alerts ? "bell-off" : "bell",
         onPress: () => void store.setAgentAlerts(session.id, !alerts),
+      });
+    }
+    // Only between turns: the Mac refuses mid-turn, so the row is dimmed
+    // until the turn ends, with Stop just below it.
+    const move = handoffItem(session, moving !== null, store.daemonOnline);
+    if (move) {
+      sessionMenuItems.push({
+        key: "handoff",
+        label: move.label,
+        icon: move.icon,
+        disabled: move.disabled,
+        onPress: () => requestHandoff(move.to),
       });
     }
     if (session.state === "busy") {
@@ -1156,6 +1201,15 @@ export default function SessionScreen() {
         {switchError ? (
           <ContentColumn>
             <SwitchErrorNote error={switchError} onDismiss={() => setSwitchError("")} />
+          </ContentColumn>
+        ) : null}
+        {moving ? (
+          <ContentColumn>
+            <MovingNote toTerminal={moving === "terminal"} />
+          </ContentColumn>
+        ) : moveError ? (
+          <ContentColumn>
+            <SwitchErrorNote error={moveError} onDismiss={() => setMoveError("")} />
           </ContentColumn>
         ) : null}
         {session && !session.question && (
@@ -1713,6 +1767,24 @@ function SwitchErrorNote({ error, onDismiss }: { error: string; onDismiss(): voi
       <Pressable onPress={onDismiss} hitSlop={10} accessibilityRole="button" accessibilityLabel="Dismiss">
         <Feather name="x-circle" size={16} color={color.faint} />
       </Pressable>
+    </View>
+  );
+}
+
+/** While a session moves to a terminal on the Mac, or back into Agentman. */
+function MovingNote({ toTerminal }: { toTerminal: boolean }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  return (
+    <View style={styles.note} accessibilityLiveRegion="polite">
+      <View style={styles.noteIcon}>
+        <Feather name={toTerminal ? "terminal" : "log-in"} size={13} color={color.muted} />
+      </View>
+      <Text style={styles.noteText}>
+        {toTerminal
+          ? "Opening this session in a terminal on your Mac…"
+          : "Taking this session over from its terminal…"}
+      </Text>
     </View>
   );
 }
