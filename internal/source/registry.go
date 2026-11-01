@@ -278,6 +278,36 @@ func (r *Registry) ConnectCodex(version string) {
 	}
 }
 
+// Release stops driving a session, for an adapter that drives sessions only
+// while it works (Muse); others have nothing to let go of.
+func (r *Registry) Release(ctx context.Context, sessionID string) error {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return err
+	}
+	if releaser, ok := s.(interface {
+		Release(context.Context, string) error
+	}); ok {
+		return releaser.Release(ctx, sessionID)
+	}
+	return nil
+}
+
+// LaunchMuse starts a Muse session through Muse itself; see
+// MuseSource.Launch.
+func (r *Registry) LaunchMuse(ctx context.Context, dir, prompt string) (string, error) {
+	r.mu.RLock()
+	s := r.sources[protocol.KindMuse]
+	r.mu.RUnlock()
+	launcher, ok := s.(interface {
+		Launch(context.Context, string, string) (string, error)
+	})
+	if !ok {
+		return "", errors.New("source: Muse is not available")
+	}
+	return launcher.Launch(ctx, dir, prompt)
+}
+
 // ConnectMuse starts the Muse adapter's connection to Muse. Only the
 // long-running daemon does this; see MuseSource.Connect.
 func (r *Registry) ConnectMuse() {

@@ -146,6 +146,8 @@ func (d *Daemon) startLocalSession(ctx context.Context, req protocol.Request) (s
 		id, err = startOpenCodeSession(ctx, dir, req.Text)
 	} else if req.Kind == protocol.KindCodex {
 		id, err = d.startCodexSession(ctx, dir, req.Text)
+	} else if req.Kind == protocol.KindMuse {
+		id, err = d.registry.LaunchMuse(ctx, dir, req.Text)
 	} else {
 		id, err = startTerminalSession(ctx, req.Kind, dir, req.Text)
 	}

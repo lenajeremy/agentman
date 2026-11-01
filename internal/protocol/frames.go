@@ -111,6 +111,10 @@ const (
 	// in its folder's history. What ends is the cost of leaving it open,
 	// which is what made panes pile up once opening them became easy.
 	ReqEndSession RequestType = "end_session"
+	// ReqReleaseSession asks the daemon to stop driving a session, so a
+	// terminal can open it: Muse lets one connection drive a session at a
+	// time, and `am muse resume` sends this before it opens one.
+	ReqReleaseSession RequestType = "release_session"
 	// ReqCreateDirectory makes one folder for a new session to start in.
 	// Starting an agent somewhere new should not need a trip to the Mac.
 	ReqCreateDirectory RequestType = "create_directory"
@@ -321,6 +325,8 @@ const (
 	EvtSessionStarted EventType = "session_started"
 	// EvtFolders answers ReqListFolders.
 	EvtFolders EventType = "folders"
+	// EvtSessionReleased answers ReqReleaseSession once the daemon has let go.
+	EvtSessionReleased EventType = "session_released"
 	// EvtSessionEnded answers ReqEndSession once the pane is gone.
 	EvtSessionEnded EventType = "session_ended"
 	// EvtDirectorySessions answers ReqDirectorySessions.

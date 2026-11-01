@@ -9,12 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -88,6 +90,9 @@ type museHost struct {
 	up        chan struct{} // closed while connected; replaced on each drop
 	listeners map[int]func(museMessage)
 	nextKey   int
+	// started is set once run is under way, by the daemon at startup or by
+	// the first command that needs Muse in a one-off (`am send`).
+	started bool
 	// views are the sessions being watched (view/subscribe), each counted by
 	// its watchers, so a reconnect watches them again.
 	views map[string]int
@@ -110,12 +115,14 @@ func newMuseHost(start museTransport) *museHost {
 }
 
 // museServe starts `muse serve --join`, or reports that Muse is not
-// installed.
+// installed. It makes sure Muse's daemon runs first, so a terminal started
+// as its client (`am muse`) shares it, and its sessions can be watched live.
 func museServe(ctx context.Context) (io.WriteCloser, io.Reader, func(), int, error) {
-	binary, err := museBinary()
+	binary, err := MuseBinary()
 	if err != nil {
 		return nil, nil, nil, 0, err
 	}
+	MuseEnsureDaemon(ctx, binary)
 	cmd := exec.CommandContext(ctx, binary, "serve", "--join")
 	// Muse writes diagnostics there; nothing reads them, so they go nowhere.
 	cmd.Stderr = io.Discard
@@ -144,8 +151,55 @@ func museServe(ctx context.Context) (io.WriteCloser, io.Reader, func(), int, err
 	return in, out, stop, cmd.Process.Pid, nil
 }
 
-// museBinary finds Muse's launcher: on PATH, else where its installer puts it.
-func museBinary() (string, error) {
+// museDaemonSocket is where Muse's machine daemon listens.
+func museDaemonSocket() string {
+	data := os.Getenv("XDG_DATA_HOME")
+	if data == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		data = filepath.Join(home, ".local", "share")
+	}
+	return filepath.Join(data, "muse", "session-server", "session-server.sock")
+}
+
+// MuseEnsureDaemon starts Muse's daemon when none answers. It is Muse's own
+// (`muse serve --listen --client-started`), which leaves by itself once
+// nothing is connected and no session is loaded, so it lasts only as long as
+// Agentman or a terminal uses it.
+func MuseEnsureDaemon(ctx context.Context, binary string) {
+	socket := museDaemonSocket()
+	if socket == "" || museSocketAnswers(socket) {
+		return
+	}
+	cmd := exec.Command(binary, "serve", "--listen", "--client-started")
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if cmd.Start() != nil {
+		return
+	}
+	go func() { _ = cmd.Wait() }()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && ctx.Err() == nil {
+		if museSocketAnswers(socket) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func museSocketAnswers(socket string) bool {
+	conn, err := net.DialTimeout("unix", socket, 300*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+// MuseBinary finds Muse's launcher: on PATH, else where its installer puts it.
+func MuseBinary() (string, error) {
 	if binary, err := exec.LookPath("muse"); err == nil {
 		return binary, nil
 	}
@@ -163,6 +217,9 @@ func museBinary() (string, error) {
 // run keeps a connection to Muse until ctx ends, starting the child again
 // whenever it exits. With Muse not installed it looks again now and then.
 func (h *museHost) run(ctx context.Context) {
+	h.mu.Lock()
+	h.started = true
+	h.mu.Unlock()
 	wait := time.Second
 	for ctx.Err() == nil {
 		began := time.Now()
@@ -290,11 +347,18 @@ func (h *museHost) isUp() bool {
 	return h.conn != nil
 }
 
-// connection waits briefly for Muse to be connected.
+// connection waits briefly for Muse to be connected, connecting first when
+// nothing has yet (a one-off command, outside the daemon).
 func (h *museHost) connection(ctx context.Context) (*museConn, error) {
 	h.mu.Lock()
-	conn, up := h.conn, h.up
+	conn, up, started := h.conn, h.up, h.started
+	if !started {
+		h.started = true
+	}
 	h.mu.Unlock()
+	if !started {
+		go h.run(context.Background())
+	}
 	if conn != nil {
 		return conn, nil
 	}

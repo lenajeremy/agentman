@@ -466,3 +466,73 @@ func TestMuseNeverAsksAboutATerminalsSession(t *testing.T) {
 		t.Fatalf("answer: %v", err)
 	}
 }
+
+func TestMusePastListsAFoldersOldSessionsAsContinuable(t *testing.T) {
+	source, fake := startFakeMuse(t, t.TempDir())
+	fake.answers["session/list"] = func(params json.RawMessage) (any, *museRPCError) {
+		var p struct {
+			Cursor string `json:"cursor"`
+		}
+		_ = json.Unmarshal(params, &p)
+		if p.Cursor == "" {
+			next := "page2"
+			return map[string]any{"sessions": []any{
+				map[string]any{"sessionId": "a", "status": "notLoaded", "workspaceRoot": "/code/site", "updatedAt": "2026-10-01T10:00:00Z", "title": "Old one"},
+				map[string]any{"sessionId": "b", "status": "notLoaded", "workspaceRoot": "/code/site/web", "updatedAt": "2026-10-20T10:00:00Z", "title": "Inside"},
+			}, "nextCursor": next}, nil
+		}
+		return map[string]any{"sessions": []any{
+			map[string]any{"sessionId": "c", "status": "notLoaded", "workspaceRoot": "/code/sitemap", "updatedAt": "2026-10-25T10:00:00Z"},
+			map[string]any{"sessionId": "d", "status": "notLoaded", "kind": "subagent", "workspaceRoot": "/code/site", "updatedAt": "2026-10-25T10:00:00Z"},
+		}, "nextCursor": nil}, nil
+	}
+	past, err := source.Past(context.Background(), "/code/site", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(past) != 2 || past[0].NativeID != "b" || past[1].NativeID != "a" {
+		t.Fatalf("want b then a (newest first, subtree, no sibling folder, no subagent): %+v", past)
+	}
+	if past[1].Inject != protocol.InjectAPI || past[1].State != protocol.StateIdle {
+		t.Fatalf("an old Muse session can be continued: %+v", past[1])
+	}
+	folders, _ := source.Directories(context.Background())
+	counts := map[string]int{}
+	for _, folder := range folders {
+		counts[folder.Path] = folder.Agents
+	}
+	if counts["/code/site"] != 1 || counts["/code/site/web"] != 1 || counts["/code/sitemap"] != 1 {
+		t.Fatalf("folders: %+v", folders)
+	}
+}
+
+func TestMuseLaunchStartsASessionWithItsFirstMessage(t *testing.T) {
+	source, fake := startFakeMuse(t, t.TempDir())
+	var started, turn map[string]any
+	fake.answers["session/start"] = func(params json.RawMessage) (any, *museRPCError) {
+		_ = json.Unmarshal(params, &started)
+		return map[string]any{"session": map[string]any{"sessionId": "new1", "status": "idle"}, "viewCursor": "v"}, nil
+	}
+	fake.answers["turn/start"] = func(params json.RawMessage) (any, *museRPCError) {
+		_ = json.Unmarshal(params, &turn)
+		return map[string]any{"status": "accepted"}, nil
+	}
+	fake.answers["session/read"] = func(json.RawMessage) (any, *museRPCError) {
+		return map[string]any{"session": map[string]any{"sessionId": "new1", "status": "running"}}, nil
+	}
+	dir := t.TempDir()
+	id, err := source.Launch(context.Background(), dir, "add a dark mode")
+	if err != nil || id != "muse:new1" {
+		t.Fatalf("launch: %q %v", id, err)
+	}
+	resolved, _ := filepath.EvalSymlinks(dir)
+	if roots, _ := started["workspaceRoots"].([]any); len(roots) != 1 || roots[0] != resolved {
+		t.Fatalf("session/start should name the canonical folder: %v", started)
+	}
+	if turn["sessionId"] != "new1" || fake.called("session/resume") {
+		t.Fatalf("the first turn runs on the started session without resuming it: %v", turn)
+	}
+	if !source.holding("new1") {
+		t.Fatal("Agentman drives its first turn")
+	}
+}

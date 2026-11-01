@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -199,4 +200,51 @@ func (s *MuseSource) holding(native string) bool {
 	defer s.holds.mu.Unlock()
 	_, ok := s.holds.held[native]
 	return ok
+}
+
+// Launch starts a Muse session in dir with its first message, through Muse
+// itself: no terminal. Agentman drives it for that first turn and lets it go
+// after, as it does a send; its id is the one discovery gives it.
+func (s *MuseSource) Launch(ctx context.Context, dir, prompt string) (string, error) {
+	// Muse wants the canonical path ("/private/tmp", not "/tmp").
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
+	var started struct {
+		Session museSession `json:"session"`
+	}
+	if err := s.host.call(ctx, "session/start", map[string]any{
+		"commandId": museCommandID(), "workspaceRoots": []string{dir},
+	}, &started); err != nil {
+		return "", err
+	}
+	native := started.Session.SessionID
+	if native == "" {
+		return "", errors.New("source: Muse started no session")
+	}
+	// Starting it made this connection its driver.
+	holdCtx, cancel := context.WithCancel(context.Background())
+	s.holds.mu.Lock()
+	if s.holds.held == nil {
+		s.holds.held = map[string]context.CancelFunc{}
+	}
+	s.holds.held[native] = cancel
+	s.holds.mu.Unlock()
+	go s.hold(holdCtx, native)
+	if _, err := s.Inject(ctx, musePrefix+native, prompt); err != nil {
+		s.letGo(native)
+		return "", err
+	}
+	return musePrefix + native, nil
+}
+
+// Release lets go of a session Agentman is driving, so a terminal can open
+// it (`am muse resume`). The work under way goes on; the terminal picks it
+// up, as Muse hands a late joiner what is pending.
+func (s *MuseSource) Release(ctx context.Context, sessionID string) error {
+	native := strings.TrimPrefix(sessionID, musePrefix)
+	if s.holding(native) {
+		s.letGo(native)
+	}
+	return nil
 }
