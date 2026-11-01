@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Agentman for Mac's updates, read by Sparkle inside the app (SUFeedURL in
+  desktop/project.yml). scripts/release-mac.sh adds one item per release, newest
+  first: each carries its DMG's length and EdDSA signature, so an item edited
+  by hand stops installing. Sparkle offers the newest item whose
+  sparkle:version (the build number) is above the running app's and whose
+  minimum macOS the Mac meets.
+-->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Agentman for Mac</title>
+    <link>https://agentman-nu.vercel.app/mac</link>
+    <description>Updates to Agentman for Mac.</description>
+    <language>en</language>
+  </channel>
+</rss>
