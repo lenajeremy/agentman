@@ -42,6 +42,7 @@ import { FolderInitials, FolderPicture, useFolderIcon } from "../../components/F
 import { Loader } from "../../components/Loader";
 import { Pulse } from "../../components/Pulse";
 import { QuestionCard } from "../../components/QuestionCard";
+import { QuestionSheet } from "../../components/QuestionSheet";
 import { Thinking } from "../../components/Thinking";
 import { ToolRow } from "../../components/ToolRow";
 import { AttachmentStrip } from "../../components/AttachmentStrip";
@@ -1187,33 +1188,25 @@ export default function SessionScreen() {
             bottom: impossible to miss, but the transcript above stays
             readable for context. */}
         {session?.question ? (
-          <View
-            style={[
-              styles.sheet,
-              {
-                maxHeight: Math.max(260, Math.min(520, viewportHeight * 0.62)),
-                paddingBottom: (keyboardVisible ? 0 : insets.bottom) + space.md,
-              },
-            ]}
+          <QuestionSheet
+            collapsedHeight={Math.max(260, Math.min(520, viewportHeight * 0.62))}
+            // Pulled up, it stops short of the header, which still says whose
+            // question this is.
+            expandedHeight={viewportHeight - insets.top - headerHeight - space.md}
+            bottomPadding={(keyboardVisible ? 0 : insets.bottom) + space.md}
+            resetKey={session.question.id ?? session.question.prompt}
+            scrollRef={sheetScroll}
           >
-            <View style={styles.grabber} />
-            <ScrollView
-              ref={sheetScroll}
-              contentContainerStyle={styles.sheetContent}
-              keyboardShouldPersistTaps="handled"
-              nestedScrollEnabled
-            >
-              <ContentColumn>
-                <QuestionCard
-                  question={session.question}
-                  onAnswer={(answer) => store.answerQuestion(sessionId, answer)}
-                  disabled={!store.daemonOnline}
-                  submissionStatus={answerAction?.status}
-                  submissionError={answerAction?.error}
-                />
-              </ContentColumn>
-            </ScrollView>
-          </View>
+            <ContentColumn>
+              <QuestionCard
+                question={session.question}
+                onAnswer={(answer) => store.answerQuestion(sessionId, answer)}
+                disabled={!store.daemonOnline}
+                submissionStatus={answerAction?.status}
+                submissionError={answerAction?.error}
+              />
+            </ContentColumn>
+          </QuestionSheet>
         ) : (
           <View style={styles.composerShell}>
             <ContentColumn
@@ -2352,26 +2345,6 @@ const makeStyles = (c: Palette) =>
       marginTop: space.xs,
     },
 
-    sheet: {
-      backgroundColor: c.surface,
-      borderTopLeftRadius: radius.sheet,
-      borderTopRightRadius: radius.sheet,
-      paddingTop: 10,
-      shadowColor: c.shadow,
-      shadowOpacity: 0.12,
-      shadowRadius: 24,
-      shadowOffset: { width: 0, height: -6 },
-      elevation: 12,
-    },
-    grabber: {
-      alignSelf: "center",
-      width: 38,
-      height: 5,
-      borderRadius: 3,
-      backgroundColor: c.fillStrong,
-      marginBottom: space.md,
-    },
-    sheetContent: { paddingHorizontal: 20, paddingBottom: space.xs },
     thinking: { paddingTop: space.sm },
     composerShell: { backgroundColor: c.paper },
     composer: { paddingHorizontal: space.lg, paddingTop: space.sm },
