@@ -13,7 +13,7 @@ import type { Usage, UsageAgent } from "../lib/protocol";
 import { useStore } from "../lib/store";
 import { agentLabel, font, Palette, radius, scaled, size, space } from "../lib/theme";
 import {
-  agentColor, axisLabel, axisMoney, bucketValue, fraction, kindColors, momentLabel, money, monotonePath,
+  agentColor, axisLabel, axisMoney, bucketValue, fraction, kindColors, modelNote, momentLabel, money, monotonePath,
   niceAxis, percent, RANGES, rangeTitle, rowLabel, sessions, tokens, unitAdjective, unitNoun, unitOf,
   type Metric,
 } from "../lib/usage";
@@ -359,7 +359,7 @@ function Breakdown({ usage, metric, by, dark }: {
         .sort((a, b) => cost ? (b.cost - a.cost) || (all(b.tokens) - all(a.tokens)) : all(b.tokens) - all(a.tokens))
         .map((model) => ({
           key: `${model.kind}/${model.model}`, name: model.model || "Unknown model", kind: model.kind as string | undefined,
-          cost: model.priced ? model.cost : undefined, tokens: all(model.tokens),
+          cost: model.priced ? model.cost : undefined, tokens: all(model.tokens), note: modelNote(model, metric),
           parts: [] as { kind: string; value: number }[],
         }))
     : [...(usage.buckets ?? [])].reverse().flatMap((bucket) => {
@@ -368,7 +368,7 @@ function Breakdown({ usage, metric, by, dark }: {
         return [{
           key: String(bucket.start), name: rowLabel(unit, new Date(bucket.start)), kind: undefined as string | undefined,
           cost: Object.values(bucket.cost ?? {}).reduce((sum, value) => sum + value, 0) as number | undefined, tokens: count,
-          parts: kinds.map((kind) => ({ kind, value: bucketValue(bucket, kind, metric) })),
+          note: undefined as string | undefined, parts: kinds.map((kind) => ({ kind, value: bucketValue(bucket, kind, metric) })),
         }];
       });
   const shareOf = (row: (typeof rows)[number]) => fraction(cost ? row.cost ?? 0 : row.tokens, grand);
@@ -397,6 +397,7 @@ function Breakdown({ usage, metric, by, dark }: {
                     <View key={part.kind} style={[styles.sharePart, { flexGrow: part.value / Math.max(partsSum, 1e-9), backgroundColor: agentColor(part.kind, dark) }]} />
                   ))}
                 </View>
+                {row.note ? <Text style={styles.modelNote} numberOfLines={2}>{row.note}</Text> : null}
               </View>
               <View style={styles.breakdownNumbers}>
                 <Text style={styles.breakdownValue}>
@@ -465,6 +466,7 @@ const makeStyles = (c: Palette) =>
     breakdownMain: { flex: 1, gap: 6, minWidth: 0 },
     breakdownName: { flexDirection: "row", alignItems: "center", gap: 6 },
     modelName: { ...font.sans, fontSize: size.caption, color: c.text, flexShrink: 1 },
+    modelNote: { ...font.sans, fontSize: size.label, color: c.muted, fontVariant: ["tabular-nums"] },
     shareTrack: { height: 2.5, borderRadius: 2, overflow: "hidden", flexDirection: "row" },
     sharePart: { height: 2.5, flexBasis: 0 },
     breakdownNumbers: { alignItems: "flex-end", gap: 2 },

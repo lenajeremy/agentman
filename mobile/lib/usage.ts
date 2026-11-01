@@ -1,4 +1,4 @@
-import type { Usage, UsageBucket } from "./protocol";
+import type { Usage, UsageBucket, UsageModel, UsagePart } from "./protocol";
 
 /**
  * The usage screen's arithmetic and words, kept apart from the screen so they
@@ -97,6 +97,20 @@ export function percent(share: number): string {
 
 export function sessions(count: number): string {
   return count === 1 ? "1 session" : `${count.toLocaleString("en-US")} sessions`;
+}
+
+/** The line under a model in the breakdown: how much of it Claude ran in fast
+ *  mode, at a higher price, and how much went to advising another model, as
+ *  on the Mac. Nothing for a model used only the usual way. */
+export function modelNote(model: Pick<UsageModel, "fast" | "advisor" | "priced">, metric: Metric): string | undefined {
+  const value = (part: UsagePart) => metric === "cost" && model.priced
+    ? money(part.cost)
+    : tokens(part.tokens.input + part.tokens.cacheRead + part.tokens.cacheWrite + part.tokens.output);
+  const notes = [
+    model.fast ? `${value(model.fast)} in fast mode` : "",
+    model.advisor ? `${value(model.advisor)} as advisor` : "",
+  ].filter(Boolean);
+  return notes.length > 0 ? notes.join(" · ") : undefined;
 }
 
 export function fraction(part: number, whole: number): number {

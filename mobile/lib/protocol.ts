@@ -572,6 +572,17 @@ export interface UsageModel {
   cost: number;
   /** False for a model with no known price: its cost is left out. */
   priced: boolean;
+  /** The part Claude ran in fast mode, at a higher price, and the part spent
+   *  advising another model during its turns: both counted above too.
+   *  Absent when there was none, and from older Macs. */
+  fast?: UsagePart | null;
+  advisor?: UsagePart | null;
+}
+
+/** Part of a model's share. */
+export interface UsagePart {
+  tokens: UsageTokens;
+  cost: number;
 }
 
 /** What the agents on the Mac spent over a range, from their own records. */
@@ -1190,7 +1201,12 @@ function isUsage(value: unknown): value is Usage {
       isRecord(bucket) && finiteNumber(bucket.start) && isNumberMap(bucket.cost) && isNumberMap(bucket.tokens))) &&
     (value.models === undefined || value.models === null || boundedArray(value.models, 1000, (model): model is UsageModel =>
       isRecord(model) && boundedString(model.model, 256) && boundedString(model.kind, 64, true) &&
-      isTokens(model.tokens) && finiteNumber(model.cost) && typeof model.priced === "boolean"));
+      isTokens(model.tokens) && finiteNumber(model.cost) && typeof model.priced === "boolean" &&
+      isUsagePart(model.fast) && isUsagePart(model.advisor)));
+}
+
+function isUsagePart(value: unknown): boolean {
+  return value === undefined || value === null || (isRecord(value) && isTokens(value.tokens) && finiteNumber(value.cost));
 }
 
 function isSearchResults(value: unknown): value is SearchResults {

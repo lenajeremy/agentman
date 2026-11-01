@@ -515,6 +515,16 @@ struct Usage: Codable, Sendable, Equatable {
         var cost: Double
         /// False for a model with no known price: its cost is left out.
         var priced: Bool
+        /// The part Claude ran in fast mode, at a higher price, and the part
+        /// spent advising another model during its turns: both counted above
+        /// too. Absent when there was none, and from older daemons.
+        var fast: Part?
+        var advisor: Part?
+    }
+    /// Part of a model's share.
+    struct Part: Codable, Sendable, Equatable {
+        var tokens: Tokens
+        var cost: Double
     }
 
     var days: Int

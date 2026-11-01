@@ -85,7 +85,7 @@ func TestAntigravityCallsAreReadOnceEach(t *testing.T) {
 	sqliteDB(t, filepath.Join(home, ".gemini", "antigravity-cli", "index.db"), `create table conversations (id text);`)
 
 	s := NewScanner(home, WithCatalog(prices))
-	records, skipped := s.Records(context.Background(), time.Now().Add(-24*time.Hour))
+	records, skipped := s.antigravity.read(context.Background(), s.antigravityRoots, time.Now().Add(-24*time.Hour))
 	if skipped != 0 {
 		t.Fatalf("skipped %d", skipped)
 	}

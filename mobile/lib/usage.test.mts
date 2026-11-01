@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  axisLabel, axisMoney, bucketValue, momentLabel, money, monotonePath, niceAxis, percent, RANGES, rangeTitle,
+  axisLabel, axisMoney, bucketValue, modelNote, momentLabel, money, monotonePath, niceAxis, percent, RANGES, rangeTitle,
   rowLabel, sessions, tokens, unitOf,
 } from "./usage.ts";
 import { decodeDaemonEvent } from "./protocol.ts";
@@ -78,4 +78,21 @@ test("a usage event is read, and a malformed one is not", () => {
   assert.equal(decodeDaemonEvent({ type: "usage", usage })?.usage?.sessions, 2);
   assert.equal(decodeDaemonEvent({ type: "usage", usage: { ...usage, tokens: { input: "1" } } }), null);
   assert.equal(decodeDaemonEvent({ type: "usage" }), null);
+
+  const fast = { tokens: { input: 1, cacheRead: 0, cacheWrite: 0, output: 1 }, cost: 0.5 };
+  const parted = { ...usage, models: [{ ...usage.models[0], fast, advisor: null }] };
+  assert.equal(decodeDaemonEvent({ type: "usage", usage: parted })?.usage?.models?.[0].fast?.cost, 0.5);
+  assert.equal(decodeDaemonEvent({ type: "usage", usage: { ...usage, models: [{ ...usage.models[0], fast: { cost: "1" } }] } }), null);
+});
+
+// A model's fast-mode and advising parts are told under it; a model used
+// only the usual way says nothing more.
+test("a model says what ran in fast mode and what went to advising", () => {
+  const part = (cost: number, output: number) => ({ tokens: { input: 0, cacheRead: 0, cacheWrite: 0, output }, cost });
+  assert.equal(modelNote({ priced: true, fast: part(26.63, 1_200_000), advisor: part(28.3, 170_000) }, "cost"),
+    "$26.63 in fast mode · $28.30 as advisor");
+  assert.equal(modelNote({ priced: true, advisor: part(28.3, 170_000) }, "tokens"), "170K as advisor");
+  assert.equal(modelNote({ priced: false, fast: part(0, 950) }, "cost"), "950 in fast mode", "no price: its tokens");
+  assert.equal(modelNote({ priced: true }, "cost"), undefined);
+  assert.equal(modelNote({ priced: true, fast: null, advisor: null }, "cost"), undefined);
 });
