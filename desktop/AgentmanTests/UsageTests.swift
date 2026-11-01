@@ -88,6 +88,25 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(UsageView.ranges.map(UsageView.rangeTitle), ["24h", "7d", "30d", "90d", "6m", "1y", "All"])
     }
 
+    // A model's fast-mode and advising parts are told under it; a model used
+    // only the usual way, or from a daemon that predates them, says nothing.
+    func testAModelSaysWhatRanFastAndWhatWentToAdvising() throws {
+        let json = """
+        {"model":"claude-opus-5-5","kind":"claude","tokens":{"input":0,"cacheRead":0,"cacheWrite":0,"output":1370000},"cost":54.93,"priced":true,
+         "fast":{"tokens":{"input":0,"cacheRead":0,"cacheWrite":0,"output":1200000},"cost":26.63},
+         "advisor":{"tokens":{"input":0,"cacheRead":0,"cacheWrite":0,"output":170000},"cost":28.3}}
+        """
+        var model = try JSONDecoder().decode(Usage.Model.self, from: Data(json.utf8))
+        XCTAssertEqual(model.fast?.cost, 26.63)
+        XCTAssertEqual(UsageFormat.note(model, cost: true), "$26.63 in fast mode · $28.30 as advisor")
+        XCTAssertEqual(UsageFormat.note(model, cost: false), "1.20M in fast mode · 170K as advisor")
+        model.fast = nil
+        model.priced = false
+        XCTAssertEqual(UsageFormat.note(model, cost: true), "170K as advisor", "no price: its tokens")
+        let usage = try XCTUnwrap(JSONDecoder().decode(DaemonEvent.self, from: Data(Self.sample.utf8)).usage)
+        XCTAssertNil(UsageFormat.note(try XCTUnwrap(usage.models?.first), cost: true))
+    }
+
     func testAgentmanUsageLinkOpensThePage() throws {
         let store = AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-usage.sock"))
         store.open(try XCTUnwrap(URL(string: "agentman://usage")))

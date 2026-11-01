@@ -531,6 +531,8 @@ private struct UsageBreakdownTable: View {
         let kind: String?
         let cost: Double?
         let tokens: Int64
+        /// A model's fast-mode and advising parts, under its bar.
+        var note: String?
         /// Each agent's part, for a day's bar.
         let parts: [Part]
     }
@@ -549,7 +551,7 @@ private struct UsageBreakdownTable: View {
             }
             return models.map {
                 Row(id: $0.kind + "/" + $0.model, name: $0.model.isEmpty ? "Unknown model" : $0.model, kind: $0.kind,
-                    cost: $0.priced ? $0.cost : nil, tokens: $0.tokens.total, parts: [])
+                    cost: $0.priced ? $0.cost : nil, tokens: $0.tokens.total, note: UsageFormat.note($0, cost: cost), parts: [])
             }
         case .day:
             let kinds = (usage.agents ?? []).map(\.kind)
@@ -623,7 +625,15 @@ private struct UsageBreakdownTable: View {
                         .truncationMode(.middle)
                 }
                 bar(row, share: share, scale: scale)
+                if let note = row.note {
+                    Text(note)
+                        .font(Fonts.sans(12))
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                }
             }
+            // The name and its note take the room they need before the gap.
+            .layoutPriority(1)
             Spacer(minLength: 12)
             Group {
                 if let cost = row.cost {
@@ -837,5 +847,14 @@ enum UsageFormat {
 
     static func sessions(_ count: Int) -> String {
         count == 1 ? "1 session" : "\(count.formatted()) sessions"
+    }
+
+    /// The line under a model in the breakdown: how much of it Claude ran in
+    /// fast mode, at a higher price, and how much went to advising another
+    /// model. Nothing for a model used only the usual way.
+    static func note(_ model: Usage.Model, cost: Bool) -> String? {
+        let value = { (part: Usage.Part) in cost && model.priced ? money(part.cost) : tokens(part.tokens.total) }
+        let notes = [model.fast.map { value($0) + " in fast mode" }, model.advisor.map { value($0) + " as advisor" }].compactMap { $0 }
+        return notes.isEmpty ? nil : notes.joined(separator: " · ")
     }
 }
