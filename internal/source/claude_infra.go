@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/lenajeremy/agentman/internal/procinfo"
 )
 
 // Two things the Claude registry gets wrong for our purposes, both of which
@@ -49,8 +51,8 @@ func (c claudeCandidate) key() claudeProcessKey {
 //
 // Their command line is the only thing that tells them apart, and the process
 // snapshot discovery already takes records only each executable's name. So
-// this asks `ps` for the arguments of every registry pid it has not judged
-// yet, in one call, and remembers the answer. A process's command line does
+// this reads the arguments of every registry pid it has not judged yet, and
+// remembers the answer. A process's command line does
 // not change, so once the registry's handful of pids are judged a sweep costs
 // no extra process at all — which matters, because this runs every second and
 // the code around it was rewritten once already to stop spawning per session.
@@ -144,9 +146,19 @@ func isClaudeInfra(args string) bool {
 	return false
 }
 
-// claudeProcessArgs reads the full command lines of the given pids in one
-// `ps` call.
+// claudeProcessArgs reads the full command lines of the given pids: from the
+// kernel where procinfo can, otherwise in one `ps` call.
 func claudeProcessArgs(ctx context.Context, pids []int) map[int]string {
+	if procinfo.Supported {
+		result := make(map[int]string, len(pids))
+		for _, pid := range pids {
+			// ps joins the arguments with spaces too.
+			if args, err := procinfo.Args(pid); err == nil {
+				result[pid] = strings.Join(args, " ")
+			}
+		}
+		return result
+	}
 	ctx, cancel := context.WithTimeout(ctx, processCheckTimeout)
 	defer cancel()
 	list := make([]string, len(pids))

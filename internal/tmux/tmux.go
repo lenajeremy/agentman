@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lenajeremy/agentman/internal/procinfo"
 	"github.com/lenajeremy/agentman/internal/question"
 )
 
@@ -513,11 +514,12 @@ type ProcessTree struct {
 	commands map[int]string
 }
 
-// SnapshotProcessTree reads the process table with one cancellable ps command.
-// The caller's context is authoritative; commandTimeout is only a second line
-// of defence for callers that supplied no deadline of their own. Within a
-// discovery sweep the table is read once, on the sweep's context; see
-// WithSweep.
+// SnapshotProcessTree reads the process table: from the kernel where
+// procinfo can (see process_table.go), otherwise with one cancellable ps
+// command. The caller's context is authoritative; commandTimeout is only a
+// second line of defence for callers that supplied no deadline of their own.
+// Within a discovery sweep the table is read once, on the sweep's context;
+// see WithSweep.
 func SnapshotProcessTree(ctx context.Context) (*ProcessTree, error) {
 	if s := sweepOf(ctx); s != nil {
 		return s.processTree()
@@ -526,6 +528,16 @@ func SnapshotProcessTree(ctx context.Context) (*ProcessTree, error) {
 }
 
 func snapshotProcessTree(ctx context.Context) (*ProcessTree, error) {
+	if procinfo.Supported {
+		tree, err := kernelProcessTree(ctx)
+		if err == nil || ctx.Err() != nil {
+			return tree, err
+		}
+	}
+	return psProcessTree(ctx)
+}
+
+func psProcessTree(ctx context.Context) (*ProcessTree, error) {
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 
