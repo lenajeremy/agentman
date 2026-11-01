@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
+import { Platform } from "react-native";
 import { File } from "expo-file-system";
 
 import { canAttachMore, MAX_ATTACHMENTS } from "./attachments";
@@ -57,6 +58,9 @@ export function useAttachments(credentials: Credentials | null) {
   // to appear without the composer being touched.
   useEffect(() => {
     refreshClipboard();
+    // Expo has no clipboard events on the web, where calling it threw and
+    // took the whole session screen down.
+    if (Platform.OS === "web") return;
     const subscription = Clipboard.addClipboardListener(() => refreshClipboard());
     return () => Clipboard.removeClipboardListener(subscription);
   }, [refreshClipboard]);
