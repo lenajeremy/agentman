@@ -40,6 +40,9 @@ struct AgentmanApp: App {
         .defaultSize(width: 1560, height: 980)
         .windowStyle(.hiddenTitleBar)
         .commands {
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesCommand()
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Agent") { store.selection = .newAgent }
                     .keyboardShortcut("n", modifiers: .command)
@@ -99,8 +102,13 @@ struct AgentmanApp: App {
     }
 }
 
-/// Asks before quitting with unsaved edits in the editor.
+/// Starts the updater, and asks before quitting with unsaved edits in the
+/// editor.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated { AppUpdater.shared.start() }
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         MainActor.assumeIsolated {
             let unsaved = EditorRegistry.shared.unsaved

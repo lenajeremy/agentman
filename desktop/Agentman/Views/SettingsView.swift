@@ -929,18 +929,38 @@ private struct EditorSection: View {
     }
 }
 
-/// Which app and which am serve, and whether a newer one is out.
-private struct AboutSection: View {
+/// Which app and which am serve, and whether a newer one is out. The app
+/// updates itself (AppUpdater), so its row says where that stands and checks
+/// on request; am serve's still hands over a command to run.
+struct AboutSection: View {
     @Environment(AgentsStore.self) private var store
     @State private var copied = false
+    private var updater: AppUpdater { .shared }
 
     var body: some View {
         let app = Bundle.main.infoDictionary
         let version = (app?["CFBundleShortVersionString"] as? String) ?? "?"
         let build = (app?["CFBundleVersion"] as? String) ?? "?"
         SettingsSection(title: "About") {
-            SettingsRow(title: "Agentman for Mac") {
-                Text("\(version) (\(build))").font(TextStyle.caption).foregroundStyle(Palette.muted)
+            SettingsRow(title: "Agentman for Mac",
+                        detail: AppUpdater.detail(updater.status, lastChecked: updater.lastChecked,
+                                                  automatic: updater.checksAutomatically)) {
+                HStack(spacing: 8) {
+                    Text("\(version) (\(build))").font(TextStyle.caption).foregroundStyle(Palette.muted)
+                    if updater.status != .off {
+                        Button(AppUpdater.action(updater.status)) { updater.check() }
+                            .disabled(!updater.canCheck)
+                    }
+                }
+            }
+            if updater.status != .off {
+                SettingsRow(title: "Check for updates automatically",
+                            detail: "Once a day, in the background.") {
+                    Toggle("", isOn: Binding(get: { updater.checksAutomatically },
+                                             set: { updater.checksAutomatically = $0 }))
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
             }
             SettingsRow(title: "am serve", detail: updateDetail, divider: false) {
                 HStack(spacing: 8) {
