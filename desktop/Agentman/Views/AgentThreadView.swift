@@ -1484,7 +1484,10 @@ struct Composer: View {
                     .help("Attach images (or paste or drop them)")
                 }
                 if !modes.isEmpty, let session {
-                    switchMenu(values: modes, current: session.mode, label: SessionLabels.mode, help: "Switch the agent's mode") { value in
+                    // Muse's mode is its reasoning effort, unknown until set.
+                    switchMenu(values: modes, current: session.mode, label: SessionLabels.mode,
+                               unset: session.kind == "muse" ? "Effort" : "Choose",
+                               help: session.kind == "muse" ? "Switch Muse's reasoning effort" : "Switch the agent's mode") { value in
                         Task { await apply(model: false, value) }
                     }
                 }
@@ -1566,7 +1569,7 @@ struct Composer: View {
     }
 
     private func switchMenu(values: [String], current: String?, label: @escaping (String) -> String,
-                            help: String, choose: @escaping (String) -> Void) -> some View {
+                            unset: String = "Choose", help: String, choose: @escaping (String) -> Void) -> some View {
         Menu {
             ForEach(values, id: \.self) { value in
                 Button {
@@ -1581,7 +1584,7 @@ struct Composer: View {
             }
         } label: {
             HStack(spacing: 4) {
-                Text(current.map(label) ?? "Choose")
+                Text(current.map(label) ?? unset)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .bold))
             }

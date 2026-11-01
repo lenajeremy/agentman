@@ -67,6 +67,14 @@ export function modeLabel(mode: string): string {
 }
 
 /**
+ * What an agent's mode is, in a word: Muse's is its reasoning effort, the
+ * others' a mode.
+ */
+export function modeWord(kind: string | undefined): string {
+  return kind === "muse" ? "Effort" : "Mode";
+}
+
+/**
  * A model as a person would say it: "Opus 5.5" for claude-opus-5-5,
  * "GPT-6.1 Sol" for gpt-6.1-sol. Names an agent already prints for people,
  * such as "Gemini 3.8 Pro (High)", are left exactly as they are.

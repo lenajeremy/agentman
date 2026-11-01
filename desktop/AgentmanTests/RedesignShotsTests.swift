@@ -152,6 +152,9 @@ final class RedesignShotsTests: XCTestCase {
          {"id":"muse:a","kind":"muse","name":"Add a dark mode toggle","cwd":"\(site)","state":"waiting_input","inject":"api","lastActivityAt":\(now - 30_000),"model":"muse-spark-1.3",
           "question":{"id":"approval:x:0","prompt":"","title":"Run this command?","detail":"npm test -- settings","options":[{"key":"allow_once","label":"Allow once"},{"key":"abort","label":"Reject"}]}},
          {"id":"muse:b","kind":"muse","name":"Tidy the API errors","cwd":"\(api)","state":"idle","inject":"none","lastActivityAt":\(now - 300_000),"model":"muse-spark-1.3"},
+         {"id":"muse:c","kind":"muse","name":"Write the release notes","cwd":"\(api)","state":"idle","inject":"api","lastActivityAt":\(now - 120_000),"model":"muse-spark-1.3-contributor",
+          "modes":["minimal effort","low effort","medium effort","high effort","xhigh effort"],
+          "models":["muse-wonder-1.0-contributor","muse-spark-1.3-contributor","muse-spark-1.2-contributor"],"modelScope":"session"},
          {"id":"c","kind":"claude","name":"Fix Safari sign-in","cwd":"\(site)","state":"busy","inject":"tmux","lastActivityAt":\(now - 60_000)}
         ]}
         """
@@ -180,7 +183,7 @@ final class RedesignShotsTests: XCTestCase {
         UserDefaults.standard.set("muse", forKey: "newAgentKind")
         for dark in [false, true] {
             let look = dark ? "dark" : "light"
-            for (id, name) in [("muse:a", "muse-approval"), ("muse:b", "muse-watched")] {
+            for (id, name) in [("muse:a", "muse-approval"), ("muse:b", "muse-watched"), ("muse:c", "muse-switches")] {
                 let store = AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-shots.sock"))
                 for json in [sessions, waiting, watched] {
                     store.apply(try JSONDecoder().decode(DaemonEvent.self, from: Data(json.utf8)))

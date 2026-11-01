@@ -54,7 +54,7 @@ import { OutputViewer } from "../../components/OutputViewer";
 import { type Frame } from "../../lib/message-menu";
 import { artifactsButtonLabel } from "../../lib/artifacts";
 import { canEnd, shouldResume } from "../../lib/resume";
-import { folderName, modeLabel, modelLabel, showsInFeed, statusChip } from "../../lib/session-view";
+import { folderName, modeLabel, modelLabel, modeWord, showsInFeed, statusChip } from "../../lib/session-view";
 import {
   defaultScopeWarning,
   switchChoices,
@@ -695,7 +695,7 @@ export default function SessionScreen() {
   }
   const switchTitle =
     switchMenu === "mode"
-      ? "Mode"
+      ? modeWord(session?.kind)
       : session?.modelScope === "default"
         ? "Model · also the default for new sessions"
         : "Model for this session";
@@ -711,6 +711,7 @@ export default function SessionScreen() {
         mode: chip?.mode && chip.mode !== "mode" ? chip.mode : undefined,
         modePending: switching?.kind === "mode" ? switching.value : undefined,
         onMode: modeChoices ? () => openSwitchMenu("mode") : undefined,
+        modeWord: modeWord(session.kind),
         contextPercent: session.contextPercent,
       })
     : null;
@@ -1423,6 +1424,8 @@ interface HeaderControlsProps {
   mode?: string;
   modePending?: string;
   onMode?: () => void;
+  /** What the chip says before a mode is known: "Mode", or Muse's "Effort". */
+  modeWord?: string;
   contextPercent?: number;
 }
 
@@ -1443,6 +1446,7 @@ function ModeControl({
   mode,
   modePending,
   onMode,
+  modeWord: unsetWord,
   contextPercent,
   disabled,
 }: HeaderControlsProps & { disabled?: boolean }) {
@@ -1454,7 +1458,7 @@ function ModeControl({
       {shownMode || onMode ? (
         <ModelButton
           kind="Mode"
-          model={shownMode ? modeLabel(shownMode) : "Mode"}
+          model={shownMode ? modeLabel(shownMode) : (unsetWord ?? "Mode")}
           pending={Boolean(modePending)}
           onPress={onMode}
           disabled={disabled}
