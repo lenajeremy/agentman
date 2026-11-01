@@ -225,12 +225,23 @@ func historyName(prompt, cwd string) string {
 	return ""
 }
 
+// MaxPastLimit is the most one directory's history may be asked for. The
+// folder list asks for DefaultPastLimit; search, reading every conversation
+// once in the background, asks for all of them.
+const MaxPastLimit = 100_000
+
 // limitOrDefault normalises a caller's cap.
+//
+// A cap is only a cap: a listing is never made room for up to it ahead of
+// time. Six adapters did, and search asks for MaxPastLimit, so each of its
+// sweeps made six slices of 100,000 sessions, 305 MB apiece, all at once,
+// to find a few dozen. That was the daemon's 445 MB peak, and why its
+// footprint settled at 300 MB.
 func limitOrDefault(limit int) int {
-	if limit <= 0 || limit > DefaultPastLimit {
+	if limit <= 0 {
 		return DefaultPastLimit
 	}
-	return limit
+	return min(limit, MaxPastLimit)
 }
 
 // scanTail applies visit to the lines in the last limit bytes of a file,

@@ -101,6 +101,16 @@ func (d *Daemon) resumeSession(ctx context.Context, sessionID string) (string, e
 		return id, nil
 	}
 
+	// Some agents' sessions take a message as they are (Muse): reopening one
+	// only lists it again, and nothing starts.
+	if reopened, err := d.registry.Reopen(ctx, sessionID); reopened {
+		if err != nil {
+			return "", err
+		}
+		d.resumes.remember(sessionID, sessionID, time.Now())
+		return sessionID, nil
+	}
+
 	session, ok := d.resumable(sessionID)
 	if !ok {
 		return "", fmt.Errorf("daemon: nothing is known about this session any more")

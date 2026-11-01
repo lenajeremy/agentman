@@ -64,8 +64,16 @@ func sweepOf(ctx context.Context) *sweep {
 	return s
 }
 
+// list lists the panes once a sweep. The same tmux run captures the panes
+// the last listing found, which every adapter goes on to read; see listOn.
 func (s *sweep) list() ([]Session, error) {
-	s.listOnce.Do(func() { s.sessions, s.listErr = listSessions(s.ctx) })
+	s.listOnce.Do(func() {
+		var panes map[string]string
+		s.sessions, panes, s.listErr = listAndCapture(s.ctx, true)
+		s.captureMu.Lock()
+		s.panes = panes
+		s.captureMu.Unlock()
+	})
 	return slices.Clone(s.sessions), s.listErr
 }
 
@@ -76,18 +84,31 @@ func (s *sweep) processTree() (*ProcessTree, error) {
 
 // capture returns a pane as the sweep captured it.
 //
-// The first capture asked for in a sweep captures every listed pane in one
-// tmux run. Each pane is handed out once: a second look in the same sweep is
-// fresh, so a flow that captures, presses a key and captures again sees what
-// the key did. A pane the batch did not reach is not found here either, and
-// the caller captures it alone.
+// The listing captured the panes it already knew. The first capture asked
+// for in a sweep captures every other listed pane — one that is new since
+// the last sweep, or that a closed pane kept the listing's run from
+// reaching — in one tmux run. Each pane is handed out once: a second look in
+// the same sweep is fresh, so a flow that captures, presses a key and
+// captures again sees what the key did. A pane the batch did not reach is
+// not found here either, and the caller captures it alone.
 func (s *sweep) capture(name string) (string, bool) {
+	sessions, _ := s.list()
 	s.captureMu.Lock()
 	defer s.captureMu.Unlock()
 	if !s.captured {
 		s.captured = true
-		sessions, _ := s.list()
-		s.panes = captureAll(s.ctx, sessions)
+		var missing []Session
+		for _, session := range sessions {
+			if _, captured := s.panes[session.Name]; !captured {
+				missing = append(missing, session)
+			}
+		}
+		for pane, text := range captureAll(s.ctx, missing) {
+			if s.panes == nil {
+				s.panes = map[string]string{}
+			}
+			s.panes[pane] = text
+		}
 	}
 	pane, ok := s.panes[name]
 	delete(s.panes, name)
@@ -141,27 +162,46 @@ func captureAll(ctx context.Context, sessions []Session) map[string]string {
 
 // captureOn captures the panes of sessions that all run on one server.
 func captureOn(ctx context.Context, server server, sessions []Session) map[string]string {
+	names := make([]string, len(sessions))
+	for index, session := range sessions {
+		names[index] = session.Name
+	}
+	marker := newMarker()
+	out, _ := runOutputOn(ctx, server, captureArgs(names, marker)...)
+	return parseCaptures(out, names, marker)
+}
+
+// newMarker returns the markers of one tmux run, each with the run's nonce.
+func newMarker() func(label string) string {
 	var nonce [8]byte
 	_, _ = rand.Read(nonce[:])
-	marker := func(index int) string {
-		return "agentman-sweep-" + hex.EncodeToString(nonce[:]) + "-" + strconv.Itoa(index)
-	}
-	args := make([]string, 0, len(sessions)*8)
-	for index, session := range sessions {
+	prefix := "agentman-sweep-" + hex.EncodeToString(nonce[:]) + "-"
+	return func(label string) string { return prefix + label }
+}
+
+// captureArgs captures each pane, then prints its marker.
+func captureArgs(names []string, marker func(string) string) []string {
+	args := make([]string, 0, len(names)*8)
+	for index, name := range names {
 		if index > 0 {
 			args = append(args, ";")
 		}
-		args = append(args, "capture-pane", "-t", session.Name, "-p", ";", "display-message", "-p", marker(index))
+		args = append(args, "capture-pane", "-t", name, "-p", ";", "display-message", "-p", marker(strconv.Itoa(index)))
 	}
-	out, _ := runOutputOn(ctx, server, args...)
-	panes := make(map[string]string, len(sessions))
-	for index, session := range sessions {
-		end := strings.Index(out, marker(index)+"\n")
+	return args
+}
+
+// parseCaptures splits captureArgs's output into panes, as far as it got.
+func parseCaptures(out string, names []string, marker func(string) string) map[string]string {
+	panes := make(map[string]string, len(names))
+	for index, name := range names {
+		mark := marker(strconv.Itoa(index))
+		end := strings.Index(out, mark+"\n")
 		if end < 0 {
 			break
 		}
-		panes[session.Name] = out[:end]
-		out = out[end+len(marker(index))+1:]
+		panes[name] = out[:end]
+		out = out[end+len(mark)+1:]
 	}
 	return panes
 }

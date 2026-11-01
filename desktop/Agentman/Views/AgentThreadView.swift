@@ -52,6 +52,9 @@ struct AgentThreadView: View {
     /// What a panel command showed, in a sheet, and whether one is being read.
     @State private var panel: CommandPanel?
     @State private var readingPanel = false
+    /// The find bar, while it is open, and the message it last scrolled to.
+    @State private var finding: Finding?
+    @State private var scrollTarget: ScrollTarget?
 
     /// Claude Code in tmux reads the messages it is holding on Ctrl-X
     /// Ctrl-S, so they can be sent now rather than when the step ends.
@@ -59,6 +62,27 @@ struct AgentThreadView: View {
     /// The terminal under the conversation shows while it is kept there and
     /// this folder has a shell open.
     private var bottomTerminalShows: Bool { Self.showsBottomTerminal(kept: bottomTerminal, folder: session.cwd) }
+
+    /// Shows the match before or after the one shown, round from the end.
+    private func step(_ delta: Int) {
+        guard var found = finding, !found.matches.isEmpty else { return }
+        let count = found.matches.count
+        let at = found.index.map { ($0 + delta + count) % count } ?? (delta > 0 ? 0 : count - 1)
+        found.index = at
+        finding = found
+        let id = found.matches[at].messageId
+        Task { await reveal(id) }
+    }
+
+    /// Reads back to a message if it is not loaded yet, then scrolls to it
+    /// and stops following the end, so news does not pull the thread away.
+    private func reveal(_ messageId: String) async {
+        following.atEnd = false
+        guard await store.loadThrough(session.id, messageId: messageId) else { return }
+        // A frame for the rows read back to be laid out before scrolling.
+        try? await Task.sleep(for: .milliseconds(60))
+        scrollTarget = ScrollTarget(id: messageId)
+    }
 
     static func showsBottomTerminal(kept: Bool, folder: String) -> Bool {
         kept && FileManager.default.fileExists(atPath: folder) && !EditorRegistry.shared.store(for: folder).terminals.isEmpty
@@ -313,6 +337,7 @@ struct AgentThreadView: View {
                     .environment(\.imageGallery, ThreadItem.pictures(in: items))
                     .environment(\.threadFolder, session.cwd)
                     .environment(\.threadSkills, slash?.skills ?? [])
+                    .environment(\.findMarks, finding?.marks)
                 }
                 .scrollIndicators(.never)
                 .modifier(FollowsEnd(following: following, earlier: store.hasMore[session.id] == true ? { await store.loadOlder(session.id) } : nil))
@@ -327,6 +352,11 @@ struct AgentThreadView: View {
                 }
                 .overlay {
                     if dropping { DropTarget(label: "Drop images for \(session.name)") }
+                }
+                .overlay(alignment: .topTrailing) {
+                    FindBar(finding: $finding, previous: { step(-1) }, next: { step(1) })
+                        .padding(.top, 10)
+                        .padding(.trailing, 16)
                 }
                 .onChange(of: store.messages[session.id]?.last?.id) { _, last in
                     guard last != nil, following.atEnd else { return }
@@ -344,6 +374,47 @@ struct AgentThreadView: View {
                     following.atEnd = true
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo("end", anchor: .bottom)
+                    }
+                }
+                .onChange(of: scrollTarget) { _, target in
+                    guard let target else { return }
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        proxy.scrollTo(target.id, anchor: .center)
+                    }
+                }
+                // Opened from a search: at the message, its words found.
+                .task(id: store.jump?.serial) {
+                    guard let jump = store.jump, jump.sessionId == session.id else { return }
+                    store.jump = nil
+                    finding = Finding(query: jump.query)
+                    let matches = await store.searchThread(session.id, query: jump.query)
+                    finding = Finding(query: jump.query, searched: jump.query, matches: matches,
+                                      index: matches.firstIndex { $0.messageId == jump.messageId })
+                    await reveal(jump.messageId)
+                }
+                // Typed into the find bar: the whole conversation searched a
+                // moment after typing stops, the newest match shown.
+                .task(id: finding?.query) {
+                    guard let query = finding?.query, query != finding?.searched else { return }
+                    try? await Task.sleep(for: .milliseconds(200))
+                    guard !Task.isCancelled else { return }
+                    let matches = await store.searchThread(session.id, query: query)
+                    guard !Task.isCancelled, finding?.query == query else { return }
+                    finding?.searched = query
+                    finding?.matches = matches
+                    finding?.index = matches.isEmpty ? nil : matches.count - 1
+                    if let last = matches.last { await reveal(last.messageId) }
+                }
+                .background {
+                    // ⌘F finds in the conversation; not in an editor's
+                    // panel, where the editor's own find has it.
+                    if !inPanel {
+                        Button("Find in Conversation") {
+                            if finding == nil { finding = Finding(query: "") }
+                        }
+                        .keyboardShortcut("f", modifiers: .command)
+                        .opacity(0)
+                        .accessibilityHidden(true)
                     }
                 }
             }
@@ -456,7 +527,9 @@ struct AgentThreadView: View {
     /// The space at either side of the conversation: less in a panel.
     private var gutter: CGFloat { inPanel ? 14 : 36 }
 
-    private static let resumableKinds: Set<String> = ["claude", "codex", "cursor-cli", "kiro", "antigravity"]
+    /// Muse reopens in place: the daemon lists the session again, and
+    /// nothing starts.
+    private static let resumableKinds: Set<String> = ["claude", "codex", "cursor-cli", "kiro", "antigravity", "muse"]
 
     /// An ended session its agent can reopen, as the phone decides it.
     static func resumable(_ session: Session) -> Bool {
@@ -506,7 +579,11 @@ struct AgentThreadView: View {
     }
 
     private var placeholder: String {
-        if !session.canReceive { return "Start this agent with am \(session.kind) to message it from here" }
+        if !session.canReceive {
+            // Muse lets one client drive a session: a terminal has this one.
+            if session.kind == "muse" { return "Open in a terminal: close it there to message it from here" }
+            return "Start this agent with am \(session.kind) to message it from here"
+        }
         if session.question != nil { return "Answer the question above first" }
         if session.inject == "hook" {
             return "Message \(session.name): it reads it when its turn ends (start it with am \(session.kind) to type in directly)"
@@ -576,6 +653,18 @@ struct AgentThreadView: View {
     private func fileReference(_ url: URL) async -> Result<String, TerminalProblem> {
         if !url.path.contains(where: \.isWhitespace) { return .success(url.path) }
         return await store.keepFile(url, for: session.id)
+    }
+}
+
+/// Made again whenever any agent's session changes, as the view around it
+/// reads them all; drawn again only when its own agent changed in what it
+/// shows. Drawn each time, its message box, panels and workspace card were
+/// remade for news of other agents, and for its own agent's every step:
+/// when it last did something, which the panels that refresh by it read
+/// from the store's AgentActivity instead.
+extension AgentThreadView: Equatable {
+    nonisolated static func == (lhs: AgentThreadView, rhs: AgentThreadView) -> Bool {
+        lhs.inPanel == rhs.inPanel && lhs.session.identical(besidesActivityTo: rhs.session)
     }
 }
 
@@ -939,8 +1028,20 @@ struct StateChip: View {
 /// One entry in a conversation.
 struct MessageRow: View {
     let message: Message
+    @Environment(\.findMarks) private var marks
 
     var body: some View {
+        content.environment(\.findHighlight, highlight)
+    }
+
+    /// The find bar's words, when it is open, and whether this is the
+    /// match it shows.
+    private var highlight: FindHighlight? {
+        guard let marks, !marks.words.isEmpty else { return nil }
+        return FindHighlight(words: marks.words, current: marks.current == message.id)
+    }
+
+    @ViewBuilder private var content: some View {
         switch message.role {
         case .user:
             if let text = message.text, MessageRow.isCompactionSummary(text) {
@@ -996,6 +1097,7 @@ extension MessageRow {
 private struct LongText: View {
     @Environment(\.threadFolder) private var folder
     @Environment(\.threadSkills) private var skills
+    @Environment(\.findHighlight) private var highlight
     let text: String
     @State private var open = false
     private var long: Bool { text.count > 700 || text.filter(\.isNewline).count > 10 }
@@ -1010,6 +1112,10 @@ private struct LongText: View {
                 .buttonStyle(.link)
                 .font(TextStyle.caption)
             }
+        }
+        // The match shown may be past the lines a long message shows.
+        .onChange(of: highlight?.current == true, initial: true) { _, current in
+            if current, long { open = true }
         }
     }
 }
@@ -1534,7 +1640,10 @@ struct Composer: View {
                     .help("Attach images (or paste or drop them)")
                 }
                 if !modes.isEmpty, let session {
-                    switchMenu(values: modes, current: session.mode, label: SessionLabels.mode, help: "Switch the agent's mode") { value in
+                    // Muse's mode is its reasoning effort, unknown until set.
+                    switchMenu(values: modes, current: session.mode, label: SessionLabels.mode,
+                               unset: session.kind == "muse" ? "Effort" : "Choose",
+                               help: session.kind == "muse" ? "Switch Muse's reasoning effort" : "Switch the agent's mode") { value in
                         Task { await apply(model: false, value) }
                     }
                 }
@@ -1616,7 +1725,7 @@ struct Composer: View {
     }
 
     private func switchMenu(values: [String], current: String?, label: @escaping (String) -> String,
-                            help: String, choose: @escaping (String) -> Void) -> some View {
+                            unset: String = "Choose", help: String, choose: @escaping (String) -> Void) -> some View {
         Menu {
             ForEach(values, id: \.self) { value in
                 Button {
@@ -1631,7 +1740,7 @@ struct Composer: View {
             }
         } label: {
             HStack(spacing: 4) {
-                Text(current.map(label) ?? "Choose")
+                Text(current.map(label) ?? unset)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .bold))
             }

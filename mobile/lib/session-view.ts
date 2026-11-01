@@ -56,12 +56,22 @@ export function modeLabel(mode: string): string {
     "accept edits": "Accept edits",
     acceptedits: "Accept edits",
     bypasspermissions: "Bypass permissions",
+    // Muse's reasoning effort, switched as its mode.
+    "xhigh effort": "Extra high effort",
   };
   const found = known[raw.toLowerCase()];
   if (found) return found;
   const words = raw.replace(/^kiro_/i, "").replace(/[_-]+/g, " ").trim();
   if (!words) return raw;
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * What an agent's mode is, in a word: Muse's is its reasoning effort, the
+ * others' a mode.
+ */
+export function modeWord(kind: string | undefined): string {
+  return kind === "muse" ? "Effort" : "Mode";
 }
 
 /**
@@ -84,6 +94,12 @@ export function modelLabel(model: string): string {
   if (gpt) {
     const rest = gpt[2] ? " " + gpt[2].split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ") : "";
     return `GPT-${gpt[1]}${rest}`;
+  }
+  // Meta Muse: muse-spark-1.3-contributor is "Muse Spark 1.3", as Muse's
+  // terminal says it (contributor is the account's mode, not a model).
+  const muse = raw.match(/^muse-([a-z]+)-(\d+(?:\.\d+)*)(?:-contributor)?$/i);
+  if (muse) {
+    return `Muse ${muse[1].charAt(0).toUpperCase()}${muse[1].slice(1).toLowerCase()} ${muse[2]}`;
   }
   if (raw === "auto") return "Auto";
   return raw;

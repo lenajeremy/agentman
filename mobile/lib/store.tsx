@@ -77,6 +77,8 @@ import {
   DaemonInfo,
   Folder,
   Usage,
+  Limits,
+  SearchResults,
   Message,
   Tool,
   Page,
@@ -201,8 +203,19 @@ interface Store {
   /** What the agents on the Mac spent over the last days days (0: all of
    *  it), as the daemon sums it from their own records. */
   usage(days: number): Promise<Usage>;
+  /** What is left of each agent's plan on the Mac. The Mac keeps its answer
+   *  for a couple of minutes; force reads the limits again. */
+  limits(force?: boolean): Promise<Limits>;
+  /** Finds words in what was said in every conversation on the Mac, the
+   *  best message of each; with a session, every match there, in order. */
+  search(query: string, sessionId?: string): Promise<SearchResults>;
+  /** Keeps a conversation a search found, though it is neither running
+   *  nor listed, so it can be opened. */
+  rememberSession(session: Session): void;
   /** The folder the list is narrowed to, or null for everything. */
   folderFilter: string | null;
+  /** Where that folder is on the Mac, once the Mac has said. */
+  folderRoot: string | null;
   /** Narrow the list to one folder and its subtree, or clear it with null.
    *  A folder's list includes sessions that have already ended, which no
    *  amount of waiting on discovery would ever show. */
@@ -238,7 +251,7 @@ interface Store {
    *  Agentman speaks for the agents. Returns the problem, if any. */
   setAgentAlerts(sessionId: string, on: boolean): Promise<string | null>;
   startSession(
-    kind: "claude" | "codex" | "cursor-cli" | "opencode" | "kiro" | "antigravity",
+    kind: "claude" | "codex" | "cursor-cli" | "opencode" | "kiro" | "antigravity" | "muse",
     path: string,
     text: string,
   ): Promise<string>;
@@ -845,7 +858,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       case "session_ended":
       case "session_started":
       case "artifacts":
-      case "usage": {
+      case "usage":
+      case "limits": {
         if (replyTo) settleLaunchRequest(replyTo, event);
         break;
       }
@@ -1095,6 +1109,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // folderContains.
   const [folderRoot, setFolderRoot] = useState<string | null>(null);
   const [folderSessions, setFolderSessions] = useState<Session[]>([]);
+  const [foundSessions, setFoundSessions] = useState<Session[]>([]);
   const [folderLoading, setFolderLoading] = useState(false);
   // Only the newest folder request may fill the list: picking folder A then B
   // used to show A's sessions under B's name when A's reply came last.
@@ -1617,6 +1632,47 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         });
       },
 
+      limits(force) {
+        return new Promise<Limits>((resolve, reject) => {
+          const id = clientRef.current?.send(force ? { type: "limits", force: true } : { type: "limits" });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          // Asking Claude Code takes the Mac a second or two.
+          const timer = setTimeout(() => settleLaunchRequest(id), 60_000);
+          launchRequests.current.set(id, {
+            resolve: (event) => event.limits ? resolve(event.limits) : reject(new Error("The Mac didn't say what is left of the plans.")),
+            reject: (error) => reject(/unsupported request/.test(error.message)
+              ? new Error("Update agentman on your Mac to see plan limits here.")
+              : error),
+            timer,
+          });
+        });
+      },
+
+      search(query, sessionId) {
+        return new Promise<SearchResults>((resolve, reject) => {
+          const id = clientRef.current?.send({ type: "search", text: query.slice(0, 200), sessionId });
+          if (!id) {
+            reject(new Error("Not connected to your Mac right now."));
+            return;
+          }
+          const timer = setTimeout(() => settleAskRequest(id), 20_000);
+          askRequests.current.set(id, {
+            resolve: (event) => event.search ? resolve(event.search) : reject(new Error("The Mac didn't answer the search.")),
+            reject: (error) => reject(/unsupported request/.test(error.message)
+              ? new Error("Update agentman on your Mac to search here.")
+              : error),
+            timer,
+          });
+        });
+      },
+
+      rememberSession(session) {
+        setFoundSessions((current) => [session, ...current.filter((other) => other.id !== session.id)].slice(0, 50));
+      },
+
       listFolders() {
         return new Promise<Folder[]>((resolve, reject) => {
           const id = clientRef.current?.send({ type: "list_folders" });
@@ -1632,12 +1688,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
 
       folderFilter,
+      folderRoot,
       folderLoading,
       setFolderFilter,
       findSession(id) {
         return (
           sessions.find((session) => session.id === id) ??
-          folderSessions.find((session) => session.id === id)
+          folderSessions.find((session) => session.id === id) ??
+          foundSessions.find((session) => session.id === id)
         );
       },
       stateFilter,
@@ -1820,7 +1878,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         };
       },
     }),
-    [ready, credentials, connection, daemonOnline, daemonInfo, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, folderFilter, folderLoading, setFolderFilter, folderSessions, stateFilter, notifyPrefs, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, resumeSessionOnce, registerPushToken, clearLaunchRequests, clearWorkspaceRequests, settleAskRequest],
+    [ready, credentials, connection, daemonOnline, daemonInfo, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, folderFilter, folderRoot, folderLoading, setFolderFilter, folderSessions, foundSessions, stateFilter, notifyPrefs, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, resumeSessionOnce, registerPushToken, clearLaunchRequests, clearWorkspaceRequests, settleAskRequest],
   );
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;

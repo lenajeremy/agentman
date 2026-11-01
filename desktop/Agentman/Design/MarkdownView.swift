@@ -73,19 +73,40 @@ extension EnvironmentValues {
 // MARK: - Parsing
 
 /// Parsed replies, by their text. A conversation re-renders often and its
-/// replies never change, so each is parsed once.
+/// replies never change, so each is parsed once while it is in use.
+///
+/// Kept in two generations: the newer fills, a reply read again from the
+/// older moves into it, and when the newer is full it becomes the older and
+/// the older goes. A parsed reply holds some 35 times its text (18 KB for
+/// a short one), and up to 2,000 were kept, whether shown or long gone, as
+/// were the versions of a Markdown file in the editor's preview as it was
+/// typed.
 @MainActor
-private enum MarkdownCache {
-    private static var parsed: [String: [MarkdownBlock]] = [:]
+enum MarkdownCache {
+    private static var recent: [String: [MarkdownBlock]] = [:]
+    private static var older: [String: [MarkdownBlock]] = [:]
+    /// Replies in each generation: more than a conversation shows at once.
+    static let generation = 200
 
     static func blocks(for source: String) -> [MarkdownBlock] {
-        if let hit = parsed[source] { return hit }
-        var builder = BlockBuilder()
-        let blocks = builder.blocks(of: Document(parsing: source))
-        if parsed.count > 2000 { parsed.removeAll() }
-        parsed[source] = blocks
+        if let hit = recent[source] { return hit }
+        let blocks: [MarkdownBlock]
+        if let kept = older.removeValue(forKey: source) {
+            blocks = kept
+        } else {
+            var builder = BlockBuilder()
+            blocks = builder.blocks(of: Document(parsing: source))
+        }
+        if recent.count >= generation {
+            older = recent
+            recent = [:]
+        }
+        recent[source] = blocks
         return blocks
     }
+
+    /// How many parsed replies are kept, for tests.
+    static var count: Int { recent.count + older.count }
 }
 
 private struct BlockBuilder {
@@ -334,6 +355,11 @@ private enum Inline {
 private struct BlockView: View {
     let block: MarkdownBlock
     @Environment(\.markdownFolder) private var folder
+    @Environment(\.findHighlight) private var highlight
+
+    private func marked(_ text: AttributedString) -> AttributedString {
+        highlight?.mark(text) ?? text
+    }
 
     var body: some View {
         content
@@ -344,14 +370,14 @@ private struct BlockView: View {
     @ViewBuilder private var content: some View {
         switch block.kind {
         case .paragraph(let text):
-            SwiftUI.Text(text)
+            SwiftUI.Text(marked(text))
                 .font(TextStyle.body)
                 .foregroundStyle(Palette.text)
                 .lineSpacing(6)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         case .heading(let level, let text):
-            SwiftUI.Text(text)
+            SwiftUI.Text(marked(text))
                 .font(Fonts.sans(level <= 1 ? 19 : level == 2 ? 16.5 : 14.5, .medium))
                 .foregroundStyle(Palette.text)
                 .lineSpacing(3)

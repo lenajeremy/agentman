@@ -17,6 +17,7 @@ import (
 
 	"github.com/lenajeremy/agentman/internal/jsonl"
 	"github.com/lenajeremy/agentman/internal/parser"
+	"github.com/lenajeremy/agentman/internal/procinfo"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/question"
 	"github.com/lenajeremy/agentman/internal/tmux"
@@ -1167,21 +1168,27 @@ func (s *AntigravitySource) CurrentQuestion(ctx context.Context, sessionID strin
 	return antigravityQuestion(found, form), nil
 }
 
-// antigravityOpenConversations asks lsof what each agy process holds open.
-// Missing lsof, or a timeout, returns nothing: the sessions stay hidden rather
-// than guessed at.
+// antigravityOpenConversations asks what each agy process holds open: the
+// kernel where procinfo can (see kernelOpenFiles), otherwise lsof. Missing
+// lsof, or a timeout, returns nothing: the sessions stay hidden rather than
+// guessed at.
 func antigravityOpenConversations(ctx context.Context, home string, pids []int) map[int]antigravityProcess {
-	bin, err := exec.LookPath("lsof")
-	if err != nil {
-		return nil
-	}
+	var alive []int
 	ids := make([]string, 0, len(pids))
 	for _, pid := range pids {
 		if pid > 1 {
+			alive = append(alive, pid)
 			ids = append(ids, strconv.Itoa(pid))
 		}
 	}
 	if len(ids) == 0 {
+		return nil
+	}
+	if procinfo.Supported {
+		return parseAntigravityOpenFiles(home, kernelOpenFiles(alive))
+	}
+	bin, err := exec.LookPath("lsof")
+	if err != nil {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, antigravityLsofTimeout)

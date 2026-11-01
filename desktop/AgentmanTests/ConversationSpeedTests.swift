@@ -80,4 +80,32 @@ final class ConversationSpeedTests: XCTestCase {
         XCTAssertLessThanOrEqual(pixels.pixelsHigh, 221, "decoded at twice the points, not 2000 pixels")
         XCTAssertNotNil(Thumbnail.cached(Thumbnail.key(path, "110")), "kept for the next time")
     }
+
+    // A working agent's session arrives every second with only when it last
+    // did something changed: the conversation isn't drawn again for that,
+    // and the panels that refresh by it read it apart.
+    func testAWorkingAgentsStepsLeaveItsConversationAlone() throws {
+        let store = try store(Self.run)
+        var session = Session(id: "s", kind: "claude", name: "Fix the build", cwd: "/tmp", state: .busy, lastActivityAt: 1)
+        var event = DaemonEvent(type: "sessions")
+        event.sessions = [session]
+        store.apply(event)
+        let activity = store.activity("s")
+        XCTAssertEqual(activity.at, 1)
+
+        var stepped = session
+        stepped.lastActivityAt = 2
+        stepped.contextPercent = 40
+        XCTAssertEqual(AgentThreadView(session: session), AgentThreadView(session: stepped), "not drawn again for a step")
+        var update = DaemonEvent(type: "session_update")
+        update.session = stepped
+        store.apply(update)
+        XCTAssertEqual(activity.at, 2, "the panels see the step")
+
+        session.state = .idle
+        XCTAssertNotEqual(AgentThreadView(session: stepped), AgentThreadView(session: session), "drawn again when it stops")
+        var asking = stepped
+        asking.question = Question(id: "q", prompt: "Push?", options: [QuestionOption(key: "1", label: "Yes")])
+        XCTAssertNotEqual(AgentThreadView(session: stepped), AgentThreadView(session: asking))
+    }
 }

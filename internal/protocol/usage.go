@@ -64,6 +64,17 @@ type ModelUsage struct {
 	Cost   float64 `json:"cost"`
 	// Priced is false for a model with no known price: its cost is left out.
 	Priced bool `json:"priced"`
+	// Fast is the part of it Claude ran in fast mode, at a higher price,
+	// and Advisor the part spent advising another model during its turns.
+	// Both are in Tokens and Cost too; absent when there was none.
+	Fast    *UsagePart `json:"fast,omitempty"`
+	Advisor *UsagePart `json:"advisor,omitempty"`
+}
+
+// UsagePart is part of a model's share.
+type UsagePart struct {
+	Tokens Tokens  `json:"tokens"`
+	Cost   float64 `json:"cost"`
 }
 
 // Usage is the summary.

@@ -195,6 +195,7 @@ func runServe(ctx context.Context, args []string) error {
 			return err
 		}
 	}
+	tuneCollector()
 	// Started by the service at login, am serve has none of the environment
 	// a terminal would have given it; the login shell's puts it back, for
 	// itself and every agent it starts.
@@ -229,6 +230,7 @@ func runServe(ctx context.Context, args []string) error {
 	defer registry.Close()
 	registry.EnableAsyncCursor()
 	registry.ConnectCodex(version)
+	registry.ConnectMuse()
 
 	// Messages for sessions with no live input channel wait here until their
 	// next Stop hook, which is the only moment such a session can be reached.
@@ -322,6 +324,8 @@ func runServe(ctx context.Context, args []string) error {
 	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
 		agent.SetNamesFile(filepath.Join(dir, "names.json"))
 		agent.SetAlertsFile(filepath.Join(dir, "alerts.json"))
+		// Every conversation's words, for search in the apps.
+		agent.SetSearchFile(filepath.Join(dir, "search.db"))
 	}
 	// Language servers for the editor in Agentman for Mac: started on first
 	// use, stopped when idle, and all stopped with am serve.

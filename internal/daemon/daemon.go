@@ -20,8 +20,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/lenajeremy/agentman/internal/hook"
+	"github.com/lenajeremy/agentman/internal/limits"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/push"
+	"github.com/lenajeremy/agentman/internal/search"
 	"github.com/lenajeremy/agentman/internal/source"
 	"github.com/lenajeremy/agentman/internal/usage"
 )
@@ -91,6 +93,13 @@ type Daemon struct {
 	// usage reads what the agents spent, for ReqUsage.
 	usage     *usage.Scanner
 	usageOnce sync.Once
+	// limits reads what is left of each agent's plan, for ReqLimits.
+	limits     *limits.Reader
+	limitsOnce sync.Once
+	// search finds words in every conversation, for ReqSearch, from an index
+	// kept at searchPath; nil until it is open.
+	search     *search.Indexer
+	searchPath string
 	// mentions is each folder's files, for `@` in a message box.
 	mentions mentionIndex
 	// files joins the parts of files sent to agents from a phone.
@@ -410,6 +419,7 @@ func (d *Daemon) Run(ctx context.Context, hooks <-chan hook.Event) error {
 
 	d.refresh(ctx, true)
 	go d.warmUsage(ctx)
+	go d.runSearch(ctx)
 
 	d.mu.Lock()
 	watcher, sharer := d.serverWatcher, d.sharer
@@ -1095,6 +1105,12 @@ func (d *Daemon) HandleFrom(
 		}
 		return protocol.Event{Type: protocol.EvtSessionStarted, SessionID: id}
 
+	case protocol.ReqReleaseSession:
+		if err := d.registry.Release(ctx, req.SessionID, req.Stop); err != nil {
+			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
+		}
+		return protocol.Event{Type: protocol.EvtSessionReleased, SessionID: req.SessionID}
+
 	case protocol.ReqEndSession:
 		if err := d.endSession(ctx, req.SessionID); err != nil {
 			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
@@ -1134,6 +1150,11 @@ func (d *Daemon) HandleFrom(
 			limit = maxPageMessages
 		}
 		page, err := d.registry.Page(ctx, req.SessionID, req.Before, limit)
+		// An ended conversation opened from a search may have been
+		// forgotten since; naming it again is enough to read it.
+		if err != nil && d.reopenFromSearch(ctx, req.SessionID) {
+			page, err = d.registry.Page(ctx, req.SessionID, req.Before, limit)
+		}
 		if err != nil {
 			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
 		}
@@ -1278,6 +1299,12 @@ func (d *Daemon) HandleFrom(
 	case protocol.ReqUsage:
 		return d.usageSummary(ctx, req)
 
+	case protocol.ReqLimits:
+		return d.planLimits(ctx, req)
+
+	case protocol.ReqSearch:
+		return d.searchEvent(ctx, req)
+
 	case protocol.ReqRenameSession:
 		return d.renameSession(req)
 
@@ -1324,7 +1351,7 @@ func requestMutatesSession(kind protocol.RequestType) bool {
 		kind == protocol.ReqInterrupt || kind == protocol.ReqStartSession ||
 		// Resume and end start or stop a process. Run concurrently, two resumes
 		// of one session each launched their own.
-		kind == protocol.ReqResumeSession || kind == protocol.ReqEndSession ||
+		kind == protocol.ReqResumeSession || kind == protocol.ReqEndSession || kind == protocol.ReqReleaseSession ||
 		kind == protocol.ReqHandoffSession ||
 		kind == protocol.ReqReviewArtifact || kind == protocol.ReqSetMode || kind == protocol.ReqSetModel ||
 		// After a send, in order, so a message just sent is in the queue
@@ -1431,7 +1458,7 @@ func validateRequest(req protocol.Request) error {
 		return nil
 	case protocol.ReqDirectorySessions:
 		return validateFolderPath(req.Path)
-	case protocol.ReqResumeSession, protocol.ReqEndSession, protocol.ReqHandoffSession:
+	case protocol.ReqResumeSession, protocol.ReqEndSession, protocol.ReqReleaseSession, protocol.ReqHandoffSession:
 		if req.SessionID == "" || len(req.SessionID) > 512 {
 			return fmt.Errorf("daemon: invalid session")
 		}
@@ -1440,7 +1467,8 @@ func validateRequest(req protocol.Request) error {
 		if req.ClientID == "" || validateLaunchPath(req.Path, false) != nil ||
 			(req.Kind != protocol.KindClaude && req.Kind != protocol.KindCodex &&
 				req.Kind != protocol.KindCursorCLI && req.Kind != protocol.KindOpenCode &&
-				req.Kind != protocol.KindKiro && req.Kind != protocol.KindAntigravity) ||
+				req.Kind != protocol.KindKiro && req.Kind != protocol.KindAntigravity &&
+				req.Kind != protocol.KindMuse) ||
 			strings.TrimSpace(req.Text) == "" || len(req.Text) > maxMessageBytes ||
 			containsTerminalControl(req.Text) {
 			return fmt.Errorf("daemon: invalid session launch")
@@ -1476,6 +1504,10 @@ func validateRequest(req protocol.Request) error {
 		return validateWorktree(req)
 	case protocol.ReqUsage:
 		return validateUsage(req)
+	case protocol.ReqLimits:
+		return nil
+	case protocol.ReqSearch:
+		return validateSearch(req)
 	case protocol.ReqCommitFiles, protocol.ReqCommitDiff:
 		if !commitHash.MatchString(req.Commit) {
 			return fmt.Errorf("daemon: that is not a commit")

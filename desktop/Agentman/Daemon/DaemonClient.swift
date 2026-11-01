@@ -43,6 +43,8 @@ final class DaemonClient: @unchecked Sendable {
     private var fd: Int32 = -1
     private var source: DispatchSourceRead?
     private var framer = LineFramer()
+    /// What each read fills, made once rather than at every read.
+    private var buffer = [UInt8](repeating: 0, count: 64 * 1024)
     private var pending: [String: CheckedContinuation<DaemonEvent, Error>] = [:]
     private var retryDelay: TimeInterval = 0.5
     private var running = false
@@ -139,7 +141,6 @@ final class DaemonClient: @unchecked Sendable {
 
     private func readAvailable() {
         guard fd >= 0 else { return }
-        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
         let count = Darwin.read(fd, &buffer, buffer.count)
         if count < 0, errno == EAGAIN || errno == EINTR {
             return
@@ -154,9 +155,19 @@ final class DaemonClient: @unchecked Sendable {
     }
 
     private func route(_ line: Data) {
-        guard let header = try? decoder.decode(EnvelopeHeader.self, from: line) else { return }
-        let event = (try? decoder.decode(Envelope<DaemonEvent>.self, from: line))?.payload
-        if let replyTo = header.replyTo, !replyTo.isEmpty, let waiter = pending.removeValue(forKey: replyTo) {
+        // The whole envelope, read once: reading where it goes first read
+        // every frame twice. Only one whose payload this app can't read is
+        // read again for that, so whoever waits for it hears.
+        let envelope = try? decoder.decode(Envelope<DaemonEvent>.self, from: line)
+        let replyTo: String?
+        if let envelope {
+            replyTo = envelope.replyTo
+        } else {
+            guard let header = try? decoder.decode(EnvelopeHeader.self, from: line) else { return }
+            replyTo = header.replyTo
+        }
+        let event = envelope?.payload
+        if let replyTo, !replyTo.isEmpty, let waiter = pending.removeValue(forKey: replyTo) {
             if let event {
                 waiter.resume(returning: event)
             } else {

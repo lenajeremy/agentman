@@ -5,6 +5,7 @@ import SwiftUI
 /// each agent's share, a chart of each day (each hour, over the last day),
 /// the tokens by kind, and each model's or day's part. Costs are what the
 /// API would charge: an estimate, as a subscription doesn't bill per token.
+/// Its Limits tab shows what is left of each agent's plan instead.
 struct UsageView: View {
     @Environment(AgentsStore.self) private var store
     @Environment(\.detailHeaderLeading) private var headerLeading
@@ -17,12 +18,17 @@ struct UsageView: View {
     @State private var loading = false
     @State private var problem: String?
     @State private var width: CGFloat = 0
+    /// What is left of each agent's plan, on the Limits tab.
+    @State private var limits: Limits?
+    @State private var readingLimits = false
+    @State private var limitsProblem: String?
     /// False for pictures of the page, which hold what they show.
     private let reads: Bool
 
-    init(showing usage: [Int: Usage] = [:]) {
+    init(showing usage: [Int: Usage] = [:], limits: Limits? = nil) {
         _summaries = State(initialValue: usage)
-        reads = usage.isEmpty
+        _limits = State(initialValue: limits)
+        reads = usage.isEmpty && limits == nil
     }
 
     /// The ranges, in days; 0 is all of it.
@@ -45,19 +51,29 @@ struct UsageView: View {
         }
         .navigationTitle("")
         .task(id: days) { await load() }
+        // Read when the Limits tab is opened, and only then (or on Read
+        // Again): reading Claude's means starting Claude Code, which nobody
+        // should pay for while looking at something else. A tab opened again
+        // within two minutes gets the daemon's last read.
+        .task(id: metric == .limits) {
+            if metric == .limits { await loadLimits(force: false) }
+        }
     }
 
     private var header: some View {
         HStack(spacing: 10) {
             Text("Usage").font(Fonts.sans(14, .semibold))
             Spacer()
-            Segments(options: Self.ranges, selection: $days, title: Self.rangeTitle)
-            Segments(options: UsageMetric.allCases, selection: $metric) { $0.title }
-            ChromeButton(symbol: "arrow.clockwise", help: "Read again") {
-                Task { await load() }
+            if metric != .limits {
+                Segments(options: Self.ranges, selection: $days, title: Self.rangeTitle)
             }
-            .disabled(loading || !reads)
-            .opacity(loading ? 0.4 : 1)
+            Segments(options: UsageMetric.allCases, selection: $metric) { $0.title }
+            let busy = metric == .limits ? readingLimits : loading
+            ChromeButton(symbol: "arrow.clockwise", help: metric == .limits ? "Read limits again" : "Read again") {
+                Task { metric == .limits ? await loadLimits(force: true) : await load() }
+            }
+            .disabled(busy || !reads)
+            .opacity(busy ? 0.4 : 1)
         }
         .padding(.horizontal, 16)
         .padding(.leading, headerLeading)
@@ -65,7 +81,9 @@ struct UsageView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if let usage = summaries[days] {
+        if metric == .limits {
+            limitsContent
+        } else if let usage = summaries[days] {
             if usage.tokens.total == 0 {
                 NothingUsed(days: days)
             } else {
@@ -101,6 +119,55 @@ struct UsageView: View {
         }
     }
 
+    @ViewBuilder private var limitsContent: some View {
+        if let limits {
+            if limits.agents.isEmpty {
+                NoLimits()
+            } else {
+                ScrollView {
+                    LimitsPage(limits: limits)
+                        .frame(maxWidth: 1080, alignment: .leading)
+                        .padding(.horizontal, 36)
+                        .padding(.top, 18)
+                        .padding(.bottom, 48)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+        } else if let limitsProblem {
+            VStack(spacing: 10) {
+                Text(limitsProblem)
+                    .font(TextStyle.body)
+                    .foregroundStyle(Palette.muted)
+                    .multilineTextAlignment(.center)
+                Button("Try Again") { Task { await loadLimits(force: true) } }
+                    .buttonStyle(.link)
+            }
+            .padding(40)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            VStack(spacing: 12) {
+                Loader(size: 16)
+                Text("Reading what is left of each plan…")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func loadLimits(force: Bool) async {
+        guard reads else { return }
+        readingLimits = true
+        defer { readingLimits = false }
+        do {
+            limits = try await store.limits(force: force)
+            limitsProblem = nil
+        } catch is CancellationError {
+        } catch {
+            if limits == nil { limitsProblem = error.localizedDescription }
+        }
+    }
+
     private func load() async {
         guard reads else { return }
         let asked = days
@@ -118,9 +185,15 @@ struct UsageView: View {
 }
 
 enum UsageMetric: String, CaseIterable {
-    case cost, tokens
+    case cost, tokens, limits
 
-    var title: String { self == .cost ? "Cost" : "Tokens" }
+    var title: String {
+        switch self {
+        case .cost: "Cost"
+        case .tokens: "Tokens"
+        case .limits: "Limits"
+        }
+    }
 }
 
 enum UsageBreakdown: String, CaseIterable {
@@ -531,6 +604,8 @@ private struct UsageBreakdownTable: View {
         let kind: String?
         let cost: Double?
         let tokens: Int64
+        /// A model's fast-mode and advising parts, under its bar.
+        var note: String?
         /// Each agent's part, for a day's bar.
         let parts: [Part]
     }
@@ -549,7 +624,7 @@ private struct UsageBreakdownTable: View {
             }
             return models.map {
                 Row(id: $0.kind + "/" + $0.model, name: $0.model.isEmpty ? "Unknown model" : $0.model, kind: $0.kind,
-                    cost: $0.priced ? $0.cost : nil, tokens: $0.tokens.total, parts: [])
+                    cost: $0.priced ? $0.cost : nil, tokens: $0.tokens.total, note: UsageFormat.note($0, cost: cost), parts: [])
             }
         case .day:
             let kinds = (usage.agents ?? []).map(\.kind)
@@ -623,7 +698,15 @@ private struct UsageBreakdownTable: View {
                         .truncationMode(.middle)
                 }
                 bar(row, share: share, scale: scale)
+                if let note = row.note {
+                    Text(note)
+                        .font(Fonts.sans(12))
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                }
             }
+            // The name and its note take the room they need before the gap.
+            .layoutPriority(1)
             Spacer(minLength: 12)
             Group {
                 if let cost = row.cost {
@@ -837,5 +920,14 @@ enum UsageFormat {
 
     static func sessions(_ count: Int) -> String {
         count == 1 ? "1 session" : "\(count.formatted()) sessions"
+    }
+
+    /// The line under a model in the breakdown: how much of it Claude ran in
+    /// fast mode, at a higher price, and how much went to advising another
+    /// model. Nothing for a model used only the usual way.
+    static func note(_ model: Usage.Model, cost: Bool) -> String? {
+        let value = { (part: Usage.Part) in cost && model.priced ? money(part.cost) : tokens(part.tokens.total) }
+        let notes = [model.fast.map { value($0) + " in fast mode" }, model.advisor.map { value($0) + " as advisor" }].compactMap { $0 }
+        return notes.isEmpty ? nil : notes.joined(separator: " · ")
     }
 }

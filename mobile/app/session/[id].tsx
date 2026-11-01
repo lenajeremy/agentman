@@ -29,6 +29,9 @@ import { MessageMenu, type MessageMenuItem } from "../../components/MessageMenu"
 import { Toast } from "../../components/Toast";
 import { ContentColumn } from "../../components/ContentColumn";
 import { Markdown } from "../../components/Markdown";
+import { FindContext, Marked } from "../../components/FindMarks";
+import { markWords, searchable } from "../../lib/search";
+import type { SearchHit } from "../../lib/protocol";
 import { NoticeRow } from "../../components/NoticeRow";
 import { SentImages } from "../../components/SentImages";
 import { SentFileChips } from "../../components/SentFileChips";
@@ -42,6 +45,7 @@ import { FolderInitials, FolderPicture, useFolderIcon } from "../../components/F
 import { Loader } from "../../components/Loader";
 import { Pulse } from "../../components/Pulse";
 import { QuestionCard } from "../../components/QuestionCard";
+import { QuestionSheet } from "../../components/QuestionSheet";
 import { Thinking } from "../../components/Thinking";
 import { ToolRow } from "../../components/ToolRow";
 import { AttachmentStrip } from "../../components/AttachmentStrip";
@@ -54,7 +58,7 @@ import { type Frame } from "../../lib/message-menu";
 import { artifactsButtonLabel } from "../../lib/artifacts";
 import { simulatorOpensSessionMenu } from "../../lib/simulator";
 import { canEnd, shouldResume } from "../../lib/resume";
-import { folderName, modeLabel, modelLabel, showsInFeed, statusChip } from "../../lib/session-view";
+import { folderName, modeLabel, modelLabel, modeWord, showsInFeed, statusChip } from "../../lib/session-view";
 import {
   defaultScopeWarning,
   switchChoices,
@@ -116,8 +120,19 @@ const STATE_IN = () => {
 };
 const STATE_OUT = FadeOut.duration(160);
 
+/** The find bar, while it is open: the words, what the Mac found for them
+ *  in the whole conversation, oldest first, and which match is shown. */
+interface Finding {
+  query: string;
+  searched: string | null;
+  matches: SearchHit[];
+  index: number | null;
+  problem?: string;
+}
+
 export default function SessionScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // A search opens the conversation at a message, with its words found.
+  const { id, message: foundMessage, find } = useLocalSearchParams<{ id: string; message?: string; find?: string }>();
   const sessionId = decodeURIComponent(String(id));
   const store = useStore();
   const router = useRouter();
@@ -182,6 +197,11 @@ export default function SessionScreen() {
   // Rows present on first render are the backlog and must not animate in;
   // otherwise opening a session is a cascade of fades.
   const settled = useRef<Set<string> | null>(null);
+  const [finding, setFinding] = useState<Finding | null>(
+    find ? { query: find, searched: null, matches: [], index: null } : null,
+  );
+  /** A message to scroll to once it has been read back to. */
+  const [target, setTarget] = useState<string | null>(foundMessage ?? null);
 
   const session = store.findSession(sessionId);
   // A conversation cleared (/clear) or switched away from (/resume) in its
@@ -277,6 +297,8 @@ export default function SessionScreen() {
   // the visible part of the sheet. Scrolling to the end shows it: the note
   // sits under the last option.
   const sheetScroll = useRef<ComponentRef<typeof ScrollView>>(null);
+  // How tall the docked question sheet is: the gap the conversation keeps.
+  const [questionDock, setQuestionDock] = useState(0);
   useEffect(() => {
     if (Platform.OS === "web") return;
     const shown = Keyboard.addListener("keyboardDidShow", () => {
@@ -329,6 +351,68 @@ export default function SessionScreen() {
     // Reversed to feed an inverted list — see the FlatList below.
     return chronological.reverse();
   }, [messages, store.pending, sessionId, queued, queuedRows, session?.cwd]);
+  // The find bar's words, and the message whose match is shown.
+  const words = useMemo(() => markWords(finding?.searched ?? ""), [finding?.searched]);
+  const currentMatch = finding && finding.index !== null ? finding.matches[finding.index]?.messageId : undefined;
+
+  // The whole conversation is searched on the Mac, a moment after typing
+  // stops; opened from a search, the match it came from is the one shown.
+  const findQuery = finding?.query;
+  useEffect(() => {
+    if (findQuery === undefined) return;
+    const query = findQuery.trim();
+    if (!searchable(query)) {
+      setFinding((current) => current && { ...current, searched: null, matches: [], index: null, problem: undefined });
+      return;
+    }
+    let current = true;
+    const timer = setTimeout(() => {
+      store.search(query, sessionId).then(
+        (results) => {
+          if (!current) return;
+          const matches = results.hits;
+          const opened = foundMessage && find === findQuery ? matches.findIndex((hit) => hit.messageId === foundMessage) : -1;
+          const index = opened >= 0 ? opened : matches.length > 0 ? matches.length - 1 : null;
+          setFinding((now) => now && { ...now, searched: query, matches, index, problem: undefined });
+          if (opened < 0 && index !== null) setTarget(matches[index].messageId);
+        },
+        (error: Error) => {
+          if (current) setFinding((now) => now && { ...now, problem: error.message });
+        },
+      );
+    }, find === findQuery ? 0 : 400);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findQuery, sessionId]);
+
+  // Read back until the message is here, then bring it to the middle.
+  const targetLoaded = target !== null && messages.some((message) => message.id === target);
+  useEffect(() => {
+    if (target === null) return;
+    if (!targetLoaded) {
+      if (!paging) return;
+      if (paging.hasMore && !paging.loading && !paging.retentionLimited) store.loadOlder(sessionId);
+      else if (!paging.hasMore || paging.retentionLimited) setTarget(null);
+      return;
+    }
+    const index = rows.findIndex((row) => row.kind === "message" && row.message.id === target);
+    setTarget(null);
+    if (index < 0) return;
+    setTimeout(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true }), 80);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target, targetLoaded, paging?.loading, paging?.hasMore]);
+
+  const stepFinding = (delta: number) => {
+    if (!finding || finding.matches.length === 0) return;
+    const count = finding.matches.length;
+    const index = finding.index === null ? (delta > 0 ? 0 : count - 1) : (finding.index + delta + count) % count;
+    setFinding({ ...finding, index });
+    setTarget(finding.matches[index].messageId);
+  };
+
   // What a message waiting in the agent's queue says under it, the same
   // whether the phone or the Mac sent it.
   const waitingLabel = session ? pendingLabel(session.kind, session.state) : undefined;
@@ -585,6 +669,12 @@ export default function SessionScreen() {
   const sessionMenuItems: PopoverItem[] = [];
   if (session) {
     sessionMenuItems.push({
+      key: "find",
+      label: "Find in conversation",
+      icon: "search",
+      onPress: () => setFinding((current) => current ?? { query: "", searched: null, matches: [], index: null }),
+    });
+    sessionMenuItems.push({
       key: "files",
       label: "Files & changes",
       icon: "folder",
@@ -739,7 +829,7 @@ export default function SessionScreen() {
   }
   const switchTitle =
     switchMenu === "mode"
-      ? "Mode"
+      ? modeWord(session?.kind)
       : session?.modelScope === "default"
         ? "Model · also the default for new sessions"
         : "Model for this session";
@@ -755,6 +845,7 @@ export default function SessionScreen() {
         mode: chip?.mode && chip.mode !== "mode" ? chip.mode : undefined,
         modePending: switching?.kind === "mode" ? switching.value : undefined,
         onMode: modeChoices ? () => openSwitchMenu("mode") : undefined,
+        modeWord: modeWord(session.kind),
         contextPercent: session.contextPercent,
       })
     : null;
@@ -1140,6 +1231,17 @@ export default function SessionScreen() {
           Inverting also makes "load older" the natural end-of-list action.
           KEEP_READING leaves the reader where they are when they have
           scrolled up, as messages arrive below them. */}
+        {finding ? (
+          <FindBar
+            finding={finding}
+            onChange={(query) => setFinding((current) => current && { ...current, query })}
+            onStep={stepFinding}
+            onClose={() => {
+              setFinding(null);
+              setTarget(null);
+            }}
+          />
+        ) : null}
         <View style={styles.feed}>
         <FlatList
           style={styles.feed}
@@ -1165,17 +1267,29 @@ export default function SessionScreen() {
                 ? row.pending.clientId
                 : row.key
           }
+          onScrollToIndexFailed={(info) => {
+            // Rows differ in height, so a far one is reached in two steps:
+            // near it by the average, then exactly once it is laid out.
+            listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
+            setTimeout(() => {
+              listRef.current?.scrollToIndex({ index: info.index, viewPosition: 0.5, animated: true });
+            }, 120);
+          }}
           renderItem={({ item }) =>
             item.kind === "message" ? (
-              <MessageRow
-                message={item.message}
-                cwd={session?.cwd ?? ""}
-                fresh={
-                  settled.current !== null &&
-                  !settled.current.has(item.message.id)
-                }
-                onCopied={showCopied}
-              />
+              <FindContext.Provider
+                value={finding && words.length > 0 ? { words, current: item.message.id === currentMatch } : null}
+              >
+                <MessageRow
+                  message={item.message}
+                  cwd={session?.cwd ?? ""}
+                  fresh={
+                    settled.current !== null &&
+                    !settled.current.has(item.message.id)
+                  }
+                  onCopied={showCopied}
+                />
+              </FindContext.Provider>
             ) : item.kind === "tools" ? (
               <ToolGroup calls={item.calls} said={item.said} cwd={session?.cwd ?? ""} pictures={item.pictures} />
             ) : item.kind === "pending" ? (
@@ -1241,33 +1355,9 @@ export default function SessionScreen() {
             bottom: impossible to miss, but the transcript above stays
             readable for context. */}
         {session?.question ? (
-          <View
-            style={[
-              styles.sheet,
-              {
-                maxHeight: Math.max(260, Math.min(520, viewportHeight * 0.62)),
-                paddingBottom: (keyboardVisible ? 0 : insets.bottom) + space.md,
-              },
-            ]}
-          >
-            <View style={styles.grabber} />
-            <ScrollView
-              ref={sheetScroll}
-              contentContainerStyle={styles.sheetContent}
-              keyboardShouldPersistTaps="handled"
-              nestedScrollEnabled
-            >
-              <ContentColumn>
-                <QuestionCard
-                  question={session.question}
-                  onAnswer={(answer) => store.answerQuestion(sessionId, answer)}
-                  disabled={!store.daemonOnline}
-                  submissionStatus={answerAction?.status}
-                  submissionError={answerAction?.error}
-                />
-              </ContentColumn>
-            </ScrollView>
-          </View>
+          // The sheet is drawn over the screen (below), so pulled up it can
+          // cover the header; this keeps the conversation ending above it.
+          <View style={{ height: questionDock }} />
         ) : (
           <View style={styles.composerShell}>
             <ContentColumn
@@ -1467,6 +1557,26 @@ export default function SessionScreen() {
         )}
       </KeyboardAvoidingView>
 
+      {session?.question ? (
+        <QuestionSheet
+          dockedHeight={Math.max(260, Math.min(520, viewportHeight * 0.62))}
+          bottomPadding={(keyboardVisible ? 0 : insets.bottom) + space.md}
+          resetKey={session.question.id ?? session.question.prompt}
+          scrollRef={sheetScroll}
+          onDockHeight={setQuestionDock}
+        >
+          <ContentColumn>
+            <QuestionCard
+              question={session.question}
+              onAnswer={(answer) => store.answerQuestion(sessionId, answer)}
+              disabled={!store.daemonOnline}
+              submissionStatus={answerAction?.status}
+              submissionError={answerAction?.error}
+            />
+          </ContentColumn>
+        </QuestionSheet>
+      ) : null}
+
       <Toast message={toast} onHidden={hideToast} top={insets.top + headerHeight + space.sm} />
       {panelView ? (
         <OutputViewer
@@ -1484,6 +1594,8 @@ interface HeaderControlsProps {
   mode?: string;
   modePending?: string;
   onMode?: () => void;
+  /** What the chip says before a mode is known: "Mode", or Muse's "Effort". */
+  modeWord?: string;
   contextPercent?: number;
 }
 
@@ -1504,6 +1616,7 @@ function ModeControl({
   mode,
   modePending,
   onMode,
+  modeWord: unsetWord,
   contextPercent,
   disabled,
 }: HeaderControlsProps & { disabled?: boolean }) {
@@ -1515,7 +1628,7 @@ function ModeControl({
       {shownMode || onMode ? (
         <ModelButton
           kind="Mode"
-          model={shownMode ? modeLabel(shownMode) : "Mode"}
+          model={shownMode ? modeLabel(shownMode) : (unsetWord ?? "Mode")}
           pending={Boolean(modePending)}
           onPress={onMode}
           disabled={disabled}
@@ -1778,6 +1891,9 @@ function DeliveryNote({
   } else if (kind === "cursor-cli") {
     text =
       "Start Cursor Agent CLI with am cursor to send this chat messages remotely.";
+  } else if (kind === "muse" && state !== "ended") {
+    // Muse lets one client drive a session at a time: a terminal has it.
+    text = "Open in a terminal on your Mac. Close it there to send from here.";
   } else if (kind === "claude" || kind === "codex" || kind === "kiro" || kind === "antigravity") {
     text = `Start this session with am ${kind} to send it messages.`;
   } else {
@@ -1849,6 +1965,70 @@ function MessageRow({
         <Markdown>{message.text ?? ""}</Markdown>
       </View>
     </Appear>
+  );
+}
+
+/**
+ * Find in one conversation, under its header: the words, which match is
+ * shown of how many, the one before and the next. The Mac finds them in the
+ * whole conversation, not just what the phone has loaded.
+ */
+function FindBar({
+  finding,
+  onChange,
+  onStep,
+  onClose,
+}: {
+  finding: Finding;
+  onChange(query: string): void;
+  onStep(delta: number): void;
+  onClose(): void;
+}) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const searched = finding.searched !== null;
+  const none = searched && finding.matches.length === 0;
+  const count = finding.problem
+    ? "!"
+    : !searched
+      ? "–"
+      : none
+        ? "0/0"
+        : `${finding.index === null ? "–" : finding.index + 1}/${finding.matches.length}`;
+  return (
+    <ContentColumn style={styles.findBar}>
+      <Feather name="search" size={15} color={color.muted} />
+      <TextInput
+        value={finding.query}
+        onChangeText={onChange}
+        placeholder="Find in conversation"
+        placeholderTextColor={color.faint}
+        style={styles.findInput}
+        autoFocus={!finding.query}
+        returnKeyType="search"
+        onSubmitEditing={() => onStep(1)}
+        autoCorrect={false}
+        autoCapitalize="none"
+        accessibilityLabel="Find in conversation"
+      />
+      <Text
+        style={[styles.findCount, (none || finding.problem) && { color: color.errorText }]}
+        accessibilityLabel={finding.problem ?? undefined}
+      >
+        {count}
+      </Text>
+      <MotionPressable hitSlop={8} onPress={() => onStep(-1)} disabled={finding.matches.length === 0}
+        accessibilityRole="button" accessibilityLabel="Previous match">
+        <Feather name="chevron-up" size={20} color={finding.matches.length ? color.text : color.faint} />
+      </MotionPressable>
+      <MotionPressable hitSlop={8} onPress={() => onStep(1)} disabled={finding.matches.length === 0}
+        accessibilityRole="button" accessibilityLabel="Next match">
+        <Feather name="chevron-down" size={20} color={finding.matches.length ? color.text : color.faint} />
+      </MotionPressable>
+      <MotionPressable hitSlop={8} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close find">
+        <Feather name="x" size={18} color={color.muted} />
+      </MotionPressable>
+    </ContentColumn>
   );
 }
 
@@ -1989,7 +2169,7 @@ function SentMessage({
           event.nativeEvent.actionName === "copy" && copyMessage(text, onCopied)
         }
       >
-        <Text style={styles.userText}>{text}</Text>
+        <Text style={styles.userText}><Marked text={text} /></Text>
       </Pressable>
       )}
       <MessageMenu
@@ -2144,6 +2324,24 @@ const makeStyles = (c: Palette) =>
     page: { flex: 1, backgroundColor: c.paper },
     keyboardAvoider: { flex: 1 },
     feed: { flex: 1 },
+    findBar: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      paddingHorizontal: space.lg,
+      paddingVertical: space.sm,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.line,
+      backgroundColor: c.surface,
+    },
+    findInput: {
+      flex: 1,
+      ...font.sans,
+      fontSize: size.body,
+      color: c.text,
+      paddingVertical: space.xs,
+    },
+    findCount: { ...font.mono, fontSize: size.caption, color: c.muted, minWidth: 34, textAlign: "right" },
 
     // Top-aligned: the controls row makes the body three lines tall, and
     // centred buttons ended up beside the folder instead of the title.
@@ -2421,26 +2619,6 @@ const makeStyles = (c: Palette) =>
       marginTop: space.xs,
     },
 
-    sheet: {
-      backgroundColor: c.surface,
-      borderTopLeftRadius: radius.sheet,
-      borderTopRightRadius: radius.sheet,
-      paddingTop: 10,
-      shadowColor: c.shadow,
-      shadowOpacity: 0.12,
-      shadowRadius: 24,
-      shadowOffset: { width: 0, height: -6 },
-      elevation: 12,
-    },
-    grabber: {
-      alignSelf: "center",
-      width: 38,
-      height: 5,
-      borderRadius: 3,
-      backgroundColor: c.fillStrong,
-      marginBottom: space.md,
-    },
-    sheetContent: { paddingHorizontal: 20, paddingBottom: space.xs },
     thinking: { paddingTop: space.sm },
     composerShell: { backgroundColor: c.paper },
     composer: { paddingHorizontal: space.lg, paddingTop: space.sm },

@@ -21,6 +21,7 @@ const (
 	KindCursorCLI   Kind = "cursor-cli"
 	KindKiro        Kind = "kiro"
 	KindAntigravity Kind = "antigravity"
+	KindMuse        Kind = "muse"
 )
 
 // State is a session's current disposition.

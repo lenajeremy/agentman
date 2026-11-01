@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lenajeremy/agentman/internal/procinfo"
 )
 
 // scanTimeout bounds one listing. lsof can be slow on a busy machine, and a
@@ -54,8 +57,46 @@ func ScanListeners(ctx context.Context) (Scan, error) {
 	case "linux":
 		return scanProc("/proc")
 	default:
+		if procinfo.Supported {
+			if scan, err := scanKernel(); err == nil {
+				return scan, nil
+			}
+		}
 		return scanLsof(ctx)
 	}
+}
+
+/* -------------------------------- kernel --------------------------------- */
+
+// scanKernel asks the kernel what lsof would print. A scan runs every three
+// seconds, and lsof is a process of its own that reads every process's open
+// files: two of them a scan, about 60 ms of CPU each. Read from here, the
+// same answer takes a few milliseconds.
+func scanKernel() (Scan, error) {
+	found, err := procinfo.Listening()
+	if err != nil {
+		return Scan{}, err
+	}
+	scan := Scan{Cwds: map[int]string{}}
+	for pid, sockets := range found {
+		command, _ := procinfo.Name(pid)
+		for _, socket := range sockets {
+			scan.Listeners = append(scan.Listeners, Listener{
+				Port: socket.Port, PID: pid, Command: command, Loopback: addrOnLoopback(socket.Addr),
+			})
+		}
+		if cwd, err := procinfo.Cwd(pid); err == nil {
+			scan.Cwds[pid] = cwd
+		}
+	}
+	scan.Listeners = dedupe(scan.Listeners)
+	return scan, nil
+}
+
+// addrOnLoopback is reachableOnLoopback for an address already parsed.
+func addrOnLoopback(addr netip.Addr) bool {
+	addr = addr.Unmap()
+	return addr.IsUnspecified() || addr.IsLoopback()
 }
 
 /* --------------------------------- lsof ---------------------------------- */

@@ -5,15 +5,16 @@ import { StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
 import Svg, { G, Line, Path, Text as SvgText } from "react-native-svg";
 
 import { AgentIcon } from "../components/AgentIcon";
+import { LimitsPage } from "../components/LimitsPage";
 import { Loader } from "../components/Loader";
 import { MotionPressable } from "../components/MotionPressable";
 import { Section, Segmented, SettingsPage } from "../components/SettingsKit";
 import { useStyles, useTheme } from "../lib/appearance";
-import type { Usage, UsageAgent } from "../lib/protocol";
+import type { Limits, Usage, UsageAgent } from "../lib/protocol";
 import { useStore } from "../lib/store";
 import { agentLabel, font, Palette, radius, scaled, size, space } from "../lib/theme";
 import {
-  agentColor, axisLabel, axisMoney, bucketValue, fraction, kindColors, momentLabel, money, monotonePath,
+  agentColor, axisLabel, axisMoney, bucketValue, fraction, kindColors, modelNote, momentLabel, money, monotonePath,
   niceAxis, percent, RANGES, rangeTitle, rowLabel, sessions, tokens, unitAdjective, unitNoun, unitOf,
   type Metric,
 } from "../lib/usage";
@@ -22,26 +23,54 @@ import {
  * What the agents on the Mac spent, as its usage page shows it: the total,
  * each agent's share, a chart of each day (each hour, week or month), the
  * tokens by kind, and each model's or day's part. Costs are what the API
- * would charge: an estimate, as a subscription doesn't bill per token.
+ * would charge: an estimate, as a subscription doesn't bill per token. The
+ * Limits tab shows what is left of each agent's plan instead.
  */
 
-// The range and measure last looked at, kept while the app runs.
+type Tab = Metric | "limits";
+
+// The range and tab last looked at, kept while the app runs.
 let lastDays = 30;
-let lastMetric: Metric = "cost";
+let lastMetric: Tab = "cost";
 
 export default function UsageScreen() {
   const store = useStore();
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
-  // A link can name the range and measure: /usage?days=90&metric=tokens.
+  // A link can name the range and tab: /usage?days=90&metric=tokens, or
+  // /usage?metric=limits.
   const params = useLocalSearchParams<{ days?: string; metric?: string }>();
   const linked = Number(params.days);
   const [days, setDays] = useState((RANGES as readonly number[]).includes(linked) && params.days !== undefined ? linked : lastDays);
-  const [metric, setMetric] = useState<Metric>(params.metric === "tokens" || params.metric === "cost" ? params.metric : lastMetric);
+  const [metric, setMetric] = useState<Tab>(
+    params.metric === "tokens" || params.metric === "cost" || params.metric === "limits" ? params.metric : lastMetric);
   const [read, setRead] = useState<Record<number, Usage>>({});
   const [problem, setProblem] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const asked = useRef(0);
+  const [limits, setLimits] = useState<Limits | null>(null);
+  const [limitsProblem, setLimitsProblem] = useState<string | null>(null);
+  const [readingLimits, setReadingLimits] = useState(false);
+
+  const loadLimits = useCallback(async (force: boolean) => {
+    setReadingLimits(true);
+    try {
+      setLimits(await store.limits(force));
+      setLimitsProblem(null);
+    } catch (error) {
+      setLimitsProblem(error instanceof Error ? error.message : String(error));
+    } finally {
+      setReadingLimits(false);
+    }
+  }, [store]);
+
+  // Read when the Limits tab is opened, and only then (or on refresh):
+  // reading Claude's means the Mac starting Claude Code, which nobody should
+  // pay for while looking at something else. A tab opened again within two
+  // minutes gets the Mac's last read.
+  useEffect(() => {
+    if (metric === "limits") void loadLimits(false);
+  }, [metric, loadLimits]);
 
   const load = useCallback(async (range: number) => {
     const ask = ++asked.current;
@@ -64,28 +93,47 @@ export default function UsageScreen() {
   useEffect(() => { lastMetric = metric; }, [metric]);
 
   const usage = read[days];
+  const onLimits = metric === "limits";
+  const busy = onLimits ? readingLimits : loading;
   return (
     <SettingsPage
       title="Usage"
       action={
-        <MotionPressable onPress={() => void load(days)} disabled={loading} hitSlop={12} pressedScale={0.92}
-          style={styles.iconButton} accessibilityRole="button" accessibilityLabel="Read again">
-          {loading && usage ? <Loader size={9} /> : <Feather name="rotate-cw" size={17} color={color.text} />}
+        <MotionPressable onPress={() => void (onLimits ? loadLimits(true) : load(days))} disabled={busy} hitSlop={12}
+          pressedScale={0.92} style={styles.iconButton} accessibilityRole="button"
+          accessibilityLabel={onLimits ? "Read limits again" : "Read again"}>
+          {busy && (onLimits ? limits : usage) ? <Loader size={9} /> : <Feather name="rotate-cw" size={17} color={color.text} />}
         </MotionPressable>
       }
     >
       <View style={styles.controls}>
-        <Segmented options={RANGES.map((range) => ({ value: String(range), label: rangeTitle(range) }))}
-          value={String(days)} onChange={(value) => setDays(Number(value))} />
+        {onLimits ? null : (
+          <Segmented options={RANGES.map((range) => ({ value: String(range), label: rangeTitle(range) }))}
+            value={String(days)} onChange={(value) => setDays(Number(value))} />
+        )}
         <View style={styles.metric}>
-          <Segmented options={[{ value: "cost", label: "Cost" }, { value: "tokens", label: "Tokens" }]}
-            value={metric} onChange={(value) => setMetric(value as Metric)} />
+          <Segmented options={[{ value: "cost", label: "Cost" }, { value: "tokens", label: "Tokens" }, { value: "limits", label: "Limits" }]}
+            value={metric} onChange={(value) => setMetric(value as Tab)} />
         </View>
       </View>
-      {usage ? (
+      {onLimits ? (
+        limits ? <LimitsPage limits={limits} /> : limitsProblem ? (
+          <View style={styles.problem}>
+            <Text style={styles.note}>{limitsProblem}</Text>
+            <MotionPressable onPress={() => void loadLimits(true)} accessibilityRole="button" hitSlop={8}>
+              <Text style={styles.link}>Try again</Text>
+            </MotionPressable>
+          </View>
+        ) : (
+          <View style={styles.loading}>
+            <Loader size={14} />
+            <Text style={styles.note}>Reading what is left of each plan…</Text>
+          </View>
+        )
+      ) : usage ? (
         usage.tokens.input + usage.tokens.cacheRead + usage.tokens.cacheWrite + usage.tokens.output === 0
           ? <Text style={styles.note}>{days === 0 ? "Nothing used yet." : `Nothing used in the past ${days === 1 ? "day" : `${days} days`}.`}</Text>
-          : <UsagePage usage={usage} metric={metric} />
+          : <UsagePage usage={usage} metric={metric === "tokens" ? "tokens" : "cost"} />
       ) : problem ? (
         <View style={styles.problem}>
           <Text style={styles.note}>{problem}</Text>
@@ -359,7 +407,7 @@ function Breakdown({ usage, metric, by, dark }: {
         .sort((a, b) => cost ? (b.cost - a.cost) || (all(b.tokens) - all(a.tokens)) : all(b.tokens) - all(a.tokens))
         .map((model) => ({
           key: `${model.kind}/${model.model}`, name: model.model || "Unknown model", kind: model.kind as string | undefined,
-          cost: model.priced ? model.cost : undefined, tokens: all(model.tokens),
+          cost: model.priced ? model.cost : undefined, tokens: all(model.tokens), note: modelNote(model, metric),
           parts: [] as { kind: string; value: number }[],
         }))
     : [...(usage.buckets ?? [])].reverse().flatMap((bucket) => {
@@ -368,7 +416,7 @@ function Breakdown({ usage, metric, by, dark }: {
         return [{
           key: String(bucket.start), name: rowLabel(unit, new Date(bucket.start)), kind: undefined as string | undefined,
           cost: Object.values(bucket.cost ?? {}).reduce((sum, value) => sum + value, 0) as number | undefined, tokens: count,
-          parts: kinds.map((kind) => ({ kind, value: bucketValue(bucket, kind, metric) })),
+          note: undefined as string | undefined, parts: kinds.map((kind) => ({ kind, value: bucketValue(bucket, kind, metric) })),
         }];
       });
   const shareOf = (row: (typeof rows)[number]) => fraction(cost ? row.cost ?? 0 : row.tokens, grand);
@@ -397,6 +445,7 @@ function Breakdown({ usage, metric, by, dark }: {
                     <View key={part.kind} style={[styles.sharePart, { flexGrow: part.value / Math.max(partsSum, 1e-9), backgroundColor: agentColor(part.kind, dark) }]} />
                   ))}
                 </View>
+                {row.note ? <Text style={styles.modelNote} numberOfLines={2}>{row.note}</Text> : null}
               </View>
               <View style={styles.breakdownNumbers}>
                 <Text style={styles.breakdownValue}>
@@ -419,7 +468,7 @@ const makeStyles = (c: Palette) =>
   StyleSheet.create({
     iconButton: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
     controls: { gap: space.sm, marginTop: space.md },
-    metric: { width: 200 },
+    metric: { width: 270 },
     note: { ...font.sans, fontSize: size.caption, color: c.muted, lineHeight: size.caption * 1.4 },
     skipped: { marginTop: space.lg },
     link: { ...font.sansMedium, fontSize: size.caption, color: c.workingText, marginTop: space.sm },
@@ -465,6 +514,7 @@ const makeStyles = (c: Palette) =>
     breakdownMain: { flex: 1, gap: 6, minWidth: 0 },
     breakdownName: { flexDirection: "row", alignItems: "center", gap: 6 },
     modelName: { ...font.sans, fontSize: size.caption, color: c.text, flexShrink: 1 },
+    modelNote: { ...font.sans, fontSize: size.label, color: c.muted, fontVariant: ["tabular-nums"] },
     shareTrack: { height: 2.5, borderRadius: 2, overflow: "hidden", flexDirection: "row" },
     sharePart: { height: 2.5, flexBasis: 0 },
     breakdownNumbers: { alignItems: "flex-end", gap: 2 },

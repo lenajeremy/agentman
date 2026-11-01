@@ -93,3 +93,13 @@ test("canEnd covers only panes Agentman started", () => {
   assert.equal(canEnd({ kind: "claude", inject: "none" }), false);
   assert.equal(canEnd({ kind: "opencode", inject: "api" }), false);
 });
+
+// Muse reopens in place: an old session opened from search or a folder is
+// listed again on the Mac and takes messages; one a terminal has open is
+// left to the terminal.
+test("an ended Muse session is reopened, a terminal's is not", () => {
+  assert.equal(canResume("muse"), true);
+  assert.equal(shouldResume({ kind: "muse", inject: "none", state: "ended" }), true);
+  assert.equal(shouldResume({ kind: "muse", inject: "none", state: "idle" }), false);
+  assert.equal(shouldResume({ kind: "muse", inject: "api", state: "idle" }), false);
+});

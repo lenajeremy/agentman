@@ -29,7 +29,7 @@ struct NewAgentView: View {
         case newWorktree(String)
     }
 
-    static let kinds = ["claude", "codex", "cursor-cli", "opencode", "kiro", "antigravity"]
+    static let kinds = ["claude", "codex", "cursor-cli", "opencode", "kiro", "antigravity", "muse"]
 
     var body: some View {
         VStack(spacing: 22) {

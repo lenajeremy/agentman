@@ -117,6 +117,12 @@ const (
 	// on there; answered with EvtSessionStarted and the id it goes by now.
 	// Only between turns.
 	ReqHandoffSession RequestType = "handoff_session"
+	// ReqReleaseSession asks the daemon to stop driving a session, so a
+	// terminal can open it: Muse lets one connection drive a session at a
+	// time, and `am muse resume` sends this before it opens one. Muse will not
+	// let go mid-turn; with Stop the turn is ended first, otherwise the reply
+	// is an error saying the turn is still running.
+	ReqReleaseSession RequestType = "release_session"
 	// ReqCreateDirectory makes one folder for a new session to start in.
 	// Starting an agent somewhere new should not need a trip to the Mac.
 	ReqCreateDirectory RequestType = "create_directory"
@@ -220,6 +226,8 @@ type Request struct {
 	// selections or a custom response. OptionKey remains the terminal-menu path.
 	OptionKeys []string `json:"optionKeys,omitempty"`
 	AnswerText string   `json:"answerText,omitempty"`
+	// Stop ends the turn under way before ReqReleaseSession lets go.
+	Stop bool `json:"stop,omitempty"`
 	// ClientID is echoed on SendResult so the app can settle its optimistic
 	// message bubble.
 	ClientID string `json:"clientId,omitempty"`
@@ -284,7 +292,7 @@ type Request struct {
 	// directory as ReqListChanges names them.
 	Paths []string `json:"paths,omitempty"`
 	// Force removes a worktree with uncommitted changes or an agent in it,
-	// on ReqRemoveWorktree.
+	// on ReqRemoveWorktree, and reads plan limits again on ReqLimits.
 	Force bool `json:"force,omitempty"`
 	// IgnoreWhitespace leaves changes to whitespace alone out of a
 	// ReqFileDiff or a ReqCommitDiff, as `git diff -w` does.
@@ -327,6 +335,8 @@ const (
 	EvtSessionStarted EventType = "session_started"
 	// EvtFolders answers ReqListFolders.
 	EvtFolders EventType = "folders"
+	// EvtSessionReleased answers ReqReleaseSession once the daemon has let go.
+	EvtSessionReleased EventType = "session_released"
 	// EvtSessionEnded answers ReqEndSession once the pane is gone.
 	EvtSessionEnded EventType = "session_ended"
 	// EvtDirectorySessions answers ReqDirectorySessions.
@@ -380,8 +390,10 @@ type Event struct {
 	Worktree  *Worktree        `json:"worktree,omitempty"`
 	Worktrees []Worktree       `json:"worktrees,omitempty"`
 	Usage     *Usage           `json:"usage,omitempty"`
+	Limits    *Limits          `json:"limits,omitempty"`
 	PairCode  *PairCode        `json:"pairCode,omitempty"`
 	Devices   []Device         `json:"devices,omitempty"`
+	Search    *SearchResults   `json:"search,omitempty"`
 	// Directory names only; the app never needs the Mac's absolute home path.
 	Directories []string `json:"directories,omitempty"`
 	Path        string   `json:"path,omitempty"`
