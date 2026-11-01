@@ -58,6 +58,7 @@ enum RequestType: String, Codable, Sendable {
     case usage
     case pairCode = "pair_code"
     case devices
+    case search
     case startSession = "start_session"
     case listFolders = "list_folders"
     case directorySessions = "directory_sessions"
@@ -208,6 +209,7 @@ struct DaemonEvent: Codable, Sendable {
     var usage: Usage?
     var pairCode: PairCode?
     var devices: [Device]?
+    var search: MessageSearchResults?
 
     // Agentman, the manager.
     var entry: ManagerEntry?
@@ -433,6 +435,32 @@ struct PairCode: Codable, Sendable, Equatable {
     /// Milliseconds since 1970.
     var expiresAt: Int64
     var expires: Date { Date(timeIntervalSince1970: Double(expiresAt) / 1000) }
+}
+
+/// What a search found: a message in each conversation, the best first; or,
+/// searching one conversation, every message there that matched, in order.
+struct MessageSearchResults: Codable, Sendable, Equatable {
+    var query: String
+    /// The conversation searched, when it was one.
+    var sessionId: String?
+    var hits: [SearchHit]
+    /// Conversations are still being read, so more may match later.
+    var indexing: Bool?
+}
+
+struct SearchHit: Codable, Sendable, Equatable, Identifiable {
+    /// The conversation, running or ended, so one never shown can be opened.
+    var session: Session?
+    var messageId: String
+    var role: Role
+    var ts: Int64?
+    /// A couple of lines of the message, from just before the match.
+    var snippet: String
+    /// How many of its messages matched as well as this one.
+    var matches: Int?
+
+    var id: String { (session?.id ?? "") + "/" + messageId }
+    var date: Date? { ts.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
 }
 
 /// A phone or tablet that has reached this Mac through the relay.

@@ -334,6 +334,11 @@ private enum Inline {
 private struct BlockView: View {
     let block: MarkdownBlock
     @Environment(\.markdownFolder) private var folder
+    @Environment(\.findHighlight) private var highlight
+
+    private func marked(_ text: AttributedString) -> AttributedString {
+        highlight?.mark(text) ?? text
+    }
 
     var body: some View {
         content
@@ -344,14 +349,14 @@ private struct BlockView: View {
     @ViewBuilder private var content: some View {
         switch block.kind {
         case .paragraph(let text):
-            SwiftUI.Text(text)
+            SwiftUI.Text(marked(text))
                 .font(TextStyle.body)
                 .foregroundStyle(Palette.text)
                 .lineSpacing(6)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         case .heading(let level, let text):
-            SwiftUI.Text(text)
+            SwiftUI.Text(marked(text))
                 .font(Fonts.sans(level <= 1 ? 19 : level == 2 ? 16.5 : 14.5, .medium))
                 .foregroundStyle(Palette.text)
                 .lineSpacing(3)
