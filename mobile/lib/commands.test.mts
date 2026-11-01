@@ -108,6 +108,9 @@ test("only a Claude or Codex the Mac types into takes commands", () => {
   // Kiro through its ACP server runs its own commands.
   assert.equal(takesCommands({ kind: "kiro", inject: "api" }), true);
   assert.equal(takesCommands({ kind: "kiro", inject: "none" }), false);
+  // So does OpenCode through its server.
+  assert.equal(takesCommands({ kind: "opencode", inject: "api" }), true);
+  assert.equal(takesCommands({ kind: "opencode", inject: "none" }), false);
   assert.equal(takesCommands(undefined), false);
 });
 

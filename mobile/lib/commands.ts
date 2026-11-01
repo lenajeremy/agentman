@@ -14,11 +14,11 @@ const commandKinds = new Set(["claude", "codex", "antigravity"]);
 
 /** Commands are typed into the agent's prompt, so a Claude, Codex or
  *  Antigravity the Mac started in a terminal it can type into takes them;
- *  so does a Kiro the Mac runs through Kiro's ACP server, which runs them
- *  itself. */
+ *  so does a Kiro the Mac runs through Kiro's ACP server, and an OpenCode
+ *  reached through its server, which run them themselves. */
 export function takesCommands(session: Pick<Session, "kind" | "inject"> | undefined): boolean {
   if (!session) return false;
-  if (session.kind === "kiro") return session.inject === "api";
+  if (session.kind === "kiro" || session.kind === "opencode") return session.inject === "api";
   return commandKinds.has(session.kind) && session.inject === "tmux";
 }
 
