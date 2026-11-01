@@ -247,7 +247,7 @@ final class DaemonSetup {
         var reasons: [Reason] = []
         if let managed {
             if Release.before(managed.version, bundled.version) { reasons.append(.managedOlder(managed.version)) }
-        } else {
+        } else if !keepsNewer(bundled: bundled, daemon: daemon, required: required) {
             reasons.append(.noManagedCopy)
         }
         if let daemon {
@@ -257,6 +257,16 @@ final class DaemonSetup {
             reasons.append(.noDaemon)
         }
         return reasons
+    }
+
+    /// Whether a daemon the user installed themselves (with Homebrew, the
+    /// install script) is kept rather than replaced: it is a newer release
+    /// than the am the app carries, and serves everything this app needs.
+    /// Setting up would put the app's older copy in its place and take
+    /// features away; once the app has caught up, the next look sets it up.
+    nonisolated static func keepsNewer(bundled: AmVersion, daemon: DaemonInfo?, required: Int) -> Bool {
+        guard let daemon, (daemon.apiLevel ?? 0) >= required else { return false }
+        return Release.before(bundled.version, daemon.version)
     }
 
     /// Reads what the am the app carries says it is, once, and what the copy

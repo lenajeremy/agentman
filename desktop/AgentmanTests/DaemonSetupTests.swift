@@ -96,6 +96,15 @@ final class DaemonSetupTests: XCTestCase {
         XCTAssertEqual(DaemonSetup.reasons(bundled: bundled, managed: AmVersion(version: "0.38.0-12-gabc"), daemon: fine), [])
         // Without an am of its own the app has nothing to set up with.
         XCTAssertEqual(DaemonSetup.reasons(bundled: nil, managed: nil, daemon: nil), [])
+        // A newer daemon the user installed themselves is kept while it
+        // serves what the app needs; an equal one, or one too old, is not.
+        XCTAssertEqual(DaemonSetup.reasons(bundled: bundled, managed: nil,
+                                           daemon: DaemonInfo(version: "0.40.0", apiLevel: 1, install: "homebrew")), [])
+        XCTAssertEqual(DaemonSetup.reasons(bundled: bundled, managed: nil,
+                                           daemon: DaemonInfo(version: "0.39.0", apiLevel: 1, install: "homebrew")), [.noManagedCopy])
+        XCTAssertEqual(DaemonSetup.reasons(bundled: bundled, managed: nil,
+                                           daemon: DaemonInfo(version: "0.40.0", apiLevel: 0, install: "homebrew")),
+                       [.noManagedCopy, .daemonTooOld(0)])
     }
 
     func testReleasesCompareAsAmComparesThem() {
