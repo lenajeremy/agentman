@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/lenajeremy/agentman/internal/hook"
+	"github.com/lenajeremy/agentman/internal/limits"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/push"
 	"github.com/lenajeremy/agentman/internal/search"
@@ -92,6 +93,9 @@ type Daemon struct {
 	// usage reads what the agents spent, for ReqUsage.
 	usage     *usage.Scanner
 	usageOnce sync.Once
+	// limits reads what is left of each agent's plan, for ReqLimits.
+	limits     *limits.Reader
+	limitsOnce sync.Once
 	// search finds words in every conversation, for ReqSearch, from an index
 	// kept at searchPath; nil until it is open.
 	search     *search.Indexer
@@ -1276,6 +1280,9 @@ func (d *Daemon) HandleFrom(
 	case protocol.ReqUsage:
 		return d.usageSummary(ctx, req)
 
+	case protocol.ReqLimits:
+		return d.planLimits(ctx, req)
+
 	case protocol.ReqSearch:
 		return d.searchEvent(ctx, req)
 
@@ -1476,6 +1483,8 @@ func validateRequest(req protocol.Request) error {
 		return validateWorktree(req)
 	case protocol.ReqUsage:
 		return validateUsage(req)
+	case protocol.ReqLimits:
+		return nil
 	case protocol.ReqSearch:
 		return validateSearch(req)
 	case protocol.ReqCommitFiles, protocol.ReqCommitDiff:
