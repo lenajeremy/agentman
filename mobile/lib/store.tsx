@@ -233,7 +233,7 @@ interface Store {
    *  Agentman speaks for the agents. Returns the problem, if any. */
   setAgentAlerts(sessionId: string, on: boolean): Promise<string | null>;
   startSession(
-    kind: "claude" | "codex" | "cursor-cli" | "opencode" | "kiro" | "antigravity",
+    kind: "claude" | "codex" | "cursor-cli" | "opencode" | "kiro" | "antigravity" | "muse",
     path: string,
     text: string,
   ): Promise<string>;
