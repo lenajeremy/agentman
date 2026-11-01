@@ -431,7 +431,7 @@ func TestMuseApprovalBecomesAQuestionAndIsDecided(t *testing.T) {
 	if err != nil || question == nil {
 		t.Fatalf("question: %v %v", question, err)
 	}
-	if question.Prompt != "Run this command?" || question.Detail != "rm -rf build" || len(question.Options) != 2 || question.Options[0].Key != "allow_once" {
+	if question.Title != "Run this command?" || question.Prompt != "" || question.Detail != "rm -rf build" || len(question.Options) != 2 || question.Options[0].Key != "allow_once" {
 		t.Fatalf("approval card: %+v", question)
 	}
 	if err := source.Answer(context.Background(), "muse:s", protocol.QuestionAnswer{QuestionID: question.ID, OptionKey: "deny"}); err != nil {

@@ -113,13 +113,13 @@ func museApprovalQuestion(approval museApproval) *protocol.Question {
 	case approval.RawArgs != "":
 		detail = museClip(approval.RawArgs, 400)
 	}
-	if approval.ReviewerReason != "" {
-		detail = strings.TrimSpace(detail + "\n\n" + approval.ReviewerReason)
-	}
+	// The ask is the title (lists and alerts show it), what it would run
+	// the detail, and the prompt only Muse's reviewer's reason, when it gave
+	// one: repeating the ask under the command said it twice.
 	question := &protocol.Question{
 		ID:     "approval:" + approval.ApprovalID + ":" + strconv.Itoa(approval.Requirement.SourceIndex),
 		Title:  prompt,
-		Prompt: prompt,
+		Prompt: strings.TrimSpace(approval.ReviewerReason),
 		Detail: detail,
 	}
 	for _, choice := range approval.AvailableChoices {
