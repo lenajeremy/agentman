@@ -413,6 +413,19 @@ final class AgentsStore {
         return await perform(request, for: sessionId)
     }
 
+    /// When each agent last did something, apart from its session, for the
+    /// panels that refresh as it works: each reads its agent's here, and the
+    /// conversation around them is not drawn again for a session that
+    /// changed in nothing else, as a working agent's does every second.
+    @ObservationIgnored private var activities: [String: AgentActivity] = [:]
+
+    func activity(_ sessionId: String) -> AgentActivity {
+        if let known = activities[sessionId] { return known }
+        let made = AgentActivity(session(sessionId)?.lastActivityAt)
+        activities[sessionId] = made
+        return made
+    }
+
     /// A run of tool calls' title, which its row alone observes.
     func toolTitle(_ calls: [Message]) -> ToolRunTitle {
         let key = Self.toolRunKey(calls)
@@ -811,6 +824,7 @@ final class AgentsStore {
         switch event.type {
         case "sessions":
             sessions = (event.sessions ?? []).sorted(by: Self.boardOrder)
+            for session in sessions { activities[session.id]?.update(session.lastActivityAt) }
             sessionsLoaded = true
             if let info = event.daemon {
                 daemonInfo = info
@@ -843,6 +857,7 @@ final class AgentsStore {
                 sessions.append(session)
             }
             sessions.sort(by: Self.boardOrder)
+            activities[session.id]?.update(session.lastActivityAt)
             followTakeovers()
         case "session_gone":
             sessions.removeAll { $0.id == event.sessionId }
@@ -1257,6 +1272,19 @@ enum DaemonRestart {
                     : "It isn't running as a service on this Mac. Run `am service restart` in a terminal, or stop am serve where it runs and start it again.")
             }
         }
+    }
+}
+
+/// When an agent last did something, in milliseconds as the daemon says it.
+@MainActor @Observable
+final class AgentActivity {
+    private(set) var at: Int64?
+
+    init(_ at: Int64?) { self.at = at }
+
+    /// Set only when it changed, so its readers redraw only then.
+    func update(_ new: Int64?) {
+        if new != at { at = new }
     }
 }
 

@@ -35,7 +35,7 @@ struct WorkspacePanel: View {
                 switch tab {
                 case .changes: ChangesList(session: session, open: push)
                 case .files: FileList(session: session, path: "", open: push)
-                case .history: HistoryPanel(sessionID: session.id, cwd: session.cwd, state: session.state, activity: session.lastActivityAt)
+                case .history: HistoryPanel(sessionID: session.id, cwd: session.cwd, state: session.state, activity: store.activity(session.id).at)
                 case .plans: ArtifactList(session: session, open: push)
                 }
             } else {
@@ -105,7 +105,7 @@ struct WorkspacePanel: View {
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Palette.line))
         // Again as the agent works: a turn changes files long before it ends.
         // A burst of activity asks once, a second after it settles.
-        .task(id: Refresh(state: session.state, activity: session.lastActivityAt, reread: reread)) {
+        .task(id: Refresh(state: session.state, activity: store.activity(session.id).at, reread: reread)) {
             if changes.isEmpty == false || branch != nil { try? await Task.sleep(for: .seconds(1)) }
             guard !Task.isCancelled else { return }
             let read = GitRead(state: session.state, reread: reread)

@@ -919,6 +919,18 @@ struct Session: Codable, Sendable, Identifiable, Hashable {
             && question == other.question && previous == other.previous
     }
 
+    /// The same in every field but when it last did something and how full
+    /// its context is, which change as it works and which a conversation
+    /// doesn't show.
+    func identical(besidesActivityTo other: Session) -> Bool {
+        var mine = self, theirs = other
+        mine.lastActivityAt = nil
+        theirs.lastActivityAt = nil
+        mine.contextPercent = nil
+        theirs.contextPercent = nil
+        return mine.identical(to: theirs)
+    }
+
     /// Whether this app can send to it. A session the daemon cannot reach
     /// shows its conversation, read-only.
     var canReceive: Bool { inject != nil && inject != "none" }
