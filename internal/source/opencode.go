@@ -245,7 +245,7 @@ type ocSession struct {
 	// Agent is OpenCode 2's agent for the session, "build" or "plan": the
 	// mode its terminal app switches with tab.
 	Agent string `json:"agent"`
-	Model     struct {
+	Model struct {
 		ID         string `json:"id"`
 		ProviderID string `json:"providerID"`
 	} `json:"model"`
