@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -126,8 +127,9 @@ func (s *MuseSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 	var recent museSessionList
 	params := map[string]any{"limit": 200, "updatedAfter": time.Now().Add(-museLiveWindow).UTC().Format(time.RFC3339)}
 	if err := s.host.call(ctx, "session/list", params, &recent); err != nil {
-		// Muse not installed, or not reachable: nothing to show.
-		return nil, nil
+		// Connected, so a failed read is a hiccup: the registry keeps the
+		// last list rather than dropping every Muse agent until the next.
+		return nil, fmt.Errorf("source: Muse sessions: %w", err)
 	}
 	open := s.openInTerminal()
 	found := make([]protocol.Session, 0, len(recent.Sessions)+len(open))

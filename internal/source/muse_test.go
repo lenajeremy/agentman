@@ -639,3 +639,33 @@ func TestMuseReleaseMidTurnIsRefusedUnlessStopped(t *testing.T) {
 		t.Fatalf("leaves sent: %v, want a plain one (refused) then one that stops", stops)
 	}
 }
+
+// A connected Muse that fails one list read keeps its agents listed: the
+// registry holds the last list rather than the apps losing every Muse agent
+// for a sweep.
+func TestMuseDiscoverHiccupKeepsTheLastList(t *testing.T) {
+	source, fake := startFakeMuse(t, t.TempDir())
+	var mu sync.Mutex
+	fail := false
+	fake.answers["session/list"] = func(json.RawMessage) (any, *museRPCError) {
+		mu.Lock()
+		defer mu.Unlock()
+		if fail {
+			return nil, &museRPCError{Code: -32603, Message: "internal error"}
+		}
+		return map[string]any{"sessions": []any{map[string]any{"sessionId": "s", "kind": "root", "status": "idle", "workspaceRoot": "/code/app", "updatedAt": time.Now().UTC().Format(time.RFC3339)}}}, nil
+	}
+	registry := NewRegistry()
+	registry.Add(source)
+	first, _ := registry.Discover(context.Background())
+	if len(first) != 1 {
+		t.Fatalf("first sweep: %+v", first)
+	}
+	mu.Lock()
+	fail = true
+	mu.Unlock()
+	second, err := registry.Discover(context.Background())
+	if err == nil || len(second) != 1 || second[0].ID != "muse:s" {
+		t.Fatalf("after a failed read: %+v, %v", second, err)
+	}
+}
