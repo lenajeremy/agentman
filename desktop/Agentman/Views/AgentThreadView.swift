@@ -452,7 +452,11 @@ struct AgentThreadView: View {
     }
 
     private var placeholder: String {
-        if !session.canReceive { return "Start this agent with am \(session.kind) to message it from here" }
+        if !session.canReceive {
+            // Muse lets one client drive a session: a terminal has this one.
+            if session.kind == "muse" { return "Open in a terminal: close it there to message it from here" }
+            return "Start this agent with am \(session.kind) to message it from here"
+        }
         if session.question != nil { return "Answer the question above first" }
         if session.inject == "hook" {
             return "Message \(session.name): it reads it when its turn ends (start it with am \(session.kind) to type in directly)"
