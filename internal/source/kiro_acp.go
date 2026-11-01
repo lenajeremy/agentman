@@ -65,7 +65,10 @@ type kiroACP struct {
 }
 
 type kiroACPSession struct {
-	native, cwd     string
+	native, cwd string
+	// previous is the id the session went by in the pane Agentman took it
+	// over from, when that was the pane's own; see Session.Previous.
+	previous        string
 	client          *acpClient
 	busy            bool
 	loading         bool
@@ -241,6 +244,12 @@ func (s *KiroSource) StartACPSession(ctx context.Context, dir, prompt string) (s
 // under the same id, in the folder it ran in; the next message goes to it.
 // A session already running here is left as it is.
 func (s *KiroSource) ResumeACPSession(ctx context.Context, sessionID, cwd string) (string, error) {
+	return s.resumeACP(ctx, sessionID, cwd, "")
+}
+
+// resumeACP is ResumeACPSession for a session that went by previous in the
+// pane it is taken over from ("" when it went by its own id).
+func (s *KiroSource) resumeACP(ctx context.Context, sessionID, cwd, previous string) (string, error) {
 	native, ok := strings.CutPrefix(sessionID, string(protocol.KindKiro)+":")
 	if !ok || !validClaudeSessionID(native) {
 		return "", ErrNoKiroACP
@@ -249,7 +258,7 @@ func (s *KiroSource) ResumeACPSession(ctx context.Context, sessionID, cwd string
 		return sessionID, nil
 	}
 	now := time.Now().UnixMilli()
-	st := &kiroACPSession{native: native, cwd: cwd, started: now, active: now, loading: true}
+	st := &kiroACPSession{native: native, cwd: cwd, previous: previous, started: now, active: now, loading: true}
 	client, err := s.dialACP(cwd, func(event acpEnvelope) { s.handleACP(st, event) })
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrNoKiroACP, err)
@@ -623,6 +632,9 @@ func (s *KiroSource) applyACP(found []protocol.Session, next map[string]kiroSess
 		s.acp.mu.Lock()
 		meta.Inject = protocol.InjectAPI
 		meta.Question = nil
+		if st.previous != "" {
+			meta.Previous = st.previous
+		}
 		switch {
 		case st.pending != nil:
 			meta.State, meta.Question = protocol.StateWaitingInput, st.pending.question

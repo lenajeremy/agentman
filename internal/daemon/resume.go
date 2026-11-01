@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -132,6 +133,83 @@ func (d *Daemon) resumeSession(ctx context.Context, sessionID string) (string, e
 	}
 	d.resumes.remember(sessionID, id, time.Now())
 	return id, nil
+}
+
+// handoffSession moves a live session to the other side of its Handoff: one
+// Agentman runs itself into a pane of its own ("Open in terminal"), or one in
+// Agentman's pane back into Agentman ("Take over"). The adapter closes the
+// side being left and waits for the agent there to let go of the
+// conversation; then the other side opens on it. A side that fails to open
+// puts the session back where it was, so a move never leaves it closed.
+func (d *Daemon) handoffSession(ctx context.Context, sessionID string) (string, error) {
+	var live protocol.Session
+	for _, session := range d.snapshot() {
+		if session.ID == sessionID {
+			live = session
+			break
+		}
+	}
+	if live.ID == "" {
+		return "", errors.New("daemon: this session is not running")
+	}
+	handoff, ok := handoffFor(d.registry, live.Kind)
+	resume, resumable := source.ResumeArgs(live.Kind, live.NativeID)
+	if !ok || !resumable {
+		return "", errors.New("daemon: this session cannot be moved")
+	}
+	agent := handoffAgentName(live.Kind)
+	naming := func(native, pane string) (string, string) {
+		return d.registry.ResumedSession(live.ID, native, pane)
+	}
+	var id string
+	switch live.Handoff {
+	case protocol.HandoffTerminal:
+		cwd, err := handoff.ReleaseDirect(ctx, live.ID)
+		if err != nil {
+			return "", err
+		}
+		id, err = startResumedSession(ctx, live.Kind, cwd, resume, naming)
+		if err != nil {
+			if _, back := handoff.ResumeDirect(ctx, live.ID, live.NativeID, cwd); back != nil {
+				log.Printf("handoff: %s did not go back into Agentman: %v", live.ID, back)
+			}
+			return "", fmt.Errorf("daemon: %s did not open in a terminal (%v), so it carries on here", agent, err)
+		}
+	case protocol.HandoffAgentman:
+		cwd, err := handoff.ReleasePane(ctx, live.ID)
+		if err != nil {
+			return "", err
+		}
+		id, err = handoff.ResumeDirect(ctx, live.ID, live.NativeID, cwd)
+		if err != nil {
+			if _, back := startResumedSession(ctx, live.Kind, cwd, resume, naming); back != nil {
+				log.Printf("handoff: %s did not go back into its pane: %v", live.ID, back)
+			}
+			return "", fmt.Errorf("daemon: Agentman could not take %s over (%v), so it is back in its terminal", agent, err)
+		}
+	default:
+		return "", errors.New("daemon: this session cannot be moved")
+	}
+	// Coming up on the other side, it may look ended for a sweep or two.
+	d.resumes.remember(live.ID, id, time.Now())
+	return id, nil
+}
+
+// handoffAgentName is how a move's errors name the agent.
+func handoffAgentName(kind protocol.Kind) string {
+	switch kind {
+	case protocol.KindKiro:
+		return "Kiro"
+	case protocol.KindClaude:
+		return "Claude"
+	default:
+		return string(kind)
+	}
+}
+
+// handoffFor is a variable so a test can move a session without an agent.
+var handoffFor = func(registry *source.Registry, kind protocol.Kind) (source.Handoff, bool) {
+	return registry.Handoff(kind)
 }
 
 // resumeKiroACP is a variable so a test can resume without Kiro.

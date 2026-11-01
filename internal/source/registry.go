@@ -301,6 +301,33 @@ func (r *Registry) ResumeKiroACP(ctx context.Context, sessionID, cwd string) (st
 	return kiro.ResumeACPSession(ctx, sessionID, cwd)
 }
 
+// Handoff is an adapter's side of moving a live session between a pane
+// Agentman started and the agent Agentman runs itself (over Kiro's ACP
+// server); see Session.Handoff. The daemon opens the other side in between.
+type Handoff interface {
+	// ReleaseDirect closes a session Agentman runs itself, between turns,
+	// and waits until its agent has let go of the conversation. It returns
+	// the folder the session ran in.
+	ReleaseDirect(ctx context.Context, sessionID string) (string, error)
+	// ReleasePane closes the pane Agentman started for a session, between
+	// turns, and waits likewise.
+	ReleasePane(ctx context.Context, sessionID string) (string, error)
+	// ResumeDirect carries a session on in Agentman after its pane closed;
+	// native is the agent's own id for the conversation. It returns the id
+	// the session goes by now.
+	ResumeDirect(ctx context.Context, sessionID, native, cwd string) (string, error)
+}
+
+// Handoff returns the adapter's side of moving a kind's sessions, when it
+// can move them.
+func (r *Registry) Handoff(kind protocol.Kind) (Handoff, bool) {
+	r.mu.RLock()
+	s := r.sources[kind]
+	r.mu.RUnlock()
+	handoff, ok := s.(Handoff)
+	return handoff, ok
+}
+
 func (r *Registry) kiro() (*KiroSource, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

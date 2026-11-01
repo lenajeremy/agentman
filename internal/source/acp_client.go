@@ -162,6 +162,28 @@ func (c *acpClient) close() {
 	})
 }
 
+// shutdown ends the agent the gentle way first: ACP agents take their stdin
+// closing as the end, and Kiro then writes out the conversation and lets go
+// of it (its lock) in well under a second. One still running after wait is
+// killed. It returns once the process is gone, or ctx ends.
+func (c *acpClient) shutdown(ctx context.Context, wait time.Duration) {
+	c.writeMu.Lock()
+	_ = c.stdin.Close()
+	c.writeMu.Unlock()
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-c.closed:
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+	c.close()
+	select {
+	case <-c.closed:
+	case <-ctx.Done():
+	}
+}
+
 // acpSpec says how to start one agent's ACP server.
 type acpSpec struct {
 	// name is how errors name the agent: "Cursor", "Kiro".

@@ -63,12 +63,19 @@ type KiroSource struct {
 	// is only a description.
 	sendKeys func(context.Context, string, ...string) error
 	sendText func(context.Context, string, string) error
+	// killPane closes one of Agentman's panes, for a move into Agentman.
+	killPane func(context.Context, string) error
 	// models is Kiro's model list, fetched in the background; see kiro_switch.go.
 	models *kiroModelCatalog
 	// acp is the sessions run through Kiro's ACP server, and acpDial starts
 	// one (kiroACPDial when nil); see kiro_acp.go.
 	acp     kiroACP
 	acpDial func(cwd string, handle func(acpEnvelope)) (*acpClient, error)
+
+	// moves are the sessions being moved between a pane and ACP; see
+	// kiro_handoff.go.
+	movesMu sync.Mutex
+	moves   map[string]kiroMove
 
 	mu       sync.RWMutex
 	sessions map[string]kiroSession
@@ -95,6 +102,9 @@ type kiroSession struct {
 	transcript string
 	tmuxName   string
 	status     kiroStatus
+	// held says Kiro holds the chat's lock in this session's pane: it has
+	// opened the chat there, rather than still starting.
+	held bool
 }
 
 type kiroLock struct {
@@ -156,6 +166,7 @@ func NewKiroSource(home string) (*KiroSource, error) {
 		captureScrollback: tmux.CaptureScrollback,
 		sendKeys:          tmux.SendKeys,
 		sendText:          tmux.Send,
+		killPane:          tmux.Kill,
 		models:            &kiroModelCatalog{fetch: kiroListModels},
 		sessions:          map[string]kiroSession{},
 		metas:             map[string]kiroMetaEntry{},
@@ -281,7 +292,7 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 		status.apply(&session)
 		s.offerSwitches(&session)
 		found = append(found, session)
-		next[id] = kiroSession{meta: session, transcript: transcript, tmuxName: tmuxName, status: status}
+		next[id] = kiroSession{meta: session, transcript: transcript, tmuxName: tmuxName, status: status, held: tmuxName != ""}
 	}
 
 	// A pane with no session yet: Kiro is starting, or sitting at its first
@@ -325,6 +336,8 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 
 	// Sessions run through Kiro's ACP server are Agentman's to drive.
 	found = s.applyACP(found, next)
+	s.applyHandoff(found, next)
+	found = s.applyMoves(found)
 
 	s.mu.Lock()
 	s.sessions = next

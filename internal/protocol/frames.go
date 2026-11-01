@@ -111,6 +111,12 @@ const (
 	// in its folder's history. What ends is the cost of leaving it open,
 	// which is what made panes pile up once opening them became easy.
 	ReqEndSession RequestType = "end_session"
+	// ReqHandoffSession moves a live session to the other side of
+	// Session.Handoff: one Agentman runs itself into a terminal pane, or one
+	// in Agentman's pane back into Agentman. The same conversation carries
+	// on there; answered with EvtSessionStarted and the id it goes by now.
+	// Only between turns.
+	ReqHandoffSession RequestType = "handoff_session"
 	// ReqCreateDirectory makes one folder for a new session to start in.
 	// Starting an agent somewhere new should not need a trip to the Mac.
 	ReqCreateDirectory RequestType = "create_directory"
