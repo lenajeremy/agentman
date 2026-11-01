@@ -197,3 +197,105 @@ func TestAnAppsAmUpgradesTheDaemonsCopy(t *testing.T) {
 		t.Error("the managed copy handed over to itself")
 	}
 }
+
+// After an upgrade, a copy of am the service runs is brought up to date and
+// the service restarted on it, as before, whether someone put it at
+// ~/.agentman/bin/am by hand or the app did (its marker stays). An am that
+// an app or Homebrew keeps current is left as it is, and the service with it.
+func TestTheServicesAmAfterAnUpgrade(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		place    func(t *testing.T, home string) string
+		replaced bool
+	}{
+		{"a copy put there by hand", func(t *testing.T, home string) string {
+			path := update.ManagedPath(home)
+			fakeAm(t, path, "0.38.0", "by hand")
+			return path
+		}, true},
+		{"the app's copy", func(t *testing.T, home string) string {
+			path := putManagedCopy(t, home, true)
+			fakeAm(t, path, "0.38.0", "the app's copy")
+			return path
+		}, true},
+		{"a link into the app", func(t *testing.T, home string) string {
+			link := filepath.Join(home, "bin", "am")
+			if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(fakeApp(t, home, "0.38.0"), link); err != nil {
+				t.Fatal(err)
+			}
+			return link
+		}, false},
+		{"Homebrew's", func(t *testing.T, home string) string {
+			path := filepath.Join(home, "Caskroom", "agentman", "0.38.0", "am")
+			fakeAm(t, path, "0.38.0", "Homebrew's")
+			return path
+		}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newSetupWorld(t, 0)
+			serviceAm := c.place(t, w.home)
+			if err := os.MkdirAll(filepath.Dir(w.plist), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			job := renderServicePlist(servicePlist{Binary: serviceAm, Log: "/l", Home: w.home, Path: "/usr/bin"})
+			if err := os.WriteFile(w.plist, []byte(job), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			w.launchd.loaded = true
+			w.daemon.run("0.38.0")
+			upgraded := filepath.Join(w.home, "new", "am")
+			fakeAm(t, upgraded, "0.39.0", "upgraded")
+			before, _ := os.ReadFile(serviceAm)
+
+			var err error
+			out := captureStdout(t, func() { err = moveDaemon(context.Background(), "", upgraded, "0.39.0") })
+			if err != nil {
+				t.Fatalf("moveDaemon: %v\n%s", err, out)
+			}
+			after, _ := os.ReadFile(serviceAm)
+			restarted := len(w.launchd.changes()) > 0
+			if c.replaced {
+				v, _ := binaryVersion(context.Background(), serviceAm)
+				if v != "0.39.0" || !restarted || !strings.Contains(out, "Restarted the service on agentman 0.39.0") {
+					t.Errorf("the copy is %s, restarted %v:\n%s", v, restarted, out)
+				}
+			} else if string(after) != string(before) || restarted || !strings.Contains(out, "left as it is") {
+				t.Errorf("an am kept by another was touched (restarted %v):\n%s", restarted, out)
+			}
+			if c.name == "the app's copy" && !update.IsManaged(serviceAm) {
+				t.Error("the app's copy lost its marker")
+			}
+		})
+	}
+}
+
+// am service install from an am nothing manages runs that am, named as on
+// PATH, exactly as before the app; from the am inside an app it runs the
+// daemon's copy, put in place from it.
+func TestServiceInstallRunsTheAmItAlwaysDid(t *testing.T) {
+	w := newSetupWorld(t, 0)
+	var err error
+	out := captureStdout(t, func() { err = installService(context.Background(), "") })
+	if err != nil {
+		t.Fatalf("service install: %v\n%s", err, out)
+	}
+	stable, _ := stableBinary()
+	if got, _ := serviceBinary(w.plist); got != stable {
+		t.Errorf("the service runs %q, want %q", got, stable)
+	}
+	if !strings.Contains(out, "Agentman now runs in the background") {
+		t.Errorf("service install said:\n%s", out)
+	}
+
+	appAm := fakeApp(t, w.home, "0.39.0")
+	managed, err := serviceCopyFromApp(context.Background(), appAm, "")
+	if err != nil || managed != update.ManagedPath(w.home) || !update.IsManaged(managed) {
+		t.Fatalf("serviceCopyFromApp = %q, %v", managed, err)
+	}
+	if v, _ := binaryVersion(context.Background(), managed); v != "0.39.0" {
+		t.Errorf("the daemon's copy is %s", v)
+	}
+}
