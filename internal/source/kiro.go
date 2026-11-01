@@ -239,15 +239,12 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 		}
 
 		id := string(protocol.KindKiro) + ":" + native
-		tmuxName := ""
+		tmuxName, previous := "", ""
 		for _, pane := range panes {
 			if !claimed[pane.Name] && processes.OwnsPID(pane.PanePID, lock.PID) {
 				tmuxName = pane.Name
 				claimed[pane.Name] = true
-				// Key a pane-backed session on the pane. A phone launch knows
-				// the pane before Kiro has chosen a session id, so this is
-				// the only id that stays the same across that moment.
-				id = string(protocol.KindKiro) + ":" + tmuxID(pane.Name)
+				id, previous = kiroPaneSessionID(pane.Name, native)
 				break
 			}
 		}
@@ -262,6 +259,7 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 			Cwd:       meta.Cwd,
 			State:     s.transcriptState(transcript),
 			Inject:    protocol.InjectNone,
+			Previous:  previous,
 			StartedAt: parseRFC3339Millis(meta.CreatedAt, lock.StartedAt),
 			// Kiro's shell tool runs commands under this process, so a dev
 			// server started by the agent descends from it.
@@ -292,7 +290,13 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 		if claimed[pane.Name] {
 			continue
 		}
-		id := string(protocol.KindKiro) + ":" + tmuxID(pane.Name)
+		id, _ := kiroPaneSessionID(pane.Name, "")
+		chat := kiroPaneChat(pane.Name)
+		if _, held := s.acpOwned(id); held || next[id].meta.ID != "" {
+			// Its chat is open somewhere else, so Kiro will not open it here:
+			// the pane is a pane of its own, not that chat.
+			id, chat = string(protocol.KindKiro)+":"+tmuxID(pane.Name), ""
+		}
 		started := pane.Created.UnixMilli()
 		if pane.Created.IsZero() {
 			started = time.Now().UnixMilli()
@@ -302,11 +306,21 @@ func (s *KiroSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 			State: protocol.StateIdle, Inject: protocol.InjectTmux,
 			StartedAt: started, LastActivityAt: started, AgentPID: pane.PanePID,
 		}
+		// A pane opened to carry on a chat is that chat while Kiro starts:
+		// its thread keeps showing what was said.
+		transcript := ""
+		if chat != "" {
+			base := filepath.Join(s.sessionsDir(), chat)
+			session.NativeID, transcript = chat, base+".jsonl"
+			if meta, ok := s.readMeta(base + ".json"); ok {
+				session.Name = kiroName(meta)
+			}
+		}
 		status := s.applyPane(ctx, &session, pane.Name, "", kiroStatus{})
 		status.apply(&session)
 		s.offerSwitches(&session)
 		found = append(found, session)
-		next[id] = kiroSession{meta: session, tmuxName: pane.Name, status: status}
+		next[id] = kiroSession{meta: session, transcript: transcript, tmuxName: pane.Name, status: status}
 	}
 
 	// Sessions run through Kiro's ACP server are Agentman's to drive.
