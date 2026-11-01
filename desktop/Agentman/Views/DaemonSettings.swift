@@ -7,8 +7,10 @@ struct CommandLineSection: View {
 
     var body: some View {
         let setup = store.setup
-        CommandLineRows(command: setup.commandStatus()) { Task { await setup.installCommand() } }
-            .task { await setup.lookAtShell() }
+        CommandLineRows(command: setup.commandStatus(), tmuxMissing: setup.tmuxMissing) {
+            Task { await setup.installCommand() }
+        }
+        .task { await setup.lookAtShell() }
     }
 }
 
@@ -16,10 +18,21 @@ struct CommandLineSection: View {
 /// show each state.
 struct CommandLineRows: View {
     let command: DaemonSetup.CommandStatus
+    /// tmux isn't installed: a row says so, and how to install it.
+    var tmuxMissing = false
     var install: () -> Void = {}
+    @State private var copied = false
 
     var body: some View {
         SettingsSection(title: "Command line") {
+            if tmuxMissing {
+                SettingsRow(title: "tmux isn't installed", detail: TmuxNote.text) {
+                    Button(copied ? "Copied" : "Copy Command") {
+                        TmuxNote.copy()
+                        copied = true
+                    }
+                }
+            }
             SettingsRow(title: "am in Terminal", detail: command.detail, divider: command.problem != nil) {
                 if command.busy {
                     Loader(size: 10)
@@ -43,6 +56,46 @@ struct CommandLineRows: View {
                     .padding(.vertical, 12)
             }
         }
+    }
+}
+
+/// Agents started in a terminal (am claude, am codex…) run inside tmux, so
+/// the daemon can type into them. The app doesn't carry or install it; it
+/// says when it is missing, and how to get it.
+struct TmuxNote: View {
+    static let command = "brew install tmux"
+    static let text = "Agents you start in a terminal, such as with am claude, run inside tmux. Install it with \(command)."
+
+    @State private var copied = false
+
+    static func copy() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "terminal")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Palette.needsYouText)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("tmux isn't installed")
+                    .font(TextStyle.captionMedium)
+                    .foregroundStyle(Palette.text)
+                Text(Self.text)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            SmallButton(title: copied ? "Copied" : "Copy", symbol: copied ? "checkmark" : "doc.on.doc") {
+                Self.copy()
+                copied = true
+            }
+        }
+        .padding(12)
+        .background(Palette.needsYouWash, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.needsYouEdge))
     }
 }
 

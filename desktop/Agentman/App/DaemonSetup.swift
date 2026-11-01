@@ -35,7 +35,8 @@ final class DaemonSetup {
         /// folder when PATH looks there first and the user can write it,
         /// else the other, which the Mac's own PATH has.
         var commandFolders = (preferred: "/opt/homebrew/bin", fallback: "/usr/local/bin")
-        /// Where tmux usually is, looked in beside PATH.
+        /// Where tmux usually is, looked in beside PATH, so a login shell
+        /// that didn't say its PATH doesn't make it look missing.
         var toolFolders = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"]
 
         /// The copy the app manages, which the login service runs.
@@ -498,6 +499,10 @@ final class DaemonSetup {
         let tmux = Self.find("tmux", in: path + paths.toolFolders.filter { !path.contains($0) })
         shellTools = ShellTools(path: path, am: Self.find("am", in: path), tmux: tmux?.path)
     }
+
+    /// Whether tmux is missing, once the shell has been looked at: agents
+    /// started in a terminal need it.
+    var tmuxMissing: Bool { shellTools.map { $0.tmux == nil } ?? false }
 
     /// The first program called name in folders, as a shell finds it.
     nonisolated static func find(_ name: String, in folders: [String]) -> Found? {

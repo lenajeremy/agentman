@@ -30,6 +30,9 @@ struct SetupScreen: View {
                     if case .failed(let failure) = setup.phase {
                         FailureNote(failure: failure)
                     }
+                    if setup.tmuxMissing, !setup.running {
+                        TmuxNote()
+                    }
                 }
                 .padding(.horizontal, 24)
                 footer(setup)
@@ -42,6 +45,7 @@ struct SetupScreen: View {
             .shadow(color: .black.opacity(0.2), radius: 40, y: 16)
         }
         .transition(.opacity)
+        .task { await setup.lookAtShell() }
     }
 
     private func header(_ setup: DaemonSetup) -> some View {

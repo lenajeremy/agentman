@@ -46,8 +46,14 @@ final class DaemonSetupTests: XCTestCase {
         #"{"step":"summary","ok":false,"binary":"/Users/me/.agentman/bin/am","managed":true,"apiLevel":0,"socket":"/Users/me/.agentman/am.sock","log":"/Users/me/.agentman/serve.log","failed":["service"]}"#,
     ]
 
-    private func setup(am: FakeAm, automatic: Bool = true, allowed: Bool = true) -> DaemonSetup {
-        let setup = DaemonSetup(runner: am, paths: DaemonSetup.Paths(bundled: Self.bundled, home: home.path),
+    /// A setup on the test's home, whose shell finds tmux unless told not to.
+    private func setup(am: FakeAm, automatic: Bool = true, allowed: Bool = true, tmux: Bool = true) -> DaemonSetup {
+        var paths = DaemonSetup.Paths(bundled: Self.bundled, home: home.path)
+        paths.toolFolders = []
+        let tools = home.appendingPathComponent("tools")
+        try? FileManager.default.createDirectory(at: tools, withIntermediateDirectories: true)
+        if tmux { _ = try? program("tmux", in: tools.path) }
+        let setup = DaemonSetup(runner: am, shell: FakeShell(path: tmux ? [tools.path] : []), paths: paths,
                                 allowed: allowed, automatic: automatic, defaults: defaults, appVersion: "0.39.0")
         setup.absenceGrace = .milliseconds(30)
         return setup
@@ -393,6 +399,22 @@ final class DaemonSetupTests: XCTestCase {
         XCTAssertEqual(other.commandStatus().problem, "There is already an am at \(hidden)/am, which your PATH doesn't reach.")
     }
 
+    func testTmuxIsLookedForOnPathAndWhereItUsuallyIs() async throws {
+        let usual = try folder("usual")
+        let shell = FakeShell(path: [try folder("bin")])
+        let none = setup(am: FakeAm(setup: []), shell: shell, brew: "/nonexistent-brew", local: "/nonexistent-local", tools: [usual])
+        XCTAssertFalse(none.tmuxMissing, "not said before it has looked")
+        await none.lookAtShell()
+        XCTAssertTrue(none.tmuxMissing)
+
+        // Where Homebrew puts it counts too, so a login shell that didn't
+        // say its PATH doesn't make tmux look missing.
+        let tmux = try program("tmux", in: usual)
+        await none.lookAtShell()
+        XCTAssertFalse(none.tmuxMissing)
+        XCTAssertEqual(none.shellTools?.tmux, tmux)
+    }
+
     func testWithoutTheAppsCopyThereIsNothingToLink() async throws {
         let local = try folder("local")
         let setup = setup(am: FakeAm(setup: []), shell: FakeShell(path: [local]), brew: "/nonexistent-brew", local: local)
@@ -457,6 +479,12 @@ final class DaemonSetupTests: XCTestCase {
             let welcome = store(FakeAm(setup: Self.goodRun))
             welcome.setup.showsScreen = true
             try render(SetupScreen(), size: size, dark: dark, store: welcome, to: folder.appendingPathComponent("setup-welcome-\(look).png"))
+            // Before, on a Mac without tmux.
+            let noTmux = store(FakeAm(setup: Self.goodRun), tmux: false)
+            noTmux.setup.showsScreen = true
+            await noTmux.setup.lookAtShell()
+            XCTAssertTrue(noTmux.setup.tmuxMissing)
+            try render(SetupScreen(), size: size, dark: dark, store: noTmux, to: folder.appendingPathComponent("setup-welcome-tmux-\(look).png"))
 
             // During: three steps said, the fourth under way.
             let during = store(FakeAm(setup: Array(Self.goodRun.prefix(3)), hold: true))
@@ -571,24 +599,25 @@ final class DaemonSetupTests: XCTestCase {
             ("Installed", status(DaemonSetup.Found(path: "/usr/local/bin/am", real: managed))),
             ("Homebrew's", status(DaemonSetup.Found(path: "/opt/homebrew/bin/am", real: "/opt/homebrew/Caskroom/agentman/0.39.0/am"))),
             ("Install failed", failed),
+            ("tmux isn't installed", status(DaemonSetup.Found(path: "/usr/local/bin/am", real: managed))),
         ]
         for dark in [false, true] {
             let page = VStack(alignment: .leading, spacing: 18) {
                 ForEach(Array(states.enumerated()), id: \.offset) { _, state in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(state.0).font(TextStyle.label).foregroundStyle(Palette.faint).padding(.leading, 4)
-                        CommandLineRows(command: state.1)
+                        CommandLineRows(command: state.1, tmuxMissing: state.0.hasPrefix("tmux"))
                     }
                 }
             }
             .padding(24)
-            try render(page, size: CGSize(width: 620, height: 1080), dark: dark, store: store(FakeAm(setup: [])),
+            try render(page, size: CGSize(width: 620, height: 1260), dark: dark, store: store(FakeAm(setup: [])),
                        to: URL(fileURLWithPath: out).appendingPathComponent("command-\(dark ? "dark" : "light").png"))
         }
     }
 
-    private func store(_ am: FakeAm) -> AgentsStore {
-        AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-setup.sock"), setup: setup(am: am, automatic: false))
+    private func store(_ am: FakeAm, tmux: Bool = true) -> AgentsStore {
+        AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-setup.sock"), setup: setup(am: am, automatic: false, tmux: tmux))
     }
 
     private func render<V: View>(_ view: V, size: CGSize, dark: Bool, store: AgentsStore, to url: URL) throws {
