@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
@@ -20,6 +21,9 @@ import (
 // Scanner reads the records, keeping what it read of each log so the next
 // read only takes what was added.
 type Scanner struct {
+	// mu makes one summary at a time: the sums a read returns are the
+	// logs' own, added to by the next read.
+	mu     sync.Mutex
 	home   string
 	claude *logs
 	codex  *logs
@@ -80,41 +84,54 @@ func antigravityRoots(home string) []string {
 	return out
 }
 
-// Records reads every agent's calls since since.
-func (s *Scanner) Records(ctx context.Context, since time.Time) ([]Record, int) {
+// read reads every agent's calls since since: what they add up to, when the
+// earliest was made, and how many records couldn't be read. Slots are cut
+// for loc's clock.
+func (s *Scanner) read(ctx context.Context, since time.Time, catalog Catalog, loc *time.Location) ([][]spend, time.Time, int) {
 	// A log changed in the range may hold calls from before it; they are
 	// left out when summed.
-	claude, skippedClaude := s.claude.read(filepath.Join(s.home, ".claude", "projects"), since)
+	sums, first, skipped := s.claude.read(filepath.Join(s.home, ".claude", "projects"), since, catalog, loc)
 	codexHome := filepath.Join(s.home, ".codex")
-	codex, skippedCodex := s.codex.read(filepath.Join(codexHome, "sessions"), since)
-	archived, skippedArchived := s.codex.read(filepath.Join(codexHome, "archived_sessions"), since)
-	out := make([]Record, 0, len(claude)+len(codex)+len(archived))
-	out = append(out, claude...)
-	out = append(out, codex...)
-	out = append(out, archived...)
+	for _, folder := range []string{"sessions", "archived_sessions"} {
+		codex, firstCodex, skippedCodex := s.codex.read(filepath.Join(codexHome, folder), since, catalog, loc)
+		sums = append(sums, codex...)
+		if firstCodex != 0 && (first == 0 || firstCodex < first) {
+			first = firstCodex
+		}
+		skipped += skippedCodex
+	}
 	opencode, skippedOpenCode := readOpenCode(ctx, s.openCodeDB, since)
-	out = append(out, opencode...)
 	antigravity, skippedAntigravity := s.antigravity.read(ctx, s.antigravityRoots, since)
-	out = append(out, antigravity...)
-	return out, skippedClaude + skippedCodex + skippedArchived + skippedOpenCode + skippedAntigravity
+	others := spends(append(opencode, antigravity...), catalog)
+	for _, c := range others {
+		if first == 0 || c.at < first {
+			first = c.at
+		}
+	}
+	earliest := time.Time{}
+	if first != 0 {
+		earliest = time.Unix(0, first)
+	}
+	return append(sums, others), earliest, skipped + skippedOpenCode + skippedAntigravity
 }
 
 // Summary sums the last days days, or everything the records hold for 0.
 func (s *Scanner) Summary(ctx context.Context, days int, now time.Time) protocol.Usage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	catalog := s.prices.Catalog(ctx)
 	if days == 0 {
-		records, skipped := s.Records(ctx, time.Time{})
+		sums, earliest, skipped := s.read(ctx, time.Time{}, catalog, now.Location())
 		first := now
-		for _, r := range records {
-			if r.At.Before(first) {
-				first = r.At
-			}
+		if !earliest.IsZero() && earliest.Before(first) {
+			first = earliest
 		}
 		from, unit := AllTime(first, now)
-		return Summarize(records, s.prices.Catalog(ctx), days, from, unit, now, skipped)
+		return summarize(sums, catalog, days, from, unit, now, skipped)
 	}
 	from, unit := Window(days, now)
-	records, skipped := s.Records(ctx, from)
-	return Summarize(records, s.prices.Catalog(ctx), days, from, unit, now, skipped)
+	sums, _, skipped := s.read(ctx, from, catalog, now.Location())
+	return summarize(sums, catalog, days, from, unit, now, skipped)
 }
 
 // Unit is how wide a range's buckets are.
@@ -229,31 +246,43 @@ func readOpenCode(ctx context.Context, db string, since time.Time) ([]Record, in
 
 // Cost is what the API would charge for a call at these prices.
 func Cost(r Record, p Price) protocol.UsageCost {
-	if p.Above != nil && r.Context > p.AboveTokens {
+	return cost(r.Tokens, r.CacheWrite1h, p.Above != nil && r.Context > p.AboveTokens, p)
+}
+
+// cost is what the API would charge for tokens, past the prompt length
+// prices rise at when long.
+func cost(tokens protocol.Tokens, write1h int64, long bool, p Price) protocol.UsageCost {
+	if long && p.Above != nil {
 		p = *p.Above
 	}
-	writes5m := r.Tokens.CacheWrite - r.CacheWrite1h
+	writes5m := tokens.CacheWrite - write1h
 	return protocol.UsageCost{
-		Input:      float64(r.Tokens.Input) * p.Input / 1e6,
-		CacheRead:  float64(r.Tokens.CacheRead) * p.CacheRead / 1e6,
-		CacheWrite: (float64(writes5m)*p.CacheWrite + float64(r.CacheWrite1h)*p.Input*2) / 1e6,
-		Output:     float64(r.Tokens.Output) * p.Output / 1e6,
+		Input:      float64(tokens.Input) * p.Input / 1e6,
+		CacheRead:  float64(tokens.CacheRead) * p.CacheRead / 1e6,
+		CacheWrite: (float64(writes5m)*p.CacheWrite + float64(write1h)*p.Input*2) / 1e6,
+		Output:     float64(tokens.Output) * p.Output / 1e6,
 	}
 }
 
 // Summarize sums the records from from to now in buckets a unit wide.
 func Summarize(records []Record, catalog Catalog, days int, from time.Time, unit Unit, now time.Time, skipped int) protocol.Usage {
+	return summarize([][]spend{spends(records, catalog)}, catalog, days, from, unit, now, skipped)
+}
+
+// summarize sums what was spent from from to now in buckets a unit wide. A
+// call more than one log holds is counted where it is first found.
+func summarize(sums [][]spend, catalog Catalog, days int, from time.Time, unit Unit, now time.Time, skipped int) protocol.Usage {
 	u := protocol.Usage{Days: days, Hourly: unit == Hour, Unit: string(unit), Skipped: skipped}
-	var starts []time.Time
+	var starts []int64
 	for t := from; !t.After(now); t = next(t, unit) {
-		starts = append(starts, t)
+		starts = append(starts, t.UnixNano())
 	}
 	u.Buckets = make([]protocol.UsageBucket, len(starts))
 	for i, start := range starts {
-		u.Buckets[i] = protocol.UsageBucket{Start: start.UnixMilli(), Cost: map[protocol.Kind]float64{}, Tokens: map[protocol.Kind]int64{}}
+		u.Buckets[i] = protocol.UsageBucket{Start: start / 1e6, Cost: map[protocol.Kind]float64{}, Tokens: map[protocol.Kind]int64{}}
 	}
-	bucket := func(at time.Time) int {
-		i := sort.Search(len(starts), func(i int) bool { return starts[i].After(at) }) - 1
+	bucket := func(at int64) int {
+		i := sort.Search(len(starts), func(i int) bool { return starts[i] > at }) - 1
 		return i
 	}
 
@@ -261,60 +290,76 @@ func Summarize(records []Record, catalog Catalog, days int, from time.Time, unit
 		kind  protocol.Kind
 		model string
 	}
+	type sessionKey struct {
+		kind    protocol.Kind
+		session string
+	}
+	type priced struct {
+		Price
+		ok bool
+	}
 	agents := map[protocol.Kind]*protocol.AgentUsage{}
-	sessions := map[protocol.Kind]map[string]bool{}
 	models := map[modelKey]*protocol.ModelUsage{}
-	seen := map[string]bool{}
-	allSessions := map[string]bool{}
-	for _, r := range records {
-		if r.At.Before(from) || r.At.After(now) {
-			continue
-		}
-		if r.Key != "" {
-			if seen[r.Key] {
+	sessions := map[sessionKey]bool{}
+	prices := map[*label]priced{}
+	seen := map[uint64]bool{}
+	start, end := from.UnixNano(), now.UnixNano()
+	for _, part := range sums {
+		for _, s := range part {
+			if s.at < start || s.at > end {
 				continue
 			}
-			seen[r.Key] = true
-		}
-		price, priced := catalog.Lookup(r.Provider, r.Model)
-		var cost protocol.UsageCost
-		if priced {
-			cost = Cost(r, price)
-			u.CacheSavings += float64(r.Tokens.CacheRead) * (price.Input - price.CacheRead) / 1e6
-		}
-		a := agents[r.Agent]
-		if a == nil {
-			a = &protocol.AgentUsage{Kind: r.Agent}
-			agents[r.Agent] = a
-			sessions[r.Agent] = map[string]bool{}
-		}
-		a.Tokens = a.Tokens.Add(r.Tokens)
-		a.Cost += cost.Total()
-		sessions[r.Agent][r.Session] = true
-		allSessions[string(r.Agent)+"\x00"+r.Session] = true
+			if s.key != 0 {
+				if seen[s.key] {
+					continue
+				}
+				seen[s.key] = true
+			}
+			l := s.label
+			price, found := prices[l]
+			if !found {
+				price.Price, price.ok = catalog.Lookup(l.provider, l.model)
+				prices[l] = price
+			}
+			var spent protocol.UsageCost
+			if price.ok {
+				spent = cost(s.tokens, s.write1h, s.long, price.Price)
+				u.CacheSavings += float64(s.tokens.CacheRead) * (price.Input - price.CacheRead) / 1e6
+			}
+			a := agents[l.agent]
+			if a == nil {
+				a = &protocol.AgentUsage{Kind: l.agent}
+				agents[l.agent] = a
+			}
+			a.Tokens = a.Tokens.Add(s.tokens)
+			a.Cost += spent.Total()
+			sessions[sessionKey{l.agent, l.session}] = true
 
-		key := modelKey{r.Agent, r.Model}
-		m := models[key]
-		if m == nil {
-			m = &protocol.ModelUsage{Model: r.Model, Kind: r.Agent, Priced: priced}
-			models[key] = m
-		}
-		m.Tokens = m.Tokens.Add(r.Tokens)
-		m.Cost += cost.Total()
+			key := modelKey{l.agent, l.model}
+			m := models[key]
+			if m == nil {
+				m = &protocol.ModelUsage{Model: l.model, Kind: l.agent, Priced: price.ok}
+				models[key] = m
+			}
+			m.Tokens = m.Tokens.Add(s.tokens)
+			m.Cost += spent.Total()
 
-		u.Tokens = u.Tokens.Add(r.Tokens)
-		u.Cost.Input += cost.Input
-		u.Cost.CacheRead += cost.CacheRead
-		u.Cost.CacheWrite += cost.CacheWrite
-		u.Cost.Output += cost.Output
+			u.Tokens = u.Tokens.Add(s.tokens)
+			u.Cost.Input += spent.Input
+			u.Cost.CacheRead += spent.CacheRead
+			u.Cost.CacheWrite += spent.CacheWrite
+			u.Cost.Output += spent.Output
 
-		if i := bucket(r.At); i >= 0 {
-			u.Buckets[i].Cost[r.Agent] += cost.Total()
-			u.Buckets[i].Tokens[r.Agent] += r.Tokens.Total()
+			if i := bucket(s.at); i >= 0 {
+				u.Buckets[i].Cost[l.agent] += spent.Total()
+				u.Buckets[i].Tokens[l.agent] += s.tokens.Total()
+			}
 		}
 	}
-	for kind, a := range agents {
-		a.Sessions = len(sessions[kind])
+	for session := range sessions {
+		agents[session.kind].Sessions++
+	}
+	for _, a := range agents {
 		u.Agents = append(u.Agents, *a)
 	}
 	sort.Slice(u.Agents, func(i, j int) bool {
@@ -332,6 +377,6 @@ func Summarize(records []Record, catalog Catalog, days int, from time.Time, unit
 		}
 		return u.Models[i].Tokens.Total() > u.Models[j].Tokens.Total()
 	})
-	u.Sessions = len(allSessions)
+	u.Sessions = len(sessions)
 	return u
 }

@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"bytes"
 	"context"
 	"math"
 	"os"
@@ -44,6 +45,23 @@ func claudeLine(id, at, model string, input, write, write1h, read, output int) s
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// calls is what a log's lines say, call by call, as its reader parses them.
+func calls(t *testing.T, path string, parse func([]byte, string, *fileState) (Record, bool, error)) []Record {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state fileState
+	var out []Record
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if r, ok, err := parse(bytes.TrimSpace(line), path, &state); err == nil && ok {
+			out = append(out, r)
+		}
+	}
+	return out
+}
 
 var prices = Catalog{
 	"anthropic": {"claude-opus-5-5": {Input: 4, Output: 20, CacheRead: 0.2, CacheWrite: 5}},
@@ -101,9 +119,9 @@ func TestCodexCallsAreTheChangeInItsTotals(t *testing.T) {
 		count(3000, 2500, 30, 2000, 1700, 20),
 		count(100, 0, 5, 100, 0, 5),
 	)
-	records, _ := NewScanner(home, WithCatalog(prices)).Records(context.Background(), time.Now().Add(-24*time.Hour))
+	path := filepath.Join(home, ".codex/sessions/2026/10/31/rollout-x.jsonl")
 	var got []protocol.Tokens
-	for _, r := range records {
+	for _, r := range calls(t, path, parseCodex) {
 		if r.Model != "gpt-6.1-sol" || r.Agent != protocol.KindCodex {
 			t.Errorf("record = %+v", r)
 		}
@@ -121,6 +139,9 @@ func TestCodexCallsAreTheChangeInItsTotals(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("call %d = %+v, want %+v", i, got[i], want[i])
 		}
+	}
+	if u := NewScanner(home, WithCatalog(prices)).Summary(context.Background(), 7, time.Now()); u.Tokens != (protocol.Tokens{Input: 600, CacheRead: 2500, Output: 35}) {
+		t.Errorf("summed = %+v", u.Tokens)
 	}
 }
 
@@ -141,9 +162,12 @@ func TestCodexCarriedTotalsAreNotCountedAgain(t *testing.T) {
 		`{"timestamp":"`+at+`","type":"turn_context","payload":{"model":"gpt-6.1-sol"}}`,
 		count(903000, 802500, 5030, 3000, 2500, 30),
 	)
-	records, _ := NewScanner(home, WithCatalog(prices)).Records(context.Background(), time.Now().Add(-24*time.Hour))
+	records := calls(t, filepath.Join(home, ".codex/sessions/2026/10/31/rollout-carried.jsonl"), parseCodex)
 	if len(records) != 1 || records[0].Tokens != (protocol.Tokens{Input: 500, CacheRead: 2500, Output: 30}) || records[0].Model != "gpt-6.1-sol" {
 		t.Fatalf("records = %+v", records)
+	}
+	if u := NewScanner(home, WithCatalog(prices)).Summary(context.Background(), 7, time.Now()); u.Tokens != records[0].Tokens {
+		t.Fatalf("summed = %+v", u.Tokens)
 	}
 }
 
@@ -275,19 +299,17 @@ func TestALogIsReadFromWhereItStopped(t *testing.T) {
 	at := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
 	write(t, path, claudeLine("a", at, "claude-opus-5-5", 1, 0, 0, 0, 1))
 	s := NewScanner(home, WithCatalog(prices))
-	since := time.Now().Add(-24 * time.Hour)
-	if records, _ := s.Records(context.Background(), since); len(records) != 1 {
-		t.Fatalf("first read: %d", len(records))
+	if u := s.Summary(context.Background(), 1, time.Now()); u.Tokens.Total() != 2 {
+		t.Fatalf("first read: %d tokens", u.Tokens.Total())
 	}
 	half := claudeLine("b", at, "claude-opus-5-5", 2, 0, 0, 0, 2)
 	appendLines(t, path, half[:40])
-	if records, _ := s.Records(context.Background(), since); len(records) != 1 {
-		t.Fatalf("a half-written line was read: %d", len(records))
+	if u := s.Summary(context.Background(), 1, time.Now()); u.Tokens.Total() != 2 || u.Skipped != 0 {
+		t.Fatalf("a half-written line was read: %d tokens, %d skipped", u.Tokens.Total(), u.Skipped)
 	}
 	appendLines(t, path, half[40:]+"\n")
-	records, skipped := s.Records(context.Background(), since)
-	if len(records) != 2 || skipped != 0 {
-		t.Fatalf("after the line was finished: %d records, %d skipped", len(records), skipped)
+	if u := s.Summary(context.Background(), 1, time.Now()); u.Tokens.Total() != 6 || u.Skipped != 0 {
+		t.Fatalf("after the line was finished: %d tokens, %d skipped", u.Tokens.Total(), u.Skipped)
 	}
 }
 
@@ -314,5 +336,121 @@ func TestOpenCodesCallsComeFromItsDatabase(t *testing.T) {
 	if r.Agent != protocol.KindOpenCode || r.Session != "ses_1" || r.Model != "gpt-6.1-sol" || r.Provider != "openai" ||
 		r.Tokens != (protocol.Tokens{Input: 296, CacheRead: 50560, Output: 191}) {
 		t.Errorf("record = %+v", r)
+	}
+}
+
+// A call summed in its log, then found in another (a session resumed in a
+// new file carries its earlier calls along), is still counted once; and
+// still once when the first log goes.
+func TestACallCarriedToAnotherLogIsCountedOnce(t *testing.T) {
+	home := t.TempDir()
+	at := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	carried := claudeLine("a", at, "claude-opus-5-5", 10, 0, 0, 0, 1)
+	first := filepath.Join(home, ".claude/projects/p/b.jsonl")
+	write(t, first, carried, carried, claudeLine("b", at, "claude-opus-5-5", 100, 0, 0, 0, 10))
+	s := NewScanner(home, WithCatalog(prices))
+	ctx := context.Background()
+	if u := s.Summary(ctx, 7, time.Now()); u.Tokens.Total() != 121 {
+		t.Fatalf("one log: %d tokens", u.Tokens.Total())
+	}
+	// One log read before the first, one after: the call is counted once.
+	for _, name := range []string{"a.jsonl", "c.jsonl"} {
+		write(t, filepath.Join(home, ".claude/projects/p", name), carried, claudeLine(name, at, "claude-opus-5-5", 1000, 0, 0, 0, 100))
+	}
+	if u := s.Summary(ctx, 7, time.Now()); u.Tokens.Total() != 121+2*1100 {
+		t.Fatalf("carried into two more logs: %d tokens", u.Tokens.Total())
+	}
+	if err := os.Remove(first); err != nil {
+		t.Fatal(err)
+	}
+	if u := s.Summary(ctx, 7, time.Now()); u.Tokens.Total() != 11+2*1100 {
+		t.Fatalf("the first log gone: %d tokens", u.Tokens.Total())
+	}
+	if u := NewScanner(home, WithCatalog(prices)).Summary(ctx, 7, time.Now()); u.Tokens.Total() != 11+2*1100 {
+		t.Fatalf("read afresh: %d tokens", u.Tokens.Total())
+	}
+}
+
+// Calls are summed by the hour, or by the half hour where the clock is half
+// an hour off UTC: days start at local midnight and the last day goes by
+// UTC hours, and each sum falls in one bucket of either.
+func TestSumsFallInOneBucketOfAnyClock(t *testing.T) {
+	india := time.FixedZone("IST", 5*3600+1800)
+	home := t.TempDir()
+	day := time.Date(2026, 10, 30, 0, 0, 0, 0, india)
+	stamp := func(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
+	write(t, filepath.Join(home, ".claude/projects/p/s.jsonl"),
+		claudeLine("a", stamp(day.Add(-10*time.Minute)), "claude-opus-5-5", 1, 0, 0, 0, 0),
+		claudeLine("b", stamp(day.Add(10*time.Minute)), "claude-opus-5-5", 2, 0, 0, 0, 0),
+		claudeLine("c", stamp(day.Add(15*time.Hour+15*time.Minute)), "claude-opus-5-5", 4, 0, 0, 0, 0),
+		claudeLine("d", stamp(day.Add(15*time.Hour+45*time.Minute)), "claude-opus-5-5", 8, 0, 0, 0, 0),
+	)
+	now := day.Add(20 * time.Hour)
+	s := NewScanner(home, WithCatalog(prices))
+	week := s.Summary(context.Background(), 7, now)
+	if n := len(week.Buckets); week.Buckets[n-1].Tokens[protocol.KindClaude] != 14 || week.Buckets[n-2].Tokens[protocol.KindClaude] != 1 {
+		t.Errorf("by local day: %+v", week.Buckets)
+	}
+	// 15:15 and 15:45 in India are 09:45 and 10:15 UTC: two hours.
+	hours := map[int64]int64{}
+	for _, b := range s.Summary(context.Background(), 1, now).Buckets {
+		if n := b.Tokens[protocol.KindClaude]; n > 0 {
+			hours[b.Start] = n
+		}
+	}
+	nine := time.Date(2026, 10, 30, 9, 0, 0, 0, time.UTC).UnixMilli()
+	if hours[nine] != 4 || hours[nine+3600_000] != 8 {
+		t.Errorf("by the hour: %v", hours)
+	}
+}
+
+// A long prompt read from a log is charged the dearer price, past the length
+// the catalog says: when that changes, the logs are summed again.
+func TestLongPromptsAreToldApartAtTheCatalogsLength(t *testing.T) {
+	home := t.TempDir()
+	at := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	count := func(in, out int) string {
+		return `{"timestamp":"` + at + `","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":` + itoa(in) +
+			`,"output_tokens":` + itoa(out) + `},"last_token_usage":{"input_tokens":` + itoa(in) + `,"output_tokens":` + itoa(out) + `}}}}`
+	}
+	write(t, filepath.Join(home, ".codex/sessions/2026/10/31/rollout-long.jsonl"),
+		`{"timestamp":"`+at+`","type":"turn_context","payload":{"model":"gpt-6.1-sol"}}`,
+		count(300000, 1000))
+	s := NewScanner(home, WithCatalog(prices))
+	if got, want := s.Summary(context.Background(), 7, time.Now()).Cost.Total(), (300000*4+1000*15)/1e6; math.Abs(got-want) > 1e-9 {
+		t.Errorf("past 272K: $%v, want $%v", got, want)
+	}
+	price := prices["openai"]["gpt-6.1-sol"]
+	price.AboveTokens = 400000
+	s.prices = WithCatalog(Catalog{"openai": {"gpt-6.1-sol": price}})
+	if got, want := s.Summary(context.Background(), 7, time.Now()).Cost.Total(), (300000*2+1000*10)/1e6; math.Abs(got-want) > 1e-9 {
+		t.Errorf("under 400K: $%v, want $%v", got, want)
+	}
+}
+
+// A reply whose lines run past a range's start counts from its first line in
+// the range: the lines before it, and what they said, are left out.
+func TestAReplyRunningPastARangesStartCountsFromItsLinesInIt(t *testing.T) {
+	now := time.Date(2026, 10, 31, 15, 30, 0, 0, time.Local)
+	start, _ := Window(7, now)
+	early := claudeLine("a", start.Add(-500*time.Millisecond).UTC().Format(time.RFC3339Nano), "claude-opus-5-5", 2, 0, 0, 0, 1)
+	late := claudeLine("a", start.Add(500*time.Millisecond).UTC().Format(time.RFC3339Nano), "claude-opus-5-5", 2, 0, 0, 0, 100)
+	for _, together := range []bool{true, false} {
+		home := t.TempDir()
+		path := filepath.Join(home, ".claude/projects/p/s.jsonl")
+		s := NewScanner(home, WithCatalog(prices))
+		if together {
+			write(t, path, early, late)
+		} else {
+			write(t, path, early)
+			s.Summary(context.Background(), 30, now)
+			appendLines(t, path, late+"\n")
+		}
+		if u := s.Summary(context.Background(), 7, now); u.Tokens != (protocol.Tokens{Input: 2, Output: 100}) {
+			t.Errorf("read together %v, the week: %+v", together, u.Tokens)
+		}
+		if u := s.Summary(context.Background(), 30, now); u.Tokens != (protocol.Tokens{Input: 2, Output: 1}) {
+			t.Errorf("read together %v, the month: %+v", together, u.Tokens)
+		}
 	}
 }
