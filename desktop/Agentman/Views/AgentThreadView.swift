@@ -505,7 +505,9 @@ struct AgentThreadView: View {
     /// The space at either side of the conversation: less in a panel.
     private var gutter: CGFloat { inPanel ? 14 : 36 }
 
-    private static let resumableKinds: Set<String> = ["claude", "codex", "cursor-cli", "kiro", "antigravity"]
+    /// Muse reopens in place: the daemon lists the session again, and
+    /// nothing starts.
+    private static let resumableKinds: Set<String> = ["claude", "codex", "cursor-cli", "kiro", "antigravity", "muse"]
 
     /// An ended session its agent can reopen, as the phone decides it.
     static func resumable(_ session: Session) -> Bool {

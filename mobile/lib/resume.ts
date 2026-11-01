@@ -14,6 +14,9 @@ const RESUMABLE = new Set([
   "cursor-cli",
   "kiro",
   "antigravity",
+  // Muse reopens in place: the Mac lists the session again, and nothing
+  // starts (any Muse session takes a message).
+  "muse",
 ]);
 
 export function canResume(kind: string): boolean {
