@@ -9,7 +9,8 @@ import type { DeviceInfo } from "./protocol";
  * name the user chose), the kind of device, and the system's version.
  */
 export function deviceInfo(): DeviceInfo {
-  const constants = Platform.constants as { interfaceIdiom?: string; Model?: string; Brand?: string };
+  // The web build has no platform constants at all.
+  const constants = (Platform.constants ?? {}) as { interfaceIdiom?: string; Model?: string; Brand?: string };
   let model: string | undefined;
   if (Platform.OS === "ios") {
     model = constants.interfaceIdiom === "pad" ? "iPad" : "iPhone";

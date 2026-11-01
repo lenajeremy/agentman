@@ -336,7 +336,7 @@ h2 {
 }
 .providers {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   margin-top: 40px;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -360,6 +360,17 @@ h2 {
 }
 .providers > div:first-child svg {
   color: #d78a6b;
+}
+.providers span {
+  white-space: nowrap;
+}
+/* Seven to a row is tight on a small laptop before it drops to three. */
+@media (min-width: 1001px) and (max-width: 1240px) {
+  .providers > div {
+    gap: 8px;
+    padding-left: 6px;
+    padding-right: 6px;
+  }
 }
 .benefits {
   display: flex;
@@ -563,10 +574,12 @@ h2 {
   .providers > div {
     border-bottom: 1px solid #1b1b1b;
   }
-  .providers > div:nth-child(3) {
+  .providers > div:nth-child(3n) {
     border-right: 0;
   }
-  .providers > div:nth-child(n + 4) {
+  /* Seven in rows of three: the last one has the row to itself. */
+  .providers > div:last-child {
+    grid-column: 1 / -1;
     border-bottom: 0;
   }
   .benefits {

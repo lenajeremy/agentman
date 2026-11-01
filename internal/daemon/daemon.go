@@ -1088,6 +1088,12 @@ func (d *Daemon) HandleFrom(
 		}
 		return protocol.Event{Type: protocol.EvtSessionStarted, SessionID: id}
 
+	case protocol.ReqReleaseSession:
+		if err := d.registry.Release(ctx, req.SessionID, req.Stop); err != nil {
+			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
+		}
+		return protocol.Event{Type: protocol.EvtSessionReleased, SessionID: req.SessionID}
+
 	case protocol.ReqEndSession:
 		if err := d.endSession(ctx, req.SessionID); err != nil {
 			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
@@ -1325,7 +1331,7 @@ func requestMutatesSession(kind protocol.RequestType) bool {
 		kind == protocol.ReqInterrupt || kind == protocol.ReqStartSession ||
 		// Resume and end start or stop a process. Run concurrently, two resumes
 		// of one session each launched their own.
-		kind == protocol.ReqResumeSession || kind == protocol.ReqEndSession ||
+		kind == protocol.ReqResumeSession || kind == protocol.ReqEndSession || kind == protocol.ReqReleaseSession ||
 		kind == protocol.ReqReviewArtifact || kind == protocol.ReqSetMode || kind == protocol.ReqSetModel ||
 		// After a send, in order, so a message just sent is in the queue
 		// before the keys that send the queue are pressed.
@@ -1431,7 +1437,7 @@ func validateRequest(req protocol.Request) error {
 		return nil
 	case protocol.ReqDirectorySessions:
 		return validateFolderPath(req.Path)
-	case protocol.ReqResumeSession, protocol.ReqEndSession:
+	case protocol.ReqResumeSession, protocol.ReqEndSession, protocol.ReqReleaseSession:
 		if req.SessionID == "" || len(req.SessionID) > 512 {
 			return fmt.Errorf("daemon: invalid session")
 		}
@@ -1440,7 +1446,8 @@ func validateRequest(req protocol.Request) error {
 		if req.ClientID == "" || validateLaunchPath(req.Path, false) != nil ||
 			(req.Kind != protocol.KindClaude && req.Kind != protocol.KindCodex &&
 				req.Kind != protocol.KindCursorCLI && req.Kind != protocol.KindOpenCode &&
-				req.Kind != protocol.KindKiro && req.Kind != protocol.KindAntigravity) ||
+				req.Kind != protocol.KindKiro && req.Kind != protocol.KindAntigravity &&
+				req.Kind != protocol.KindMuse) ||
 			strings.TrimSpace(req.Text) == "" || len(req.Text) > maxMessageBytes ||
 			containsTerminalControl(req.Text) {
 			return fmt.Errorf("daemon: invalid session launch")

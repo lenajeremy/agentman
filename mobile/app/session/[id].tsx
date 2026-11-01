@@ -45,6 +45,7 @@ import { FolderInitials, FolderPicture, useFolderIcon } from "../../components/F
 import { Loader } from "../../components/Loader";
 import { Pulse } from "../../components/Pulse";
 import { QuestionCard } from "../../components/QuestionCard";
+import { QuestionSheet } from "../../components/QuestionSheet";
 import { Thinking } from "../../components/Thinking";
 import { ToolRow } from "../../components/ToolRow";
 import { AttachmentStrip } from "../../components/AttachmentStrip";
@@ -56,7 +57,7 @@ import { OutputViewer } from "../../components/OutputViewer";
 import { type Frame } from "../../lib/message-menu";
 import { artifactsButtonLabel } from "../../lib/artifacts";
 import { canEnd, shouldResume } from "../../lib/resume";
-import { folderName, modeLabel, modelLabel, showsInFeed, statusChip } from "../../lib/session-view";
+import { folderName, modeLabel, modelLabel, modeWord, showsInFeed, statusChip } from "../../lib/session-view";
 import {
   defaultScopeWarning,
   switchChoices,
@@ -294,6 +295,8 @@ export default function SessionScreen() {
   // the visible part of the sheet. Scrolling to the end shows it: the note
   // sits under the last option.
   const sheetScroll = useRef<ComponentRef<typeof ScrollView>>(null);
+  // How tall the docked question sheet is: the gap the conversation keeps.
+  const [questionDock, setQuestionDock] = useState(0);
   useEffect(() => {
     if (Platform.OS === "web") return;
     const shown = Keyboard.addListener("keyboardDidShow", () => {
@@ -781,7 +784,7 @@ export default function SessionScreen() {
   }
   const switchTitle =
     switchMenu === "mode"
-      ? "Mode"
+      ? modeWord(session?.kind)
       : session?.modelScope === "default"
         ? "Model · also the default for new sessions"
         : "Model for this session";
@@ -797,6 +800,7 @@ export default function SessionScreen() {
         mode: chip?.mode && chip.mode !== "mode" ? chip.mode : undefined,
         modePending: switching?.kind === "mode" ? switching.value : undefined,
         onMode: modeChoices ? () => openSwitchMenu("mode") : undefined,
+        modeWord: modeWord(session.kind),
         contextPercent: session.contextPercent,
       })
     : null;
@@ -1297,33 +1301,9 @@ export default function SessionScreen() {
             bottom: impossible to miss, but the transcript above stays
             readable for context. */}
         {session?.question ? (
-          <View
-            style={[
-              styles.sheet,
-              {
-                maxHeight: Math.max(260, Math.min(520, viewportHeight * 0.62)),
-                paddingBottom: (keyboardVisible ? 0 : insets.bottom) + space.md,
-              },
-            ]}
-          >
-            <View style={styles.grabber} />
-            <ScrollView
-              ref={sheetScroll}
-              contentContainerStyle={styles.sheetContent}
-              keyboardShouldPersistTaps="handled"
-              nestedScrollEnabled
-            >
-              <ContentColumn>
-                <QuestionCard
-                  question={session.question}
-                  onAnswer={(answer) => store.answerQuestion(sessionId, answer)}
-                  disabled={!store.daemonOnline}
-                  submissionStatus={answerAction?.status}
-                  submissionError={answerAction?.error}
-                />
-              </ContentColumn>
-            </ScrollView>
-          </View>
+          // The sheet is drawn over the screen (below), so pulled up it can
+          // cover the header; this keeps the conversation ending above it.
+          <View style={{ height: questionDock }} />
         ) : (
           <View style={styles.composerShell}>
             <ContentColumn
@@ -1523,6 +1503,26 @@ export default function SessionScreen() {
         )}
       </KeyboardAvoidingView>
 
+      {session?.question ? (
+        <QuestionSheet
+          dockedHeight={Math.max(260, Math.min(520, viewportHeight * 0.62))}
+          bottomPadding={(keyboardVisible ? 0 : insets.bottom) + space.md}
+          resetKey={session.question.id ?? session.question.prompt}
+          scrollRef={sheetScroll}
+          onDockHeight={setQuestionDock}
+        >
+          <ContentColumn>
+            <QuestionCard
+              question={session.question}
+              onAnswer={(answer) => store.answerQuestion(sessionId, answer)}
+              disabled={!store.daemonOnline}
+              submissionStatus={answerAction?.status}
+              submissionError={answerAction?.error}
+            />
+          </ContentColumn>
+        </QuestionSheet>
+      ) : null}
+
       <Toast message={toast} onHidden={hideToast} top={insets.top + headerHeight + space.sm} />
       {panelView ? (
         <OutputViewer
@@ -1540,6 +1540,8 @@ interface HeaderControlsProps {
   mode?: string;
   modePending?: string;
   onMode?: () => void;
+  /** What the chip says before a mode is known: "Mode", or Muse's "Effort". */
+  modeWord?: string;
   contextPercent?: number;
 }
 
@@ -1560,6 +1562,7 @@ function ModeControl({
   mode,
   modePending,
   onMode,
+  modeWord: unsetWord,
   contextPercent,
   disabled,
 }: HeaderControlsProps & { disabled?: boolean }) {
@@ -1571,7 +1574,7 @@ function ModeControl({
       {shownMode || onMode ? (
         <ModelButton
           kind="Mode"
-          model={shownMode ? modeLabel(shownMode) : "Mode"}
+          model={shownMode ? modeLabel(shownMode) : (unsetWord ?? "Mode")}
           pending={Boolean(modePending)}
           onPress={onMode}
           disabled={disabled}
@@ -1816,6 +1819,9 @@ function DeliveryNote({
   } else if (kind === "cursor-cli") {
     text =
       "Start Cursor Agent CLI with am cursor to send this chat messages remotely.";
+  } else if (kind === "muse") {
+    // Muse lets one client drive a session at a time: a terminal has it.
+    text = "Open in a terminal on your Mac. Close it there to send from here.";
   } else if (kind === "claude" || kind === "codex" || kind === "kiro" || kind === "antigravity") {
     text = `Start this session with am ${kind} to send it messages.`;
   } else {
@@ -2541,26 +2547,6 @@ const makeStyles = (c: Palette) =>
       marginTop: space.xs,
     },
 
-    sheet: {
-      backgroundColor: c.surface,
-      borderTopLeftRadius: radius.sheet,
-      borderTopRightRadius: radius.sheet,
-      paddingTop: 10,
-      shadowColor: c.shadow,
-      shadowOpacity: 0.12,
-      shadowRadius: 24,
-      shadowOffset: { width: 0, height: -6 },
-      elevation: 12,
-    },
-    grabber: {
-      alignSelf: "center",
-      width: 38,
-      height: 5,
-      borderRadius: 3,
-      backgroundColor: c.fillStrong,
-      marginBottom: space.md,
-    },
-    sheetContent: { paddingHorizontal: 20, paddingBottom: space.xs },
     thinking: { paddingTop: space.sm },
     composerShell: { backgroundColor: c.paper },
     composer: { paddingHorizontal: space.lg, paddingTop: space.sm },

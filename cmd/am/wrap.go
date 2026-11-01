@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -226,6 +227,14 @@ func runSend(ctx context.Context, args []string) error {
 	}
 	sessionID, text := args[0], strings.Join(args[1:], " ")
 
+	// Muse lets one connection drive a session at a time, and Agentman takes
+	// a session only for the turn it sends. A one-off command that took it
+	// would exit still holding it, so Muse is always sent to through the
+	// daemon, whose one connection lets go when the turn ends.
+	if strings.HasPrefix(sessionID, string(protocol.KindMuse)+":") {
+		return sendThroughDaemon(ctx, sessionID, text)
+	}
+
 	registry, err := buildRegistry()
 	if err != nil {
 		return err
@@ -307,4 +316,38 @@ func runAnswer(ctx context.Context, args []string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown session %s", args[0])
+}
+
+// sendThroughDaemon hands a message to the running daemon to deliver.
+func sendThroughDaemon(ctx context.Context, sessionID, text string) error {
+	socket, err := socketPath()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	event, err := socketCall(socket)(ctx, protocol.Request{
+		Type: protocol.ReqSendMessage, SessionID: sessionID, Text: text,
+		ClientID: fmt.Sprintf("am-send-%d", time.Now().UnixNano()),
+	})
+	if err != nil {
+		return fmt.Errorf("Muse sessions are sent to through the daemon, and it isn't running: start it with `am serve` (or `am service install`)")
+	}
+	switch {
+	case event.Type == protocol.EvtError:
+		return errors.New(strings.TrimPrefix(event.Error, "daemon: "))
+	case event.Status == protocol.StatusFailed:
+		return errors.New(strings.TrimPrefix(firstNonEmptyString(event.Error, "could not deliver"), "daemon: "))
+	}
+	fmt.Printf("%s delivered\n", dim("✓"))
+	return nil
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }

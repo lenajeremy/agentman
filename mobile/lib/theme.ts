@@ -245,6 +245,8 @@ export function agentLabel(kind: string): { name: string; short: string } {
       return { name: "Kiro", short: "ki" };
     case "antigravity":
       return { name: "Antigravity", short: "ag" };
+    case "muse":
+      return { name: "Muse", short: "mu" };
     default:
       return { name: kind, short: kind.slice(0, 2) };
   }

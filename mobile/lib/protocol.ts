@@ -28,6 +28,7 @@ export type AgentKind =
   | "cursor-cli"
   | "kiro"
   | "antigravity"
+  | "muse"
   | (string & {});
 export type SessionState = "busy" | "idle" | "waiting_input" | "ended";
 

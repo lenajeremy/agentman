@@ -10,6 +10,8 @@ enum SessionLabels {
             "default": "Default", "kiro_default": "Default", "kiro_planner": "Planner", "kiro_guide": "Guide",
             "accept-edits": "Accept edits", "accept edits": "Accept edits", "acceptedits": "Accept edits",
             "bypasspermissions": "Bypass permissions",
+            // Muse's reasoning effort, switched as its mode.
+            "xhigh effort": "Extra high effort",
         ]
         if let found = known[raw.lowercased()] { return found }
         var words = raw
@@ -34,6 +36,11 @@ enum SessionLabels {
             let rest = m.2.map { " " + $0.split(separator: "-").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ") } ?? ""
             return "GPT-\(m.1)\(rest)"
         }
+        // Meta Muse: muse-spark-1.3-contributor is "Muse Spark 1.3", as Muse's
+        // terminal says it (contributor is the account's mode, not a model).
+        if let m = raw.wholeMatch(of: /(?i)muse-([a-z]+)-(\d+(?:\.\d+)*)(?:-contributor)?/) {
+            return "Muse " + m.1.prefix(1).uppercased() + m.1.dropFirst().lowercased() + " \(m.2)"
+        }
         if raw == "auto" { return "Auto" }
         return raw
     }
@@ -50,6 +57,7 @@ enum AgentName {
         case "cursor-cli": "Cursor CLI"
         case "kiro": "Kiro"
         case "antigravity": "Antigravity"
+        case "muse": "Muse"
         default: kind.capitalized
         }
     }
