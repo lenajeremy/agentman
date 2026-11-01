@@ -104,8 +104,13 @@ func listSessions(ctx context.Context) ([]Session, error) {
 	}
 	var sessions []Session
 	found := map[string]server{}
+	now := time.Now()
 	for _, server := range servers() {
-		listed := listOn(ctx, server)
+		if !dueForListing(server, now) {
+			continue
+		}
+		listed, err := listOn(ctx, server)
+		noteListing(server, len(listed), err, now)
 		for _, session := range listed {
 			if _, seen := found[session.Name]; seen {
 				continue
@@ -119,12 +124,12 @@ func listSessions(ctx context.Context) ([]Session, error) {
 }
 
 // listOn lists the agent sessions on one server.
-func listOn(ctx context.Context, server server) []Session {
+func listOn(ctx context.Context, server server) ([]Session, error) {
 	out, err := runOn(ctx, server, "list-sessions", "-F",
 		"#{session_name}\t#{pane_pid}\t#{pane_current_path}\t#{pane_current_command}\t#{session_created}\t#{pane_title}")
 	if err != nil {
 		// tmux exits non-zero when no server is running, which is normal.
-		return nil
+		return nil, err
 	}
 
 	var sessions []Session
@@ -152,7 +157,7 @@ func listOn(ctx context.Context, server server) []Session {
 		}
 		sessions = append(sessions, session)
 	}
-	return sessions
+	return sessions, nil
 }
 
 // Launch starts a command in a new detached tmux session and returns its name.

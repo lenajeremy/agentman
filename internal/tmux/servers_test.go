@@ -2,12 +2,14 @@ package tmux
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // legacyServer stands a second private server in for the one terminals
@@ -143,6 +145,76 @@ func TestLaunchGivesTheAgentItsEnvironment(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = Kill(context.Background(), name) })
 	readSoon(t, out, "from the terminal")
+}
+
+// The shared server is asked every sweep while agents still run there, and
+// once it has none, only now and then: no agent starts there any more.
+func TestTheSharedServerIsAskedRarelyOnceItHasNoAgents(t *testing.T) {
+	requireTmux(t)
+	socket := legacyServer(t)
+	legacy := server{"-S", socket}
+	listedNames := func() []string {
+		sessions, err := List(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, session := range sessions {
+			names = append(names, session.Name)
+		}
+		return names
+	}
+
+	// No server there at all is as quiet as one with no agents.
+	listedNames()
+	if dueForListing(legacy, time.Now()) {
+		t.Fatal("a missing server is asked again on the next sweep")
+	}
+	old := "agentman-claude-quiet-" + filepath.Base(t.TempDir())
+	startOn(t, socket, old)
+	if slices.Contains(listedNames(), old) {
+		t.Fatal("a quiet server was asked before its wait was out")
+	}
+	if !dueForListing(legacy, time.Now().Add(quietServerWait)) {
+		t.Fatal("a quiet server is never asked again")
+	}
+
+	quiet.mu.Lock()
+	quiet.next[legacy.key()] = time.Now().Add(-time.Second)
+	quiet.mu.Unlock()
+	if !slices.Contains(listedNames(), old) {
+		t.Fatal("the agent on the shared server was not found once its wait was out")
+	}
+	if !dueForListing(legacy, time.Now()) || !slices.Contains(listedNames(), old) {
+		t.Fatal("a server with an agent on it is not asked every sweep")
+	}
+	if !dueForListing(ours(), time.Now()) {
+		t.Fatal("ours is not asked every sweep")
+	}
+}
+
+// Only a definite "nothing here" quiets a server: a listing that failed for
+// another reason may have missed running agents.
+func TestOnlyANoServerErrorQuietsAServer(t *testing.T) {
+	legacy := server{"-S", "/tmp/agentman-quiet-errors"}
+	t.Cleanup(func() {
+		quiet.mu.Lock()
+		delete(quiet.next, legacy.key())
+		quiet.mu.Unlock()
+	})
+	now := time.Now()
+	noteListing(legacy, 0, errors.New("signal: killed"), now)
+	if !dueForListing(legacy, now) {
+		t.Fatal("a failed listing quieted the server")
+	}
+	noteListing(legacy, 0, errors.New("no server running on /tmp/agentman-quiet-errors"), now)
+	if dueForListing(legacy, now) {
+		t.Fatal("no server there did not quiet it")
+	}
+	noteListing(legacy, 1, nil, now)
+	if !dueForListing(legacy, now) {
+		t.Fatal("an agent found there left it quiet")
+	}
 }
 
 func TestCommandsGoToTheServerOfTheSessionTheyName(t *testing.T) {

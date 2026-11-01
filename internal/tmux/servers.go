@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // AgentsSocket names the tmux server agents run on: Agentman's own, apart
@@ -54,6 +55,62 @@ func servers() []server {
 		list = append(list, server{})
 	}
 	return list
+}
+
+// quietServerWait is how long a server other than ours goes unasked once a
+// listing found no agent on it.
+//
+// The shared server is only asked for agents that started there before
+// agents had a server of their own, and none start there now: once a
+// listing finds none, there will not be another. It was still asked every
+// second, a tmux run of its own each time, to say nothing. It is asked again
+// now and then rather than never, in case an older am started one there.
+var quietServerWait = 30 * time.Second
+
+// quiet is when each quiet server is next asked, by its flags.
+var quiet struct {
+	mu   sync.Mutex
+	next map[string]time.Time
+}
+
+func (s server) key() string { return strings.Join(s, " ") }
+
+// dueForListing reports whether a server should be listed now. Ours always
+// is.
+func dueForListing(s server, now time.Time) bool {
+	if s.key() == ours().key() {
+		return true
+	}
+	quiet.mu.Lock()
+	defer quiet.mu.Unlock()
+	next, waiting := quiet.next[s.key()]
+	return !waiting || !now.Before(next)
+}
+
+// noteListing records what listing a server found. Only a definite answer —
+// a listing with no agent in it, or no server there at all — quiets one; a
+// listing that failed for any other reason may have missed agents that are
+// running.
+func noteListing(s server, agents int, err error, now time.Time) {
+	if s.key() == ours().key() {
+		return
+	}
+	quiet.mu.Lock()
+	defer quiet.mu.Unlock()
+	if agents > 0 || (err != nil && !noServer(err)) {
+		delete(quiet.next, s.key())
+		return
+	}
+	if quiet.next == nil {
+		quiet.next = map[string]time.Time{}
+	}
+	quiet.next[s.key()] = now.Add(quietServerWait)
+}
+
+// noServer reports whether tmux failed because no server runs there.
+func noServer(err error) bool {
+	message := err.Error()
+	return strings.Contains(message, "no server running") || strings.Contains(message, "error connecting to")
 }
 
 // SocketPath is where Agentman's own server listens, for anything that
