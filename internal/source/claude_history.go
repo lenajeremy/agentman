@@ -40,7 +40,7 @@ func (s *ClaudeSource) Past(ctx context.Context, dir string, limit int) ([]proto
 	}
 
 	slug := claudeProjectSlug(dir)
-	candidates := make([]historyEntry, 0, limit)
+	var candidates []historyEntry // sized by what is found; see limitOrDefault
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue

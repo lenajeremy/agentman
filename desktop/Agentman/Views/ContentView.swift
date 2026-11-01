@@ -23,7 +23,7 @@ struct ContentView: View {
                         }
                         .transition(.move(edge: .leading))
                 }
-                detail
+                Detail()
                     // With the sidebar hidden, the headers make room for the
                     // window's buttons and the one that brings it back.
                     .environment(\.detailHeaderLeading, sidebarHidden ? headerLeading + 34 : 0)
@@ -95,30 +95,6 @@ struct ContentView: View {
 
     /// agentman://settings opens Settings, at a tab with
     /// agentman://settings/keys; the rest are the store's to open.
-
-    /// Agentman, or the agent picked, beside the sidebar.
-    private var detail: some View {
-        Group {
-            switch store.selection {
-            case .agent(let id):
-                if let session = store.session(id) {
-                    AgentThreadView(session: session)
-                        .id(session.id)
-                } else {
-                    GoneView()
-                }
-            case .newAgent:
-                NewAgentView()
-            case .usage:
-                UsageView()
-            case .manager, nil:
-                ManagerChatView()
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Palette.paper)
-    }
-
     private func open(_ url: URL) {
         if url.host() == "terminal" {
             let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
@@ -139,6 +115,37 @@ struct ContentView: View {
         } else {
             store.open(url)
         }
+    }
+}
+
+/// Agentman, or the agent picked, beside the sidebar. A view of its own,
+/// as it reads the agents' sessions: news of any agent redraws it alone,
+/// not the window around it, and the thread only when its own agent
+/// changed.
+private struct Detail: View {
+    @Environment(AgentsStore.self) private var store
+
+    var body: some View {
+        Group {
+            switch store.selection {
+            case .agent(let id):
+                if let session = store.session(id) {
+                    AgentThreadView(session: session)
+                        .equatable()
+                        .id(session.id)
+                } else {
+                    GoneView()
+                }
+            case .newAgent:
+                NewAgentView()
+            case .usage:
+                UsageView()
+            case .manager, nil:
+                ManagerChatView()
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Palette.paper)
     }
 }
 

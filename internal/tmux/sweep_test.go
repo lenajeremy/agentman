@@ -139,8 +139,8 @@ func TestASweepCapturesEveryPaneInOneGo(t *testing.T) {
 	}
 }
 
-// A pane that closes between the sweep's list and its capture stops tmux's
-// run partway. The panes it did not reach are captured one by one.
+// A pane that closes between sweeps stops the next listing's run at its
+// capture. The panes it did not reach are captured in a run of their own.
 func TestASweepCaptureSurvivesAPaneThatClosed(t *testing.T) {
 	requireTmux(t)
 	ctx := context.Background()
@@ -154,22 +154,57 @@ func TestASweepCaptureSurvivesAPaneThatClosed(t *testing.T) {
 	}
 	capturedSoon(t, ctx, first, "still here")
 	capturedSoon(t, ctx, second, "still here")
-
-	sweep, done := WithSweep(ctx)
-	defer done()
-	if _, err := List(sweep); err != nil {
-		t.Fatal(err)
+	if !listed(t, ctx, first) || !listed(t, ctx, second) {
+		t.Fatal("the panes were not listed")
 	}
-	gone, kept := first, second
+	// The listing's run captures in name order, so the closed pane comes
+	// first and keeps it from reaching the other.
+	gone, kept := min(first, second), max(first, second)
 	if err := Kill(ctx, gone); err != nil {
 		t.Fatal(err)
 	}
+
+	sweep, done := WithSweep(ctx)
+	defer done()
 	pane, err := Capture(sweep, kept)
 	if err != nil || !strings.Contains(pane, "still here") {
 		t.Errorf("an open pane was lost with a closed one: %q, %v", pane, err)
 	}
 	if _, err := Capture(sweep, gone); err == nil {
 		t.Error("a closed pane was reported captured")
+	}
+}
+
+// Discovery listed the panes in one tmux run and captured them in another,
+// every second. Once a sweep knows the panes, one run does both.
+func TestASweepListsAndCapturesInOneRun(t *testing.T) {
+	requireTmux(t)
+	ctx := context.Background()
+	first, _ := newSink(t)
+	second, _ := newSink(t)
+	if err := Send(ctx, second, "listed and captured"); err != nil {
+		t.Fatal(err)
+	}
+	capturedSoon(t, ctx, second, "listed and captured")
+	if !listed(t, ctx, first) || !listed(t, ctx, second) {
+		t.Fatal("the panes were not listed")
+	}
+
+	before := runs.Load()
+	sweep, done := WithSweep(ctx)
+	defer done()
+	if !listed(t, sweep, first) {
+		t.Fatal("the sweep did not list a running pane")
+	}
+	pane, err := Capture(sweep, second)
+	if err != nil || !strings.Contains(pane, "listed and captured") {
+		t.Fatalf("capture = %q, %v", pane, err)
+	}
+	if _, err := Capture(sweep, first); err != nil {
+		t.Fatal(err)
+	}
+	if spent := runs.Load() - before; spent != 1 {
+		t.Errorf("a sweep took %d tmux runs to list and capture its panes, want 1", spent)
 	}
 }
 

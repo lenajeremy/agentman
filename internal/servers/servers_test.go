@@ -202,6 +202,35 @@ func TestWatcherConfirmsBeforeShowingAndProbesOnce(t *testing.T) {
 	}
 }
 
+// With no session running, no listener could be one's server, so the
+// machine's sockets are not read; one that is seen again once a session
+// starts must still be seen twice before it is shown.
+func TestWatcherDoesNotScanWithoutSessions(t *testing.T) {
+	scans := 0
+	w := &Watcher{
+		scan: func(context.Context) (Scan, error) {
+			scans++
+			return Scan{Listeners: []Listener{{Port: 3000, PID: 10, Command: "node", Loopback: true}},
+				Cwds: map[int]string{10: "/src/app"}}, nil
+		},
+		tree:      func(context.Context) (Ancestry, error) { return nil, nil },
+		probe:     func(context.Context, int) (string, bool) { return "", true },
+		now:       time.Now,
+		sightings: map[listenerKey]int{},
+		probes:    map[listenerKey]probeResult{},
+	}
+	owners := []Owner{{SessionID: "s", Cwd: "/src/app"}}
+	if _, err := w.Update(context.Background(), owners); err != nil {
+		t.Fatal(err)
+	}
+	if found, err := w.Update(context.Background(), nil); err != nil || len(found) != 0 || scans != 1 {
+		t.Fatalf("with no sessions: %v, %v after %d scans", found, err, scans)
+	}
+	if again, _ := w.Update(context.Background(), owners); len(again["s"]) != 0 {
+		t.Fatalf("a sighting from before the gap counted: %+v", again)
+	}
+}
+
 func TestWatcherRetriesServersThatWereNotReady(t *testing.T) {
 	now := time.Unix(1000, 0)
 	ready := false

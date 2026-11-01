@@ -448,6 +448,40 @@ func TestCodexKeepsSessionsWhenTheProcessProbeCannotSeeTheInstall(t *testing.T) 
 	}
 }
 
+// Where Codex has never written a rollout there is nothing for the probe to
+// decide, so it does not run: on a Mac without Codex it was a pgrep or two
+// every second, for nothing.
+func TestCodexWithNowhereForRolloutsDoesNotProbe(t *testing.T) {
+	src, err := NewCodexSource(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	probed := false
+	src.processCheck = func(context.Context) bool { probed = true; return true }
+	src.listPanes = noPanes
+	found, err := src.Discover(context.Background())
+	if err != nil || len(found) != 0 {
+		t.Fatalf("Discover = %v, %v", found, err)
+	}
+	if probed {
+		t.Error("probed for Codex where it has never written a rollout")
+	}
+}
+
+// The process table a sweep already read answers what `pgrep -x codex` did.
+func TestCodexIsFoundInTheProcessTable(t *testing.T) {
+	for table, want := range map[string]bool{
+		"10 1 /opt/homebrew/bin/codex\n":    true,
+		"10 1 codex\n":                      true,
+		"10 1 node\n11 10 /usr/bin/true\n":  false,
+		"10 1 /Users/me/bin/codex-helper\n": false,
+	} {
+		if got := codexInTree(tmux.ProcessTreeFromTable(table)); got != want {
+			t.Errorf("codexInTree(%q) = %v, want %v", table, got, want)
+		}
+	}
+}
+
 // With no pane to vouch for it, a negative probe still clears everything — the
 // ghost sessions that check exists to remove.
 func TestCodexClearsSessionsWhenNothingIsRunning(t *testing.T) {

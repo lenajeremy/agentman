@@ -36,7 +36,7 @@ func (s *CursorCLISource) Past(ctx context.Context, dir string, limit int) ([]pr
 		live[session.meta.NativeID] = true
 	}
 	s.mu.RUnlock()
-	found := make([]protocol.Session, 0, limit)
+	var found []protocol.Session // sized by what is found; see limitOrDefault
 	for _, chat := range chats {
 		if err := ctx.Err(); err != nil {
 			return nil, err

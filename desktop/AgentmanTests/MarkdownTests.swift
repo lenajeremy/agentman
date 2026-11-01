@@ -57,4 +57,22 @@ final class MarkdownTests: XCTestCase {
         let wrapped = height(String(repeating: "Same, plus the description ", count: 6))
         XCTAssertGreaterThan(wrapped, oneLine + 40, "one line \(oneLine), wrapped \(wrapped)")
     }
+
+    // Parsed replies are kept while they are read, not every one ever shown:
+    // a long day's worth stays within two generations, and a reply read
+    // again parses the same.
+    func testParsedRepliesAreKeptWhileRead() {
+        let first = MarkdownView("**Kept** while read: `\(UUID())`").blocks
+        for index in 0..<(MarkdownCache.generation * 5) {
+            _ = MarkdownView("Reply \(index): **bold** and `code` \(UUID())")
+        }
+        XCTAssertLessThanOrEqual(MarkdownCache.count, MarkdownCache.generation * 2)
+        let reply = "A reply read again: **bold**, `code`\n\n- one\n- two"
+        let parsed = MarkdownView(reply).blocks
+        for index in 0..<(MarkdownCache.generation + 10) {
+            _ = MarkdownView("Another \(index) \(UUID())")
+        }
+        XCTAssertEqual(MarkdownView(reply).blocks.map(\.id), parsed.map(\.id))
+        XCTAssertFalse(first.isEmpty)
+    }
 }

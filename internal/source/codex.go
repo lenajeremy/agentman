@@ -102,15 +102,18 @@ const codexArgvPattern = `(^|[/[:space:]])codex(\.[cm]?js)?([[:space:]]|$)`
 // A missing pgrep (or any other failure) returns true rather than false: it is
 // far better to show a session that has ended than to hide one that is running.
 func codexRunning(ctx context.Context) bool {
-	ctx, cancel := context.WithTimeout(ctx, processCheckTimeout)
-	defer cancel()
-
-	if _, err := exec.LookPath("pgrep"); err != nil {
+	// An exact name match is the cheap probe with no false positives, and it
+	// finds an install whose executable is a binary, as well as the binary an
+	// npm install's launcher starts. The process table the sweep has already
+	// read answers it; `pgrep -x codex` used to, a process of its own every
+	// second.
+	if tree, err := tmux.SnapshotProcessTree(ctx); err == nil && codexInTree(tree) {
 		return true
 	}
-	// An exact name match is the cheap probe with no false positives, and it
-	// finds an install whose executable is a binary.
-	if exec.CommandContext(ctx, "pgrep", "-x", "codex").Run() == nil {
+
+	ctx, cancel := context.WithTimeout(ctx, processCheckTimeout)
+	defer cancel()
+	if _, err := exec.LookPath("pgrep"); err != nil {
 		return true
 	}
 	// An npm install runs through Node, so the process is named `node` and the
@@ -131,6 +134,16 @@ func codexRunning(ctx context.Context) bool {
 		return false
 	}
 	return true
+}
+
+// codexInTree reports whether a process in the table was run as codex.
+func codexInTree(tree *tmux.ProcessTree) bool {
+	for _, pid := range tree.PIDs() {
+		if filepath.Base(tree.Command(pid)) == "codex" {
+			return true
+		}
+	}
+	return false
 }
 
 // isCodexPane reports whether a tmux session agentman owns is running Codex.
@@ -365,6 +378,12 @@ func (s *CodexSource) sessionsDir() string {
 	return filepath.Join(s.home, ".codex", "sessions")
 }
 
+// keepsRollouts reports whether Codex has anywhere to have written one.
+func (s *CodexSource) keepsRollouts() bool {
+	info, err := os.Stat(s.sessionsDir())
+	return err == nil && info.IsDir()
+}
+
 // Discover implements Source.
 func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 	// Codex writes no pid to its rollout, so a session is matched to a tmux
@@ -390,7 +409,11 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 		s.holdWaiting(daemon)
 	}
 
-	if !daemonReady && !anyCodexPane(panes) && s.processCheck != nil && !s.processCheck(ctx) {
+	// Without a pane or the daemon, a session can only come from a rollout:
+	// with nowhere for rollouts to be, as where Codex was never run, there is
+	// nothing for the probe to decide.
+	if !daemonReady && !anyCodexPane(panes) &&
+		(!s.keepsRollouts() || (s.processCheck != nil && !s.processCheck(ctx))) {
 		s.mu.Lock()
 		s.sessions = map[string]codexSession{}
 		s.mu.Unlock()

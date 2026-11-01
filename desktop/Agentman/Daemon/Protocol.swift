@@ -56,6 +56,7 @@ enum RequestType: String, Codable, Sendable {
     case listWorktrees = "list_worktrees"
     case removeWorktree = "remove_worktree"
     case usage
+    case limits
     case pairCode = "pair_code"
     case devices
     case search
@@ -147,7 +148,8 @@ struct DaemonRequest: Codable, Sendable {
     var withFile: Bool?
     /// The files a git_commit commits.
     var paths: [String]?
-    /// Removes a worktree with uncommitted changes or an agent in it.
+    /// Removes a worktree with uncommitted changes or an agent in it; reads
+    /// plan limits again rather than the daemon's last answer.
     var force: Bool?
     /// Which way a review_artifact goes: approved, or changes asked for.
     var approve: Bool?
@@ -207,6 +209,8 @@ struct DaemonEvent: Codable, Sendable {
     var worktree: Worktree?
     var worktrees: [Worktree]?
     var usage: Usage?
+    /// What is left of each agent's plan, on "limits".
+    var limits: Limits?
     var pairCode: PairCode?
     var devices: [Device]?
     var search: MessageSearchResults?
@@ -515,6 +519,16 @@ struct Usage: Codable, Sendable, Equatable {
         var cost: Double
         /// False for a model with no known price: its cost is left out.
         var priced: Bool
+        /// The part Claude ran in fast mode, at a higher price, and the part
+        /// spent advising another model during its turns: both counted above
+        /// too. Absent when there was none, and from older daemons.
+        var fast: Part?
+        var advisor: Part?
+    }
+    /// Part of a model's share.
+    struct Part: Codable, Sendable, Equatable {
+        var tokens: Tokens
+        var cost: Double
     }
 
     var days: Int
@@ -531,6 +545,42 @@ struct Usage: Codable, Sendable, Equatable {
     var models: [Model]?
     /// Records that couldn't be read: usage may be short.
     var skipped: Int?
+}
+
+/// What is left of each agent's plan, as each agent reports it: Claude
+/// Code's five hours and week, Codex's ChatGPT plan.
+struct Limits: Codable, Sendable, Equatable {
+    struct Agent: Codable, Sendable, Equatable {
+        var kind: String
+        /// "Max", "Plus", when the agent says.
+        var plan: String?
+        /// When the numbers were read, in milliseconds since 1970.
+        var checkedAt: Int64
+        /// The numbers the agent wrote down with its last reply, rather than
+        /// asked of the account just now.
+        var lastTurn: Bool?
+        var windows: [Window]?
+        /// Why there are no numbers, or why the ones shown are old.
+        var problem: String?
+
+        var checked: Date { Date(timeIntervalSince1970: Double(checkedAt) / 1000) }
+    }
+    struct Window: Codable, Sendable, Equatable, Identifiable {
+        var id: String
+        /// "session", "weekly", "monthly" or "other".
+        var kind: String
+        var label: String
+        /// The share used, 0 to 100.
+        var used: Double
+        /// When it resets, in milliseconds since 1970.
+        var resetsAt: Int64?
+        /// How long the window lasts.
+        var minutes: Int?
+
+        var resets: Date? { resetsAt.flatMap { $0 > 0 ? Date(timeIntervalSince1970: Double($0) / 1000) : nil } }
+    }
+
+    var agents: [Agent]
 }
 
 struct Worktree: Codable, Sendable, Hashable, Identifiable {
@@ -910,6 +960,26 @@ struct Session: Codable, Sendable, Identifiable, Hashable {
     }
 
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
+
+    /// Every field the same, those == leaves out included: for a view that
+    /// is not drawn again while its session hasn't changed at all.
+    func identical(to other: Session) -> Bool {
+        self == other && kind == other.kind && alerts == other.alerts && cwd == other.cwd && inject == other.inject
+            && startedAt == other.startedAt && modelScope == other.modelScope && contextPercent == other.contextPercent
+            && question == other.question && previous == other.previous
+    }
+
+    /// The same in every field but when it last did something and how full
+    /// its context is, which change as it works and which a conversation
+    /// doesn't show.
+    func identical(besidesActivityTo other: Session) -> Bool {
+        var mine = self, theirs = other
+        mine.lastActivityAt = nil
+        theirs.lastActivityAt = nil
+        mine.contextPercent = nil
+        theirs.contextPercent = nil
+        return mine.identical(to: theirs)
+    }
 
     /// Whether this app can send to it. A session the daemon cannot reach
     /// shows its conversation, read-only.

@@ -269,6 +269,7 @@ export type RequestType =
   | "find_files"
   | "attach_file"
   | "usage"
+  | "limits"
   | "search";
 
 export interface Request {
@@ -289,6 +290,8 @@ export interface Request {
   device?: DeviceInfo;
   /** The range on usage: 1, 7, 30, 90, 180 or 365 days, or 0 for all of it. */
   days?: number;
+  /** Reads plan limits again on "limits", rather than the Mac's last answer. */
+  force?: boolean;
   /** An agent's own alerts on or off, on set_agent_alerts. */
   alerts?: boolean;
   /** Chooses an option on answer_question. */
@@ -441,6 +444,7 @@ export type EventType =
   | "files"
   | "attached"
   | "usage"
+  | "limits"
   | "search";
 
 export interface WorkspaceEntry { name: string; directory: boolean; size?: number }
@@ -572,6 +576,17 @@ export interface UsageModel {
   cost: number;
   /** False for a model with no known price: its cost is left out. */
   priced: boolean;
+  /** The part Claude ran in fast mode, at a higher price, and the part spent
+   *  advising another model during its turns: both counted above too.
+   *  Absent when there was none, and from older Macs. */
+  fast?: UsagePart | null;
+  advisor?: UsagePart | null;
+}
+
+/** Part of a model's share. */
+export interface UsagePart {
+  tokens: UsageTokens;
+  cost: number;
 }
 
 /** What the agents on the Mac spent over a range, from their own records. */
@@ -617,6 +632,42 @@ export interface Usage {
   skipped?: number;
 }
 
+/** One window of a plan: a share used that goes back to nothing when it
+ *  resets. */
+export interface LimitWindow {
+  id: string;
+  /** "session", "weekly", "monthly" or "other". */
+  kind: string;
+  /** "Session", "Weekly", "Weekly · Opus". */
+  label: string;
+  /** The share used, 0 to 100. */
+  used: number;
+  /** When it resets, in ms since 1970. */
+  resetsAt?: number;
+  /** How long the window lasts. */
+  minutes?: number;
+}
+
+/** What is left of one agent's plan, as the agent itself reports it. */
+export interface AgentLimits {
+  kind: string;
+  /** "Max", "Plus", when the agent says. */
+  plan?: string;
+  /** When the numbers were read, in ms since 1970. */
+  checkedAt: number;
+  /** The numbers the agent wrote down with its last reply, not asked of the
+   *  account just now. */
+  lastTurn?: boolean;
+  windows?: LimitWindow[];
+  /** Why there are no numbers, or why the ones shown are old. */
+  problem?: string;
+}
+
+/** What is left of each agent's plan on the Mac. */
+export interface Limits {
+  agents: AgentLimits[];
+}
+
 export interface DaemonEvent {
   type: EventType;
   sessionId?: string;
@@ -656,6 +707,8 @@ export interface DaemonEvent {
   daemon?: DaemonInfo;
   /** What the agents spent, on "usage". */
   usage?: Usage;
+  /** What is left of each agent's plan, on "limits". */
+  limits?: Limits;
   /** What was said that matched, on "search". */
   search?: SearchResults;
   /** One entry in Agentman's conversation, new or finished, on
@@ -936,7 +989,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     "manager_brief", "manager_schedules", "manager_settings",
     "manager_permission", "manager_reset", "knowledge", "keys",
     "transcript", "voice_account", "commands", "command_panel", "files", "attached", "usage",
-    "search",
+    "limits", "search",
   ] as const)) return null;
 
   switch (value.type) {
@@ -957,6 +1010,9 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
       break;
     case "usage":
       if (!isUsage(value.usage)) return null;
+      break;
+    case "limits":
+      if (!isLimits(value.limits)) return null;
       break;
     case "search":
       if (!isSearchResults(value.search)) return null;
@@ -1190,7 +1246,24 @@ function isUsage(value: unknown): value is Usage {
       isRecord(bucket) && finiteNumber(bucket.start) && isNumberMap(bucket.cost) && isNumberMap(bucket.tokens))) &&
     (value.models === undefined || value.models === null || boundedArray(value.models, 1000, (model): model is UsageModel =>
       isRecord(model) && boundedString(model.model, 256) && boundedString(model.kind, 64, true) &&
-      isTokens(model.tokens) && finiteNumber(model.cost) && typeof model.priced === "boolean"));
+      isTokens(model.tokens) && finiteNumber(model.cost) && typeof model.priced === "boolean" &&
+      isUsagePart(model.fast) && isUsagePart(model.advisor)));
+}
+
+function isUsagePart(value: unknown): boolean {
+  return value === undefined || value === null || (isRecord(value) && isTokens(value.tokens) && finiteNumber(value.cost));
+}
+
+function isLimits(value: unknown): value is Limits {
+  return isRecord(value) &&
+    boundedArray(value.agents, 16, (agent): agent is AgentLimits =>
+      isRecord(agent) && boundedString(agent.kind, 64, true) && finiteNumber(agent.checkedAt) &&
+      optionalBoundedString(agent.plan, 64) && optionalBoundedString(agent.problem, 1000) &&
+      (agent.lastTurn === undefined || typeof agent.lastTurn === "boolean") &&
+      (agent.windows === undefined || agent.windows === null || boundedArray(agent.windows, 32, (window): window is LimitWindow =>
+        isRecord(window) && boundedString(window.id, 128, true) && boundedString(window.kind, 32, true) &&
+        boundedString(window.label, 128, true) && finiteNumber(window.used) &&
+        optionalFiniteNumber(window.resetsAt) && optionalFiniteNumber(window.minutes))));
 }
 
 function isSearchResults(value: unknown): value is SearchResults {

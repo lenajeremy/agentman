@@ -36,8 +36,9 @@ func (s *CodexSource) Past(ctx context.Context, dir string, limit int) ([]protoc
 	limit = limitOrDefault(limit)
 
 	rollouts := s.allRollouts()
-	found := make([]protocol.Session, 0, limit)
-	seen := make(map[string]bool, limit)
+	// Sized by what is found, not by limit; see limitOrDefault.
+	var found []protocol.Session
+	seen := map[string]bool{}
 
 	for _, rollout := range rollouts {
 		if err := ctx.Err(); err != nil {

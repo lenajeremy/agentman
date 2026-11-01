@@ -35,7 +35,7 @@ func (s *OpenCodeSource) Past(ctx context.Context, dir string, limit int) ([]pro
 	limit = limitOrDefault(limit)
 
 	listed, err := s.listEverySession(ctx)
-	found := make([]protocol.Session, 0, limit)
+	var found []protocol.Session // sized by what is found; see limitOrDefault
 	for _, item := range listed.sessions {
 		if len(found) == limit {
 			break
