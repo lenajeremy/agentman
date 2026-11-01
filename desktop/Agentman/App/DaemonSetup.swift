@@ -31,6 +31,12 @@ final class DaemonSetup {
         var bundled: String?
         /// The home ~/.agentman is in.
         var home: String
+        /// Where a link to am may go so it works in Terminal: Homebrew's
+        /// folder when PATH looks there first and the user can write it,
+        /// else the other, which the Mac's own PATH has.
+        var commandFolders = (preferred: "/opt/homebrew/bin", fallback: "/usr/local/bin")
+        /// Where tmux usually is, looked in beside PATH.
+        var toolFolders = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"]
 
         /// The copy the app manages, which the login service runs.
         var managed: String { (home as NSString).appendingPathComponent(".agentman/bin/am") }
@@ -103,7 +109,14 @@ final class DaemonSetup {
     private(set) var upgrading = false
     private(set) var upgradeProblem: String?
 
+    /// Where a terminal finds am and tmux, once looked; nil until then.
+    private(set) var shellTools: ShellTools?
+    /// Putting am on PATH, and why it didn't work.
+    private(set) var linking = false
+    private(set) var linkProblem: String?
+
     let runner: any AmRunner
+    let shell: any ShellSystem
     let paths: Paths
     /// Whether this app may run am setup here at all, from the screen or
     /// from Settings.
@@ -129,10 +142,11 @@ final class DaemonSetup {
     /// How long a missing daemon is given at launch before the app sets up.
     var absenceGrace: Duration = .seconds(3)
 
-    init(runner: any AmRunner = ProcessAmRunner(), paths: Paths = .app, allowed: Bool = DaemonSetup.mayRunHere,
-         automatic: Bool? = nil, defaults: UserDefaults = .standard,
+    init(runner: any AmRunner = ProcessAmRunner(), shell: any ShellSystem = MacShell(), paths: Paths = .app,
+         allowed: Bool = DaemonSetup.mayRunHere, automatic: Bool? = nil, defaults: UserDefaults = .standard,
          appVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "") {
         self.runner = runner
+        self.shell = shell
         self.paths = paths
         self.allowed = allowed && paths.bundled != nil
         // By itself only on the user's own daemon: an app pointed at a test
@@ -456,6 +470,149 @@ final class DaemonSetup {
         case "npm": "Installed with npm"
         case "download": "Installed with the install script, or by hand"
         default: "An am from before this app"
+        }
+    }
+
+    // MARK: - The am command
+
+    /// A program a terminal finds on PATH.
+    struct Found: Equatable, Sendable {
+        /// Where PATH finds it.
+        var path: String
+        /// Where it really is, links followed.
+        var real: String
+    }
+
+    /// What a terminal finds: am, and tmux.
+    struct ShellTools: Equatable, Sendable {
+        /// The login shell's PATH; empty when it didn't say.
+        var path: [String]
+        var am: Found?
+        /// tmux, on PATH or where it is usually put.
+        var tmux: String?
+    }
+
+    /// Looks where a terminal finds am and tmux.
+    func lookAtShell() async {
+        let path = await shell.loginPath() ?? []
+        let tmux = Self.find("tmux", in: path + paths.toolFolders.filter { !path.contains($0) })
+        shellTools = ShellTools(path: path, am: Self.find("am", in: path), tmux: tmux?.path)
+    }
+
+    /// The first program called name in folders, as a shell finds it.
+    nonisolated static func find(_ name: String, in folders: [String]) -> Found? {
+        for folder in folders {
+            let path = (folder as NSString).appendingPathComponent(name)
+            var isFolder: ObjCBool = false
+            if FileManager.default.fileExists(atPath: path, isDirectory: &isFolder), !isFolder.boolValue,
+               FileManager.default.isExecutableFile(atPath: path) {
+                return Found(path: path, real: real(path))
+            }
+        }
+        return nil
+    }
+
+    /// path with every link on the way followed.
+    nonisolated static func real(_ path: String) -> String {
+        guard let resolved = realpath(path, nil) else { return path }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
+
+    /// Where the link to am goes, and whether making it needs the
+    /// administrator prompt: the preferred folder when PATH looks there
+    /// before the fallback and it can be written, else the fallback.
+    nonisolated static func linkFolder(path: [String], preferred: String, fallback: String,
+                                       writable: (String) -> Bool) -> (folder: String, admin: Bool) {
+        if let first = path.firstIndex(of: preferred), first < (path.firstIndex(of: fallback) ?? .max), writable(preferred) {
+            return (preferred, false)
+        }
+        return (fallback, !writable(fallback))
+    }
+
+    /// What Settings says of the am command, and whether it offers to put
+    /// it on PATH.
+    struct CommandStatus: Equatable {
+        var detail: String
+        /// The app's copy is what a terminal runs.
+        var installed = false
+        /// Install would link the app's copy into this folder.
+        var installTo: String?
+        /// Looking at the shell, or making the link.
+        var busy = false
+        var problem: String?
+    }
+
+    func commandStatus() -> CommandStatus {
+        let managedThere = FileManager.default.isExecutableFile(atPath: paths.managed)
+        var status = Self.commandStatus(tools: shellTools, managed: paths.managed, managedThere: managedThere,
+                                        allowed: allowed, folders: paths.commandFolders,
+                                        writable: FileManager.default.isWritableFile(atPath:))
+        status.busy = status.busy || linking
+        status.problem = linkProblem
+        return status
+    }
+
+    nonisolated static func commandStatus(tools: ShellTools?, managed: String, managedThere: Bool, allowed: Bool,
+                                          folders: (preferred: String, fallback: String),
+                                          writable: (String) -> Bool) -> CommandStatus {
+        guard let tools else { return CommandStatus(detail: "Looking…", busy: true) }
+        let home = (managed as NSString).abbreviatingWithTildeInPath
+        if let am = tools.am {
+            if am.real == real(managed) {
+                return CommandStatus(detail: "\(am.path) runs the app's copy, \(home).", installed: true)
+            }
+            return CommandStatus(detail: "\(am.path), \(origin(am.real)). It works with the app's am serve.")
+        }
+        guard allowed else {
+            return CommandStatus(detail: "Not on your PATH.")
+        }
+        guard managedThere else {
+            return CommandStatus(detail: "Not on your PATH. Set up Agentman first: the command runs the app's copy, \(home).")
+        }
+        let (folder, admin) = linkFolder(path: tools.path, preferred: folders.preferred, fallback: folders.fallback, writable: writable)
+        return CommandStatus(detail: "Not on your PATH. Install links \(folder)/am to the app's copy, \(home)" +
+                             (admin ? ", and asks for your password once." : "."),
+                             installTo: folder)
+    }
+
+    /// Where an am came from, by where it really is.
+    nonisolated static func origin(_ real: String) -> String {
+        if real.contains(".app/Contents/") { return "inside an app" }
+        if real.contains("/Caskroom/") || real.contains("/Cellar/") { return "from Homebrew" }
+        if real.contains("/node_modules/") { return "from npm" }
+        return "installed with the install script or by hand"
+    }
+
+    /// Install: makes am work in Terminal, with a link to the copy the app
+    /// manages in a folder on PATH, through the administrator prompt when
+    /// that folder isn't the user's to write. Only when the user asks.
+    func installCommand() async {
+        guard allowed, !linking, let tools = shellTools, tools.am == nil,
+              FileManager.default.isExecutableFile(atPath: paths.managed) else { return }
+        let (folder, admin) = Self.linkFolder(path: tools.path, preferred: paths.commandFolders.preferred,
+                                              fallback: paths.commandFolders.fallback,
+                                              writable: FileManager.default.isWritableFile(atPath:))
+        let link = (folder as NSString).appendingPathComponent("am")
+        linkProblem = nil
+        // An am the PATH doesn't reach is someone's, and stays.
+        if FileManager.default.isExecutableFile(atPath: link), Self.real(link) != Self.real(paths.managed) {
+            linkProblem = "There is already an am at \(link), which your PATH doesn't reach."
+            return
+        }
+        linking = true
+        let result = await shell.link(link, to: paths.managed, admin: admin)
+        linking = false
+        switch result {
+        case .linked:
+            await lookAtShell()
+            if shellTools?.am == nil {
+                linkProblem = "Made \(link), but your shell's PATH doesn't include \(folder)."
+            }
+        case .cancelled:
+            break
+        case .failed(let why):
+            linkProblem = why
         }
     }
 }

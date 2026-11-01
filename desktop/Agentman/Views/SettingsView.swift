@@ -269,6 +269,7 @@ private struct GeneralPage: View {
                 }
             }
         }
+        CommandLineSection()
         about
     }
 

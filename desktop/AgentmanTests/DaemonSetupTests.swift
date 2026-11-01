@@ -284,6 +284,123 @@ final class DaemonSetupTests: XCTestCase {
                        setup.upgradeProblem)
     }
 
+    // MARK: The am command
+
+    /// A folder of the test's own, standing for one on PATH.
+    private func folder(_ name: String) throws -> String {
+        let url = home.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url.path
+    }
+
+    private func program(_ name: String, in folder: String) throws -> String {
+        let path = (folder as NSString).appendingPathComponent(name)
+        try Data("#!/bin/sh\n".utf8).write(to: URL(fileURLWithPath: path))
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+        return path
+    }
+
+    private func setup(am: FakeAm, shell: FakeShell, brew: String, local: String, tools: [String] = []) -> DaemonSetup {
+        var paths = DaemonSetup.Paths(bundled: Self.bundled, home: home.path)
+        paths.commandFolders = (brew, local)
+        paths.toolFolders = tools
+        return DaemonSetup(runner: am, shell: shell, paths: paths, allowed: true, automatic: false, defaults: defaults, appVersion: "0.39.0")
+    }
+
+    func testWhereTheLinkGoes() {
+        let brew = "/opt/homebrew/bin", local = "/usr/local/bin"
+        let everything: (String) -> Bool = { _ in true }
+        XCTAssertTrue(DaemonSetup.linkFolder(path: [brew, local, "/usr/bin"], preferred: brew, fallback: local, writable: everything) == (brew, false))
+        XCTAssertTrue(DaemonSetup.linkFolder(path: [local, brew], preferred: brew, fallback: local, writable: everything) == (local, false),
+                      "PATH looks in /usr/local/bin first")
+        XCTAssertTrue(DaemonSetup.linkFolder(path: ["/usr/bin", local], preferred: brew, fallback: local, writable: everything) == (local, false))
+        XCTAssertTrue(DaemonSetup.linkFolder(path: [brew, local], preferred: brew, fallback: local, writable: { _ in false }) == (local, true),
+                      "neither is the user's to write: the administrator prompt")
+    }
+
+    func testFindingAmOnPath() throws {
+        let first = try folder("first"), second = try folder("second")
+        try FileManager.default.createDirectory(atPath: (first as NSString).appendingPathComponent("am"), withIntermediateDirectories: true)
+        let am = try program("am", in: second)
+        XCTAssertEqual(DaemonSetup.find("am", in: [first, second])?.path, am, "a folder called am is no program")
+        XCTAssertNil(DaemonSetup.find("tmux", in: [first, second]))
+        XCTAssertEqual(DaemonSetup.origin("/opt/homebrew/Caskroom/agentman/0.39.0/am"), "from Homebrew")
+        XCTAssertEqual(DaemonSetup.origin("/Applications/Agentman.app/Contents/Helpers/am"), "inside an app")
+        XCTAssertEqual(DaemonSetup.origin("/usr/local/lib/node_modules/agentman/bin/am"), "from npm")
+    }
+
+    func testInstallingTheCommand() async throws {
+        let am = FakeAm(setup: [])
+        try manage("0.39.0", am: am)
+        let brew = try folder("brew"), local = try folder("local")
+        let shell = FakeShell(path: [brew, local, "/usr/bin"])
+        let setup = setup(am: am, shell: shell, brew: brew, local: local)
+        XCTAssertEqual(setup.commandStatus().detail, "Looking…")
+        await setup.lookAtShell()
+        let before = setup.commandStatus()
+        XCTAssertEqual(before.installTo, brew)
+        XCTAssertFalse(before.installed)
+
+        await setup.installCommand()
+        XCTAssertEqual(shell.links, [.init(link: brew + "/am", target: setup.paths.managed, admin: false)])
+        let after = setup.commandStatus()
+        XCTAssertTrue(after.installed, after.detail)
+        XCTAssertNil(after.problem)
+        XCTAssertNil(after.installTo)
+    }
+
+    func testInstallAsksForThePasswordWhereItMust() async throws {
+        let am = FakeAm(setup: [])
+        try manage("0.39.0", am: am)
+        let local = home.appendingPathComponent("not-yet").path
+        let shell = FakeShell(path: [local, "/usr/bin"])
+        let setup = setup(am: am, shell: shell, brew: home.appendingPathComponent("no-brew").path, local: local)
+        await setup.lookAtShell()
+        XCTAssertTrue(setup.commandStatus().detail.hasSuffix("and asks for your password once."), setup.commandStatus().detail)
+        await setup.installCommand()
+        XCTAssertEqual(shell.links.map(\.admin), [true])
+        XCTAssertTrue(setup.commandStatus().installed)
+
+        // Cancelled at the prompt: nothing said.
+        let cancelling = FakeShell(path: [home.appendingPathComponent("other").path], result: .cancelled)
+        let again = self.setup(am: am, shell: cancelling, brew: "/nonexistent-brew", local: home.appendingPathComponent("other").path)
+        await again.lookAtShell()
+        await again.installCommand()
+        XCTAssertEqual(cancelling.links.count, 1)
+        XCTAssertNil(again.commandStatus().problem)
+        XCTAssertFalse(again.commandStatus().installed)
+    }
+
+    func testAnAmAlreadyOnPathIsSaidAndKept() async throws {
+        let am = FakeAm(setup: [])
+        try manage("0.39.0", am: am)
+        let brew = try folder("brew"), local = try folder("local")
+        let theirs = try program("am", in: brew)
+        let setup = setup(am: am, shell: FakeShell(path: [brew, local]), brew: brew, local: local)
+        await setup.lookAtShell()
+        let status = setup.commandStatus()
+        XCTAssertEqual(status.detail, "\(theirs), installed with the install script or by hand. It works with the app's am serve.")
+        XCTAssertNil(status.installTo)
+
+        // An am the PATH doesn't reach is left as it is.
+        let hidden = try folder("hidden")
+        _ = try program("am", in: hidden)
+        let shell = FakeShell(path: [local])
+        let other = self.setup(am: am, shell: shell, brew: "/nonexistent-brew", local: hidden)
+        await other.lookAtShell()
+        await other.installCommand()
+        XCTAssertEqual(shell.links, [])
+        XCTAssertEqual(other.commandStatus().problem, "There is already an am at \(hidden)/am, which your PATH doesn't reach.")
+    }
+
+    func testWithoutTheAppsCopyThereIsNothingToLink() async throws {
+        let local = try folder("local")
+        let setup = setup(am: FakeAm(setup: []), shell: FakeShell(path: [local]), brew: "/nonexistent-brew", local: local)
+        await setup.lookAtShell()
+        XCTAssertNil(setup.commandStatus().installTo)
+        XCTAssertTrue(setup.commandStatus().detail.contains("Set up Agentman first"))
+    }
+
     // MARK: Never on this Mac
 
     func testNothingRunsWithoutLeave() async throws {
@@ -304,6 +421,16 @@ final class DaemonSetupTests: XCTestCase {
         XCTAssertFalse(store.setup.automatic)
         let refused = await ProcessAmRunner().run("/usr/bin/true", []) { _ in }
         XCTAssertEqual(refused.status, -1, "the real runner runs nothing under tests")
+        let shell = MacShell()
+        let path = await shell.loginPath()
+        XCTAssertNil(path, "the user's shell profile isn't run")
+        let linked = await shell.link("/nonexistent/am", to: "/nonexistent/target", admin: true)
+        XCTAssertEqual(linked, .failed("Nothing is linked under tests."))
+        XCTAssertFalse(store.setup.paths.home.hasPrefix(NSHomeDirectory() + "/"), "not even a look at the user's ~/.agentman")
+    }
+
+    func testAppleScriptQuoting() {
+        XCTAssertEqual(MacShell.quote(#"/Users/a "b"\c"#), #""/Users/a \"b\"\\c""#)
     }
 
     // The am this build carries says it is the app's (it only says its
@@ -424,6 +551,42 @@ final class DaemonSetupTests: XCTestCase {
         await upgrading.value
     }
 
+    /// Settings' am command row in each state, with a Mac's own paths.
+    func testRenderCommandRow() throws {
+        guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
+        let managed = "/Users/me/.agentman/bin/am"
+        let path = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
+        func status(_ am: DaemonSetup.Found?, managedThere: Bool = true, writable: Bool = false) -> DaemonSetup.CommandStatus {
+            DaemonSetup.commandStatus(tools: DaemonSetup.ShellTools(path: path, am: am), managed: managed, managedThere: managedThere,
+                                      allowed: true, folders: ("/opt/homebrew/bin", "/usr/local/bin"), writable: { _ in writable })
+        }
+        var failed = status(nil)
+        failed.problem = "The administrator prompt couldn't be shown: the app isn't allowed to ask for it."
+        let states: [(String, DaemonSetup.CommandStatus)] = [
+            ("Looking", DaemonSetup.commandStatus(tools: nil, managed: managed, managedThere: true, allowed: true,
+                                                  folders: ("/opt/homebrew/bin", "/usr/local/bin"), writable: { _ in true })),
+            ("Not on PATH: Install, with the password", status(nil)),
+            ("Not on PATH: Install into Homebrew's folder", status(nil, writable: true)),
+            ("Not on PATH, nothing set up yet", status(nil, managedThere: false)),
+            ("Installed", status(DaemonSetup.Found(path: "/usr/local/bin/am", real: managed))),
+            ("Homebrew's", status(DaemonSetup.Found(path: "/opt/homebrew/bin/am", real: "/opt/homebrew/Caskroom/agentman/0.39.0/am"))),
+            ("Install failed", failed),
+        ]
+        for dark in [false, true] {
+            let page = VStack(alignment: .leading, spacing: 18) {
+                ForEach(Array(states.enumerated()), id: \.offset) { _, state in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(state.0).font(TextStyle.label).foregroundStyle(Palette.faint).padding(.leading, 4)
+                        CommandLineRows(command: state.1)
+                    }
+                }
+            }
+            .padding(24)
+            try render(page, size: CGSize(width: 620, height: 1080), dark: dark, store: store(FakeAm(setup: [])),
+                       to: URL(fileURLWithPath: out).appendingPathComponent("command-\(dark ? "dark" : "light").png"))
+        }
+    }
+
     private func store(_ am: FakeAm) -> AgentsStore {
         AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-setup.sock"), setup: setup(am: am, automatic: false))
     }
@@ -503,5 +666,44 @@ final class FakeAm: AmRunner, @unchecked Sendable {
         held = nil
         lock.unlock()
         waiting?.resume()
+    }
+}
+
+/// A shell whose PATH is the test's folders and whose links go there: no
+/// profile is run, nothing outside the test's folders is written, and no
+/// password is asked for.
+final class FakeShell: ShellSystem, @unchecked Sendable {
+    struct Link: Equatable {
+        var link: String
+        var target: String
+        var admin: Bool
+    }
+
+    private let lock = NSLock()
+    private let path: [String]
+    private let result: LinkResult
+    private var made: [Link] = []
+
+    init(path: [String], result: LinkResult = .linked) {
+        self.path = path
+        self.result = result
+    }
+
+    var links: [Link] { lock.withLock { made } }
+
+    func loginPath() async -> [String]? { path }
+
+    func link(_ link: String, to target: String, admin: Bool) async -> LinkResult {
+        lock.withLock { made.append(Link(link: link, target: target, admin: admin)) }
+        guard result == .linked else { return result }
+        let files = FileManager.default
+        try? files.createDirectory(atPath: (link as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try? files.removeItem(atPath: link)
+        do {
+            try files.createSymbolicLink(atPath: link, withDestinationPath: target)
+            return .linked
+        } catch {
+            return .failed(error.localizedDescription)
+        }
     }
 }
