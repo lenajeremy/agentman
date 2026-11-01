@@ -108,7 +108,8 @@ final class LoaderTests: XCTestCase {
     func testTheLayersMoveAsTheDrawingDoes() throws {
         for dark in [false, true] {
             for step in 0..<24 {
-                let time = Double(step) * Loader.hold * 2 / 24 + 0.013
+                // Between frames the window server is given, where it guesses most.
+                let time = Double(step) * Loader.hold * 2 / 24 + 0.5 / LoaderLayer.coloursPerSecond
                 let drawn = try pixels(image(Loader(at: time), look: dark ? .darkAqua : .aqua, scale: 8))
                 let moved = try pixels(layers(at: time, dark: dark, scale: 8))
                 XCTAssertEqual(drawn.count, moved.count)

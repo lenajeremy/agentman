@@ -207,7 +207,7 @@ final class LoaderLayer: CALayer {
     /// breathing of the arc and its gradient with it, and the colours
     /// flowing, whose round is `period`.
     private func animate(_ colors: [[CGColor]], period: Double, clock: (media: CFTimeInterval, reference: TimeInterval)) {
-        let fps = Self.framesPerSecond
+        let fps = Self.breathsPerSecond
         // Begun as long before now as the clock is into each period, so the
         // ring is where the drawn one would be.
         func repeating(_ animation: CAAnimation, period: Double) -> CAAnimation {
@@ -245,9 +245,14 @@ final class LoaderLayer: CALayer {
         gradient.colors = colors.first
     }
 
-    /// Frames a second the colours and the breathing are given at; the
-    /// window server goes smoothly from one to the next.
-    static let framesPerSecond = 60.0
+    /// Frames a second the breathing and the colours are given at; the
+    /// window server goes in straight lines from one to the next, which on
+    /// curves this gentle is within a fraction of a degree and of a shade.
+    /// Each frame is work for every ring that appears: the colours most, as
+    /// each is converted for the screen, and a new step in a conversation
+    /// brings a new ring. At 60 a second, that was most of what a step cost.
+    static let breathsPerSecond = 30.0
+    static let coloursPerSecond = 20.0
 
     /// The stops' colours through one round of every colour, a frame at a
     /// time; worked out once for each set of colours, as resolving and
@@ -258,8 +263,8 @@ final class LoaderLayer: CALayer {
         if let known = made[colors] { return known }
         let palette = colors.map { Color($0) }
         let period = Loader.hold * Double(max(1, colors.count))
-        let frames = (0...Int((period * framesPerSecond).rounded())).map { frame in
-            Loader.stops(Double(frame) / framesPerSecond, colors: palette).map { $0.color.resolve(in: environment).cgColor }
+        let frames = (0...Int((period * coloursPerSecond).rounded())).map { frame in
+            Loader.stops(Double(frame) / coloursPerSecond, colors: palette).map { $0.color.resolve(in: environment).cgColor }
         }
         if made.count > 8 { made.removeAll() }
         made[colors] = frames
