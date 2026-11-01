@@ -145,6 +145,8 @@ final class LoaderLayer: CALayer {
     private let gradient = CAGradientLayer()
     private let arc = CAShapeLayer()
     private var shown: (size: CGFloat, colors: [Color.Resolved])?
+    /// The colours it shows in, as resolved for its appearance.
+    var colors: [Color.Resolved] { shown?.colors ?? [] }
 
     /// The screen's pixels to a point, for the arc and gradient to be drawn at.
     var scale: CGFloat = 2 {

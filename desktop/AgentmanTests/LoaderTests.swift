@@ -126,6 +126,35 @@ final class LoaderTests: XCTestCase {
         }
     }
 
+    // In a window, the moving ring takes the window's appearance, and turns
+    // to the other when the window does, as the drawn one did at its next
+    // frame.
+    func testTheMovingRingFollowsTheAppearance() throws {
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { throw XCTSkip("still with reduced motion") }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 40, height: 40), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.alphaValue = 0
+        window.ignoresMouseEvents = true
+        window.appearance = NSAppearance(named: .aqua)
+        window.contentView = NSHostingView(rootView: Loader().padding(10))
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil) }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        func ring(in view: NSView) -> LoaderView? {
+            (view as? LoaderView) ?? view.subviews.lazy.compactMap(ring(in:)).first
+        }
+        let shown = try XCTUnwrap(ring(in: try XCTUnwrap(window.contentView)), "the moving ring, not a drawing")
+        var light = EnvironmentValues()
+        light.colorScheme = .light
+        XCTAssertEqual(shown.ring.colors, Palette.loader.map { $0.resolve(in: light) })
+        window.appearance = NSAppearance(named: .darkAqua)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        var dark = EnvironmentValues()
+        dark.colorScheme = .dark
+        XCTAssertEqual(shown.ring.colors, Palette.loader.map { $0.resolve(in: dark) })
+        XCTAssertNotNil(shown.ring.animation(forKey: "turn") ?? shown.ring.sublayers?.first?.animation(forKey: "turn"), "it turns")
+    }
+
     // The colours flow round the layers' ring as round the drawn one.
     func testTheLayersColoursFlowRoundTheRing() throws {
         func redAndBlue(at time: TimeInterval) throws -> (red: Int, blue: Int) {
