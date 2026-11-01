@@ -2,56 +2,87 @@
   "url": "https://testflight.apple.com/join/UcJvsjED",
   "builds": [
     {
-      "build": 30,
-      "version": "0.5.0",
-      "date": "2026-10-20T05:11:31.112Z",
+      "build": 41,
+      "version": "0.14.1",
+      "date": "2026-11-01T03:47:44.166Z",
       "changes": [
-        "Messages you send while Claude is working now stay in the chat, marked Pending, until Claude reads them. Tap Send now to have it read them straight away."
+        "Picking a command from the \"/\" menu now puts it in the message box and closes the menu, so you can send it straight away."
       ]
     },
     {
-      "build": 27,
-      "version": "0.2.0",
-      "date": "2026-10-12T09:14:31.136Z",
+      "build": 40,
+      "version": "0.14.0",
+      "date": "2026-11-01T03:47:41.235Z",
       "changes": [
-        "Italic text in replies is now actually italic, including inside bold text and headings.",
-        "Replies render markdown more faithfully: nested lists, task checkboxes, strikethrough, tappable bare links, and formatting inside links and quotes.",
-        "Links in an agent's reply now open even when they are in bold, instead of showing as raw [text](url).",
-        "The update prompt and Settings now show the app's version, like 0.2.0 (27)."
+        "Markdown files in a project open rendered, as on GitHub: pictures, badges and links to the project's files work, with the raw text a tab away."
       ]
     },
     {
-      "build": 26,
-      "version": "0.1.1",
-      "date": "2026-10-07T10:00:51.365Z",
+      "build": 39,
+      "version": "0.13.0",
+      "date": "2026-11-01T03:47:38.079Z",
       "changes": [
-        "When a newer version of the app or of agentman on your Mac is out, Agentman tells you once, with what's new and how to update. Settings → Versions shows both."
+        "Antigravity chats get the \"/\" menu: its commands, workflows (/goal, /plan, /schedule...) and your skills, with /usage, /context, /tasks and /mcp shown in a panel. Pictures you send to Antigravity show on your message."
       ]
     },
     {
-      "build": 25,
-      "version": "0.1.1",
-      "date": "2026-10-07T07:39:22Z",
+      "build": 38,
+      "version": "0.12.1",
+      "date": "2026-11-01T03:47:35.276Z",
       "changes": [
-        "Alerts now have their own sounds: a ping when an agent needs you and a chime when one finishes, even with the app closed."
+        "Coming back to the app on an agent's screen now shows the messages that arrived while you were away, without leaving and reopening it."
       ]
     },
     {
-      "build": 24,
-      "version": "0.1.1",
-      "date": "2026-10-06T20:15:51Z",
+      "build": 37,
+      "version": "0.12.0",
+      "date": "2026-11-01T03:47:32.340Z",
       "changes": [
-        "The pairing screen now explains how to set up Agentman on your computer, step by step, with commands you can copy.",
-        "Fixed the switches in Settings → Notifications springing back on. They now turn off when you tap them."
+        "Type \"/\" in a Codex agent's message box to run its commands (/compact, /review, /init, /status, /diff…) or \"$\" to use one of its skills, as you can for Claude."
       ]
     },
     {
-      "build": 23,
-      "version": "0.1.1",
-      "date": "2026-10-06T14:06:42Z",
+      "build": 36,
+      "version": "0.11.0",
+      "date": "2026-11-01T03:47:29.153Z",
       "changes": [
-        "Fixed idle agents disappearing from the board. One unreadable session no longer hides all the others.",
-        "No more notifications while you're using the app. In Settings → Notifications, choose whether you're alerted when an agent needs you, when it finishes, or both."
+        "Pictures you paste into Codex now show in the conversation, and an agent's edits open to a coloured diff of what changed, each file named."
+      ]
+    },
+    {
+      "build": 35,
+      "version": "0.10.0",
+      "date": "2026-11-01T03:47:26.086Z",
+      "changes": [
+        "Attach any file to a message (a PDF, a log, a spreadsheet), not just images; the agent reads it on your Mac.",
+        "Type \"@\" in a message box to name one of the agent's files; it reads the file when your message arrives.",
+        "When an agent looks at several images in a row, they now show as one step with the pictures side by side, instead of one step per picture.",
+        "Type \"/\" in a Claude agent's message box to run its commands: /compact, /context, /rename, your skills and more. /usage and /status show their answer right here, and a thread follows /clear to the new conversation."
+      ]
+    },
+    {
+      "build": 34,
+      "version": "0.9.0",
+      "date": "2026-11-01T03:47:23.034Z",
+      "changes": [
+        "Speak your messages: tap the mic beside the message box and Agentman writes out what you say (sign in to Celery in Agentman for Mac › Settings › Keys first). Text is a little larger throughout."
+      ]
+    },
+    {
+      "build": 33,
+      "version": "0.8.0",
+      "date": "2026-11-01T03:47:20.185Z",
+      "changes": [
+        "Agent threads are calmer: the agent's work sits in small grey pills under its words, background tasks say what finished, and the mode moved down beside the model so the header is one row.",
+        "Pictures you send Agentman now show, and open full screen when tapped. You can paste a screenshot into Agentman's box, and close (or swipe away) its news cards."
+      ]
+    },
+    {
+      "build": 32,
+      "version": "0.7.0",
+      "date": "2026-11-01T03:47:17.122Z",
+      "changes": [
+        "Notifications now come from Agentman while it's on: its replies, briefs and cards, and a tap opens it. To hear from agents directly too, turn on \"Hear from every agent\" in Settings › Notifications, or \"Notify me about this agent\" from an agent's menu."
       ]
     }
   ]

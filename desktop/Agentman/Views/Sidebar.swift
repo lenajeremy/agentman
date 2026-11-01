@@ -32,20 +32,48 @@ struct Sidebar: View {
             }
 
             let sections = store.sidebar
+            let found = store.sidebarHits
             if !sections.pinned.isEmpty {
                 SectionHeading(title: "Pinned")
-                ForEach(sections.pinned) { row($0) }
+                ForEach(sections.pinned) { row($0, match: found.bySession[$0.id]) }
             }
             if !sections.working.isEmpty {
                 SectionHeading(title: "Working", count: sections.working.count, open: $workingOpen)
                 if workingOpen {
-                    ForEach(sections.working) { row($0) }
+                    ForEach(sections.working) { row($0, match: found.bySession[$0.id]) }
                 }
                 if !sections.active.isEmpty { SectionRule() }
             } else if !sections.pinned.isEmpty, !sections.active.isEmpty {
                 SectionRule()
             }
-            ForEach(sections.active) { row($0) }
+            ForEach(sections.active) { row($0, match: found.bySession[$0.id]) }
+
+            // Searching, the conversations whose messages have the words
+            // and whose names do not: running or long over.
+            if !found.others.isEmpty {
+                Section {
+                    ForEach(found.others) { hit in
+                        if let session = hit.session {
+                            AgentButton(session: session, match: hit)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 2, leading: 10, bottom: 2, trailing: 10))
+                        }
+                    }
+                } header: {
+                    Text("In messages")
+                        .font(TextStyle.label)
+                        .foregroundStyle(Palette.faint)
+                        .textCase(nil)
+                        .padding(.leading, SidebarMetrics.header)
+                }
+            }
+            if found.searching, found.others.isEmpty, sections.isEmpty {
+                Text(found.indexing ? "Reading your conversations…" : "Searching messages…")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.faint)
+                    .padding(.leading, SidebarMetrics.header)
+                    .listRowSeparator(.hidden)
+            }
 
             // In a folder, the sessions that ran there and ended: read them,
             // or resume one.
@@ -81,9 +109,10 @@ struct Sidebar: View {
                 .frame(height: 32)
                 HStack(spacing: 9) {
                     Image(systemName: "magnifyingglass")
-                    TextField("Search agents", text: $store.search)
+                    TextField("Search", text: $store.search)
                         .textFieldStyle(.plain)
-                        .accessibilityLabel("Search agents")
+                        .accessibilityLabel("Search agents and messages")
+                        .onExitCommand { store.search = "" }
                     FilterMenu()
                         .labelStyle(.iconOnly)
                         .fixedSize()
@@ -110,6 +139,21 @@ struct Sidebar: View {
             .background(Palette.sidebar)
         }
         .task { await store.loadFolders() }
+        // What the conversations said, a moment after typing stops: the
+        // daemon answers in milliseconds, so this only spares it a query
+        // per key.
+        .task(id: store.search) {
+            let query = store.search.trimmingCharacters(in: .whitespaces)
+            guard AgentsStore.searchable(query) else {
+                store.messageHits = nil
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            let results = await store.searchMessages(query)
+            guard !Task.isCancelled else { return }
+            store.messageHits = results
+        }
         // The branch under each agent's title, kept current as agents switch.
         .task {
             while !Task.isCancelled {
@@ -157,8 +201,8 @@ struct Sidebar: View {
         .frame(maxHeight: min(CGFloat(sessions.count) * 80, 190))
     }
 
-    private func row(_ session: Session, inList: Bool = true) -> some View {
-        AgentButton(session: session, inList: inList)
+    private func row(_ session: Session, inList: Bool = true, match: SearchHit? = nil) -> some View {
+        AgentButton(session: session, inList: inList, match: match)
             .listRowSeparator(.hidden)
             .listRowInsets(EdgeInsets(top: 2, leading: 10, bottom: 2, trailing: 10))
             .contextMenu {
@@ -218,19 +262,29 @@ private struct AgentButton: View {
     /// In the list, which draws a row's highlight; or at the sidebar's foot,
     /// which doesn't.
     var inList = true
+    /// What a search found in its conversation, which a click opens at.
+    var match: SearchHit?
     @State private var hovering = false
 
     var body: some View {
-        AgentRow(session: session)
+        AgentRow(session: session, match: match, query: store.messageHits?.query ?? "")
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, inList ? 0 : SidebarMetrics.margin + SidebarMetrics.list)
             .contentShape(Rectangle())
-            .onTapGesture { store.selection = .agent(session.id) }
+            .onTapGesture { open() }
             .onHover { hovering = $0 }
             .background { if !inList { RowHighlight(selected: selected, hovering: hovering) } }
             .listRowBackground(RowHighlight(selected: selected, hovering: hovering))
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-            .accessibilityAction { store.selection = .agent(session.id) }
+            .accessibilityAction { open() }
+    }
+
+    private func open() {
+        if let match, let query = store.messageHits?.query {
+            store.open(match, query: query)
+        } else {
+            store.selection = .agent(session.id)
+        }
     }
 
     private var selected: Bool { store.selection == .agent(session.id) }
@@ -371,6 +425,9 @@ struct AgentmanBadge: View {
 struct AgentRow: View {
     @Environment(AgentsStore.self) private var store
     let session: Session
+    /// What a search found in its conversation, shown under it.
+    var match: SearchHit?
+    var query = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -428,6 +485,12 @@ struct AgentRow: View {
             }
             .font(TextStyle.caption)
             }
+            if let match {
+                Text(SearchWords.snippet(match, query: query))
+                    .font(TextStyle.caption)
+                    .lineLimit(2)
+                    .help(match.snippet)
+            }
         }
         .padding(.vertical, 8)
         .padding(.horizontal, SidebarMetrics.inset)
@@ -461,7 +524,7 @@ struct AgentRow: View {
                 Text("Working")
             }
             .foregroundStyle(Palette.workingText)
-        } else if session.state == .ended {
+        } else if session.state == .ended, match == nil {
             Text("Ended")
         } else if let when = session.lastActivity {
             Text(Relative.short(when)).monospacedDigit()

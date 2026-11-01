@@ -323,6 +323,8 @@ func runServe(ctx context.Context, args []string) error {
 	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
 		agent.SetNamesFile(filepath.Join(dir, "names.json"))
 		agent.SetAlertsFile(filepath.Join(dir, "alerts.json"))
+		// Every conversation's words, for search in the apps.
+		agent.SetSearchFile(filepath.Join(dir, "search.db"))
 	}
 	// Language servers for the editor in Agentman for Mac: started on first
 	// use, stopped when idle, and all stopped with am serve.

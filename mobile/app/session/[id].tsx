@@ -29,6 +29,9 @@ import { MessageMenu, type MessageMenuItem } from "../../components/MessageMenu"
 import { Toast } from "../../components/Toast";
 import { ContentColumn } from "../../components/ContentColumn";
 import { Markdown } from "../../components/Markdown";
+import { FindContext, Marked } from "../../components/FindMarks";
+import { markWords, searchable } from "../../lib/search";
+import type { SearchHit } from "../../lib/protocol";
 import { NoticeRow } from "../../components/NoticeRow";
 import { SentImages } from "../../components/SentImages";
 import { SentFileChips } from "../../components/SentFileChips";
@@ -115,8 +118,19 @@ const STATE_IN = () => {
 };
 const STATE_OUT = FadeOut.duration(160);
 
+/** The find bar, while it is open: the words, what the Mac found for them
+ *  in the whole conversation, oldest first, and which match is shown. */
+interface Finding {
+  query: string;
+  searched: string | null;
+  matches: SearchHit[];
+  index: number | null;
+  problem?: string;
+}
+
 export default function SessionScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // A search opens the conversation at a message, with its words found.
+  const { id, message: foundMessage, find } = useLocalSearchParams<{ id: string; message?: string; find?: string }>();
   const sessionId = decodeURIComponent(String(id));
   const store = useStore();
   const router = useRouter();
@@ -181,6 +195,11 @@ export default function SessionScreen() {
   // Rows present on first render are the backlog and must not animate in;
   // otherwise opening a session is a cascade of fades.
   const settled = useRef<Set<string> | null>(null);
+  const [finding, setFinding] = useState<Finding | null>(
+    find ? { query: find, searched: null, matches: [], index: null } : null,
+  );
+  /** A message to scroll to once it has been read back to. */
+  const [target, setTarget] = useState<string | null>(foundMessage ?? null);
 
   const session = store.findSession(sessionId);
   // A conversation cleared (/clear) or switched away from (/resume) in its
@@ -330,6 +349,68 @@ export default function SessionScreen() {
     // Reversed to feed an inverted list — see the FlatList below.
     return chronological.reverse();
   }, [messages, store.pending, sessionId, queued, queuedRows, session?.cwd]);
+  // The find bar's words, and the message whose match is shown.
+  const words = useMemo(() => markWords(finding?.searched ?? ""), [finding?.searched]);
+  const currentMatch = finding && finding.index !== null ? finding.matches[finding.index]?.messageId : undefined;
+
+  // The whole conversation is searched on the Mac, a moment after typing
+  // stops; opened from a search, the match it came from is the one shown.
+  const findQuery = finding?.query;
+  useEffect(() => {
+    if (findQuery === undefined) return;
+    const query = findQuery.trim();
+    if (!searchable(query)) {
+      setFinding((current) => current && { ...current, searched: null, matches: [], index: null, problem: undefined });
+      return;
+    }
+    let current = true;
+    const timer = setTimeout(() => {
+      store.search(query, sessionId).then(
+        (results) => {
+          if (!current) return;
+          const matches = results.hits;
+          const opened = foundMessage && find === findQuery ? matches.findIndex((hit) => hit.messageId === foundMessage) : -1;
+          const index = opened >= 0 ? opened : matches.length > 0 ? matches.length - 1 : null;
+          setFinding((now) => now && { ...now, searched: query, matches, index, problem: undefined });
+          if (opened < 0 && index !== null) setTarget(matches[index].messageId);
+        },
+        (error: Error) => {
+          if (current) setFinding((now) => now && { ...now, problem: error.message });
+        },
+      );
+    }, find === findQuery ? 0 : 400);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findQuery, sessionId]);
+
+  // Read back until the message is here, then bring it to the middle.
+  const targetLoaded = target !== null && messages.some((message) => message.id === target);
+  useEffect(() => {
+    if (target === null) return;
+    if (!targetLoaded) {
+      if (!paging) return;
+      if (paging.hasMore && !paging.loading && !paging.retentionLimited) store.loadOlder(sessionId);
+      else if (!paging.hasMore || paging.retentionLimited) setTarget(null);
+      return;
+    }
+    const index = rows.findIndex((row) => row.kind === "message" && row.message.id === target);
+    setTarget(null);
+    if (index < 0) return;
+    setTimeout(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true }), 80);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target, targetLoaded, paging?.loading, paging?.hasMore]);
+
+  const stepFinding = (delta: number) => {
+    if (!finding || finding.matches.length === 0) return;
+    const count = finding.matches.length;
+    const index = finding.index === null ? (delta > 0 ? 0 : count - 1) : (finding.index + delta + count) % count;
+    setFinding({ ...finding, index });
+    setTarget(finding.matches[index].messageId);
+  };
+
   // What a message waiting in the agent's queue says under it, the same
   // whether the phone or the Mac sent it.
   const waitingLabel = session ? pendingLabel(session.kind, session.state) : undefined;
@@ -554,6 +635,12 @@ export default function SessionScreen() {
   // shrinking, not a control changing shape.
   const sessionMenuItems: PopoverItem[] = [];
   if (session) {
+    sessionMenuItems.push({
+      key: "find",
+      label: "Find in conversation",
+      icon: "search",
+      onPress: () => setFinding((current) => current ?? { query: "", searched: null, matches: [], index: null }),
+    });
     sessionMenuItems.push({
       key: "files",
       label: "Files & changes",
@@ -1090,6 +1177,17 @@ export default function SessionScreen() {
           Inverting also makes "load older" the natural end-of-list action.
           KEEP_READING leaves the reader where they are when they have
           scrolled up, as messages arrive below them. */}
+        {finding ? (
+          <FindBar
+            finding={finding}
+            onChange={(query) => setFinding((current) => current && { ...current, query })}
+            onStep={stepFinding}
+            onClose={() => {
+              setFinding(null);
+              setTarget(null);
+            }}
+          />
+        ) : null}
         <View style={styles.feed}>
         <FlatList
           style={styles.feed}
@@ -1115,17 +1213,29 @@ export default function SessionScreen() {
                 ? row.pending.clientId
                 : row.key
           }
+          onScrollToIndexFailed={(info) => {
+            // Rows differ in height, so a far one is reached in two steps:
+            // near it by the average, then exactly once it is laid out.
+            listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
+            setTimeout(() => {
+              listRef.current?.scrollToIndex({ index: info.index, viewPosition: 0.5, animated: true });
+            }, 120);
+          }}
           renderItem={({ item }) =>
             item.kind === "message" ? (
-              <MessageRow
-                message={item.message}
-                cwd={session?.cwd ?? ""}
-                fresh={
-                  settled.current !== null &&
-                  !settled.current.has(item.message.id)
-                }
-                onCopied={showCopied}
-              />
+              <FindContext.Provider
+                value={finding && words.length > 0 ? { words, current: item.message.id === currentMatch } : null}
+              >
+                <MessageRow
+                  message={item.message}
+                  cwd={session?.cwd ?? ""}
+                  fresh={
+                    settled.current !== null &&
+                    !settled.current.has(item.message.id)
+                  }
+                  onCopied={showCopied}
+                />
+              </FindContext.Provider>
             ) : item.kind === "tools" ? (
               <ToolGroup calls={item.calls} said={item.said} cwd={session?.cwd ?? ""} pictures={item.pictures} />
             ) : item.kind === "pending" ? (
@@ -1787,6 +1897,70 @@ function MessageRow({
 }
 
 /**
+ * Find in one conversation, under its header: the words, which match is
+ * shown of how many, the one before and the next. The Mac finds them in the
+ * whole conversation, not just what the phone has loaded.
+ */
+function FindBar({
+  finding,
+  onChange,
+  onStep,
+  onClose,
+}: {
+  finding: Finding;
+  onChange(query: string): void;
+  onStep(delta: number): void;
+  onClose(): void;
+}) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const searched = finding.searched !== null;
+  const none = searched && finding.matches.length === 0;
+  const count = finding.problem
+    ? "!"
+    : !searched
+      ? "–"
+      : none
+        ? "0/0"
+        : `${finding.index === null ? "–" : finding.index + 1}/${finding.matches.length}`;
+  return (
+    <ContentColumn style={styles.findBar}>
+      <Feather name="search" size={15} color={color.muted} />
+      <TextInput
+        value={finding.query}
+        onChangeText={onChange}
+        placeholder="Find in conversation"
+        placeholderTextColor={color.faint}
+        style={styles.findInput}
+        autoFocus={!finding.query}
+        returnKeyType="search"
+        onSubmitEditing={() => onStep(1)}
+        autoCorrect={false}
+        autoCapitalize="none"
+        accessibilityLabel="Find in conversation"
+      />
+      <Text
+        style={[styles.findCount, (none || finding.problem) && { color: color.errorText }]}
+        accessibilityLabel={finding.problem ?? undefined}
+      >
+        {count}
+      </Text>
+      <MotionPressable hitSlop={8} onPress={() => onStep(-1)} disabled={finding.matches.length === 0}
+        accessibilityRole="button" accessibilityLabel="Previous match">
+        <Feather name="chevron-up" size={20} color={finding.matches.length ? color.text : color.faint} />
+      </MotionPressable>
+      <MotionPressable hitSlop={8} onPress={() => onStep(1)} disabled={finding.matches.length === 0}
+        accessibilityRole="button" accessibilityLabel="Next match">
+        <Feather name="chevron-down" size={20} color={finding.matches.length ? color.text : color.faint} />
+      </MotionPressable>
+      <MotionPressable hitSlop={8} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close find">
+        <Feather name="x" size={18} color={color.muted} />
+      </MotionPressable>
+    </ContentColumn>
+  );
+}
+
+/**
  * How long a message has to be held before its menu opens. Long enough that a
  * scroll which starts on a bubble never opens it; short enough not to feel
  * like waiting.
@@ -1923,7 +2097,7 @@ function SentMessage({
           event.nativeEvent.actionName === "copy" && copyMessage(text, onCopied)
         }
       >
-        <Text style={styles.userText}>{text}</Text>
+        <Text style={styles.userText}><Marked text={text} /></Text>
       </Pressable>
       )}
       <MessageMenu
@@ -2078,6 +2252,24 @@ const makeStyles = (c: Palette) =>
     page: { flex: 1, backgroundColor: c.paper },
     keyboardAvoider: { flex: 1 },
     feed: { flex: 1 },
+    findBar: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      paddingHorizontal: space.lg,
+      paddingVertical: space.sm,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.line,
+      backgroundColor: c.surface,
+    },
+    findInput: {
+      flex: 1,
+      ...font.sans,
+      fontSize: size.body,
+      color: c.text,
+      paddingVertical: space.xs,
+    },
+    findCount: { ...font.mono, fontSize: size.caption, color: c.muted, minWidth: 34, textAlign: "right" },
 
     // Top-aligned: the controls row makes the body three lines tall, and
     // centred buttons ended up beside the folder instead of the title.

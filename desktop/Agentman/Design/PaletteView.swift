@@ -14,6 +14,13 @@ struct PaletteItem: Identifiable {
     /// A line of text shown instead of the title, with what matched marked,
     /// as a search's result is; the detail then says where it is.
     var line: AttributedString? = nil
+    /// A second line under the title: what a conversation said that matched.
+    var snippet: AttributedString? = nil
+    /// The heading over a group of rows, shown above its first.
+    var section: String? = nil
+
+    /// How tall the row is, for the list's height.
+    var height: CGFloat { snippet == nil ? 34 : 52 }
 }
 
 /// A floating search box with its results under it, in the manner of the
@@ -82,6 +89,15 @@ struct PaletteView: View {
                         ScrollView {
                             VStack(spacing: 2) {
                                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                                    if let section = Self.heading(items, at: index) {
+                                        Text(section)
+                                            .font(TextStyle.label)
+                                            .foregroundStyle(Palette.faint)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(.horizontal, 10)
+                                            .padding(.top, index == 0 ? 2 : 8)
+                                            .padding(.bottom, 2)
+                                    }
                                     row(item, selected: index == selected)
                                         .onTapGesture { choose(item) }
                                         .onHover { if $0 { selected = index } }
@@ -89,7 +105,7 @@ struct PaletteView: View {
                             }
                             .padding(6)
                         }
-                        .frame(height: min(CGFloat(items.count) * 34 + 12, 380))
+                        .frame(height: min(Self.height(of: items) + 12, 380))
                         .onChange(of: selected) { _, now in
                             if items.indices.contains(now) { proxy.scrollTo(items[now].id) }
                         }
@@ -128,7 +144,41 @@ struct PaletteView: View {
         }
     }
 
-    private func row(_ item: PaletteItem, selected: Bool) -> some View {
+    /// A group's heading, over the first of its rows.
+    static func heading(_ items: [PaletteItem], at index: Int) -> String? {
+        guard let section = items[index].section else { return nil }
+        return index == 0 || items[index - 1].section != section ? section : nil
+    }
+
+    static func height(of items: [PaletteItem]) -> CGFloat {
+        items.indices.reduce(0) { total, index in
+            total + items[index].height + (heading(items, at: index) == nil ? 0 : 28)
+        }
+    }
+
+    @ViewBuilder private func row(_ item: PaletteItem, selected: Bool) -> some View {
+        if let snippet = item.snippet {
+            VStack(alignment: .leading, spacing: 3) {
+                titleRow(item)
+                Text(snippet)
+                    .font(TextStyle.caption)
+                    .lineLimit(1)
+                    .padding(.leading, 28)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 50)
+            .background(selected ? Palette.fill : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
+        } else {
+            titleRow(item)
+                .padding(.horizontal, 10)
+                .frame(height: 32)
+                .background(selected ? Palette.fill : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .contentShape(Rectangle())
+        }
+    }
+
+    private func titleRow(_ item: PaletteItem) -> some View {
         HStack(spacing: 10) {
             Group {
                 if let fileIcon = item.fileIcon {
@@ -170,9 +220,5 @@ struct PaletteView: View {
                     .foregroundStyle(Palette.muted)
             }
         }
-        .padding(.horizontal, 10)
-        .frame(height: 32)
-        .background(selected ? Palette.fill : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .contentShape(Rectangle())
     }
 }

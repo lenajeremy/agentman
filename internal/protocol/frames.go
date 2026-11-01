@@ -386,6 +386,7 @@ type Event struct {
 	Usage     *Usage           `json:"usage,omitempty"`
 	PairCode  *PairCode        `json:"pairCode,omitempty"`
 	Devices   []Device         `json:"devices,omitempty"`
+	Search    *SearchResults   `json:"search,omitempty"`
 	// Directory names only; the app never needs the Mac's absolute home path.
 	Directories []string `json:"directories,omitempty"`
 	Path        string   `json:"path,omitempty"`

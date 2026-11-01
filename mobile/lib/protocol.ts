@@ -268,7 +268,8 @@ export type RequestType =
   | "command_panel"
   | "find_files"
   | "attach_file"
-  | "usage";
+  | "usage"
+  | "search";
 
 export interface Request {
   type: RequestType;
@@ -439,7 +440,8 @@ export type EventType =
   | "command_panel"
   | "files"
   | "attached"
-  | "usage";
+  | "usage"
+  | "search";
 
 export interface WorkspaceEntry { name: string; directory: boolean; size?: number }
 export interface WorkspaceChange {
@@ -573,6 +575,32 @@ export interface UsageModel {
 }
 
 /** What the agents on the Mac spent over a range, from their own records. */
+/**
+ * What a search found: the best message of each conversation, best first;
+ * or, searching one conversation, every message there that matched, in order.
+ */
+export interface SearchResults {
+  query: string;
+  /** The conversation searched, when it was one. */
+  sessionId?: string;
+  hits: SearchHit[];
+  /** The Mac is still reading its conversations, so more may match later. */
+  indexing?: boolean;
+}
+
+export interface SearchHit {
+  /** The conversation, running or ended, so one never listed can be opened.
+   *  Absent from a search in one conversation. */
+  session?: Session;
+  messageId: string;
+  role: Message["role"];
+  ts?: number;
+  /** A couple of lines of the message, from just before the match. */
+  snippet: string;
+  /** How many of its messages matched as well as this one. */
+  matches?: number;
+}
+
 export interface Usage {
   days: number;
   hourly?: boolean;
@@ -628,6 +656,8 @@ export interface DaemonEvent {
   daemon?: DaemonInfo;
   /** What the agents spent, on "usage". */
   usage?: Usage;
+  /** What was said that matched, on "search". */
+  search?: SearchResults;
   /** One entry in Agentman's conversation, new or finished, on
    *  "manager_entry". */
   entry?: ManagerEntry;
@@ -906,6 +936,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     "manager_brief", "manager_schedules", "manager_settings",
     "manager_permission", "manager_reset", "knowledge", "keys",
     "transcript", "voice_account", "commands", "command_panel", "files", "attached", "usage",
+    "search",
   ] as const)) return null;
 
   switch (value.type) {
@@ -926,6 +957,9 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
       break;
     case "usage":
       if (!isUsage(value.usage)) return null;
+      break;
+    case "search":
+      if (!isSearchResults(value.search)) return null;
       break;
     case "session_gone":
       if (!boundedString(value.sessionId, 512, true)) return null;
@@ -1157,6 +1191,21 @@ function isUsage(value: unknown): value is Usage {
     (value.models === undefined || value.models === null || boundedArray(value.models, 1000, (model): model is UsageModel =>
       isRecord(model) && boundedString(model.model, 256) && boundedString(model.kind, 64, true) &&
       isTokens(model.tokens) && finiteNumber(model.cost) && typeof model.priced === "boolean"));
+}
+
+function isSearchResults(value: unknown): value is SearchResults {
+  return isRecord(value) &&
+    boundedString(value.query, 1024) &&
+    optionalBoundedString(value.sessionId, 512) &&
+    (value.indexing === undefined || typeof value.indexing === "boolean") &&
+    boundedArray(value.hits, 1000, (hit): hit is SearchHit =>
+      isRecord(hit) &&
+      boundedString(hit.messageId, 4096, true) &&
+      isOneOf(hit.role, ["user", "assistant", "tool", "system"] as const) &&
+      boundedString(hit.snippet, 4096) &&
+      (hit.ts === undefined || finiteNumber(hit.ts)) &&
+      (hit.matches === undefined || finiteNumber(hit.matches)) &&
+      (hit.session === undefined || isSession(hit.session)));
 }
 
 function isFolder(value: unknown): value is Folder {

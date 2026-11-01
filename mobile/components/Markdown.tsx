@@ -18,6 +18,7 @@ import {
 import { useStyles, useTheme } from "../lib/appearance";
 import { looksLikeSvg, MAX_SVG_CHARS, svgSize } from "../lib/pictures";
 import { CodeViewer } from "./CodeViewer";
+import { FindContext, type FindMarks, Marked } from "./FindMarks";
 import { SyntaxCode } from "./SyntaxCode";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 
@@ -197,7 +198,8 @@ function Blocks({ blocks, styles, muted }: { blocks: Block[]; styles: Styles; mu
 
 function BlockView({ block, styles, muted }: { block: Block; styles: Styles; muted: boolean }) {
   const document = useContext(DocumentContext);
-  const setting = { ...PLAIN, open: document?.open };
+  const marks = useContext(FindContext);
+  const setting = { ...PLAIN, open: document?.open, marks };
   const centered = block.centered && styles.centered;
   switch (block.kind) {
     case "heading": {
@@ -456,7 +458,7 @@ function TableGrid({
   widths: number[];
   styles: Styles;
 }) {
-  const setting = { ...PLAIN, open: useContext(DocumentContext)?.open };
+  const setting = { ...PLAIN, open: useContext(DocumentContext)?.open, marks: useContext(FindContext) };
   return (
     <ScrollView
       horizontal
@@ -523,6 +525,8 @@ interface Setting {
   inLink: boolean;
   /** Opens a file a document links to. */
   open?: (path: string) => void;
+  /** The find bar's words, while it is open. */
+  marks?: FindMarks | null;
 }
 
 const PLAIN: Setting = { bold: false, italic: false, inLink: false };
@@ -531,7 +535,7 @@ function renderInline(content: Inline[], styles: Styles, setting = PLAIN): React
   return content.map((node, key) => {
     switch (node.kind) {
       case "text":
-        return node.text;
+        return setting.marks ? <Marked key={key} text={node.text} marks={setting.marks} /> : node.text;
       case "break":
         return "\n";
       case "bold":
