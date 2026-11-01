@@ -70,6 +70,8 @@ func (f *ocServiceFake) start(t *testing.T) *httptest.Server {
 					"agent": "build",
 					"model": map[string]string{"id": "gpt-6", "providerID": "openai"},
 					"time":  map[string]float64{"created": now - 60000, "updated": now}},
+				{"id": "ses_old", "projectID": "p", "title": "Last week's fix", "location": map[string]string{"directory": "/w/app"},
+					"time": map[string]float64{"created": now - 8*24*3600e3, "updated": now - 7*24*3600e3}},
 				{"id": "ses_child", "parentID": "ses_1", "projectID": "p", "title": "A subagent",
 					"location": map[string]string{"directory": "/w/app"}, "time": map[string]float64{"created": now, "updated": now}},
 			}, "cursor": map[string]any{}})
@@ -478,5 +480,38 @@ func TestOpenCodeServiceSwitchesModeAndModel(t *testing.T) {
 	if model, _ := post.body["model"].(map[string]any); post.path != "/api/session/ses_1/model" ||
 		model["id"] != "big-pickle" || model["providerID"] != "opencode" {
 		t.Fatalf("model switch sent %+v", post)
+	}
+}
+
+// A session idle for days is in its folder's history, not on the board,
+// and OpenCode 2's service still takes a message for it, which makes it
+// live again.
+func TestOpenCodeServiceOldSessionsTakeMessages(t *testing.T) {
+	fake := &ocServiceFake{}
+	server := fake.start(t)
+	src := openCodeServiceSource(t, server.URL, "secret")
+	ctx := context.Background()
+	sessions, err := src.Discover(ctx)
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("board = %+v, %v", sessions, err)
+	}
+	past, err := src.Past(ctx, "/w/app", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var old *protocol.Session
+	for i := range past {
+		if past[i].ID == "opencode:ses_old" {
+			old = &past[i]
+		}
+	}
+	if old == nil || old.Inject != protocol.InjectAPI {
+		t.Fatalf("history = %+v", past)
+	}
+	if mode, err := src.Inject(ctx, old.ID, "carry on"); err != nil || mode != protocol.InjectAPI {
+		t.Fatalf("inject: %v %v", mode, err)
+	}
+	if post := fake.lastPost(t); post.path != "/api/session/ses_old/prompt" || post.body["text"] != "carry on" {
+		t.Fatalf("sent %+v", post)
 	}
 }

@@ -141,14 +141,12 @@ func (s *KiroSource) CommandPanel(ctx context.Context, sessionID, command string
 // own commands (its built-in /init and /review, and the user's), /compact,
 // and the skills. An OpenCode 1 server lists skills only.
 func (s *OpenCodeSource) Commands(ctx context.Context, sessionID string) ([]protocol.Command, error) {
-	s.mu.RLock()
-	session, ok := s.sessions[sessionID]
-	s.mu.RUnlock()
+	session, ok := s.routeFor(sessionID)
 	if !ok {
 		return nil, fmt.Errorf("source: unknown opencode session %q", sessionID)
 	}
 	home, _ := os.UserHomeDir()
-	skills := listSkills(home, session.meta.Cwd, openCodeSkillFolders)
+	skills := listSkills(home, session.directory, openCodeSkillFolders)
 	commands, err := s.openCodeCommands(ctx, session)
 	if err != nil {
 		return skills, nil

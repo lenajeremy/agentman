@@ -1563,10 +1563,10 @@ func (s *OpenCodeSource) InjectWithSkills(ctx context.Context, sessionID, text s
 }
 
 func (s *OpenCodeSource) inject(ctx context.Context, sessionID, text string, skills []string) (protocol.InjectMode, error) {
-	s.mu.RLock()
-	session, ok := s.sessions[sessionID]
-	s.mu.RUnlock()
-	if !ok {
+	// A session idle past openCodeIdleWindow is in a folder's history rather
+	// than on the board, and its server still takes messages for it.
+	session, ok := s.routeFor(sessionID)
+	if !ok || session.baseURL == "" {
 		return protocol.InjectNone, fmt.Errorf("source: unknown opencode session %q", sessionID)
 	}
 	if ran, err := s.runCommand(ctx, session, text); ran || err != nil {
