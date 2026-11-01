@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -339,16 +340,28 @@ func (s *MuseSource) readWithStatus(ctx context.Context, sessionID string) ([]pr
 	if err != nil {
 		return nil, "", err
 	}
-	messages := parser.MuseMessages(sessionID, read.History.Items)
-	// Muse keeps how the last turn ended beside the items; a failed or
-	// stopped turn says so after its rows (earlier ones are not kept).
-	if read.LastTurn != nil {
+	// Muse keeps how its last finished turn ended beside the items; a failed
+	// or stopped turn says so right after that turn's rows (earlier ones are
+	// not kept). While a newer turn is still finishing its background checks,
+	// the last finished turn is an older one, so the row goes after its own
+	// items, not at the end of the thread.
+	messages := make([]protocol.Message, 0, len(read.History.Items)+1)
+	after := -1
+	for _, item := range read.History.Items {
+		if message, ok := parser.MuseMessage(sessionID, item); ok {
+			messages = append(messages, message)
+		}
+		if read.LastTurn != nil && item.TurnID != "" && item.TurnID == read.LastTurn.TurnID {
+			after = len(messages)
+		}
+	}
+	if read.LastTurn != nil && after >= 0 {
 		at := int64(0)
-		if len(messages) > 0 {
-			at = messages[len(messages)-1].Ts + 1
+		if after > 0 {
+			at = messages[after-1].Ts + 1
 		}
 		if row, ok := parser.MuseTurnEnded(sessionID, *read.LastTurn, at); ok {
-			messages = append(messages, row)
+			messages = slices.Insert(messages, after, row)
 		}
 	}
 	return messages, read.Session.Status, nil

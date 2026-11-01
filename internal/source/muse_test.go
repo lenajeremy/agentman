@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -244,7 +245,7 @@ func TestMuseFailedTurnSaysWhy(t *testing.T) {
 		return map[string]any{
 			"session": map[string]any{"sessionId": "s"},
 			"history": map[string]any{"mode": "inline", "items": []any{
-				map[string]any{"itemId": "u1", "kind": "userMessage", "text": "hi", "recordedAt": "2026-11-01T03:41:09Z"},
+				map[string]any{"itemId": "u1", "kind": "userMessage", "turnId": "t1", "text": "hi", "recordedAt": "2026-11-01T03:41:09Z"},
 			}},
 			"lastTurn": map[string]any{"turnId": "t1", "terminal": "failed", "reason": why,
 				"error": map[string]any{"kind": "modelError", "message": why, "retryable": false}},
@@ -850,5 +851,35 @@ func TestMuseEffortIsSwitchedAsAMode(t *testing.T) {
 	}
 	if err := source.SetMode(context.Background(), "muse:s", "ultra effort"); err == nil {
 		t.Fatal("a tier the model doesn't have must be refused")
+	}
+}
+
+// While a newer turn finishes its background checks, Muse's last finished
+// turn is an older one: its row goes after that turn's items, not at the
+// end of the thread after the newer reply.
+func TestMuseTurnEndRowSitsAfterItsOwnTurn(t *testing.T) {
+	source, fake := startFakeMuse(t, t.TempDir())
+	fake.answers["session/read"] = func(json.RawMessage) (any, *museRPCError) {
+		return map[string]any{
+			"session": map[string]any{"sessionId": "s"},
+			"history": map[string]any{"mode": "inline", "items": []any{
+				map[string]any{"itemId": "u1", "kind": "userMessage", "turnId": "t1", "text": "run it"},
+				map[string]any{"itemId": "a1", "kind": "agentMessage", "turnId": "t1", "text": "Running it."},
+				map[string]any{"itemId": "u2", "kind": "userMessage", "turnId": "t2", "text": "say ok"},
+				map[string]any{"itemId": "a2", "kind": "agentMessage", "turnId": "t2", "text": "ok"},
+			}},
+			"lastTurn": map[string]any{"turnId": "t1", "terminal": "cancelled"},
+		}, nil
+	}
+	page, err := source.Page(context.Background(), "muse:s", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, message := range page.Messages {
+		ids = append(ids, message.ID)
+	}
+	if strings.Join(ids, ",") != "u1,a1,turn:t1:cancelled,u2,a2" {
+		t.Fatalf("order: %v", ids)
 	}
 }
