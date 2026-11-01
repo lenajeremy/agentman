@@ -19,6 +19,7 @@ import (
 
 	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/update"
 )
 
 // am serve as a login service: started by the system when the user logs in,
@@ -78,6 +79,13 @@ func installService(ctx context.Context, configHome string) error {
 	if err != nil {
 		return err
 	}
+	// The am inside an app moves and changes with the app, so the service
+	// runs the daemon's copy of it, ~/.agentman/bin/am, put in place first.
+	if self := installedPath(); update.InAppBundle(self) {
+		if binary, err = serviceCopyFromApp(ctx, self, configHome); err != nil {
+			return err
+		}
+	}
 	if err := putServiceOn(binary, configHome, func(line string) { fmt.Println(line) }); err != nil {
 		return err
 	}
@@ -87,6 +95,28 @@ func installService(ctx context.Context, configHome string) error {
 	}
 	fmt.Println("Agentman now runs in the background: it starts when you log in, and agents keep running when you quit a terminal.")
 	return printServiceStatus(ctx, configHome)
+}
+
+// serviceCopyFromApp puts the daemon's copy of am in place from the am
+// inside an app at self, as am setup does, and returns where it is.
+func serviceCopyFromApp(ctx context.Context, self, configHome string) (string, error) {
+	home := configHome
+	if home == "" {
+		var err error
+		if home, err = os.UserHomeDir(); err != nil {
+			return "", err
+		}
+	}
+	managed := update.ManagedPath(home)
+	result, err := installManaged(ctx, self, managed, "", false)
+	if err != nil {
+		return "", fmt.Errorf("service: %w", err)
+	}
+	if result.Changed {
+		fmt.Printf("Installed %s from %s, for the service to run: it stays put when the app moves.\n",
+			collapseHome(managed), filepath.Base(update.BundleOf(self)))
+	}
+	return managed, nil
 }
 
 // putServiceOn makes the login service run the am at binary, taking over

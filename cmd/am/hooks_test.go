@@ -184,10 +184,17 @@ func captureStdout(t *testing.T, fn func()) string {
 
 // fakeAgentHome is a HOME of its own with a Claude Code and a Codex in it,
 // and a PATH holding only a claude command that writes down what it was
-// asked, so nothing here reaches the user's own agents.
+// asked and keeps the server it was given in ~/.claude.json, as the real
+// one does, so nothing here reaches the user's own agents. Its path is kept
+// short: a unix socket's may not pass 104 bytes on macOS, and the daemon's
+// is in it.
 func fakeAgentHome(t *testing.T) string {
 	t.Helper()
-	home := t.TempDir()
+	home, err := os.MkdirTemp("", "amh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
 	t.Setenv("HOME", home)
 	for _, dir := range []string{".claude", ".codex"} {
 		if err := os.MkdirAll(filepath.Join(home, dir), 0o700); err != nil {
@@ -198,7 +205,9 @@ func fakeAgentHome(t *testing.T) string {
 	if err := os.MkdirAll(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	claude := "#!/bin/sh\necho \"$@\" >> \"$HOME/claude-calls\"\n"
+	claude := "#!/bin/sh\necho \"$@\" >> \"$HOME/claude-calls\"\n" +
+		"[ \"$1 $2\" = \"mcp add\" ] && printf '{\"mcpServers\":{\"agentman\":{\"command\":\"%s\",\"args\":[\"mcp\"]}}}' \"$7\" > \"$HOME/.claude.json\"\n" +
+		"exit 0\n"
 	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(claude), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -14,7 +14,8 @@ const Version = 2
 // that reports no level is level 0.
 //
 //  1. The daemon reports its API level and how it was installed
-//     (DaemonInfo), and am version --json says both of any am.
+//     (DaemonInfo), am version --json says both of any am, and am setup
+//     sets everything up, the daemon's copy at ~/.agentman/bin/am included.
 const APILevel = 1
 
 // Peer names a routing destination.

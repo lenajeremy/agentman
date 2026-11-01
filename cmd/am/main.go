@@ -62,6 +62,8 @@ Usage:
   am lsp status               Which language servers the Mac app's editor can use
   am lsp install <language>   Get a language's server now (go, typescript, python, rust)
   am lsp clean                Remove the language servers am downloaded
+  am setup                    Set everything up at once, or again: config, hooks,
+                              agents' tools and the background service
   am doctor                   Check that everything is wired up correctly
   am upgrade [-check]         Install the newest agentman the way this one was
                               installed, and restart the service on it
@@ -147,6 +149,8 @@ func main() {
 		err = runAttach(ctx, args)
 	case "open":
 		err = runOpen(args)
+	case "setup":
+		err = runSetup(ctx, args)
 	case "doctor":
 		err = runDoctor(ctx, args)
 	case "upgrade":
