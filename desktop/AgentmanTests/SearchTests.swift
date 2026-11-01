@@ -136,6 +136,11 @@ final class SearchTests: XCTestCase {
             opened.selection = .agent("a")
             try render(ContentView(), size: CGSize(width: 1100, height: 640), dark: dark, store: opened,
                        to: folder.appendingPathComponent("search-opened-\(look).png"))
+
+            let palette = try store()
+            palette.selection = .agent("b")
+            try render(ZStack { ContentView(); CommandPalette(query: "safari") }, size: CGSize(width: 1100, height: 640), dark: dark,
+                       store: palette, to: folder.appendingPathComponent("search-palette-\(look).png"))
         }
     }
 
