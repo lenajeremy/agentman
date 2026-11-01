@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/lenajeremy/agentman/internal/hook"
+	"github.com/lenajeremy/agentman/internal/update"
 )
 
 // Regression: hooks were recorded at the symlink's target, which under
@@ -157,6 +158,119 @@ func TestUninstallRemovesKirosOptInAgent(t *testing.T) {
 	}
 	if _, err := os.Stat(hook.KiroAgentPath(home)); !os.IsNotExist(err) {
 		t.Errorf("the Kiro agent survived an uninstall:\n%s", out)
+	}
+}
+
+// captureStdout runs fn with what it prints kept from the test's output, and
+// returns it.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = write
+	done := make(chan []byte)
+	go func() {
+		out, _ := io.ReadAll(read)
+		done <- out
+	}()
+	defer func() { os.Stdout = old }()
+	fn()
+	write.Close()
+	return string(<-done)
+}
+
+// fakeAgentHome is a HOME of its own with a Claude Code and a Codex in it,
+// and a PATH holding only a claude command that writes down what it was
+// asked, so nothing here reaches the user's own agents.
+func fakeAgentHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, dir := range []string{".claude", ".codex"} {
+		if err := os.MkdirAll(filepath.Join(home, dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bin := filepath.Join(home, "path")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	claude := "#!/bin/sh\necho \"$@\" >> \"$HOME/claude-calls\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(claude), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	return home
+}
+
+// putManagedCopy puts an am at the managed path, marked as the app's when
+// marked is set.
+func putManagedCopy(t *testing.T, home string, marked bool) string {
+	t.Helper()
+	managed := update.ManagedPath(home)
+	if err := os.MkdirAll(filepath.Dir(managed), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managed, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if marked {
+		if err := update.WriteMarker(managed, update.Marker{AppVersion: "0.39.0"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return managed
+}
+
+// Without the app, hooks and tools name this am as they always did, even
+// with an am put at ~/.agentman/bin/am by hand; with the app's copy there,
+// they name that copy, which the daemon runs and which never moves.
+func TestHooksAndToolsNameTheAppsCopyWhenThereIsOne(t *testing.T) {
+	home := fakeAgentHome(t)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stable, err := stableBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	managed := putManagedCopy(t, home, false)
+	if got, _ := hookBinary(); got != stableBinaryPath(self) {
+		t.Errorf("hooks without the app name %q, want %q", got, stableBinaryPath(self))
+	}
+	if got, _ := toolsBinary(); got != stable {
+		t.Errorf("tools without the app name %q, want %q", got, stable)
+	}
+
+	if err := update.WriteMarker(managed, update.Marker{AppVersion: "0.39.0"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := hookBinary(); got != managed {
+		t.Errorf("hooks name %q, want the app's copy", got)
+	}
+	if got, _ := toolsBinary(); got != managed {
+		t.Errorf("tools name %q, want the app's copy", got)
+	}
+
+	var installErr error
+	out := captureStdout(t, func() { installErr = runInstallHooks(context.Background(), nil, false) })
+	if installErr != nil {
+		t.Fatalf("install-hooks: %v\n%s", installErr, out)
+	}
+	settings, _ := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	codex, _ := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
+	calls, _ := os.ReadFile(filepath.Join(home, "claude-calls"))
+	for name, content := range map[string][]byte{"Claude's hooks": settings, "Codex's config": codex, "claude mcp add": calls} {
+		if !strings.Contains(string(content), managed) {
+			t.Errorf("%s don't name the app's copy:\n%s", name, content)
+		}
+		if strings.Contains(string(content), self) {
+			t.Errorf("%s name the am that installed them:\n%s", name, content)
+		}
 	}
 }
 
