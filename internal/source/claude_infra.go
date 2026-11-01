@@ -4,6 +4,7 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -149,6 +150,12 @@ func isClaudeInfra(args string) bool {
 // claudeProcessArgs reads the full command lines of the given pids: from the
 // kernel where procinfo can, otherwise in one `ps` call.
 func claudeProcessArgs(ctx context.Context, pids []int) map[int]string {
+	// No process has a pid below 1, and Linux's ps refuses the whole list,
+	// printing nothing, when one is in it.
+	pids = slices.DeleteFunc(slices.Clone(pids), func(pid int) bool { return pid < 1 })
+	if len(pids) == 0 {
+		return map[int]string{}
+	}
 	if procinfo.Supported {
 		result := make(map[int]string, len(pids))
 		for _, pid := range pids {
