@@ -98,11 +98,31 @@ func TestArgsOfAnotherUsersProcessFail(t *testing.T) {
 
 func TestParseProcArgs(t *testing.T) {
 	raw := []byte("\x02\x00\x00\x00/usr/local/bin/node\x00\x00\x00\x00node\x00/tmp/a b.js\x00PATH=/bin\x00")
-	args, err := parseProcArgs(raw)
+	args, err := parseProcArgs(raw, 0)
 	if err != nil || !slices.Equal(args, []string{"node", "/tmp/a b.js"}) {
 		t.Fatalf("parseProcArgs = %q, %v", args, err)
 	}
-	if _, err := parseProcArgs([]byte("\x01\x00\x00\x00/bin/x")); err == nil {
+	if first, err := parseProcArgs(raw, 1); err != nil || !slices.Equal(first, []string{"node"}) {
+		t.Fatalf("the first argument alone = %q, %v", first, err)
+	}
+	if _, err := parseProcArgs([]byte("\x01\x00\x00\x00/bin/x"), 0); err == nil {
 		t.Fatal("parsed an unterminated path")
+	}
+}
+
+// Arg0 reads through a buffer that is used again; what it returned must not
+// change with the next read.
+func TestArg0KeepsItsAnswer(t *testing.T) {
+	first, err := Arg0(startChild(t, t.TempDir()))
+	if err != nil || first != "/bin/sleep" {
+		t.Fatalf("Arg0 = %q, %v", first, err)
+	}
+	for range 3 {
+		if _, err := Arg0(os.Getpid()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if first != "/bin/sleep" {
+		t.Fatalf("an earlier answer changed to %q", first)
 	}
 }

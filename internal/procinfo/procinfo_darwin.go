@@ -32,10 +32,32 @@ const (
 )
 
 // table is the buffer the process table is read into, kept between reads:
-// the table is about a megabyte, and it is read every second.
+// the table is about a megabyte, and it is read every second. names holds
+// one copy of each short name, rather than one per process per read.
 var table struct {
-	mu  sync.Mutex
-	buf []unix.KinfoProc
+	mu    sync.Mutex
+	buf   []unix.KinfoProc
+	names map[string]string
+}
+
+// maxNames bounds table.names; past it, the names start afresh.
+const maxNames = 4096
+
+// name returns the short name in comm, sharing a copy with every other
+// process of that name. The caller holds table.mu.
+func name(comm []byte) string {
+	if end := bytes.IndexByte(comm, 0); end >= 0 {
+		comm = comm[:end]
+	}
+	if known, ok := table.names[string(comm)]; ok {
+		return known
+	}
+	if table.names == nil || len(table.names) >= maxNames {
+		table.names = map[string]string{}
+	}
+	fresh := string(comm)
+	table.names[fresh] = fresh
+	return fresh
 }
 
 // List reads the whole process table, every user's processes, in one call.
@@ -74,7 +96,7 @@ func List() ([]Process, error) {
 				PPID:    int(entry.Eproc.Ppid),
 				UID:     int(entry.Eproc.Ucred.Uid),
 				Started: entry.Proc.P_starttime.Sec*1_000_000 + int64(entry.Proc.P_starttime.Usec),
-				Comm:    cString(entry.Proc.P_comm[:]),
+				Comm:    name(entry.Proc.P_comm[:]),
 				Zombie:  entry.Proc.P_stat == processZombie,
 			})
 		}
@@ -86,25 +108,67 @@ func List() ([]Process, error) {
 // rewritten in place, as `ps -o args` shows them; the first is the name it
 // was run by. Only the user's own processes can be read.
 func Args(pid int) ([]string, error) {
+	var args []string
+	err := readProcArgs(pid, func(raw []byte) (err error) {
+		args, err = parseProcArgs(raw, 0)
+		return err
+	})
+	return args, err
+}
+
+// Arg0 returns the name a process was run by, Args' first, without making
+// strings of the rest.
+func Arg0(pid int) (string, error) {
+	var name string
+	err := readProcArgs(pid, func(raw []byte) error {
+		args, err := parseProcArgs(raw, 1)
+		if err == nil {
+			name = args[0]
+		}
+		return err
+	})
+	return name, err
+}
+
+// argsBuffers holds what arguments are read into. With the environment that
+// follows them they come to kilobytes, and new processes are read every
+// second; a buffer larger than maxPooledArgs is not kept.
+var argsBuffers = sync.Pool{New: func() any { return new([]byte) }}
+
+const maxPooledArgs = 64 << 10
+
+// readProcArgs hands parse a process's KERN_PROCARGS2, in a buffer that is
+// reused once parse returns.
+func readProcArgs(pid int, parse func([]byte) error) error {
 	mib := []int32{ctlKern, kernProcArgs2, int32(pid)}
 	var size uintptr
 	if err := sysctl(mib, nil, &size); err != nil {
-		return nil, err
+		return err
 	}
 	if size == 0 {
-		return nil, syscall.EINVAL
+		return syscall.EINVAL
 	}
-	buf := make([]byte, size)
+	pooled := argsBuffers.Get().(*[]byte)
+	defer func() {
+		if cap(*pooled) <= maxPooledArgs {
+			argsBuffers.Put(pooled)
+		}
+	}()
+	if uintptr(cap(*pooled)) < size {
+		*pooled = make([]byte, size)
+	}
+	buf := (*pooled)[:size]
 	if err := sysctl(mib, &buf[0], &size); err != nil {
-		return nil, err
+		return err
 	}
-	return parseProcArgs(buf[:size])
+	return parse(buf[:size])
 }
 
 // parseProcArgs reads KERN_PROCARGS2: the argument count, the path the
 // program was executed from, padding, then the arguments themselves, each
-// ending in a NUL, followed by the environment.
-func parseProcArgs(raw []byte) ([]string, error) {
+// ending in a NUL, followed by the environment. most, when above 0, stops
+// it after that many arguments.
+func parseProcArgs(raw []byte, most int) ([]string, error) {
 	if len(raw) < 4 {
 		return nil, syscall.EINVAL
 	}
@@ -115,6 +179,9 @@ func parseProcArgs(raw []byte) ([]string, error) {
 		return nil, syscall.EINVAL
 	}
 	rest = bytes.TrimLeft(rest[end:], "\x00")
+	if most > 0 {
+		argc = min(argc, most)
+	}
 	var args []string
 	for len(args) < argc && len(rest) > 0 {
 		end := bytes.IndexByte(rest, 0)

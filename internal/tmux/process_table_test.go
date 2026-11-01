@@ -75,10 +75,11 @@ func TestKernelProcessTreeRemembersSettledProcesses(t *testing.T) {
 		t.Fatal(err)
 	}
 	commands.mu.Lock()
-	for key := range commands.byProcess {
+	for key, known := range commands.byProcess {
 		switch key.pid {
 		case 1, child:
-			commands.byProcess[key] = "remembered"
+			known.command = "remembered"
+			commands.byProcess[key] = known
 		}
 	}
 	commands.mu.Unlock()
@@ -93,6 +94,21 @@ func TestKernelProcessTreeRemembersSettledProcesses(t *testing.T) {
 	}
 	if got := tree.Command(child); got != "agentman-young-child" {
 		t.Errorf("a new process was named from memory: %q", got)
+	}
+
+	// A process that has ended is forgotten.
+	commands.mu.Lock()
+	gone := processKey{pid: 1 << 30, comm: "gone"}
+	commands.byProcess[gone] = knownCommand{command: "gone"}
+	commands.mu.Unlock()
+	if _, err := kernelProcessTree(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	commands.mu.Lock()
+	_, kept := commands.byProcess[gone]
+	commands.mu.Unlock()
+	if kept {
+		t.Error("an ended process is still remembered")
 	}
 }
 

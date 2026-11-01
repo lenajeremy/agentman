@@ -35,10 +35,19 @@ type processKey struct {
 	comm    string
 }
 
-// commands is what each process was last read to be running.
+// commands is what each process was last read to be running. The map is
+// kept and swept rather than made anew each snapshot: it holds an entry for
+// every process on the machine, and a snapshot is taken every second.
 var commands struct {
 	mu        sync.Mutex
-	byProcess map[processKey]string
+	sweep     uint64
+	byProcess map[processKey]knownCommand
+}
+
+type knownCommand struct {
+	command string
+	// seen is the last snapshot the process was in.
+	seen uint64
 }
 
 // kernelProcessTree reads the process table from the kernel.
@@ -58,22 +67,30 @@ func kernelProcessTree(ctx context.Context) (*ProcessTree, error) {
 
 	commands.mu.Lock()
 	defer commands.mu.Unlock()
-	// Only the processes running now are kept, so this is never larger
-	// than the process table.
-	next := make(map[processKey]string, len(processes))
+	if commands.byProcess == nil {
+		commands.byProcess = make(map[processKey]knownCommand, len(processes))
+	}
+	commands.sweep++
 	for _, process := range processes {
 		tree.parents[process.PID] = process.PPID
 		key := processKey{pid: process.PID, started: process.Started, comm: process.Comm}
-		command, known := commands.byProcess[key]
-		if !known || process.Started > settled {
-			command = commandOf(process)
+		known, ok := commands.byProcess[key]
+		if !ok || process.Started > settled {
+			known.command = commandOf(process)
 		}
-		next[key] = command
-		if command != "" {
-			tree.commands[process.PID] = command
+		known.seen = commands.sweep
+		commands.byProcess[key] = known
+		if known.command != "" {
+			tree.commands[process.PID] = known.command
 		}
 	}
-	commands.byProcess = next
+	// Only the processes running now are kept, so this is never larger
+	// than the process table.
+	for key, known := range commands.byProcess {
+		if known.seen != commands.sweep {
+			delete(commands.byProcess, key)
+		}
+	}
 	return tree, nil
 }
 
@@ -84,8 +101,8 @@ func commandOf(process procinfo.Process) string {
 	if process.Zombie {
 		return "<defunct>"
 	}
-	if args, err := procinfo.Args(process.PID); err == nil {
-		return args[0]
+	if name, err := procinfo.Arg0(process.PID); err == nil {
+		return name
 	}
 	if path, err := procinfo.Path(process.PID); err == nil {
 		return path
