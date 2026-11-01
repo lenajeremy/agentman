@@ -315,6 +315,16 @@ final class DaemonSetup {
         await readVersions()
     }
 
+    /// Set Up Again, from Restart Daemon when there was no service to
+    /// restart: am setup with its steps on the screen.
+    func runOnScreen() {
+        guard allowed, !running, !upgrading else { return }
+        phase = .ready
+        steps = []
+        showsScreen = true
+        Task { await run() }
+    }
+
     /// The welcome screen's "Not now": the app leaves the daemon as it is
     /// until it is next launched, or set up from Settings.
     func notNow() {

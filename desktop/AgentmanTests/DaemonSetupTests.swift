@@ -451,6 +451,23 @@ final class DaemonSetupTests: XCTestCase {
         XCTAssertFalse(store.setup.paths.home.hasPrefix(NSHomeDirectory() + "/"), "not even a look at the user's ~/.agentman")
     }
 
+    // Restart Daemon with no service to restart: the app offers to set it
+    // up again, on the screen; without its am it says how in a terminal.
+    func testRestartingWithoutAServiceOffersToSetUp() async {
+        XCTAssertTrue(DaemonRestart.notAService(canSetUp: true).contains("Set it up again"))
+        XCTAssertTrue(DaemonRestart.notAService(canSetUp: false).contains("am setup"))
+        let refused = await DaemonRestart.restart()
+        XCTAssertEqual(refused, "Nothing is restarted under tests.", "launchctl is never run under tests")
+
+        let am = FakeAm(setup: Self.goodRun)
+        let setup = setup(am: am, automatic: false)
+        setup.runOnScreen()
+        XCTAssertTrue(setup.showsScreen)
+        await until { if case .finished = setup.phase { true } else { false } }
+        XCTAssertEqual(am.runs.count, 1)
+        XCTAssertNil(setup.note, "on the screen, not in the footer")
+    }
+
     func testAppleScriptQuoting() {
         XCTAssertEqual(MacShell.quote(#"/Users/a "b"\c"#), #""/Users/a \"b\"\\c""#)
     }

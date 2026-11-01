@@ -62,7 +62,13 @@ struct AgentmanApp: App {
             // The daemon outlives the app, by design: quitting the app
             // leaves it running, so a stuck one is restarted here.
             CommandGroup(after: .appSettings) {
-                Button("Restart Daemon…") { DaemonRestart.confirm() }
+                Button("Restart Daemon…") {
+                    let setup = store.setup
+                    DaemonRestart.confirm(setUp: setup.allowed ? {
+                        openWindow(id: "main")
+                        setup.runOnScreen()
+                    } : nil)
+                }
             }
             CommandMenu("Go") {
                 Button("Command Palette…") {
