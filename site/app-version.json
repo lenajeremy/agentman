@@ -2,6 +2,14 @@
   "url": "https://testflight.apple.com/join/UcJvsjED",
   "builds": [
     {
+      "build": 34,
+      "version": "0.9.0",
+      "date": "2026-11-01T03:47:23.034Z",
+      "changes": [
+        "Speak your messages: tap the mic beside the message box and Agentman writes out what you say (sign in to Celery in Agentman for Mac › Settings › Keys first). Text is a little larger throughout."
+      ]
+    },
+    {
       "build": 33,
       "version": "0.8.0",
       "date": "2026-11-01T03:47:20.185Z",
