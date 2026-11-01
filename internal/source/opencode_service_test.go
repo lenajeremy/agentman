@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -94,6 +95,11 @@ func (f *ocServiceFake) start(t *testing.T) *httptest.Server {
 			}
 			reply(map[string]any{"location": map[string]string{"directory": "/w/app"}, "data": []map[string]string{
 				{"id": "frontend-design", "name": "Frontend Design", "content": "# Frontend Design"},
+			}})
+		case "/api/command":
+			reply(map[string]any{"location": map[string]string{"directory": r.URL.Query().Get("location[directory]")}, "data": []map[string]string{
+				{"name": "init", "description": "guided AGENTS.md setup"},
+				{"name": "review", "description": "review changes [commit|branch|pr], defaults to uncommitted"},
 			}})
 		case "/api/model":
 			reply(map[string]any{"data": []map[string]string{
@@ -375,5 +381,64 @@ func TestOpenCodeMajorVersion(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	if got := OpenCodeMajorVersion(context.Background()); got != 0 {
 		t.Errorf("without opencode: %d", got)
+	}
+}
+
+// OpenCode 2's own commands are in the "/" menu with /compact, and a message
+// that starts with one runs it; any other "/" is words.
+func TestOpenCodeServiceRunsItsCommands(t *testing.T) {
+	fake := &ocServiceFake{}
+	server := fake.start(t)
+	src := openCodeServiceSource(t, server.URL, "secret")
+	ctx := context.Background()
+	if _, err := src.Discover(ctx); err != nil {
+		t.Fatal(err)
+	}
+	commands, err := src.Commands(ctx, "opencode:ses_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, command := range commands {
+		if !command.Skill {
+			names = append(names, command.Name)
+		}
+	}
+	if !slices.Equal(names, []string{"init", "review", "compact"}) {
+		t.Fatalf("commands = %q", names)
+	}
+
+	for _, tc := range []struct {
+		text, path string
+		body       map[string]any
+	}{
+		{"/review the branch", "/api/session/ses_1/command", map[string]any{"name": "review", "text": "the branch"}},
+		{"/init", "/api/session/ses_1/command", map[string]any{"name": "init", "text": ""}},
+		{"/compact", "/api/session/ses_1/compact", map[string]any{}},
+		{"/etc/hosts is wrong", "/api/session/ses_1/prompt", map[string]any{"text": "/etc/hosts is wrong"}},
+	} {
+		if mode, err := src.Inject(ctx, "opencode:ses_1", tc.text); err != nil || mode != protocol.InjectAPI {
+			t.Fatalf("%q: %v %v", tc.text, mode, err)
+		}
+		post := fake.lastPost(t)
+		if post.path != tc.path || fmt.Sprint(post.body) != fmt.Sprint(tc.body) {
+			t.Errorf("%q sent %s %v, want %s %v", tc.text, post.path, post.body, tc.path, tc.body)
+		}
+	}
+}
+
+// A finished compaction is a note in the conversation, as other agents'
+// are; one under way is not yet.
+func TestOpenCodeServiceShowsCompaction(t *testing.T) {
+	for status, want := range map[string]int{"completed": 1, "running": 0} {
+		raw := `{"type":"compaction","id":"msg_c","time":{"created":5},"status":"` + status + `","reason":"manual","summary":"## Objective"}`
+		message, ok := openCodeServiceMessage(json.RawMessage(raw))
+		var rows []protocol.Message
+		if ok {
+			rows = openCodeMessages("opencode:ses_1", message)
+		}
+		if len(rows) != want || (want == 1 && (rows[0].Role != protocol.RoleSystem || rows[0].Text != "Context compacted")) {
+			t.Errorf("%s compaction = %+v", status, rows)
+		}
 	}
 }

@@ -137,7 +137,9 @@ func (s *KiroSource) CommandPanel(ctx context.Context, sessionID, command string
 	return protocol.CommandPanel{}, errNoPanels
 }
 
-// Commands lists the skills an OpenCode session can be told to use.
+// Commands lists what an OpenCode session can be told to do: OpenCode 2's
+// own commands (its built-in /init and /review, and the user's), /compact,
+// and the skills. An OpenCode 1 server lists skills only.
 func (s *OpenCodeSource) Commands(ctx context.Context, sessionID string) ([]protocol.Command, error) {
 	s.mu.RLock()
 	session, ok := s.sessions[sessionID]
@@ -146,7 +148,12 @@ func (s *OpenCodeSource) Commands(ctx context.Context, sessionID string) ([]prot
 		return nil, fmt.Errorf("source: unknown opencode session %q", sessionID)
 	}
 	home, _ := os.UserHomeDir()
-	return listSkills(home, session.meta.Cwd, openCodeSkillFolders), nil
+	skills := listSkills(home, session.meta.Cwd, openCodeSkillFolders)
+	commands, err := s.openCodeCommands(ctx, session)
+	if err != nil {
+		return skills, nil
+	}
+	return append(commands, skills...), nil
 }
 
 // CommandPanel implements CommandSource: OpenCode's list is skills only.

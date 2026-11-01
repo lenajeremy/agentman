@@ -1285,6 +1285,12 @@ func openCodeWaiting(sessionID string, messages []ocMessage) (texts, rows []stri
 // openCodeMessages flattens one API message into the normalized feed.
 func openCodeMessages(sessionID string, message ocMessage) []protocol.Message {
 	ts := message.Info.Time.Created
+	if message.Info.Role == "compaction" {
+		return []protocol.Message{{
+			ID: message.Info.ID + ":compaction", SessionID: sessionID,
+			Role: protocol.RoleSystem, Ts: ts, Text: "Context compacted",
+		}}
+	}
 	role := protocol.RoleAssistant
 	if message.Info.Role == "user" {
 		role = protocol.RoleUser
@@ -1555,6 +1561,12 @@ func (s *OpenCodeSource) inject(ctx context.Context, sessionID, text string, ski
 	s.mu.RUnlock()
 	if !ok {
 		return protocol.InjectNone, fmt.Errorf("source: unknown opencode session %q", sessionID)
+	}
+	if ran, err := s.runCommand(ctx, session, text); ran || err != nil {
+		if err != nil {
+			return protocol.InjectNone, err
+		}
+		return protocol.InjectAPI, nil
 	}
 
 	body := map[string]any{
