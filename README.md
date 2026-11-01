@@ -202,7 +202,7 @@ sequenceDiagram
 | OpenCode | Native HTTP API across the watched local port range | `prompt_async` API | Native question and permission APIs |
 | Cursor | Agent transcript JSONL under `~/.cursor/projects`, enriched from the IDE's `state.vscdb` composer index (exact timestamps, subtitle, blocking flag) | Read-only for now | Blocking flag surfaces as waiting input (view-only; resolve in the IDE) |
 | Kiro CLI | Session files under `~/.kiro/sessions/cli`; the session lock names the owning process, which matches its tmux pane by ancestry | tmux for `am kiro`; other sessions read-only | Tool approvals, including Kiro's second-level trust options, answered from the pane |
-| Antigravity CLI | Trajectory transcript under `~/.gemini/antigravity-cli/brain`; running conversations found by what each `agy` process holds open (lsof) | tmux for `am antigravity`; other sessions read-only | Command permissions and first-run folder trust, answered from the pane |
+| Antigravity CLI | Trajectory transcript under `~/.gemini/antigravity-cli/brain`; running conversations found by what each `agy` process holds open (from the kernel on macOS, lsof elsewhere) | tmux for `am antigravity`; other sessions read-only | Command permissions and first-run folder trust, answered from the pane |
 | Cursor Agent CLI | Local chat store for terminal chats; Agentman transcript for phone-created ACP chats | ACP with live reply chunks for phone-created chats; tmux for `am cursor`; other terminal chats read-only | ACP permissions, questions, plans, and cancellation for phone-created chats; terminal prompts for `am cursor` |
 
 Cursor IDE discovery excludes CLI-owned transcripts, which Cursor also writes
@@ -214,9 +214,10 @@ use the Cursor IDE for those actions. Cursor Agent CLI chats have separate
 history from IDE chats and do not sync into the IDE. Start a CLI chat with
 `agent login` once, then `am cursor` to make its terminal reachable from the
 phone; a chat started with
-`agent` directly remains read-only. When available, `lsof` identifies the
-exact chat database held open by a managed CLI process, even when several
-sessions share one directory. Without that signal Agentman only links a pane
+`agent` directly remains read-only. The exact chat database held open by a
+managed CLI process — read from the kernel on macOS, and from `lsof`, when
+available, elsewhere — identifies its chat, even when several sessions
+share one directory. Without that signal Agentman only links a pane
 to a chat when the directory and update time identify one unambiguously.
 CLI chat history requires the `sqlite3`
 command on `PATH`. Without it, IDE transcripts still appear, but their

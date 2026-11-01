@@ -94,12 +94,8 @@ func Listening() (map[int][]Listener, error) {
 		if process.Zombie {
 			continue
 		}
-		n, err := pidInfo(process.PID, procPIDListFDs, 0, fds)
-		// A full buffer may have cut the list short.
-		for err == nil && n >= len(fds) && len(fds) < maxFDBuffer {
-			fds = make([]byte, 2*len(fds))
-			n, err = pidInfo(process.PID, procPIDListFDs, 0, fds)
-		}
+		var n int
+		fds, n, err = listFDs(process.PID, fds)
 		if err != nil {
 			continue // another user's process, or one that has just exited
 		}

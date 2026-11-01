@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/lenajeremy/agentman/internal/parser"
+	"github.com/lenajeremy/agentman/internal/procinfo"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/tmux"
 )
@@ -176,19 +177,26 @@ func cursorCLIChatIDs(home string) map[string]bool {
 // cursorCLIOpenStores identifies the active chat by the database the agent
 // process actually has open. This remains exact when two panes share a cwd,
 // when an old chat is resumed, and when the user switches chats in one pane.
-// lsof is optional: environments without it retain the conservative fallback.
+// It is read from the kernel where procinfo can (see kernelOpenFiles), and
+// otherwise from lsof, which is optional: environments without it retain the
+// conservative fallback.
 func cursorCLIOpenStores(ctx context.Context, home string, pids []int) (map[int]string, bool) {
 	result := make(map[int]string)
+	var unique []int
 	ids := make([]string, 0, len(pids))
 	seen := make(map[int]bool, len(pids))
 	for _, pid := range pids {
 		if pid > 1 && !seen[pid] {
 			seen[pid] = true
+			unique = append(unique, pid)
 			ids = append(ids, strconv.Itoa(pid))
 		}
 	}
 	if len(ids) == 0 {
 		return result, true
+	}
+	if procinfo.Supported {
+		return parseCursorCLIOpenStores(home, kernelOpenFiles(unique)), true
 	}
 	bin, err := exec.LookPath("lsof")
 	if err != nil {
