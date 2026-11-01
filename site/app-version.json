@@ -2,6 +2,14 @@
   "url": "https://testflight.apple.com/join/UcJvsjED",
   "builds": [
     {
+      "build": 36,
+      "version": "0.11.0",
+      "date": "2026-11-01T03:47:29.153Z",
+      "changes": [
+        "Pictures you paste into Codex now show in the conversation, and an agent's edits open to a coloured diff of what changed, each file named."
+      ]
+    },
+    {
       "build": 35,
       "version": "0.10.0",
       "date": "2026-11-01T03:47:26.086Z",
@@ -79,15 +87,6 @@
       "changes": [
         "The pairing screen now explains how to set up Agentman on your computer, step by step, with commands you can copy.",
         "Fixed the switches in Settings → Notifications springing back on. They now turn off when you tap them."
-      ]
-    },
-    {
-      "build": 23,
-      "version": "0.1.1",
-      "date": "2026-10-06T14:06:42Z",
-      "changes": [
-        "Fixed idle agents disappearing from the board. One unreadable session no longer hides all the others.",
-        "No more notifications while you're using the app. In Settings → Notifications, choose whether you're alerted when an agent needs you, when it finishes, or both."
       ]
     }
   ]
