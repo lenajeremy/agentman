@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -207,12 +208,37 @@ func readOpenCode(ctx context.Context, db string, since time.Time) ([]Record, in
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	query := `select session_id as s, time_created as t, json_extract(data,'$.modelID') as m, json_extract(data,'$.providerID') as p,` +
-		` json_extract(data,'$.tokens.input') as i, json_extract(data,'$.tokens.output') as o, json_extract(data,'$.tokens.reasoning') as r,` +
-		` json_extract(data,'$.tokens.cache.read') as cr, json_extract(data,'$.tokens.cache.write') as cw` +
-		` from message where time_created >= ` + strconv.FormatInt(since.UnixMilli(), 10) +
-		` and json_extract(data,'$.role') = 'assistant'`
-	out, err := exec.CommandContext(ctx, bin, "-readonly", "-json", "file:"+db+"?mode=ro", query).Output()
+	tables, err := exec.CommandContext(ctx, bin, "-readonly", "file:"+db+"?mode=ro",
+		`select name from sqlite_master where type = 'table' and name in ('message', 'session_message')`).Output()
+	if err != nil {
+		return nil, 1
+	}
+	has := func(name string) bool { return slices.Contains(strings.Fields(string(tables)), name) }
+	after := strconv.FormatInt(since.UnixMilli(), 10)
+	// OpenCode 2 keeps a session's messages in session_message, and copied
+	// the ones from before into it under the same ids; OpenCode 1 kept them
+	// in message. A reply in both is read from session_message.
+	var parts []string
+	if has("session_message") {
+		parts = append(parts, `select session_id as s, time_created as t, json_extract(data,'$.model.id') as m, json_extract(data,'$.model.providerID') as p,`+
+			` json_extract(data,'$.tokens.input') as i, json_extract(data,'$.tokens.output') as o, json_extract(data,'$.tokens.reasoning') as r,`+
+			` json_extract(data,'$.tokens.cache.read') as cr, json_extract(data,'$.tokens.cache.write') as cw`+
+			` from session_message where type = 'assistant' and time_created >= `+after)
+	}
+	if has("message") {
+		old := `select session_id as s, time_created as t, json_extract(data,'$.modelID') as m, json_extract(data,'$.providerID') as p,` +
+			` json_extract(data,'$.tokens.input') as i, json_extract(data,'$.tokens.output') as o, json_extract(data,'$.tokens.reasoning') as r,` +
+			` json_extract(data,'$.tokens.cache.read') as cr, json_extract(data,'$.tokens.cache.write') as cw` +
+			` from message where time_created >= ` + after + ` and json_extract(data,'$.role') = 'assistant'`
+		if has("session_message") {
+			old += ` and id not in (select id from session_message)`
+		}
+		parts = append(parts, old)
+	}
+	if len(parts) == 0 {
+		return nil, 0
+	}
+	out, err := exec.CommandContext(ctx, bin, "-readonly", "-json", "file:"+db+"?mode=ro", strings.Join(parts, " union all ")).Output()
 	if err != nil || len(out) == 0 {
 		return nil, 0
 	}
