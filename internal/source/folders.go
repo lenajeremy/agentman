@@ -221,6 +221,42 @@ func (r *Registry) InDirectory(ctx context.Context, dir string, limit int) ([]pr
 	return all, nil
 }
 
+// Past returns every ended session recorded at or below dir, from every
+// adapter with a history, up to limit from each. Unlike InDirectory it is not
+// cached and leaves the live sessions out: it is for reading transcripts in
+// the background, not for a list on screen.
+func (r *Registry) Past(ctx context.Context, dir string, limit int) ([]protocol.Session, error) {
+	dir = filepath.Clean(dir)
+	if dir == "" || dir == "." {
+		return nil, fmt.Errorf("source: a directory is required")
+	}
+	var (
+		mu       sync.Mutex
+		past     []protocol.Session
+		failures []string
+		wg       sync.WaitGroup
+	)
+	for kind, h := range r.histories() {
+		wg.Add(1)
+		go func(kind protocol.Kind, h History) {
+			defer wg.Done()
+			sessions, err := h.Past(ctx, dir, limit)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				failures = append(failures, fmt.Sprintf("%s: %v", kind, err))
+			}
+			past = append(past, sessions...)
+		}(kind, h)
+	}
+	wg.Wait()
+	if len(failures) > 0 {
+		sort.Strings(failures)
+		return past, fmt.Errorf("source: %s", strings.Join(failures, "; "))
+	}
+	return past, nil
+}
+
 // nativeSession is one conversation as its agent names it.
 type nativeSession struct {
 	kind     protocol.Kind

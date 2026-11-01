@@ -225,12 +225,17 @@ func historyName(prompt, cwd string) string {
 	return ""
 }
 
+// MaxPastLimit is the most one directory's history may be asked for. The
+// folder list asks for DefaultPastLimit; search, reading every conversation
+// once in the background, asks for all of them.
+const MaxPastLimit = 100_000
+
 // limitOrDefault normalises a caller's cap.
 func limitOrDefault(limit int) int {
-	if limit <= 0 || limit > DefaultPastLimit {
+	if limit <= 0 {
 		return DefaultPastLimit
 	}
-	return limit
+	return min(limit, MaxPastLimit)
 }
 
 // scanTail applies visit to the lines in the last limit bytes of a file,
