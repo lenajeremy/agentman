@@ -961,6 +961,26 @@ struct Session: Codable, Sendable, Identifiable, Hashable {
 
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 
+    /// Every field the same, those == leaves out included: for a view that
+    /// is not drawn again while its session hasn't changed at all.
+    func identical(to other: Session) -> Bool {
+        self == other && kind == other.kind && alerts == other.alerts && cwd == other.cwd && inject == other.inject
+            && startedAt == other.startedAt && modelScope == other.modelScope && contextPercent == other.contextPercent
+            && question == other.question && previous == other.previous
+    }
+
+    /// The same in every field but when it last did something and how full
+    /// its context is, which change as it works and which a conversation
+    /// doesn't show.
+    func identical(besidesActivityTo other: Session) -> Bool {
+        var mine = self, theirs = other
+        mine.lastActivityAt = nil
+        theirs.lastActivityAt = nil
+        mine.contextPercent = nil
+        theirs.contextPercent = nil
+        return mine.identical(to: theirs)
+    }
+
     /// Whether this app can send to it. A session the daemon cannot reach
     /// shows its conversation, read-only.
     var canReceive: Bool { inject != nil && inject != "none" }

@@ -600,6 +600,18 @@ struct AgentThreadView: View {
     }
 }
 
+/// Made again whenever any agent's session changes, as the view around it
+/// reads them all; drawn again only when its own agent changed in what it
+/// shows. Drawn each time, its message box, panels and workspace card were
+/// remade for news of other agents, and for its own agent's every step:
+/// when it last did something, which the panels that refresh by it read
+/// from the store's AgentActivity instead.
+extension AgentThreadView: Equatable {
+    nonisolated static func == (lhs: AgentThreadView, rhs: AgentThreadView) -> Bool {
+        lhs.inPanel == rhs.inPanel && lhs.session.identical(besidesActivityTo: rhs.session)
+    }
+}
+
 /// The thread's name and where it works, in the title bar. Clicking the
 /// name renames the session in place: Return keeps it, Escape or clicking
 /// away leaves it as it was.

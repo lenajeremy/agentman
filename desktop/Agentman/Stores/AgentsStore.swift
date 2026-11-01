@@ -299,18 +299,49 @@ final class AgentsStore {
     /// shows it under a thread's title. Read every few seconds while the
     /// sidebar shows; folders that aren't repositories have none.
     private(set) var branches: [String: String] = [:]
+    /// Each folder's HEAD file, as its branch was last read from it.
+    @ObservationIgnored private var heads: [String: GitHead] = [:]
 
     func readBranches() async {
         let folders = Set(sessions.filter { $0.state != .ended }.map(\.cwd))
         var read: [String: String] = [:]
         for folder in folders {
+            if let branch = await branch(in: folder) { read[folder] = branch }
+        }
+        heads = heads.filter { folders.contains($0.key) }
+        if read != branches { branches = read }
+    }
+
+    /// A folder's branch: from git the first time, and again only once its
+    /// HEAD file has changed, which it does when the branch does; otherwise
+    /// as last read. Asking git every few seconds was a process for each
+    /// folder each time, with nothing changed.
+    private func branch(in folder: String) async -> String? {
+        if let head = heads[folder], let stamp = head.stamp, stamp == GitHead.stamp(head.file) { return head.branch }
+        let url = URL(fileURLWithPath: folder)
+        var file = heads[folder]?.file
+        if file.flatMap(GitHead.stamp) == nil {
+            // .git/HEAD, or the main repository's for a worktree. A folder
+            // that isn't in a repository is asked again next time.
+            guard let path = await Git.run(["rev-parse", "--git-path", "HEAD"], in: url)?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty else {
+                heads[folder] = nil
+                return nil
+            }
+            file = path.hasPrefix("/") ? path : url.appendingPathComponent(path).path
+        }
+        guard let file else { return nil }
+        // Stamped before reading, so a change while it is read is read again.
+        let stamp = GitHead.stamp(file)
+        var branch = (try? String(contentsOfFile: file, encoding: .utf8)).flatMap(GitHead.branch(in:))
+        if branch == nil {
             // Empty on a detached HEAD; a new repository's branch, before
             // its first commit, is named all the same.
-            guard let branch = await Git.run(["branch", "--show-current"], in: URL(fileURLWithPath: folder))?
-                .trimmingCharacters(in: .whitespacesAndNewlines), !branch.isEmpty else { continue }
-            read[folder] = branch
+            branch = await Git.run(["branch", "--show-current"], in: url)?.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        if read != branches { branches = read }
+        let named = branch?.isEmpty == false ? branch : nil
+        heads[folder] = GitHead(file: file, stamp: stamp, branch: named)
+        return named
     }
 
     /// Opens what an agentman:// link names: agentman://agent/<session id>,
@@ -380,6 +411,19 @@ final class AgentsStore {
         request.optionKeys = keys
         request.clientId = "mac-answer-\(UUID().uuidString)"
         return await perform(request, for: sessionId)
+    }
+
+    /// When each agent last did something, apart from its session, for the
+    /// panels that refresh as it works: each reads its agent's here, and the
+    /// conversation around them is not drawn again for a session that
+    /// changed in nothing else, as a working agent's does every second.
+    @ObservationIgnored private var activities: [String: AgentActivity] = [:]
+
+    func activity(_ sessionId: String) -> AgentActivity {
+        if let known = activities[sessionId] { return known }
+        let made = AgentActivity(session(sessionId)?.lastActivityAt)
+        activities[sessionId] = made
+        return made
     }
 
     /// A run of tool calls' title, which its row alone observes.
@@ -780,6 +824,7 @@ final class AgentsStore {
         switch event.type {
         case "sessions":
             sessions = (event.sessions ?? []).sorted(by: Self.boardOrder)
+            for session in sessions { activities[session.id]?.update(session.lastActivityAt) }
             sessionsLoaded = true
             if let info = event.daemon {
                 daemonInfo = info
@@ -812,6 +857,7 @@ final class AgentsStore {
                 sessions.append(session)
             }
             sessions.sort(by: Self.boardOrder)
+            activities[session.id]?.update(session.lastActivityAt)
             followTakeovers()
         case "session_gone":
             sessions.removeAll { $0.id == event.sessionId }
@@ -1134,6 +1180,44 @@ final class AgentsStore {
     }
 }
 
+/// A repository's HEAD file, and the branch last read from it.
+nonisolated struct GitHead: Equatable, Sendable {
+    var file: String
+    var stamp: Stamp?
+    var branch: String?
+
+    /// What changes when the file is written again: git writes HEAD anew
+    /// and renames it into place.
+    struct Stamp: Equatable, Sendable {
+        var inode: UInt64
+        var size: Int64
+        var seconds: Int
+        var nanoseconds: Int
+    }
+
+    static func stamp(_ file: String) -> Stamp? {
+        var info = stat()
+        guard stat(file, &info) == 0 else { return nil }
+        return Stamp(inode: UInt64(info.st_ino), size: Int64(info.st_size),
+                     seconds: info.st_mtimespec.tv_sec, nanoseconds: info.st_mtimespec.tv_nsec)
+    }
+
+    /// The branch a HEAD file names, as `git branch --show-current` says
+    /// it: empty when HEAD is detached, nil when only git can say (a ref
+    /// outside refs/heads, or the reftable format, whose HEAD file names a
+    /// stand-in).
+    static func branch(in contents: String) -> String? {
+        let line = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = "ref: refs/heads/"
+        if line.hasPrefix(prefix) {
+            let name = String(line.dropFirst(prefix.count))
+            return name.isEmpty || name == ".invalid" || name.contains(where: \.isNewline) ? nil : name
+        }
+        if line.count >= 40, line.allSatisfy(\.isHexDigit) { return "" }
+        return nil
+    }
+}
+
 /// Why an agent's terminal can't be shown.
 struct TerminalProblem: Error {
     let message: String
@@ -1188,6 +1272,19 @@ enum DaemonRestart {
                     : "It isn't running as a service on this Mac. Run `am service restart` in a terminal, or stop am serve where it runs and start it again.")
             }
         }
+    }
+}
+
+/// When an agent last did something, in milliseconds as the daemon says it.
+@MainActor @Observable
+final class AgentActivity {
+    private(set) var at: Int64?
+
+    init(_ at: Int64?) { self.at = at }
+
+    /// Set only when it changed, so its readers redraw only then.
+    func update(_ new: Int64?) {
+        if new != at { at = new }
     }
 }
 

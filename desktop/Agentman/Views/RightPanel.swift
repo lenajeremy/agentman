@@ -25,6 +25,7 @@ struct RightPanel: View {
     static let defaultWidth: Double = 540
     static let minWidth: Double = 360
 
+    @Environment(AgentsStore.self) private var store
     let session: Session
     @Binding var maximised: Bool
     let close: () -> Void
@@ -149,13 +150,13 @@ struct RightPanel: View {
             Rectangle().fill(Palette.line).frame(height: 1)
             switch shown {
             case .diff:
-                DiffPanel(sessionID: session.id, cwd: session.cwd, state: session.state, activity: session.lastActivityAt)
+                DiffPanel(sessionID: session.id, cwd: session.cwd, state: session.state, activity: store.activity(session.id).at)
                     .equatable()
                     .id(session.id)
             case .files:
                 FilesPanel(folder: session.cwd).equatable().id(session.cwd)
             case .history:
-                HistoryPanel(sessionID: session.id, cwd: session.cwd, state: session.state, activity: session.lastActivityAt)
+                HistoryPanel(sessionID: session.id, cwd: session.cwd, state: session.state, activity: store.activity(session.id).at)
                     .equatable()
                     .id(session.id)
             case .terminal:
