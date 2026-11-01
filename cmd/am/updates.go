@@ -19,10 +19,21 @@ func installedPath() string {
 	return path
 }
 
-// daemonInfo is what the phone is told about this agentman: its version
-// always, and what is newer once a check has succeeded.
-func daemonInfo(checker *update.Checker, upgrade string) *protocol.DaemonInfo {
-	info := &protocol.DaemonInfo{Version: strings.TrimPrefix(version, "v")}
+// installRoute is how the running am was installed, as the apps and am
+// version --json name it.
+func installRoute() string {
+	return update.HowInstalled(installedPath()).String()
+}
+
+// daemonInfo is what the apps are told about this agentman: its version,
+// API level and install route always, and what is newer once a check has
+// succeeded.
+func daemonInfo(checker *update.Checker, upgrade, install string) *protocol.DaemonInfo {
+	info := &protocol.DaemonInfo{
+		Version:  strings.TrimPrefix(version, "v"),
+		APILevel: protocol.APILevel,
+		Install:  install,
+	}
 	status, checked := checker.Status()
 	if !checked {
 		return info

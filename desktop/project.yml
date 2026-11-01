@@ -48,6 +48,16 @@ targets:
         basedOnDependencyAnalysis: false
         outputFiles:
           - $(SRCROOT)/Agentman/Resources/EditorWeb/main.js
+    postBuildScripts:
+      # am, built from this repository into Contents/Helpers and signed as
+      # the app is (scripts/build-am.sh): the app sets everything up with it
+      # on first launch. Last, so Xcode signs the app around it. Run every
+      # time; Go's build cache makes an unchanged am a moment's work.
+      - name: Build am
+        script: '"$SRCROOT/scripts/build-am.sh"'
+        basedOnDependencyAnalysis: false
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/am
     dependencies:
       - package: Markdown
       - package: SwiftTerm

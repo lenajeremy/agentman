@@ -131,6 +131,33 @@ func mustExecutable() string {
 	return binary
 }
 
+// managedBinary is the copy Agentman for Mac runs the daemon from,
+// ~/.agentman/bin/am, when the app has put one there.
+func managedBinary() (string, bool) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", false
+	}
+	path := update.ManagedPath(home)
+	return path, update.IsManaged(path)
+}
+
+// hookBinary is the am an agent's hooks call. Where Agentman for Mac
+// manages the daemon, that is its copy, whichever am installs the hooks:
+// the path never changes when the app is moved or updated, or when
+// Homebrew's am comes and goes, and it is the am the daemon runs. Otherwise
+// it is this am, named as stableBinaryPath says, as it always was.
+func hookBinary() (string, error) {
+	if managed, ok := managedBinary(); ok {
+		return managed, nil
+	}
+	binary, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine own path: %w", err)
+	}
+	return stableBinaryPath(binary), nil
+}
+
 // runInstallHooks registers agentman's hooks with every supported agent.
 func runInstallHooks(ctx context.Context, args []string, remove bool) error {
 	fs := flag.NewFlagSet("install-hooks", flag.ExitOnError)
@@ -140,11 +167,10 @@ func runInstallHooks(ctx context.Context, args []string, remove bool) error {
 		return err
 	}
 
-	binary, err := os.Executable()
+	binary, err := hookBinary()
 	if err != nil {
-		return fmt.Errorf("cannot determine own path: %w", err)
+		return err
 	}
-	binary = stableBinaryPath(binary)
 
 	cfg, err := hook.LoadConfig("")
 	if err != nil {
@@ -206,7 +232,7 @@ func runInstallHooks(ctx context.Context, args []string, remove bool) error {
 
 	// Agentman's tools for agents (am mcp) go in and out with the hooks.
 	if !*kiro {
-		if mcpBinary, err := stableBinary(); err == nil {
+		if mcpBinary, err := toolsBinary(); err == nil {
 			if mcpPlans, err := (hook.Installer{Binary: mcpBinary}).MCPPlans(remove); err == nil && len(mcpPlans) > 0 {
 				fmt.Printf("\n%s\n", dim("Agentman's tools for agents (am mcp)"))
 				failures += applyMCPPlans(mcpPlans, remove, *dryRun)
@@ -299,7 +325,7 @@ func runDoctor(ctx context.Context, args []string) error {
 	}
 	check(cfg.Token != "", "local config", collapseHome(filepath.Join(home, ".agentman", "config.json")))
 
-	binary := stableBinaryPath(mustExecutable())
+	binary, _ := hookBinary()
 	plans, err := hook.Installer{Binary: binary}.Plans(cfg.Token, false)
 	if err != nil {
 		return err
@@ -320,7 +346,7 @@ func runDoctor(ctx context.Context, args []string) error {
 	}
 	// Agentman's tools are for Agentman's users, so a missing one is a
 	// suggestion, not a problem.
-	if mcpBinary, err := stableBinary(); err == nil {
+	if mcpBinary, err := toolsBinary(); err == nil {
 		mcpPlans, _ := hook.Installer{Binary: mcpBinary}.MCPPlans(false)
 		for _, plan := range mcpPlans {
 			label := string(plan.Kind) + " tools"
@@ -381,6 +407,15 @@ func runDoctor(ctx context.Context, args []string) error {
 		warn("hook listener", "not running — start it with `am serve`")
 	} else {
 		check(true, "hook listener", "responding on "+listenAddr)
+	}
+	// Where Agentman for Mac manages the daemon, say so; for anyone else
+	// this section reads as it always did.
+	if managed, ok := managedBinary(); ok {
+		detail := collapseHome(managed) + ", the copy " + update.ManagingApp + " manages"
+		if marker, _ := update.ReadMarker(managed); marker.AppVersion != "" {
+			detail += " (installed by " + marker.AppVersion + ")"
+		}
+		check(true, "daemon's am", detail)
 	}
 	// Being behind is worth knowing, not a fault: the old version still works.
 	switch {

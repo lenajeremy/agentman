@@ -532,15 +532,23 @@ struct AgentRow: View {
     }
 }
 
-/// Whether the app can reach `am serve`, and which version it is.
-private struct ConnectionFooter: View {
+/// Whether the app can reach `am serve`, and which version it is; while the
+/// app sets the daemon up by itself, how that goes.
+struct ConnectionFooter: View {
     @Environment(AgentsStore.self) private var store
+    @Environment(\.openSettings) private var openSettings
+    @AppStorage("settingsTab") private var settingsTab = "general"
 
     var body: some View {
         HStack(spacing: 7) {
-            Circle()
-                .fill(color)
-                .frame(width: 7, height: 7)
+            if store.setup.note == .updating {
+                Loader(size: 8)
+                    .frame(width: 8, height: 8)
+            } else {
+                Circle()
+                    .fill(color)
+                    .frame(width: 7, height: 7)
+            }
             Text(text)
                 .font(TextStyle.caption)
                 .foregroundStyle(Palette.muted)
@@ -554,18 +562,41 @@ private struct ConnectionFooter: View {
         // Its own ground, so the list ends above it instead of running under.
         .background(Palette.sidebar)
         .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 1) }
-        .help(store.socketPath)
+        .contentShape(Rectangle())
+        // A setup that didn't work is explained in Settings, with what to do.
+        .onTapGesture {
+            guard case .failed = store.setup.note else { return }
+            settingsTab = SettingsPage.general.rawValue
+            openSettings()
+        }
+        .help(help)
+    }
+
+    private var help: String {
+        if case .failed(let message) = store.setup.note { return message + " Click for Settings." }
+        return store.socketPath
     }
 
     private var color: Color {
+        switch store.setup.note {
+        case .updated: return Palette.ok
+        case .failed: return Palette.error
+        default: break
+        }
         switch store.status {
-        case .connected: Palette.ok
-        case .connecting: Palette.faint
-        case .unavailable: Palette.error
+        case .connected: return Palette.ok
+        case .connecting: return Palette.faint
+        case .unavailable: return Palette.error
         }
     }
 
     private var text: String {
+        switch store.setup.note {
+        case .updating: return "Updating am serve…"
+        case .updated(let version): return version.isEmpty ? "am serve updated" : "am serve updated to \(version)"
+        case .failed: return "Couldn't update am serve"
+        case nil: break
+        }
         switch store.status {
         case .connected:
             if let version = store.daemonInfo?.version { return "Mac connected · am \(version)" }

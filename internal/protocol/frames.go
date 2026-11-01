@@ -6,6 +6,18 @@ import "encoding/json"
 // an old app talking to a new relay fails loudly rather than subtly.
 const Version = 2
 
+// APILevel counts what apps can rely on a daemon for. Unlike Version it
+// never breaks anything: it goes up by one whenever an app comes to need a
+// daemon feature that older daemons lack, so an app can tell a daemon too
+// old for it, and upgrade it, from one that is merely older. A newer daemon
+// works with an older app, which ignores what it doesn't know. A daemon
+// that reports no level is level 0.
+//
+//  1. The daemon reports its API level and how it was installed
+//     (DaemonInfo), am version --json says both of any am, and am setup
+//     sets everything up, the daemon's copy at ~/.agentman/bin/am included.
+const APILevel = 1
+
 // Peer names a routing destination.
 type Peer string
 
@@ -456,6 +468,13 @@ type Event struct {
 // DaemonInfo describes the agentman running on this Mac.
 type DaemonInfo struct {
 	Version string `json:"version"`
+	// APILevel is the daemon's APILevel: what an app can rely on it for.
+	// Missing, and so 0, from a daemon older than the field.
+	APILevel int `json:"apiLevel,omitempty"`
+	// Install is how the daemon's am was installed: "managed" (the copy
+	// Agentman for Mac runs it from), "app" (inside an app), "homebrew",
+	// "npm" or "download".
+	Install string `json:"install,omitempty"`
 	// Latest is the newest release. Empty until a check has succeeded, or
 	// when checking is switched off.
 	Latest string `json:"latest,omitempty"`

@@ -321,7 +321,7 @@ func runMCPInstall(args []string, remove bool) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	binary, err := stableBinary()
+	binary, err := toolsBinary()
 	if err != nil {
 		return err
 	}
@@ -397,7 +397,7 @@ func giveAgentsTools(cfg hook.Config) {
 	if cfg.NoAgentTools {
 		return
 	}
-	binary, err := stableBinary()
+	binary, err := toolsBinary()
 	if err != nil {
 		return
 	}
@@ -415,6 +415,16 @@ func giveAgentsTools(cfg hook.Config) {
 		}
 		fmt.Printf("%s %s\n", stamp(), dim(fmt.Sprintf("agentman   gave %s Agentman's tools (am mcp); new sessions have them", plan.Kind)))
 	}
+}
+
+// toolsBinary is the am to register as agents' tools (am mcp). Where
+// Agentman for Mac manages the daemon, that is its copy, for the reasons
+// hookBinary gives; otherwise stableBinary, as it always was.
+func toolsBinary() (string, error) {
+	if managed, ok := managedBinary(); ok {
+		return managed, nil
+	}
+	return stableBinary()
 }
 
 // stableBinary is the am to register: the one on PATH when it is this

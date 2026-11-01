@@ -9,7 +9,7 @@ struct AgentmanApp: App {
     /// Unit tests run inside the app, as its host, and get none of it: no
     /// window, no daemon, no editor on the user's folders, and nothing
     /// restored from the user's own copy of the app.
-    static let underTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    nonisolated static let underTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
     init() {
         if Self.underTests {
@@ -62,7 +62,13 @@ struct AgentmanApp: App {
             // The daemon outlives the app, by design: quitting the app
             // leaves it running, so a stuck one is restarted here.
             CommandGroup(after: .appSettings) {
-                Button("Restart Daemon…") { DaemonRestart.confirm() }
+                Button("Restart Daemon…") {
+                    let setup = store.setup
+                    DaemonRestart.confirm(setUp: setup.allowed ? {
+                        openWindow(id: "main")
+                        setup.runOnScreen()
+                    } : nil)
+                }
             }
             CommandMenu("Go") {
                 Button("Command Palette…") {

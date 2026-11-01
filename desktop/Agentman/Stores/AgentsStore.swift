@@ -134,8 +134,13 @@ final class AgentsStore {
     private static let agentmanPanel = "agentman"
     private var started = false
 
-    init(client: DaemonClient = DaemonClient()) {
+    /// Keeping am serve right for this app: setting it up on first launch,
+    /// and again when it is missing or too old.
+    let setup: DaemonSetup
+
+    init(client: DaemonClient = DaemonClient(), setup: DaemonSetup? = nil) {
         self.client = client
+        self.setup = setup ?? DaemonSetup()
         manager = ManagerStore(client: client)
         manager.onNews = { [weak self] entry in self?.news(entry) }
         manager.onCardClosed = { [weak self] card in
@@ -811,8 +816,10 @@ final class AgentsStore {
 
     // MARK: - Daemon events
 
-    private func statusChanged(_ status: DaemonClient.Status) {
+    /// Internal rather than private so tests can say how the connection is.
+    func statusChanged(_ status: DaemonClient.Status) {
         self.status = status
+        setup.connectionChanged(status)
         guard status == .connected else { return }
         Task {
             if let event = try? await client.request(DaemonRequest(.listSessions)) {
@@ -844,6 +851,8 @@ final class AgentsStore {
             if let info = event.daemon {
                 daemonInfo = info
             }
+            // A daemon too old to say anything of itself is level 0.
+            setup.daemonReported(event.daemon ?? DaemonInfo(version: ""))
             followTakeovers()
         case "turn_complete":
             if let id = event.sessionId { away.record(.finished(event.preview), sessionId: id) }
@@ -1250,7 +1259,9 @@ struct VoiceProblem: Error {
 enum DaemonRestart {
     static let label = "dev.agentman.serve"
 
-    static func confirm() {
+    /// Asks, restarts, and says why it couldn't. With setUp, the app can set
+    /// the service up itself (DaemonSetup), and offers to when there is none.
+    static func confirm(setUp: (() -> Void)? = nil) {
         let alert = NSAlert()
         alert.messageText = "Restart the daemon?"
         alert.informativeText = "Agentman's daemon starts again in a few seconds. Your agents keep running; a message still being sent may need sending again."
@@ -1258,18 +1269,34 @@ enum DaemonRestart {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         Task {
-            if let problem = await restart() {
-                let failed = NSAlert()
-                failed.messageText = "The daemon couldn't be restarted"
-                failed.informativeText = problem
+            guard let problem = await restart(canSetUp: setUp != nil) else { return }
+            let failed = NSAlert()
+            failed.messageText = "The daemon couldn't be restarted"
+            failed.informativeText = problem
+            if let setUp {
+                failed.addButton(withTitle: "Set Up Again")
+                failed.addButton(withTitle: "Cancel")
+                if failed.runModal() == .alertFirstButtonReturn { setUp() }
+            } else {
                 failed.runModal()
             }
         }
     }
 
+    /// Why there was no service to restart, and what to do instead: set up
+    /// again, from the app when it can, else am setup in a terminal.
+    nonisolated static func notAService(canSetUp: Bool) -> String {
+        canSetUp
+            ? "It isn't running as a background service on this Mac. Set it up again to start it at login, with your agents connected."
+            : "It isn't running as a background service on this Mac. Run `am setup` in a terminal to start it at login, or stop am serve where it runs and start it again."
+    }
+
     /// Kicks the service; answers why it couldn't.
-    static func restart(service: String = label) async -> String? {
-        await withCheckedContinuation { continuation in
+    static func restart(service: String = label, canSetUp: Bool = false) async -> String? {
+        // The tests run inside the app: the user's service is never theirs
+        // to restart.
+        guard !AgentmanApp.underTests else { return "Nothing is restarted under tests." }
+        return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
@@ -1283,8 +1310,7 @@ enum DaemonRestart {
                     continuation.resume(returning: error.localizedDescription)
                     return
                 }
-                continuation.resume(returning: process.terminationStatus == 0 ? nil
-                    : "It isn't running as a service on this Mac. Run `am service restart` in a terminal, or stop am serve where it runs and start it again.")
+                continuation.resume(returning: process.terminationStatus == 0 ? nil : notAService(canSetUp: canSetUp))
             }
         }
     }

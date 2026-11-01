@@ -19,6 +19,7 @@ import (
 
 	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/protocol"
+	"github.com/lenajeremy/agentman/internal/update"
 )
 
 // am serve as a login service: started by the system when the user logs in,
@@ -78,20 +79,69 @@ func installService(ctx context.Context, configHome string) error {
 	if err != nil {
 		return err
 	}
+	// The am inside an app moves and changes with the app, so the service
+	// runs the daemon's copy of it, ~/.agentman/bin/am, put in place first.
+	if self := installedPath(); update.InAppBundle(self) {
+		if binary, err = serviceCopyFromApp(ctx, self, configHome); err != nil {
+			return err
+		}
+	}
+	if err := putServiceOn(binary, configHome, func(line string) { fmt.Println(line) }); err != nil {
+		return err
+	}
+	socket := filepath.Join(dir, "am.sock")
+	if !waitFor(30*time.Second, func() bool { return socketAnswers(socket) }) {
+		return fmt.Errorf("service: installed, but am serve hasn't answered yet; see %s", collapseHome(filepath.Join(dir, "serve.log")))
+	}
+	fmt.Println("Agentman now runs in the background: it starts when you log in, and agents keep running when you quit a terminal.")
+	return printServiceStatus(ctx, configHome)
+}
+
+// serviceCopyFromApp puts the daemon's copy of am in place from the am
+// inside an app at self, as am setup does, and returns where it is.
+func serviceCopyFromApp(ctx context.Context, self, configHome string) (string, error) {
+	home := configHome
+	if home == "" {
+		var err error
+		if home, err = os.UserHomeDir(); err != nil {
+			return "", err
+		}
+	}
+	managed := update.ManagedPath(home)
+	result, err := installManaged(ctx, self, managed, "", false)
+	if err != nil {
+		return "", fmt.Errorf("service: %w", err)
+	}
+	if result.Changed {
+		fmt.Printf("Installed %s from %s, for the service to run: it stays put when the app moves.\n",
+			collapseHome(managed), filepath.Base(update.BundleOf(self)))
+	}
+	return managed, nil
+}
+
+// putServiceOn makes the login service run the am at binary, taking over
+// from any other daemon so only one ever runs: the job loaded now, which
+// keeps the plist it was loaded with, is taken down first, and an am serve
+// started from a terminal is stopped. The new job is then written and
+// loaded. Whether it answers is the caller's to wait for. say is told what
+// is happening, a line at a time.
+func putServiceOn(binary, configHome string, say func(string)) error {
+	dir, err := hook.ConfigDir(configHome)
+	if err != nil {
+		return err
+	}
 	plist, err := servicePlistPath()
 	if err != nil {
 		return err
 	}
-	// A loaded job keeps the plist it was loaded with: take it down first.
 	if serviceLoaded() {
 		_ = launchctl("bootout", serviceTarget())
 		waitFor(5*time.Second, func() bool { return !serviceLoaded() })
 	}
-	// One am serve at a time: a copy started from a terminal makes way.
-	if pid := terminalDaemon(configHome); pid > 0 {
-		fmt.Printf("Stopping am serve (pid %d), started from a terminal…\n", pid)
-		_ = syscall.Kill(pid, syscall.SIGINT)
-		if !waitFor(15*time.Second, func() bool { return syscall.Kill(pid, 0) != nil }) {
+	if pid := findTerminalDaemon(configHome); pid > 0 {
+		say(fmt.Sprintf("Stopping am serve (pid %d), started from a terminal…", pid))
+		_ = stopProcess(pid)
+		if !waitFor(15*time.Second, func() bool { return !processAlive(pid) }) {
 			return fmt.Errorf("service: am serve (pid %d) didn't stop; stop it, then run this again", pid)
 		}
 	}
@@ -108,16 +158,24 @@ func installService(ctx context.Context, configHome string) error {
 	if err := os.WriteFile(plist, []byte(content), 0o644); err != nil {
 		return err
 	}
-	if err := launchctl("bootstrap", fmt.Sprintf("gui/%d", os.Getuid()), plist); err != nil {
-		return err
-	}
-	socket := filepath.Join(dir, "am.sock")
-	if !waitFor(30*time.Second, func() bool { return socketAnswers(socket) }) {
-		return fmt.Errorf("service: installed, but am serve hasn't answered yet; see %s", collapseHome(filepath.Join(dir, "serve.log")))
-	}
-	fmt.Println("Agentman now runs in the background: it starts when you log in, and agents keep running when you quit a terminal.")
-	return printServiceStatus(ctx, configHome)
+	return launchctl("bootstrap", fmt.Sprintf("gui/%d", os.Getuid()), plist)
 }
+
+// launchctlCommand runs launchctl and returns what it printed. launchd is
+// the same whatever HOME says, so tests put a fake here: the real one would
+// act on the user's own service.
+var launchctlCommand = func(args ...string) ([]byte, error) {
+	return exec.Command("launchctl", args...).CombinedOutput()
+}
+
+// findTerminalDaemon, stopProcess and processAlive find and stop an am
+// serve started from a terminal; tests replace them so no real process is
+// ever signalled.
+var (
+	findTerminalDaemon = terminalDaemon
+	stopProcess        = func(pid int) error { return syscall.Kill(pid, syscall.SIGINT) }
+	processAlive       = func(pid int) bool { return syscall.Kill(pid, 0) == nil }
+)
 
 func uninstallService() error {
 	plist, err := servicePlistPath()
@@ -244,7 +302,8 @@ func servicePlistPath() (string, error) {
 func serviceTarget() string { return fmt.Sprintf("gui/%d/%s", os.Getuid(), serviceLabel) }
 
 func serviceLoaded() bool {
-	return exec.Command("launchctl", "print", serviceTarget()).Run() == nil
+	_, err := launchctlCommand("print", serviceTarget())
+	return err == nil
 }
 
 var (
@@ -254,7 +313,7 @@ var (
 
 // serviceState is what launchd says of the job: its state and process.
 func serviceState() (string, int) {
-	out, err := exec.Command("launchctl", "print", serviceTarget()).Output()
+	out, err := launchctlCommand("print", serviceTarget())
 	if err != nil {
 		return "not loaded", 0
 	}
@@ -274,7 +333,7 @@ func parseLaunchState(out string) (string, int) {
 }
 
 func launchctl(args ...string) error {
-	out, err := exec.Command("launchctl", args...).CombinedOutput()
+	out, err := launchctlCommand(args...)
 	if err != nil {
 		return fmt.Errorf("launchctl %s: %s", args[0], strings.TrimSpace(string(out)))
 	}
