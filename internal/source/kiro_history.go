@@ -30,7 +30,7 @@ func (s *KiroSource) Past(ctx context.Context, dir string, limit int) ([]protoco
 	limit = limitOrDefault(limit)
 
 	running := s.kiroRunning(ctx)
-	found := make([]protocol.Session, 0, limit)
+	var found []protocol.Session // sized by what is found; see limitOrDefault
 	for _, entry := range newestTranscripts(s.sessionsDir(), ".json", 0) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
