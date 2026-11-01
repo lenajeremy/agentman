@@ -137,6 +137,64 @@ final class RedesignShotsTests: XCTestCase {
         }
     }
 
+    /// Meta Muse agents: one waiting on an approval, its thread with Muse's
+    /// tool rows, and one a terminal has open (watched, not sent to) whose
+    /// last turn was stopped and the one before it refused by the model; and
+    /// the new-agent sheet with Muse chosen. In light and dark.
+    func testRenderMuse() throws {
+        guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
+        let shots = URL(fileURLWithPath: out)
+        let site = try folder("site", files: ["README.md": "# Site\n"]).path
+        let api = try folder("api").path
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let sessions = """
+        {"type":"sessions","sessions":[
+         {"id":"muse:a","kind":"muse","name":"Add a dark mode toggle","cwd":"\(site)","state":"waiting_input","inject":"api","lastActivityAt":\(now - 30_000),"model":"muse-spark-1.3",
+          "question":{"id":"approval:x:0","prompt":"","title":"Run this command?","detail":"npm test -- settings","options":[{"key":"allow_once","label":"Allow once"},{"key":"abort","label":"Reject"}]}},
+         {"id":"muse:b","kind":"muse","name":"Tidy the API errors","cwd":"\(api)","state":"idle","inject":"none","lastActivityAt":\(now - 300_000),"model":"muse-spark-1.3"},
+         {"id":"c","kind":"claude","name":"Fix Safari sign-in","cwd":"\(site)","state":"busy","inject":"tmux","lastActivityAt":\(now - 60_000)}
+        ]}
+        """
+        let waiting = """
+        {"type":"messages","sessionId":"muse:a","messages":[
+         {"id":"1","sessionId":"muse:a","role":"user","ts":\(now - 200_000),"text":"Add a dark mode toggle to the settings page, then run its tests."},
+         {"id":"2","sessionId":"muse:a","role":"tool","ts":\(now - 190_000),"tool":{"name":"read_file","summary":"src/settings.tsx","status":"ok","title":"Read settings.tsx"}},
+         {"id":"3","sessionId":"muse:a","role":"tool","ts":\(now - 170_000),"tool":{"name":"edit_file","summary":"src/settings.tsx","status":"ok","title":"Edited settings.tsx"}},
+         {"id":"4","sessionId":"muse:a","role":"assistant","ts":\(now - 160_000),"text":"Added a **Dark mode** switch under Appearance; it follows the system until it's turned on. Running the settings tests next."},
+         {"id":"5","sessionId":"muse:a","role":"tool","ts":\(now - 30_000),"tool":{"name":"bash","summary":"npm test -- settings","status":"running","title":"Running the settings tests"}}
+        ]}
+        """
+        let watched = """
+        {"type":"messages","sessionId":"muse:b","messages":[
+         {"id":"1","sessionId":"muse:b","role":"user","ts":\(now - 900_000),"text":"Make the API errors say what to do next."},
+         {"id":"turn:t0:failed","sessionId":"muse:b","role":"system","ts":\(now - 899_000),"text":"Muse turn failed: API error 402: Billing verification failed. To use this API key, your team needs to resolve a billing issue first."},
+         {"id":"3","sessionId":"muse:b","role":"user","ts":\(now - 400_000),"text":"Try again"},
+         {"id":"4","sessionId":"muse:b","role":"tool","ts":\(now - 390_000),"tool":{"name":"search","summary":"errors.go","status":"ok","title":"Searched for “ErrNotFound”"}},
+         {"id":"5","sessionId":"muse:b","role":"tool","ts":\(now - 380_000),"tool":{"name":"bash","summary":"go test ./api/...","status":"error","title":"Ran the API tests"}},
+         {"id":"turn:t1:cancelled","sessionId":"muse:b","role":"system","ts":\(now - 300_000),"text":"Interrupted"}
+        ]}
+        """
+        let keys = ["newAgentKind"]
+        let saved = keys.map { ($0, UserDefaults.standard.object(forKey: $0)) }
+        defer { for (key, value) in saved { if let value { UserDefaults.standard.set(value, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } } }
+        UserDefaults.standard.set("muse", forKey: "newAgentKind")
+        for dark in [false, true] {
+            let look = dark ? "dark" : "light"
+            for (id, name) in [("muse:a", "muse-approval"), ("muse:b", "muse-watched")] {
+                let store = AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-shots.sock"))
+                for json in [sessions, waiting, watched] {
+                    store.apply(try JSONDecoder().decode(DaemonEvent.self, from: Data(json.utf8)))
+                }
+                store.selection = .agent(id)
+                try render(ContentView(), size: CGSize(width: 1100, height: 700), dark: dark, store: store,
+                           to: shots.appendingPathComponent("\(name)-\(look).png"))
+            }
+            let store = AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-shots.sock"))
+            try render(NewAgentView().background(Palette.paper), size: CGSize(width: 900, height: 520), dark: dark, store: store,
+                       to: shots.appendingPathComponent("muse-new-agent-\(look).png"))
+        }
+    }
+
     /// The editor with no file open: a folder with nothing changed, and one
     /// where agents changed a few files, in light and dark.
     func testRenderEditorEmpty() async throws {
