@@ -104,6 +104,14 @@ func OwnersOf(sessions []protocol.Session) []Owner {
 }
 
 func (w *Watcher) update(ctx context.Context, owners []Owner, confirm int) (map[string][]protocol.Server, error) {
+	// With no session to own a server, every listener would be passed over:
+	// the answer is the one a scan would give, without reading every
+	// process's sockets for it.
+	if len(owners) == 0 {
+		w.sightings = map[listenerKey]int{}
+		clear(w.probes)
+		return map[string][]protocol.Server{}, nil
+	}
 	scan, err := w.scan(ctx)
 	if err != nil {
 		return nil, err
