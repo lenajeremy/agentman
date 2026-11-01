@@ -236,6 +236,13 @@ func (in Installer) planCodex(home, token string, remove bool) Plan {
 	block := codexNotifyBegin + "\n" +
 		"notify = [" + string(quotedBinary) + ", \"hook\", \"codex\", \"Stop\"]\n" +
 		codexNotifyEnd + "\n"
+	// Already at the top as it would be written: what follows it, a blank
+	// line before Agentman's MCP table among it, stays as it is, so a second
+	// install finds nothing to do.
+	if strings.HasPrefix(plan.Before, block) {
+		plan.After = plan.Before
+		return plan
+	}
 	plan.After = block + strings.TrimLeft(base, "\n")
 	plan.Changed = plan.After != plan.Before
 	return plan

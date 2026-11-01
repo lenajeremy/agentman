@@ -414,6 +414,37 @@ func TestCodexNotifyPreservesTOMLAndIsIdempotent(t *testing.T) {
 	}
 }
 
+// install-hooks writes Codex's notify, then Agentman's MCP table after a
+// blank line; installing again finds both in place and changes nothing,
+// rather than taking the blank line out and backing the file up for it.
+func TestCodexNotifyAndToolsInstallOnce(t *testing.T) {
+	home := t.TempDir()
+	path := codexConfigPath(home)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	in := Installer{Home: home, Binary: "/Users/me/.agentman/bin/am"}
+	apply := func() (hooks, tools bool) {
+		notify := in.planCodex(home, "", false)
+		if err := notify.Apply(); err != nil {
+			t.Fatal(err)
+		}
+		mcp := in.planCodexMCP(home, false)
+		if err := mcp.Apply(); err != nil {
+			t.Fatal(err)
+		}
+		return notify.Changed, mcp.Changed
+	}
+	if hooks, tools := apply(); !hooks || !tools {
+		t.Fatalf("first install changed hooks %v, tools %v", hooks, tools)
+	}
+	first, _ := os.ReadFile(path)
+	if hooks, tools := apply(); hooks || tools {
+		after, _ := os.ReadFile(path)
+		t.Fatalf("second install changed hooks %v, tools %v:\n%s\nthen\n%s", hooks, tools, first, after)
+	}
+}
+
 func TestCodexNotifyRefusesToReplaceUserCommand(t *testing.T) {
 	home := t.TempDir()
 	path := codexConfigPath(home)
