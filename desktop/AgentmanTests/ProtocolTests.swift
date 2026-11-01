@@ -66,6 +66,19 @@ final class ProtocolTests: XCTestCase {
         // A state this app does not know yet must not lose the whole board.
         XCTAssertEqual(sessions[1].state, .unknown)
         XCTAssertFalse(sessions[1].canReceive)
+        // A daemon from before API levels says neither.
+        XCTAssertNil(event.daemon?.apiLevel)
+        XCTAssertNil(event.daemon?.install)
+    }
+
+    // What a daemon since API level 1 says of itself (internal/protocol's
+    // DaemonInfo), on every session list.
+    func testTheDaemonSaysItsAPILevelAndHowItWasInstalled() throws {
+        let event = try JSONDecoder().decode(DaemonEvent.self, from: Data("""
+        {"type":"sessions","sessions":[],"daemon":{"version":"0.39.0","apiLevel":1,"install":"managed","latest":"0.39.0"}}
+        """.utf8))
+        XCTAssertEqual(event.daemon?.apiLevel, 1)
+        XCTAssertEqual(event.daemon?.install, "managed")
     }
 
     // The daemon decodes requests with Go's encoding/json: unset fields are

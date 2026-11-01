@@ -1051,6 +1051,14 @@ struct Page: Codable, Sendable {
 /// The agentman running on this Mac, and whether a newer one is out.
 struct DaemonInfo: Codable, Sendable, Hashable {
     var version: String
+    /// What the app can rely on the daemon for (internal/protocol.APILevel):
+    /// it goes up by one whenever the app comes to need something older
+    /// daemons lack. Missing, and so 0, from a daemon older than the field.
+    var apiLevel: Int?
+    /// How the daemon's am was installed: "managed" (the copy this app put
+    /// at ~/.agentman/bin/am), "app" (inside an app), "homebrew", "npm" or
+    /// "download"; nil from a daemon older than the field.
+    var install: String?
     var latest: String?
     var behind: Int?
     var upgrade: String?
