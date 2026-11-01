@@ -601,6 +601,26 @@ final class DaemonSetupTests: XCTestCase {
         }
         busy.release()
         await upgrading.value
+
+        // The end of the General page, as Settings shows it: the Command
+        // line section above About, on a Mac without tmux.
+        let managed = "/Users/me/.agentman/bin/am"
+        let command = DaemonSetup.commandStatus(
+            tools: DaemonSetup.ShellTools(path: ["/opt/homebrew/bin", "/usr/local/bin"], am: nil), managed: managed,
+            managedThere: true, allowed: true, folders: ("/opt/homebrew/bin", "/usr/local/bin"), writable: { _ in false })
+        for dark in [false, true] {
+            let page = SettingsPageView(title: "General") {
+                CommandLineRows(command: command, tmuxMissing: true)
+                SettingsSection(title: "About") {
+                    SettingsRow(title: "Agentman for Mac") {
+                        Text("0.39.0 (44)").font(TextStyle.caption).foregroundStyle(Palette.muted)
+                    }
+                    DaemonServeRow()
+                }
+            }
+            try render(page, size: CGSize(width: 600, height: 580), dark: dark, store: states[2].1,
+                       to: URL(fileURLWithPath: out).appendingPathComponent("settings-general-end-\(dark ? "dark" : "light").png"))
+        }
     }
 
     /// Settings' am command row in each state, with a Mac's own paths.
