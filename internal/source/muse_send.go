@@ -89,18 +89,21 @@ func (s *MuseSource) take(ctx context.Context, native string) error {
 	if err != nil {
 		return err
 	}
-	holdCtx, cancel := context.WithCancel(context.Background())
-	s.holds.mu.Lock()
-	s.holds.held[native] = cancel
-	s.holds.mu.Unlock()
-	go s.hold(holdCtx, native)
+	s.startHold(native)
 	return nil
 }
 
-// hold lets the session go once it has been idle with nothing waiting on the
-// user. A turn only just started may still read as idle, so it waits for
-// one sign of work first, or a few checks of quiet.
-func (s *MuseSource) hold(ctx context.Context, native string) {
+// startHold marks the session held and watches it until Muse is done. The
+// watch starts listening before this returns, so a turn that ends at once
+// is still seen ending.
+func (s *MuseSource) startHold(native string) {
+	holdCtx, cancel := context.WithCancel(context.Background())
+	s.holds.mu.Lock()
+	if s.holds.held == nil {
+		s.holds.held = map[string]context.CancelFunc{}
+	}
+	s.holds.held[native] = cancel
+	s.holds.mu.Unlock()
 	statuses := make(chan museStatus, 16)
 	stop := s.host.listen(func(message museMessage) {
 		if message.Method != "session/statusChanged" && message.Method != "turn/completed" {
@@ -114,7 +117,16 @@ func (s *MuseSource) hold(ctx context.Context, native string) {
 			}
 		}
 	})
-	defer stop()
+	go func() {
+		defer stop()
+		s.hold(holdCtx, native, statuses)
+	}()
+}
+
+// hold lets the session go once it has been idle with nothing waiting on the
+// user. A turn only just started may still read as idle, so it waits for
+// one sign of work first, or a few checks of quiet.
+func (s *MuseSource) hold(ctx context.Context, native string, statuses <-chan museStatus) {
 	ticker := time.NewTicker(museHoldCheck)
 	defer ticker.Stop()
 	worked, quiet := false, 0
@@ -223,14 +235,7 @@ func (s *MuseSource) Launch(ctx context.Context, dir, prompt string) (string, er
 		return "", errors.New("source: Muse started no session")
 	}
 	// Starting it made this connection its driver.
-	holdCtx, cancel := context.WithCancel(context.Background())
-	s.holds.mu.Lock()
-	if s.holds.held == nil {
-		s.holds.held = map[string]context.CancelFunc{}
-	}
-	s.holds.held[native] = cancel
-	s.holds.mu.Unlock()
-	go s.hold(holdCtx, native)
+	s.startHold(native)
 	if _, err := s.Inject(ctx, musePrefix+native, prompt); err != nil {
 		s.letGo(native)
 		return "", err
