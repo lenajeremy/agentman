@@ -49,6 +49,8 @@ Usage:
   am cursor [args...]         Start Cursor Agent CLI so you can message it later
   am kiro [args...]           Start Kiro CLI so you can message it later
   am antigravity [args...]    Start Antigravity CLI so you can message it later (or: am agy)
+  am muse [args...]           Open Meta Muse here, watched live from your phone
+                              (am muse resume <id> takes a session back from it)
   am send <session-id> <text> Send a message to a running session
   am interrupt <session-id>   Stop the active turn in a managed session
   am answer <session-id> <key> Answer a pending choice shown by an agent
@@ -120,6 +122,9 @@ func main() {
 			agent = "antigravity" // one pane prefix, whichever name was typed
 		}
 		err = runWrap(ctx, agent, args)
+	case "muse":
+		// No tmux: Muse is followed and driven through its own protocol.
+		err = runMuse(ctx, args)
 	case "opencode":
 		// No tmux: OpenCode takes prompts over its API. What it needs instead
 		// is its API on the port the daemon watches.
