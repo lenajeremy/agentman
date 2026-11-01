@@ -276,6 +276,8 @@ export default function SessionScreen() {
   // the visible part of the sheet. Scrolling to the end shows it: the note
   // sits under the last option.
   const sheetScroll = useRef<ComponentRef<typeof ScrollView>>(null);
+  // How tall the docked question sheet is: the gap the conversation keeps.
+  const [questionDock, setQuestionDock] = useState(0);
   useEffect(() => {
     if (Platform.OS === "web") return;
     const shown = Keyboard.addListener("keyboardDidShow", () => {
@@ -1189,25 +1191,9 @@ export default function SessionScreen() {
             bottom: impossible to miss, but the transcript above stays
             readable for context. */}
         {session?.question ? (
-          <QuestionSheet
-            collapsedHeight={Math.max(260, Math.min(520, viewportHeight * 0.62))}
-            // Pulled up, it stops short of the header, which still says whose
-            // question this is.
-            expandedHeight={viewportHeight - insets.top - headerHeight - space.md}
-            bottomPadding={(keyboardVisible ? 0 : insets.bottom) + space.md}
-            resetKey={session.question.id ?? session.question.prompt}
-            scrollRef={sheetScroll}
-          >
-            <ContentColumn>
-              <QuestionCard
-                question={session.question}
-                onAnswer={(answer) => store.answerQuestion(sessionId, answer)}
-                disabled={!store.daemonOnline}
-                submissionStatus={answerAction?.status}
-                submissionError={answerAction?.error}
-              />
-            </ContentColumn>
-          </QuestionSheet>
+          // The sheet is drawn over the screen (below), so pulled up it can
+          // cover the header; this keeps the conversation ending above it.
+          <View style={{ height: questionDock }} />
         ) : (
           <View style={styles.composerShell}>
             <ContentColumn
@@ -1406,6 +1392,26 @@ export default function SessionScreen() {
           </View>
         )}
       </KeyboardAvoidingView>
+
+      {session?.question ? (
+        <QuestionSheet
+          dockedHeight={Math.max(260, Math.min(520, viewportHeight * 0.62))}
+          bottomPadding={(keyboardVisible ? 0 : insets.bottom) + space.md}
+          resetKey={session.question.id ?? session.question.prompt}
+          scrollRef={sheetScroll}
+          onDockHeight={setQuestionDock}
+        >
+          <ContentColumn>
+            <QuestionCard
+              question={session.question}
+              onAnswer={(answer) => store.answerQuestion(sessionId, answer)}
+              disabled={!store.daemonOnline}
+              submissionStatus={answerAction?.status}
+              submissionError={answerAction?.error}
+            />
+          </ContentColumn>
+        </QuestionSheet>
+      ) : null}
 
       <Toast message={toast} onHidden={hideToast} top={insets.top + headerHeight + space.sm} />
       {panelView ? (
