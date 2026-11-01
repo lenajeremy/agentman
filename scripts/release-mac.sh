@@ -227,14 +227,19 @@ info() { plutil -extract "$1" raw -o - "$plist" 2>/dev/null; }
 # this is where an export that forgot them would show.
 codesign --verify --deep --strict "$app" || fail "the app's signature does not verify."
 sparkle="$app/Contents/Frameworks/Sparkle.framework/Versions/B"
-for code in "$app" "$app/Contents/Frameworks/Sparkle.framework" "$sparkle/Autoupdate" "$sparkle/Updater.app" \
-            "$sparkle"/XPCServices/*.xpc; do
+[ -x "$app/Contents/Helpers/am" ] || fail "the app carries no am: Contents/Helpers/am is missing."
+for code in "$app" "$app/Contents/Helpers/am" "$app/Contents/Frameworks/Sparkle.framework" "$sparkle/Autoupdate" \
+            "$sparkle/Updater.app" "$sparkle"/XPCServices/*.xpc; do
   details="$(codesign -dvv "$code" 2>&1)"
   grep -q "^TeamIdentifier=$TEAM\$" <<<"$details" && grep -q "^Authority=Developer ID Application" <<<"$details" &&
     grep -q "^Timestamp=" <<<"$details" && grep -q "flags=.*runtime" <<<"$details" ||
     fail "${code#"$app"/} is not signed with the Developer ID, a timestamp and the hardened runtime."
 done
-say "Signed: the app and Sparkle's helpers, with the Developer ID and the hardened runtime."
+# The am the app carries is the daemon it installs, so it must be the release
+# being made: a stale build left in the bundle would set up an older daemon.
+bundled="$("$app/Contents/Helpers/am" version --json 2>/dev/null | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin).get("version", ""))')"
+[ "$bundled" = "$version" ] || fail "the am inside the app says it is ${bundled:-nothing}, not $version."
+say "Signed: the app, the am it carries ($bundled) and Sparkle's helpers, with the Developer ID and the hardened runtime."
 
 step "Making the disk image"
 mkdir -p "$OUT/dmg"
