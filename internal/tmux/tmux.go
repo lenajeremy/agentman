@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lenajeremy/agentman/internal/procinfo"
@@ -99,17 +100,30 @@ func List(ctx context.Context) ([]Session, error) {
 }
 
 func listSessions(ctx context.Context) ([]Session, error) {
+	sessions, _, err := listAndCapture(ctx, false)
+	return sessions, err
+}
+
+// listAndCapture lists the agent sessions on every server. With capture, the
+// run that lists a server also captures the panes it had last time, which is
+// what a sweep goes on to ask for; see sweep.list.
+func listAndCapture(ctx context.Context, capture bool) ([]Session, map[string]string, error) {
 	if !Available() {
-		return nil, ErrNotInstalled
+		return nil, nil, ErrNotInstalled
 	}
 	var sessions []Session
+	var panes map[string]string
 	found := map[string]server{}
 	now := time.Now()
 	for _, server := range servers() {
 		if !dueForListing(server, now) {
 			continue
 		}
-		listed, err := listOn(ctx, server)
+		var names []string
+		if capture {
+			names = locatedOn(server)
+		}
+		listed, captured, err := listOn(ctx, server, names)
 		noteListing(server, len(listed), err, now)
 		for _, session := range listed {
 			if _, seen := found[session.Name]; seen {
@@ -117,21 +131,57 @@ func listSessions(ctx context.Context) ([]Session, error) {
 			}
 			found[session.Name] = server
 			sessions = append(sessions, session)
+			if pane, ok := captured[session.Name]; ok {
+				if panes == nil {
+					panes = map[string]string{}
+				}
+				panes[session.Name] = pane
+			}
 		}
 	}
 	rememberAll(found)
-	return sessions, nil
+	return sessions, panes, nil
 }
 
-// listOn lists the agent sessions on one server.
-func listOn(ctx context.Context, server server) ([]Session, error) {
-	out, err := runOn(ctx, server, "list-sessions", "-F",
-		"#{session_name}\t#{pane_pid}\t#{pane_current_path}\t#{pane_current_command}\t#{session_created}\t#{pane_title}")
-	if err != nil {
-		// tmux exits non-zero when no server is running, which is normal.
-		return nil, err
-	}
+// listFormat is one session per line; see parseListing.
+const listFormat = "#{session_name}\t#{pane_pid}\t#{pane_current_path}\t#{pane_current_command}\t#{session_created}\t#{pane_title}"
 
+// listOn lists the agent sessions on one server, and captures the panes of
+// the sessions named in capture in the same tmux run:
+//
+//	list-sessions -F ... ; display-message -p LISTED ; capture-pane -t A -p ; display-message -p MARK0 ; ...
+//
+// Discovery listed the panes in one run and captured them in another, every
+// second; now one does both. A pane named here that has closed since stops
+// the run at its capture, leaving the listing and the captures before it,
+// and the sweep captures the rest itself.
+func listOn(ctx context.Context, server server, capture []string) ([]Session, map[string]string, error) {
+	if len(capture) == 0 {
+		out, err := runOn(ctx, server, "list-sessions", "-F", listFormat)
+		if err != nil {
+			// tmux exits non-zero when no server is running, which is normal.
+			return nil, nil, err
+		}
+		return parseListing(out), nil, nil
+	}
+	marker := newMarker()
+	args := []string{"list-sessions", "-F", listFormat, ";", "display-message", "-p", marker("listed")}
+	args = append(args, ";")
+	args = append(args, captureArgs(capture, marker)...)
+	out, err := runOutputOn(ctx, server, args...)
+	end := strings.Index(out, marker("listed")+"\n")
+	if end < 0 {
+		// The listing itself failed: no server, most likely.
+		if err == nil {
+			err = errors.New("tmux: the listing did not finish")
+		}
+		return nil, nil, commandError(err)
+	}
+	return parseListing(out[:end]), parseCaptures(out[end+len(marker("listed"))+1:], capture, marker), nil
+}
+
+// parseListing reads list-sessions output in listFormat.
+func parseListing(out string) []Session {
 	var sessions []Session
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		// The title is last and kept whole: a program may put a tab in it.
@@ -157,7 +207,7 @@ func listOn(ctx context.Context, server server) ([]Session, error) {
 		}
 		sessions = append(sessions, session)
 	}
-	return sessions, nil
+	return sessions
 }
 
 // Launch starts a command in a new detached tmux session and returns its name.
@@ -675,13 +725,18 @@ func run(ctx context.Context, args ...string) (string, error) {
 	}
 	out, err := runOutput(ctx, args...)
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
-			return "", fmt.Errorf("%s", strings.TrimSpace(string(exitErr.Stderr)))
-		}
-		return "", err
+		return "", commandError(err)
 	}
 	return out, nil
+}
+
+// commandError is what tmux said went wrong, when it said anything.
+func commandError(err error) error {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+		return fmt.Errorf("%s", strings.TrimSpace(string(exitErr.Stderr)))
+	}
+	return err
 }
 
 // runOutput runs one tmux command and returns what it printed, including
@@ -691,7 +746,11 @@ func runOutput(ctx context.Context, args ...string) (string, error) {
 	return runOutputOn(ctx, serverFor(args), args...)
 }
 
+// runs counts tmux runs, so a test can hold discovery to its budget.
+var runs atomic.Int64
+
 func runOutputOn(ctx context.Context, server server, args ...string) (string, error) {
+	runs.Add(1)
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "tmux", append(server.flags(), args...)...).Output()
@@ -702,11 +761,7 @@ func runOutputOn(ctx context.Context, server server, args ...string) (string, er
 func runOn(ctx context.Context, server server, args ...string) (string, error) {
 	out, err := runOutputOn(ctx, server, args...)
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
-			return "", fmt.Errorf("%s", strings.TrimSpace(string(exitErr.Stderr)))
-		}
-		return "", err
+		return "", commandError(err)
 	}
 	return out, nil
 }

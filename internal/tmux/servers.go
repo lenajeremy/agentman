@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -177,6 +178,20 @@ func rememberAll(found map[string]server) {
 	locatedMu.Lock()
 	defer locatedMu.Unlock()
 	located = found
+}
+
+// locatedOn lists the sessions last found on a server, in a stable order.
+func locatedOn(s server) []string {
+	locatedMu.Lock()
+	defer locatedMu.Unlock()
+	var names []string
+	for name, on := range located {
+		if on.key() == s.key() {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names
 }
 
 func serverOf(name string) server {
