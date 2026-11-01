@@ -48,6 +48,8 @@ test("modes read as words, not identifiers", () => {
   assert.equal(modeLabel("kiro_planner"), "Planner");
   assert.equal(modeLabel("kiro_guide"), "Guide");
   assert.equal(modeLabel("accept-edits"), "Accept edits");
+  assert.equal(modeLabel("high effort"), "High effort");
+  assert.equal(modeLabel("xhigh effort"), "Extra high effort");
   assert.equal(modeLabel("accept edits"), "Accept edits");
   assert.equal(modeLabel("plan"), "Plan");
   assert.equal(modeLabel("default"), "Default");

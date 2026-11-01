@@ -16,6 +16,8 @@ final class SessionLabelsTests: XCTestCase {
 
     func testModesAreNamedAsPeopleSayThem() {
         XCTAssertEqual(SessionLabels.mode("accept-edits"), "Accept edits")
+        XCTAssertEqual(SessionLabels.mode("high effort"), "High effort")
+        XCTAssertEqual(SessionLabels.mode("xhigh effort"), "Extra high effort")
         XCTAssertEqual(SessionLabels.mode("kiro_planner"), "Planner")
         XCTAssertEqual(SessionLabels.mode("plan"), "Plan")
         XCTAssertEqual(SessionLabels.mode("bypassPermissions"), "Bypass permissions")

@@ -794,3 +794,61 @@ func TestMuseModelsAreListedAndSwitched(t *testing.T) {
 		t.Fatal("a model Muse doesn't offer must be refused")
 	}
 }
+
+// A Muse session's reasoning effort is its mode in the apps: the tiers of its
+// model, none marked until Agentman sets one or sees one set, and a pick is
+// session/setReasoningEffort, confirmed by Muse's change event.
+func TestMuseEffortIsSwitchedAsAMode(t *testing.T) {
+	source, fake := startFakeMuse(t, t.TempDir())
+	fake.answers["model/list"] = func(json.RawMessage) (any, *museRPCError) {
+		return map[string]any{"providerId": "meta", "models": []any{
+			map[string]any{"modelId": "muse-spark-1.3-contributor", "providerId": "meta", "variants": []string{"minimal", "low", "medium", "high", "xhigh", "max"}},
+		}}, nil
+	}
+	fake.answers["session/list"] = func(json.RawMessage) (any, *museRPCError) {
+		return map[string]any{"sessions": []any{map[string]any{"sessionId": "s", "kind": "root", "status": "idle", "modelId": "muse-spark-1.3-contributor",
+			"updatedAt": time.Now().UTC().Format(time.RFC3339)}}}, nil
+	}
+	fake.answers["session/read"] = func(json.RawMessage) (any, *museRPCError) {
+		return map[string]any{"session": map[string]any{"sessionId": "s", "status": "idle", "modelId": "muse-spark-1.3-contributor"}}, nil
+	}
+	fake.answers["session/resume"] = func(json.RawMessage) (any, *museRPCError) { return map[string]any{}, nil }
+	var mu sync.Mutex
+	var asked map[string]any
+	fake.answers["session/setReasoningEffort"] = func(params json.RawMessage) (any, *museRPCError) {
+		mu.Lock()
+		_ = json.Unmarshal(params, &asked)
+		tier, _ := asked["reasoningEffort"].(string)
+		mu.Unlock()
+		go fake.notify("session/reasoningEffortChanged", map[string]any{"sessionId": "s", "reasoningEffort": tier, "source": "client"})
+		return map[string]any{"status": "accepted"}, nil
+	}
+
+	var offered protocol.Session
+	waitFor(t, "the effort tiers to be offered", func() bool {
+		sessions, _ := source.Discover(context.Background())
+		if len(sessions) == 1 && len(sessions[0].Modes) > 0 {
+			offered = sessions[0]
+			return true
+		}
+		return false
+	})
+	if len(offered.Modes) != 6 || offered.Modes[3] != "high effort" || offered.Mode != "" {
+		t.Fatalf("offered: %v, current %q", offered.Modes, offered.Mode)
+	}
+	if err := source.SetMode(context.Background(), "muse:s", "low effort"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	if asked["reasoningEffort"] != "low" || asked["sessionId"] != "s" {
+		t.Fatalf("setReasoningEffort params: %v", asked)
+	}
+	mu.Unlock()
+	sessions, _ := source.Discover(context.Background())
+	if sessions[0].Mode != "low effort" {
+		t.Fatalf("current effort after the switch: %q", sessions[0].Mode)
+	}
+	if err := source.SetMode(context.Background(), "muse:s", "ultra effort"); err == nil {
+		t.Fatal("a tier the model doesn't have must be refused")
+	}
+}

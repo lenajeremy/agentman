@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -33,6 +34,18 @@ type museModel struct {
 	ModelID    string  `json:"modelId"`
 	ProviderID string  `json:"providerId"`
 	ProfileID  *string `json:"profileId"`
+	// Variants are the model's reasoning-effort tiers, lowest first; Muse
+	// sends an object instead when it does not know them.
+	Variants json.RawMessage `json:"variants"`
+}
+
+// efforts is the model's effort tiers, or none when Muse does not know them.
+func (m museModel) efforts() []string {
+	var tiers []string
+	if json.Unmarshal(m.Variants, &tiers) != nil {
+		return nil
+	}
+	return tiers
 }
 
 type museCatalog struct {

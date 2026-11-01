@@ -37,6 +37,7 @@ type MuseSource struct {
 	answers    museAnswers
 	foreground museForeground
 	catalog    museCatalog
+	efforts    museEfforts
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -50,6 +51,7 @@ func NewMuseSource() *MuseSource {
 func newMuseSourceWith(host *museHost, home string) *MuseSource {
 	s := &MuseSource{host: host, home: home}
 	host.listen(s.trackForeground)
+	host.listen(s.trackEffort)
 	return s
 }
 
@@ -152,6 +154,7 @@ func (s *MuseSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 			meta.State = protocol.StateIdle
 		}
 		s.offerModels(&meta)
+		s.offerEfforts(&meta)
 		found = append(found, meta)
 	}
 	for id := range open {

@@ -56,6 +56,8 @@ export function modeLabel(mode: string): string {
     "accept edits": "Accept edits",
     acceptedits: "Accept edits",
     bypasspermissions: "Bypass permissions",
+    // Muse's reasoning effort, switched as its mode.
+    "xhigh effort": "Extra high effort",
   };
   const found = known[raw.toLowerCase()];
   if (found) return found;

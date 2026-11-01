@@ -10,6 +10,8 @@ enum SessionLabels {
             "default": "Default", "kiro_default": "Default", "kiro_planner": "Planner", "kiro_guide": "Guide",
             "accept-edits": "Accept edits", "accept edits": "Accept edits", "acceptedits": "Accept edits",
             "bypasspermissions": "Bypass permissions",
+            // Muse's reasoning effort, switched as its mode.
+            "xhigh effort": "Extra high effort",
         ]
         if let found = known[raw.lowercased()] { return found }
         var words = raw
