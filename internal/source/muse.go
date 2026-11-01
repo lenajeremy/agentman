@@ -39,6 +39,7 @@ type MuseSource struct {
 	foreground museForeground
 	catalog    museCatalog
 	efforts    museEfforts
+	reopens    museReopens
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -146,25 +147,22 @@ func (s *MuseSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 			continue
 		}
 		seen[session.SessionID] = true
-		meta := museToSession(session, open[session.SessionID])
-		if s.holding(session.SessionID) {
-			meta.Inject = protocol.InjectAPI
-		}
-		// The answer is in; Muse is only finishing its background checks.
-		if meta.State == protocol.StateBusy && s.foregroundDone(session.SessionID) {
-			meta.State = protocol.StateIdle
-		}
-		s.offerModels(&meta)
-		s.offerEfforts(&meta)
-		found = append(found, meta)
+		found = append(found, s.describe(session, open[session.SessionID]))
 	}
+	// Open in a terminal, or reopened from the apps: listed however quiet.
+	extra := make([]string, 0, len(open))
 	for id := range open {
+		extra = append(extra, id)
+	}
+	extra = append(extra, s.reopened()...)
+	for _, id := range extra {
 		if seen[id] {
 			continue
 		}
+		seen[id] = true
 		var read museRead
 		if s.host.call(ctx, "session/read", map[string]any{"sessionId": id, "excludeItems": true}, &read) == nil {
-			found = append(found, museToSession(read.Session, true))
+			found = append(found, s.describe(read.Session, open[id]))
 		}
 	}
 	// What a waiting agent asks, for the apps' question card.
@@ -176,6 +174,23 @@ func (s *MuseSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 		}
 	}
 	return found, nil
+}
+
+// describe is a session as the apps see it: what Muse says, plus what
+// Agentman knows of it (it drives it now, its answer is in, what it can be
+// switched to).
+func (s *MuseSource) describe(session museSession, inTerminal bool) protocol.Session {
+	meta := museToSession(session, inTerminal)
+	if s.holding(session.SessionID) {
+		meta.Inject = protocol.InjectAPI
+	}
+	// The answer is in; Muse is only finishing its background checks.
+	if meta.State == protocol.StateBusy && s.foregroundDone(session.SessionID) {
+		meta.State = protocol.StateIdle
+	}
+	s.offerModels(&meta)
+	s.offerEfforts(&meta)
+	return meta
 }
 
 func museToSession(session museSession, inTerminal bool) protocol.Session {

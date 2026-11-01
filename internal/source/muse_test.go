@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -881,5 +882,54 @@ func TestMuseTurnEndRowSitsAfterItsOwnTurn(t *testing.T) {
 	}
 	if strings.Join(ids, ",") != "u1,a1,turn:t1:cancelled,u2,a2" {
 		t.Fatalf("order: %v", ids)
+	}
+}
+
+// An old Muse session opened from the apps (search, a folder's history) is
+// reopened in place: listed again as one the apps can send to, with nothing
+// started. One a terminal has open stays the terminal's.
+func TestMuseReopenListsAnOldSessionAgain(t *testing.T) {
+	home := t.TempDir()
+	source, fake := startFakeMuse(t, home)
+	fake.answers["session/list"] = func(json.RawMessage) (any, *museRPCError) {
+		return map[string]any{"sessions": []any{}}, nil // nothing recent
+	}
+	fake.answers["session/read"] = func(params json.RawMessage) (any, *museRPCError) {
+		var read struct {
+			SessionID string `json:"sessionId"`
+		}
+		_ = json.Unmarshal(params, &read)
+		return map[string]any{"session": map[string]any{"sessionId": read.SessionID, "status": "notLoaded",
+			"workspaceRoot": "/code/app", "updatedAt": "2026-11-01T06:23:45Z", "name": "Name three planets"}}, nil
+	}
+	registry := NewRegistry()
+	registry.Add(source)
+
+	if sessions, _ := source.Discover(context.Background()); len(sessions) != 0 {
+		t.Fatalf("an old session is not listed before it is reopened: %+v", sessions)
+	}
+	reopened, err := registry.Reopen(context.Background(), "muse:old")
+	if !reopened || err != nil {
+		t.Fatalf("reopen: %v %v", reopened, err)
+	}
+	sessions, _ := source.Discover(context.Background())
+	if len(sessions) != 1 || sessions[0].ID != "muse:old" || sessions[0].Inject != protocol.InjectAPI || sessions[0].State != protocol.StateIdle {
+		t.Fatalf("reopened: %+v", sessions)
+	}
+
+	// A terminal's session is not taken over by a reopen.
+	registryDir := filepath.Join(home, "runtime", "muse", "sessions")
+	if err := os.MkdirAll(registryDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	live := fmt.Sprintf(`{"session_id":"held","process_generation_hint":"pid=%d"}`, os.Getpid())
+	if err := os.WriteFile(filepath.Join(registryDir, "held.json"), []byte(live), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Reopen(context.Background(), "muse:held"); err == nil {
+		t.Fatal("a session a terminal has open must not be reopened here")
+	}
+	if reopened, _ := registry.Reopen(context.Background(), "claude:x"); reopened {
+		t.Fatal("other agents reopen the usual way")
 	}
 }

@@ -1819,7 +1819,7 @@ function DeliveryNote({
   } else if (kind === "cursor-cli") {
     text =
       "Start Cursor Agent CLI with am cursor to send this chat messages remotely.";
-  } else if (kind === "muse") {
+  } else if (kind === "muse" && state !== "ended") {
     // Muse lets one client drive a session at a time: a terminal has it.
     text = "Open in a terminal on your Mac. Close it there to send from here.";
   } else if (kind === "claude" || kind === "codex" || kind === "kiro" || kind === "antigravity") {

@@ -293,6 +293,24 @@ func (r *Registry) Release(ctx context.Context, sessionID string, stop bool) err
 	return nil
 }
 
+// Reopen lists an ended session again in place, for an adapter whose
+// sessions take a message without anything being started (Muse): it reports
+// false when the session's adapter has no such thing, and the daemon reopens
+// it the usual way instead.
+func (r *Registry) Reopen(ctx context.Context, sessionID string) (bool, error) {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return false, nil
+	}
+	reopener, ok := s.(interface {
+		Reopen(context.Context, string) error
+	})
+	if !ok {
+		return false, nil
+	}
+	return true, reopener.Reopen(ctx, sessionID)
+}
+
 // LaunchMuse starts a Muse session through Muse itself; see
 // MuseSource.Launch.
 func (r *Registry) LaunchMuse(ctx context.Context, dir, prompt string) (string, error) {
