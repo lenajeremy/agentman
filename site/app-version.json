@@ -2,6 +2,14 @@
   "url": "https://testflight.apple.com/join/UcJvsjED",
   "builds": [
     {
+      "build": 41,
+      "version": "0.14.1",
+      "date": "2026-11-01T03:47:44.166Z",
+      "changes": [
+        "Picking a command from the \"/\" menu now puts it in the message box and closes the menu, so you can send it straight away."
+      ]
+    },
+    {
       "build": 40,
       "version": "0.14.0",
       "date": "2026-11-01T03:47:41.235Z",
@@ -75,14 +83,6 @@
       "date": "2026-11-01T03:47:17.122Z",
       "changes": [
         "Notifications now come from Agentman while it's on: its replies, briefs and cards, and a tap opens it. To hear from agents directly too, turn on \"Hear from every agent\" in Settings › Notifications, or \"Notify me about this agent\" from an agent's menu."
-      ]
-    },
-    {
-      "build": 30,
-      "version": "0.5.0",
-      "date": "2026-10-20T05:11:31.112Z",
-      "changes": [
-        "Messages you send while Claude is working now stay in the chat, marked Pending, until Claude reads them. Tap Send now to have it read them straight away."
       ]
     }
   ]
