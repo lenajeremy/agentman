@@ -66,3 +66,17 @@ func TestMuseToolTitlesSayWhatHappened(t *testing.T) {
 		t.Errorf("question row: %+v", tool)
 	}
 }
+
+func TestMuseTurnEndedNamesStopsAndFailures(t *testing.T) {
+	if _, ok := MuseTurnEnded("muse:s", MuseTurnEnd{TurnID: "t", Terminal: "completed"}, 1); ok {
+		t.Error("a finished turn needs no row")
+	}
+	if row, ok := MuseTurnEnded("muse:s", MuseTurnEnd{TurnID: "t", Terminal: "cancelled", Reason: "cancelled during model step"}, 1); !ok ||
+		row.Text != "Interrupted" || row.Role != protocol.RoleSystem || row.ID != "turn:t:cancelled" {
+		t.Errorf("stopped turn: %+v", row)
+	}
+	if row, ok := MuseTurnEnded("muse:s", MuseTurnEnd{TurnID: "t", Terminal: "failed", Reason: "model unavailable"}, 1); !ok ||
+		row.Text != "Muse turn failed: model unavailable" {
+		t.Errorf("failed turn: %+v", row)
+	}
+}

@@ -311,14 +311,14 @@ func (s *MuseSource) readWithStatus(ctx context.Context, sessionID string) ([]pr
 		return nil, "", err
 	}
 	messages := parser.MuseMessages(sessionID, read.History.Items)
-	// Muse keeps how the last turn ended beside the items; a failure shows
-	// after that turn's rows (earlier failures are not kept).
+	// Muse keeps how the last turn ended beside the items; a failed or
+	// stopped turn says so after its rows (earlier ones are not kept).
 	if read.LastTurn != nil {
 		at := int64(0)
 		if len(messages) > 0 {
 			at = messages[len(messages)-1].Ts + 1
 		}
-		if row, ok := parser.MuseTurnFailed(sessionID, *read.LastTurn, at); ok {
+		if row, ok := parser.MuseTurnEnded(sessionID, *read.LastTurn, at); ok {
 			messages = append(messages, row)
 		}
 	}
@@ -472,7 +472,7 @@ func (l *museLive) apply(native string, message museMessage) []protocol.Message 
 	case "turn/completed":
 		var end parser.MuseTurnEnd
 		if json.Unmarshal(message.Params, &end) == nil {
-			if row, ok := parser.MuseTurnFailed(l.sessionID, end, time.Now().UnixMilli()); ok {
+			if row, ok := parser.MuseTurnEnded(l.sessionID, end, time.Now().UnixMilli()); ok {
 				return []protocol.Message{row}
 			}
 		}

@@ -98,11 +98,23 @@ type MuseTurnEnd struct {
 	} `json:"error"`
 }
 
-// MuseTurnFailed is the row a failed turn leaves. Muse records no item for
-// the failure, so a turn its model refused (billing, quota, an outage) would
-// otherwise look like Muse silently did nothing.
-func MuseTurnFailed(sessionID string, end MuseTurnEnd, ts int64) (protocol.Message, bool) {
-	if end.Terminal != "failed" || end.TurnID == "" {
+// MuseTurnEnded is the row a turn that did not finish leaves. Muse records
+// no item for how it ended, and drops a reply cut short, so a turn its model
+// refused (billing, quota, an outage) or one the person stopped would
+// otherwise look like Muse silently did nothing. Stopped turns read
+// "Interrupted", as Codex's do.
+func MuseTurnEnded(sessionID string, end MuseTurnEnd, ts int64) (protocol.Message, bool) {
+	if end.TurnID == "" {
+		return protocol.Message{}, false
+	}
+	switch end.Terminal {
+	case "cancelled":
+		return protocol.Message{
+			ID: "turn:" + end.TurnID + ":cancelled", SessionID: sessionID,
+			Role: protocol.RoleSystem, Ts: ts, Text: "Interrupted",
+		}, true
+	case "failed":
+	default:
 		return protocol.Message{}, false
 	}
 	reason := end.Reason
