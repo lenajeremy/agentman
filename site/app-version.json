@@ -2,6 +2,14 @@
   "url": "https://testflight.apple.com/join/UcJvsjED",
   "builds": [
     {
+      "build": 39,
+      "version": "0.13.0",
+      "date": "2026-11-01T03:47:38.079Z",
+      "changes": [
+        "Antigravity chats get the \"/\" menu: its commands, workflows (/goal, /plan, /schedule...) and your skills, with /usage, /context, /tasks and /mcp shown in a panel. Pictures you send to Antigravity show on your message."
+      ]
+    },
+    {
       "build": 38,
       "version": "0.12.1",
       "date": "2026-11-01T03:47:35.276Z",
@@ -78,14 +86,6 @@
         "Replies render markdown more faithfully: nested lists, task checkboxes, strikethrough, tappable bare links, and formatting inside links and quotes.",
         "Links in an agent's reply now open even when they are in bold, instead of showing as raw [text](url).",
         "The update prompt and Settings now show the app's version, like 0.2.0 (27)."
-      ]
-    },
-    {
-      "build": 26,
-      "version": "0.1.1",
-      "date": "2026-10-07T10:00:51.365Z",
-      "changes": [
-        "When a newer version of the app or of agentman on your Mac is out, Agentman tells you once, with what's new and how to update. Settings → Versions shows both."
       ]
     }
   ]
