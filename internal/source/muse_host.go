@@ -49,7 +49,8 @@ type museRPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Data    struct {
-		Kind string `json:"kind"`
+		Kind   string `json:"kind"`
+		Reason string `json:"reason"`
 	} `json:"data"`
 }
 
@@ -60,6 +61,13 @@ func (e *museRPCError) Error() string { return "muse: " + e.Message }
 func museInUse(err error) bool {
 	var rpc *museRPCError
 	return errors.As(err, &rpc) && rpc.Data.Kind == "sessionInUse"
+}
+
+// museBusy reports Muse refusing a command because the session is mid-turn,
+// as it refuses to let go of one.
+func museBusy(err error) bool {
+	var rpc *museRPCError
+	return errors.As(err, &rpc) && rpc.Data.Reason == "runtime_busy"
 }
 
 // museMessage is one MSP message: a reply (ID set, Method empty), a

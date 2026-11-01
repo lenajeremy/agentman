@@ -73,7 +73,7 @@ func (s *MuseSource) Close() {
 	}
 	s.holds.mu.Unlock()
 	for _, native := range held {
-		s.letGo(native)
+		s.letGo(native, false)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

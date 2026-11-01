@@ -113,7 +113,9 @@ const (
 	ReqEndSession RequestType = "end_session"
 	// ReqReleaseSession asks the daemon to stop driving a session, so a
 	// terminal can open it: Muse lets one connection drive a session at a
-	// time, and `am muse resume` sends this before it opens one.
+	// time, and `am muse resume` sends this before it opens one. Muse will not
+	// let go mid-turn; with Stop the turn is ended first, otherwise the reply
+	// is an error saying the turn is still running.
 	ReqReleaseSession RequestType = "release_session"
 	// ReqCreateDirectory makes one folder for a new session to start in.
 	// Starting an agent somewhere new should not need a trip to the Mac.
@@ -218,6 +220,8 @@ type Request struct {
 	// selections or a custom response. OptionKey remains the terminal-menu path.
 	OptionKeys []string `json:"optionKeys,omitempty"`
 	AnswerText string   `json:"answerText,omitempty"`
+	// Stop ends the turn under way before ReqReleaseSession lets go.
+	Stop bool `json:"stop,omitempty"`
 	// ClientID is echoed on SendResult so the app can settle its optimistic
 	// message bubble.
 	ClientID string `json:"clientId,omitempty"`

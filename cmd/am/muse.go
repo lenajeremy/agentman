@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -25,7 +28,9 @@ func runMuse(ctx context.Context, args []string) error {
 	}
 	source.MuseEnsureDaemon(ctx, binary)
 	if id := museResumeTarget(args); id != "" {
-		releaseMuse(ctx, id)
+		if err := takeMuseBack(ctx, id, os.Stdin, os.Stderr); err != nil {
+			return err
+		}
 	}
 	fmt.Fprintf(os.Stderr, "%s\n", dim("agentman: watched live from your phone; close this session to send from there"))
 	env := append(os.Environ(), "MUSE_EXPERIMENTAL_TUI_MSP_CLIENT=1")
@@ -49,14 +54,55 @@ func museResumeTarget(args []string) string {
 
 var museUUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// releaseMuse asks the running daemon to let go of a session; without one
-// running there is nothing to let go of.
-func releaseMuse(ctx context.Context, id string) {
+// takeMuseBack makes the daemon let go of a session before this terminal
+// opens it. Muse will not hand over a session mid-turn, so when Agentman is
+// running one (perhaps waiting on an approval) the person is asked whether
+// to stop it; without a terminal to ask, the turn is left to finish.
+func takeMuseBack(ctx context.Context, id string, in io.Reader, out io.Writer) error {
+	err := releaseMuse(ctx, id, false)
+	if err == nil || err.Error() != source.ErrMuseWorking.Error() {
+		// Not running, or not answering: Muse itself says if the session
+		// is still open elsewhere.
+		return nil
+	}
+	if !stdinIsTerminal() {
+		return errors.New("Agentman is running a turn in this session; open it once that turn is done, or stop it from the phone")
+	}
+	fmt.Fprint(out, "Agentman is running a turn in this session (it may be waiting on an approval).\nStop it and open the session here? [y/N] ")
+	answer, _ := bufio.NewReader(in).ReadString('\n')
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		if err := releaseMuse(ctx, id, true); err != nil {
+			return fmt.Errorf("could not take the session back: %w", err)
+		}
+		return nil
+	}
+	return errors.New("left the session with Agentman; it lets go when the turn is done")
+}
+
+// releaseMuse asks the running daemon to let go of a session, ending its
+// turn first when stop says so. Without a daemon running there is nothing
+// to let go of.
+func releaseMuse(ctx context.Context, id string, stop bool) error {
 	socket, err := socketPath()
 	if err != nil {
-		return
+		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	_, _ = socketCall(socket)(ctx, protocol.Request{Type: protocol.ReqReleaseSession, SessionID: "muse:" + id})
+	reply, err := socketCall(socket)(ctx, protocol.Request{Type: protocol.ReqReleaseSession, SessionID: "muse:" + id, Stop: stop})
+	if err != nil {
+		return nil
+	}
+	if reply.Type == protocol.EvtError {
+		return errors.New(reply.Error)
+	}
+	return nil
+}
+
+// stdinIsTerminal says whether there is a person to ask; a variable so tests
+// can be that person.
+var stdinIsTerminal = func() bool {
+	info, err := os.Stdin.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }

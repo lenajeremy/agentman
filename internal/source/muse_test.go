@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -330,7 +331,7 @@ func TestMuseSendTakesTheSessionAndLetsItGoWhenDone(t *testing.T) {
 			CommandID string `json:"commandId"`
 		}
 		_ = json.Unmarshal(params, &leave)
-		go fake.notify("session/leaveCompleted", map[string]any{"sessionId": "s", "commandId": leave.CommandID, "outcome": "left"})
+		go fake.notify("session/leaveCompleted", map[string]any{"sessionId": "s", "commandId": leave.CommandID, "outcome": "released"})
 		return map[string]any{"status": "accepted"}, nil
 	}
 
@@ -584,5 +585,57 @@ func TestMuseLaunchStartsASessionWithItsFirstMessage(t *testing.T) {
 	}
 	if !source.holding("new1") {
 		t.Fatal("Agentman drives its first turn")
+	}
+}
+
+// Muse will not let go of a session mid-turn (runtime_busy). Agentman keeps
+// holding it rather than believing it let go, says so to a release, and ends
+// the turn first only when told to stop.
+func TestMuseReleaseMidTurnIsRefusedUnlessStopped(t *testing.T) {
+	source, fake := startFakeMuse(t, t.TempDir())
+	fake.answers["session/resume"] = func(json.RawMessage) (any, *museRPCError) { return map[string]any{}, nil }
+	fake.answers["turn/start"] = func(json.RawMessage) (any, *museRPCError) { return map[string]any{"status": "accepted"}, nil }
+	fake.answers["session/read"] = func(json.RawMessage) (any, *museRPCError) {
+		return map[string]any{"session": map[string]any{"sessionId": "s", "status": "running", "attention": []string{"approvalPending"}}}, nil
+	}
+	var mu sync.Mutex
+	var stops []bool
+	fake.answers["session/leave"] = func(params json.RawMessage) (any, *museRPCError) {
+		var leave struct {
+			CommandID string `json:"commandId"`
+			Stop      bool   `json:"stop"`
+		}
+		_ = json.Unmarshal(params, &leave)
+		mu.Lock()
+		stops = append(stops, leave.Stop)
+		mu.Unlock()
+		if !leave.Stop {
+			rejected := &museRPCError{Code: -32030, Message: "session/leave rejected: runtime_busy"}
+			rejected.Data.Kind, rejected.Data.Reason = "commandRejected", "runtime_busy"
+			return nil, rejected
+		}
+		go fake.notify("session/leaveCompleted", map[string]any{"sessionId": "s", "commandId": leave.CommandID, "outcome": "released"})
+		return map[string]any{"status": "accepted"}, nil
+	}
+
+	if _, err := source.Inject(context.Background(), "muse:s", "run the migration"); err != nil {
+		t.Fatal(err)
+	}
+	if err := source.Release(context.Background(), "muse:s", false); !errors.Is(err, ErrMuseWorking) {
+		t.Fatalf("release mid-turn: %v, want ErrMuseWorking", err)
+	}
+	if !source.holding("s") {
+		t.Fatal("a refused release must leave Agentman holding the session")
+	}
+	if err := source.Release(context.Background(), "muse:s", true); err != nil {
+		t.Fatalf("release with stop: %v", err)
+	}
+	if source.holding("s") {
+		t.Fatal("still holding after Muse let go")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(stops) != 2 || stops[0] || !stops[1] {
+		t.Fatalf("leaves sent: %v, want a plain one (refused) then one that stops", stops)
 	}
 }

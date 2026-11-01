@@ -280,15 +280,15 @@ func (r *Registry) ConnectCodex(version string) {
 
 // Release stops driving a session, for an adapter that drives sessions only
 // while it works (Muse); others have nothing to let go of.
-func (r *Registry) Release(ctx context.Context, sessionID string) error {
+func (r *Registry) Release(ctx context.Context, sessionID string, stop bool) error {
 	s, err := r.forSession(sessionID)
 	if err != nil {
 		return err
 	}
 	if releaser, ok := s.(interface {
-		Release(context.Context, string) error
+		Release(context.Context, string, bool) error
 	}); ok {
-		return releaser.Release(ctx, sessionID)
+		return releaser.Release(ctx, sessionID, stop)
 	}
 	return nil
 }

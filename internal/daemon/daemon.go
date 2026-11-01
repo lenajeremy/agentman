@@ -1083,7 +1083,7 @@ func (d *Daemon) HandleFrom(
 		return protocol.Event{Type: protocol.EvtSessionStarted, SessionID: id}
 
 	case protocol.ReqReleaseSession:
-		if err := d.registry.Release(ctx, req.SessionID); err != nil {
+		if err := d.registry.Release(ctx, req.SessionID, req.Stop); err != nil {
 			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
 		}
 		return protocol.Event{Type: protocol.EvtSessionReleased, SessionID: req.SessionID}
