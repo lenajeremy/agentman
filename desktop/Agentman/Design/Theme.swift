@@ -66,6 +66,7 @@ enum Palette {
         case "opencode": Color(light: 0x3E8EBF, dark: 0x6BB3E0)
         case "antigravity": Color(light: 0x7C5CE6, dark: 0xA48BF5)
         case "kiro": Color(light: 0x9A4FE0, dark: 0xBE8BF2)
+        case "muse": Color(light: 0x0866FF, dark: 0x5C9DFF)
         case "cursor", "cursor-cli": Color(light: 0x5B6170, dark: 0xB4B8C2)
         default: Color(light: 0x8A8D94, dark: 0x9EA1A8)
         }

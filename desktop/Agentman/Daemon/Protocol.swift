@@ -504,6 +504,9 @@ struct Usage: Codable, Sendable, Equatable {
         var sessions: Int
         var tokens: Tokens
         var cost: Double
+        /// What an agent that bills in credits (Kiro) says its turns cost,
+        /// not part of the cost. Absent for the rest, and from older daemons.
+        var credits: Double?
     }
     /// A day of the chart, an hour over the last day.
     struct Bucket: Codable, Sendable, Equatable {
@@ -511,6 +514,7 @@ struct Usage: Codable, Sendable, Equatable {
         var start: Int64
         var cost: [String: Double]?
         var tokens: [String: Int64]?
+        var credits: [String: Double]?
         var date: Date { Date(timeIntervalSince1970: Double(start) / 1000) }
     }
     struct Model: Codable, Sendable, Equatable {
@@ -525,6 +529,8 @@ struct Usage: Codable, Sendable, Equatable {
         /// too. Absent when there was none, and from older daemons.
         var fast: Part?
         var advisor: Part?
+        /// Its turns' cost in credits, for an agent that bills in them.
+        var credits: Double?
     }
     /// Part of a model's share.
     struct Part: Codable, Sendable, Equatable {
@@ -540,6 +546,8 @@ struct Usage: Codable, Sendable, Equatable {
     var sessions: Int
     var tokens: Tokens
     var cost: Cost
+    /// Credits agents that bill in them spent: a measure of its own.
+    var credits: Double?
     var cacheSavings: Double
     var agents: [Agent]?
     var buckets: [Bucket]?

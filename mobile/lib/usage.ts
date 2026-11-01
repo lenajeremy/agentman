@@ -1,4 +1,4 @@
-import type { Usage, UsageBucket, UsageModel, UsagePart } from "./protocol";
+import type { Usage, UsageAgent, UsageBucket, UsageModel, UsagePart } from "./protocol";
 
 /**
  * The usage screen's arithmetic and words, kept apart from the screen so they
@@ -102,16 +102,32 @@ export function sessions(count: number): string {
 /** The line under a model in the breakdown: how much of it Claude ran in fast
  *  mode, at a higher price, and how much went to advising another model, as
  *  on the Mac. Nothing for a model used only the usual way. */
-export function modelNote(model: Pick<UsageModel, "fast" | "advisor" | "priced">, metric: Metric): string | undefined {
+export function modelNote(model: Pick<UsageModel, "fast" | "advisor" | "priced" | "credits">, metric: Metric): string | undefined {
   const value = (part: UsagePart) => metric === "cost" && model.priced
     ? money(part.cost)
     : tokens(part.tokens.input + part.tokens.cacheRead + part.tokens.cacheWrite + part.tokens.output);
   const notes = [
     model.fast ? `${value(model.fast)} in fast mode` : "",
     model.advisor ? `${value(model.advisor)} as advisor` : "",
+    model.credits && model.credits > 0 ? credits(model.credits) : "",
   ].filter(Boolean);
   return notes.length > 0 ? notes.join(" · ") : undefined;
 }
+
+/** Credits, as Kiro counts them, to two places: "6.57 credits", as on the Mac. */
+export function credits(value: number): string {
+  const shown = value > 0 && value < 0.005 ? "<0.01" : value.toFixed(2);
+  return `${shown} ${shown === "1.00" ? "credit" : "credits"}`;
+}
+
+/** An agent's credits, when it spent credits and nothing the totals count. */
+export function creditsOnly(agent: Pick<UsageAgent, "credits" | "cost" | "tokens">): number | undefined {
+  const t = agent.tokens;
+  if (!agent.credits || agent.credits <= 0 || agent.cost !== 0 || t.input + t.cacheRead + t.cacheWrite + t.output !== 0) return undefined;
+  return agent.credits;
+}
+
+export const CREDITS_NOTE = "Billed in credits, not in the totals";
 
 export function fraction(part: number, whole: number): number {
   return whole > 0 ? part / whole : 0;
@@ -125,6 +141,7 @@ export function agentColor(kind: string, dark: boolean): string {
     opencode: ["#3E8EBF", "#6BB3E0"],
     antigravity: ["#7C5CE6", "#A48BF5"],
     kiro: ["#9A4FE0", "#BE8BF2"],
+    muse: ["#0866FF", "#5C9DFF"],
     cursor: ["#5B6170", "#B4B8C2"],
     "cursor-cli": ["#5B6170", "#B4B8C2"],
   };

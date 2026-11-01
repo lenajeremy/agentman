@@ -297,6 +297,8 @@ struct UsagePage: View {
         let share = cost ? fraction(agent.cost, of: usage.cost.total)
                          : fraction(Double(agent.tokens.total), of: Double(usage.tokens.total))
         let other = cost ? UsageFormat.tokens(agent.tokens.total) + " tokens" : UsageFormat.money(agent.cost)
+        // Kiro counts credits, not tokens: its row says those instead.
+        let credits = UsageFormat.creditsOnly(agent)
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 7) {
                 Circle().fill(Palette.agent(agent.kind)).frame(width: 7, height: 7)
@@ -311,12 +313,12 @@ struct UsagePage: View {
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)
                 Spacer(minLength: 8)
-                Text(cost ? UsageFormat.money(agent.cost) : UsageFormat.tokens(agent.tokens.total))
+                Text(credits.map(UsageFormat.credits) ?? (cost ? UsageFormat.money(agent.cost) : UsageFormat.tokens(agent.tokens.total)))
                     .font(Fonts.sans(13.5, .medium))
                     .monospacedDigit()
                     .foregroundStyle(Palette.text)
             }
-            Text(UsageFormat.percent(share) + (cost ? " of cost · " : " of tokens · ") + other)
+            Text(credits != nil ? UsageFormat.creditsNote : UsageFormat.percent(share) + (cost ? " of cost · " : " of tokens · ") + other)
                 .font(Fonts.sans(12))
                 .foregroundStyle(Palette.muted)
                 .padding(.leading, 14)
@@ -922,12 +924,28 @@ enum UsageFormat {
         count == 1 ? "1 session" : "\(count.formatted()) sessions"
     }
 
+    /// Credits, as Kiro counts them, to two places: "6.57 credits".
+    static func credits(_ value: Double) -> String {
+        let shown = value > 0 && value < 0.005 ? "<0.01" : String(format: "%.2f", value)
+        return shown + (shown == "1.00" ? " credit" : " credits")
+    }
+
+    /// An agent's credits, when it spent credits and nothing the totals count.
+    static func creditsOnly(_ agent: Usage.Agent) -> Double? {
+        guard let credits = agent.credits, credits > 0, agent.cost == 0, agent.tokens.total == 0 else { return nil }
+        return credits
+    }
+
+    static let creditsNote = "Billed in credits, not in the totals"
+
     /// The line under a model in the breakdown: how much of it Claude ran in
-    /// fast mode, at a higher price, and how much went to advising another
-    /// model. Nothing for a model used only the usual way.
+    /// fast mode, at a higher price, how much went to advising another model,
+    /// and what it cost in credits for an agent that bills in them. Nothing
+    /// for a model used only the usual way.
     static func note(_ model: Usage.Model, cost: Bool) -> String? {
         let value = { (part: Usage.Part) in cost && model.priced ? money(part.cost) : tokens(part.tokens.total) }
-        let notes = [model.fast.map { value($0) + " in fast mode" }, model.advisor.map { value($0) + " as advisor" }].compactMap { $0 }
+        let notes = [model.fast.map { value($0) + " in fast mode" }, model.advisor.map { value($0) + " as advisor" },
+                     model.credits.flatMap { $0 > 0 ? credits($0) : nil }].compactMap { $0 }
         return notes.isEmpty ? nil : notes.joined(separator: " · ")
     }
 }

@@ -567,6 +567,9 @@ export interface UsageAgent {
   sessions: number;
   tokens: UsageTokens;
   cost: number;
+  /** What an agent that bills in credits (Kiro) says its turns cost, not part
+   *  of the cost. Absent for the rest, and from older Macs. */
+  credits?: number;
 }
 
 /** A bucket of the chart: an hour, day, week or month, from `start` (ms). */
@@ -574,6 +577,7 @@ export interface UsageBucket {
   start: number;
   cost?: Record<string, number>;
   tokens?: Record<string, number>;
+  credits?: Record<string, number>;
 }
 
 export interface UsageModel {
@@ -588,6 +592,8 @@ export interface UsageModel {
    *  Absent when there was none, and from older Macs. */
   fast?: UsagePart | null;
   advisor?: UsagePart | null;
+  /** Its turns' cost in credits, for an agent that bills in them. */
+  credits?: number;
 }
 
 /** Part of a model's share. */
@@ -631,6 +637,8 @@ export interface Usage {
   sessions: number;
   tokens: UsageTokens;
   cost: UsageTokens;
+  /** Credits agents that bill in them spent: a measure of its own. */
+  credits?: number;
   cacheSavings: number;
   agents?: UsageAgent[] | null;
   buckets?: UsageBucket[] | null;
@@ -1246,15 +1254,17 @@ function isUsage(value: unknown): value is Usage {
     (value.hourly === undefined || typeof value.hourly === "boolean") &&
     optionalBoundedString(value.unit, 16) &&
     (value.skipped === undefined || finiteNumber(value.skipped)) &&
+    optionalFiniteNumber(value.credits) &&
     (value.agents === undefined || value.agents === null || boundedArray(value.agents, 64, (agent): agent is UsageAgent =>
       isRecord(agent) && boundedString(agent.kind, 64, true) && finiteNumber(agent.sessions) &&
-      isTokens(agent.tokens) && finiteNumber(agent.cost))) &&
+      isTokens(agent.tokens) && finiteNumber(agent.cost) && optionalFiniteNumber(agent.credits))) &&
     (value.buckets === undefined || value.buckets === null || boundedArray(value.buckets, 2000, (bucket): bucket is UsageBucket =>
-      isRecord(bucket) && finiteNumber(bucket.start) && isNumberMap(bucket.cost) && isNumberMap(bucket.tokens))) &&
+      isRecord(bucket) && finiteNumber(bucket.start) && isNumberMap(bucket.cost) && isNumberMap(bucket.tokens) &&
+      isNumberMap(bucket.credits))) &&
     (value.models === undefined || value.models === null || boundedArray(value.models, 1000, (model): model is UsageModel =>
       isRecord(model) && boundedString(model.model, 256) && boundedString(model.kind, 64, true) &&
       isTokens(model.tokens) && finiteNumber(model.cost) && typeof model.priced === "boolean" &&
-      isUsagePart(model.fast) && isUsagePart(model.advisor)));
+      isUsagePart(model.fast) && isUsagePart(model.advisor) && optionalFiniteNumber(model.credits)));
 }
 
 function isUsagePart(value: unknown): boolean {
