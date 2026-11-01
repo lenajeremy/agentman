@@ -269,9 +269,11 @@ func (h How) String() string {
 	}
 }
 
-// HomebrewCask is the cask, named fully: Homebrew refuses a bare name from a
-// tap nobody has trusted yet.
-const HomebrewCask = "lenajeremy/agentman/agentman"
+// HomebrewCask is the CLI's cask, named fully: Homebrew refuses a bare name
+// from a tap nobody has trusted yet. It is agentman-cli since `agentman`
+// became the Mac app; an install made under the old name is moved across by
+// the tap's cask_renames.json, so upgrading it by this name works too.
+const HomebrewCask = "lenajeremy/agentman/agentman-cli"
 
 // HowInstalled judges how the am at executable (with symlinks resolved) was
 // installed, by where it is and, for the app's copy, the marker beside it.

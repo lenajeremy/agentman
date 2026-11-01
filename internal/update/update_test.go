@@ -124,6 +124,8 @@ func TestHowAmWasInstalledIsReadFromWhereItIs(t *testing.T) {
 	for path, want := range map[string]How{
 		"/opt/homebrew/Caskroom/agentman/0.14.1/am":                                   Homebrew,
 		"/home/linuxbrew/.linuxbrew/Caskroom/agentman/0.14.1/am":                      Homebrew,
+		"/opt/homebrew/Caskroom/agentman-cli/0.39.0/am":                               Homebrew,
+		"/home/linuxbrew/.linuxbrew/Caskroom/agentman-cli/0.39.0/am":                  Homebrew,
 		"/usr/local/lib/node_modules/agentman/node_modules/agentman-linux-x64/bin/am": Npm,
 		"/usr/local/bin/am":          Downloaded,
 		"/home/me/.local/bin/am":     Downloaded,
