@@ -51,6 +51,9 @@ const light = {
   working: "#3268F5",
   workingText: "#1F35C7",
   workingWash: "#EEF1FF",
+  /** Words found in a conversation: every match, and the one shown. */
+  findMatch: "#FFEB99",
+  findCurrent: "#FFB866",
   workingSoft: "#D9DFFF",
   /** The working ring's second colour, which it flows into and back from. */
   loaderPink: "#F0407F",
@@ -102,6 +105,8 @@ const dark: Palette = {
   working: "#578CFF",
   workingText: "#9DAAFF",
   workingWash: "#1A1F3D",
+  findMatch: "#5A4A0C",
+  findCurrent: "#9A5A12",
   workingSoft: "#28305E",
   loaderPink: "#FF5C9A",
   needsYou: "#FF7D45",
