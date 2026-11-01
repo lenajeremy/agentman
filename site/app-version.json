@@ -2,6 +2,14 @@
   "url": "https://testflight.apple.com/join/UcJvsjED",
   "builds": [
     {
+      "build": 38,
+      "version": "0.12.1",
+      "date": "2026-11-01T03:47:35.276Z",
+      "changes": [
+        "Coming back to the app on an agent's screen now shows the messages that arrived while you were away, without leaving and reopening it."
+      ]
+    },
+    {
       "build": 37,
       "version": "0.12.0",
       "date": "2026-11-01T03:47:32.340Z",
@@ -78,14 +86,6 @@
       "date": "2026-10-07T10:00:51.365Z",
       "changes": [
         "When a newer version of the app or of agentman on your Mac is out, Agentman tells you once, with what's new and how to update. Settings → Versions shows both."
-      ]
-    },
-    {
-      "build": 25,
-      "version": "0.1.1",
-      "date": "2026-10-07T07:39:22Z",
-      "changes": [
-        "Alerts now have their own sounds: a ping when an agent needs you and a chime when one finishes, even with the app closed."
       ]
     }
   ]
