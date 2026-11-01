@@ -234,6 +234,56 @@ func TestMuseFollowStreamsAReplyInPlace(t *testing.T) {
 	}
 }
 
+// A turn Muse's model refused leaves no item, only how the turn ended; the
+// thread says so, in history and live, rather than looking finished.
+func TestMuseFailedTurnSaysWhy(t *testing.T) {
+	source, fake := startFakeMuse(t, t.TempDir())
+	const why = "API error 402: Billing verification failed."
+	fake.answers["session/read"] = func(params json.RawMessage) (any, *museRPCError) {
+		return map[string]any{
+			"session": map[string]any{"sessionId": "s"},
+			"history": map[string]any{"mode": "inline", "items": []any{
+				map[string]any{"itemId": "u1", "kind": "userMessage", "text": "hi", "recordedAt": "2026-11-01T03:41:09Z"},
+			}},
+			"lastTurn": map[string]any{"turnId": "t1", "terminal": "failed", "reason": why,
+				"error": map[string]any{"kind": "modelError", "message": why, "retryable": false}},
+		}, nil
+	}
+	page, err := source.Page(context.Background(), "muse:s", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 2 {
+		t.Fatalf("history: %+v", page.Messages)
+	}
+	if row := page.Messages[1]; row.Role != protocol.RoleSystem || row.Text != "Muse turn failed: "+why || row.Ts <= page.Messages[0].Ts {
+		t.Errorf("failed turn row: %+v", row)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	out := make(chan []protocol.Message, 16)
+	go func() { _ = source.Follow(ctx, "muse:s", out) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for !fake.called("view/subscribe") {
+		if time.Now().After(deadline) {
+			t.Fatal("Follow never watched the session")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	fake.notify("turn/completed", map[string]any{"sessionId": "s", "turnId": "t0", "terminal": "completed"})
+	fake.notify("turn/completed", map[string]any{"sessionId": "s", "turnId": "t1", "terminal": "failed",
+		"error": map[string]any{"kind": "modelError", "message": why, "retryable": false}})
+	select {
+	case rows := <-out:
+		if len(rows) != 1 || rows[0].ID != "turn:t1:failed" || rows[0].Text != "Muse turn failed: "+why {
+			t.Fatalf("live failed turn: %+v", rows)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a failed turn was not shown live")
+	}
+}
+
 func TestMuseCommandIDIsAVersion7UUID(t *testing.T) {
 	id := museCommandID()
 	if len(id) != 36 || id[14] != '7' || (id[19] != '8' && id[19] != '9' && id[19] != 'a' && id[19] != 'b') {

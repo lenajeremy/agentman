@@ -112,6 +112,7 @@ type museRead struct {
 		Mode  string            `json:"mode"`
 		Items []parser.MuseItem `json:"items"`
 	} `json:"history"`
+	LastTurn *parser.MuseTurnEnd `json:"lastTurn"`
 }
 
 // Discover implements Source: sessions active in the last half hour, and
@@ -309,7 +310,19 @@ func (s *MuseSource) readWithStatus(ctx context.Context, sessionID string) ([]pr
 	if err := s.host.call(ctx, "session/read", map[string]any{"sessionId": native, "excludeItems": false}, &read); err != nil {
 		return nil, "", err
 	}
-	return parser.MuseMessages(sessionID, read.History.Items), read.Session.Status, nil
+	messages := parser.MuseMessages(sessionID, read.History.Items)
+	// Muse keeps how the last turn ended beside the items; a failure shows
+	// after that turn's rows (earlier failures are not kept).
+	if read.LastTurn != nil {
+		at := int64(0)
+		if len(messages) > 0 {
+			at = messages[len(messages)-1].Ts + 1
+		}
+		if row, ok := parser.MuseTurnFailed(sessionID, *read.LastTurn, at); ok {
+			messages = append(messages, row)
+		}
+	}
+	return messages, read.Session.Status, nil
 }
 
 // musePage cuts the messages before a cursor (a message id) to a page.
@@ -455,6 +468,13 @@ func (l *museLive) apply(native string, message museMessage) []protocol.Message 
 		delete(l.texts, params.Item.ItemID)
 		if row, ok := parser.MuseMessage(l.sessionID, params.Item); ok {
 			return []protocol.Message{row}
+		}
+	case "turn/completed":
+		var end parser.MuseTurnEnd
+		if json.Unmarshal(message.Params, &end) == nil {
+			if row, ok := parser.MuseTurnFailed(l.sessionID, end, time.Now().UnixMilli()); ok {
+				return []protocol.Message{row}
+			}
 		}
 	}
 	return nil

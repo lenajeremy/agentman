@@ -86,6 +86,38 @@ func MuseMessage(sessionID string, item MuseItem) (protocol.Message, bool) {
 	return message, false
 }
 
+// MuseTurnEnd is how a turn ended, as Muse reports it live (turn/completed)
+// and in a session's lastTurn.
+type MuseTurnEnd struct {
+	TurnID   string `json:"turnId"`
+	Terminal string `json:"terminal"`
+	Reason   string `json:"reason"`
+	Error    *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// MuseTurnFailed is the row a failed turn leaves. Muse records no item for
+// the failure, so a turn its model refused (billing, quota, an outage) would
+// otherwise look like Muse silently did nothing.
+func MuseTurnFailed(sessionID string, end MuseTurnEnd, ts int64) (protocol.Message, bool) {
+	if end.Terminal != "failed" || end.TurnID == "" {
+		return protocol.Message{}, false
+	}
+	reason := end.Reason
+	if end.Error != nil && strings.TrimSpace(end.Error.Message) != "" {
+		reason = end.Error.Message
+	}
+	text := "Muse turn failed"
+	if reason = strings.TrimSpace(reason); reason != "" {
+		text += ": " + reason
+	}
+	return protocol.Message{
+		ID: "turn:" + end.TurnID + ":failed", SessionID: sessionID,
+		Role: protocol.RoleSystem, Ts: ts, Text: clip(text, PreviewChars),
+	}, true
+}
+
 func museTool(item MuseItem) *protocol.Tool {
 	tool := &protocol.Tool{Name: firstNonEmpty(item.Tool, item.Kind), Status: museToolStatus(item)}
 	if item.Kind == "userShell" {
