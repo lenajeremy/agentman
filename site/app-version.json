@@ -2,6 +2,14 @@
   "url": "https://testflight.apple.com/join/UcJvsjED",
   "builds": [
     {
+      "build": 40,
+      "version": "0.14.0",
+      "date": "2026-11-01T03:47:41.235Z",
+      "changes": [
+        "Markdown files in a project open rendered, as on GitHub: pictures, badges and links to the project's files work, with the raw text a tab away."
+      ]
+    },
+    {
       "build": 39,
       "version": "0.13.0",
       "date": "2026-11-01T03:47:38.079Z",
@@ -75,17 +83,6 @@
       "date": "2026-10-20T05:11:31.112Z",
       "changes": [
         "Messages you send while Claude is working now stay in the chat, marked Pending, until Claude reads them. Tap Send now to have it read them straight away."
-      ]
-    },
-    {
-      "build": 27,
-      "version": "0.2.0",
-      "date": "2026-10-12T09:14:31.136Z",
-      "changes": [
-        "Italic text in replies is now actually italic, including inside bold text and headings.",
-        "Replies render markdown more faithfully: nested lists, task checkboxes, strikethrough, tappable bare links, and formatting inside links and quotes.",
-        "Links in an agent's reply now open even when they are in bold, instead of showing as raw [text](url).",
-        "The update prompt and Settings now show the app's version, like 0.2.0 (27)."
       ]
     }
   ]
