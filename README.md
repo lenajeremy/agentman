@@ -42,11 +42,13 @@ for your machine, checks it against the release's checksums and installs `am`
 without sudo. To use Homebrew directly, on macOS or Linux:
 
 ```bash
-brew install lenajeremy/agentman/agentman
+brew install lenajeremy/agentman/agentman-cli
 ```
 
-Name the tap in full: Homebrew 7 refuses a bare `brew install agentman` from a
-tap you have not trusted (`brew trust lenajeremy/agentman`).
+Name the tap in full: Homebrew 7 refuses a bare `brew install agentman-cli`
+from a tap you have not trusted (`brew trust lenajeremy/agentman`). The tap's
+`agentman` cask is Agentman for Mac, the app; `agentman-cli` is `am` alone,
+for a Mac without the app or a Linux machine.
 
 Or build it from source:
 
