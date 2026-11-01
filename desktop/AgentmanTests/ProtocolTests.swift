@@ -10,6 +10,27 @@ final class LineFramerTests: XCTestCase {
         XCTAssertEqual(framer.append(Data()), [])
     }
 
+    // However a stream is cut into reads, the same lines come out: one byte
+    // at a time, or a big frame in the socket's 64 KB reads.
+    func testLinesComeOutTheSameHoweverTheStreamIsCut() {
+        let stream = Data("{\"a\":1}\n\n{\"b\":\"two\"}\n{\"c\":3}\n{\"d\"".utf8)
+        var whole = LineFramer(), bytes = LineFramer()
+        let atOnce = whole.append(stream)
+        let oneByOne = stream.flatMap { bytes.append(Data([$0])) }
+        XCTAssertEqual(oneByOne, atOnce)
+        XCTAssertEqual(bytes.append(Data(":4}\n".utf8)), [Data("{\"d\":4}".utf8)])
+
+        let big = Data(repeating: UInt8(ascii: "x"), count: 6 << 20) + Data("\nnext\n".utf8)
+        var framer = LineFramer()
+        var lines: [Data] = []
+        let started = Date()
+        for offset in stride(from: 0, to: big.count, by: 64 << 10) {
+            lines += framer.append(big.subdata(in: offset..<min(offset + (64 << 10), big.count)))
+        }
+        print("LINEFRAMER 6 MB in 64 KB reads: \(Int(Date().timeIntervalSince(started) * 1000)) ms")
+        XCTAssertEqual(lines.map(\.count), [6 << 20, 4])
+    }
+
     func testALineLongerThanAFrameIsDropped() {
         var framer = LineFramer(maxLine: 8)
         XCTAssertEqual(framer.append(Data("0123456789\nok\n".utf8)), [Data("ok".utf8)])
