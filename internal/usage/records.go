@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,7 +37,16 @@ type Record struct {
 	// Key names a call written more than once (a resumed Claude session
 	// carries its earlier calls into its new file), to count it once.
 	Key string
+	// Mode is how the call was made, when not the usual way: modeFast for
+	// Claude's fast mode, charged more, or modeAdvisor for a model consulted
+	// during another's turn.
+	Mode string
 }
+
+const (
+	modeFast    = "fast"
+	modeAdvisor = "advisor"
+)
 
 // What is kept of the logs is what the summaries need: a log's calls are
 // summed as they are read, by label and by the slot of time they fall in.
@@ -45,12 +55,14 @@ type Record struct {
 // next.
 
 // label is what calls are summed by, besides their time: the agent, the
-// model and the session. Each is made once, however many sums share it.
+// model, the session and the mode. Each is made once, however many sums
+// share it.
 type label struct {
 	agent    protocol.Kind
 	provider string // the catalog's provider: anthropic, openai, google
 	model    string
 	session  string
+	mode     string
 	// limit is the prompt length past which the model's price rises, by the
 	// catalog the label was made with: 0 for none.
 	limit int64
@@ -95,8 +107,8 @@ type labels struct {
 	catalog Catalog
 }
 
-func (ls *labels) get(agent protocol.Kind, provider, model, session string) *label {
-	key := label{agent: agent, provider: provider, model: model, session: session}
+func (ls *labels) get(agent protocol.Kind, provider, model, session, mode string) *label {
+	key := label{agent: agent, provider: provider, model: model, session: session, mode: mode}
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 	if l := ls.made[key]; l != nil {
@@ -296,7 +308,7 @@ func trim[S ~[]E, E any](s S) S {
 type logs struct {
 	mu     sync.Mutex
 	files  map[string]*fileState
-	parse  func(line []byte, path string, state *fileState) (Record, bool, error)
+	parse  parser
 	match  func(path string) bool
 	labels *labels
 	// loc is the time zone the slots were cut for.
@@ -305,7 +317,10 @@ type logs struct {
 	shared []uint64
 }
 
-func newLogs(match func(string) bool, parse func([]byte, string, *fileState) (Record, bool, error)) *logs {
+// parser reads a log's line, telling add each call it records.
+type parser func(line []byte, path string, state *fileState, add func(Record)) error
+
+func newLogs(match func(string) bool, parse parser) *logs {
 	return &logs{files: map[string]*fileState{}, match: match, parse: parse, labels: &labels{}}
 }
 
@@ -460,6 +475,7 @@ func (l *logs) readFrom(path string, state *fileState) {
 		return
 	}
 	reader := bufio.NewReaderSize(f, 1<<20)
+	add := func(r Record) { l.take(state, r) }
 	for {
 		line, err := reader.ReadBytes('\n')
 		if err != nil {
@@ -467,13 +483,8 @@ func (l *logs) readFrom(path string, state *fileState) {
 			return
 		}
 		state.offset += int64(len(line))
-		record, ok, perr := l.parse(bytes.TrimSpace(line), path, state)
-		if perr != nil {
+		if err := l.parse(bytes.TrimSpace(line), path, state, add); err != nil {
 			state.skipped++
-			continue
-		}
-		if ok {
-			l.take(state, record)
 		}
 	}
 }
@@ -487,8 +498,8 @@ func (l *logs) take(s *fileState, r Record) {
 		s.first = at
 	}
 	lb := s.last
-	if lb == nil || lb.agent != r.Agent || lb.provider != r.Provider || lb.model != r.Model || lb.session != r.Session {
-		lb = l.labels.get(r.Agent, r.Provider, r.Model, r.Session)
+	if lb == nil || lb.agent != r.Agent || lb.provider != r.Provider || lb.model != r.Model || lb.session != r.Session || lb.mode != r.Mode {
+		lb = l.labels.get(r.Agent, r.Provider, r.Model, r.Session, r.Mode)
 		s.last = lb
 	}
 	c := spend{at: at, label: lb, tokens: r.Tokens, write1h: r.CacheWrite1h, long: lb.limit > 0 && r.Context > lb.limit}
@@ -528,7 +539,7 @@ func spends(records []Record, catalog Catalog) []spend {
 	made := &labels{catalog: catalog}
 	out := make([]spend, 0, len(records))
 	for _, r := range records {
-		lb := made.get(r.Agent, r.Provider, r.Model, r.Session)
+		lb := made.get(r.Agent, r.Provider, r.Model, r.Session, r.Mode)
 		out = append(out, spend{
 			at: r.At.UnixNano(), label: lb, key: hashKey(r.Key), tokens: r.Tokens, write1h: r.CacheWrite1h,
 			long: lb.limit > 0 && r.Context > lb.limit,
@@ -539,62 +550,101 @@ func spends(records []Record, catalog Catalog) []spend {
 
 // Claude Code: an assistant line's message carries the model and its usage.
 // A reply written over several lines repeats them, under one message id.
+// A turn run in fast mode says so (speed), and is charged more. A turn that
+// consulted an advisor lists each consultation among its iterations, under
+// the advisor's model: the turn's own usage leaves them out, and they are
+// charged at the advisor's prices, at the usual speed.
 
 var (
 	usageMark     = []byte(`"usage"`)
 	assistantMark = []byte(`"assistant"`)
 )
 
-func parseClaude(line []byte, path string, _ *fileState) (Record, bool, error) {
-	if !bytes.Contains(line, usageMark) || !bytes.Contains(line, assistantMark) {
-		return Record{}, false, nil
-	}
-	var l struct {
-		Type      string `json:"type"`
-		Timestamp string `json:"timestamp"`
-		SessionID string `json:"sessionId"`
-		RequestID string `json:"requestId"`
-		Message   struct {
-			ID    string `json:"id"`
-			Model string `json:"model"`
-			Usage *struct {
-				Input         int64 `json:"input_tokens"`
-				CacheCreation int64 `json:"cache_creation_input_tokens"`
-				CacheRead     int64 `json:"cache_read_input_tokens"`
-				Output        int64 `json:"output_tokens"`
-				Detail        *struct {
-					OneHour int64 `json:"ephemeral_1h_input_tokens"`
-				} `json:"cache_creation"`
-			} `json:"usage"`
-		} `json:"message"`
-	}
-	if err := json.Unmarshal(line, &l); err != nil {
-		return Record{}, false, err
-	}
-	if l.Type != "assistant" || l.Message.Usage == nil || l.Message.Model == "" || l.Message.Model == "<synthetic>" {
-		return Record{}, false, nil
-	}
-	at, err := time.Parse(time.RFC3339Nano, l.Timestamp)
-	if err != nil {
-		return Record{}, false, err
-	}
-	u := l.Message.Usage
-	session := l.SessionID
-	if session == "" {
-		session = strings.TrimSuffix(filepath.Base(path), ".jsonl")
-	}
+type claudeUsage struct {
+	Input         int64 `json:"input_tokens"`
+	CacheCreation int64 `json:"cache_creation_input_tokens"`
+	CacheRead     int64 `json:"cache_read_input_tokens"`
+	Output        int64 `json:"output_tokens"`
+	Detail        *struct {
+		OneHour int64 `json:"ephemeral_1h_input_tokens"`
+	} `json:"cache_creation"`
+}
+
+func (u claudeUsage) record(session, model string, at time.Time) Record {
 	r := Record{
-		Agent: protocol.KindClaude, Session: session, Model: l.Message.Model, Provider: "anthropic", At: at,
+		Agent: protocol.KindClaude, Session: session, Model: model, Provider: "anthropic", At: at,
 		Tokens:  protocol.Tokens{Input: u.Input, CacheRead: u.CacheRead, CacheWrite: u.CacheCreation, Output: u.Output},
 		Context: u.Input + u.CacheRead + u.CacheCreation,
 	}
 	if u.Detail != nil {
 		r.CacheWrite1h = min(u.Detail.OneHour, u.CacheCreation)
 	}
+	return r
+}
+
+func parseClaude(line []byte, path string, _ *fileState, add func(Record)) error {
+	if !bytes.Contains(line, usageMark) || !bytes.Contains(line, assistantMark) {
+		return nil
+	}
+	var l struct {
+		Type         string `json:"type"`
+		Timestamp    string `json:"timestamp"`
+		SessionID    string `json:"sessionId"`
+		RequestID    string `json:"requestId"`
+		AdvisorModel string `json:"advisorModel"`
+		Message      struct {
+			ID    string `json:"id"`
+			Model string `json:"model"`
+			Usage *struct {
+				claudeUsage
+				Speed      string `json:"speed"`
+				Iterations []struct {
+					claudeUsage
+					Type  string `json:"type"`
+					Model string `json:"model"`
+				} `json:"iterations"`
+			} `json:"usage"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(line, &l); err != nil {
+		return err
+	}
+	if l.Type != "assistant" || l.Message.Usage == nil || l.Message.Model == "" || l.Message.Model == "<synthetic>" {
+		return nil
+	}
+	at, err := time.Parse(time.RFC3339Nano, l.Timestamp)
+	if err != nil {
+		return err
+	}
+	u := l.Message.Usage
+	session := l.SessionID
+	if session == "" {
+		session = strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	}
+	r := u.record(session, l.Message.Model, at)
+	if u.Speed == "fast" {
+		r.Mode = modeFast
+	}
 	if l.Message.ID != "" {
 		r.Key = l.Message.ID + ":" + l.RequestID
 	}
-	return r, true, nil
+	add(r)
+	advised := 0
+	for _, it := range u.Iterations {
+		if it.Type != "advisor_message" {
+			continue
+		}
+		advice := it.record(session, cmp.Or(it.Model, l.AdvisorModel), at)
+		advice.Mode = modeAdvisor
+		if r.Key != "" {
+			advice.Key = r.Key + "/advisor/" + strconv.Itoa(advised)
+		}
+		advised++
+		if advice.Model != "" && advice.Tokens.Total() > 0 {
+			add(advice)
+		}
+	}
+	return nil
 }
 
 // Codex: a turn_context line names the model; a token_count event carries
@@ -619,10 +669,10 @@ func (u codexUsage) tokens() protocol.Tokens {
 	return protocol.Tokens{Input: max(u.Input-u.Cached-u.CacheWrite, 0), CacheRead: u.Cached, CacheWrite: u.CacheWrite, Output: u.Output}
 }
 
-func parseCodex(line []byte, path string, state *fileState) (Record, bool, error) {
+func parseCodex(line []byte, path string, state *fileState, add func(Record)) error {
 	turn, count := bytes.Contains(line, turnMark), bytes.Contains(line, tokenCountMark)
 	if !turn && !count {
-		return Record{}, false, nil
+		return nil
 	}
 	var l struct {
 		Timestamp string `json:"timestamp"`
@@ -637,20 +687,20 @@ func parseCodex(line []byte, path string, state *fileState) (Record, bool, error
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(line, &l); err != nil {
-		return Record{}, false, err
+		return err
 	}
 	if l.Type == "turn_context" {
 		if l.Payload.Model != "" {
 			state.model = l.Payload.Model
 		}
-		return Record{}, false, nil
+		return nil
 	}
 	if l.Payload.Type != "token_count" || l.Payload.Info == nil || l.Payload.Info.Total == nil {
-		return Record{}, false, nil
+		return nil
 	}
 	at, err := time.Parse(time.RFC3339Nano, l.Timestamp)
 	if err != nil {
-		return Record{}, false, err
+		return err
 	}
 	total := l.Payload.Info.Total.tokens()
 	call := protocol.Tokens{
@@ -668,17 +718,18 @@ func parseCodex(line []byte, path string, state *fileState) (Record, bool, error
 	state.total, state.counted = total, true
 	if call.Total() == 0 {
 		// The same totals again, as a rate-limit update repeats them.
-		return Record{}, false, nil
+		return nil
 	}
 	var context int64
 	if last := l.Payload.Info.Last; last != nil {
 		context = last.Input
 	}
 	session := strings.TrimSuffix(filepath.Base(path), ".jsonl")
-	return Record{
+	add(Record{
 		Agent: protocol.KindCodex, Session: session, Model: state.model, Provider: "openai", At: at,
 		Tokens: call, Context: context,
-	}, true, nil
+	})
+	return nil
 }
 
 func isClaudeLog(path string) bool { return strings.HasSuffix(path, ".jsonl") }

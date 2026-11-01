@@ -115,6 +115,19 @@ func (c Catalog) Lookup(provider, model string) (Price, bool) {
 	return found, best != ""
 }
 
+// fast is the price of a Claude model in fast mode, which the catalog
+// doesn't list: Anthropic charges every kind of token, cache reads and
+// writes too, at twice the model's price on Opus 4.8 and later, and six
+// times on Opus 4.6 and 4.7, where fast mode began. It holds however long
+// the prompt. Claude Code prices its own fast turns the same way.
+func (p Price) fast(model string) Price {
+	times := 2.0
+	if strings.HasPrefix(model, "claude-opus-4-6") || strings.HasPrefix(model, "claude-opus-4-7") {
+		times = 6
+	}
+	return Price{Input: p.Input * times, Output: p.Output * times, CacheRead: p.CacheRead * times, CacheWrite: p.CacheWrite * times}
+}
+
 // Prices keeps the catalog: read from models.dev at most once a day and
 // kept on disk, OpenCode's own copy standing in when neither can be had.
 type Prices struct {

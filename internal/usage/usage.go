@@ -319,6 +319,9 @@ func summarize(sums [][]spend, catalog Catalog, days int, from time.Time, unit U
 			price, found := prices[l]
 			if !found {
 				price.Price, price.ok = catalog.Lookup(l.provider, l.model)
+				if l.mode == modeFast {
+					price.Price = price.fast(l.model)
+				}
 				prices[l] = price
 			}
 			var spent protocol.UsageCost
@@ -343,6 +346,10 @@ func summarize(sums [][]spend, catalog Catalog, days int, from time.Time, unit U
 			}
 			m.Tokens = m.Tokens.Add(s.tokens)
 			m.Cost += spent.Total()
+			if part := modePart(m, l.mode); part != nil {
+				part.Tokens = part.Tokens.Add(s.tokens)
+				part.Cost += spent.Total()
+			}
 
 			u.Tokens = u.Tokens.Add(s.tokens)
 			u.Cost.Input += spent.Input
@@ -379,4 +386,22 @@ func summarize(sums [][]spend, catalog Catalog, days int, from time.Time, unit U
 	})
 	u.Sessions = len(sessions)
 	return u
+}
+
+// modePart is the part of a model's share its calls in a mode add to, made
+// when first needed: nil for calls made the usual way.
+func modePart(m *protocol.ModelUsage, mode string) *protocol.UsagePart {
+	var part **protocol.UsagePart
+	switch mode {
+	case modeFast:
+		part = &m.Fast
+	case modeAdvisor:
+		part = &m.Advisor
+	default:
+		return nil
+	}
+	if *part == nil {
+		*part = &protocol.UsagePart{}
+	}
+	return *part
 }

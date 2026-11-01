@@ -47,7 +47,7 @@ func claudeLine(id, at, model string, input, write, write1h, read, output int) s
 func itoa(n int) string { return strconv.Itoa(n) }
 
 // calls is what a log's lines say, call by call, as its reader parses them.
-func calls(t *testing.T, path string, parse func([]byte, string, *fileState) (Record, bool, error)) []Record {
+func calls(t *testing.T, path string, parse parser) []Record {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -56,9 +56,7 @@ func calls(t *testing.T, path string, parse func([]byte, string, *fileState) (Re
 	var state fileState
 	var out []Record
 	for _, line := range bytes.Split(data, []byte("\n")) {
-		if r, ok, err := parse(bytes.TrimSpace(line), path, &state); err == nil && ok {
-			out = append(out, r)
-		}
+		_ = parse(bytes.TrimSpace(line), path, &state, func(r Record) { out = append(out, r) })
 	}
 	return out
 }
@@ -452,5 +450,67 @@ func TestAReplyRunningPastARangesStartCountsFromItsLinesInIt(t *testing.T) {
 		if u := s.Summary(context.Background(), 30, now); u.Tokens != (protocol.Tokens{Input: 2, Output: 1}) {
 			t.Errorf("read together %v, the month: %+v", together, u.Tokens)
 		}
+	}
+}
+
+// A Claude turn in fast mode is charged twice its model's price for every
+// kind of token (six times on Opus 4.6, where fast mode began). An advisor
+// consulted during a turn is counted apart from the turn, under its own
+// model and at its prices, once however many lines repeat it.
+func TestClaudesFastModeAndAdvisorsAreCountedAtTheirPrices(t *testing.T) {
+	home := t.TempDir()
+	at := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	turn := func(id, model, usage string) string {
+		return `{"type":"assistant","timestamp":"` + at + `","sessionId":"s1","requestId":"req_` + id + `","advisorModel":"claude-opus-5-5",` +
+			`"message":{"id":"msg_` + id + `","model":"` + model + `","usage":{` + usage + `}}}`
+	}
+	fast := turn("f", "claude-opus-5-5", `"input_tokens":10,"cache_creation_input_tokens":1000,"cache_read_input_tokens":5000,"output_tokens":200,`+
+		`"cache_creation":{"ephemeral_1h_input_tokens":600,"ephemeral_5m_input_tokens":400},"service_tier":"standard","speed":"fast",`+
+		`"iterations":[{"input_tokens":10,"output_tokens":200,"cache_read_input_tokens":5000,"cache_creation_input_tokens":1000,"type":"message"}]`)
+	fastOld := turn("o", "claude-opus-4-6", `"input_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":100,"speed":"fast"`)
+	// The usage the advisor's documentation shows: the turn's own counts are
+	// its two executor iterations; the advisor's are apart.
+	executor := `"input_tokens":1760,"cache_read_input_tokens":412,"cache_creation_input_tokens":0,"output_tokens":531,"speed":"standard"`
+	advised := turn("a", "claude-sonnet-5-5", executor+`,"iterations":[`+
+		`{"type":"message","input_tokens":412,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":89},`+
+		`{"type":"advisor_message","model":"claude-opus-5-5","input_tokens":823,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":1612},`+
+		`{"type":"message","input_tokens":1348,"cache_read_input_tokens":412,"cache_creation_input_tokens":0,"output_tokens":442}]`)
+	// A reply's first line may come before its advisor was consulted.
+	write(t, filepath.Join(home, ".claude/projects/p/s1.jsonl"), fast, fast, fastOld, turn("a", "claude-sonnet-5-5", executor), advised, advised)
+	catalog := Catalog{"anthropic": {
+		"claude-opus-5-5":   prices["anthropic"]["claude-opus-5-5"],
+		"claude-opus-4-6":   {Input: 5, Output: 25, CacheRead: 0.5, CacheWrite: 6.25},
+		"claude-sonnet-5-5": {Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5},
+	}}
+	u := NewScanner(home, WithCatalog(catalog)).Summary(context.Background(), 7, time.Now())
+
+	fastCost := 2 * (10*4 + 400*5 + 600*8 + 5000*0.2 + 200*20) / 1e6
+	fastOldCost := 6 * (100*5 + 100*25) / 1e6
+	turnCost := (1760*2 + 412*0.1 + 531*10) / 1e6
+	adviceCost := (823*4 + 1612*20) / 1e6
+	if got, want := u.Cost.Total(), fastCost+fastOldCost+turnCost+adviceCost; math.Abs(got-want) > 1e-9 {
+		t.Errorf("cost = %v, want %v", got, want)
+	}
+	if want := (protocol.Tokens{Input: 10 + 100 + 1760 + 823, CacheRead: 5000 + 412, CacheWrite: 1000, Output: 200 + 100 + 531 + 1612}); u.Tokens != want {
+		t.Errorf("tokens = %+v, want %+v", u.Tokens, want)
+	}
+	models := map[string]protocol.ModelUsage{}
+	for _, m := range u.Models {
+		models[m.Model] = m
+	}
+	opus := models["claude-opus-5-5"]
+	if opus.Fast == nil || opus.Advisor == nil || opus.Fast.Tokens.Total() != 6210 || opus.Advisor.Tokens.Total() != 2435 ||
+		opus.Tokens.Total() != 6210+2435 || math.Abs(opus.Fast.Cost-fastCost) > 1e-9 || math.Abs(opus.Advisor.Cost-adviceCost) > 1e-9 ||
+		math.Abs(opus.Cost-fastCost-adviceCost) > 1e-9 {
+		t.Errorf("Opus 5.5, fast and advising: %+v, fast %+v, advisor %+v", opus, opus.Fast, opus.Advisor)
+	}
+	if old := models["claude-opus-4-6"]; old.Fast == nil || old.Fast.Tokens.Total() != 200 || math.Abs(old.Cost-fastOldCost) > 1e-9 {
+		t.Errorf("Opus 4.6 fast: %+v", old)
+	}
+	if sonnet := models["claude-sonnet-5-5"]; sonnet.Fast != nil || sonnet.Advisor != nil || sonnet.Tokens.Total() != 2703 || math.Abs(sonnet.Cost-turnCost) > 1e-9 {
+		t.Errorf("the advised turn: %+v", sonnet)
+	}
+	if len(u.Models) != 3 || u.Sessions != 1 {
+		t.Errorf("%d models, %d sessions", len(u.Models), u.Sessions)
 	}
 }
