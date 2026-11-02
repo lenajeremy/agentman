@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import Agentman
 
@@ -106,4 +107,34 @@ final class TerminalScrollTests: XCTestCase {
         XCTAssertLessThan(terminal.buffer.yDisp, bottom, "The view moved back through its scrollback")
         XCTAssertFalse(screen.contains("^["), "Nothing was sent to the program")
     }
+
+    // The editor's layout: SwiftUI's flipped hosting view, the code above
+    // and the terminal under it. Scrolling over the code is the code's;
+    // only scrolling over the terminal is the terminal's.
+    func testOnlyScrollingOverTheTerminalFindsIt() throws {
+        let view = session.view
+        let editor = NSView()
+        let root = NSHostingView(rootView: VStack(spacing: 0) {
+            ScrollingStandIn(view: editor).frame(height: 220)
+            ScrollingStandIn(view: view).frame(height: 100)
+        }.frame(width: 640, height: 320))
+        XCTAssertTrue(root.isFlipped, "The case it was for: a flipped content view")
+        window.contentView = root
+        root.layoutSubtreeIfNeeded()
+        settle()
+        func found(atTopBy y: CGFloat) -> AgentmanTerminalView? {
+            let height = window.contentLayoutRect.height
+            return AgentmanTerminalView.terminal(at: NSPoint(x: 320, y: height - y), in: window)
+        }
+        XCTAssertNil(found(atTopBy: 20), "Near the top of the code, the code scrolls")
+        XCTAssertNil(found(atTopBy: 150), "In the middle of the code, the code scrolls")
+        XCTAssertTrue(found(atTopBy: 280) === view, "Over the terminal, the terminal scrolls")
+    }
+}
+
+/// An AppKit view placed in SwiftUI as it is.
+private struct ScrollingStandIn: NSViewRepresentable {
+    let view: NSView
+    func makeNSView(context: Context) -> NSView { view.removeFromSuperview(); return view }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
