@@ -2,6 +2,14 @@
   "url": "https://testflight.apple.com/join/UcJvsjED",
   "builds": [
     {
+      "build": 42,
+      "version": "0.15.0",
+      "date": "2026-11-04T20:02:20.215Z",
+      "changes": [
+        "Mobile: Expo SDK 58"
+      ]
+    },
+    {
       "build": 41,
       "version": "0.14.1",
       "date": "2026-11-01T03:47:44.166Z",
@@ -75,14 +83,6 @@
       "changes": [
         "Agent threads are calmer: the agent's work sits in small grey pills under its words, background tasks say what finished, and the mode moved down beside the model so the header is one row.",
         "Pictures you send Agentman now show, and open full screen when tapped. You can paste a screenshot into Agentman's box, and close (or swipe away) its news cards."
-      ]
-    },
-    {
-      "build": 32,
-      "version": "0.7.0",
-      "date": "2026-11-01T03:47:17.122Z",
-      "changes": [
-        "Notifications now come from Agentman while it's on: its replies, briefs and cards, and a tap opens it. To hear from agents directly too, turn on \"Hear from every agent\" in Settings › Notifications, or \"Notify me about this agent\" from an agent's menu."
       ]
     }
   ]
