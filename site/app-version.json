@@ -2,6 +2,60 @@
   "url": "https://testflight.apple.com/join/UcJvsjED",
   "builds": [
     {
+      "build": 45,
+      "version": "0.18.0",
+      "date": "2026-11-04T20:02:31.630Z",
+      "changes": [
+        "Usage now says under each model how much of it ran in Claude's fast mode, which costs more, and how much went to advising another model.",
+        "New: a Limits tab in Settings › Usage shows how much of your Claude and Codex plans is left in each window, when each resets, and whether you're using it faster than the window passes.",
+        "Phone: a question sheet opens to the whole screen",
+        "Apps: call Muse's mode its effort",
+        "Phone: the web build opens a session again",
+        "Phone: question options show their place, not their key",
+        "Phone: pull a question sheet up to see all of it",
+        "Muse: switch reasoning effort from the apps",
+        "Muse: switch models from the apps",
+        "Apps: say a terminal has a Muse session",
+        "Start Meta Muse agents from the phone and the Mac.",
+        "Apps: Muse by name, with Meta's mark"
+      ]
+    },
+    {
+      "build": 44,
+      "version": "0.17.0",
+      "date": "2026-11-04T20:02:27.896Z",
+      "changes": [
+        "Search the Agents list for anything you or an agent said, in any conversation on your Mac, and open it right at that message with the words marked. \"Find in conversation\" is in each conversation's menu."
+      ]
+    },
+    {
+      "build": 43,
+      "version": "0.16.0",
+      "date": "2026-11-04T20:02:24.405Z",
+      "changes": [
+        "Nothing new to try here: a fix to that screenshot helper.",
+        "Nothing new to try here: this only helps us take screenshots of long settings pages.",
+        "New: Settings › Usage shows what your agents spent: the total, each agent's share, a chart you can touch to read out any day, and each model's part, from the past 24 hours to all time, in cost or tokens.",
+        "Agentman for Mac's new Devices page can tell which phone this is.",
+        "Phone: a folder's logo in the thread header",
+        "Phone: Working shows once, in the header or at the foot",
+        "Phone: no development warnings over screenshots",
+        "A thread's header shows its folder and what the agent is doing, and the message box looks like the Mac's.",
+        "A working agent shows the Mac's blue and pink ring.",
+        "The app's colours match Agentman for Mac: neutral greys, and true black in dark mode.",
+        "Phone: font faces as style fragments",
+        "Phone: a simulator can start in light or dark"
+      ]
+    },
+    {
+      "build": 42,
+      "version": "0.15.0",
+      "date": "2026-11-04T20:02:20.215Z",
+      "changes": [
+        "Mobile: Expo SDK 58"
+      ]
+    },
+    {
       "build": 41,
       "version": "0.14.1",
       "date": "2026-11-01T03:47:44.166Z",
@@ -47,42 +101,6 @@
       "date": "2026-11-01T03:47:29.153Z",
       "changes": [
         "Pictures you paste into Codex now show in the conversation, and an agent's edits open to a coloured diff of what changed, each file named."
-      ]
-    },
-    {
-      "build": 35,
-      "version": "0.10.0",
-      "date": "2026-11-01T03:47:26.086Z",
-      "changes": [
-        "Attach any file to a message (a PDF, a log, a spreadsheet), not just images; the agent reads it on your Mac.",
-        "Type \"@\" in a message box to name one of the agent's files; it reads the file when your message arrives.",
-        "When an agent looks at several images in a row, they now show as one step with the pictures side by side, instead of one step per picture.",
-        "Type \"/\" in a Claude agent's message box to run its commands: /compact, /context, /rename, your skills and more. /usage and /status show their answer right here, and a thread follows /clear to the new conversation."
-      ]
-    },
-    {
-      "build": 34,
-      "version": "0.9.0",
-      "date": "2026-11-01T03:47:23.034Z",
-      "changes": [
-        "Speak your messages: tap the mic beside the message box and Agentman writes out what you say (sign in to Celery in Agentman for Mac › Settings › Keys first). Text is a little larger throughout."
-      ]
-    },
-    {
-      "build": 33,
-      "version": "0.8.0",
-      "date": "2026-11-01T03:47:20.185Z",
-      "changes": [
-        "Agent threads are calmer: the agent's work sits in small grey pills under its words, background tasks say what finished, and the mode moved down beside the model so the header is one row.",
-        "Pictures you send Agentman now show, and open full screen when tapped. You can paste a screenshot into Agentman's box, and close (or swipe away) its news cards."
-      ]
-    },
-    {
-      "build": 32,
-      "version": "0.7.0",
-      "date": "2026-11-01T03:47:17.122Z",
-      "changes": [
-        "Notifications now come from Agentman while it's on: its replies, briefs and cards, and a tap opens it. To hear from agents directly too, turn on \"Hear from every agent\" in Settings › Notifications, or \"Notify me about this agent\" from an agent's menu."
       ]
     }
   ]

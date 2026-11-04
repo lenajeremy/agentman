@@ -194,15 +194,27 @@ final class AgentmanTerminalView: LocalProcessTerminalView {
     /// SwiftTerm's handling. Once, for every terminal.
     @MainActor static let watchScrolling: Void = {
         NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
-            guard let window = event.window, let content = window.contentView,
-                  let hit = content.hitTest(content.convert(event.locationInWindow, from: nil)) else { return event }
-            var view: NSView? = hit
-            while let current = view, !(current is AgentmanTerminalView) { view = current.superview }
-            guard let terminal = view as? AgentmanTerminalView else { return event }
+            guard let window = event.window,
+                  let terminal = terminal(at: event.locationInWindow, in: window) else { return event }
             terminal.scroll(with: event)
             return nil
         }
     }()
+
+    /// The terminal under a point in a window, if any.
+    ///
+    /// `hitTest` takes a point in the coordinates of the view's superview,
+    /// not its own. The content view is a flipped `NSHostingView` under an
+    /// unflipped frame view, so a point in its own coordinates comes out
+    /// upside down: scrolling at the top of the editor found the terminal
+    /// at the bottom of the window and scrolled that instead.
+    @MainActor static func terminal(at locationInWindow: NSPoint, in window: NSWindow) -> AgentmanTerminalView? {
+        guard let content = window.contentView else { return nil }
+        let point = content.superview?.convert(locationInWindow, from: nil) ?? locationInWindow
+        var view = content.hitTest(point)
+        while let current = view, !(current is AgentmanTerminalView) { view = current.superview }
+        return view as? AgentmanTerminalView
+    }
     /// Movement not yet a whole line (or report), carried to the next event.
     private var wheel: CGFloat = 0
 
