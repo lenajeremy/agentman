@@ -18,6 +18,8 @@ final class AppUpdaterTests: XCTestCase {
         let key = try XCTUnwrap(info["SUPublicEDKey"] as? String)
         XCTAssertEqual(Data(base64Encoded: key)?.count, 32)
         XCTAssertNil(info["SUEnableAutomaticChecks"], "Sparkle asks once whether to check by itself")
+        XCTAssertEqual(info["SUAllowsAutomaticUpdates"] as? Bool, true,
+                       "updating to match a newer am serve downloads in the background, whatever the user said to the prompt")
     }
 
     // The delegate's methods are optional, so a misspelt one compiles and is

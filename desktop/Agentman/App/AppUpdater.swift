@@ -42,6 +42,15 @@ final class AppUpdater: NSObject {
 
     private var controller: SPUStandardUpdaterController?
     private var observations: [NSKeyValueObservation] = []
+    /// Installs the update Sparkle downloaded by itself now, rather than
+    /// at quit, restarting the app: Sparkle hands it over with the update.
+    @ObservationIgnored private var installNowHandler: (() -> Void)?
+
+    /// Sparkle's own "download by itself" setting, as the user left it,
+    /// while updateInBackground() has it on for one check. Kept in the
+    /// defaults too, so a crash mid-check can't leave it changed.
+    @ObservationIgnored private var heldAutomaticDownloads: Bool?
+    static let heldAutomaticDownloadsKey = "updaterHeldAutomaticDownloads"
 
     /// Whether Sparkle checks by itself: the user's answer to its prompt,
     /// and the switch in Settings after it.
@@ -62,6 +71,10 @@ final class AppUpdater: NSObject {
         let updater = controller.updater
         status = .idle
         lastChecked = updater.lastUpdateCheckDate
+        if UserDefaults.standard.object(forKey: Self.heldAutomaticDownloadsKey) != nil {
+            updater.automaticallyDownloadsUpdates = UserDefaults.standard.bool(forKey: Self.heldAutomaticDownloadsKey)
+            UserDefaults.standard.removeObject(forKey: Self.heldAutomaticDownloadsKey)
+        }
         // Both change under Sparkle: the first while it downloads in the
         // background, the second when the user answers its prompt.
         observations = [
@@ -79,6 +92,46 @@ final class AppUpdater: NSObject {
     /// With an update already found or downloaded, it offers that one.
     func check() {
         controller?.checkForUpdates(nil)
+    }
+
+    /// Checks in the background and, when there is an update, downloads it
+    /// and installs it when the app quits, with no window: for when the
+    /// user has already said yes, in a terminal or with "Update
+    /// automatically when am serve is newer" (AppCatchUp). Sparkle only
+    /// downloads by itself with its automatic downloads on, so they are on
+    /// for this one check and put back once it has found what it found.
+    /// An update that needs the user anyway, such as one asking for an
+    /// administrator's password, Sparkle offers in its window instead; with
+    /// a check already under way, that one carries on.
+    func updateInBackground() {
+        guard let updater = controller?.updater, !updater.sessionInProgress else { return }
+        if heldAutomaticDownloads == nil {
+            heldAutomaticDownloads = updater.automaticallyDownloadsUpdates
+            UserDefaults.standard.set(updater.automaticallyDownloadsUpdates, forKey: Self.heldAutomaticDownloadsKey)
+        }
+        updater.automaticallyDownloadsUpdates = true
+        updater.checkForUpdatesInBackground()
+    }
+
+    /// Puts Sparkle's automatic downloads back as the user had them, once a
+    /// background check has come to an end: nothing new, the update ready
+    /// to install at quit, or a problem.
+    private func releaseAutomaticDownloads() {
+        guard let held = heldAutomaticDownloads else { return }
+        heldAutomaticDownloads = nil
+        controller?.updater.automaticallyDownloadsUpdates = held
+        UserDefaults.standard.removeObject(forKey: Self.heldAutomaticDownloadsKey)
+    }
+
+    /// Restart to Update: installs a downloaded update now and restarts
+    /// the app; with none in hand, Sparkle's window says where things are.
+    func installNow() {
+        if let installNowHandler {
+            self.installNowHandler = nil
+            installNowHandler()
+        } else {
+            check()
+        }
     }
 
     /// What the About row says under the app's version.
@@ -137,6 +190,7 @@ extension AppUpdater: SPUUpdaterDelegate {
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: any Error) {
         status = .upToDate
+        releaseAutomaticDownloads()
     }
 
     func updater(_ updater: SPUUpdater, userDidMake choice: SPUUserUpdateChoice, forUpdate updateItem: SUAppcastItem,
@@ -167,15 +221,19 @@ extension AppUpdater: SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem,
                  immediateInstallationBlock immediateInstallHandler: @escaping () -> Void) -> Bool {
         status = .ready(item.displayVersionString)
+        installNowHandler = immediateInstallHandler
+        releaseAutomaticDownloads()
         return false
     }
 
     func updater(_ updater: SPUUpdater, didAbortWithError error: any Error) {
         if Self.shows(error as NSError) { status = .failed(error.localizedDescription) }
+        releaseAutomaticDownloads()
     }
 
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
         lastChecked = updater.lastUpdateCheckDate
+        releaseAutomaticDownloads()
         if status == .checking { status = .idle }
     }
 }

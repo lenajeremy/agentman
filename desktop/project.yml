@@ -95,6 +95,11 @@ targets:
         # Sparkle asks once, on the second launch, whether to check by itself.
         SUFeedURL: https://agentman-nu.vercel.app/appcast.xml
         SUPublicEDKey: Wkd9F/65lovmZQN7p6GxBiG6sXy6LM7KPF3ILNAd8+k=
+        # Updating to match a newer am serve, once the user has said yes
+        # (App/AppCatchUp.swift), downloads in the background and installs
+        # at quit. Sparkle allows that only with automatic checks on unless
+        # this says it may, so it does, whatever was answered to its prompt.
+        SUAllowsAutomaticUpdates: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.agentman.mac

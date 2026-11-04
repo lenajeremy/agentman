@@ -932,10 +932,12 @@ private struct EditorSection: View {
 
 /// Which app and which am serve, and whether a newer one is out. The app
 /// updates itself (AppUpdater), so its row says where that stands and checks
-/// on request; am serve's row (DaemonServeRow) says where the daemon runs
-/// from and upgrades it.
+/// on request, and whether it updates to match a newer am serve without
+/// asking (AppCatchUp); am serve's row (DaemonServeRow) says where the
+/// daemon runs from and upgrades it.
 struct AboutSection: View {
     private var updater: AppUpdater { .shared }
+    @AppStorage(AppCatchUp.automaticKey) private var updateWithDaemon = false
 
     var body: some View {
         let app = Bundle.main.infoDictionary
@@ -958,6 +960,12 @@ struct AboutSection: View {
                             detail: "Once a day, in the background.") {
                     Toggle("", isOn: Binding(get: { updater.checksAutomatically },
                                              set: { updater.checksAutomatically = $0 }))
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+                SettingsRow(title: "Update Agentman when am serve is newer",
+                            detail: "Without asking: it downloads in the background and installs when you quit.") {
+                    Toggle("", isOn: $updateWithDaemon)
                         .toggleStyle(.switch)
                         .labelsHidden()
                 }

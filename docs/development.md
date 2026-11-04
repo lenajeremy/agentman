@@ -151,6 +151,14 @@ updates automatically, then checks daily. Agentman › Check for Updates… chec
 now, and Settings › General › About shows the update's state beside the version,
 with a switch for the daily check. Debug builds never update.
 
+The app and `am` carry the same version and stay matched both ways, never going
+backwards. Updating the app brings the daemon's `am` forward with it. When `am`
+is updated on its own to a newer release (with `am upgrade`, Homebrew or the
+install script), the app updates to match (`App/AppCatchUp.swift`): `am upgrade`
+asks first, both being the default (`-yes`, `-only-am`), and leaves the answer
+in `~/.agentman/app-update.json`; otherwise the app asks once a version, with a
+switch in Settings › General › About to update without asking.
+
 #### The signing key
 
 Sparkle installs only updates signed with the EdDSA key whose public half is

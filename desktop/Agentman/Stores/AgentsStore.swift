@@ -137,10 +137,14 @@ final class AgentsStore {
     /// Keeping am serve right for this app: setting it up on first launch,
     /// and again when it is missing or too old.
     let setup: DaemonSetup
+    /// The other way round: the app updating to match an am serve newer
+    /// than itself.
+    let catchUp: AppCatchUp
 
-    init(client: DaemonClient = DaemonClient(), setup: DaemonSetup? = nil) {
+    init(client: DaemonClient = DaemonClient(), setup: DaemonSetup? = nil, catchUp: AppCatchUp? = nil) {
         self.client = client
         self.setup = setup ?? DaemonSetup()
+        self.catchUp = catchUp ?? AppCatchUp()
         manager = ManagerStore(client: client)
         manager.onNews = { [weak self] entry in self?.news(entry) }
         manager.onCardClosed = { [weak self] card in
@@ -850,6 +854,7 @@ final class AgentsStore {
             sessionsLoaded = true
             if let info = event.daemon {
                 daemonInfo = info
+                catchUp.daemonReported(info)
             }
             // A daemon too old to say anything of itself is level 0.
             setup.daemonReported(event.daemon ?? DaemonInfo(version: ""))
