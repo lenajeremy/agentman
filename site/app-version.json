@@ -2,6 +2,25 @@
   "url": "https://testflight.apple.com/join/UcJvsjED",
   "builds": [
     {
+      "build": 43,
+      "version": "0.16.0",
+      "date": "2026-11-04T20:02:24.405Z",
+      "changes": [
+        "Nothing new to try here: a fix to that screenshot helper.",
+        "Nothing new to try here: this only helps us take screenshots of long settings pages.",
+        "New: Settings › Usage shows what your agents spent: the total, each agent's share, a chart you can touch to read out any day, and each model's part, from the past 24 hours to all time, in cost or tokens.",
+        "Agentman for Mac's new Devices page can tell which phone this is.",
+        "Phone: a folder's logo in the thread header",
+        "Phone: Working shows once, in the header or at the foot",
+        "Phone: no development warnings over screenshots",
+        "A thread's header shows its folder and what the agent is doing, and the message box looks like the Mac's.",
+        "A working agent shows the Mac's blue and pink ring.",
+        "The app's colours match Agentman for Mac: neutral greys, and true black in dark mode.",
+        "Phone: font faces as style fragments",
+        "Phone: a simulator can start in light or dark"
+      ]
+    },
+    {
       "build": 42,
       "version": "0.15.0",
       "date": "2026-11-04T20:02:20.215Z",
@@ -74,15 +93,6 @@
       "date": "2026-11-01T03:47:23.034Z",
       "changes": [
         "Speak your messages: tap the mic beside the message box and Agentman writes out what you say (sign in to Celery in Agentman for Mac › Settings › Keys first). Text is a little larger throughout."
-      ]
-    },
-    {
-      "build": 33,
-      "version": "0.8.0",
-      "date": "2026-11-01T03:47:20.185Z",
-      "changes": [
-        "Agent threads are calmer: the agent's work sits in small grey pills under its words, background tasks say what finished, and the mode moved down beside the model so the header is one row.",
-        "Pictures you send Agentman now show, and open full screen when tapped. You can paste a screenshot into Agentman's box, and close (or swipe away) its news cards."
       ]
     }
   ]
