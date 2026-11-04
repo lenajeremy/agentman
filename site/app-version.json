@@ -2,6 +2,25 @@
   "url": "https://testflight.apple.com/join/UcJvsjED",
   "builds": [
     {
+      "build": 45,
+      "version": "0.18.0",
+      "date": "2026-11-04T20:02:31.630Z",
+      "changes": [
+        "Usage now says under each model how much of it ran in Claude's fast mode, which costs more, and how much went to advising another model.",
+        "New: a Limits tab in Settings › Usage shows how much of your Claude and Codex plans is left in each window, when each resets, and whether you're using it faster than the window passes.",
+        "Phone: a question sheet opens to the whole screen",
+        "Apps: call Muse's mode its effort",
+        "Phone: the web build opens a session again",
+        "Phone: question options show their place, not their key",
+        "Phone: pull a question sheet up to see all of it",
+        "Muse: switch reasoning effort from the apps",
+        "Muse: switch models from the apps",
+        "Apps: say a terminal has a Muse session",
+        "Start Meta Muse agents from the phone and the Mac.",
+        "Apps: Muse by name, with Meta's mark"
+      ]
+    },
+    {
       "build": 44,
       "version": "0.17.0",
       "date": "2026-11-04T20:02:27.896Z",
@@ -82,17 +101,6 @@
       "date": "2026-11-01T03:47:29.153Z",
       "changes": [
         "Pictures you paste into Codex now show in the conversation, and an agent's edits open to a coloured diff of what changed, each file named."
-      ]
-    },
-    {
-      "build": 35,
-      "version": "0.10.0",
-      "date": "2026-11-01T03:47:26.086Z",
-      "changes": [
-        "Attach any file to a message (a PDF, a log, a spreadsheet), not just images; the agent reads it on your Mac.",
-        "Type \"@\" in a message box to name one of the agent's files; it reads the file when your message arrives.",
-        "When an agent looks at several images in a row, they now show as one step with the pictures side by side, instead of one step per picture.",
-        "Type \"/\" in a Claude agent's message box to run its commands: /compact, /context, /rename, your skills and more. /usage and /status show their answer right here, and a thread follows /clear to the new conversation."
       ]
     }
   ]
