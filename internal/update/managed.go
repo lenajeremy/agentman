@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -118,17 +117,8 @@ func BundleOf(path string) string {
 	return filepath.FromSlash(slashed[:at+len(".app")])
 }
 
-var shortVersion = regexp.MustCompile(`<key>CFBundleShortVersionString</key>\s*<string>([^<]+)</string>`)
-
-// AppVersion is the version an app bundle's Info.plist gives, when it is
-// written as XML, which is how Xcode leaves a Mac app's; empty otherwise.
+// AppVersion is the version an app bundle's Info.plist gives, its
+// CFBundleShortVersionString; empty when it gives none.
 func AppVersion(bundle string) string {
-	raw, err := os.ReadFile(filepath.Join(bundle, "Contents", "Info.plist"))
-	if err != nil {
-		return ""
-	}
-	if match := shortVersion.FindSubmatch(raw); match != nil {
-		return strings.TrimSpace(string(match[1]))
-	}
-	return ""
+	return infoPlistString(bundle, "CFBundleShortVersionString")
 }

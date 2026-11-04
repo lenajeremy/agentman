@@ -66,7 +66,9 @@ Usage:
                               agents' tools and the background service
   am doctor                   Check that everything is wired up correctly
   am upgrade [-check]         Install the newest agentman the way this one was
-                              installed, and restart the service on it
+                              installed, and restart the service on it; asks
+                              whether Agentman for Mac updates to match
+                              (-yes: it does, -only-am: it doesn't)
   am version                  Print the version
 
 Flags:

@@ -31,15 +31,25 @@ import (
 // The copy Agentman for Mac manages at ~/.agentman/bin/am is upgraded the
 // install script's way, in its place. The am inside the app is never
 // replaced: run from there, am upgrade hands over to the managed copy.
+//
+// On a Mac with Agentman for Mac older than the release am goes to, it asks
+// first whether the app should follow (see macapp.go): -yes says both
+// without asking, as does having no terminal to ask in, and -only-am says
+// am alone.
 func runUpgrade(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
-	check := fs.Bool("check", false, "only say whether a newer agentman is out")
+	check := fs.Bool("check", false, "only say whether a newer agentman is out, and which version of Agentman for Mac is installed")
+	yes := fs.Bool("yes", false, "update Agentman for Mac to match too, without asking")
+	onlyAm := fs.Bool("only-am", false, "update only am, without asking; Agentman for Mac offers its update itself")
 	configHome := fs.String("config-home", "", "separate home for Agentman state")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("upgrade: unexpected argument %q", fs.Arg(0))
+	}
+	if *yes && *onlyAm {
+		return errors.New("upgrade: -yes updates Agentman for Mac too and -only-am leaves it; choose one")
 	}
 	resolved := installedPath()
 	how := update.HowInstalled(resolved)
@@ -59,18 +69,39 @@ func runUpgrade(ctx context.Context, args []string) error {
 		return fmt.Errorf("upgrade: couldn't find out what the latest release is: %w", err)
 	}
 	stable, _ := stableBinary()
+	app, hasApp := installedMacApp()
 	if status.Behind == 0 {
 		fmt.Printf("agentman %s is the latest release.\n", current)
 		if *check {
+			if hasApp {
+				fmt.Println(describeMacApp(app, current, false))
+			}
 			return nil
 		}
 		// Upgraded some other way, the daemon may still run the old one.
-		return moveDaemon(ctx, *configHome, stable, current)
+		if err := moveDaemon(ctx, *configHome, stable, current); err != nil {
+			return err
+		}
+		if hasApp && update.Before(app.Version, current) {
+			fmt.Println(describeMacApp(app, current, false))
+		}
+		return nil
 	}
 	fmt.Println(describeBehind(status) + ".")
 	if *check {
+		if hasApp {
+			fmt.Println(describeMacApp(app, status.Latest, true))
+		}
 		fmt.Println("am upgrade installs it.")
 		return nil
+	}
+	// Asked, and recorded, before anything changes: the app reads the
+	// answer as soon as it connects to the new am serve.
+	follow, following := planAppFollow(status.Latest, appOptions{Yes: *yes, OnlyAm: *onlyAm}, stdinIsTerminal(), os.Stdin, os.Stdout)
+	if following {
+		if err := recordAppFollow(*configHome, follow); err != nil {
+			fmt.Fprintf(os.Stderr, "Couldn't leave the choice for %s (%v); it asks when it next connects.\n", update.ManagingApp, err)
+		}
 	}
 
 	var upgraded string
@@ -118,7 +149,15 @@ func runUpgrade(ctx context.Context, args []string) error {
 		return fmt.Errorf("upgrade: %s is still agentman %s, not %s", collapseHome(upgraded), installed, status.Latest)
 	}
 	fmt.Printf("Installed agentman %s.\n", installed)
-	return moveDaemon(ctx, *configHome, upgraded, installed)
+	if err := moveDaemon(ctx, *configHome, upgraded, installed); err != nil {
+		return err
+	}
+	if following {
+		if dir, err := hook.ConfigDir(*configHome); err == nil {
+			fmt.Println(appFollowNext(ctx, follow, filepath.Join(dir, "am.sock")))
+		}
+	}
+	return nil
 }
 
 // homebrewAm finds the am Homebrew just put down: the link am was run

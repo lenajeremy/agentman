@@ -14,9 +14,12 @@ import (
 //
 // launchd is the same whatever HOME a test sets, so no test reaches the
 // real launchctl either, which would act on the developer's own service;
-// none finds or signals a daemon they started, or runs their login shell.
+// none finds or signals a daemon they started, or runs their login shell,
+// or finds the Agentman for Mac they have installed, or sees it open.
 // Tests that need any of these put in fakes of their own.
 func TestMain(m *testing.M) {
+	macAppFolders = func() []string { return nil }
+	macAppRunning = func(string) bool { return false }
 	launchctlCommand = func(...string) ([]byte, error) {
 		return nil, errors.New("tests never reach the real launchctl")
 	}
