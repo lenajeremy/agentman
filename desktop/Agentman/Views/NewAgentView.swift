@@ -6,6 +6,7 @@ import SwiftUI
 /// a worktree of the folder, one already made or a new one, so several
 /// agents can work on one repository at once.
 struct NewAgentView: View {
+    @Environment(\.detailHeaderLeading) private var headerLeading
     @Environment(AgentsStore.self) private var store
     @AppStorage("newAgentKind") private var kind = "claude"
     @AppStorage("newAgentFolder") private var folder = ""
@@ -94,6 +95,17 @@ struct NewAgentView: View {
         }
         .padding(.horizontal, 32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // A title row, as every page has; it was empty.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack {
+                Text("New agent").font(Fonts.sans(14, .semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.leading, headerLeading)
+            .frame(height: 32)
+            .windowTopBar()
+        }
         .background(Palette.paper)
         .navigationTitle("New agent")
         .task {
