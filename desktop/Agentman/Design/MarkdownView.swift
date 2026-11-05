@@ -1,3 +1,4 @@
+import AppKit
 import Markdown
 import SwiftUI
 import UniformTypeIdentifiers
@@ -384,7 +385,8 @@ private struct BlockView: View {
                 .padding(.top, level <= 2 ? 10 : 4)
                 .textSelection(.enabled)
         case .code(let language, let code):
-            ScrollView(.horizontal, showsIndicators: false) {
+            // A scroll bar shows that a long line goes on past the edge.
+            ScrollView(.horizontal, showsIndicators: true) {
                 SwiftUI.Text(folder == nil ? AttributedString(code) : Self.coloured(code, language: language))
                     .font(TextStyle.code)
                     .foregroundStyle(Palette.text)
@@ -398,6 +400,7 @@ private struct BlockView: View {
             // the quote: the code was cut off and the bar ran on below it.
             .fixedSize(horizontal: false, vertical: true)
             .background(Palette.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .modifier(CopyOnHover(text: code))
         case .quote(let blocks):
             HStack(alignment: .top, spacing: 10) {
                 RoundedRectangle(cornerRadius: 1.5)
@@ -575,6 +578,43 @@ enum MarkdownImages {
     }
 }
 
+/// A Copy button at a code block's corner, while the pointer is over it.
+private struct CopyOnHover: ViewModifier {
+    let text: String
+    @State private var hovering = false
+    @State private var copied = false
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .topTrailing) {
+                if hovering || copied {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(text, forType: .string)
+                        copied = true
+                        Task {
+                            try? await Task.sleep(for: .seconds(1.4))
+                            copied = false
+                        }
+                    } label: {
+                        Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                            .font(TextStyle.label)
+                            .foregroundStyle(Palette.textSecondary)
+                            .padding(.horizontal, 8)
+                            .frame(height: 22)
+                            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Palette.line))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(6)
+                    .transition(.opacity)
+                }
+            }
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+}
+
 /// A GitHub table: a header row, hairlines between rows, and horizontal
 /// scrolling when it is wider than the conversation.
 private struct TableBlock: View {
@@ -582,7 +622,7 @@ private struct TableBlock: View {
     let rows: [[AttributedString]]
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView(.horizontal, showsIndicators: true) {
             Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
                 GridRow {
                     ForEach(Array(header.enumerated()), id: \.offset) { _, cell in
