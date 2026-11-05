@@ -72,6 +72,39 @@ func TestMuseCallsCountOnceUnderTheirSession(t *testing.T) {
 	}
 }
 
+// Muse's automated reviewer asks a model before a step that needs approval:
+// that call is on the review's event, on the reviewer's own model, and
+// counts with the session's.
+func TestMuseReviewsCountTheirCall(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	const session = "01a19c42-9815-79b0-9e14-ddffa3824c69"
+	review := func(id string, input, cached, output int) string {
+		return `{"recorded_at":` + itoa(int(now.UnixMicro())) + `,"payload_type":"runtime.session","payload":{"kind":"approval","event":{"kind":"automated_review_completed",` +
+			`"review_id":"` + id + `","status":"approved","model":{"provider_id":"meta","model_id":"muse-spark-1.3","reasoning_effort":"low"},` +
+			`"usage":{"input_tokens":` + itoa(input) + `,"cached_input_tokens":` + itoa(cached) + `,"non_cached_input_tokens":` + itoa(input-cached) +
+			`,"output_tokens":` + itoa(output) + `,"reasoning_tokens":392,"total_tokens":` + itoa(input+output) + `}}}}`
+	}
+	write(t, filepath.Join(root, "2026/11/02", session, "session.jsonl"),
+		museModel("muse-wonder-1.0"), museCall(now, "usage-1", 31547, 0, 127),
+		`{"recorded_at":1,"payload_type":"runtime.session","payload":{"kind":"approval","event":{"kind":"automated_review_started","review_id":"r1"}}}`,
+		review("r1", 41403, 1000, 543),
+		`{"recorded_at":1,"payload_type":"runtime.session","payload":{"kind":"run","event":{"kind":"model_completed","model":"muse-wonder-1.0","usage":{"input_tokens":31547}}}}`)
+
+	records, skipped := newMuseReader().read(root, now.Add(-time.Hour))
+	if skipped != 0 || len(records) != 2 {
+		t.Fatalf("records = %+v, skipped %d", records, skipped)
+	}
+	r := records[1]
+	if r.Session != session || r.Model != "muse-spark-1.3" || r.Provider != "meta" || r.Key != "muse:review:r1" ||
+		r.Tokens != (protocol.Tokens{Input: 40403, CacheRead: 1000, Output: 543}) {
+		t.Fatalf("review = %+v", r)
+	}
+	if records[0].Model != "muse-wonder-1.0" {
+		t.Fatalf("the turn's call = %+v", records[0])
+	}
+}
+
 // Kiro counts no tokens; each turn says what it cost in credits, which reach
 // the agent, its model, the day and the total.
 func TestKiroTurnsCountTheirCredits(t *testing.T) {

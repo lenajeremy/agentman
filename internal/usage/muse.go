@@ -28,10 +28,15 @@ import (
 // of its own but with the same owner (the helper) and the same counts, so
 // a helper's call is known by those, and kept as its own log has it, on
 // its own model.
+//
+// Before a step that needs approval, Muse's automated reviewer asks a model
+// whether to allow it. That call is no goal_usage_attribution: its tokens
+// and model are on the automated_review_completed event, once per review.
 
 var (
-	museUsageMark = []byte(`"goal_usage_attribution"`)
-	museModelMark = []byte(`"run.model.configured"`)
+	museUsageMark  = []byte(`"goal_usage_attribution"`)
+	museModelMark  = []byte(`"run.model.configured"`)
+	museReviewMark = []byte(`"automated_review_completed"`)
 )
 
 // museLog is what was read from one log, kept until it changes.
@@ -146,8 +151,39 @@ type museLine struct {
 					Type string `json:"owner_type"`
 				} `json:"owner"`
 			} `json:"record"`
+			// A review's: read only for automated_review_completed, as
+			// other events use the names otherwise.
+			ReviewID string          `json:"review_id"`
+			Model    json.RawMessage `json:"model"`
+			Usage    json.RawMessage `json:"usage"`
 		} `json:"event"`
 	} `json:"payload"`
+}
+
+// museReview is the model an automated review asked, and what it took.
+type museReview struct {
+	Model struct {
+		ProviderID string `json:"provider_id"`
+		ModelID    string `json:"model_id"`
+	}
+	Usage struct {
+		Input  int64 `json:"input_tokens"`
+		Cached int64 `json:"cached_input_tokens"`
+		Output int64 `json:"output_tokens"`
+	}
+}
+
+func readMuseReview(model, usage json.RawMessage) (museReview, error) {
+	var r museReview
+	if len(model) > 0 && json.Unmarshal(model, &r.Model) != nil || json.Unmarshal(usage, &r.Usage) != nil {
+		return r, errors.New("usage: a Muse review's model or usage is not what it was")
+	}
+	return r, nil
+}
+
+// tokens are the review's: its input counts its cached part.
+func (r museReview) tokens() protocol.Tokens {
+	return protocol.Tokens{Input: max(r.Usage.Input-r.Usage.Cached, 0), CacheRead: r.Usage.Cached, Output: r.Usage.Output}
 }
 
 // museSession is the session a log belongs to: the folder under the date
@@ -185,7 +221,7 @@ func readMuseLog(path, session string) ([]Record, error) {
 	reader := bufio.NewReaderSize(f, 64*1024)
 	for {
 		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 && (bytes.Contains(line, museUsageMark) || bytes.Contains(line, museModelMark)) {
+		if len(line) > 0 && (bytes.Contains(line, museUsageMark) || bytes.Contains(line, museModelMark) || bytes.Contains(line, museReviewMark)) {
 			var l museLine
 			if json.Unmarshal(line, &l) != nil {
 				bad = errors.New("usage: a Muse log line is not JSON")
@@ -212,6 +248,26 @@ func readMuseLog(path, session string) ([]Record, error) {
 					out = append(out, Record{
 						Agent: protocol.KindMuse, Session: session, Model: model, Provider: provider,
 						At: time.UnixMicro(l.RecordedAt), Tokens: tokens, Context: q.Input, Key: key,
+					})
+				}
+			} else if e != nil && e.Kind == "automated_review_completed" && len(e.Usage) > 0 {
+				if r, err := readMuseReview(e.Model, e.Usage); err != nil {
+					bad = err
+				} else if tokens := r.tokens(); tokens.Total() > 0 {
+					reviewModel, reviewProvider := model, provider
+					if r.Model.ModelID != "" {
+						reviewModel = r.Model.ModelID
+					}
+					if r.Model.ProviderID != "" {
+						reviewProvider = r.Model.ProviderID
+					}
+					key := ""
+					if e.ReviewID != "" {
+						key = "muse:review:" + e.ReviewID
+					}
+					out = append(out, Record{
+						Agent: protocol.KindMuse, Session: session, Model: reviewModel, Provider: reviewProvider,
+						At: time.UnixMicro(l.RecordedAt), Tokens: tokens, Context: r.Usage.Input, Key: key,
 					})
 				}
 			}
