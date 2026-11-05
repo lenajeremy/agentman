@@ -75,7 +75,7 @@ struct SetupScreen: View {
     private func subtitle(_ setup: DaemonSetup) -> String {
         switch setup.phase {
         case .ready:
-            "Agentman watches your agents through a small program on this Mac, am serve. Setting it up takes a few seconds and asks you nothing."
+            "Agentman watches your agents through a small helper that runs in the background on this Mac. Setting it up takes a few seconds and needs nothing from you."
         case .running:
             "A few seconds. Your agents keep running."
         case .finished(let summary):
@@ -134,8 +134,8 @@ private struct WelcomePoints: View {
             point("point.3.connected.trianglepath.dotted", "Connects your agents",
                   "Claude Code, Codex, OpenCode and the rest report to it, and get Agentman's tools.")
             divider
-            point("arrow.triangle.swap", "Takes over from a daemon you started",
-                  "If am serve already runs from Homebrew or a terminal, this app's copy takes its place. The am command keeps working.")
+            point("arrow.triangle.swap", "Replaces one you started yourself",
+                  "If you already run the helper (am serve) from Homebrew or a terminal, this one takes its place. The am command keeps working.")
         }
         .background(Palette.paper.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
