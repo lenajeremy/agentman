@@ -37,13 +37,19 @@ struct Sidebar: View {
                 SectionHeading(title: "Pinned")
                 ForEach(sections.pinned) { row($0, match: found.bySession[$0.id]) }
             }
+            // What waits on you, before what is busy: it never sinks below
+            // a long Working list.
+            if !sections.needsYou.isEmpty {
+                SectionHeading(title: "Needs you", count: sections.needsYou.count, tint: Palette.needsYouText)
+                ForEach(sections.needsYou) { row($0, match: found.bySession[$0.id]) }
+            }
             if !sections.working.isEmpty {
                 SectionHeading(title: "Working", count: sections.working.count, open: $workingOpen)
                 if workingOpen {
                     ForEach(sections.working) { row($0, match: found.bySession[$0.id]) }
                 }
-                if !sections.active.isEmpty { SectionRule() }
-            } else if !sections.pinned.isEmpty, !sections.active.isEmpty {
+            }
+            if !sections.active.isEmpty, !(sections.pinned.isEmpty && sections.needsYou.isEmpty && sections.working.isEmpty) {
                 SectionRule()
             }
             ForEach(sections.active) { row($0, match: found.bySession[$0.id]) }
@@ -840,13 +846,15 @@ private struct SectionHeading: View {
     let title: String
     var count: Int? = nil
     var open: Binding<Bool>? = nil
+    /// The title's colour, where the section calls for attention.
+    var tint: Color? = nil
     @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 6) {
             Text(title)
                 .font(Fonts.sans(12, .medium))
-                .foregroundStyle(hovering && open != nil ? Palette.text : Palette.muted)
+                .foregroundStyle(tint ?? (hovering && open != nil ? Palette.text : Palette.muted))
             Spacer(minLength: 4)
             if let count {
                 Text(String(count))

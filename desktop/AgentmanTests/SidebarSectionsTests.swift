@@ -16,13 +16,15 @@ final class SidebarSectionsTests: XCTestCase {
 
     private func names(_ sections: SidebarSections) -> [String] {
         ["pinned:" + sections.pinned.map(\.id).joined(separator: ","),
+         "needsYou:" + sections.needsYou.map(\.id).joined(separator: ","),
          "active:" + sections.active.map(\.id).joined(separator: ","),
          "working:" + sections.working.map(\.id).joined(separator: ","),
          "archived:" + sections.archived.map(\.id).joined(separator: ",")]
     }
 
-    // What came back to you is on top, what asks for you first; what is
-    // still running folds under Working; what is done, under Archived.
+    // What asks for you comes first, in its own section; what is still
+    // running folds under Working; what came back to you follows; what is
+    // done, under Archived.
     func testEachAgentHasItsSection() {
         let sessions = [
             session("idle-recent", .idle, minutesAgo: 5),
@@ -36,7 +38,8 @@ final class SidebarSectionsTests: XCTestCase {
         ]
         XCTAssertEqual(names(SidebarSections.make(sessions, choices: .init(), now: now)), [
             "pinned:",
-            "active:asking,waiting,idle-recent,idle-older",
+            "needsYou:asking,waiting",
+            "active:idle-recent,idle-older",
             "working:busy,busy-older",
             "archived:ended,quiet",
         ])
@@ -48,29 +51,29 @@ final class SidebarSectionsTests: XCTestCase {
         var choices = SidebarSections.Choices()
         var done = session("done", .idle, minutesAgo: 10)
         choices.archived["done"] = now
-        XCTAssertEqual(names(SidebarSections.make([done], choices: choices, now: now))[3], "archived:done")
+        XCTAssertEqual(names(SidebarSections.make([done], choices: choices, now: now))[4], "archived:done")
 
         // It works again: back where it belongs.
         done.lastActivityAt = Int64(now.addingTimeInterval(60).timeIntervalSince1970 * 1000)
         done.state = .busy
-        XCTAssertEqual(names(SidebarSections.make([done], choices: choices, now: now))[2], "working:done")
+        XCTAssertEqual(names(SidebarSections.make([done], choices: choices, now: now))[3], "working:done")
 
         // An ended agent brought back stays in the active list.
         let ended = session("ended", .ended, minutesAgo: 10)
         choices.unarchived["ended"] = now
-        XCTAssertEqual(names(SidebarSections.make([ended], choices: choices, now: now))[1], "active:ended")
+        XCTAssertEqual(names(SidebarSections.make([ended], choices: choices, now: now))[2], "active:ended")
 
         // Asking you something is never archived, even archived by hand.
         let asking = session("asking", .waitingInput, minutesAgo: 1)
         choices.archived["asking"] = now
-        XCTAssertEqual(names(SidebarSections.make([asking], choices: choices, now: now))[1], "active:asking")
+        XCTAssertEqual(names(SidebarSections.make([asking], choices: choices, now: now))[1], "needsYou:asking")
     }
 
     // Pins keep the order they were pinned in, whatever the agents do.
     func testPinsStayOnTopInTheirOrder() {
         let sessions = [session("a", .idle, minutesAgo: 1), session("b", .busy, minutesAgo: 2), session("c", .idle, minutesAgo: 3)]
         let sections = SidebarSections.make(sessions, choices: .init(pinned: ["c", "b"]), now: now)
-        XCTAssertEqual(names(sections), ["pinned:c,b", "active:a", "working:", "archived:"])
+        XCTAssertEqual(names(sections), ["pinned:c,b", "needsYou:", "active:a", "working:", "archived:"])
         XCTAssertEqual(sections.shown(working: false, archived: false).map(\.id), ["c", "b", "a"])
     }
 

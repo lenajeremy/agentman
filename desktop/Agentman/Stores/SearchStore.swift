@@ -34,7 +34,7 @@ extension AgentsStore {
         found.indexing = messageHits?.indexing == true
         guard let hits = messageHits?.hits else { return found }
         let sections = sidebar
-        let named = Set((sections.pinned + sections.working + sections.active + sections.archived).map(\.id))
+        let named = Set((sections.pinned + sections.needsYou + sections.working + sections.active + sections.archived).map(\.id))
         for var hit in hits {
             guard let session = hit.session, Self.inFolder(session.cwd, folderFilter) else { continue }
             if named.contains(session.id) {
