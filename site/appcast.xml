@@ -13,5 +13,20 @@
     <link>https://agentman-nu.vercel.app/mac</link>
     <description>Updates to Agentman for Mac.</description>
     <language>en</language>
+    <item>
+      <title>Agentman 0.40.0</title>
+      <link>https://github.com/lenajeremy/agentman/releases/tag/v0.40.0</link>
+      <pubDate>Thu, 05 Nov 2026 06:49:13 GMT</pubDate>
+      <sparkle:version>45</sparkle:version>
+      <sparkle:shortVersionString>0.40.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <sparkle:fullReleaseNotesLink>https://github.com/lenajeremy/agentman/releases/tag/v0.40.0</sparkle:fullReleaseNotesLink>
+      <description sparkle:format="markdown"><![CDATA[## Agentman 0.40.0
+
+- **Everything in one app.** Agentman for Mac now carries `am` and sets it up on first launch. No terminal steps needed.
+- **Updates itself.** The app checks for updates and installs them, and keeps `am serve` on the same version.
+- **Stays matched.** When `am serve` is newer than the app, the app offers to update, or does it automatically if you ask it to.]]></description>
+      <enclosure url="https://github.com/lenajeremy/agentman/releases/download/v0.40.0/Agentman.dmg" length="40140848" type="application/octet-stream" sparkle:edSignature="UkQ/el0fhtyec0d7It7wSDWxISvMuUnuiNjL6UizNDHd9lgdh+j1nlqjk8/wXndXhW4SRDqpKbV3f8GI8pppAQ=="/>
+    </item>
   </channel>
 </rss>
