@@ -535,7 +535,7 @@ extension SiteShotsTests {
     /// the pages with much in them.
     func testAuditSettings() throws {
         _ = try auditFolder
-        let size = CGSize(width: 800, height: 580)
+        let size = CGSize(width: 880, height: 680)
         let pages = ["general", "notifications", "devices", "permissions", "personality", "knowledge", "keys", "languages"]
         for dark in [false, true] {
             for page in pages {

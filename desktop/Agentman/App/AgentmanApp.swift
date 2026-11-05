@@ -122,6 +122,7 @@ struct AgentmanApp: App {
             SettingsView()
                 .environment(store)
         }
+        .windowResizability(.contentMinSize)
     }
 }
 

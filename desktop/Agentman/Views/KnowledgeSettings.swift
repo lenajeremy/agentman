@@ -43,7 +43,7 @@ struct KnowledgeSettings: View {
                     }
                     .padding(6)
                 }
-                .frame(width: 190)
+                .frame(width: 240)
                 .background(Palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
                 .overlay {

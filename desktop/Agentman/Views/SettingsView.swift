@@ -52,7 +52,9 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Palette.paper)
         }
-        .frame(width: 800, height: 580)
+        // As large as it's made: long pages and lists get the room. No smaller
+        // than its pages need.
+        .frame(minWidth: 800, idealWidth: 880, maxWidth: .infinity, minHeight: 580, idealHeight: 680, maxHeight: .infinity)
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .onAppear { draft = store.manager.settings }
         .onChange(of: store.manager.settings) { _, settings in
