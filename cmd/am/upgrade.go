@@ -27,15 +27,34 @@ import (
 // checked against its published checksums and swapped in. The service is
 // then restarted on the new am, its own copy replaced first if it runs one.
 // Agents keep running: their tmux server is the service's, not am serve.
+//
+// The copy Agentman for Mac manages at ~/.agentman/bin/am is upgraded the
+// install script's way, in its place. The am inside the app is never
+// replaced: run from there, am upgrade hands over to the managed copy.
+//
+// On a Mac with Agentman for Mac older than the release am goes to, it asks
+// first whether the app should follow (see macapp.go): -yes says both
+// without asking, as does having no terminal to ask in, and -only-am says
+// am alone.
 func runUpgrade(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
-	check := fs.Bool("check", false, "only say whether a newer agentman is out")
+	check := fs.Bool("check", false, "only say whether a newer agentman is out, and which version of Agentman for Mac is installed")
+	yes := fs.Bool("yes", false, "update Agentman for Mac to match too, without asking")
+	onlyAm := fs.Bool("only-am", false, "update only am, without asking; Agentman for Mac offers its update itself")
 	configHome := fs.String("config-home", "", "separate home for Agentman state")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("upgrade: unexpected argument %q", fs.Arg(0))
+	}
+	if *yes && *onlyAm {
+		return errors.New("upgrade: -yes updates Agentman for Mac too and -only-am leaves it; choose one")
+	}
+	resolved := installedPath()
+	how := update.HowInstalled(resolved)
+	if how == update.AppBundle {
+		return upgradeFromApp(args, *configHome, resolved, *check)
 	}
 	current := strings.TrimPrefix(version, "v")
 	if !update.IsRelease(current) {
@@ -49,23 +68,42 @@ func runUpgrade(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("upgrade: couldn't find out what the latest release is: %w", err)
 	}
-	resolved := installedPath()
 	stable, _ := stableBinary()
+	app, hasApp := installedMacApp()
 	if status.Behind == 0 {
 		fmt.Printf("agentman %s is the latest release.\n", current)
 		if *check {
+			if hasApp {
+				fmt.Println(describeMacApp(app, current, false))
+			}
 			return nil
 		}
 		// Upgraded some other way, the daemon may still run the old one.
-		return moveDaemon(ctx, *configHome, stable, current)
+		if err := moveDaemon(ctx, *configHome, stable, current); err != nil {
+			return err
+		}
+		if hasApp && update.Before(app.Version, current) {
+			fmt.Println(describeMacApp(app, current, false))
+		}
+		return nil
 	}
 	fmt.Println(describeBehind(status) + ".")
 	if *check {
+		if hasApp {
+			fmt.Println(describeMacApp(app, status.Latest, true))
+		}
 		fmt.Println("am upgrade installs it.")
 		return nil
 	}
+	// Asked, and recorded, before anything changes: the app reads the
+	// answer as soon as it connects to the new am serve.
+	follow, following := planAppFollow(status.Latest, appOptions{Yes: *yes, OnlyAm: *onlyAm}, stdinIsTerminal(), os.Stdin, os.Stdout)
+	if following {
+		if err := recordAppFollow(*configHome, follow); err != nil {
+			fmt.Fprintf(os.Stderr, "Couldn't leave the choice for %s (%v); it asks when it next connects.\n", update.ManagingApp, err)
+		}
+	}
 
-	how := update.HowInstalled(resolved)
 	var upgraded string
 	switch how {
 	case update.Homebrew:
@@ -81,6 +119,9 @@ func runUpgrade(ctx context.Context, args []string) error {
 		}
 		upgraded = resolved
 	default:
+		if how == update.AppManaged {
+			fmt.Printf("This is the am %s runs the daemon from; it is upgraded in its place.\n", update.ManagingApp)
+		}
 		fmt.Printf("Downloading agentman %s for %s/%s…\n", status.Latest, runtime.GOOS, runtime.GOARCH)
 		binary, err := update.Fetch(ctx, client, update.DownloadsURL, status.Latest, runtime.GOOS, runtime.GOARCH)
 		if err != nil {
@@ -88,6 +129,10 @@ func runUpgrade(ctx context.Context, args []string) error {
 		}
 		fmt.Println("Checksum verified.")
 		if err := replaceBinary(resolved, binary); err != nil {
+			if errors.Is(err, os.ErrPermission) && how == update.AppManaged {
+				return fmt.Errorf("upgrade: %s is in a folder this user can't write; "+
+					"give it back to this user, then run am upgrade again", collapseHome(resolved))
+			}
 			if errors.Is(err, os.ErrPermission) {
 				return fmt.Errorf("upgrade: %s is in a folder this user can't write; "+
 					"install again with: curl -fsSL https://agentman-nu.vercel.app/install | sh", collapseHome(resolved))
@@ -104,7 +149,15 @@ func runUpgrade(ctx context.Context, args []string) error {
 		return fmt.Errorf("upgrade: %s is still agentman %s, not %s", collapseHome(upgraded), installed, status.Latest)
 	}
 	fmt.Printf("Installed agentman %s.\n", installed)
-	return moveDaemon(ctx, *configHome, upgraded, installed)
+	if err := moveDaemon(ctx, *configHome, upgraded, installed); err != nil {
+		return err
+	}
+	if following {
+		if dir, err := hook.ConfigDir(*configHome); err == nil {
+			fmt.Println(appFollowNext(ctx, follow, filepath.Join(dir, "am.sock")))
+		}
+	}
+	return nil
 }
 
 // homebrewAm finds the am Homebrew just put down: the link am was run
@@ -152,6 +205,14 @@ func moveDaemon(ctx context.Context, configHome, upgraded, newVersion string) er
 		return err
 	}
 	if !sameFile(binary, upgraded) {
+		// An am that an app or a package manager put down is theirs to
+		// replace: writing over Homebrew's link would break its next
+		// upgrade, and anything inside an app breaks the app's signature.
+		if owner := keptBy(binary); owner != "" {
+			fmt.Printf("The service runs %s, which %s keeps up to date, so it was left as it is. "+
+				"am service install moves the service onto %s.\n", collapseHome(binary), owner, collapseHome(upgraded))
+			return nil
+		}
 		copied, err := binaryVersion(ctx, binary)
 		switch serviceCopyAction(copied, err, newVersion) {
 		case copyReplace:
@@ -214,11 +275,87 @@ func serviceCopyAction(copied string, err error, newVersion string) copyAction {
 	}
 }
 
+// upgradeFromApp is am upgrade run from the am inside an app. That am is
+// the app's, sealed by its signature, and only the app's own updates
+// replace it. What can move forward is the daemon's copy, the one the app
+// put at ~/.agentman/bin/am, so the upgrade is handed to that copy: it
+// upgrades itself in its place and restarts the service on it.
+func upgradeFromApp(args []string, configHome, self string, check bool) error {
+	app := filepath.Base(update.BundleOf(self))
+	if managed, ok := daemonCopyFor(self, configHome); ok {
+		fmt.Printf("This am is part of %s, which keeps it up to date. Upgrading the daemon's copy, %s…\n", app, collapseHome(managed))
+		return syscallExec(managed, append([]string{managed, "upgrade"}, args...), os.Environ())
+	}
+	const advice = "only the app's own updates replace it: update %s for a newer agentman"
+	if check {
+		fmt.Printf("This am is part of %s, and "+advice+".\n", app, app)
+		return nil
+	}
+	return fmt.Errorf("upgrade: this am is part of %s, and "+advice, app, app)
+}
+
+// daemonCopyFor is the managed copy am upgrade hands over to from the am
+// inside an app, when there is one that isn't that am itself.
+func daemonCopyFor(self, configHome string) (string, bool) {
+	home := configHome
+	if home == "" {
+		var err error
+		if home, err = os.UserHomeDir(); err != nil {
+			return "", false
+		}
+	}
+	managed := update.ManagedPath(home)
+	if !update.IsManaged(managed) || sameFile(managed, self) {
+		return "", false
+	}
+	return managed, true
+}
+
+// keptBy names what keeps the am at path up to date when that is not am
+// upgrade's to do: the app it is inside, Homebrew or npm. Empty for an am
+// nothing else manages.
+func keptBy(path string) string {
+	resolved := path
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		resolved = real
+	}
+	switch update.HowInstalled(resolved) {
+	case update.AppBundle:
+		return filepath.Base(update.BundleOf(resolved))
+	case update.Homebrew:
+		return "Homebrew"
+	case update.Npm:
+		return "npm"
+	default:
+		return ""
+	}
+}
+
+// errInsideApp means a new file would land inside an app bundle, whose code
+// signature covers every file in it: change one and macOS refuses the app.
+var errInsideApp = errors.New("it is inside an app, which only the app's own updates may change")
+
+// insideApp reports whether a file put at path would land inside an app
+// bundle: path itself, or where its folder really is once links are
+// followed. A link at path that points into an app is not followed: a new
+// file there replaces the link and leaves the app as it is.
+func insideApp(path string) bool {
+	if update.InAppBundle(path) {
+		return true
+	}
+	dir, err := filepath.EvalSymlinks(filepath.Dir(path))
+	return err == nil && update.InAppBundle(filepath.Join(dir, filepath.Base(path)))
+}
+
 // replaceBinary puts data at path as a new file, renamed over the old: never
 // written in place, which a running am would be cut off by, and which on
 // Apple silicon leaves the kernel checking the new code against the old
-// file's signature and killing it at launch.
+// file's signature and killing it at launch. Nothing is ever put inside an
+// app bundle, by any route.
 func replaceBinary(path string, data []byte) error {
+	if insideApp(path) {
+		return fmt.Errorf("%s: %w", collapseHome(path), errInsideApp)
+	}
 	temp, err := os.CreateTemp(filepath.Dir(path), ".am.new-*")
 	if err != nil {
 		return err

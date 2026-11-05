@@ -42,11 +42,13 @@ for your machine, checks it against the release's checksums and installs `am`
 without sudo. To use Homebrew directly, on macOS or Linux:
 
 ```bash
-brew install lenajeremy/agentman/agentman
+brew install lenajeremy/agentman/agentman-cli
 ```
 
-Name the tap in full: Homebrew 7 refuses a bare `brew install agentman` from a
-tap you have not trusted (`brew trust lenajeremy/agentman`).
+Name the tap in full: Homebrew 7 refuses a bare `brew install agentman-cli`
+from a tap you have not trusted (`brew trust lenajeremy/agentman`). The tap's
+`agentman` cask is Agentman for Mac, the app; `agentman-cli` is `am` alone,
+for a Mac without the app or a Linux machine.
 
 Or build it from source:
 
@@ -543,8 +545,14 @@ git push origin v0.6.0
 ```
 
 The release workflow tests and cross-compiles the CLI, publishes GitHub
-artifacts, and updates the Homebrew tap. It requires a `HOMEBREW_TAP_TOKEN`
-repository secret with write access to the tap.
+artifacts, and updates the Homebrew tap's `agentman-cli` cask. It requires a
+`HOMEBREW_TAP_TOKEN` repository secret with write access to the tap.
+
+Agentman for Mac is released from a Mac with `scripts/release-mac.sh`: it
+builds, notarizes and signs the DMG, adds it to the appcast the app updates
+itself from, and writes the app's Homebrew cask. See
+[docs/development.md](docs/development.md#release) for both releases and the
+Homebrew names.
 
 ## License
 

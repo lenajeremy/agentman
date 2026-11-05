@@ -62,9 +62,17 @@ changelog:
 
 # Homebrew ships as a Cask rather than a Formula: GoReleaser deprecated the
 # Formula path for prebuilt binaries, and a Cask is the supported way to
-# distribute something already compiled.
+# distribute something already compiled. Homebrew installs casks on Linux
+# too, linking a cask's `binary` as it does on macOS, and Linux is where `am`
+# most often runs without the app, so one cask serves both.
+#
+# It is named agentman-cli because `agentman` is Agentman for Mac's cask
+# (written by scripts/release-mac.sh): `brew install --cask agentman` is the
+# app, `brew install agentman-cli` is `am` alone, for remote Macs and Linux.
+# Installs from before the split, under `agentman`, move to this name through
+# the tap's cask_renames.json (docs/development.md, "Homebrew").
 homebrew_casks:
-  - name: agentman
+  - name: agentman-cli
     # The archive contains `am`; without naming it here the cask defaults to
     # the project name and tries to link a file that does not exist.
     binaries:
@@ -125,6 +133,8 @@ release:
   footer: |
     ## Install
 
+    The command-line tool, `am`, on macOS or Linux:
+
     ```bash
-    brew install lenajeremy/agentman/agentman
+    brew install lenajeremy/agentman/agentman-cli
     ```

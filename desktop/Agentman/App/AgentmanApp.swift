@@ -9,7 +9,7 @@ struct AgentmanApp: App {
     /// Unit tests run inside the app, as its host, and get none of it: no
     /// window, no daemon, no editor on the user's folders, and nothing
     /// restored from the user's own copy of the app.
-    static let underTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    nonisolated static let underTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
     init() {
         if Self.underTests {
@@ -40,6 +40,9 @@ struct AgentmanApp: App {
         .defaultSize(width: 1560, height: 980)
         .windowStyle(.hiddenTitleBar)
         .commands {
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesCommand()
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Agent") { store.selection = .newAgent }
                     .keyboardShortcut("n", modifiers: .command)
@@ -62,7 +65,13 @@ struct AgentmanApp: App {
             // The daemon outlives the app, by design: quitting the app
             // leaves it running, so a stuck one is restarted here.
             CommandGroup(after: .appSettings) {
-                Button("Restart Daemon…") { DaemonRestart.confirm() }
+                Button("Restart Daemon…") {
+                    let setup = store.setup
+                    DaemonRestart.confirm(setUp: setup.allowed ? {
+                        openWindow(id: "main")
+                        setup.runOnScreen()
+                    } : nil)
+                }
             }
             CommandMenu("Go") {
                 Button("Command Palette…") {
@@ -99,8 +108,13 @@ struct AgentmanApp: App {
     }
 }
 
-/// Asks before quitting with unsaved edits in the editor.
+/// Starts the updater, and asks before quitting with unsaved edits in the
+/// editor.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated { AppUpdater.shared.start() }
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         MainActor.assumeIsolated {
             let unsaved = EditorRegistry.shared.unsaved

@@ -5,8 +5,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/lenajeremy/agentman/internal/update"
 )
 
 // The program read back from the job am service install writes, even with
@@ -87,5 +90,212 @@ func TestABinarysVersionIsWhatItSays(t *testing.T) {
 	}
 	if _, err := binaryVersion(context.Background(), filepath.Join(dir, "missing")); err == nil {
 		t.Error("a missing am reported a version")
+	}
+}
+
+// No route puts a file inside an app bundle: not at a path in one, and not
+// through a folder that is a link into one. A link at the path itself that
+// points into an app is replaced, and the app's am is left as it was.
+func TestNothingIsWrittenIntoAnApp(t *testing.T) {
+	dir := t.TempDir()
+	macOS := filepath.Join(dir, "Agentman.app", "Contents", "MacOS")
+	if err := os.MkdirAll(macOS, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	appAm := filepath.Join(macOS, "am")
+	if err := os.WriteFile(appAm, []byte("signed am"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := replaceBinary(appAm, []byte("new am")); !errors.Is(err, errInsideApp) {
+		t.Errorf("replacing the app's am: %v", err)
+	}
+	linkedDir := filepath.Join(dir, "bin")
+	if err := os.Symlink(macOS, linkedDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceBinary(filepath.Join(linkedDir, "am"), []byte("new am")); !errors.Is(err, errInsideApp) {
+		t.Errorf("replacing through a linked folder: %v", err)
+	}
+
+	link := filepath.Join(dir, "am")
+	if err := os.Symlink(appAm, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceBinary(link, []byte("new am")); err != nil {
+		t.Fatalf("replacing a link into the app: %v", err)
+	}
+	if info, err := os.Lstat(link); err != nil || !info.Mode().IsRegular() {
+		t.Errorf("the link should now be a file of its own: %v %v", info, err)
+	}
+	if data, _ := os.ReadFile(appAm); string(data) != "signed am" {
+		t.Errorf("the app's am was changed to %q", data)
+	}
+}
+
+// The service's am is left to whatever keeps it current when that isn't
+// am upgrade: the app it is inside, Homebrew or npm. A copy nothing else
+// manages, the kind am upgrade replaces, has no keeper.
+func TestWhatKeepsTheServicesAmCurrent(t *testing.T) {
+	dir := t.TempDir()
+	appAm := filepath.Join(dir, "Agentman.app", "Contents", "Resources", "am")
+	if err := os.MkdirAll(filepath.Dir(appAm), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(appAm, []byte("am"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "am")
+	if err := os.Symlink(appAm, link); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{
+		link:  "Agentman.app",
+		appAm: "Agentman.app",
+		"/opt/homebrew/Caskroom/agentman/0.31.0/am":   "Homebrew",
+		"/usr/local/lib/node_modules/agentman/bin/am": "npm",
+		filepath.Join(dir, "plain", "am"):             "",
+	} {
+		if got := keptBy(path); got != want {
+			t.Errorf("keptBy(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+// Run from the app's am, am upgrade hands over to the copy the app manages,
+// never to an am put at that path by hand, and says to update the app when
+// there is no copy to hand over to.
+func TestAnAppsAmUpgradesTheDaemonsCopy(t *testing.T) {
+	home := t.TempDir()
+	self := filepath.Join(home, "Agentman.app", "Contents", "MacOS", "am")
+	managed := update.ManagedPath(home)
+	for _, path := range []string{self, managed} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("am"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, ok := daemonCopyFor(self, home); ok {
+		t.Error("handed over to an am with no marker")
+	}
+	err := upgradeFromApp(nil, home, self, false)
+	if err == nil || !strings.Contains(err.Error(), "update Agentman.app") {
+		t.Errorf("with no managed copy: %v", err)
+	}
+	if err := upgradeFromApp([]string{"-check"}, home, self, true); err != nil {
+		t.Errorf("-check with no managed copy: %v", err)
+	}
+	if err := update.WriteMarker(managed, update.Marker{AppVersion: "0.39.0"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := daemonCopyFor(self, home); !ok || got != managed {
+		t.Errorf("daemonCopyFor = %q, %v", got, ok)
+	}
+	if _, ok := daemonCopyFor(managed, home); ok {
+		t.Error("the managed copy handed over to itself")
+	}
+}
+
+// After an upgrade, a copy of am the service runs is brought up to date and
+// the service restarted on it, as before, whether someone put it at
+// ~/.agentman/bin/am by hand or the app did (its marker stays). An am that
+// an app or Homebrew keeps current is left as it is, and the service with it.
+func TestTheServicesAmAfterAnUpgrade(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		place    func(t *testing.T, home string) string
+		replaced bool
+	}{
+		{"a copy put there by hand", func(t *testing.T, home string) string {
+			path := update.ManagedPath(home)
+			fakeAm(t, path, "0.38.0", "by hand")
+			return path
+		}, true},
+		{"the app's copy", func(t *testing.T, home string) string {
+			path := putManagedCopy(t, home, true)
+			fakeAm(t, path, "0.38.0", "the app's copy")
+			return path
+		}, true},
+		{"a link into the app", func(t *testing.T, home string) string {
+			link := filepath.Join(home, "bin", "am")
+			if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(fakeApp(t, home, "0.38.0"), link); err != nil {
+				t.Fatal(err)
+			}
+			return link
+		}, false},
+		{"Homebrew's", func(t *testing.T, home string) string {
+			path := filepath.Join(home, "Caskroom", "agentman", "0.38.0", "am")
+			fakeAm(t, path, "0.38.0", "Homebrew's")
+			return path
+		}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newSetupWorld(t, 0)
+			serviceAm := c.place(t, w.home)
+			if err := os.MkdirAll(filepath.Dir(w.plist), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			job := renderServicePlist(servicePlist{Binary: serviceAm, Log: "/l", Home: w.home, Path: "/usr/bin"})
+			if err := os.WriteFile(w.plist, []byte(job), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			w.launchd.loaded = true
+			w.daemon.run("0.38.0")
+			upgraded := filepath.Join(w.home, "new", "am")
+			fakeAm(t, upgraded, "0.39.0", "upgraded")
+			before, _ := os.ReadFile(serviceAm)
+
+			var err error
+			out := captureStdout(t, func() { err = moveDaemon(context.Background(), "", upgraded, "0.39.0") })
+			if err != nil {
+				t.Fatalf("moveDaemon: %v\n%s", err, out)
+			}
+			after, _ := os.ReadFile(serviceAm)
+			restarted := len(w.launchd.changes()) > 0
+			if c.replaced {
+				v, _ := binaryVersion(context.Background(), serviceAm)
+				if v != "0.39.0" || !restarted || !strings.Contains(out, "Restarted the service on agentman 0.39.0") {
+					t.Errorf("the copy is %s, restarted %v:\n%s", v, restarted, out)
+				}
+			} else if string(after) != string(before) || restarted || !strings.Contains(out, "left as it is") {
+				t.Errorf("an am kept by another was touched (restarted %v):\n%s", restarted, out)
+			}
+			if c.name == "the app's copy" && !update.IsManaged(serviceAm) {
+				t.Error("the app's copy lost its marker")
+			}
+		})
+	}
+}
+
+// am service install from an am nothing manages runs that am, named as on
+// PATH, exactly as before the app; from the am inside an app it runs the
+// daemon's copy, put in place from it.
+func TestServiceInstallRunsTheAmItAlwaysDid(t *testing.T) {
+	w := newSetupWorld(t, 0)
+	var err error
+	out := captureStdout(t, func() { err = installService(context.Background(), "") })
+	if err != nil {
+		t.Fatalf("service install: %v\n%s", err, out)
+	}
+	stable, _ := stableBinary()
+	if got, _ := serviceBinary(w.plist); got != stable {
+		t.Errorf("the service runs %q, want %q", got, stable)
+	}
+	if !strings.Contains(out, "Agentman now runs in the background") {
+		t.Errorf("service install said:\n%s", out)
+	}
+
+	appAm := fakeApp(t, w.home, "0.39.0")
+	managed, err := serviceCopyFromApp(context.Background(), appAm, "")
+	if err != nil || managed != update.ManagedPath(w.home) || !update.IsManaged(managed) {
+		t.Fatalf("serviceCopyFromApp = %q, %v", managed, err)
+	}
+	if v, _ := binaryVersion(context.Background(), managed); v != "0.39.0" {
+		t.Errorf("the daemon's copy is %s", v)
 	}
 }

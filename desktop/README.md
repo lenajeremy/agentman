@@ -36,7 +36,17 @@ where they are over the socket (`lsp_endpoint`) and talks to them over a
 WebSocket on loopback. Servers start when a file of their language opens and
 stop when no window has used them for ten minutes.
 
-`am serve` must be running, version 0.18 or later (the first with the socket).
+The app carries its own `am`, built from this repository at the end of each
+build (`scripts/build-am.sh`, which needs [Go](https://go.dev/dl); `GO` names
+it if it isn't where the script looks) into `Contents/Helpers/am`, for Apple
+silicon and Intel, signed as the app is and stamped with the app's version (a
+Debug build's says `-dev`). A released app sets everything up with it on first
+launch: `am setup` copies it to `~/.agentman/bin/am`, runs the login service on
+that copy, and connects the agents. Debug builds and the tests never do;
+`AGENTMAN_SETUP=1` lets a Debug build run it.
+
+Without the app's setup, `am serve` must be running, version 0.18 or later
+(the first with the socket).
 
 ## Pointing it at another daemon
 
@@ -48,6 +58,13 @@ open --env AGENTMAN_SOCKET=/tmp/am-test/.agentman/am.sock build/Build/Products/D
 ```
 
 The `socketPath` user default does the same.
+
+## Updates and releases
+
+Released copies update themselves with Sparkle (`App/AppUpdater.swift`), from
+the appcast on the site; Debug builds never do. `scripts/release-mac.sh` makes
+a release, and [docs/development.md](../docs/development.md#agentman-for-mac)
+says how.
 
 ## Links
 

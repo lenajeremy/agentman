@@ -20,6 +20,7 @@ import (
 	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/source"
+	"github.com/lenajeremy/agentman/internal/update"
 )
 
 // version is stamped at build time with -ldflags "-X main.version=...".
@@ -61,9 +62,13 @@ Usage:
   am lsp status               Which language servers the Mac app's editor can use
   am lsp install <language>   Get a language's server now (go, typescript, python, rust)
   am lsp clean                Remove the language servers am downloaded
+  am setup                    Set everything up at once, or again: config, hooks,
+                              agents' tools and the background service
   am doctor                   Check that everything is wired up correctly
   am upgrade [-check]         Install the newest agentman the way this one was
-                              installed, and restart the service on it
+                              installed, and restart the service on it; asks
+                              whether Agentman for Mac updates to match
+                              (-yes: it does, -only-am: it doesn't)
   am version                  Print the version
 
 Flags:
@@ -146,6 +151,8 @@ func main() {
 		err = runAttach(ctx, args)
 	case "open":
 		err = runOpen(args)
+	case "setup":
+		err = runSetup(ctx, args)
 	case "doctor":
 		err = runDoctor(ctx, args)
 	case "upgrade":
@@ -185,15 +192,47 @@ func runVersion(args []string) error {
 
 func formatVersion(asJSON bool) (string, error) {
 	if asJSON {
-		encoded, err := json.Marshal(struct {
-			Version string `json:"version"`
-		}{Version: version})
+		encoded, err := json.Marshal(reportVersion(installedPath()))
 		if err != nil {
 			return "", err
 		}
 		return string(encoded) + "\n", nil
 	}
 	return fmt.Sprintf("agentman %s\n", version), nil
+}
+
+// versionReport is am version --json: what Agentman for Mac reads from an
+// am before it installs it or runs the daemon on it.
+type versionReport struct {
+	Version string `json:"version"`
+	// APILevel and Protocol are protocol.APILevel and protocol.Version.
+	APILevel int `json:"apiLevel"`
+	Protocol int `json:"protocol"`
+	// Install is how this am was installed (update.How), and Managed
+	// whether it is the copy the app runs the daemon from.
+	Install string `json:"install"`
+	Managed bool   `json:"managed"`
+	// Path is this am, links followed.
+	Path string `json:"path"`
+	// AppVersion is the app this am came with: the one that installed the
+	// managed copy, or the one it is inside.
+	AppVersion string `json:"appVersion,omitempty"`
+}
+
+func reportVersion(path string) versionReport {
+	how := update.HowInstalled(path)
+	report := versionReport{
+		Version: version, APILevel: protocol.APILevel, Protocol: protocol.Version,
+		Install: how.String(), Managed: how == update.AppManaged, Path: path,
+	}
+	switch how {
+	case update.AppManaged:
+		marker, _ := update.ReadMarker(path)
+		report.AppVersion = marker.AppVersion
+	case update.AppBundle:
+		report.AppVersion = update.AppVersion(update.BundleOf(path))
+	}
+	return report
 }
 
 // buildRegistry wires up every adapter. An adapter whose CLI is not installed

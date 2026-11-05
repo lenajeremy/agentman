@@ -362,7 +362,8 @@ func runServe(ctx context.Context, args []string) error {
 	// only finds out.
 	updates := update.NewChecker(version)
 	upgrade := update.UpgradeCommand
-	agent.SetDaemonInfo(func() *protocol.DaemonInfo { return daemonInfo(updates, upgrade) })
+	install := installRoute()
+	agent.SetDaemonInfo(func() *protocol.DaemonInfo { return daemonInfo(updates, upgrade, install) })
 	if cfg.Updates.Enabled() && version != "dev" {
 		updates.OnChange = func(status update.Status) {
 			if status.Behind > 0 {

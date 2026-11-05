@@ -244,20 +244,51 @@ const (
 	Homebrew
 	// Npm is the agentman package, installed globally.
 	Npm
+	// AppBundle is the am inside an app, Agentman for Mac's: the app's own,
+	// replaced only by the app's updates, never by am upgrade.
+	AppBundle
+	// AppManaged is the copy the app put at ~/.agentman/bin/am for the
+	// daemon to run, marked by the file beside it (see Marker). am upgrade
+	// brings it forward the install script's way, in its place.
+	AppManaged
 )
 
-// HomebrewCask is the cask, named fully: Homebrew refuses a bare name from a
-// tap nobody has trusted yet.
-const HomebrewCask = "lenajeremy/agentman/agentman"
+// String names the route as am version --json and the apps say it.
+func (h How) String() string {
+	switch h {
+	case Homebrew:
+		return "homebrew"
+	case Npm:
+		return "npm"
+	case AppBundle:
+		return "app"
+	case AppManaged:
+		return "managed"
+	default:
+		return "download"
+	}
+}
+
+// HomebrewCask is the CLI's cask, named fully: Homebrew refuses a bare name
+// from a tap nobody has trusted yet. It is agentman-cli since `agentman`
+// became the Mac app; an install made under the old name is moved across by
+// the tap's cask_renames.json, so upgrading it by this name works too.
+const HomebrewCask = "lenajeremy/agentman/agentman-cli"
 
 // HowInstalled judges how the am at executable (with symlinks resolved) was
-// installed, by where it is.
+// installed, by where it is and, for the app's copy, the marker beside it.
+// An app's own am comes first: Homebrew may keep an app in its Caskroom,
+// and what is inside it is still the app's.
 func HowInstalled(executable string) How {
 	switch {
+	case InAppBundle(executable):
+		return AppBundle
 	case strings.Contains(executable, "/Caskroom/"):
 		return Homebrew
 	case strings.Contains(executable, "/node_modules/"):
 		return Npm
+	case IsManaged(executable):
+		return AppManaged
 	default:
 		return Downloaded
 	}

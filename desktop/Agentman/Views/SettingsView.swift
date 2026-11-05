@@ -269,6 +269,7 @@ private struct GeneralPage: View {
                 }
             }
         }
+        CommandLineSection()
         about
     }
 
@@ -929,42 +930,48 @@ private struct EditorSection: View {
     }
 }
 
-/// Which app and which am serve, and whether a newer one is out.
-private struct AboutSection: View {
-    @Environment(AgentsStore.self) private var store
-    @State private var copied = false
+/// Which app and which am serve, and whether a newer one is out. The app
+/// updates itself (AppUpdater), so its row says where that stands and checks
+/// on request, and whether it updates to match a newer am serve without
+/// asking (AppCatchUp); am serve's row (DaemonServeRow) says where the
+/// daemon runs from and upgrades it.
+struct AboutSection: View {
+    private var updater: AppUpdater { .shared }
+    @AppStorage(AppCatchUp.automaticKey) private var updateWithDaemon = false
 
     var body: some View {
         let app = Bundle.main.infoDictionary
         let version = (app?["CFBundleShortVersionString"] as? String) ?? "?"
         let build = (app?["CFBundleVersion"] as? String) ?? "?"
         SettingsSection(title: "About") {
-            SettingsRow(title: "Agentman for Mac") {
-                Text("\(version) (\(build))").font(TextStyle.caption).foregroundStyle(Palette.muted)
-            }
-            SettingsRow(title: "am serve", detail: updateDetail, divider: false) {
+            SettingsRow(title: "Agentman for Mac",
+                        detail: AppUpdater.detail(updater.status, lastChecked: updater.lastChecked,
+                                                  automatic: updater.checksAutomatically)) {
                 HStack(spacing: 8) {
-                    Text(store.daemonInfo?.version ?? "Not connected")
-                        .font(TextStyle.caption)
-                        .foregroundStyle(Palette.muted)
-                    if let upgrade = store.daemonInfo?.upgrade, (store.daemonInfo?.behind ?? 0) > 0 {
-                        Button(copied ? "Copied" : "Copy upgrade command") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(upgrade, forType: .string)
-                            copied = true
-                        }
+                    Text("\(version) (\(build))").font(TextStyle.caption).foregroundStyle(Palette.muted)
+                    if updater.status != .off {
+                        Button(AppUpdater.action(updater.status)) { updater.check() }
+                            .disabled(!updater.canCheck)
                     }
                 }
             }
+            if updater.status != .off {
+                SettingsRow(title: "Check for updates automatically",
+                            detail: "Once a day, in the background.") {
+                    Toggle("", isOn: Binding(get: { updater.checksAutomatically },
+                                             set: { updater.checksAutomatically = $0 }))
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+                SettingsRow(title: "Update Agentman when am serve is newer",
+                            detail: "Without asking: it downloads in the background and installs when you quit.") {
+                    Toggle("", isOn: $updateWithDaemon)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+            }
+            DaemonServeRow()
         }
-    }
-
-    private var updateDetail: String? {
-        guard let info = store.daemonInfo else { return nil }
-        if let latest = info.latest, (info.behind ?? 0) > 0 {
-            return "\(latest) is out. Run \(info.upgrade ?? "the upgrade") in a terminal."
-        }
-        return info.latest == nil ? nil : "Up to date."
     }
 }
 

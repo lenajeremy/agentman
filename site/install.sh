@@ -61,13 +61,18 @@ latest_version() {
 
 install_with_brew() {
   step "Installing with Homebrew"
-  # The fully qualified name, not `brew tap` then `brew install agentman`:
+  # The fully qualified name, not `brew tap` then `brew install agentman-cli`:
   # Homebrew 7 refuses a bare name from a tap nobody has trusted yet, while
   # naming the tap in the install is taken as that trust. Checked on 7.0.8.
-  if brew list --cask agentman >/dev/null 2>&1; then
-    brew upgrade --cask "$TAP/agentman" || true
+  #
+  # agentman-cli is `am` alone; the tap's `agentman` is the Mac app. An
+  # install from before the split, under `agentman`, counts as agentman-cli
+  # here (Homebrew looks a cask up by its old names too), and the tap's
+  # cask_renames.json moves it to the new name as it upgrades.
+  if brew list --cask agentman-cli >/dev/null 2>&1; then
+    brew upgrade --cask "$TAP/agentman-cli" || true
   else
-    brew install --cask "$TAP/agentman"
+    brew install --cask "$TAP/agentman-cli"
   fi
 }
 
