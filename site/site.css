@@ -1,6 +1,6 @@
-/* The home page: one bright orange flood with a film grain, wavy edges
-   between bands, chunky rounded headlines and small mono labels. The other
-   pages keep landing.css. */
+/* The site: one bright orange flood with a film grain, wavy edges
+   between bands, chunky rounded headlines and small mono labels.
+*/
 
 @font-face {
   font-family: "Rubik";
@@ -30,14 +30,15 @@
   --paper: #ffffff;
   --muted: #6f5f55;
   --accent: #e5480a; /* orange that reads as text on white */
-  --blue: #2945ff;
-  --blue-soft: #e4e8ff;
+  --soft: #ffe7da; /* a pale orange, for a highlighted row or tile */
+  --blue: #2945ff; /* only for the one blue section */
+  --blue-deep: #1a2bd1;
   --line: rgba(22, 13, 8, 0.12);
   --display: "Rubik", ui-rounded, system-ui, sans-serif;
   --body: "Inter", system-ui, -apple-system, sans-serif;
   --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --wave: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='10' viewBox='0 0 22 10'%3E%3Cpath d='M0 5Q5.5 0 11 5T22 5V10H0Z'/%3E%3C/svg%3E");
-  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='linear' slope='.34'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 *,
@@ -119,19 +120,11 @@ p {
 
 .flood {
   position: relative;
-  background: var(--flood);
+  background-color: var(--flood);
+  background-image: var(--grain);
+  background-blend-mode: overlay;
   color: #fff;
-  isolation: isolate;
-}
-.flood::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background: var(--grain);
-  opacity: 0.32;
-  mix-blend-mode: overlay;
-  pointer-events: none;
+  --band: var(--flood);
 }
 
 .cream {
@@ -215,7 +208,7 @@ p {
   align-items: center;
   gap: 6px;
   margin-top: 22px;
-  color: var(--blue);
+  color: var(--accent);
   font-weight: 600;
   text-decoration: none;
 }
@@ -232,7 +225,6 @@ p {
 
 .top {
   z-index: 2;
-  --band: var(--flood);
 }
 
 .nav {
@@ -368,7 +360,7 @@ p {
 .badge-ring text {
   font: 500 15px var(--mono);
   letter-spacing: 0.04em;
-  fill: var(--blue);
+  fill: currentColor;
 }
 .badge-mascot {
   position: absolute;
@@ -472,7 +464,7 @@ p {
   content: "✦";
   margin-left: 26px;
   font-size: 0.7em;
-  color: var(--blue);
+  color: var(--accent);
 }
 .marquee-track li {
   display: flex;
@@ -512,9 +504,7 @@ p {
 .block h2 {
   color: var(--accent);
 }
-.block-tight h2 {
-  color: var(--blue);
-}
+
 .lede {
   max-width: 580px;
   margin: 22px auto 0;
@@ -550,7 +540,9 @@ p {
   display: grid;
   place-items: center;
   padding: 56px 24px 0;
-  background: var(--blue);
+  background-color: var(--blue-deep);
+  background-image: var(--grain);
+  background-blend-mode: overlay;
   border-radius: 28px;
   overflow: hidden;
   border: 3px solid var(--ink);
@@ -562,15 +554,7 @@ p {
   margin-bottom: -18%;
   transform: translateY(calc((0.5 - var(--p, 0.5)) * 70px));
 }
-.phone-tile::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: var(--grain);
-  opacity: 0.35;
-  mix-blend-mode: overlay;
-  pointer-events: none;
-}
+
 
 /* MARK: Make it your own */
 
@@ -592,29 +576,25 @@ p {
   align-content: start;
   gap: 16px;
 }
-.trio svg {
-  width: 40px;
-  height: 40px;
-  fill: none;
-  stroke: var(--blue);
-  stroke-width: 2.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+.trio-sticker {
+  width: 170px;
+  height: 170px;
+  margin: -34px 0 -26px;
 }
 .trio p {
   max-width: 290px;
   font: 700 clamp(20px, 2vw, 24px) / 1.2 var(--display);
   letter-spacing: -0.02em;
-  color: var(--blue);
+  color: var(--accent);
 }
 .tag {
   padding: 5px 10px;
-  border: 1.5px solid var(--blue);
+  border: 1.5px solid var(--accent);
   border-radius: 6px;
   font: 500 11px/1.2 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--blue);
+  color: var(--accent);
 }
 
 .terminal {
@@ -669,7 +649,7 @@ p {
 
 .closing {
   margin-top: 9px;
-  padding: clamp(96px, 11vw, 140px) 0;
+  padding: clamp(96px, 11vw, 140px) 0 clamp(150px, 17vw, 230px);
 }
 .closing h2 {
   color: #fff;
@@ -721,7 +701,7 @@ p {
 
 /* MARK: Squiggle */
 
-/* A blue scribble under the hero's last line. */
+/* A scribble under the hero's last line. */
 .squiggle {
   position: relative;
   display: inline-block;
@@ -733,7 +713,7 @@ p {
   right: 4%;
   bottom: -0.16em;
   height: 0.2em;
-  background: var(--blue);
+  background: var(--ink);
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='14' viewBox='0 0 40 14' preserveAspectRatio='none'%3E%3Cpath d='M0 9c5 0 5-6 10-6s5 6 10 6 5-6 10-6 5 6 10 6' fill='none' stroke='%23000' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E") repeat-x 0 50% / 0.62em 100%;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='14' viewBox='0 0 40 14' preserveAspectRatio='none'%3E%3Cpath d='M0 9c5 0 5-6 10-6s5 6 10 6 5-6 10-6 5 6 10 6' fill='none' stroke='%23000' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E") repeat-x 0 50% / 0.62em 100%;
   transform-origin: left;
@@ -768,7 +748,7 @@ p {
 }
 .card h3 em {
   font-style: normal;
-  color: var(--blue);
+  color: var(--accent);
 }
 .card-art {
   flex: 1;
@@ -800,7 +780,7 @@ p {
   font-size: 14px;
 }
 .thread:nth-child(2) {
-  background: var(--blue-soft);
+  background: var(--soft);
 }
 .thread img {
   width: 20px;
@@ -834,7 +814,7 @@ p {
   background: currentColor;
 }
 .state.working {
-  color: var(--blue);
+  color: var(--ink);
 }
 .state.needs {
   color: var(--accent);
@@ -872,7 +852,7 @@ p {
 }
 .logos span:nth-child(2),
 .logos span:nth-child(6) {
-  background: var(--blue-soft);
+  background: var(--soft);
 }
 .logos span:hover {
   rotate: 0deg;
@@ -924,8 +904,8 @@ p {
   text-transform: uppercase;
 }
 .repo-tags span:first-child {
-  background: var(--blue);
-  color: #fff;
+  background: var(--flood);
+  color: var(--ink);
 }
 
 /* MARK: Motion */
@@ -983,6 +963,247 @@ p {
 }
 .motion .in .squiggle::after {
   transform: scaleX(1);
+}
+
+/* MARK: Blue section */
+
+/* One section is blue. As it reaches the middle of the view the whole page
+   turns blue behind it, its text and buttons follow, and the page goes back
+   to white once it has passed (site.js sets html[data-zone]). */
+body {
+  transition: background-color 0.7s ease;
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--grain);
+  mix-blend-mode: overlay;
+  opacity: 0;
+  transition: opacity 0.7s ease;
+  pointer-events: none;
+}
+html[data-zone="blue"] body {
+  background-color: var(--blue);
+}
+html[data-zone="blue"] body::before {
+  opacity: 1;
+}
+/* Without script, the section is simply blue. */
+html:not(.js) .zone {
+  background: var(--blue);
+  padding-bottom: clamp(96px, 12vw, 150px);
+}
+.zone {
+  position: relative;
+}
+.zone h2,
+.zone .lede {
+  transition: color 0.7s ease;
+}
+.zone h2 {
+  color: var(--blue);
+}
+html[data-zone="blue"] .zone h2,
+html:not(.js) .zone h2 {
+  color: #fff;
+}
+html[data-zone="blue"] .zone .lede,
+html:not(.js) .zone .lede {
+  color: rgba(255, 255, 255, 0.86);
+}
+.zone-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 30px;
+}
+.pill-zone,
+.pill-zone-ghost {
+  transition:
+    transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 0.7s ease,
+    color 0.7s ease,
+    box-shadow 0.7s ease;
+}
+.pill-zone {
+  background: var(--blue);
+  color: #fff;
+  box-shadow: 0 2px 0 var(--blue-deep);
+}
+.pill-zone-ghost {
+  background: transparent;
+  color: var(--blue);
+  box-shadow: inset 0 0 0 2px var(--blue);
+}
+html[data-zone="blue"] .pill-zone,
+html:not(.js) .pill-zone {
+  background: #fff;
+  color: var(--blue);
+  box-shadow: 0 2px 0 var(--blue-deep);
+}
+html[data-zone="blue"] .pill-zone-ghost,
+html:not(.js) .pill-zone-ghost {
+  color: #fff;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85);
+}
+.zone .phone-tile {
+  transition: border-color 0.7s ease, box-shadow 0.7s ease;
+}
+html[data-zone="blue"] .zone .phone-tile {
+  border-color: #fff;
+  box-shadow: 0 10px 0 var(--blue-deep);
+}
+
+/* MARK: Patterns */
+
+/* Dots on the cream bands. */
+.cream {
+  background-image: radial-gradient(rgba(22, 13, 8, 0.13) 1.3px, transparent 1.7px);
+  background-size: 20px 20px;
+  background-position: 10px 10px;
+}
+
+/* A grid behind the harness cards, fading out from their middle. */
+#harness {
+  position: relative;
+  isolation: isolate;
+}
+#harness::before {
+  content: "";
+  position: absolute;
+  inset: 40px 0 -40px;
+  z-index: -1;
+  background-image:
+    linear-gradient(rgba(22, 13, 8, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(22, 13, 8, 0.07) 1px, transparent 1px);
+  background-size: 36px 36px;
+  background-position: center;
+  -webkit-mask: radial-gradient(ellipse 60% 55% at 50% 60%, #000 30%, transparent 75%);
+  mask: radial-gradient(ellipse 60% 55% at 50% 60%, #000 30%, transparent 75%);
+  pointer-events: none;
+}
+
+/* A white grid over the blue, while the page is blue. */
+.zone::before {
+  content: "";
+  position: absolute;
+  inset: -80px 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask: linear-gradient(transparent, #000 20%, #000 80%, transparent);
+  mask: linear-gradient(transparent, #000 20%, #000 80%, transparent);
+  opacity: 0;
+  transition: opacity 0.7s ease;
+  pointer-events: none;
+}
+html[data-zone="blue"] .zone::before,
+html:not(.js) .zone::before {
+  opacity: 1;
+}
+.zone > * {
+  position: relative;
+}
+
+/* Wavy lines across the closing band. */
+.closing {
+  overflow: hidden;
+  isolation: isolate;
+}
+.closing::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='28' viewBox='0 0 120 28'%3E%3Cpath d='M0 14c15 0 15-10 30-10s15 10 30 10 15-10 30-10 15 10 30 10' fill='none' stroke='%23fff' stroke-opacity='.16' stroke-width='2'/%3E%3C/svg%3E")
+    repeat 0 0 / 120px 28px;
+  -webkit-mask: linear-gradient(#000, transparent 70%);
+  mask: linear-gradient(#000, transparent 70%);
+  pointer-events: none;
+}
+
+/* A label between two wavy lines. */
+.wavy-rule {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  width: min(1180px, 100% - 32px);
+  margin-inline: auto;
+}
+.wavy-rule::before,
+.wavy-rule::after {
+  content: "";
+  flex: 1;
+  height: 8px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='8' viewBox='0 0 16 8'%3E%3Cpath d='M0 4c2 0 2-3 4-3s2 3 4 3 2 3 4 3 2-3 4-3' fill='none' stroke='%23160d08' stroke-opacity='.45' stroke-width='1.3'/%3E%3C/svg%3E")
+    repeat-x 0 50% / 16px 8px;
+}
+.wavy-rule span {
+  flex: none;
+}
+
+/* MARK: Outlined text */
+
+.outline {
+  color: transparent;
+  -webkit-text-stroke: 2.5px currentColor;
+}
+#own-heading .outline {
+  -webkit-text-stroke-color: var(--ink);
+}
+
+/* A giant outlined line that slides sideways as the page scrolls. */
+.outline-strip {
+  overflow: hidden;
+  padding: clamp(64px, 9vw, 120px) 0 0;
+}
+.outline-strip div {
+  width: max-content;
+  font: 800 clamp(64px, 11vw, 168px) / 1 var(--display);
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+  color: transparent;
+  -webkit-text-stroke: 2px var(--ink);
+  transform: translateX(var(--x, -12%));
+}
+
+/* The name, outlined and huge, behind the closing call. */
+.closing-word {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -0.34em;
+  z-index: -1;
+  overflow: hidden;
+  font: 800 clamp(120px, 24vw, 380px) / 1 var(--display);
+  letter-spacing: -0.04em;
+  white-space: nowrap;
+  text-align: center;
+  color: transparent;
+  -webkit-text-stroke: 2px rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+}
+.closing-word span {
+  display: inline-block;
+  transform: translateX(var(--x, 0%));
+}
+
+/* MARK: Stickers */
+
+.phone-wrap {
+  position: relative;
+}
+.tile-sticker {
+  position: absolute;
+  z-index: 2;
+  left: -64px;
+  top: -58px;
+  width: 150px;
+  height: 150px;
+  pointer-events: none;
 }
 
 /* MARK: Narrow */
@@ -1060,6 +1281,19 @@ p {
   .split-copy .lede {
     margin-left: auto;
   }
+  .zone-actions {
+    justify-content: center;
+  }
+  .tile-sticker {
+    left: -8px;
+    top: -54px;
+    width: 116px;
+    height: 116px;
+  }
+  .outline-strip div,
+  .closing-word {
+    -webkit-text-stroke-width: 1.5px;
+  }
   .trio {
     grid-template-columns: 1fr;
     gap: 36px;
@@ -1077,6 +1311,14 @@ p {
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
+  }
+  body,
+  body::before,
+  .zone h2,
+  .zone .lede,
+  .pill-zone,
+  .pill-zone-ghost {
+    transition: none;
   }
   .badge-ring,
   .marquee-track,
