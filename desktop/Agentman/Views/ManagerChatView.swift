@@ -10,6 +10,7 @@ struct ManagerChatView: View {
     /// the panel has its own header.
     var inPanel = false
     @State private var confirmNewChat = false
+    @State private var chatAutofocus = ChatAutofocus()
     @State private var draft = ""
     @State private var attachments: [Attachment] = []
     @State private var sending = false
@@ -32,40 +33,43 @@ struct ManagerChatView: View {
     }
 
     var body: some View {
-        if inPanel {
-            conversation
-        } else {
-            VStack(spacing: 0) {
-                HStack(spacing: 10) {
-                    // The sidebar beside it already says Agentman; the page
-                    // names itself only while the sidebar is hidden.
-                    if headerLeading > 0 {
-                        Text("Agentman").font(Fonts.sans(14, .semibold))
-                    }
-                    Spacer()
-                    if !manager.schedules.isEmpty { SchedulesButton() }
-                    if !manager.entries.isEmpty {
-                        ChromeButton(symbol: "plus.bubble", help: "Start a new conversation with Agentman") {
-                            confirmNewChat = true
+        Group {
+            if inPanel {
+                conversation
+            } else {
+                VStack(spacing: 0) {
+                    HStack(spacing: 10) {
+                        // The sidebar beside it already says Agentman; the page
+                        // names itself only while the sidebar is hidden.
+                        if headerLeading > 0 {
+                            Text("Agentman").font(Fonts.sans(14, .semibold))
+                        }
+                        Spacer()
+                        if !manager.schedules.isEmpty { SchedulesButton() }
+                        if !manager.entries.isEmpty {
+                            ChromeButton(symbol: "plus.bubble", help: "Start a new conversation with Agentman") {
+                                confirmNewChat = true
+                            }
                         }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.leading, headerLeading)
+                    .frame(height: 32)
+                    .windowTopBar()
+                    conversation
                 }
-                .padding(.horizontal, 16)
-                .padding(.leading, headerLeading)
-                .frame(height: 32)
-                .windowTopBar()
-                conversation
-            }
-                .navigationTitle("")
-                .confirmationDialog("Start a new chat?", isPresented: $confirmNewChat) {
-                    Button("New Chat") {
-                        Task { manager.problem = await manager.reset() }
+                    .navigationTitle("")
+                    .confirmationDialog("Start a new chat?", isPresented: $confirmNewChat) {
+                        Button("New Chat") {
+                            Task { manager.problem = await manager.reset() }
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text(Self.newChatMessage)
                     }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text(Self.newChatMessage)
-                }
+            }
         }
+        .environment(\.chatAutofocus, chatAutofocus)
     }
 
     static let newChatMessage = "This conversation is set aside, and Agentman keeps what matters from it in its private notes. Cards still waiting stay."
@@ -306,7 +310,7 @@ private struct ManagerBox: View {
             Group {
                 if store.status != .connected {
                     ManagerComposer(text: .constant(""), thinking: false, sending: true, large: large,
-                                    placeholder: "Waiting for Agentman to connect…", onSend: {}, onStop: {})
+                                    placeholder: "Waiting for Agentman to connect…", enabled: false, onSend: {}, onStop: {})
                 } else if manager.needsKey {
                     KeyBox()
                 } else {
@@ -720,6 +724,7 @@ private struct ManagerComposer: View {
     var sending: Bool
     var large = false
     var placeholder = "Ask Agentman about your agents"
+    var enabled = true
     /// Images dragged over the box, so the conversation shows where they
     /// will land.
     var onDropTargeted: ((Bool) -> Void)? = nil
@@ -748,7 +753,9 @@ private struct ManagerComposer: View {
                     text: $text,
                     placeholder: placeholder,
                     fontSize: large ? 15 : 14,
+                    enabled: enabled,
                     focused: $focused,
+                    autofocus: true,
                     onSubmit: { if !thinking, canSend { onSend() } },
                     onImages: { add($0) },
                     onDropTargeted: onDropTargeted,
@@ -802,7 +809,6 @@ private struct ManagerComposer: View {
                     .frame(height: 0, alignment: .bottom)
             }
         }
-        .onAppear { if large { focused = true } }
     }
 
     private var canSend: Bool {

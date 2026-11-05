@@ -1694,6 +1694,7 @@ struct Composer: View {
                 placeholder: placeholder,
                 enabled: enabled,
                 focused: $focused,
+                autofocus: true,
                 onSubmit: { if canSend { onSend() } },
                 onImages: attachments == nil ? nil : { add($0) },
                 onDropTargeted: onDropTargeted,
