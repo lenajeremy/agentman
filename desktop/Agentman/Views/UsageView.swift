@@ -212,7 +212,7 @@ private struct NothingUsed: View {
             Text(days == 0 ? "Nothing used yet" : days == 1 ? "Nothing used in the past day" : "Nothing used in the past \(days) days")
                 .font(TextStyle.title)
                 .foregroundStyle(Palette.text)
-            Text("Usage is read from Claude Code, Codex, OpenCode and Antigravity's own records on this Mac.")
+            Text("Usage is read from Claude Code, Codex, OpenCode, Antigravity, Muse and Kiro's own records on this Mac.")
                 .font(TextStyle.caption)
                 .foregroundStyle(Palette.muted)
         }
