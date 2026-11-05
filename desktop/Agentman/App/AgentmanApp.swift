@@ -99,6 +99,9 @@ struct AgentmanApp: App {
         }
         .defaultSize(width: 1560, height: 980)
         .windowStyle(.hiddenTitleBar)
+        // As small as its content allows and no smaller (EditorWindow's
+        // minimum), so its columns never run past the window's edge.
+        .windowResizability(.contentMinSize)
         .commands { EditorCommands() }
 
         Settings {

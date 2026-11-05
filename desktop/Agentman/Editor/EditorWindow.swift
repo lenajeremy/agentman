@@ -49,6 +49,31 @@ struct EditorWindow: View {
     @State private var keyMonitor: Any?
     @AppStorage("terminalHeight") private var terminalHeight = 260.0
     @AppStorage("agentPanelWidth") private var panelWidth = 400.0
+    /// The window's size, kept as it changes, for what is sized by it.
+    @State private var size = CGSize(width: 1200, height: 800)
+
+    /// The least the window is: the tree (240) and room for the code (320),
+    /// with the status bar's room; and with the agent's panel (300) open.
+    static let minimumWidth: CGFloat = 640
+    static let minimumWithPanel: CGFloat = 880
+    static let minimumHeight: CGFloat = 420
+    /// The most of the window the agent's panel takes, so the code keeps
+    /// room beside it.
+    static let panelShare = 0.4
+
+    /// The agent's panel as dragged, but no more than its share of the
+    /// window, nor than leaves the tree and the code their room; never under
+    /// its own least.
+    static func panelWidth(dragged: Double, window: CGFloat) -> CGFloat {
+        let room = window - 240 - 320 - 2
+        return max(CGFloat(ColumnDivider.minimum), min(CGFloat(dragged), window * panelShare, room))
+    }
+
+    /// The terminal as dragged, but no more than 40% of a short window, so
+    /// the code keeps some lines above it.
+    static func terminalHeight(dragged: Double, window: CGFloat) -> CGFloat {
+        min(CGFloat(dragged), max(120, window * 0.4))
+    }
 
     init(folder: String, client: DaemonClient) {
         let store = EditorRegistry.shared.store(for: folder)
@@ -89,11 +114,11 @@ struct EditorWindow: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         if store.showTerminal {
-                            PanelDivider(height: $terminalHeight, maximum: (store.window?.frame.height ?? 800) * 0.75)
+                            PanelDivider(height: $terminalHeight, maximum: size.height * 0.75)
                                 .padding(.vertical, -3)
                                 .zIndex(1)
                             TerminalPanel(store: store, hide: { store.showTerminal = false })
-                                .frame(height: terminalHeight)
+                                .frame(height: Self.terminalHeight(dragged: terminalHeight, window: size.height))
                         }
                     }
                     .frame(minWidth: 320)
@@ -107,19 +132,26 @@ struct EditorWindow: View {
                     // Agentman beside the code: the folder's agent, or any
                     // other, and Agentman itself.
                     if store.showAgentPanel {
-                        ColumnDivider(width: $panelWidth, maximum: (store.window?.frame.width ?? 1200) * 0.6)
+                        ColumnDivider(width: $panelWidth, maximum: Self.panelWidth(dragged: .infinity, window: size.width))
                             .zIndex(1)
                         AgentPanel(editor: store)
-                            .frame(width: min(panelWidth, max((store.window?.frame.width ?? 1200) * 0.6, ColumnDivider.minimum)))
+                            .frame(width: Self.panelWidth(dragged: panelWidth, window: size.width))
                             .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
                 }
-                StatusBar(store: store)
             }
             .background(Palette.paper)
             .animation(.easeOut(duration: 0.18), value: store.showAgentPanel)
             }
+            // Across the whole window, under the tree too, so what it says
+            // has room at any width.
+            StatusBar(store: store)
         }
+        // Never narrower than what it shows: the tree, room for the code,
+        // and the agent's panel when it is open. Opening the panel in a
+        // narrow window widens the window.
+        .frame(minWidth: store.showAgentPanel ? Self.minimumWithPanel : Self.minimumWidth, minHeight: Self.minimumHeight)
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
         .background(Palette.paper)
         .ignoresSafeArea(.container, edges: .top)
         // An image from the agent panel, full size over the editor.
