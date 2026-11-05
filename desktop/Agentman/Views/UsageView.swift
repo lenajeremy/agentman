@@ -11,6 +11,8 @@ struct UsageView: View {
     @Environment(\.detailHeaderLeading) private var headerLeading
     @AppStorage("usageDays") private var days = 30
     @AppStorage("usageMetric") private var metric = UsageMetric.cost
+    /// Cost or Tokens, as last picked, for going back from Limits.
+    @AppStorage("usageSpendMetric") private var spendMetric = UsageMetric.cost
     @AppStorage("usageBreakdown") private var breakdown = UsageBreakdown.model
     /// Each range read so far, shown at once when it is picked again while
     /// it is read afresh.
@@ -60,14 +62,31 @@ struct UsageView: View {
         }
     }
 
+    /// Spending or plan limits: two pages, side by side beside the title.
+    /// Limits used to be a third choice beside Cost and Tokens, though it
+    /// is no measure of spending, and picking it made the header shift.
+    private var tab: Binding<UsageTab> {
+        Binding(get: { metric == .limits ? .limits : .spend }, set: { tab in
+            switch tab {
+            case .limits:
+                if metric != .limits { spendMetric = metric }
+                metric = .limits
+            case .spend:
+                metric = spendMetric == .limits ? .cost : spendMetric
+            }
+        })
+    }
+
     private var header: some View {
         HStack(spacing: 10) {
             Text("Usage").font(Fonts.sans(14, .semibold))
+            Segments(options: UsageTab.allCases, selection: tab) { $0.title }
+                .padding(.leading, 6)
             Spacer()
             if metric != .limits {
                 Segments(options: Self.ranges, selection: $days, title: Self.rangeTitle)
+                Segments(options: [UsageMetric.cost, .tokens], selection: $metric) { $0.title }
             }
-            Segments(options: UsageMetric.allCases, selection: $metric) { $0.title }
             let busy = metric == .limits ? readingLimits : loading
             ChromeButton(symbol: "arrow.clockwise", help: metric == .limits ? "Read limits again" : "Read again") {
                 Task { metric == .limits ? await loadLimits(force: true) : await load() }
@@ -183,6 +202,13 @@ struct UsageView: View {
             if summaries[asked] == nil { problem = error.localizedDescription }
         }
     }
+}
+
+/// The usage page's two pages.
+enum UsageTab: CaseIterable, Hashable {
+    case spend, limits
+
+    var title: String { self == .spend ? "Spending" : "Limits" }
 }
 
 enum UsageMetric: String, CaseIterable {
