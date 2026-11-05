@@ -5,9 +5,9 @@ import { SNAP, POP, erase, hop, sparkle, sway, twinkle } from './motions'
 import { AGENTMAN } from './icons'
 import type { Icon, Layer, Motion, Palette, Vec } from './fun'
 
-import { bell, heart, padlock, phone, toggle } from './kit-icons'
+import { bell, chat, heart, notes, padlock, phone, toggle } from './kit-icons'
 
-export { bell, heart, padlock, phone, toggle }
+export { bell, chat, heart, notes, padlock, phone, toggle }
 
 /**
  * The stickers' palette: Agentman orange on bodies, bells and checks, a pale orange tint, a deeper orange for hearts,
@@ -74,4 +74,4 @@ export const terminal: Icon = {
 }
 
 /** Every sticker the site plays, by the name a canvas asks for. */
-export const STICKERS: Record<string, Icon> = { terminal, phone, heart, bell, padlock, toggle }
+export const STICKERS: Record<string, Icon> = { terminal, phone, heart, bell, padlock, toggle, chat, notes }

@@ -8,7 +8,7 @@
       name="description"
       content="How Agentman handles pairing, coding-agent sessions, files, images, notifications, and website visits."
     />
-    <meta name="theme-color" content="#050505" />
+    <meta name="theme-color" content="#ff5f1f" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Privacy policy — Agentman" />
     <meta
@@ -20,79 +20,63 @@
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="icon" href="/favicon.png" sizes="48x48" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link
-      rel="preload"
-      href="/fonts/geist-sans-latin-500-normal.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
-    <link
-      rel="preload"
-      href="/fonts/geist-sans-latin-400-normal.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
-    <link rel="stylesheet" href="/landing.css?v=20261030b" />
-    <link rel="stylesheet" href="/subpages.css?v=20261030b" />
+    <link rel="preload" href="/fonts/rubik-latin-variable.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/inter-latin-variable.woff2" as="font" type="font/woff2" crossorigin />
+    <script>
+      document.documentElement.classList.add("js");
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) document.documentElement.classList.add("motion");
+    </script>
+    <link rel="stylesheet" href="/third-party/lenis-1.3.26.css" />
+    <link rel="stylesheet" href="/site.css?v=20261105" />
+    <script src="/third-party/lenis-1.3.26.min.js" defer></script>
+    <script src="/site.js?v=20261105" defer></script>
+    <script src="/mascot.js" defer></script>
   </head>
-  <body class="subpage privacy-page">
+  <body>
     <svg width="0" height="0" style="position: absolute" aria-hidden="true">
-      <!-- The mark: a ">" prompt with a notification waiting on it. -->
-
       <symbol id="i-github" viewBox="0 0 24 24">
         <path
           fill="currentColor"
-          stroke="none"
           d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.2-3.1-.1-.4-.5-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.6.2 2.8.1 3.2.8.8 1.2 1.9 1.2 3.1 0 4.7-2.8 5.7-5.5 6 .4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5z"
         />
       </symbol>
-
-      <!-- Agent and tool logos: Claude, OpenAI, OpenCode, Kiro and Antigravity from LobeHub Icons (MIT),
-         Cursor from Simple Icons (CC0);
-         the rest from Simple Icons (CC0). Marks belong to their owners and are
-         used only to name the tools Agentman works with. -->
+      <!-- Apple's mark from Simple Icons (CC0), only to say which platform a download is for. -->
       <symbol id="l-apple" viewBox="0 0 24 24">
-        <title>Apple</title>
         <path
           fill="currentColor"
           d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"
         />
       </symbol>
-      <symbol id="i-copy" viewBox="0 0 24 24">
-        <rect x="8" y="8" width="12" height="12" rx="3" />
-        <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+      <symbol id="i-arrow" viewBox="0 0 16 16">
+        <path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
       </symbol>
-      <symbol id="i-arrow" viewBox="0 0 24 24">
-        <path d="M5 12h14M13 6l6 6-6 6" />
-      </symbol></svg
-    ><a class="skip-link" href="#main">Skip to content</a>
-    <nav class="nav container" aria-label="Main">
-      <a class="wordmark" href="/" aria-label="Agentman home"
-        ><img src="/apple-touch-icon.png" alt="" width="24" height="24" /><span>Agentman</span></a
-      >
-      <div class="nav-links">
-        <a href="/mac#download">Download</a
-        ><a class="nav-github" href="https://github.com/lenajeremy/agentman"
-          ><svg aria-hidden="true"><use href="#i-github" /></svg
-          ><span>GitHub ↗</span></a
-        >
-      </div>
-    </nav>
-    <main id="main" class="container policy">
-      <header class="policy-header">
-        <span class="policy-eyebrow">Agentman / Legal</span>
-        <h1>Privacy policy</h1>
-        <p>
-          Agentman lets you view and control coding agents running on your
-          computer from a paired phone. This policy explains what data moves
-          between your devices, what passes through our services, and how you
-          can remove it.
-        </p>
-        <p class="policy-date">Effective September 25, 2026</p>
-      </header>
+      <symbol id="i-copy" viewBox="0 0 24 24">
+        <rect x="8" y="8" width="12" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="2" />
+        <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" fill="none" stroke="currentColor" stroke-width="2" />
+      </symbol>
+    </svg>
 
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="top flood edge-bottom">
+      <nav class="nav wrap" aria-label="Main">
+        <a class="wordmark" href="/" aria-label="Agentman home"
+          ><img src="/apple-touch-icon.png" alt="" width="28" height="28" /><span>Agentman</span></a
+        >
+        <div class="nav-links"><a href="/mac">Mac</a><a href="/ios">iPhone</a><a href="/start">Setup</a><a href="https://github.com/lenajeremy/agentman">GitHub</a></div>
+        <a class="pill pill-white pill-small" href="https://github.com/lenajeremy/agentman/releases/download/v0.40.0/Agentman.dmg"
+          ><svg aria-hidden="true"><use href="#l-apple" /></svg>Download for Mac</a
+        >
+      </nav>
+      <div class="hero hero-page hero-short wrap" id="main">
+        <p class="eyebrow" data-reveal>Agentman / Legal</p>
+        <h1 data-split>Privacy policy</h1>
+        <p class="fine" data-reveal style="--d: 250ms">Effective September 25, 2026</p>
+        <canvas class="hero-sticker" data-sticker="padlock" data-offset="0" width="260" height="260" aria-hidden="true"></canvas>
+      </div>
+    </header>
+
+    <main class="wrap policy">
       <div class="policy-body">
         <section aria-labelledby="who">
           <h2 id="who">Who runs Agentman</h2>
@@ -263,17 +247,19 @@
         </section>
       </div>
     </main>
-    <footer class="container footer">
-      <a class="wordmark" href="/"
-        ><img src="/apple-touch-icon.png" alt="" width="24" height="24" /><span>Agentman <small>· MIT licensed</small></span></a
-      >
-      <nav aria-label="Footer">
-        <a href="https://github.com/lenajeremy/agentman">GitHub</a
-        ><a href="/mac">Mac</a><a href="/ios">iPhone</a
-        ><a href="/start">Setup</a
-        ><a href="https://github.com/lenajeremy/agentman#readme">Docs</a
-        ><a href="/privacy">Privacy</a>
-      </nav>
+
+    <footer class="footer">
+      <div class="wrap footer-row">
+        <a class="wordmark" href="/"
+          ><img src="/apple-touch-icon.png" alt="" width="24" height="24" /><span>Agentman</span
+          ><small>MIT licensed</small></a
+        >
+        <nav aria-label="Footer">
+          <a href="https://github.com/lenajeremy/agentman">GitHub</a><a href="/mac">Mac</a><a href="/ios">iPhone</a
+          ><a href="/start">Setup</a><a href="https://github.com/lenajeremy/agentman#readme">Docs</a
+          ><a href="/privacy">Privacy</a>
+        </nav>
+      </div>
     </footer>
   </body>
 </html>

@@ -50,7 +50,7 @@
       if (on) root.dataset.zone = on[0].dataset.zone;
       else delete root.dataset.zone;
     },
-    { rootMargin: "-45% 0px -45% 0px" },
+    { rootMargin: "-35% 0px -35% 0px" },
   );
   for (const zone of document.querySelectorAll("[data-zone]")) zoneWatch.observe(zone);
 
