@@ -14,6 +14,23 @@
     <description>Updates to Agentman for Mac.</description>
     <language>en</language>
     <item>
+      <title>Agentman 0.41.0</title>
+      <link>https://github.com/lenajeremy/agentman/releases/tag/v0.41.0</link>
+      <pubDate>Thu, 05 Nov 2026 13:19:37 GMT</pubDate>
+      <sparkle:version>46</sparkle:version>
+      <sparkle:shortVersionString>0.41.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <sparkle:fullReleaseNotesLink>https://github.com/lenajeremy/agentman/releases/tag/v0.41.0</sparkle:fullReleaseNotesLink>
+      <description sparkle:format="markdown"><![CDATA[## Agentman 0.41.0
+
+- **Works outside full screen.** The editor's top bar, a conversation's title and the Usage page's buttons all show and respond in a normal window.
+- **Usage in the editor.** A Usage button in the editor's status bar shows your spending and plan limits, and ⌘K opens right over the editor.
+- **Antigravity limits.** The Limits tab now shows what's left of your Antigravity plan.
+- **Agents that need you come first** in the sidebar, and the message box answers an agent's question directly.
+- **Clearer when something's wrong.** A banner with Restart if Agentman loses its connection, and a terminal you open takes your typing straight away.]]></description>
+      <enclosure url="https://github.com/lenajeremy/agentman/releases/download/v0.41.0/Agentman.dmg" length="40265068" type="application/octet-stream" sparkle:edSignature="MK+3D2MnuQhpOu2RevIHi/NajzMc4H2CKMOzcA8ZfMTKM9TK5LMprSfYXxK3UYtb7q3FGFK1sSc3+qcPyE4iDw=="/>
+    </item>
+    <item>
       <title>Agentman 0.40.0</title>
       <link>https://github.com/lenajeremy/agentman/releases/tag/v0.40.0</link>
       <pubDate>Thu, 05 Nov 2026 06:49:13 GMT</pubDate>
