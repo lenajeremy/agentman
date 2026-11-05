@@ -56,10 +56,6 @@ struct ContentView: View {
             headerLeading = WindowChrome.leading(window)
         })
         .ignoresSafeArea(.container, edges: .top)
-        // A note Agentman suggests, over whatever is on screen.
-        .overlay(alignment: .topTrailing) {
-            NoteSuggestionPopup()
-        }
         .animation(.spring(duration: 0.3), value: store.manager.noteSuggestions.first?.id)
         .overlay {
             if store.showPalette, store.paletteEditor == nil {

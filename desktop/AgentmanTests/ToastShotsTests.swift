@@ -50,8 +50,8 @@ final class ToastShotsTests: XCTestCase {
         XCTAssertTrue(store.toasts.isEmpty, "Agentman's chat shows it all")
     }
 
-    // Three at most; news makes way before a card that still waits.
-    func testThreeToastsAtMostAndCardsStayLongest() throws {
+    // Two at most; news makes way before a card that still waits.
+    func testTwoToastsAtMostAndCardsStayLongest() throws {
         let store = try store()
         for n in 2...4 {
             store.showToast(ManagerEntry(id: "brief-\(n)", role: "brief", text: "News \(n)", ts: 0, sessionId: "a"))

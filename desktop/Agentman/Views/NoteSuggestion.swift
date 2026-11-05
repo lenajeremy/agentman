@@ -201,10 +201,11 @@ struct NoteReceipt: View {
     }
 }
 
-/// The suggestion waiting longest, at the top right of whatever is on screen
-/// (where the Mac shows its own notifications, clear of the message box), so
-/// a note Agentman suggests is seen without opening its conversation. In
-/// that conversation the card is shown where it was suggested instead.
+/// The suggestion waiting longest, at the top of Agentman's toasts in the
+/// window's bottom-right corner, so a note Agentman suggests is seen without
+/// opening its conversation. It used to sit at the top right, over the
+/// workspace card's buttons. In that conversation the card is shown where
+/// it was suggested instead.
 struct NoteSuggestionPopup: View {
     @Environment(AgentsStore.self) private var store
 
@@ -213,10 +214,8 @@ struct NoteSuggestionPopup: View {
         if let card = waiting.first, store.selection != .manager {
             NoteSuggestionCard(card: card, position: waiting.count > 1 ? "1 of \(waiting.count)" : nil)
                 .id(card.id)
-                .frame(width: 400)
-                .shadow(color: .black.opacity(0.18), radius: 24, y: 10)
-                .padding(.trailing, 22)
-                .padding(.top, 64)
+                .frame(width: AgentmanToasts.width)
+                .shadow(color: .black.opacity(0.14), radius: 14, y: 6)
                 .transition(.move(edge: .trailing).combined(with: .opacity))
         }
     }

@@ -25,6 +25,7 @@ struct AgentmanToasts: View {
     var body: some View {
         GeometryReader { proxy in
             VStack(alignment: .trailing, spacing: 8) {
+                NoteSuggestionPopup()
                 ForEach(store.toasts) { toast in
                     ToastView(toast: toast)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
