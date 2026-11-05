@@ -435,7 +435,7 @@ struct AgentThreadView: View {
                     attachments: session.canReceive ? $attachments : nil,
                     session: session,
                     placeholder: placeholder,
-                    enabled: session.canReceive && !sending && !readingPanel && session.question == nil,
+                    enabled: session.canReceive && !sending && !readingPanel && session.question == nil && store.status == .connected,
                     slash: slash,
                     onDropTargeted: { dropping = $0 },
                     onSend: send
@@ -579,6 +579,7 @@ struct AgentThreadView: View {
     }
 
     private var placeholder: String {
+        if store.status != .connected { return "Can't send while Agentman isn't connected" }
         if !session.canReceive {
             // Muse lets one client drive a session: a terminal has this one.
             if session.kind == "muse" { return "Open in a terminal: close it there to message it from here" }

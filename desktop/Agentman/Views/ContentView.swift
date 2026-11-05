@@ -27,6 +27,12 @@ struct ContentView: View {
                     // With the sidebar hidden, the headers make room for the
                     // window's buttons and the one that brings it back.
                     .environment(\.detailHeaderLeading, sidebarHidden ? headerLeading + 34 : 0)
+                    // Under the page's top bar while am serve can't be reached.
+                    .overlay(alignment: .top) {
+                        ConnectionBanner()
+                            .padding(.top, 44)
+                    }
+                    .animation(.easeOut(duration: 0.2), value: store.status)
                     .overlay(alignment: .topLeading) {
                         if sidebarHidden {
                             ChromeButton(symbol: "sidebar.left", help: "Show the sidebar (⌃⌘S)") { sidebarHidden = false }

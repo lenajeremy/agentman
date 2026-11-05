@@ -626,9 +626,10 @@ struct ConnectionFooter: View {
             if let version = store.daemonInfo?.version { return "Mac connected · am \(version)" }
             return "Mac connected"
         case .connecting:
-            return "Connecting to am serve…"
-        case .unavailable(let reason):
-            return "\(reason). Run am serve."
+            return "Connecting…"
+        case .unavailable:
+            // The whole story, and the way back, is in the banner over the page.
+            return "Not connected"
         }
     }
 }

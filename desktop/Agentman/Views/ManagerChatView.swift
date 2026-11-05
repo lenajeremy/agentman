@@ -262,7 +262,7 @@ private struct ManagerBox: View {
             Group {
                 if store.status != .connected {
                     ManagerComposer(text: .constant(""), thinking: false, sending: true, large: large,
-                                    placeholder: "Waiting for am serve…", onSend: {}, onStop: {})
+                                    placeholder: "Waiting for Agentman to connect…", onSend: {}, onStop: {})
                 } else if manager.needsKey {
                     KeyBox()
                 } else {
@@ -276,7 +276,7 @@ private struct ManagerBox: View {
 
             Group {
                 if case .unavailable = store.status {
-                    Text("am serve isn't running. Start it in a terminal with **am serve**.")
+                    Text("Not connected.")
                 } else if store.status == .connecting {
                     Text("Connecting…")
                 } else if manager.needsKey {
