@@ -93,7 +93,8 @@ struct CommandPalette: View {
     private func results(_ query: String) -> [PaletteItem] {
         let all = commands(for: query)
         let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return all.prefix(40).map(\.item) }
+        // Grouped while nothing is typed; ranked by match once something is.
+        guard !trimmed.isEmpty else { return all.prefix(40).map { Self.grouped($0.item) } }
         var ranked = all
             .filter { !$0.item.id.hasPrefix("ask:") }
             .compactMap { command in
@@ -112,6 +113,16 @@ struct CommandPalette: View {
             }
         }
         return ranked + saidRows(listed: ranked)
+    }
+
+    /// A row with the heading of its group: the agent open now, the agents,
+    /// and everything else.
+    nonisolated static func grouped(_ item: PaletteItem) -> PaletteItem {
+        var item = item
+        if item.section == nil {
+            item.section = item.id.hasPrefix("here-") ? "This agent" : item.id.hasPrefix("agent:") ? "Agents" : "Commands"
+        }
+        return item
     }
 
     private func ask(_ question: String) {
@@ -154,14 +165,14 @@ struct CommandPalette: View {
         // The agent open now, first; not over an editor, which has its own.
         if editor == nil, case .agent(let id) = store.selection, let session = store.session(id) {
             let folder = session.cwd
-            commands.append(Command(item: PaletteItem(id: "here-editor", title: "Open \(session.name)'s Folder in the Editor",
+            commands.append(Command(item: PaletteItem(id: "here-editor", title: "Open Its Folder in the Editor", detail: session.name,
                                                       icon: "chevron.left.forwardslash.chevron.right")) {
                 EditorOpener.open(folder: folder, with: openWindow)
             })
-            commands.append(Command(item: PaletteItem(id: "here-terminal", title: "Open a Terminal for \(session.name)", icon: "terminal")) {
+            commands.append(Command(item: PaletteItem(id: "here-terminal", title: "Open a Terminal in Its Folder", detail: session.name, icon: "terminal")) {
                 RightPanel.showTerminal(in: folder)
             })
-            commands.append(Command(item: PaletteItem(id: "here-rename", title: "Rename \(session.name)…", icon: "pencil")) {
+            commands.append(Command(item: PaletteItem(id: "here-rename", title: "Rename…", detail: session.name, icon: "pencil")) {
                 store.renaming = id
             })
         }
