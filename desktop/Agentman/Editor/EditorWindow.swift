@@ -247,11 +247,14 @@ struct EditorWindow: View {
             }
             .padding(.leading, headerLeading)
             .frame(width: 240, alignment: .leading)
-            Image(systemName: "folder").foregroundStyle(Palette.muted)
-            Text(store.name).font(Fonts.sans(13, .medium))
+            // The folder is named above the tree; up here, its branch.
             if let branch = store.branch {
-                Text("/").foregroundStyle(Palette.faint)
-                Text(branch).font(Fonts.sans(12)).foregroundStyle(Palette.muted)
+                Label(branch, systemImage: "arrow.triangle.branch")
+                    .labelStyle(.titleAndIcon)
+                    .font(Fonts.sans(12.5, .medium))
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                    .help("The branch checked out in \(store.name)")
             }
             Spacer(minLength: 8)
             ChromeButton(symbol: "magnifyingglass", help: "Go to file (⌘P)") { store.quickOpen = true }
@@ -343,13 +346,8 @@ private struct FileTree: View {
         let filter = store.treeFilter?.trimmingCharacters(in: .whitespaces) ?? ""
         List(selection: $store.selection) {
             if filter.isEmpty {
-                Section {
-                    FileTreeLevel(store: store, folder: "")
-                } header: {
-                    Text(store.name)
-                        .font(TextStyle.label)
-                        .foregroundStyle(Palette.faint)
-                }
+                // The folder's name is the header above the tree.
+                FileTreeLevel(store: store, folder: "")
             } else {
                 // What / found, as paths, best first.
                 Section {
@@ -372,15 +370,25 @@ private struct FileTree: View {
         .background(SiblingReader<NSOutlineView> { store.treeView = $0 })
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
-                HStack {
-                    Text("Files").font(Fonts.sans(12, .medium))
-                    Spacer()
+                // The folder this editor is for, where the tree starts; as
+                // tall as the tabs beside it and the agent panel's header,
+                // with the same line under it, so the three read as one row.
+                HStack(spacing: 6) {
+                    Text(store.name)
+                        .font(Fonts.sans(12.5, .semibold))
+                        .foregroundStyle(Palette.text)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help((store.root.path as NSString).abbreviatingWithTildeInPath)
+                    Spacer(minLength: 4)
                     ChromeButton(symbol: "doc.badge.plus", help: "New file") { naming = Naming(kind: .file, folder: "") }
                     ChromeButton(symbol: "folder.badge.plus", help: "New folder") { naming = Naming(kind: .folder, folder: "") }
                 }
                 .foregroundStyle(Palette.muted)
-                .padding(.horizontal, 14)
-                .frame(height: 42)
+                .padding(.leading, 14)
+                .padding(.trailing, 10)
+                .frame(height: 38)
+                .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
                 if store.treeFilter != nil {
                 TreeFilterBar(store: store)
                     .task { await store.loadAllFiles() }
@@ -1165,10 +1173,6 @@ private struct StatusBar: View {
                 Text(notice)
                     .foregroundStyle(Palette.textSecondary)
                     .transition(.opacity)
-            }
-            if let branch = store.branch {
-                Label(branch, systemImage: "arrow.triangle.branch")
-                    .labelStyle(.titleAndIcon)
             }
             if !store.marks.isEmpty {
                 Text("\(store.marks.count) changed")
