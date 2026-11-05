@@ -21,9 +21,10 @@ import XCTest
 /// TEST_RUNNER_AGENTMAN_SHOTS_LOOKS=light (or dark) draws one look alone.
 @MainActor
 final class SiteShotsTests: XCTestCase {
-    private var folders: [URL] = []
-    private var savedDefaults: [(String, Any?)] = []
-    private var editors: [EditorStore] = []
+    var folders: [URL] = []
+    var savedDefaults: [(String, Any?)] = []
+    var editors: [EditorStore] = []
+    var sharedFolders: [String: URL]?
 
     /// Every setting the windows read, kept as found and put back after.
     private static let settingKeys = [
@@ -31,7 +32,7 @@ final class SiteShotsTests: XCTestCase {
         "bottomTerminalOpen", "bottomTerminalHeight", "terminalDock", "sidebarWorkingOpen", "sidebarArchivedOpen",
         "agentPanelOpen", "agentPanelWidth", "terminalHeight", "usageDays", "usageMetric", "usageBreakdown",
         "diffSplit", "diffWrap", "diffFileTree", "diffIgnoreWhitespace", "editorVim", "editorFontSize", "drafts",
-        "managerLastRead", "sidebarChoices", "legacyEditor",
+        "managerLastRead", "sidebarChoices", "legacyEditor", "settingsTab", "newAgentKind", "newAgentFolder",
     ]
 
     override func setUp() {
@@ -63,7 +64,7 @@ final class SiteShotsTests: XCTestCase {
         super.tearDown()
     }
 
-    private var out: URL {
+    var out: URL {
         get throws {
             guard let path = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
             return URL(fileURLWithPath: path)
@@ -174,7 +175,7 @@ final class SiteShotsTests: XCTestCase {
     /// changed file open and the tests passing in its terminal; with the
     /// agent's conversation beside the code, or without.
     private func shootEditor(withAgent: Bool, size: CGSize, dark: Bool, to url: URL) throws {
-        let world = try world()
+        let world = try world(fresh: true)
         let root = world.folders["storefront"]!
         let editor = EditorRegistry.shared.store(for: root.path)
         editors.append(editor)
@@ -204,13 +205,13 @@ final class SiteShotsTests: XCTestCase {
 
     /// Puts the caret at the end of the field being typed in, rather than
     /// the text it opened with selected.
-    private static func caretAtEnd(_ window: NSWindow) {
+    static func caretAtEnd(_ window: NSWindow) {
         if let field = window.firstResponder as? NSTextView {
             field.setSelectedRange(NSRange(location: (field.string as NSString).length, length: 0))
         }
     }
 
-    private func settle(_ seconds: TimeInterval) {
+    func settle(_ seconds: TimeInterval) {
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))
     }
 
@@ -222,8 +223,10 @@ final class SiteShotsTests: XCTestCase {
     /// bar of its own, the panes beside the code take the bar for room to
     /// fill and paint over the editor's header, which the app's windows,
     /// their title bars hidden, don't.
-    private func shoot<V: View>(_ view: V, size: CGSize, dark: Bool, store: AgentsStore, wait: TimeInterval = 1.6, titled: Bool = true,
-                                prepare: (@MainActor (NSWindow) -> Void)? = nil, to url: URL) throws {
+    @discardableResult
+    func shoot<V: View>(_ view: V, size: CGSize, dark: Bool, store: AgentsStore, wait: TimeInterval = 1.6, titled: Bool = true,
+                        buttons: Bool = true, webPages: Bool = true, overlay: (@MainActor (Bool) -> Void)? = nil,
+                        prepare: (@MainActor (NSWindow) -> Void)? = nil, to url: URL) throws -> CGSize {
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
                               styleMask: titled ? [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView] : [.borderless],
                               backing: .buffered, defer: false)
@@ -264,31 +267,70 @@ final class SiteShotsTests: XCTestCase {
             prepare(window)
             settle(0.6)
         }
-        try capture(window, size: size, to: url)
+        let drawn = try capture(window, size: size, buttons: buttons, webPages: webPages, overlay: overlay, to: url)
         // Put away rather than closed: closing the last titled window ends
         // the app the tests run in, and the next test with it.
         window.orderOut(nil)
+        return drawn
     }
 
-    private func capture(_ window: NSWindow, size: CGSize, to url: URL) throws {
+    /// Writes what the window shows and returns its size, which is the one
+    /// asked for unless its content would not fit in that.
+    ///
+    /// The code editor's page is drawn in from its own snapshot. Where a
+    /// view of the app covers it whole (no file open, a Markdown preview),
+    /// `webPages` false leaves it out; where one floats over it (Go to File,
+    /// Search), `overlay` shows and hides that view, and what changes with
+    /// it is drawn over the page.
+    @discardableResult
+    func capture(_ window: NSWindow, size: CGSize, buttons: Bool = true, webPages: Bool = true,
+                 overlay: (@MainActor (Bool) -> Void)? = nil, to url: URL) throws -> CGSize {
         let content = try XCTUnwrap(window.contentView)
         let bounds = content.bounds
-        XCTAssertEqual(bounds.size, size, "\(url.lastPathComponent): the window's content isn't the size asked for")
         let scale: CGFloat = 2
         let pixels = (Int(bounds.width * scale), Int(bounds.height * scale))
 
         // The window's own drawing: at its backing scale when that is 2,
         // else into a bitmap twice the size.
-        var base = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: bounds))
-        if base.pixelsWide != pixels.0 || base.pixelsHigh != pixels.1 {
-            base = try blank(pixels: pixels, size: bounds.size)
+        func drawing() throws -> NSBitmapImageRep {
+            var rep = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: bounds))
+            if rep.pixelsWide != pixels.0 || rep.pixelsHigh != pixels.1 {
+                rep = try blank(pixels: pixels, size: bounds.size)
+            }
+            content.cacheDisplay(in: bounds, to: rep)
+            // Views drawn over the editor's page come back clear from a
+            // cached display: the layers drawn as they are, instead.
+            if Self.mostlyClear(rep), let layer = content.layer {
+                let layered = try blank(pixels: pixels, size: bounds.size)
+                NSGraphicsContext.saveGraphicsState()
+                if let context = NSGraphicsContext(bitmapImageRep: layered) {
+                    NSGraphicsContext.current = context
+                    if content.isFlipped {
+                        context.cgContext.translateBy(x: 0, y: bounds.height)
+                        context.cgContext.scaleBy(x: 1, y: -1)
+                    }
+                    layer.render(in: context.cgContext)
+                }
+                NSGraphicsContext.restoreGraphicsState()
+                return layered
+            }
+            return rep
         }
-        content.cacheDisplay(in: bounds, to: base)
+        let base = try drawing()
+        var floating: NSBitmapImageRep?
+        if let overlay {
+            overlay(false)
+            settle(0.6)
+            let under = try drawing()
+            overlay(true)
+            settle(0.6)
+            floating = Self.difference(base, under)
+        }
 
         // Web views draw nothing into a cached display: each one's own
         // snapshot, for where it sits.
         var pages: [(NSImage, NSRect)] = []
-        for web in Self.views(WKWebView.self, in: content) where !web.isHiddenOrHasHiddenAncestor && web.bounds.width > 0 {
+        for web in Self.views(WKWebView.self, in: content) where webPages && !web.isHiddenOrHasHiddenAncestor && web.bounds.width > 0 {
             let box = SnapshotBox()
             web.takeSnapshot(with: nil) { image, _ in
                 box.image = image
@@ -306,9 +348,46 @@ final class SiteShotsTests: XCTestCase {
         NSGraphicsContext.current?.imageInterpolation = .high
         base.draw(in: NSRect(origin: .zero, size: bounds.size))
         for (image, rect) in pages { image.draw(in: rect) }
-        drawWindowButtons(window)
+        floating?.draw(in: NSRect(origin: .zero, size: bounds.size))
+        if buttons { drawWindowButtons(window) }
         NSGraphicsContext.restoreGraphicsState()
         try XCTUnwrap(final.representation(using: .png, properties: [:])).write(to: url)
+        return bounds.size
+    }
+
+    /// The pixels of one drawing that another lacks, the rest clear, in a
+    /// bitmap of its own (a copy of a bitmap can share its pixels).
+    static func difference(_ with: NSBitmapImageRep, _ without: NSBitmapImageRep) -> NSBitmapImageRep? {
+        guard let mine = with.bitmapData, let other = without.bitmapData, with.bitsPerPixel == 32, without.bitsPerPixel == 32,
+              with.bytesPerRow == without.bytesPerRow, with.pixelsHigh == without.pixelsHigh,
+              let kept = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: with.pixelsWide, pixelsHigh: with.pixelsHigh,
+                                          bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                          colorSpaceName: .calibratedRGB, bytesPerRow: 0, bitsPerPixel: 0)?.retagging(with: .sRGB)
+        else { return nil }
+        kept.size = with.size
+        let rowBytes = with.bytesPerRow
+        for row in 0..<with.pixelsHigh {
+            for column in 0..<with.pixelsWide {
+                let at = row * rowBytes + column * 4
+                if mine[at] != other[at] || mine[at + 1] != other[at + 1] || mine[at + 2] != other[at + 2] || mine[at + 3] != other[at + 3],
+                   let color = with.colorAt(x: column, y: row) {
+                    kept.setColor(color, atX: column, y: row)
+                }
+            }
+        }
+        return kept
+    }
+
+    /// Whether most of a drawing is clear, as a failed one is.
+    static func mostlyClear(_ rep: NSBitmapImageRep) -> Bool {
+        var clear = 0, looked = 0
+        for row in stride(from: 0, to: rep.pixelsHigh, by: max(rep.pixelsHigh / 24, 1)) {
+            for column in stride(from: 0, to: rep.pixelsWide, by: max(rep.pixelsWide / 24, 1)) {
+                looked += 1
+                if (rep.colorAt(x: column, y: row)?.alphaComponent ?? 1) < 0.05 { clear += 1 }
+            }
+        }
+        return looked > 0 && clear * 2 > looked
     }
 
     /// What a web view's snapshot handed back, once it has.
@@ -318,7 +397,7 @@ final class SiteShotsTests: XCTestCase {
     }
 
     /// An empty sRGB bitmap of these pixels for this many points.
-    private func blank(pixels: (Int, Int), size: CGSize) throws -> NSBitmapImageRep {
+    func blank(pixels: (Int, Int), size: CGSize) throws -> NSBitmapImageRep {
         let rep = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels.0, pixelsHigh: pixels.1,
                                                  bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
                                                  colorSpaceName: .calibratedRGB, bytesPerRow: 0, bitsPerPixel: 0)?
@@ -360,7 +439,7 @@ final class SiteShotsTests: XCTestCase {
                 blue: CGFloat(rgb & 0xFF) / 255, alpha: 1)
     }
 
-    private static func views<T: NSView>(_ type: T.Type, in view: NSView) -> [T] {
+    static func views<T: NSView>(_ type: T.Type, in view: NSView) -> [T] {
         ((view as? T).map { [$0] } ?? []) + view.subviews.flatMap { views(type, in: $0) }
     }
 
@@ -373,17 +452,31 @@ final class SiteShotsTests: XCTestCase {
 
     /// The four projects, the agents in them, and a daemon that answers
     /// for them, connected.
-    private func world() throws -> World {
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent("site-shots-" + UUID().uuidString)
-        folders.append(base)
+    /// The projects and agents, with a daemon answering for them. The
+    /// projects are made once for each test and shared by its pictures,
+    /// unless `fresh` asks for new ones: the editor keeps its state for
+    /// each folder, so each picture of it gets folders of its own.
+    func world(connected: Bool = true, fresh: Bool = false, customize: ((inout Fixtures) -> Void)? = nil,
+               more: (([String: URL]) throws -> [String: DaemonEvent])? = nil) throws -> World {
         var made: [String: URL] = [:]
-        for (name, project) in Self.projects {
-            made[name] = try repository(project, named: name, in: base)
+        if !fresh, let shared = sharedFolders {
+            made = shared
+        } else {
+            let base = FileManager.default.temporaryDirectory.appendingPathComponent("site-shots-" + UUID().uuidString)
+            folders.append(base)
+            for (name, project) in Self.projects {
+                made[name] = try repository(project, named: name, in: base)
+            }
+            if !fresh { sharedFolders = made }
         }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         // What arrived in the last hour shows as new in Agentman's chat.
         UserDefaults.standard.set(now - 3_600_000, forKey: "managerLastRead")
-        let daemon = try FakeDaemon(folders: made, now: now)
+        var fixtures = Fixtures(folders: made, now: now)
+        customize?(&fixtures)
+        var built = try FakeDaemon(fixtures: fixtures, now: now)
+        if let more { built.more = try more(made) }
+        let daemon = built
         let client = DaemonClient(socketPath: "/nonexistent/agentman-site-shots.sock")
         client.answer = { request in daemon.answer(request) }
         let store = AgentsStore(client: client)
@@ -396,7 +489,7 @@ final class SiteShotsTests: XCTestCase {
         }
         // Connected, as to a running am serve: the session list and
         // Agentman's conversation are asked for, and answered above.
-        store.statusChanged(.connected)
+        if connected { store.statusChanged(.connected) }
         return World(store: store, folders: made)
     }
 
@@ -460,9 +553,44 @@ final class SiteShotsTests: XCTestCase {
         let titles: [String: String]
         let now: Int64
 
-        init(folders: [String: URL], now: Int64) throws {
+        /// Answers for any other request, by "type|session|path", "type|session"
+        /// or "type".
+        var more: [String: DaemonEvent] = [:]
+
+        /// A folder as git has it: what changed, each change's diff (a new
+        /// file's against nothing, as the daemon shows it), and the branch.
+        struct FolderGit {
+            var changes: [WorkspaceChange]
+            var diffs: [String: String]
+            var branch: String
+        }
+
+        /// Read once for each folder: the folders don't change while the
+        /// pictures are drawn.
+        nonisolated(unsafe) static var folderCache: [String: FolderGit] = [:]
+
+        static func read(_ path: String) throws -> FolderGit {
+            if let known = folderCache[path] { return known }
+            let folder = URL(fileURLWithPath: path)
+            var read = FolderGit(changes: [], diffs: [:], branch: "")
+            let status = try SiteShotsTests.git(["status", "--porcelain", "--untracked-files=all"], in: folder)
+            for line in status.split(separator: "\n") where line.count > 3 {
+                let file = String(line.dropFirst(3))
+                let untracked = line.hasPrefix("??")
+                let range = untracked ? ["--no-index", "--", "/dev/null", file] : ["--", file]
+                let counts = try SiteShotsTests.git(["diff", "--numstat"] + range, in: folder).split(separator: "\t")
+                guard counts.count >= 2 else { continue }
+                read.changes.append(WorkspaceChange(path: file, status: untracked ? "untracked" : "modified",
+                                                    added: Int(counts[0]), removed: Int(counts[1])))
+                read.diffs[file] = try SiteShotsTests.git(["diff"] + range, in: folder)
+            }
+            read.branch = try SiteShotsTests.git(["branch", "--show-current"], in: folder).trimmingCharacters(in: .whitespacesAndNewlines)
+            folderCache[path] = read
+            return read
+        }
+
+        init(fixtures: Fixtures, now: Int64) throws {
             self.now = now
-            let fixtures = Fixtures(folders: folders, now: now)
             var sessions = DaemonEvent(type: "sessions")
             sessions.sessions = fixtures.sessions
             self.sessions = sessions
@@ -477,29 +605,18 @@ final class SiteShotsTests: XCTestCase {
             // Each folder's changes and diffs, from git itself.
             var changes: [String: DaemonEvent] = [:], diffs: [String: DaemonEvent] = [:], git: [String: DaemonEvent] = [:]
             for session in fixtures.sessions {
-                let folder = URL(fileURLWithPath: session.cwd)
-                var listed: [WorkspaceChange] = []
-                // Files changed, and files new to git, each with its diff:
-                // a new file's against nothing, as the daemon shows it.
-                let status = try SiteShotsTests.git(["status", "--porcelain", "--untracked-files=all"], in: folder)
-                for line in status.split(separator: "\n") where line.count > 3 {
-                    let path = String(line.dropFirst(3))
-                    let untracked = line.hasPrefix("??")
-                    let range = untracked ? ["--no-index", "--", "/dev/null", path] : ["--", path]
-                    let counts = try SiteShotsTests.git(["diff", "--numstat"] + range, in: folder).split(separator: "\t")
-                    guard counts.count >= 2 else { continue }
-                    listed.append(WorkspaceChange(path: path, status: untracked ? "untracked" : "modified",
-                                                  added: Int(counts[0]), removed: Int(counts[1])))
+                let read = try Self.read(session.cwd)
+                let listed = read.changes
+                for (path, text) in read.diffs {
                     var diff = DaemonEvent(type: "workspace")
-                    diff.workspace = WorkspaceResult(kind: "diff", sessionId: session.id, path: path,
-                                                     diff: try SiteShotsTests.git(["diff"] + range, in: folder))
+                    diff.workspace = WorkspaceResult(kind: "diff", sessionId: session.id, path: path, diff: text)
                     diffs[session.id + "\u{0}" + path] = diff
                 }
                 var event = DaemonEvent(type: "workspace")
                 event.workspace = WorkspaceResult(kind: "changes", sessionId: session.id, changes: listed)
                 changes[session.id] = event
                 var state = DaemonEvent(type: "git")
-                let branch = try SiteShotsTests.git(["branch", "--show-current"], in: folder).trimmingCharacters(in: .whitespacesAndNewlines)
+                let branch = read.branch
                 state.git = GitState(sessionId: session.id, branch: branch, defaultBranch: "main", upstream: "origin/" + branch,
                                      ahead: 0, behind: 0, aheadOfDefault: 0, remote: "origin", changes: listed.count)
                 git[session.id] = state
@@ -520,9 +637,8 @@ final class SiteShotsTests: XCTestCase {
             history.more = false
             self.history = history
             var settings = DaemonEvent(type: "manager_settings")
-            settings.managerSettings = ManagerSettings(chatModel: "default", briefModel: "default", effort: "medium", briefs: true,
-                                                       autoApprove: true, style: "", instructions: "", keySet: true)
-            settings.managerStatus = ManagerStatus(state: "idle", keySet: true)
+            settings.managerSettings = fixtures.managerSettings
+            settings.managerStatus = ManagerStatus(state: "idle", keySet: fixtures.managerSettings.keySet)
             self.settings = settings
             var limits = DaemonEvent(type: "limits")
             limits.limits = fixtures.limits
@@ -538,7 +654,15 @@ final class SiteShotsTests: XCTestCase {
             case .listChanges: return changes[session]
             case .fileDiff: return diffs[session + "\u{0}" + (request.path ?? "")]
             case .gitStatus: return git[session]
-            case .search: return request.sessionId == nil ? search : threadSearch[session]
+            case .search:
+                // Only words the sample conversations have are found.
+                let words = (request.text ?? "").lowercased()
+                guard words.contains("apple") || words.contains("pay") else {
+                    var none = DaemonEvent(type: "search")
+                    none.search = MessageSearchResults(query: request.text ?? "", sessionId: request.sessionId, hits: [])
+                    return none
+                }
+                return request.sessionId == nil ? search : threadSearch[session]
             case .managerHistory:
                 if request.before == nil { return history }
                 var none = DaemonEvent(type: "manager_history")
@@ -553,7 +677,9 @@ final class SiteShotsTests: XCTestCase {
                 var event = DaemonEvent(type: "tools_title")
                 event.preview = title
                 return event
-            default: return nil
+            default:
+                let type = request.type.rawValue
+                return more["\(type)|\(session)|\(request.path ?? "")"] ?? more["\(type)|\(session)"] ?? more[type]
             }
         }
 
@@ -662,13 +788,15 @@ final class SiteShotsTests: XCTestCase {
     /// The sessions, threads, Agentman's chat and search, for the folders
     /// as made.
     struct Fixtures {
-        let sessions: [Session]
-        let messages: [String: [Message]]
-        let managerEntries: [ManagerEntry]
-        let searchHits: MessageSearchResults
-        let threadHits: MessageSearchResults
-        let limits: Limits
-        let runTitles: [String: String]
+        var sessions: [Session]
+        var messages: [String: [Message]]
+        var managerEntries: [ManagerEntry]
+        var searchHits: MessageSearchResults
+        var threadHits: MessageSearchResults
+        var limits: Limits
+        var runTitles: [String: String]
+        var managerSettings = ManagerSettings(chatModel: "default", briefModel: "default", effort: "medium", briefs: true,
+                                              autoApprove: true, style: "", instructions: "", keySet: true)
 
         init(folders: [String: URL], now: Int64) {
             let storefront = folders["storefront"]!.path, api = folders["api"]!.path
