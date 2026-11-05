@@ -106,8 +106,13 @@ struct Sidebar: View {
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
                     AgentmanBadge(size: 20)
-                    Text("Agentman").font(Fonts.sans(14, .semibold))
-                    Spacer()
+                    // The name, where it fits whole; at the narrowest the
+                    // mark alone, rather than "Ag…".
+                    ViewThatFits(in: .horizontal) {
+                        Text("Agentman").font(Fonts.sans(14, .semibold)).fixedSize()
+                        Color.clear.frame(width: 0, height: 0)
+                    }
+                    Spacer(minLength: 0)
                     ChromeButton(symbol: "sidebar.left", help: "Hide the sidebar (⌃⌘S)") { hidden = true }
                 }
                 .padding(.leading, headerLeading)
@@ -169,14 +174,32 @@ struct Sidebar: View {
         }
         .overlay {
             if store.sessions.isEmpty, store.status == .connected {
-                ContentUnavailableView(
-                    "No agents yet",
-                    systemImage: "sparkles",
-                    description: Text("Start one with am claude or am codex in a terminal.")
-                )
+                ContentUnavailableView {
+                    Label("No agents yet", systemImage: "sparkles")
+                } description: {
+                    Text("Start one here, or with am claude or am codex in a terminal.")
+                } actions: {
+                    SmallButton(title: "New Agent", symbol: "square.and.pencil", primary: true) { store.selection = .newAgent }
+                }
                 .padding(.top, 120)
+            } else if Self.foundNothing(query: store.search, sections: store.sidebar, hits: store.sidebarHits) {
+                // A search with nothing to show says so, instead of a blank list.
+                ContentUnavailableView {
+                    Label("Nothing found", systemImage: "magnifyingglass")
+                } description: {
+                    Text(store.folderFilter != nil || store.stateFilter != nil
+                         ? "No agent matches \u{201C}\(store.search.trimmingCharacters(in: .whitespaces))\u{201D} with these filters."
+                         : "No agent or message matches \u{201C}\(store.search.trimmingCharacters(in: .whitespaces))\u{201D}.")
+                }
+                .padding(.top, 60)
             }
         }
+    }
+
+    /// A search that found no agent and no message, and isn't still looking.
+    nonisolated static func foundNothing(query: String, sections: SidebarSections, hits: SidebarHits) -> Bool {
+        !query.trimmingCharacters(in: .whitespaces).isEmpty && sections.isEmpty && hits.others.isEmpty
+            && !hits.searching && !hits.indexing
     }
 
     /// The archived, at the foot of the list under a heading that folds

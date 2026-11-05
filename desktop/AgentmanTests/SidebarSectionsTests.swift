@@ -79,6 +79,19 @@ final class SidebarSectionsTests: XCTestCase {
         XCTAssertEqual(AgentmanCard.summary(decisions: 0, waiting: 0, unread: 0, working: 0, connected: false), "Not connected")
     }
 
+    // A search says when it found nothing, once it has finished looking.
+    func testASearchThatFindsNothingSaysSo() {
+        let none = SidebarSections()
+        XCTAssertTrue(Sidebar.foundNothing(query: "zebra", sections: none, hits: SidebarHits()))
+        XCTAssertFalse(Sidebar.foundNothing(query: "  ", sections: none, hits: SidebarHits()))
+        var looking = SidebarHits()
+        looking.searching = true
+        XCTAssertFalse(Sidebar.foundNothing(query: "zebra", sections: none, hits: looking), "still searching")
+        var some = SidebarSections()
+        some.active = [session("a", .idle, minutesAgo: 1)]
+        XCTAssertFalse(Sidebar.foundNothing(query: "a", sections: some, hits: SidebarHits()))
+    }
+
     // Pins keep the order they were pinned in, whatever the agents do.
     func testPinsStayOnTopInTheirOrder() {
         let sessions = [session("a", .idle, minutesAgo: 1), session("b", .busy, minutesAgo: 2), session("c", .idle, minutesAgo: 3)]
