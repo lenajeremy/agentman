@@ -22,7 +22,7 @@ struct QuestionCard: View {
             if let detail = question.detail, !detail.isEmpty {
                 CodeBox(text: detail)
             }
-            if !question.prompt.isEmpty {
+            if !question.prompt.isEmpty, !question.promptRepeatsDetail {
                 Text(inlineMarkdown(question.prompt))
                     .font(TextStyle.body)
                     .foregroundStyle(Palette.textSecondary)
@@ -36,6 +36,19 @@ struct QuestionCard: View {
 }
 
 extension Question {
+    /// Whether the question's sentence only says again what is shown above
+    /// it ("Run git push origin main?" under that command): then it is left
+    /// out, and the command is said once.
+    var promptRepeatsDetail: Bool {
+        guard let detail = detail?.trimmingCharacters(in: .whitespacesAndNewlines), !detail.isEmpty, !detail.contains("\n") else { return false }
+        let prompt = self.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard prompt.localizedCaseInsensitiveContains(detail) else { return false }
+        // What is left once the command is taken out is only a verb or two.
+        let rest = prompt.replacingOccurrences(of: detail, with: "", options: .caseInsensitive)
+            .trimmingCharacters(in: .punctuationCharacters.union(.whitespaces).union(CharacterSet(charactersIn: "`")))
+        return rest.split(separator: " ").count <= 2
+    }
+
     /// Whether it takes a typed answer as well as its options.
     var takesTypedAnswer: Bool { custom == true && multiple != true }
 
