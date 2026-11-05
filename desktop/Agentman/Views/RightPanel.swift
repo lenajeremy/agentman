@@ -1038,10 +1038,8 @@ private struct ChangedFilesTree: View {
             HStack(spacing: 6) {
                 if let change = node.change {
                     FileTypeIcon(name: node.name, size: 13)
-                    Text(node.name)
+                    FileNameText(name: node.name)
                         .foregroundStyle(picked == change.path ? Palette.working : Palette.text)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
                     Spacer(minLength: 4)
                     Text(ChangeStatus.letter(change.status))
                         .font(Fonts.mono(10.5, .medium))
@@ -1259,10 +1257,8 @@ private struct FileTreeRow: View {
                     Color.clear.frame(width: 10)
                 }
                 FileTypeIcon(name: entry.name, directory: entry.isDirectory, open: open, size: 14)
-                Text(entry.name)
+                FileNameText(name: entry.name)
                     .foregroundStyle(mark?.tint ?? Palette.text)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
                 if let folder, !folder.isEmpty {
                     Text(folder)
                         .font(Fonts.sans(11))

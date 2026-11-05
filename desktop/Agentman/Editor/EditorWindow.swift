@@ -85,8 +85,9 @@ struct EditorWindow: View {
         VStack(spacing: 0) {
             editorHeader
             HSplitView {
+            // Dragged wider or narrower at its edge, within reason.
             FileTree(store: store, naming: $naming)
-                .frame(width: 240)
+                .frame(minWidth: 180, idealWidth: 240, maxWidth: 420)
 
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
@@ -489,12 +490,10 @@ private struct FileRow: View {
             if store.renamingInTree == entry.path {
                 TreeRenameField(store: store, entry: entry)
             } else {
-                Text(entry.name)
+                FileNameText(name: entry.name)
                     .font(Fonts.sans(12.5))
                     .foregroundStyle(store.marked.contains(entry.path) ? Palette.workingText : mark?.tint ?? (quiet ? Palette.faint : Palette.text))
                     .strikethrough(mark == .deleted)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
             }
             Spacer(minLength: 4)
             if store.marked.contains(entry.path) {
@@ -1193,6 +1192,31 @@ private struct StatusBar: View {
         .frame(height: 24)
         .background(Palette.paper)
         .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 1) }
+    }
+}
+
+/// A file's name cut at its end where it doesn't fit, keeping its
+/// extension: "ApplePayBu….tsx", not "ApplePa…utton.tsx". The whole name
+/// shows on hover.
+struct FileNameText: View {
+    let name: String
+
+    var body: some View {
+        let parts = Self.split(name)
+        HStack(spacing: 0) {
+            Text(parts.stem).lineLimit(1).truncationMode(.tail)
+            if !parts.ext.isEmpty { Text(parts.ext).lineLimit(1).fixedSize() }
+        }
+        .help(name)
+    }
+
+    /// The name before its extension, and the extension with its dot; a
+    /// name that starts with a dot (.env) is all stem.
+    nonisolated static func split(_ name: String) -> (stem: String, ext: String) {
+        guard let dot = name.lastIndex(of: "."), dot != name.startIndex else { return (name, "") }
+        let ext = String(name[dot...])
+        guard ext.count <= 8 else { return (name, "") }
+        return (String(name[..<dot]), ext)
     }
 }
 
