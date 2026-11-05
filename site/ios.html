@@ -8,7 +8,7 @@
       name="description"
       content="Access all your coding agents from your iPhone. Keep your existing harness, follow conversations, send messages, and answer approvals from anywhere."
     />
-    <meta name="theme-color" content="#050505" />
+    <meta name="theme-color" content="#ff5f1f" />
     <meta property="og:type" content="website" />
     <meta
       property="og:title"
@@ -23,143 +23,120 @@
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="icon" href="/favicon.png" sizes="48x48" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link
-      rel="preload"
-      href="/fonts/geist-sans-latin-500-normal.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
-    <link
-      rel="preload"
-      href="/fonts/geist-sans-latin-400-normal.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
-    <link rel="stylesheet" href="/landing.css?v=20261101" />
-    <link rel="stylesheet" href="/subpages.css?v=20261030b" />
+    <link rel="preload" href="/fonts/rubik-latin-variable.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/inter-latin-variable.woff2" as="font" type="font/woff2" crossorigin />
+    <script>
+      document.documentElement.classList.add("js");
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) document.documentElement.classList.add("motion");
+    </script>
+    <link rel="stylesheet" href="/third-party/lenis-1.3.26.css" />
+    <link rel="stylesheet" href="/site.css?v=20261105" />
+    <script src="/third-party/lenis-1.3.26.min.js" defer></script>
+    <script src="/site.js?v=20261105" defer></script>
+    <script src="/mascot.js" defer></script>
   </head>
-  <body class="subpage ios-page">
+  <body>
     <svg width="0" height="0" style="position: absolute" aria-hidden="true">
-      <!-- The mark: a ">" prompt with a notification waiting on it. -->
-
       <symbol id="i-github" viewBox="0 0 24 24">
         <path
           fill="currentColor"
-          stroke="none"
           d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.2-3.1-.1-.4-.5-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.6.2 2.8.1 3.2.8.8 1.2 1.9 1.2 3.1 0 4.7-2.8 5.7-5.5 6 .4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5z"
         />
       </symbol>
-
-      <!-- Agent and tool logos: Claude, OpenAI, OpenCode, Kiro, Antigravity and Meta from LobeHub Icons (MIT),
-         Cursor from Simple Icons (CC0);
-         the rest from Simple Icons (CC0). Marks belong to their owners and are
-         used only to name the tools Agentman works with. -->
+      <!-- Apple's mark from Simple Icons (CC0), only to say which platform a download is for. -->
       <symbol id="l-apple" viewBox="0 0 24 24">
-        <title>Apple</title>
         <path
           fill="currentColor"
           d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"
         />
       </symbol>
-      <symbol id="i-copy" viewBox="0 0 24 24">
-        <rect x="8" y="8" width="12" height="12" rx="3" />
-        <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+      <symbol id="i-arrow" viewBox="0 0 16 16">
+        <path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
       </symbol>
-      <symbol id="i-arrow" viewBox="0 0 24 24">
-        <path d="M5 12h14M13 6l6 6-6 6" />
-      </symbol></svg
-    ><a class="skip-link" href="#main">Skip to content</a>
-    <nav class="nav container" aria-label="Main">
-      <a class="wordmark" href="/" aria-label="Agentman home"
-        ><img src="/apple-touch-icon.png" alt="" width="24" height="24" /><span
-          >Agentman</span
-        ></a
-      >
-      <div class="nav-links">
-        <a href="/mac#download">Download</a
-        ><a class="nav-github" href="https://github.com/lenajeremy/agentman"
-          ><svg aria-hidden="true"><use href="#i-github" /></svg
-          ><span>GitHub ↗</span></a
+      <symbol id="i-copy" viewBox="0 0 24 24">
+        <rect x="8" y="8" width="12" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="2" />
+        <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" fill="none" stroke="currentColor" stroke-width="2" />
+      </symbol>
+    </svg>
+
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="top flood edge-bottom">
+      <nav class="nav wrap" aria-label="Main">
+        <a class="wordmark" href="/" aria-label="Agentman home"
+          ><img src="/apple-touch-icon.png" alt="" width="28" height="28" /><span>Agentman</span></a
         >
-      </div>
-    </nav>
-    <main id="main">
-      <header class="page-hero container iphone-hero">
-        <div class="iphone-hero-copy">
-          <span class="eyebrow">AGENTMAN FOR IPHONE · PUBLIC BETA</span>
-          <h1>All your agents.<br />In your pocket.</h1>
-          <p>
-            Access every agent on your computer from your phone. Read their
-            conversations, send the next step, and answer approvals wherever you
-            are.
+        <div class="nav-links"><a href="/mac">Mac</a><a href="/ios" aria-current="page">iPhone</a><a href="/start">Setup</a><a href="https://github.com/lenajeremy/agentman">GitHub</a></div>
+        <a class="pill pill-white pill-small" href="https://github.com/lenajeremy/agentman/releases/download/v0.40.0/Agentman.dmg"
+          ><svg aria-hidden="true"><use href="#l-apple" /></svg>Download for Mac</a
+        >
+      </nav>
+      <div class="hero hero-split wrap" id="main">
+        <div class="hero-copy">
+          <p class="eyebrow" data-reveal>Agentman for iPhone · Public beta</p>
+          <h1 data-split>All your agents.<br /><span class="squiggle">In your pocket.</span></h1>
+          <p class="hero-sub" data-reveal style="--d: 250ms">
+            Access every agent on your computer from your phone. Read their conversations, send the next step, and
+            answer approvals wherever you are.
           </p>
-          <div class="page-actions">
-            <a
-              class="button primary"
-              href="https://testflight.apple.com/join/UcJvsjED"
-              >Get on TestFlight</a
-            ><a class="button secondary" href="/start#pair"
-              >Pair your phone ↗</a
-            >
+          <div class="hero-actions" data-reveal style="--d: 350ms">
+            <a class="pill pill-white" href="https://testflight.apple.com/join/UcJvsjED">Get on TestFlight</a
+            ><a class="pill pill-ink" href="/start#pair">Pair your phone</a>
           </div>
-          <span class="requirements"
-            >Free · Pairs with your Mac or Linux machine</span
-          >
+          <p class="fine" data-reveal style="--d: 450ms">Free · Pairs with your Mac or Linux machine</p>
         </div>
-        <div class="iphone-hero-device">
+        <div class="hero-device phone-wrap" data-reveal="rise" style="--d: 300ms">
+          <canvas class="tile-sticker" data-sticker="bell" data-offset="0" width="260" height="260" aria-hidden="true"></canvas>
           <img
-            src="/media/iphone-dark-device.webp"
+            src="/media/iphone-approval-dark.webp"
             width="840"
             height="1740"
             fetchpriority="high"
-            alt="Agentman in dark mode on iPhone, showing an approval prompt and working agents"
+            alt="Agentman for iPhone asking whether checkout-flow may run a command to apply a payments migration, with Yes and No"
           />
         </div>
-      </header>
-      <section class="section">
-        <div class="container">
-          <h2>Your harness stays.<br />Your agents come with you.</h2>
-          <p class="section-intro">
-            Claude Code, Codex, Antigravity, and more. The work runs on your
-            computer; your phone gives you a way back into every thread.
+      </div>
+    </header>
+
+    <main>
+      <section class="block zone after-device" data-zone="blue" aria-labelledby="stays-heading">
+        <div class="wrap center">
+          <h2 id="stays-heading" data-split>Your harness stays.<br />Your agents come with you.</h2>
+          <p class="lede" data-reveal style="--d: 120ms">
+            Claude Code, Codex, Antigravity, and more. The work runs on your computer; your phone gives you a way back
+            into every thread.
           </p>
-          <div class="feature-grid">
-            <article class="detail-card">
-              <h3>Every conversation, live</h3>
-              <p>
-                See who’s working, who’s finished, and who needs you. Open any
-                thread to follow the work.
-              </p>
-            </article>
-            <article class="detail-card">
-              <h3>Answer from anywhere</h3>
-              <p>
-                Read the command or question before you approve. Say no with a
-                note when the agent needs a different direction.
-              </p>
-            </article>
-            <article class="detail-card">
-              <h3>Review the actual work</h3>
-              <p>Browse files, read diffs, and review plans from your phone.</p>
-            </article>
-            <article class="detail-card">
-              <h3>Keep the work moving</h3>
-              <p>
-                Send a message or screenshot. Open a running preview, or switch
-                mode and model when your agent supports it.
-              </p>
-            </article>
-          </div>
         </div>
+        <ul class="details wrap">
+          <li class="card detail" data-reveal style="--d: 0ms">
+            <canvas class="card-sticker" data-sticker="chat" data-offset="0" width="260" height="260" aria-hidden="true"></canvas>
+            <h3>Every conversation, live</h3>
+            <p>See who’s working, who’s finished, and who needs you. Open any thread to follow the work.</p>
+          </li>
+          <li class="card detail" data-reveal style="--d: 100ms">
+            <canvas class="card-sticker" data-sticker="bell" data-offset="30" width="260" height="260" aria-hidden="true"></canvas>
+            <h3>Answer from anywhere</h3>
+            <p>Read the command or question before you approve. Say no with a note when the agent needs a different direction.</p>
+          </li>
+          <li class="card detail" data-reveal style="--d: 200ms">
+            <canvas class="card-sticker" data-sticker="notes" data-offset="60" width="260" height="260" aria-hidden="true"></canvas>
+            <h3>Review the actual work</h3>
+            <p>Browse files, read diffs, and review plans from your phone.</p>
+          </li>
+          <li class="card detail" data-reveal style="--d: 300ms">
+            <canvas class="card-sticker" data-sticker="phone" data-offset="90" width="260" height="260" aria-hidden="true"></canvas>
+            <h3>Keep the work moving</h3>
+            <p>Send a message or screenshot. Open a running preview, or switch mode and model when your agent supports it.</p>
+          </li>
+        </ul>
       </section>
-      <section class="section">
-        <div class="container video-section">
-          <div class="section-heading">
-            <h2>See it in action.</h2>
-            <p>From a question on your computer to an answer on your phone.</p>
-          </div>
+
+      <section class="block block-tight block-last" aria-labelledby="demo-heading">
+        <div class="wrap center">
+          <h2 id="demo-heading" data-split>See it in <span class="outline">action.</span></h2>
+          <p class="lede" data-reveal style="--d: 120ms">From a question on your computer to an answer on your phone.</p>
+        </div>
+        <figure class="shot wrap" data-reveal="rise">
           <video
             src="/media/launch.mp4"
             poster="/media/launch.webp"
@@ -170,33 +147,34 @@
             height="1080"
             aria-label="Agentman product demonstration"
           ></video>
-        </div>
+        </figure>
       </section>
-      <section class="section closing">
-        <div class="container">
-          <h2>Leave your desk.<br />Keep your agents close.</h2>
-          <p>Pair once. Reach every agent from your phone.</p>
-          <a
-            class="button primary"
-            href="https://testflight.apple.com/join/UcJvsjED"
-            >Get on TestFlight</a
-          ><a class="phone-link" href="/start#pair">Pairing guide ↗</a>
+
+      <section class="closing flood edge-top" aria-labelledby="closing-heading">
+        <div class="closing-word" aria-hidden="true"><span data-drift data-drift-dir="-1">Agentman</span></div>
+        <div class="wrap center">
+          <canvas class="closing-mascot" data-reveal="pop" data-mascot data-enter="0.2" width="320" height="320" aria-hidden="true"></canvas>
+          <h2 id="closing-heading" data-split>Leave your desk.<br />Keep your agents close.</h2>
+          <p class="lede" data-reveal style="--d: 120ms">Pair once. Reach every agent from your phone.</p>
+          <div class="hero-actions" data-reveal style="--d: 200ms">
+            <a class="pill pill-white" href="https://testflight.apple.com/join/UcJvsjED">Get on TestFlight</a><a class="pill pill-ink" href="/start#pair">Pairing guide</a>
+          </div>
         </div>
       </section>
     </main>
-    <footer class="container footer">
-      <a class="wordmark" href="/"
-        ><img src="/apple-touch-icon.png" alt="" width="24" height="24" /><span
-          >Agentman <small>· MIT licensed</small></span
-        ></a
-      >
-      <nav aria-label="Footer">
-        <a href="https://github.com/lenajeremy/agentman">GitHub</a
-        ><a href="/mac">Mac</a><a href="/ios">iPhone</a
-        ><a href="/start">Setup</a
-        ><a href="https://github.com/lenajeremy/agentman#readme">Docs</a
-        ><a href="/privacy">Privacy</a>
-      </nav>
+
+    <footer class="footer">
+      <div class="wrap footer-row">
+        <a class="wordmark" href="/"
+          ><img src="/apple-touch-icon.png" alt="" width="24" height="24" /><span>Agentman</span
+          ><small>MIT licensed</small></a
+        >
+        <nav aria-label="Footer">
+          <a href="https://github.com/lenajeremy/agentman">GitHub</a><a href="/mac">Mac</a><a href="/ios">iPhone</a
+          ><a href="/start">Setup</a><a href="https://github.com/lenajeremy/agentman#readme">Docs</a
+          ><a href="/privacy">Privacy</a>
+        </nav>
+      </div>
     </footer>
   </body>
 </html>

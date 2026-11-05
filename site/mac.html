@@ -8,7 +8,7 @@
       name="description"
       content="Keep your existing coding harness and bring every agent into one Mac workspace, with conversations, changes, an editor, and a terminal."
     />
-    <meta name="theme-color" content="#050505" />
+    <meta name="theme-color" content="#ff5f1f" />
     <meta property="og:type" content="website" />
     <meta
       property="og:title"
@@ -23,213 +23,176 @@
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="icon" href="/favicon.png" sizes="48x48" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link
-      rel="preload"
-      href="/fonts/geist-sans-latin-500-normal.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
-    <link
-      rel="preload"
-      href="/fonts/geist-sans-latin-400-normal.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
-    <link rel="stylesheet" href="/landing.css?v=20261101" />
-    <link rel="stylesheet" href="/subpages.css?v=20261030b" />
+    <link rel="preload" href="/fonts/rubik-latin-variable.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/inter-latin-variable.woff2" as="font" type="font/woff2" crossorigin />
+    <script>
+      document.documentElement.classList.add("js");
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) document.documentElement.classList.add("motion");
+    </script>
+    <link rel="stylesheet" href="/third-party/lenis-1.3.26.css" />
+    <link rel="stylesheet" href="/site.css?v=20261105" />
+    <script src="/third-party/lenis-1.3.26.min.js" defer></script>
+    <script src="/site.js?v=20261105" defer></script>
+    <script src="/mascot.js" defer></script>
   </head>
-  <body class="subpage mac-page">
+  <body>
     <svg width="0" height="0" style="position: absolute" aria-hidden="true">
-      <!-- The mark: a ">" prompt with a notification waiting on it. -->
-
       <symbol id="i-github" viewBox="0 0 24 24">
         <path
           fill="currentColor"
-          stroke="none"
           d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.2-3.1-.1-.4-.5-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.6.2 2.8.1 3.2.8.8 1.2 1.9 1.2 3.1 0 4.7-2.8 5.7-5.5 6 .4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5z"
         />
       </symbol>
-
-      <!-- Agent and tool logos: Claude, OpenAI, OpenCode, Kiro, Antigravity and Meta from LobeHub Icons (MIT),
-         Cursor from Simple Icons (CC0);
-         the rest from Simple Icons (CC0). Marks belong to their owners and are
-         used only to name the tools Agentman works with. -->
+      <!-- Apple's mark from Simple Icons (CC0), only to say which platform a download is for. -->
       <symbol id="l-apple" viewBox="0 0 24 24">
-        <title>Apple</title>
         <path
           fill="currentColor"
           d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"
         />
       </symbol>
-      <symbol id="i-copy" viewBox="0 0 24 24">
-        <rect x="8" y="8" width="12" height="12" rx="3" />
-        <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+      <symbol id="i-arrow" viewBox="0 0 16 16">
+        <path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
       </symbol>
-      <symbol id="i-arrow" viewBox="0 0 24 24">
-        <path d="M5 12h14M13 6l6 6-6 6" />
-      </symbol></svg
-    ><a class="skip-link" href="#main">Skip to content</a>
-    <nav class="nav container" aria-label="Main">
-      <a class="wordmark" href="/" aria-label="Agentman home"
-        ><img src="/apple-touch-icon.png" alt="" width="24" height="24" /><span>Agentman</span></a
-      >
-      <div class="nav-links">
-        <a href="/mac#download">Download</a
-        ><a class="nav-github" href="https://github.com/lenajeremy/agentman"
-          ><svg aria-hidden="true"><use href="#i-github" /></svg
-          ><span>GitHub ↗</span></a
+      <symbol id="i-copy" viewBox="0 0 24 24">
+        <rect x="8" y="8" width="12" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="2" />
+        <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" fill="none" stroke="currentColor" stroke-width="2" />
+      </symbol>
+    </svg>
+
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="top flood edge-bottom">
+      <nav class="nav wrap" aria-label="Main">
+        <a class="wordmark" href="/" aria-label="Agentman home"
+          ><img src="/apple-touch-icon.png" alt="" width="28" height="28" /><span>Agentman</span></a
         >
-      </div>
-    </nav>
-    <main id="main">
-      <header class="page-hero container">
-        <span class="eyebrow">AGENTMAN FOR MAC · PUBLIC BETA</span>
-        <h1>Every agent.<br />One workspace.</h1>
-        <p>
-          A GUI for the harness you already use. Follow every thread, review
-          changes, and work across projects without losing your place.
+        <div class="nav-links"><a href="/mac" aria-current="page">Mac</a><a href="/ios">iPhone</a><a href="/start">Setup</a><a href="https://github.com/lenajeremy/agentman">GitHub</a></div>
+        <a class="pill pill-white pill-small" href="https://github.com/lenajeremy/agentman/releases/download/v0.40.0/Agentman.dmg"
+          ><svg aria-hidden="true"><use href="#l-apple" /></svg>Download for Mac</a
+        >
+      </nav>
+      <div class="hero wrap" id="main">
+        <p class="eyebrow" data-reveal>Agentman for Mac · Public beta</p>
+        <h1 data-split>Every agent.<br /><span class="squiggle">One workspace.</span></h1>
+        <p class="hero-sub" data-reveal style="--d: 250ms">
+          A GUI for the harness you already use. Follow every thread, review changes, and work across projects
+          without losing your place.
         </p>
-        <div class="page-actions">
-          <a
-            class="button primary"
-            href="https://github.com/lenajeremy/agentman/releases/download/v0.40.0/Agentman.dmg"
-            >Download for macOS</a
-          ><a class="button secondary" href="/start">Setup guide ↗</a>
+        <div class="hero-actions" data-reveal style="--d: 350ms">
+          <a class="pill pill-white" href="https://github.com/lenajeremy/agentman/releases/download/v0.40.0/Agentman.dmg"><svg aria-hidden="true"><use href="#l-apple" /></svg>Download for Mac</a
+          ><a class="pill pill-ink" href="/start">Setup guide</a>
         </div>
-        <span class="requirements">macOS 15 or later</span>
-      </header>
-      <figure class="container desktop-hero">
-        <div class="app-frame">
-          <img
-            src="/media/desktop-overview.webp"
-            width="1440"
-            height="900"
-            alt="Agentman showing project threads, a live agent conversation, and changes beside it"
-            fetchpriority="high"
-          />
+        <p class="fine" data-reveal style="--d: 450ms">macOS 15 or later · Sets itself up · Updates itself</p>
+        <div class="badge" data-reveal="pop" style="--d: 600ms" aria-hidden="true">
+          <svg class="badge-ring" viewBox="0 0 200 200">
+            <defs><path id="ring" d="M100 100m-78 0a78 78 0 1 1 156 0a78 78 0 1 1-156 0" /></defs>
+            <text><textPath href="#ring" textLength="486">FREE · OPEN SOURCE · MAC + IPHONE · </textPath></text>
+          </svg>
+          <canvas class="badge-mascot" data-mascot data-enter="0.4" width="240" height="240"></canvas>
         </div>
+      </div>
+      <figure class="hero-shot wrap" data-tilt>
+        <img
+          src="/media/desktop-overview.webp"
+          width="2880"
+          height="1800"
+          alt="Agentman for Mac: the sidebar of agents, an agent's conversation about adding Apple Pay, and the project's branch and changes beside it"
+          fetchpriority="high"
+        />
       </figure>
-      <section class="section">
-        <div class="container">
-          <h2>Your tools.<br />Your workflow.</h2>
-          <p class="section-intro">
-            Keep your harness, commands, configuration, and subscriptions.
-            Agentman brings your agents into one GUI.
+    </header>
+
+    <main>
+      <section class="works cream edge-bottom" aria-labelledby="tools-heading">
+        <div class="wrap center">
+          <h2 id="tools-heading" data-split>Your tools.<br />Your <span class="outline">workflow.</span></h2>
+          <p class="lede" data-reveal style="--d: 120ms">
+            Keep your harness, commands, configuration, and subscriptions. Agentman brings your agents into one GUI.
           </p>
-          <div class="providers">
-            <div>
-              <img src="/media/agents/claude.svg" alt="" width="24" height="24" /><span>Claude Code</span>
-            </div>
-            <div>
-              <img src="/media/agents/openai.svg" alt="" width="24" height="24" /><span>Codex</span>
-            </div>
-            <div>
-              <img src="/media/agents/cursor.svg" alt="" width="24" height="24" /><span>Cursor</span>
-            </div>
-            <div>
-              <img src="/media/agents/opencode.svg" alt="" width="24" height="24" /><span>OpenCode</span>
-            </div>
-            <div>
-              <img src="/media/agents/kiro.svg" alt="" width="24" height="24" /><span>Kiro</span>
-            </div>
-            <div>
-              <img src="/media/agents/antigravity.svg" alt="" width="24" height="24" /><span>Antigravity</span>
-            </div>
-            <div>
-              <img src="/media/agents/meta.svg" alt="" width="24" height="24" /><span>Muse</span>
-            </div>
-          </div>
+          <ul class="agent-tiles" data-reveal style="--d: 200ms">
+            <li style="--r: -3deg"><img src="/media/agents/claude.svg" alt="" width="28" height="28" />Claude Code</li>
+            <li style="--r: 2deg"><img class="mono" src="/media/agents/openai.svg" alt="" width="28" height="28" />Codex</li>
+            <li style="--r: -2deg"><img class="mono" src="/media/agents/cursor.svg" alt="" width="28" height="28" />Cursor</li>
+            <li style="--r: 3deg"><img src="/media/agents/opencode.svg" alt="" width="28" height="28" />OpenCode</li>
+            <li style="--r: -3deg"><img src="/media/agents/kiro.svg" alt="" width="28" height="28" />Kiro</li>
+            <li style="--r: 2deg"><img src="/media/agents/antigravity.svg" alt="" width="28" height="28" />Antigravity</li>
+            <li style="--r: -2deg"><img src="/media/agents/meta.svg" alt="" width="28" height="28" />Muse</li>
+          </ul>
         </div>
       </section>
-      <section class="section">
-        <div class="container">
-          <div class="section-heading"><h2>The editor. In the same workspace.</h2><p class="section-intro">Open the code, keep the conversation beside it, and use the terminal when you need it.</p></div>
-          <figure class="app-frame editor-preview"><img src="/media/desktop-editor.webp" width="1440" height="900" loading="lazy" alt="Agentman editor with a TypeScript file, a black terminal, and the agent conversation beside the code" /></figure>
+
+      <section class="block block-tight" aria-labelledby="editor-heading">
+        <div class="wrap center">
+          <h2 id="editor-heading" data-split>The editor.<br />In the same workspace.</h2>
+          <p class="lede" data-reveal style="--d: 120ms">
+            Open the code, keep the conversation beside it, and use the terminal when you need it.
+          </p>
         </div>
+        <figure class="shot wrap" data-reveal="rise">
+          <img
+            src="/media/desktop-editor.webp"
+            width="2880"
+            height="1800"
+            loading="lazy"
+            alt="Agentman's editor with the checkout code, its tests passing in the terminal, and the agent's conversation beside the code"
+          />
+        </figure>
       </section>
-      <section class="section">
-        <div class="container">
-          <div class="section-heading"><h2>Stay close to the work.</h2></div>
-          <div class="feature-grid">
-            <article class="detail-card">
-              <span class="card-glyph" aria-hidden="true">↳</span>
-              <h3>Follow every thread</h3>
-              <p>
-                See agents across your projects, with live status and
-                conversations in one place.
-              </p>
-            </article>
-            <article class="detail-card">
-              <span class="card-glyph" aria-hidden="true">±</span>
-              <h3>Review changes in context</h3>
-              <p>
-                Read the diff beside the conversation. Open files, plans, and
-                project history as you review.
-              </p>
-            </article>
-            <article class="detail-card">
-              <span class="card-glyph" aria-hidden="true">⌘</span>
-              <h3>Step in when you need to</h3>
-              <p>
-                Open the editor or terminal from the thread. Use ⌘K to jump
-                between agents and actions.
-              </p>
-            </article>
-            <article class="detail-card">
-              <span class="card-glyph" aria-hidden="true">↗</span>
-              <h3>Pick it up on your phone</h3>
-              <p>
-                The same agents and conversations are in reach when you leave
-                your desk.
-              </p>
-              <a class="text-link" href="/ios">Meet the iPhone app ↗</a>
-            </article>
-          </div>
+
+      <section class="block block-last" aria-labelledby="close-heading">
+        <div class="wrap center">
+          <h2 id="close-heading" data-split>Stay close<br />to the <span class="outline">work.</span></h2>
         </div>
+        <ul class="details wrap">
+          <li class="card detail" data-reveal style="--d: 0ms">
+            <canvas class="card-sticker" data-sticker="chat" data-offset="0" width="260" height="260" aria-hidden="true"></canvas>
+            <h3>Follow every thread</h3>
+            <p>See agents across your projects, with live status and conversations in one place.</p>
+          </li>
+          <li class="card detail" data-reveal style="--d: 100ms">
+            <canvas class="card-sticker" data-sticker="notes" data-offset="30" width="260" height="260" aria-hidden="true"></canvas>
+            <h3>Review changes in context</h3>
+            <p>Read the diff beside the conversation. Open files, plans, and project history as you review.</p>
+          </li>
+          <li class="card detail" data-reveal style="--d: 200ms">
+            <canvas class="card-sticker" data-sticker="terminal" data-offset="60" width="260" height="260" aria-hidden="true"></canvas>
+            <h3>Step in when you need to</h3>
+            <p>Open the editor or terminal from the thread. Use ⌘K to jump between agents and actions.</p>
+          </li>
+          <li class="card detail" data-reveal style="--d: 300ms">
+            <canvas class="card-sticker" data-sticker="phone" data-offset="90" width="260" height="260" aria-hidden="true"></canvas>
+            <h3>Pick it up on your phone</h3>
+            <p>The same agents and conversations are in reach when you leave your desk. <a class="link inline" href="/ios">Meet the iPhone app <svg aria-hidden="true"><use href="#i-arrow" /></svg></a></p>
+          </li>
+        </ul>
       </section>
-      <section class="section">
-        <div class="container install-panel" id="download">
-          <div>
-            <span class="eyebrow">GET STARTED</span>
-            <h2>Give your agents<br />a workspace.</h2>
-            <p class="section-intro">
-              Install the CLI, connect your agents, then open the Mac app.
-            </p>
-            <div class="command">
-              <code
-                ><span class="pr">$</span>brew install
-                lenajeremy/agentman/agentman-cli</code
-              >
-            </div>
-            <p class="install-note">
-              Run <code>am install-hooks</code>, then <code>am serve</code>. The
-              app finds your agents.
-            </p>
-            <a class="text-link" href="/start">Full setup guide ↗</a>
+
+      <section class="closing flood edge-top" aria-labelledby="closing-heading">
+        <div class="closing-word" aria-hidden="true"><span data-drift data-drift-dir="-1">Agentman</span></div>
+        <div class="wrap center">
+          <canvas class="closing-mascot" data-reveal="pop" data-mascot data-enter="0.2" width="320" height="320" aria-hidden="true"></canvas>
+          <h2 id="closing-heading" data-split>Give your agents<br />a workspace.</h2>
+          <p class="lede" data-reveal style="--d: 120ms">Download Agentman and open it. It sets itself up: the <code>am</code> command, the hooks that tell it when an agent finishes or needs you, and Agentman running in the background. Then it keeps itself up to date.</p>
+          <div class="hero-actions" data-reveal style="--d: 200ms">
+            <a class="pill pill-white" href="https://github.com/lenajeremy/agentman/releases/download/v0.40.0/Agentman.dmg"><svg aria-hidden="true"><use href="#l-apple" /></svg>Download for Mac</a><a class="pill pill-ink" href="/start#mac">Setup guide</a>
           </div>
-          <div class="install-action">
-            <a
-              class="button primary"
-              href="https://github.com/lenajeremy/agentman/releases/download/v0.40.0/Agentman.dmg"
-              >Download for macOS</a
-            ><span class="requirements">Free · Open source · macOS 15+</span>
-          </div>
+          <a class="fine fine-link" href="/start#cli">Prefer the terminal? Set it up with am <svg aria-hidden="true"><use href="#i-arrow" /></svg></a>
         </div>
       </section>
     </main>
-    <footer class="container footer">
-      <a class="wordmark" href="/"
-        ><img src="/apple-touch-icon.png" alt="" width="24" height="24" /><span>Agentman <small>· MIT licensed</small></span></a
-      >
-      <nav aria-label="Footer">
-        <a href="https://github.com/lenajeremy/agentman">GitHub</a
-        ><a href="/mac">Mac</a><a href="/ios">iPhone</a
-        ><a href="/start">Setup</a
-        ><a href="https://github.com/lenajeremy/agentman#readme">Docs</a
-        ><a href="/privacy">Privacy</a>
-      </nav>
+
+    <footer class="footer">
+      <div class="wrap footer-row">
+        <a class="wordmark" href="/"
+          ><img src="/apple-touch-icon.png" alt="" width="24" height="24" /><span>Agentman</span
+          ><small>MIT licensed</small></a
+        >
+        <nav aria-label="Footer">
+          <a href="https://github.com/lenajeremy/agentman">GitHub</a><a href="/mac">Mac</a><a href="/ios">iPhone</a
+          ><a href="/start">Setup</a><a href="https://github.com/lenajeremy/agentman#readme">Docs</a
+          ><a href="/privacy">Privacy</a>
+        </nav>
+      </div>
     </footer>
   </body>
 </html>
