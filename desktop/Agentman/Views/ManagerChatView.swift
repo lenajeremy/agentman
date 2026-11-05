@@ -222,6 +222,7 @@ struct ManagerChatView: View {
 /// Agentman's name and the one box to talk to it, while there is no
 /// conversation yet.
 private struct EntryHero: View {
+    @Environment(AgentsStore.self) private var store
     @Binding var draft: String
     @Binding var attachments: [Attachment]
     @Binding var dropping: Bool
@@ -242,10 +243,49 @@ private struct EntryHero: View {
             ManagerBox(draft: $draft, attachments: $attachments, dropping: $dropping, sending: sending, large: true, send: send)
                 .frame(maxWidth: 620)
 
+            // A few questions to start with, once there is someone to ask.
+            if store.status == .connected, !store.manager.needsKey {
+                FlowLayout(spacing: 8) {
+                    ForEach(Self.starters, id: \.self) { question in
+                        StarterChip(text: question) {
+                            draft = question
+                            send()
+                        }
+                    }
+                }
+                .frame(maxWidth: 620)
+                .padding(.top, 6)
+            }
+
             Spacer(minLength: 48)
             Spacer(minLength: 24)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+extension EntryHero {
+    static let starters = ["What needs me?", "What happened while I was away?", "What is everyone working on?"]
+}
+
+/// A question to start the conversation with, asked when clicked.
+private struct StarterChip: View {
+    let text: String
+    let ask: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: ask) {
+            Text(text)
+                .font(TextStyle.caption)
+                .foregroundStyle(hovering ? Palette.text : Palette.textSecondary)
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(hovering ? Palette.fill : Palette.surface, in: Capsule())
+                .overlay(Capsule().strokeBorder(Palette.line))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }
 
