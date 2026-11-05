@@ -1,14 +1,17 @@
 // Package limits reads what is left of each agent's plan: a Claude
-// subscription's five-hour and weekly windows, a ChatGPT plan's for Codex.
+// subscription's five-hour and weekly windows, a ChatGPT plan's for Codex,
+// and Antigravity's quotas for each group of its models.
 //
 // Each agent is asked in its own way, and none of them hands Agentman a
 // credential. Claude Code is started with no prompt and asked for its /usage
 // numbers, which it reads from Anthropic with its own sign-in. Codex's shared
 // daemon is asked the same; while it isn't running, Codex's rollouts say what
-// was left as of its last reply. Neither token is read, copied or sent on.
+// was left as of its last reply. agy answers its own /usage in print mode,
+// without a turn. No token is read, copied or sent on.
 //
-// Answers are kept for a couple of minutes, so a page opened again and again
-// doesn't start Claude Code each time.
+// Agents are asked only when asked for their limits, never in the
+// background. Answers are kept for a couple of minutes, so a page opened
+// again and again doesn't start Claude Code or agy each time.
 package limits
 
 import (
@@ -40,7 +43,9 @@ type Reader struct {
 	codexDaemon func(context.Context) (CodexSnapshot, error)
 	// claude asks Claude Code for its numbers; replaced in tests.
 	claude func(context.Context) (claudeUsage, error)
-	now    func() time.Time
+	// antigravity asks agy for its quotas; replaced in tests.
+	antigravity func(context.Context) (agyUsage, error)
+	now         func() time.Time
 
 	mu sync.Mutex
 	// answer is the last read, made at read.
@@ -66,6 +71,7 @@ func WithCodexDaemon(ask func(context.Context) (CodexSnapshot, error)) Option {
 func NewReader(home string, options ...Option) *Reader {
 	r := &Reader{home: home, now: time.Now, good: map[protocol.Kind]protocol.AgentLimits{}}
 	r.claude = r.askClaude
+	r.antigravity = r.askAntigravity
 	for _, option := range options {
 		option(r)
 	}
@@ -112,9 +118,9 @@ func (r *Reader) readAll(done chan struct{}) {
 	ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
 	defer cancel()
 
-	var claude, codex *result
+	var claude, codex, antigravity *result
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		claude = r.readClaude(ctx)
@@ -123,12 +129,16 @@ func (r *Reader) readAll(done chan struct{}) {
 		defer wg.Done()
 		codex = r.readCodex(ctx)
 	}()
+	go func() {
+		defer wg.Done()
+		antigravity = r.readAntigravity(ctx)
+	}()
 	wg.Wait()
 
 	agents := []protocol.AgentLimits{}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, agent := range []*result{claude, codex} {
+	for _, agent := range []*result{claude, codex, antigravity} {
 		if agent != nil {
 			agents = append(agents, r.remembered(*agent))
 		}
