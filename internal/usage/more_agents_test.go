@@ -9,40 +9,61 @@ import (
 )
 
 func museCall(at time.Time, usage string, input, cached, output int) string {
+	return museOwnedCall(at, usage, "main-root", "main_root", input, cached, output)
+}
+
+// museOwnedCall is a call made by owner: the session's own run (main-root),
+// or a helper by its id.
+func museOwnedCall(at time.Time, usage, owner, ownerType string, input, cached, output int) string {
 	return `{"recorded_at":` + itoa(int(at.UnixMicro())) + `,"payload_type":"runtime.session","payload":{"kind":"run","event":{"kind":"goal_usage_attribution","record":{"usage_id":"` + usage +
 		`","usage_family":"provider","quantity":{"unit":"tokens","reported":true,"input_tokens":` + itoa(input) + `,"output_tokens":` + itoa(output) +
-		`,"cached_tokens":` + itoa(cached) + `,"reasoning_tokens":0}}}}}`
+		`,"cached_tokens":` + itoa(cached) + `,"reasoning_tokens":42},"owner":{"requester_kind":"reminder","owner_id":"` + owner + `","owner_type":"` + ownerType + `"}}}}}`
+}
+
+func museModel(model string) string {
+	return `{"recorded_at":1,"payload_type":"run.model.configured","payload":{"record":{"provider_id":"meta","model_id":"` + model + `"}}}`
 }
 
 // Muse's calls are its goal_usage_attribution events, on the model the run
 // was set up with. A helper's calls count under the session it helped, and
-// a call two logs hold counts once.
+// a call two logs hold counts once: the session's log writes its helpers'
+// calls again under usage ids of its own, and those are known by the
+// helper and the counts, and kept on the helper's own model.
 func TestMuseCallsCountOnceUnderTheirSession(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
 	const session = "01a1943f-eca7-78c1-ad8b-52f437e0be7f"
-	model := `{"recorded_at":1,"payload_type":"run.model.configured","payload":{"record":{"provider_id":"meta","model_id":"muse-spark-1.3"}}}`
+	const helper = "01a1955b-04de-77e2-a67c-eef854a212ab"
 	write(t, filepath.Join(root, "2026/10/31", session, "session.jsonl"),
 		`{"payload_type":"runtime.session","payload":{"event":{"kind":"model_request_configured","base_instructions":"…tokens…"}}}`,
-		model, museCall(now, "usage-1", 30321, 0, 126), museCall(now, "usage-2", 21285, 1000, 601))
-	write(t, filepath.Join(root, "2026/10/31", session, "subagent/01a1955b-04de-77e2-a67c-eef854a212ab/session.jsonl"),
-		model, museCall(now, "usage-2", 21285, 1000, 601), museCall(now, "usage-3", 3598, 0, 138))
+		museModel("muse-wonder-1.0"), museCall(now, "usage-1", 30321, 0, 126), museCall(now, "usage-2", 21285, 1000, 601),
+		// The helper's call again, and one by a helper that kept no log.
+		museOwnedCall(now, "usage-69f8", helper, "reminder_child", 3598, 0, 138),
+		museOwnedCall(now, "usage-d8a7", "01a1955b-0517-7dd3-923e-2bcba5096666", "reminder_child", 3516, 0, 442))
+	write(t, filepath.Join(root, "2026/10/31", session, "subagent", helper, "session.jsonl"),
+		museModel("muse-spark-1.3"), museCall(now, "usage-2", 21285, 1000, 601),
+		museOwnedCall(now, "usage-5723", helper, "reminder_child", 3598, 0, 138))
 
 	m := newMuseReader()
 	records, skipped := m.read(root, now.Add(-time.Hour))
 	if skipped != 0 || len(records) != 4 {
 		t.Fatalf("records = %+v, skipped %d", records, skipped)
 	}
+	models := map[string]string{}
 	for _, r := range records {
-		if r.Agent != protocol.KindMuse || r.Session != session || r.Model != "muse-spark-1.3" || r.Provider != "meta" || r.Key == "" {
+		if r.Agent != protocol.KindMuse || r.Session != session || r.Provider != "meta" || r.Key == "" {
 			t.Fatalf("record = %+v", r)
 		}
+		models[itoa(int(r.Tokens.Input))] = r.Model
+	}
+	if models["30321"] != "muse-wonder-1.0" || models["3598"] != "muse-spark-1.3" || models["3516"] != "muse-wonder-1.0" {
+		t.Fatalf("models = %v", models)
 	}
 	catalog := Catalog{"meta": {"muse-spark-1.3": {Input: 1, Output: 2, CacheRead: 0.5}}}
 	from, unit := Window(1, now)
 	u := Summarize(records, catalog, 1, from, unit, now, 0)
 	if len(u.Agents) != 1 || u.Agents[0].Sessions != 1 ||
-		u.Tokens != (protocol.Tokens{Input: 30321 + 20285 + 3598, CacheRead: 1000, Output: 126 + 601 + 138}) {
+		u.Tokens != (protocol.Tokens{Input: 30321 + 20285 + 3598 + 3516, CacheRead: 1000, Output: 126 + 601 + 138 + 442}) {
 		t.Fatalf("summary = %+v", u)
 	}
 	// Read again unchanged, the logs aren't parsed again; gone, they are let go.
