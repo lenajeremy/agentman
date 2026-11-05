@@ -26,6 +26,41 @@ final class LimitsTests: XCTestCase {
         """
     }
 
+    /// Antigravity's quotas as agy 1.5.1 reported them on 2026-11-05, after
+    /// Claude Code's: a session and a week for each group of models, the
+    /// sessions not used yet.
+    static func sampleWithAntigravity(now: Date = Date()) -> String {
+        func at(_ hours: Double) -> Int64 { Int64((now.timeIntervalSince1970 + hours * 3600) * 1000) }
+        let checked = Int64(now.timeIntervalSince1970 * 1000)
+        return """
+        {"type":"limits","limits":{"agents":[
+         {"kind":"claude","plan":"Max","checkedAt":\(checked - 90_000),"windows":[
+          {"id":"five_hour","kind":"session","label":"Session","used":38,"resetsAt":\(at(2.5)),"minutes":300},
+          {"id":"seven_day","kind":"weekly","label":"Weekly","used":56,"resetsAt":\(at(5 * 24 + 16)),"minutes":10080}]},
+         {"kind":"antigravity","checkedAt":\(checked - 20_000),"windows":[
+          {"id":"gemini-weekly","kind":"weekly","label":"Weekly · Gemini","used":1.5,"resetsAt":\(at(3 * 24 + 21.75)),"minutes":10080},
+          {"id":"gemini-5h","kind":"session","label":"Session · Gemini","used":0,"minutes":300},
+          {"id":"3p-weekly","kind":"weekly","label":"Weekly · Claude & GPT","used":50.4,"resetsAt":\(at(5 * 24 + 22.5)),"minutes":10080},
+          {"id":"3p-5h","kind":"session","label":"Session · Claude & GPT","used":0,"minutes":300},
+          {"id":"gemini-argon-wtu-weekly","kind":"weekly","label":"Weekly · Gemini 4 Argon","used":11.3,"resetsAt":\(at(3 * 24 + 21.75)),"minutes":10080}]}
+        ]}}
+        """
+    }
+
+    // Antigravity's windows come in group by group; the sessions are shown
+    // first, and the footnote names it.
+    func testReadsAntigravitysQuotas() throws {
+        let limits = try limits(Self.sampleWithAntigravity())
+        XCTAssertEqual(limits.agents.map(\.kind), ["claude", "antigravity"])
+        let antigravity = limits.agents[1]
+        XCTAssertNil(antigravity.plan)
+        XCTAssertEqual(LimitsFormat.ordered(antigravity.windows ?? []).map(\.id),
+                       ["gemini-5h", "3p-5h", "gemini-weekly", "3p-weekly", "gemini-argon-wtu-weekly"])
+        XCTAssertNil(antigravity.windows?[1].resets, "a session not used yet")
+        XCTAssertEqual(AgentName.of(antigravity.kind), "Antigravity")
+        XCTAssertTrue(LimitsFormat.footnote.contains("Antigravity"))
+    }
+
     private func limits(_ text: String = sample()) throws -> Limits {
         try XCTUnwrap(JSONDecoder().decode(DaemonEvent.self, from: Data(text.utf8)).limits)
     }
@@ -118,6 +153,13 @@ final class LimitsTests: XCTestCase {
                        size: CGSize(width: 1000, height: 420), dark: dark,
                        to: folder.appendingPathComponent("limits-problems-\(look).png"))
         }
+        // Antigravity's quotas under Claude Code's.
+        try render(UsageView(showing: [30: usage], limits: try self.limits(Self.sampleWithAntigravity())).background(Palette.paper),
+                   size: CGSize(width: 1240, height: 1180), dark: false,
+                   to: folder.appendingPathComponent("limits-antigravity-light.png"))
+        try render(UsageView(showing: [30: usage], limits: try self.limits(Self.sampleWithAntigravity())).background(Palette.paper),
+                   size: CGSize(width: 760, height: 1300), dark: false,
+                   to: folder.appendingPathComponent("limits-antigravity-narrow-light.png"))
         // The other tabs keep their switch of ranges beside the new one, in
         // a window as narrow as the page gets beside the sidebar too.
         defaults.set("cost", forKey: "usageMetric")
