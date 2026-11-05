@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
@@ -178,6 +179,9 @@ func sameJSON(a, b any) bool {
 // Code writes ~/.claude.json all the time, so the change goes through its
 // own `claude mcp` commands rather than an edit beside it; the file is only
 // read, to see what is there.
+// claudeRetryWait is how long a failed `claude mcp` waits to try again.
+var claudeRetryWait = 1500 * time.Millisecond
+
 func (in Installer) planClaudeMCP(home string, remove bool) (Plan, bool) {
 	path := filepath.Join(home, ".claude.json")
 	claude, lookErr := exec.LookPath("claude")
@@ -224,6 +228,13 @@ func (in Installer) planClaudeMCP(home string, remove bool) (Plan, bool) {
 			// Taking out the server before adding it again may find none,
 			// and that's fine.
 			if err == nil || (i == 0 && !remove) {
+				continue
+			}
+			// Claude Code saves this file all the time while it runs; a
+			// change made at the same moment can fail. Once more, a moment
+			// later, before saying so (a fresh install from the app did).
+			time.Sleep(claudeRetryWait)
+			if out, err = exec.Command(claude, step...).CombinedOutput(); err == nil {
 				continue
 			}
 			return fmt.Errorf("claude %s: %v: %s", strings.Join(step, " "), err, strings.TrimSpace(string(out)))
