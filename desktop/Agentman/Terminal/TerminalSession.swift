@@ -30,6 +30,11 @@ final class TerminalSession: Identifiable, @preconcurrency LocalProcessTerminalV
         start()
     }
 
+    /// What a new shell runs instead of the user's own shell, for tests:
+    /// a test that opens a terminal must not start the user's shell and
+    /// its startup files.
+    nonisolated(unsafe) static var testCommand: [String]?
+
     /// The user's shell, as the system knows it.
     static var shell: String {
         if let entry = getpwuid(getuid()), let shell = entry.pointee.pw_shell {

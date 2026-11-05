@@ -505,7 +505,7 @@ final class EditorStore {
     /// A new shell beside the one in front, in the same tab.
     func splitTerminal() {
         guard let active = activeTerminal, splits[active.id] == nil else { return }
-        let session = TerminalSession(folder: root, number: terminals.count + 1)
+        let session = TerminalSession(folder: root, number: terminals.count + 1, command: TerminalSession.testCommand)
         terminals.append(session)
         splits[active.id] = session.id
     }
@@ -517,7 +517,7 @@ final class EditorStore {
 
     /// A new shell in the folder, in front.
     func newTerminal() {
-        let session = TerminalSession(folder: root, number: terminals.count + 1)
+        let session = TerminalSession(folder: root, number: terminals.count + 1, command: TerminalSession.testCommand)
         terminals.append(session)
         activeTerminalID = session.id
         if !showTerminal { showTerminal = true }

@@ -184,7 +184,13 @@ private struct TerminalHost: NSViewRepresentable {
         host.isHidden = !visible
         if visible && (wasHidden || context.coordinator.first) {
             context.coordinator.first = false
-            DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
+            // The keyboard goes to the shell once it is in a window. A shell
+            // started by the same click that shows the terminal isn't in one
+            // yet a moment later, and the keyboard used to stay where it was
+            // until the terminal was hidden and shown again.
+            let container = host as? TerminalContainer
+            container?.wantsKeyboard = true
+            DispatchQueue.main.async { container?.takeKeyboardIfWanted() }
         }
     }
 
@@ -198,6 +204,20 @@ private struct TerminalHost: NSViewRepresentable {
 /// Sizes the shell's view to itself, and only once it has a size of its
 /// own.
 private final class TerminalContainer: NSView {
+    /// The shell takes the keyboard as soon as it is in a window and shown.
+    var wantsKeyboard = false
+
+    func takeKeyboardIfWanted() {
+        guard wantsKeyboard, !isHidden, let window, let view = subviews.first else { return }
+        wantsKeyboard = false
+        window.makeFirstResponder(view)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        takeKeyboardIfWanted()
+    }
+
     override func resizeSubviews(withOldSize oldSize: NSSize) {
         for view in subviews where bounds.width > 0 && bounds.height > 0 {
             view.frame = bounds
