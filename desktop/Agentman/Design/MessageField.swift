@@ -240,7 +240,9 @@ final class ChatAutofocus {
         }
         remember(window)
         guard text.isEditable else { return false }
-        if window.firstResponder !== origin || window.attachedSheet != nil {
+        let responder = window.firstResponder
+        let empty = responder == nil || responder === window || responder === window.contentView
+        if (!empty && responder !== origin) || window.attachedSheet != nil {
             completed = true
             return true
         }
