@@ -438,6 +438,7 @@ struct AgentmanCard: View {
 /// The desktop app's own icon, including its macOS optical inset.
 struct AgentmanBadge: View {
     var size: CGFloat
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Image(nsImage: NSImage(named: NSImage.applicationIconName) ?? NSImage())
@@ -445,6 +446,9 @@ struct AgentmanBadge: View {
             .interpolation(.high)
             .scaledToFit()
             .frame(width: size, height: size)
+            // Its black square sank into a dark window; a faint light edge,
+            // following its own shape, keeps it there.
+            .shadow(color: .white.opacity(scheme == .dark ? 0.35 : 0), radius: 0.6)
             .accessibilityHidden(true)
     }
 }
