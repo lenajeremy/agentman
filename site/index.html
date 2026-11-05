@@ -22,7 +22,13 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="preload" href="/fonts/rubik-latin-variable.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/inter-latin-variable.woff2" as="font" type="font/woff2" crossorigin />
+    <script>
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) document.documentElement.classList.add("motion");
+    </script>
+    <link rel="stylesheet" href="/third-party/lenis-1.3.26.css" />
     <link rel="stylesheet" href="/home.css?v=20261105" />
+    <script src="/third-party/lenis-1.3.26.min.js" defer></script>
+    <script src="/home.js?v=20261105" defer></script>
     <script src="/mascot.js" defer></script>
   </head>
   <body>
@@ -67,19 +73,19 @@
       </a>
 
       <div class="hero wrap" id="main">
-        <h1>Your agents.<br />Your harness.<br />One workspace.</h1>
-        <p class="hero-sub">
+        <h1 data-split>Your agents.<br />Your harness.<br /><span class="squiggle">One workspace.</span></h1>
+        <p class="hero-sub" data-reveal style="--d: 250ms">
           Give Claude Code, Codex, Antigravity, and the tools you already use a GUI. Keep your workflow.
           Reach every agent from your phone.
         </p>
-        <div class="hero-actions">
+        <div class="hero-actions" data-reveal style="--d: 350ms">
           <a class="pill pill-white" href="https://github.com/lenajeremy/agentman/releases/download/v0.40.0/Agentman.dmg"
             ><svg aria-hidden="true"><use href="#l-apple" /></svg>Download for Mac</a
           ><a class="pill pill-ink" href="/ios">Get the iPhone app</a>
         </div>
-        <p class="fine">macOS 15 or later · Free and open source</p>
+        <p class="fine" data-reveal style="--d: 450ms">macOS 15 or later · Free and open source</p>
 
-        <div class="badge" aria-hidden="true">
+        <div class="badge" data-reveal="pop" style="--d: 600ms" aria-hidden="true">
           <svg class="badge-ring" viewBox="0 0 200 200">
             <defs><path id="ring" d="M100 100m-78 0a78 78 0 1 1 156 0a78 78 0 1 1-156 0" /></defs>
             <text><textPath href="#ring" textLength="486">FREE · OPEN SOURCE · MAC + IPHONE · </textPath></text>
@@ -94,7 +100,7 @@
         ></a>
       </div>
 
-      <figure class="hero-shot wrap">
+      <figure class="hero-shot wrap" data-tilt>
         <img
           src="/media/mac-agentman.webp"
           alt="Agentman for Mac: agents grouped by project on the left, and Agentman's summary of what they did, with one waiting for approval to push"
@@ -132,29 +138,55 @@
 
       <section class="block" id="harness" aria-labelledby="harness-heading">
         <div class="wrap center">
-          <h2 id="harness-heading">Keep the harness<br />you already use.</h2>
-          <p class="lede">
+          <h2 id="harness-heading" data-split>Keep the harness<br />you already use.</h2>
+          <p class="lede" data-reveal>
             Agentman isn’t another harness. It’s a GUI for yours. Keep your commands, configuration, and
             subscriptions.
           </p>
-          <ul class="chips">
-            <li>One place to follow every thread</li>
-            <li>Your existing agent accounts</li>
-            <li>Free and open source</li>
-          </ul>
         </div>
+        <ul class="cards wrap">
+          <li class="card" data-reveal style="--d: 0ms">
+            <h3>One place to follow <em>every thread</em></h3>
+            <div class="card-art threads" aria-hidden="true">
+              <div class="thread"><img src="/media/agents/claude.svg" alt="" /><b>checkout-flow</b><span class="state working">Working</span></div>
+              <div class="thread"><img class="mono" src="/media/agents/openai.svg" alt="" /><b>api-migrations</b><span class="state needs">Needs you</span></div>
+              <div class="thread"><img src="/media/agents/opencode.svg" alt="" /><b>docs-refresh</b><span class="state working">Working</span></div>
+              <div class="thread"><img src="/media/agents/kiro.svg" alt="" /><b>onboarding-v2</b><span class="state idle">Idle</span></div>
+            </div>
+          </li>
+          <li class="card" data-reveal style="--d: 120ms">
+            <h3>Your existing <em>agent accounts</em></h3>
+            <div class="card-art logos" aria-hidden="true">
+              <span style="--r: -8deg"><img src="/media/agents/claude.svg" alt="" /></span>
+              <span style="--r: 6deg"><img class="mono" src="/media/agents/openai.svg" alt="" /></span>
+              <span style="--r: -4deg"><img class="mono" src="/media/agents/cursor.svg" alt="" /></span>
+              <span style="--r: 9deg"><img src="/media/agents/antigravity.svg" alt="" /></span>
+              <span style="--r: -10deg"><img src="/media/agents/kiro.svg" alt="" /></span>
+              <span style="--r: 5deg"><img src="/media/agents/opencode.svg" alt="" /></span>
+            </div>
+            <p class="card-note">Your accounts. Your subscriptions.</p>
+          </li>
+          <li class="card" data-reveal style="--d: 240ms">
+            <h3>Free and <em>open source</em></h3>
+            <div class="card-art repo" aria-hidden="true">
+              <div class="repo-head"><svg><use href="#i-github" /></svg>lenajeremy/agentman</div>
+              <div class="repo-line"><em>$</em> git clone github.com/lenajeremy/agentman</div>
+              <div class="repo-tags"><span>MIT licensed</span><span>Mac</span><span>iPhone</span><span>CLI</span></div>
+            </div>
+          </li>
+        </ul>
       </section>
 
       <section class="block block-tight" aria-labelledby="review-heading">
         <div class="wrap center">
-          <h2 id="review-heading">The conversation.<br />The changes.<br />Right beside it.</h2>
-          <p class="lede">
+          <h2 id="review-heading" data-split>The conversation.<br />The changes.<br />Right beside it.</h2>
+          <p class="lede" data-reveal style="--d: 120ms">
             Follow a thread, inspect a diff, and open the project in the editor. Keep the context while you
             review the work.
           </p>
-          <a class="link" href="/mac">Explore Agentman for Mac <svg aria-hidden="true"><use href="#i-arrow" /></svg></a>
+          <a class="link" data-reveal style="--d: 200ms" href="/mac">Explore Agentman for Mac <svg aria-hidden="true"><use href="#i-arrow" /></svg></a>
         </div>
-        <figure class="shot wrap">
+        <figure class="shot wrap" data-reveal="rise">
           <img
             src="/media/mac-editor.webp"
             alt="Agentman's editor with a project's files on the left, a changed file open, and its tests passing in the terminal below"
@@ -168,14 +200,14 @@
       <section class="block" aria-labelledby="pocket-heading">
         <div class="wrap split">
           <div class="split-copy">
-            <h2 id="pocket-heading">Every agent.<br />In your pocket.</h2>
-            <p class="lede">
+            <h2 id="pocket-heading" data-split>Every agent.<br />In your pocket.</h2>
+            <p class="lede" data-reveal style="--d: 120ms">
               Access all your agents from your phone. Read any conversation, send a message, and answer
               approvals wherever you are.
             </p>
-            <a class="link" href="/ios">Get Agentman for iPhone <svg aria-hidden="true"><use href="#i-arrow" /></svg></a>
+            <a class="link" data-reveal style="--d: 200ms" href="/ios">Get Agentman for iPhone <svg aria-hidden="true"><use href="#i-arrow" /></svg></a>
           </div>
-          <div class="phone-tile flood">
+          <div class="phone-tile" data-reveal="rise" data-parallax>
             <img
               src="/media/iphone-dark-device.webp"
               width="840"
@@ -189,25 +221,25 @@
 
       <section class="own cream edge-top edge-bottom" aria-labelledby="own-heading">
         <div class="wrap center">
-          <h2 id="own-heading">Make it your own.</h2>
+          <h2 id="own-heading" data-split>Make it your own.</h2>
           <ul class="trio">
-            <li>
+            <li data-reveal style="--d: 0ms">
               <svg viewBox="0 0 40 40" aria-hidden="true"><rect x="4" y="7" width="32" height="26" rx="6" /><path d="M12 16l5 4-5 4M21 25h7" /></svg>
               <p>Keep your tools. Use the harness and workflow you already know.</p>
               <span class="tag">Your harness</span>
             </li>
-            <li>
+            <li data-reveal style="--d: 120ms">
               <svg viewBox="0 0 40 40" aria-hidden="true"><rect x="11" y="3" width="18" height="34" rx="5" /><path d="M17 31h6" /></svg>
               <p>Bring your agents along. Reach every conversation from your phone.</p>
               <span class="tag">Mac + iPhone</span>
             </li>
-            <li>
+            <li data-reveal style="--d: 240ms">
               <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M14 12 6 20l8 8M26 12l8 8-8 8M22 9l-4 22" /></svg>
               <p>Make it yours. Read the code, change it, or run your own copy.</p>
               <span class="tag">MIT licensed</span>
             </li>
           </ul>
-          <div class="terminal" aria-label="Using Agentman from the terminal">
+          <div class="terminal" data-reveal aria-label="Using Agentman from the terminal">
             <div class="terminal-bar"><i></i><i></i><i></i><span>~/projects</span></div>
             <div class="terminal-body">
               <div><em>$</em> brew install lenajeremy/agentman/agentman-cli</div>
@@ -226,9 +258,9 @@
 
       <section class="closing flood" id="download" aria-labelledby="download-heading">
         <div class="wrap center">
-          <canvas class="closing-mascot" data-mascot data-enter="0.2" width="320" height="320" aria-hidden="true"></canvas>
-          <h2 id="download-heading">Keep your harness.<br />Take your agents with you.</h2>
-          <p class="lede">A GUI for the tools you already use, with every agent in reach on your phone.</p>
+          <canvas class="closing-mascot" data-reveal="pop" data-mascot data-enter="0.2" width="320" height="320" aria-hidden="true"></canvas>
+          <h2 id="download-heading" data-split>Keep your harness.<br />Take your agents with you.</h2>
+          <p class="lede" data-reveal style="--d: 120ms">A GUI for the tools you already use, with every agent in reach on your phone.</p>
           <div class="hero-actions">
             <a class="pill pill-white" href="https://github.com/lenajeremy/agentman/releases/download/v0.40.0/Agentman.dmg"
               ><svg aria-hidden="true"><use href="#l-apple" /></svg>Download for Mac</a
