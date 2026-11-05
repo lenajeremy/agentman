@@ -49,6 +49,7 @@ struct ManagerChatView: View {
                 .padding(.horizontal, 16)
                 .padding(.leading, headerLeading)
                 .frame(height: 32)
+                .windowTopBar()
                 conversation
             }
                 .navigationTitle("")

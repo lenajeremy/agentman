@@ -258,7 +258,7 @@ struct AgentThreadView: View {
         .padding(.horizontal, 18)
         .padding(.leading, headerLeading)
         .frame(height: 32)
-        .background(Palette.paper)
+        .windowTopBar()
     }
 
     /// The conversation and the box under it, in the window or a panel.

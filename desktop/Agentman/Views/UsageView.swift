@@ -78,6 +78,7 @@ struct UsageView: View {
         .padding(.horizontal, 16)
         .padding(.leading, headerLeading)
         .frame(height: 32)
+        .windowTopBar()
     }
 
     @ViewBuilder private var content: some View {

@@ -224,8 +224,8 @@ struct EditorWindow: View {
         }
         .padding(.trailing, 14)
         .frame(height: 32)
-        .background(Palette.paper)
         .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
+        .windowTopBar()
     }
 
     /// ⌘W closes the tab in front, and the window once no tab is left.
@@ -1499,6 +1499,18 @@ struct EditorCommands: Commands {
 
 /// A single title row: the content fills the frame behind native controls.
 @MainActor
+extension View {
+    /// A window's top bar: drawn over what is below it, and given its
+    /// clicks first. In a normal window the title bar is a strip of the
+    /// window's own content, and a scroller or the editor's panes below a
+    /// bar reach up under that strip; without this they draw over the bar
+    /// and take the clicks meant for its buttons. Full screen has no title
+    /// bar, which is why the bars only worked there.
+    func windowTopBar() -> some View {
+        background(Palette.paper).zIndex(1)
+    }
+}
+
 enum WindowChrome {
     static func leading(_ window: NSWindow) -> CGFloat {
         window.styleMask.contains(.fullScreen) ? 16 : 82

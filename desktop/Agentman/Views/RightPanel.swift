@@ -145,6 +145,7 @@ struct RightPanel: View {
             .padding(.leading, maximised ? headerLeading + 12 : 10)
             .padding(.trailing, 10)
             .frame(height: 32)
+            .windowTopBar()
             // A shape, not a colour: a colour by the title bar spreads up
             // into it, over the tabs.
             Rectangle().fill(Palette.line).frame(height: 1)
