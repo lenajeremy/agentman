@@ -20,6 +20,7 @@ struct LimitsPage: View {
                 Text(LimitsFormat.footnote)
                     .font(TextStyle.caption)
                     .foregroundStyle(Palette.faint)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

@@ -62,7 +62,7 @@ struct ContentView: View {
         }
         .animation(.spring(duration: 0.3), value: store.manager.noteSuggestions.first?.id)
         .overlay {
-            if store.showPalette {
+            if store.showPalette, store.paletteEditor == nil {
                 CommandPalette()
             }
         }

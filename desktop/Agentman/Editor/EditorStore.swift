@@ -63,6 +63,11 @@ final class EditorRegistry {
         return store
     }
 
+    /// The editor whose window is in front, if an editor's is.
+    var keyEditor: EditorStore? {
+        stores.values.first { $0.window?.isKeyWindow == true }
+    }
+
     /// Every file with unsaved edits, in any folder.
     var unsaved: [EditorDocument] {
         stores.values.flatMap { $0.documents.filter(\.isDirty) }
@@ -123,6 +128,8 @@ final class EditorStore {
     /// What the panel shows: nil until it first opens, when it picks the
     /// agent working on the folder.
     var panelRoute: PanelRoute?
+    /// The status bar's Usage popover is open.
+    var showUsage = false
     /// Asked to show the agent working on the folder, as `am open` asks:
     /// done once the agents are known.
     var showsFolderAgent = false

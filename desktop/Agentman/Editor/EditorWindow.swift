@@ -154,6 +154,12 @@ struct EditorWindow: View {
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
         .background(Palette.paper)
         .ignoresSafeArea(.container, edges: .top)
+        // ⌘K, over this editor: agents open in its panel.
+        .overlay {
+            if agents.showPalette, agents.paletteEditor == store.root.path {
+                CommandPalette(editor: store)
+            }
+        }
         // An image from the agent panel, full size over the editor.
         .overlay {
             if let box = agents.lightbox, box.place == store.root.path {
@@ -1169,6 +1175,7 @@ private struct StatusBar: View {
                 Text("\(store.marks.count) changed")
             }
             Spacer()
+            UsageItem(store: store)
             if let document = store.active {
                 if document.kind == .text {
                     ProblemCount(store: store, problems: document.problems)
@@ -1186,6 +1193,27 @@ private struct StatusBar: View {
         .frame(height: 24)
         .background(Palette.paper)
         .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 1) }
+    }
+}
+
+/// Usage, in the status bar: opens what the agents spent and what is left
+/// of each plan, over the editor.
+private struct UsageItem: View {
+    @Bindable var store: EditorStore
+    @State private var hovering = false
+
+    var body: some View {
+        Button { store.showUsage.toggle() } label: {
+            Label("Usage", systemImage: "chart.xyaxis.line")
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(hovering || store.showUsage ? Palette.text : Palette.muted)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("What your agents spent, and what's left of each plan")
+        .popover(isPresented: $store.showUsage, arrowEdge: .top) {
+            UsagePopover { store.showUsage = false }
+        }
     }
 }
 
