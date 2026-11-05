@@ -325,12 +325,12 @@ private struct ManagerBox: View {
                     Text("Connecting…")
                 } else if manager.needsKey {
                     HStack(spacing: 4) {
+                        // The card above says what the key is for.
+                        Text("Don't have one?")
                         if manager.provider == "gemini" {
-                            Text("Agentman runs on your Gemini API key, kept in your Keychain.")
-                            Link("Get a key", destination: URL(string: "https://aistudio.google.com/apikey")!)
+                            Link("Get a Gemini key", destination: URL(string: "https://aistudio.google.com/apikey")!)
                         } else {
-                            Text("Agentman runs on your Anthropic API key, kept in your Keychain.")
-                            Link("Get a key", destination: URL(string: "https://console.anthropic.com/settings/keys")!)
+                            Link("Get an Anthropic key", destination: URL(string: "https://console.anthropic.com/settings/keys")!)
                         }
                     }
                 }
@@ -835,13 +835,26 @@ private struct KeyBox: View {
     @State private var saving = false
     @State private var problem: String?
 
+    private var gemini: Bool { store.manager.provider == "gemini" }
+
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
+            // What Agentman is and why it needs a key, before the key.
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Agentman needs an API key")
+                    .font(TextStyle.bodyMedium)
+                    .foregroundStyle(Palette.text)
+                Text("It reads what your agents are doing, answers their routine requests, and tells you what needs you. "
+                     + "It runs on your own \(gemini ? "Gemini" : "Anthropic") key, kept in your Mac's Keychain and only sent to \(gemini ? "Google" : "Anthropic").")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 6)
             HStack(spacing: 10) {
                 Image(systemName: "key")
                     .foregroundStyle(Palette.muted)
-                SecureField(store.manager.provider == "gemini"
-                    ? "Paste your Gemini API key to start" : "Paste your Anthropic API key to start", text: $key)
+                SecureField(gemini ? "Paste your Gemini API key" : "Paste your Anthropic API key", text: $key)
                     .textFieldStyle(.plain)
                     .font(Fonts.sans(15))
                     .onSubmit(save)
