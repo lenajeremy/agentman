@@ -69,6 +69,16 @@ final class SidebarSectionsTests: XCTestCase {
         XCTAssertEqual(names(SidebarSections.make([asking], choices: choices, now: now))[1], "needsYou:asking")
     }
 
+    // The Agentman row says one thing, the most pressing, in words.
+    func testTheAgentmanRowSaysOneThing() {
+        XCTAssertEqual(AgentmanCard.summary(decisions: 2, waiting: 3, unread: 4, working: 1, connected: true), "2 things need you")
+        XCTAssertEqual(AgentmanCard.summary(decisions: 0, waiting: 1, unread: 4, working: 1, connected: true), "1 agent needs you")
+        XCTAssertEqual(AgentmanCard.summary(decisions: 0, waiting: 0, unread: 3, working: 1, connected: true), "3 new messages")
+        XCTAssertEqual(AgentmanCard.summary(decisions: 0, waiting: 0, unread: 0, working: 2, connected: true), "2 agents working")
+        XCTAssertEqual(AgentmanCard.summary(decisions: 0, waiting: 0, unread: 0, working: 0, connected: true), "All quiet")
+        XCTAssertEqual(AgentmanCard.summary(decisions: 0, waiting: 0, unread: 0, working: 0, connected: false), "Not connected")
+    }
+
     // Pins keep the order they were pinned in, whatever the agents do.
     func testPinsStayOnTopInTheirOrder() {
         let sessions = [session("a", .idle, minutesAgo: 1), session("b", .busy, minutesAgo: 2), session("c", .idle, minutesAgo: 3)]
