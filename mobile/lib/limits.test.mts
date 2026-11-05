@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  checkedLabel, elapsed, evenLeft, leftPercent, orderedWindows, pace, resetsLabel, span,
+  checkedLabel, elapsed, evenLeft, leftPercent, LIMITS_FOOTNOTE, orderedWindows, pace, resetsLabel, span,
 } from "./limits.ts";
 import { decodeDaemonEvent, type LimitWindow } from "./protocol.ts";
+import { agentColor } from "./usage.ts";
 
 const now = 1_800_000_000_000;
 const hour = 3_600_000;
@@ -82,4 +83,35 @@ test("a limits event is read, and a malformed one dropped", () => {
     type: "limits",
     limits: { agents: [{ kind: "claude", checkedAt: now, windows: [{ id: "a", kind: "session", label: "Session", used: "38" }] }] },
   }), null, "a share that isn't a number");
+});
+
+// Antigravity's quotas, as agy 1.5.1 gave them: a session and a week for
+// each group of models, the sessions not used yet. They come through, the
+// sessions first, in Antigravity's colour, and the footnote names it.
+test("Antigravity's quotas are read and ordered", () => {
+  const event = decodeDaemonEvent({
+    type: "limits",
+    limits: {
+      agents: [{
+        kind: "antigravity", checkedAt: now,
+        windows: [
+          { id: "gemini-weekly", kind: "weekly", label: "Weekly · Gemini", used: 1.5, resetsAt: now + 93 * hour, minutes: 10080 },
+          { id: "gemini-5h", kind: "session", label: "Session · Gemini", used: 0, minutes: 300 },
+          { id: "3p-weekly", kind: "weekly", label: "Weekly · Claude & GPT", used: 50.4, resetsAt: now + 142 * hour, minutes: 10080 },
+          { id: "3p-5h", kind: "session", label: "Session · Claude & GPT", used: 0, minutes: 300 },
+          { id: "gemini-argon-wtu-weekly", kind: "weekly", label: "Weekly · Gemini 4 Argon", used: 11.3, resetsAt: now + 93 * hour, minutes: 10080 },
+        ],
+      }],
+    },
+  });
+  assert.ok(event?.limits);
+  const agent = event.limits.agents[0];
+  const windows = agent.windows ?? [];
+  assert.equal(agent.kind, "antigravity");
+  assert.deepEqual(orderedWindows(windows).map((w) => w.id),
+    ["gemini-5h", "3p-5h", "gemini-weekly", "3p-weekly", "gemini-argon-wtu-weekly"]);
+  assert.equal(resetsLabel(windows[1], now), null, "a session not used yet");
+  assert.equal(leftPercent(windows[2]), 50);
+  assert.equal(agentColor("antigravity", false), "#7C5CE6");
+  assert.match(LIMITS_FOOTNOTE, /Antigravity/);
 });

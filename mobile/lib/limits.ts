@@ -6,7 +6,7 @@ import type { AgentLimits, LimitWindow } from "./protocol";
  */
 
 export const LIMITS_FOOTNOTE =
-  "Read from Claude Code and Codex on your Mac, as their own /usage and /status show. Other agents don't report plan limits.";
+  "Read from Claude Code, Codex and Antigravity on your Mac, as their own /usage and /status show. Other agents don't report plan limits.";
 
 export type Pace = "ahead" | "on" | "under";
 
