@@ -322,7 +322,7 @@ struct AgentThreadView: View {
                         // The question is part of the conversation, so it
                         // scrolls with it and is never squeezed to fit.
                         if let question = session.question {
-                            QuestionCard(session: session, question: question)
+                            QuestionCard(session: session, question: question, typedInComposer: true)
                                 .id("question")
                         }
                         // Below the last message, so following the thread
@@ -435,7 +435,8 @@ struct AgentThreadView: View {
                     attachments: session.canReceive ? $attachments : nil,
                     session: session,
                     placeholder: placeholder,
-                    enabled: session.canReceive && !sending && !readingPanel && session.question == nil && store.status == .connected,
+                    enabled: session.canReceive && !sending && !readingPanel && store.status == .connected
+                        && (session.question == nil || session.question?.takesTypedAnswer == true),
                     slash: slash,
                     onDropTargeted: { dropping = $0 },
                     onSend: send
@@ -585,7 +586,10 @@ struct AgentThreadView: View {
             if session.kind == "muse" { return "Open in a terminal: close it there to message it from here" }
             return "Start this agent with am \(session.kind) to message it from here"
         }
-        if session.question != nil { return "Answer the question above first" }
+        if let question = session.question {
+            if question.takesTypedAnswer { return "Type an answer, or pick one above" }
+            return question.isApproval ? "Approve or deny above to continue" : "Pick an answer above to continue"
+        }
         if session.inject == "hook" {
             return "Message \(session.name): it reads it when its turn ends (start it with am \(session.kind) to type in directly)"
         }
@@ -595,6 +599,16 @@ struct AgentThreadView: View {
     private func send() {
         var text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { return }
+        // While a question takes a typed answer, what is typed is the answer.
+        if let question = session.question, question.takesTypedAnswer {
+            guard !text.isEmpty else { return }
+            sending = true
+            Task {
+                if await store.answer(session.id, question: question, reply: QuestionReply(text: text)) { draft = "" }
+                sending = false
+            }
+            return
+        }
         // A panel command sent bare is read off the agent's terminal, since it
         // never reaches the transcript; a bare /model would leave a picker
         // open there.

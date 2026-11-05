@@ -7,6 +7,9 @@ struct QuestionCard: View {
     @Environment(AgentsStore.self) private var store
     let session: Session
     let question: Question
+    /// A typed answer goes in the thread's own message box, so the card
+    /// shows no second box for it.
+    var typedInComposer = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -24,11 +27,25 @@ struct QuestionCard: View {
                     .font(TextStyle.body)
                     .foregroundStyle(Palette.textSecondary)
             }
-            QuestionChoices(question: question) { reply in
+            QuestionChoices(question: question, typed: !typedInComposer) { reply in
                 await store.answer(session.id, question: question, reply: reply)
             }
         }
         .modifier(DecisionPanel())
+    }
+}
+
+extension Question {
+    /// Whether it takes a typed answer as well as its options.
+    var takesTypedAnswer: Bool { custom == true && multiple != true }
+
+    /// Whether it asks for permission to do something: its options say yes
+    /// or allow, rather than offering answers.
+    var isApproval: Bool {
+        options.contains {
+            let label = $0.label.lowercased()
+            return label.hasPrefix("yes") || label.hasPrefix("allow") || label.hasPrefix("approve")
+        }
     }
 }
 
@@ -84,6 +101,8 @@ struct QuestionChoices: View {
     var suggested: String?
     /// The typed answer's box, which in Agentman's chat is for Agentman.
     var typedPrompt = "Or type an answer"
+    /// Whether to show that box: not where the message box below takes it.
+    var typed = true
     let answer: (QuestionReply) async -> Bool
     @State private var note = ""
     @State private var noting: QuestionOption?
@@ -101,7 +120,7 @@ struct QuestionChoices: View {
                 singleChoice
             }
 
-            if question.custom == true, question.multiple != true, noting == nil {
+            if typed, question.custom == true, question.multiple != true, noting == nil {
                 HStack {
                     TextField(typedPrompt, text: $note)
                         .textFieldStyle(.roundedBorder)
