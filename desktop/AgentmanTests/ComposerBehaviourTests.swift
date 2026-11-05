@@ -94,7 +94,7 @@ final class ComposerBehaviourTests: XCTestCase {
         let full = field.frame.height
         let font = MessageField.font(14)
         let line = ceil(font.ascender - font.descender + font.leading + MessageField.lineSpacing)
-        XCTAssertEqual(full, line * 10, accuracy: 2, "Ten lines at most")
+        XCTAssertEqual(full, line * CGFloat(MessageField.defaultMaxLines), accuracy: 2, "Seven lines at most")
         XCTAssertGreaterThan(text.frame.height, field.contentSize.height + line * 5, "The rest is there to scroll to")
 
         // No scroller shows, and the wheel still scrolls.

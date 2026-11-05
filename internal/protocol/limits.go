@@ -2,8 +2,8 @@ package protocol
 
 // Limits: how much of each agent's plan is left in each of its windows (a
 // Claude subscription's five hours and its week, a ChatGPT plan's for
-// Codex), as each agent itself reports it. The phone and the Mac draw the
-// same answer.
+// Codex, Antigravity's for each group of its models), as each agent itself
+// reports it. The phone and the Mac draw the same answer.
 
 const (
 	// ReqLimits asks what is left of each agent's plan, answered with an

@@ -63,6 +63,11 @@ final class EditorRegistry {
         return store
     }
 
+    /// The editor whose window is in front, if an editor's is.
+    var keyEditor: EditorStore? {
+        stores.values.first { $0.window?.isKeyWindow == true }
+    }
+
     /// Every file with unsaved edits, in any folder.
     var unsaved: [EditorDocument] {
         stores.values.flatMap { $0.documents.filter(\.isDirty) }
@@ -123,6 +128,8 @@ final class EditorStore {
     /// What the panel shows: nil until it first opens, when it picks the
     /// agent working on the folder.
     var panelRoute: PanelRoute?
+    /// The status bar's Usage popover is open.
+    var showUsage = false
     /// Asked to show the agent working on the folder, as `am open` asks:
     /// done once the agents are known.
     var showsFolderAgent = false
@@ -505,7 +512,7 @@ final class EditorStore {
     /// A new shell beside the one in front, in the same tab.
     func splitTerminal() {
         guard let active = activeTerminal, splits[active.id] == nil else { return }
-        let session = TerminalSession(folder: root, number: terminals.count + 1)
+        let session = TerminalSession(folder: root, number: terminals.count + 1, command: TerminalSession.testCommand)
         terminals.append(session)
         splits[active.id] = session.id
     }
@@ -517,7 +524,7 @@ final class EditorStore {
 
     /// A new shell in the folder, in front.
     func newTerminal() {
-        let session = TerminalSession(folder: root, number: terminals.count + 1)
+        let session = TerminalSession(folder: root, number: terminals.count + 1, command: TerminalSession.testCommand)
         terminals.append(session)
         activeTerminalID = session.id
         if !showTerminal { showTerminal = true }

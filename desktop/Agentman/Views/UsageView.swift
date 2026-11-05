@@ -11,6 +11,8 @@ struct UsageView: View {
     @Environment(\.detailHeaderLeading) private var headerLeading
     @AppStorage("usageDays") private var days = 30
     @AppStorage("usageMetric") private var metric = UsageMetric.cost
+    /// Cost or Tokens, as last picked, for going back from Limits.
+    @AppStorage("usageSpendMetric") private var spendMetric = UsageMetric.cost
     @AppStorage("usageBreakdown") private var breakdown = UsageBreakdown.model
     /// Each range read so far, shown at once when it is picked again while
     /// it is read afresh.
@@ -60,14 +62,31 @@ struct UsageView: View {
         }
     }
 
+    /// Spending or plan limits: two pages, side by side beside the title.
+    /// Limits used to be a third choice beside Cost and Tokens, though it
+    /// is no measure of spending, and picking it made the header shift.
+    private var tab: Binding<UsageTab> {
+        Binding(get: { metric == .limits ? .limits : .spend }, set: { tab in
+            switch tab {
+            case .limits:
+                if metric != .limits { spendMetric = metric }
+                metric = .limits
+            case .spend:
+                metric = spendMetric == .limits ? .cost : spendMetric
+            }
+        })
+    }
+
     private var header: some View {
         HStack(spacing: 10) {
             Text("Usage").font(Fonts.sans(14, .semibold))
+            Segments(options: UsageTab.allCases, selection: tab) { $0.title }
+                .padding(.leading, 6)
             Spacer()
             if metric != .limits {
                 Segments(options: Self.ranges, selection: $days, title: Self.rangeTitle)
+                Segments(options: [UsageMetric.cost, .tokens], selection: $metric) { $0.title }
             }
-            Segments(options: UsageMetric.allCases, selection: $metric) { $0.title }
             let busy = metric == .limits ? readingLimits : loading
             ChromeButton(symbol: "arrow.clockwise", help: metric == .limits ? "Read limits again" : "Read again") {
                 Task { metric == .limits ? await loadLimits(force: true) : await load() }
@@ -78,6 +97,7 @@ struct UsageView: View {
         .padding(.horizontal, 16)
         .padding(.leading, headerLeading)
         .frame(height: 32)
+        .windowTopBar()
     }
 
     @ViewBuilder private var content: some View {
@@ -184,6 +204,13 @@ struct UsageView: View {
     }
 }
 
+/// The usage page's two pages.
+enum UsageTab: CaseIterable, Hashable {
+    case spend, limits
+
+    var title: String { self == .spend ? "Spending" : "Limits" }
+}
+
 enum UsageMetric: String, CaseIterable {
     case cost, tokens, limits
 
@@ -212,7 +239,7 @@ private struct NothingUsed: View {
             Text(days == 0 ? "Nothing used yet" : days == 1 ? "Nothing used in the past day" : "Nothing used in the past \(days) days")
                 .font(TextStyle.title)
                 .foregroundStyle(Palette.text)
-            Text("Usage is read from Claude Code, Codex, OpenCode and Antigravity's own records on this Mac.")
+            Text("Usage is read from Claude Code, Codex, OpenCode, Antigravity, Muse and Kiro's own records on this Mac.")
                 .font(TextStyle.caption)
                 .foregroundStyle(Palette.muted)
         }

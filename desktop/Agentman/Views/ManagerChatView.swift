@@ -37,7 +37,11 @@ struct ManagerChatView: View {
         } else {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
-                    Text("Agentman").font(Fonts.sans(14, .semibold))
+                    // The sidebar beside it already says Agentman; the page
+                    // names itself only while the sidebar is hidden.
+                    if headerLeading > 0 {
+                        Text("Agentman").font(Fonts.sans(14, .semibold))
+                    }
                     Spacer()
                     if !manager.schedules.isEmpty { SchedulesButton() }
                     if !manager.entries.isEmpty {
@@ -49,6 +53,7 @@ struct ManagerChatView: View {
                 .padding(.horizontal, 16)
                 .padding(.leading, headerLeading)
                 .frame(height: 32)
+                .windowTopBar()
                 conversation
             }
                 .navigationTitle("")
@@ -217,6 +222,7 @@ struct ManagerChatView: View {
 /// Agentman's name and the one box to talk to it, while there is no
 /// conversation yet.
 private struct EntryHero: View {
+    @Environment(AgentsStore.self) private var store
     @Binding var draft: String
     @Binding var attachments: [Attachment]
     @Binding var dropping: Bool
@@ -237,10 +243,49 @@ private struct EntryHero: View {
             ManagerBox(draft: $draft, attachments: $attachments, dropping: $dropping, sending: sending, large: true, send: send)
                 .frame(maxWidth: 620)
 
+            // A few questions to start with, once there is someone to ask.
+            if store.status == .connected, !store.manager.needsKey {
+                FlowLayout(spacing: 8) {
+                    ForEach(Self.starters, id: \.self) { question in
+                        StarterChip(text: question) {
+                            draft = question
+                            send()
+                        }
+                    }
+                }
+                .frame(maxWidth: 620)
+                .padding(.top, 6)
+            }
+
             Spacer(minLength: 48)
             Spacer(minLength: 24)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+extension EntryHero {
+    static let starters = ["What needs me?", "What happened while I was away?", "What is everyone working on?"]
+}
+
+/// A question to start the conversation with, asked when clicked.
+private struct StarterChip: View {
+    let text: String
+    let ask: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: ask) {
+            Text(text)
+                .font(TextStyle.caption)
+                .foregroundStyle(hovering ? Palette.text : Palette.textSecondary)
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(hovering ? Palette.fill : Palette.surface, in: Capsule())
+                .overlay(Capsule().strokeBorder(Palette.line))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }
 
@@ -261,7 +306,7 @@ private struct ManagerBox: View {
             Group {
                 if store.status != .connected {
                     ManagerComposer(text: .constant(""), thinking: false, sending: true, large: large,
-                                    placeholder: "Waiting for am serve…", onSend: {}, onStop: {})
+                                    placeholder: "Waiting for Agentman to connect…", onSend: {}, onStop: {})
                 } else if manager.needsKey {
                     KeyBox()
                 } else {
@@ -275,17 +320,17 @@ private struct ManagerBox: View {
 
             Group {
                 if case .unavailable = store.status {
-                    Text("am serve isn't running. Start it in a terminal with **am serve**.")
+                    Text("Not connected.")
                 } else if store.status == .connecting {
                     Text("Connecting…")
                 } else if manager.needsKey {
                     HStack(spacing: 4) {
+                        // The card above says what the key is for.
+                        Text("Don't have one?")
                         if manager.provider == "gemini" {
-                            Text("Agentman runs on your Gemini API key, kept in your Keychain.")
-                            Link("Get a key", destination: URL(string: "https://aistudio.google.com/apikey")!)
+                            Link("Get a Gemini key", destination: URL(string: "https://aistudio.google.com/apikey")!)
                         } else {
-                            Text("Agentman runs on your Anthropic API key, kept in your Keychain.")
-                            Link("Get a key", destination: URL(string: "https://console.anthropic.com/settings/keys")!)
+                            Link("Get an Anthropic key", destination: URL(string: "https://console.anthropic.com/settings/keys")!)
                         }
                     }
                 }
@@ -790,13 +835,26 @@ private struct KeyBox: View {
     @State private var saving = false
     @State private var problem: String?
 
+    private var gemini: Bool { store.manager.provider == "gemini" }
+
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
+            // What Agentman is and why it needs a key, before the key.
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Agentman needs an API key")
+                    .font(TextStyle.bodyMedium)
+                    .foregroundStyle(Palette.text)
+                Text("It reads what your agents are doing, answers their routine requests, and tells you what needs you. "
+                     + "It runs on your own \(gemini ? "Gemini" : "Anthropic") key, kept in your Mac's Keychain and only sent to \(gemini ? "Google" : "Anthropic").")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 6)
             HStack(spacing: 10) {
                 Image(systemName: "key")
                     .foregroundStyle(Palette.muted)
-                SecureField(store.manager.provider == "gemini"
-                    ? "Paste your Gemini API key to start" : "Paste your Anthropic API key to start", text: $key)
+                SecureField(gemini ? "Paste your Gemini API key" : "Paste your Anthropic API key", text: $key)
                     .textFieldStyle(.plain)
                     .font(Fonts.sans(15))
                     .onSubmit(save)

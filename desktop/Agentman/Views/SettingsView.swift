@@ -52,7 +52,9 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Palette.paper)
         }
-        .frame(width: 800, height: 580)
+        // As large as it's made: long pages and lists get the room. No smaller
+        // than its pages need.
+        .frame(minWidth: 800, idealWidth: 880, maxWidth: .infinity, minHeight: 580, idealHeight: 680, maxHeight: .infinity)
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .onAppear { draft = store.manager.settings }
         .onChange(of: store.manager.settings) { _, settings in
@@ -237,10 +239,7 @@ private struct GeneralPage: View {
     @Binding var draft: ManagerSettings?
 
     var body: some View {
-        let settings = store.manager.settings
-        KeySection(provider: "anthropic", saved: settings?.anthropicKeySet ?? settings?.keySet == true)
-        KeySection(provider: "gemini", saved: settings?.geminiKeySet == true)
-
+        // Agentman's API keys are on the Keys page, with the agents' keys.
         AppearanceSection()
         EditorSection()
 
@@ -285,7 +284,7 @@ private struct GeneralPage: View {
                     "gemini": settings?.geminiKeySet == true]
         let missing = Set([draft.chatModel, draft.briefModel].map(ManagerSettings.provider(of:))).filter { keys[$0] != true }
         guard let engine = missing.sorted().first else { return nil }
-        return "Add your \(engine == "gemini" ? "Gemini" : "Anthropic") API key above to use these models."
+        return "Add your \(engine == "gemini" ? "Gemini" : "Anthropic") API key in Keys to use these models."
     }
 
     private func modelPicker(_ selection: Binding<String>) -> some View {
@@ -303,7 +302,7 @@ private struct GeneralPage: View {
 }
 
 /// One engine's API key: whether it is saved, and a field to save one.
-private struct KeySection: View {
+struct KeySection: View {
     @Environment(AgentsStore.self) private var store
     let provider: String
     let saved: Bool
@@ -857,7 +856,7 @@ struct VoiceSection: View {
                         // became a mailto link.
                         TextField("", text: $email, prompt: Text(verbatim: "you@example.com"))
                             .textFieldStyle(.roundedBorder)
-                            .frame(width: 210)
+                            .frame(width: 180)
                             .onSubmit(start)
                         Button("Send Code", action: start)
                             .disabled(!email.contains("@") || busy)

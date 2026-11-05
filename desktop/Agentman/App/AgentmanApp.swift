@@ -75,13 +75,27 @@ struct AgentmanApp: App {
             }
             CommandMenu("Go") {
                 Button("Command Palette…") {
-                    openWindow(id: "main")
+                    // Over the window in front: an editor's, or the main one.
+                    if let editor = EditorRegistry.shared.keyEditor {
+                        store.paletteEditor = editor.root.path
+                    } else {
+                        store.paletteEditor = nil
+                        openWindow(id: "main")
+                    }
                     store.showPalette = true
                 }
                 .keyboardShortcut("k", modifiers: .command)
                 Button("Agentman") { openWindow(id: "main"); store.selection = .manager }
                     .keyboardShortcut("0", modifiers: [.command, .option])
-                Button("Usage") { openWindow(id: "main"); store.selection = .usage }
+                Button("Usage") {
+                    // In an editor, its own Usage, without leaving it.
+                    if let editor = EditorRegistry.shared.keyEditor {
+                        editor.showUsage = true
+                    } else {
+                        openWindow(id: "main")
+                        store.selection = .usage
+                    }
+                }
                 Button("What Happened While I Was Away") {
                     openWindow(id: "main")
                     store.showAway(since: store.away.last?.since ?? Date().addingTimeInterval(-3600))
@@ -99,12 +113,16 @@ struct AgentmanApp: App {
         }
         .defaultSize(width: 1560, height: 980)
         .windowStyle(.hiddenTitleBar)
+        // As small as its content allows and no smaller (EditorWindow's
+        // minimum), so its columns never run past the window's edge.
+        .windowResizability(.contentMinSize)
         .commands { EditorCommands() }
 
         Settings {
             SettingsView()
                 .environment(store)
         }
+        .windowResizability(.contentMinSize)
     }
 }
 

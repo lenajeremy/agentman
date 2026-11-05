@@ -49,6 +49,31 @@ struct EditorWindow: View {
     @State private var keyMonitor: Any?
     @AppStorage("terminalHeight") private var terminalHeight = 260.0
     @AppStorage("agentPanelWidth") private var panelWidth = 400.0
+    /// The window's size, kept as it changes, for what is sized by it.
+    @State private var size = CGSize(width: 1200, height: 800)
+
+    /// The least the window is: the tree (240) and room for the code (320),
+    /// with the status bar's room; and with the agent's panel (300) open.
+    static let minimumWidth: CGFloat = 640
+    static let minimumWithPanel: CGFloat = 880
+    static let minimumHeight: CGFloat = 420
+    /// The most of the window the agent's panel takes, so the code keeps
+    /// room beside it.
+    static let panelShare = 0.4
+
+    /// The agent's panel as dragged, but no more than its share of the
+    /// window, nor than leaves the tree and the code their room; never under
+    /// its own least.
+    static func panelWidth(dragged: Double, window: CGFloat) -> CGFloat {
+        let room = window - 240 - 320 - 2
+        return max(CGFloat(ColumnDivider.minimum), min(CGFloat(dragged), window * panelShare, room))
+    }
+
+    /// The terminal as dragged, but no more than 40% of a short window, so
+    /// the code keeps some lines above it.
+    static func terminalHeight(dragged: Double, window: CGFloat) -> CGFloat {
+        min(CGFloat(dragged), max(120, window * 0.4))
+    }
 
     init(folder: String, client: DaemonClient) {
         let store = EditorRegistry.shared.store(for: folder)
@@ -60,8 +85,9 @@ struct EditorWindow: View {
         VStack(spacing: 0) {
             editorHeader
             HSplitView {
+            // Dragged wider or narrower at its edge, within reason.
             FileTree(store: store, naming: $naming)
-                .frame(width: 240)
+                .frame(minWidth: 180, idealWidth: 240, maxWidth: 420)
 
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
@@ -89,11 +115,11 @@ struct EditorWindow: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         if store.showTerminal {
-                            PanelDivider(height: $terminalHeight, maximum: (store.window?.frame.height ?? 800) * 0.75)
+                            PanelDivider(height: $terminalHeight, maximum: size.height * 0.75)
                                 .padding(.vertical, -3)
                                 .zIndex(1)
                             TerminalPanel(store: store, hide: { store.showTerminal = false })
-                                .frame(height: terminalHeight)
+                                .frame(height: Self.terminalHeight(dragged: terminalHeight, window: size.height))
                         }
                     }
                     .frame(minWidth: 320)
@@ -107,21 +133,34 @@ struct EditorWindow: View {
                     // Agentman beside the code: the folder's agent, or any
                     // other, and Agentman itself.
                     if store.showAgentPanel {
-                        ColumnDivider(width: $panelWidth, maximum: (store.window?.frame.width ?? 1200) * 0.6)
+                        ColumnDivider(width: $panelWidth, maximum: Self.panelWidth(dragged: .infinity, window: size.width))
                             .zIndex(1)
                         AgentPanel(editor: store)
-                            .frame(width: min(panelWidth, max((store.window?.frame.width ?? 1200) * 0.6, ColumnDivider.minimum)))
+                            .frame(width: Self.panelWidth(dragged: panelWidth, window: size.width))
                             .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
                 }
-                StatusBar(store: store)
             }
             .background(Palette.paper)
             .animation(.easeOut(duration: 0.18), value: store.showAgentPanel)
             }
+            // Across the whole window, under the tree too, so what it says
+            // has room at any width.
+            StatusBar(store: store)
         }
+        // Never narrower than what it shows: the tree, room for the code,
+        // and the agent's panel when it is open. Opening the panel in a
+        // narrow window widens the window.
+        .frame(minWidth: store.showAgentPanel ? Self.minimumWithPanel : Self.minimumWidth, minHeight: Self.minimumHeight)
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
         .background(Palette.paper)
         .ignoresSafeArea(.container, edges: .top)
+        // ⌘K, over this editor: agents open in its panel.
+        .overlay {
+            if agents.showPalette, agents.paletteEditor == store.root.path {
+                CommandPalette(editor: store)
+            }
+        }
         // An image from the agent panel, full size over the editor.
         .overlay {
             if let box = agents.lightbox, box.place == store.root.path {
@@ -208,11 +247,14 @@ struct EditorWindow: View {
             }
             .padding(.leading, headerLeading)
             .frame(width: 240, alignment: .leading)
-            Image(systemName: "folder").foregroundStyle(Palette.muted)
-            Text(store.name).font(Fonts.sans(13, .medium))
+            // The folder is named above the tree; up here, its branch.
             if let branch = store.branch {
-                Text("/").foregroundStyle(Palette.faint)
-                Text(branch).font(Fonts.sans(12)).foregroundStyle(Palette.muted)
+                Label(branch, systemImage: "arrow.triangle.branch")
+                    .labelStyle(.titleAndIcon)
+                    .font(Fonts.sans(12.5, .medium))
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                    .help("The branch checked out in \(store.name)")
             }
             Spacer(minLength: 8)
             ChromeButton(symbol: "magnifyingglass", help: "Go to file (⌘P)") { store.quickOpen = true }
@@ -224,8 +266,8 @@ struct EditorWindow: View {
         }
         .padding(.trailing, 14)
         .frame(height: 32)
-        .background(Palette.paper)
         .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
+        .windowTopBar()
     }
 
     /// ⌘W closes the tab in front, and the window once no tab is left.
@@ -304,13 +346,8 @@ private struct FileTree: View {
         let filter = store.treeFilter?.trimmingCharacters(in: .whitespaces) ?? ""
         List(selection: $store.selection) {
             if filter.isEmpty {
-                Section {
-                    FileTreeLevel(store: store, folder: "")
-                } header: {
-                    Text(store.name)
-                        .font(TextStyle.label)
-                        .foregroundStyle(Palette.faint)
-                }
+                // The folder's name is the header above the tree.
+                FileTreeLevel(store: store, folder: "")
             } else {
                 // What / found, as paths, best first.
                 Section {
@@ -333,15 +370,25 @@ private struct FileTree: View {
         .background(SiblingReader<NSOutlineView> { store.treeView = $0 })
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
-                HStack {
-                    Text("Files").font(Fonts.sans(12, .medium))
-                    Spacer()
+                // The folder this editor is for, where the tree starts; as
+                // tall as the tabs beside it and the agent panel's header,
+                // with the same line under it, so the three read as one row.
+                HStack(spacing: 6) {
+                    Text(store.name)
+                        .font(Fonts.sans(12.5, .semibold))
+                        .foregroundStyle(Palette.text)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help((store.root.path as NSString).abbreviatingWithTildeInPath)
+                    Spacer(minLength: 4)
                     ChromeButton(symbol: "doc.badge.plus", help: "New file") { naming = Naming(kind: .file, folder: "") }
                     ChromeButton(symbol: "folder.badge.plus", help: "New folder") { naming = Naming(kind: .folder, folder: "") }
                 }
                 .foregroundStyle(Palette.muted)
-                .padding(.horizontal, 14)
-                .frame(height: 42)
+                .padding(.leading, 14)
+                .padding(.trailing, 10)
+                .frame(height: 38)
+                .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
                 if store.treeFilter != nil {
                 TreeFilterBar(store: store)
                     .task { await store.loadAllFiles() }
@@ -451,12 +498,10 @@ private struct FileRow: View {
             if store.renamingInTree == entry.path {
                 TreeRenameField(store: store, entry: entry)
             } else {
-                Text(entry.name)
+                FileNameText(name: entry.name)
                     .font(Fonts.sans(12.5))
                     .foregroundStyle(store.marked.contains(entry.path) ? Palette.workingText : mark?.tint ?? (quiet ? Palette.faint : Palette.text))
                     .strikethrough(mark == .deleted)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
             }
             Spacer(minLength: 4)
             if store.marked.contains(entry.path) {
@@ -1129,14 +1174,11 @@ private struct StatusBar: View {
                     .foregroundStyle(Palette.textSecondary)
                     .transition(.opacity)
             }
-            if let branch = store.branch {
-                Label(branch, systemImage: "arrow.triangle.branch")
-                    .labelStyle(.titleAndIcon)
-            }
             if !store.marks.isEmpty {
                 Text("\(store.marks.count) changed")
             }
             Spacer()
+            UsageItem(store: store)
             if let document = store.active {
                 if document.kind == .text {
                     ProblemCount(store: store, problems: document.problems)
@@ -1154,6 +1196,52 @@ private struct StatusBar: View {
         .frame(height: 24)
         .background(Palette.paper)
         .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 1) }
+    }
+}
+
+/// A file's name cut at its end where it doesn't fit, keeping its
+/// extension: "ApplePayBu….tsx", not "ApplePa…utton.tsx". The whole name
+/// shows on hover.
+struct FileNameText: View {
+    let name: String
+
+    var body: some View {
+        let parts = Self.split(name)
+        HStack(spacing: 0) {
+            Text(parts.stem).lineLimit(1).truncationMode(.tail)
+            if !parts.ext.isEmpty { Text(parts.ext).lineLimit(1).fixedSize() }
+        }
+        .help(name)
+    }
+
+    /// The name before its extension, and the extension with its dot; a
+    /// name that starts with a dot (.env) is all stem.
+    nonisolated static func split(_ name: String) -> (stem: String, ext: String) {
+        guard let dot = name.lastIndex(of: "."), dot != name.startIndex else { return (name, "") }
+        let ext = String(name[dot...])
+        guard ext.count <= 8 else { return (name, "") }
+        return (String(name[..<dot]), ext)
+    }
+}
+
+/// Usage, in the status bar: opens what the agents spent and what is left
+/// of each plan, over the editor.
+private struct UsageItem: View {
+    @Bindable var store: EditorStore
+    @State private var hovering = false
+
+    var body: some View {
+        Button { store.showUsage.toggle() } label: {
+            Label("Usage", systemImage: "chart.xyaxis.line")
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(hovering || store.showUsage ? Palette.text : Palette.muted)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("What your agents spent, and what's left of each plan")
+        .popover(isPresented: $store.showUsage, arrowEdge: .top) {
+            UsagePopover { store.showUsage = false }
+        }
     }
 }
 
@@ -1499,6 +1587,18 @@ struct EditorCommands: Commands {
 
 /// A single title row: the content fills the frame behind native controls.
 @MainActor
+extension View {
+    /// A window's top bar: drawn over what is below it, and given its
+    /// clicks first. In a normal window the title bar is a strip of the
+    /// window's own content, and a scroller or the editor's panes below a
+    /// bar reach up under that strip; without this they draw over the bar
+    /// and take the clicks meant for its buttons. Full screen has no title
+    /// bar, which is why the bars only worked there.
+    func windowTopBar() -> some View {
+        background(Palette.paper).zIndex(1)
+    }
+}
+
 enum WindowChrome {
     static func leading(_ window: NSWindow) -> CGFloat {
         window.styleMask.contains(.fullScreen) ? 16 : 82

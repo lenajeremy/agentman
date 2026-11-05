@@ -6,11 +6,14 @@ import Foundation
 /// with, out of the way but not gone.
 nonisolated struct SidebarSections: Equatable, Sendable {
     var pinned: [Session] = []
+    /// Waiting on you: an approval or a question. First after the pins, so
+    /// they never sink under the busy ones.
+    var needsYou: [Session] = []
     var active: [Session] = []
     var working: [Session] = []
     var archived: [Session] = []
 
-    var isEmpty: Bool { pinned.isEmpty && active.isEmpty && working.isEmpty && archived.isEmpty }
+    var isEmpty: Bool { pinned.isEmpty && needsYou.isEmpty && active.isEmpty && working.isEmpty && archived.isEmpty }
 
     /// An agent idle this long is archived by itself.
     static let archiveAfter: TimeInterval = 3 * 24 * 60 * 60
@@ -31,6 +34,8 @@ nonisolated struct SidebarSections: Equatable, Sendable {
                 sections.archived.append(session)
             } else if choices.pinned.contains(session.id) {
                 pinned[session.id] = session
+            } else if AgentsStore.filterState(session) == .waitingInput {
+                sections.needsYou.append(session)
             } else if AgentsStore.filterState(session) == .busy {
                 sections.working.append(session)
             } else {
@@ -39,13 +44,9 @@ nonisolated struct SidebarSections: Equatable, Sendable {
         }
         sections.pinned = choices.pinned.compactMap { pinned[$0] }
         let recent: (Session, Session) -> Bool = { ($0.lastActivityAt ?? 0) > ($1.lastActivityAt ?? 0) }
-        // What asks for you leads; then whatever came back to you last.
-        sections.active.sort { a, b in
-            let waitingA = AgentsStore.filterState(a) == .waitingInput
-            let waitingB = AgentsStore.filterState(b) == .waitingInput
-            if waitingA != waitingB { return waitingA }
-            return recent(a, b)
-        }
+        // Whatever came back to you last first.
+        sections.needsYou.sort(by: recent)
+        sections.active.sort(by: recent)
         sections.working.sort(by: recent)
         sections.archived.sort(by: recent)
         return sections
@@ -68,6 +69,6 @@ nonisolated struct SidebarSections: Equatable, Sendable {
     /// Every agent shown, in the order the sidebar lists them, with the
     /// collapsed sections left out: what the arrow keys step through.
     func shown(working workingOpen: Bool, archived archivedOpen: Bool) -> [Session] {
-        pinned + (workingOpen ? working : []) + active + (archivedOpen ? archived : [])
+        pinned + needsYou + (workingOpen ? working : []) + active + (archivedOpen ? archived : [])
     }
 }

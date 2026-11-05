@@ -49,7 +49,8 @@ struct PaletteView: View {
     var body: some View {
         let items = results(query)
         ZStack(alignment: .top) {
-            Color.black.opacity(0.001)
+            // The window dimmed behind it, so it reads as in front.
+            Color.black.opacity(0.12)
                 .contentShape(Rectangle())
                 .onTapGesture(perform: dismiss)
             VStack(spacing: 0) {
@@ -110,15 +111,14 @@ struct PaletteView: View {
                             if items.indices.contains(now) { proxy.scrollTo(items[now].id) }
                         }
                     }
-                    if let status {
-                        Divider()
-                        Text(status)
-                            .font(TextStyle.caption)
-                            .foregroundStyle(Palette.faint)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 7)
-                    }
+                    Divider()
+                    // What it's doing, or how to use it.
+                    Text(status ?? Self.hints)
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.faint)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 7)
                 } else if !query.isEmpty {
                     Divider()
                     Text(status ?? "Nothing matches")
@@ -143,6 +143,8 @@ struct PaletteView: View {
             typed?(query)
         }
     }
+
+    static let hints = "↑↓ to move · ↵ to open · esc to close"
 
     /// A group's heading, over the first of its rows.
     static func heading(_ items: [PaletteItem], at index: Int) -> String? {

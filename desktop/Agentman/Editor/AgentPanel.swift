@@ -293,17 +293,6 @@ private struct AgentmanRow: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 4)
-                let unread = agents.viewingManager ? 0 : agents.manager.unread.count
-                if unread > 0 {
-                    Text(unread > 99 ? "99+" : String(unread))
-                        .font(TextStyle.label)
-                        .monospacedDigit()
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .frame(minWidth: 18, minHeight: 18)
-                        .background(Palette.working, in: Capsule())
-                        .accessibilityLabel("\(unread) new")
-                }
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(Palette.faint)
@@ -319,14 +308,13 @@ private struct AgentmanRow: View {
         !agents.manager.openCards.isEmpty || !agents.needsYou.isEmpty
     }
 
+    /// The same line as the sidebar's Agentman row; when there's nothing
+    /// to say, what this row is for.
     private var summary: String {
-        let cards = agents.manager.openCards.count
-        if cards > 0 { return cards == 1 ? "1 card waiting for you" : "\(cards) cards waiting for you" }
-        let waiting = agents.needsYou.count
-        let working = agents.working.count
-        if waiting > 0 { return waiting == 1 ? "1 agent needs you" : "\(waiting) agents need you" }
-        if working > 0 { return working == 1 ? "1 agent working" : "\(working) agents working" }
-        return "Ask about any of your agents"
+        let line = AgentmanCard.summary(decisions: agents.manager.openCards.count, waiting: agents.needsYou.count,
+                                        unread: agents.viewingManager ? 0 : agents.manager.unread.count,
+                                        working: agents.working.count, connected: agents.status == .connected)
+        return line == "All quiet" ? "Ask about any of your agents" : line
     }
 }
 

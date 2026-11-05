@@ -258,7 +258,7 @@ struct AgentThreadView: View {
         .padding(.horizontal, 18)
         .padding(.leading, headerLeading)
         .frame(height: 32)
-        .background(Palette.paper)
+        .windowTopBar()
     }
 
     /// The conversation and the box under it, in the window or a panel.
@@ -322,7 +322,7 @@ struct AgentThreadView: View {
                         // The question is part of the conversation, so it
                         // scrolls with it and is never squeezed to fit.
                         if let question = session.question {
-                            QuestionCard(session: session, question: question)
+                            QuestionCard(session: session, question: question, typedInComposer: true)
                                 .id("question")
                         }
                         // Below the last message, so following the thread
@@ -428,6 +428,9 @@ struct AgentThreadView: View {
                             resuming = false
                         }
                     }
+                } else if Self.offersTakeOver(session) {
+                    // Started in a terminal: taken over, it is messaged here.
+                    TakeOverBar(session: session, moving: moving) { confirmTakeOver = true }
                 } else {
                 Composer(
                     mentions: mentions,
@@ -435,7 +438,8 @@ struct AgentThreadView: View {
                     attachments: session.canReceive ? $attachments : nil,
                     session: session,
                     placeholder: placeholder,
-                    enabled: session.canReceive && !sending && !readingPanel && session.question == nil,
+                    enabled: session.canReceive && !sending && !readingPanel && store.status == .connected
+                        && (session.question == nil || session.question?.takesTypedAnswer == true),
                     slash: slash,
                     onDropTargeted: { dropping = $0 },
                     onSend: send
@@ -536,6 +540,24 @@ struct AgentThreadView: View {
         session.inject == "none" && session.state == .ended && resumableKinds.contains(session.kind)
     }
 
+    /// A session you can only watch that Agentman can take over from its
+    /// terminal, so it can be messaged here.
+    static func offersTakeOver(_ session: Session) -> Bool {
+        !session.canReceive && session.state != .ended && session.handoff == "agentman"
+    }
+
+    /// What the title says about a thread that can't be talked to: ended, or
+    /// only watched; nil for the rest.
+    nonisolated static func stateLabel(_ session: Session) -> (text: String, help: String)? {
+        if session.state == .ended {
+            return ("Ended", "This session has ended. Its conversation is here to read.")
+        }
+        if !session.canReceive {
+            return ("Watching", "Started outside Agentman: you can follow it here, and message it once it runs through am.")
+        }
+        return nil
+    }
+
     /// A session running in a terminal agentman can close and reopen.
     static func endable(_ session: Session) -> Bool {
         session.inject == "tmux" && resumableKinds.contains(session.kind)
@@ -579,12 +601,17 @@ struct AgentThreadView: View {
     }
 
     private var placeholder: String {
+        if store.status != .connected { return "Can't send while Agentman isn't connected" }
         if !session.canReceive {
+            if session.state == .ended { return "This session has ended" }
             // Muse lets one client drive a session: a terminal has this one.
             if session.kind == "muse" { return "Open in a terminal: close it there to message it from here" }
-            return "Start this agent with am \(session.kind) to message it from here"
+            return "Started outside Agentman: start it with am \(session.kind) to message it here"
         }
-        if session.question != nil { return "Answer the question above first" }
+        if let question = session.question {
+            if question.takesTypedAnswer { return "Type an answer, or pick one above" }
+            return question.isApproval ? "Approve or deny above to continue" : "Pick an answer above to continue"
+        }
         if session.inject == "hook" {
             return "Message \(session.name): it reads it when its turn ends (start it with am \(session.kind) to type in directly)"
         }
@@ -594,6 +621,16 @@ struct AgentThreadView: View {
     private func send() {
         var text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { return }
+        // While a question takes a typed answer, what is typed is the answer.
+        if let question = session.question, question.takesTypedAnswer {
+            guard !text.isEmpty else { return }
+            sending = true
+            Task {
+                if await store.answer(session.id, question: question, reply: QuestionReply(text: text)) { draft = "" }
+                sending = false
+            }
+            return
+        }
         // A panel command sent bare is read off the agent's terminal, since it
         // never reaches the transcript; a bare /model would leave a picker
         // open there.
@@ -719,6 +756,16 @@ private struct ThreadTitle: View {
                     .onHover { hovering = $0 }
                     .help(session.originalName.map { "Click to rename · renamed from “\($0)”" } ?? "Click to rename")
                     .accessibilityLabel("Rename \(session.name)")
+                    if let label = AgentThreadView.stateLabel(session) {
+                        Text(label.text)
+                            .font(TextStyle.label)
+                            .foregroundStyle(Palette.muted)
+                            .padding(.horizontal, 7)
+                            .frame(height: 18)
+                            .background(Palette.fill, in: Capsule())
+                            .fixedSize()
+                            .help(label.help)
+                    }
                 }
             }
         }
@@ -745,6 +792,38 @@ private struct ThreadTitle: View {
         editing = false
         guard !new.isEmpty, new != session.name else { return }
         Task { await store.rename(session.id, to: new) }
+    }
+}
+
+/// In place of the message box for a session started in a terminal, that
+/// Agentman can take over so it is messaged here.
+private struct TakeOverBar: View {
+    let session: Session
+    let moving: Bool
+    let takeOver: () -> Void
+
+    var body: some View {
+        let working = session.state == .busy || session.question != nil || moving
+        HStack(spacing: 12) {
+            Image(systemName: "eye")
+                .foregroundStyle(Palette.muted)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("You're watching this session")
+                    .font(TextStyle.captionMedium)
+                    .foregroundStyle(Palette.text)
+                Text(working ? "It runs in a terminal. You can take it over when this turn ends."
+                             : "It runs in a terminal. Take it over to message it here; its terminal closes.")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
+            }
+            Spacer()
+            Button("Take Over…", action: takeOver)
+                .buttonStyle(.borderedProminent)
+                .disabled(working)
+        }
+        .padding(14)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.line))
     }
 }
 

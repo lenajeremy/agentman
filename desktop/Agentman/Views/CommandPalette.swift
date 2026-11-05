@@ -9,6 +9,10 @@ struct CommandPalette: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
     @AppStorage("settingsTab") private var settingsTab = "general"
+    /// The editor it is open over; nil over the main window. There, agents
+    /// and Agentman open in the editor's panel, and the rest brings the main
+    /// window forward.
+    var editor: EditorStore? = nil
     /// What is typed when it opens; tests open it with a search.
     var query = ""
     /// What the conversations said, for what was typed a moment ago.
@@ -33,8 +37,11 @@ struct CommandPalette: View {
                 if item.id.hasPrefix("ask:") {
                     ask(String(item.id.dropFirst(4)))
                 } else if let said, let hit = said.hits.first(where: { "said:" + $0.id == item.id }) {
+                    // The message, found in the whole thread: the main window's.
+                    if editor != nil { openWindow(id: "main") }
                     store.open(hit, query: said.query)
                 } else {
+                    if editor != nil, !Self.staysInEditor(item.id) { openWindow(id: "main") }
                     commands(for: "").first { $0.item.id == item.id }?.run()
                 }
             },
@@ -86,7 +93,8 @@ struct CommandPalette: View {
     private func results(_ query: String) -> [PaletteItem] {
         let all = commands(for: query)
         let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return all.prefix(40).map(\.item) }
+        // Grouped while nothing is typed; ranked by match once something is.
+        guard !trimmed.isEmpty else { return all.prefix(40).map { Self.grouped($0.item) } }
         var ranked = all
             .filter { !$0.item.id.hasPrefix("ask:") }
             .compactMap { command in
@@ -107,9 +115,42 @@ struct CommandPalette: View {
         return ranked + saidRows(listed: ranked)
     }
 
+    /// A row with the heading of its group: the agent open now, the agents,
+    /// and everything else.
+    nonisolated static func grouped(_ item: PaletteItem) -> PaletteItem {
+        var item = item
+        if item.section == nil {
+            item.section = item.id.hasPrefix("here-") ? "This agent" : item.id.hasPrefix("agent:") ? "Agents" : "Commands"
+        }
+        return item
+    }
+
     private func ask(_ question: String) {
-        store.selection = .manager
+        openAgentman()
         Task { _ = await store.manager.send(question) }
+    }
+
+    /// What, chosen over an editor, happens in the editor itself.
+    nonisolated static func staysInEditor(_ id: String) -> Bool {
+        id.hasPrefix("agent:") || id == "agentman" || id == "usage" || id.hasPrefix("editor:") || id == "open-folder"
+    }
+
+    private func openAgent(_ id: String) {
+        if let editor {
+            editor.panelRoute = .agent(id)
+            editor.showAgentPanel = true
+        } else {
+            store.selection = .agent(id)
+        }
+    }
+
+    private func openAgentman() {
+        if let editor {
+            editor.panelRoute = .agentman
+            editor.showAgentPanel = true
+        } else {
+            store.selection = .manager
+        }
     }
 
     private func commands(for query: String) -> [Command] {
@@ -121,17 +162,17 @@ struct CommandPalette: View {
                                                       icon: "sparkles", tint: Palette.working)) { ask(trimmed) })
         }
 
-        // The agent open now, first.
-        if case .agent(let id) = store.selection, let session = store.session(id) {
+        // The agent open now, first; not over an editor, which has its own.
+        if editor == nil, case .agent(let id) = store.selection, let session = store.session(id) {
             let folder = session.cwd
-            commands.append(Command(item: PaletteItem(id: "here-editor", title: "Open \(session.name)'s Folder in the Editor",
+            commands.append(Command(item: PaletteItem(id: "here-editor", title: "Open Its Folder in the Editor", detail: session.name,
                                                       icon: "chevron.left.forwardslash.chevron.right")) {
                 EditorOpener.open(folder: folder, with: openWindow)
             })
-            commands.append(Command(item: PaletteItem(id: "here-terminal", title: "Open a Terminal for \(session.name)", icon: "terminal")) {
+            commands.append(Command(item: PaletteItem(id: "here-terminal", title: "Open a Terminal in Its Folder", detail: session.name, icon: "terminal")) {
                 RightPanel.showTerminal(in: folder)
             })
-            commands.append(Command(item: PaletteItem(id: "here-rename", title: "Rename \(session.name)…", icon: "pencil")) {
+            commands.append(Command(item: PaletteItem(id: "here-rename", title: "Rename…", detail: session.name, icon: "pencil")) {
                 store.renaming = id
             })
         }
@@ -148,7 +189,7 @@ struct CommandPalette: View {
                                   icon: "circle.fill", tint: Palette.dot(session.state)),
                 keywords: session.cwd + " " + AgentName.of(session.kind)
             ) {
-                store.selection = .agent(session.id)
+                openAgent(session.id)
             })
         }
 
@@ -156,11 +197,11 @@ struct CommandPalette: View {
             store.selection = .newAgent
         })
         commands.append(Command(item: PaletteItem(id: "agentman", title: "Agentman", detail: "the conversation", icon: "bubble.left.and.text.bubble.right")) {
-            store.selection = .manager
+            openAgentman()
         })
         commands.append(Command(item: PaletteItem(id: "usage", title: "Usage", detail: "what the agents spent", icon: "chart.xyaxis.line"),
-                                keywords: "cost tokens spend money") {
-            store.selection = .usage
+                                keywords: "cost tokens spend money limits") {
+            if let editor { editor.showUsage = true } else { store.selection = .usage }
         })
         commands.append(Command(item: PaletteItem(id: "away", title: "What Happened While I Was Away", icon: "clock.arrow.circlepath"),
                                 keywords: "summary catch up") {

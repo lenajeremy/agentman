@@ -13,7 +13,10 @@ struct MessageField: NSViewRepresentable {
     var placeholder: String
     var fontSize: CGFloat = 14
     var enabled = true
-    var maxLines = 10
+    /// Seven lines, then it scrolls: a long draft leaves the conversation
+    /// above it in view. (Ten covered too much of it.)
+    var maxLines = MessageField.defaultMaxLines
+    nonisolated static let defaultMaxLines = 7
     @Binding var focused: Bool
     var onSubmit: () -> Void
     /// Where pasted or dropped images go; nil leaves them to the text view,

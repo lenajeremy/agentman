@@ -37,13 +37,19 @@ struct Sidebar: View {
                 SectionHeading(title: "Pinned")
                 ForEach(sections.pinned) { row($0, match: found.bySession[$0.id]) }
             }
+            // What waits on you, before what is busy: it never sinks below
+            // a long Working list.
+            if !sections.needsYou.isEmpty {
+                SectionHeading(title: "Needs you", count: sections.needsYou.count, tint: Palette.needsYouText)
+                ForEach(sections.needsYou) { row($0, match: found.bySession[$0.id]) }
+            }
             if !sections.working.isEmpty {
                 SectionHeading(title: "Working", count: sections.working.count, open: $workingOpen)
                 if workingOpen {
                     ForEach(sections.working) { row($0, match: found.bySession[$0.id]) }
                 }
-                if !sections.active.isEmpty { SectionRule() }
-            } else if !sections.pinned.isEmpty, !sections.active.isEmpty {
+            }
+            if !sections.active.isEmpty, !(sections.pinned.isEmpty && sections.needsYou.isEmpty && sections.working.isEmpty) {
                 SectionRule()
             }
             ForEach(sections.active) { row($0, match: found.bySession[$0.id]) }
@@ -100,8 +106,13 @@ struct Sidebar: View {
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
                     AgentmanBadge(size: 20)
-                    Text("Agentman").font(Fonts.sans(14, .semibold))
-                    Spacer()
+                    // The name, where it fits whole; at the narrowest the
+                    // mark alone, rather than "Ag…".
+                    ViewThatFits(in: .horizontal) {
+                        Text("Agentman").font(Fonts.sans(14, .semibold)).fixedSize()
+                        Color.clear.frame(width: 0, height: 0)
+                    }
+                    Spacer(minLength: 0)
                     ChromeButton(symbol: "sidebar.left", help: "Hide the sidebar (⌃⌘S)") { hidden = true }
                 }
                 .padding(.leading, headerLeading)
@@ -163,14 +174,32 @@ struct Sidebar: View {
         }
         .overlay {
             if store.sessions.isEmpty, store.status == .connected {
-                ContentUnavailableView(
-                    "No agents yet",
-                    systemImage: "sparkles",
-                    description: Text("Start one with am claude or am codex in a terminal.")
-                )
+                ContentUnavailableView {
+                    Label("No agents yet", systemImage: "sparkles")
+                } description: {
+                    Text("Start one here, or with am claude or am codex in a terminal.")
+                } actions: {
+                    SmallButton(title: "New Agent", symbol: "square.and.pencil", primary: true) { store.selection = .newAgent }
+                }
                 .padding(.top, 120)
+            } else if Self.foundNothing(query: store.search, sections: store.sidebar, hits: store.sidebarHits) {
+                // A search with nothing to show says so, instead of a blank list.
+                ContentUnavailableView {
+                    Label("Nothing found", systemImage: "magnifyingglass")
+                } description: {
+                    Text(store.folderFilter != nil || store.stateFilter != nil
+                         ? "No agent matches \u{201C}\(store.search.trimmingCharacters(in: .whitespaces))\u{201D} with these filters."
+                         : "No agent or message matches \u{201C}\(store.search.trimmingCharacters(in: .whitespaces))\u{201D}.")
+                }
+                .padding(.top, 60)
             }
         }
+    }
+
+    /// A search that found no agent and no message, and isn't still looking.
+    nonisolated static func foundNothing(query: String, sections: SidebarSections, hits: SidebarHits) -> Bool {
+        !query.trimmingCharacters(in: .whitespaces).isEmpty && sections.isEmpty && hits.others.isEmpty
+            && !hits.searching && !hits.indexing
     }
 
     /// The archived, at the foot of the list under a heading that folds
@@ -328,7 +357,7 @@ private enum SidebarMetrics {
 
 /// Agentman, pinned at the top: its mark, what it has to say, and anything
 /// new since the user last looked.
-private struct AgentmanCard: View {
+struct AgentmanCard: View {
     @Environment(AgentsStore.self) private var store
     @State private var hovering = false
 
@@ -348,16 +377,6 @@ private struct AgentmanCard: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 4)
-                if unread > 0 {
-                    Text(unread > 99 ? "99+" : String(unread))
-                        .font(TextStyle.label)
-                        .monospacedDigit()
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .frame(minWidth: 18, minHeight: 18)
-                        .background(Palette.working, in: Capsule())
-                        .accessibilityLabel("\(unread) new")
-                }
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 8)
@@ -397,20 +416,29 @@ private struct AgentmanCard: View {
         store.manager.openCards.count > 0 || !store.needsYou.isEmpty
     }
 
+    /// One line, the most pressing thing first: what Agentman needs you to
+    /// decide, agents waiting on you, what it said since you last looked,
+    /// who is working. One number, in words; there used to be a badge too,
+    /// counting something else.
     private var summary: String {
-        let cards = store.manager.openCards.count
-        if cards > 0 { return cards == 1 ? "1 card waiting for you" : "\(cards) cards waiting for you" }
-        let waiting = store.needsYou.count
-        let working = store.working.count
+        Self.summary(decisions: store.manager.openCards.count, waiting: store.needsYou.count, unread: unread,
+                     working: store.working.count, connected: store.status == .connected)
+    }
+
+    nonisolated static func summary(decisions: Int, waiting: Int, unread: Int, working: Int, connected: Bool) -> String {
+        if decisions > 0 { return decisions == 1 ? "1 thing needs you" : "\(decisions) things need you" }
         if waiting > 0 { return waiting == 1 ? "1 agent needs you" : "\(waiting) agents need you" }
+        if unread > 0 { return unread == 1 ? "1 new message" : "\(unread) new messages" }
         if working > 0 { return working == 1 ? "1 agent working" : "\(working) agents working" }
-        return "All quiet"
+        // Quiet is only known while connected.
+        return connected ? "All quiet" : "Not connected"
     }
 }
 
 /// The desktop app's own icon, including its macOS optical inset.
 struct AgentmanBadge: View {
     var size: CGFloat
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Image(nsImage: NSImage(named: NSImage.applicationIconName) ?? NSImage())
@@ -418,6 +446,9 @@ struct AgentmanBadge: View {
             .interpolation(.high)
             .scaledToFit()
             .frame(width: size, height: size)
+            // Its black square sank into a dark window; a faint light edge,
+            // following its own shape, keeps it there.
+            .shadow(color: .white.opacity(scheme == .dark ? 0.35 : 0), radius: 0.6)
             .accessibilityHidden(true)
     }
 }
@@ -622,9 +653,10 @@ struct ConnectionFooter: View {
             if let version = store.daemonInfo?.version { return "Mac connected · am \(version)" }
             return "Mac connected"
         case .connecting:
-            return "Connecting to am serve…"
-        case .unavailable(let reason):
-            return "\(reason). Run am serve."
+            return "Connecting…"
+        case .unavailable:
+            // The whole story, and the way back, is in the banner over the page.
+            return "Not connected"
         }
     }
 }
@@ -840,13 +872,15 @@ private struct SectionHeading: View {
     let title: String
     var count: Int? = nil
     var open: Binding<Bool>? = nil
+    /// The title's colour, where the section calls for attention.
+    var tint: Color? = nil
     @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 6) {
             Text(title)
                 .font(Fonts.sans(12, .medium))
-                .foregroundStyle(hovering && open != nil ? Palette.text : Palette.muted)
+                .foregroundStyle(tint ?? (hovering && open != nil ? Palette.text : Palette.muted))
             Spacer(minLength: 4)
             if let count {
                 Text(String(count))

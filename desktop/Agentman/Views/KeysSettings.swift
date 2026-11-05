@@ -18,7 +18,7 @@ struct KeysSettings: View {
                         Text("Keys")
                             .font(TextStyle.display)
                             .foregroundStyle(Palette.text)
-                        Text("API keys for your agents. They ask for one through Agentman, or Agentman gives one when you ask. It goes into the project's .env, and only when git ignores that file.")
+                        Text("Agentman's own API keys, and the keys it hands to your agents. Values go into your Mac's Keychain and are never shown again.")
                             .font(TextStyle.caption)
                             .foregroundStyle(Palette.muted)
                             .fixedSize(horizontal: false, vertical: true)
@@ -31,10 +31,16 @@ struct KeysSettings: View {
                     }
                 }
 
-                // Agentman's own sign-in for voice prompts, apart from the
-                // keys it hands to agents.
-                VoiceSection()
+                // Agentman's own keys first: they used to be in General.
+                let settings = manager.settings
+                KeySection(provider: "anthropic", saved: settings?.anthropicKeySet ?? settings?.keySet == true)
+                KeySection(provider: "gemini", saved: settings?.geminiKeySet == true)
 
+                Text("For your agents")
+                    .font(TextStyle.captionMedium)
+                    .foregroundStyle(Palette.muted)
+                    .padding(.leading, 4)
+                    .padding(.bottom, -10)
                 if manager.keys.isEmpty {
                     Text("No keys yet")
                         .font(TextStyle.caption)
@@ -60,6 +66,16 @@ struct KeysSettings: View {
                         }
                     }
                 }
+                Text("They ask for one through Agentman, or Agentman gives one when you ask. It goes into the project's .env, and only when git ignores that file.")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+                    .padding(.top, -10)
+
+                // Agentman's own sign-in for voice prompts, apart from the
+                // keys it hands to agents.
+                VoiceSection()
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 26)

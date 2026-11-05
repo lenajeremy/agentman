@@ -82,6 +82,9 @@ final class AgentsStore {
     var newAgentPreset: NewAgentPreset?
     /// The command palette, over the main window.
     var showPalette = false
+    /// The folder of the editor the palette is open over; nil over the main
+    /// window.
+    var paletteEditor: String?
     /// Unsent messages, by session, kept across launches.
     private(set) var drafts: [String: String] = (UserDefaults.standard.dictionary(forKey: "drafts") as? [String: String]) ?? [:]
     @ObservationIgnored private var draftWrite: Task<Void, Never>?
@@ -955,9 +958,10 @@ final class AgentsStore {
         let card: Bool
     }
 
-    /// Newest last, three at most.
+    /// Newest last, two at most: more covered the conversation. The rest
+    /// still wait in Agentman's chat, and its row in the sidebar counts them.
     private(set) var toasts: [Toast] = []
-    static let maxToasts = 3
+    static let maxToasts = 2
 
     /// What becomes a toast while the app is in front: an agent waiting on
     /// the user, its news, word from it, and Agentman's reply. A note or a

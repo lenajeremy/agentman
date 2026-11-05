@@ -4,7 +4,8 @@ import SwiftUI
 /// each agent, a card per window with the share left, a bar of it in the
 /// agent's colour, a mark where spending evenly would have it, and when it
 /// resets. The numbers are each agent's own: Claude Code's /usage, Codex's
-/// /status.
+/// /status, Antigravity's /usage (a session and a week for each group of its
+/// models).
 struct LimitsPage: View {
     let limits: Limits
     /// Now, for how far through each window the plan is; fixed in pictures.
@@ -20,6 +21,7 @@ struct LimitsPage: View {
                 Text(LimitsFormat.footnote)
                     .font(TextStyle.caption)
                     .foregroundStyle(Palette.faint)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -97,10 +99,14 @@ private struct LimitCard: View {
         let pace = LimitsFormat.pace(window, now: now)
         HStack(alignment: .center, spacing: 28) {
             VStack(alignment: .leading, spacing: 2) {
+                // Antigravity's labels name a group of models too: "Weekly ·
+                // Gemini 4 Argon" is set a little smaller rather than cut short.
                 Text(window.label)
                     .font(Fonts.sans(13, .medium))
                     .foregroundStyle(Palette.textSecondary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .help(window.label)
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text("\(left)%")
                         .font(Fonts.sans(28, .semibold))
@@ -176,7 +182,7 @@ private struct LimitBar: View {
 /// How the Limits tab reads a window: what is left, whether the plan is being
 /// spent faster than the window passes, and when it resets.
 enum LimitsFormat {
-    static let footnote = "Read from Claude Code and Codex on this Mac, as their own /usage and /status show. Other agents don't report plan limits."
+    static let footnote = "Read from Claude Code, Codex and Antigravity on this Mac, as their own /usage and /status show. Other agents don't report plan limits."
     static let lastTurnHelp = "Codex's shared daemon isn't running, so these are the numbers Codex wrote down with its last reply."
 
     enum Pace: Equatable {

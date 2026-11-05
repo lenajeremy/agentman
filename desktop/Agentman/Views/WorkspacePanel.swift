@@ -939,7 +939,8 @@ struct CardRow<Icon: View, Trailing: View>: View {
             Text(title)
                 .foregroundStyle(Palette.textSecondary)
                 .lineLimit(1)
-                .truncationMode(.middle)
+                .truncationMode(.tail)
+                .help(title)
             Spacer(minLength: 6)
             trailing.foregroundStyle(Palette.muted)
         }
