@@ -14,6 +14,20 @@
     <description>Updates to Agentman for Mac.</description>
     <language>en</language>
     <item>
+      <title>Agentman 0.41.2</title>
+      <link>https://github.com/lenajeremy/agentman/releases/tag/v0.41.2</link>
+      <pubDate>Thu, 05 Nov 2026 16:03:19 GMT</pubDate>
+      <sparkle:version>48</sparkle:version>
+      <sparkle:shortVersionString>0.41.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <sparkle:fullReleaseNotesLink>https://github.com/lenajeremy/agentman/releases/tag/v0.41.2</sparkle:fullReleaseNotesLink>
+      <description sparkle:format="markdown"><![CDATA[- Start typing immediately when you open an agent chat or Agentman chat, including chats in the editor panel.
+- Chat updates respect your focus when you move to search, a terminal, or another control.
+- Fix Codex notification setup on fresh installs.
+- Show clearer setup failure details and retry Claude tool configuration when needed.]]></description>
+      <enclosure url="https://github.com/lenajeremy/agentman/releases/download/v0.41.2/Agentman.dmg" length="40260138" type="application/octet-stream" sparkle:edSignature="ARssSDYe1A1PcdZVbsRITj63CuzyTjLwRzyn3/dbc05NVNX7Y/42P186rd5cdesm5ghvBml7xNx5rM5zJv5pAg=="/>
+    </item>
+    <item>
       <title>Agentman 0.41.0</title>
       <link>https://github.com/lenajeremy/agentman/releases/tag/v0.41.0</link>
       <pubDate>Thu, 05 Nov 2026 13:19:37 GMT</pubDate>
