@@ -9,6 +9,7 @@ import SwiftUI
 /// field keeps paste and drop to itself: a dropped screenshot became its
 /// path, and Edit ▸ Paste never reached the app at all.
 struct MessageField: NSViewRepresentable {
+    @Environment(\.chatAutofocus) private var chatAutofocus
     @Binding var text: String
     var placeholder: String
     var fontSize: CGFloat = 14
@@ -18,6 +19,9 @@ struct MessageField: NSViewRepresentable {
     var maxLines = MessageField.defaultMaxLines
     nonisolated static let defaultMaxLines = 7
     @Binding var focused: Bool
+    /// Give a newly opened composer the keyboard once it can take input.
+    /// Subsequent updates and re-enabling must respect where the user went.
+    var autofocus = false
     var onSubmit: () -> Void
     /// Where pasted or dropped images go; nil leaves them to the text view,
     /// which takes only their text.
@@ -77,12 +81,13 @@ struct MessageField: NSViewRepresentable {
         }
         // Focus follows the binding when it is set from outside, never
         // fighting a click elsewhere.
-        if focused != context.coordinator.lastFocused {
+        if !context.coordinator.reportingFocus, focused != context.coordinator.lastFocused {
             context.coordinator.lastFocused = focused
             if focused {
                 textView.takeFocus()
             }
         }
+        textView.requestAutofocus()
     }
 
     private func update(_ textView: MessageTextView) {
@@ -94,6 +99,8 @@ struct MessageField: NSViewRepresentable {
         textView.insertionPointColor = NSColor(Palette.text)
         textView.defaultParagraphStyle = paragraph
         textView.typingAttributes = [.font: font, .foregroundColor: NSColor(Palette.text), .paragraphStyle: paragraph]
+        textView.chatAutofocus = chatAutofocus
+        textView.autofocus = autofocus
         textView.isEditable = enabled
         textView.placeholder = placeholder
         textView.setAccessibilityPlaceholderValue(placeholder)
@@ -139,6 +146,10 @@ struct MessageField: NSViewRepresentable {
         var parent: MessageField
         weak var textView: MessageTextView?
         var lastFocused = false
+        /// Native focus is reported on the next turn, outside SwiftUI's
+        /// update. Until then its old binding is not a new focus request.
+        var reportingFocus = false
+        private var focusGeneration = 0
 
         init(_ parent: MessageField) { self.parent = parent }
 
@@ -187,11 +198,68 @@ struct MessageField: NSViewRepresentable {
                 parent.slash?.dismiss()
             }
             // Not while SwiftUI is updating the view that reported it.
-            DispatchQueue.main.async { [parent] in
+            // Coalesce quick changes so an old gain cannot undo a loss.
+            reportingFocus = true
+            focusGeneration += 1
+            let generation = focusGeneration
+            DispatchQueue.main.async { [weak self] in
+                guard let self, generation == focusGeneration else { return }
                 if parent.focused != now { parent.focused = now }
+                reportingFocus = false
             }
         }
     }
+}
+
+/// One chat's initial focus request. Agentman's welcome and conversation
+/// use different boxes; replacing one is not opening another chat.
+@MainActor
+final class ChatAutofocus {
+    var completed = false
+    private weak var lastFocusedView: NSTextView?
+    private var hasOwnedFocus = false
+    private var hasOrigin = false
+    private weak var origin: NSResponder?
+
+    func remember(_ window: NSWindow) {
+        guard !hasOrigin else { return }
+        origin = window.firstResponder
+        hasOrigin = true
+    }
+
+    /// True once this box's request is settled; false while unavailable.
+    func request(_ text: NSTextView) -> Bool {
+        guard let window = text.window else { return false }
+        if completed {
+            // A focused welcome box may have been replaced by the chat's
+            // regular box. Only transfer from a removed box into an empty
+            // responder slot; never take it from another control.
+            guard hasOwnedFocus, lastFocusedView !== text, text.isEditable, window.attachedSheet == nil,
+                  window.firstResponder == nil || window.firstResponder === window || window.firstResponder === window.contentView else { return true }
+            return window.makeFirstResponder(text)
+        }
+        remember(window)
+        guard text.isEditable else { return false }
+        let responder = window.firstResponder
+        let empty = responder == nil || responder === window || responder === window.contentView
+        if (!empty && responder !== origin) || window.attachedSheet != nil {
+            completed = true
+            return true
+        }
+        let focused = window.makeFirstResponder(text)
+        if focused { completed = true }
+        return focused
+    }
+
+    func receivedFocus(_ text: NSTextView) {
+        completed = true
+        hasOwnedFocus = true
+        lastFocusedView = text
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var chatAutofocus: ChatAutofocus? = nil
 }
 
 /// The scroll view around a message box's text. It keeps the text view
@@ -232,6 +300,28 @@ final class MessageTextView: NSTextView {
     var slash: SlashCommands?
     /// Focus asked for before the box was in a window, given when it is.
     private var wantsFocus = false
+    var autofocus = false
+    var chatAutofocus: ChatAutofocus?
+    private let initialFocus = ChatAutofocus()
+    private var focusRequest: ChatAutofocus { chatAutofocus ?? initialFocus }
+
+    private var autofocusPending = false
+    private var autofocusSettled = false
+
+    func requestAutofocus() {
+        guard autofocus, let window, !autofocusPending, !autofocusSettled else { return }
+        focusRequest.remember(window)
+        autofocusPending = true
+        // Focus after SwiftUI has finished attaching/removing its boxes;
+        // otherwise that layout can immediately undo makeFirstResponder.
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self else { return }
+            autofocusPending = false
+            guard let window, self.window === window else { return }
+            autofocusSettled = focusRequest.request(self)
+        }
+    }
+
     /// A file chip shows its file while the pointer rests on it.
     lazy var hover = ChipHover(self) { [weak self] in self?.mentions?.root.path }
 
@@ -246,6 +336,7 @@ final class MessageTextView: NSTextView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil { hover.track() } else { hover.close() }
+        requestAutofocus()
         if wantsFocus, window != nil {
             wantsFocus = false
             takeFocus()
@@ -392,7 +483,10 @@ final class MessageTextView: NSTextView {
 
     override func becomeFirstResponder() -> Bool {
         let became = super.becomeFirstResponder()
-        if became { focusChanged(true) }
+        if became {
+            focusRequest.receivedFocus(self)
+            focusChanged(true)
+        }
         return became
     }
 
