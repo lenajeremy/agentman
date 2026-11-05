@@ -1,8 +1,10 @@
 package hook
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -221,6 +223,20 @@ func (in Installer) planCodex(home, token string, remove bool) Plan {
 	plan.beforeDigest = sha256.Sum256(raw)
 
 	base, _ := stripCodexNotifyBlock(plan.Before)
+	// Codex's Computer Use takes over `notify` and passes each event on to
+	// the command that was there before (--previous-notify). Agentman's hook
+	// goes in that place, a path that changed with it; anything else there
+	// is the user's and stays.
+	ours := []string{in.Binary, "hook", "codex", "Stop"}
+	if chained, ok, err := chainCodexNotify(base, ours, remove); ok {
+		if err != nil {
+			plan.Err = fmt.Errorf("%s: %v", path, err)
+			return plan
+		}
+		plan.After = chained
+		plan.Changed = plan.After != plan.Before
+		return plan
+	}
 	if remove {
 		plan.After = base
 		plan.Changed = plan.After != plan.Before
@@ -228,7 +244,7 @@ func (in Installer) planCodex(home, token string, remove bool) Plan {
 	}
 	if hasTopLevelTOMLKey(base, "notify") {
 		plan.Err = fmt.Errorf(
-			"%s already defines `notify`; refusing to replace the user's command", path)
+			"%s already defines `notify` for another program; Agentman leaves it as it is, so Codex's turns reach Agentman more slowly", path)
 		return plan
 	}
 
@@ -270,6 +286,89 @@ func stripCodexNotifyBlock(text string) (string, bool) {
 		end++
 	}
 	return text[:start] + text[end:], true
+}
+
+// codexNotifyChainer is the program that takes over Codex's `notify` and
+// passes each event on: Codex's own Computer Use client.
+const codexNotifyChainer = "SkyComputerUseClient"
+
+// chainCodexNotify puts Agentman's hook in the place a notifier that passes
+// events on keeps for the command before it: Codex Computer Use's
+// --previous-notify, a JSON list in one argument. ok is false when the
+// top-level `notify` is not such a notifier. That place is Agentman's when
+// it is empty or already holds Agentman's hook, wherever am was; another
+// command there stays, and err says so. Removing takes Agentman's hook out
+// of that place and leaves the notifier.
+func chainCodexNotify(text string, ours []string, remove bool) (string, bool, error) {
+	var err error
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") {
+			return text, false, nil
+		}
+		key, value, found := strings.Cut(trimmed, "=")
+		if !found || strings.TrimSpace(key) != "notify" {
+			continue
+		}
+		// A one-line array of basic strings, which JSON reads the same way.
+		var args []string
+		if json.Unmarshal([]byte(strings.TrimSpace(value)), &args) != nil || len(args) == 0 ||
+			filepath.Base(args[0]) != codexNotifyChainer {
+			return text, false, nil
+		}
+		at := -1
+		for j, arg := range args {
+			if arg == "--previous-notify" && j+1 < len(args) {
+				at = j
+				break
+			}
+		}
+		if at >= 0 {
+			var previous []string
+			if json.Unmarshal([]byte(args[at+1]), &previous) != nil || !isAgentmanCodexHook(previous) {
+				if remove {
+					return text, true, nil
+				}
+				return text, true, errors.New("Codex Computer Use passes Codex's events on to another program, so Agentman's hook can't go there too")
+			}
+			args = append(args[:at], args[at+2:]...)
+		}
+		if !remove {
+			var encoded string
+			if encoded, err = encodeCompactJSON(ours); err != nil {
+				return text, true, err
+			}
+			args = append(args, "--previous-notify", encoded)
+		}
+		quoted := make([]string, len(args))
+		for j, arg := range args {
+			if quoted[j], err = encodeCompactJSON(arg); err != nil {
+				return text, true, err
+			}
+		}
+		indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+		lines[i] = indent + "notify = [" + strings.Join(quoted, ", ") + "]"
+		return strings.Join(lines, "\n"), true, nil
+	}
+	return text, false, nil
+}
+
+// isAgentmanCodexHook is am's Codex hook command, wherever that am is.
+func isAgentmanCodexHook(command []string) bool {
+	return len(command) >= 3 && filepath.Base(command[0]) == "am" && command[1] == "hook" && command[2] == "codex"
+}
+
+// encodeCompactJSON writes a value as JSON, with no escaping for HTML: TOML
+// reads the result as the same strings.
+func encodeCompactJSON(value any) (string, error) {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return "", err
+	}
+	return strings.TrimRight(buffer.String(), "\n"), nil
 }
 
 // hasTopLevelTOMLKey looks only before the first table header. TOML never

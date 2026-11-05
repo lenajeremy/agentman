@@ -498,6 +498,14 @@ final class DaemonSetupTests: XCTestCase {
 
     // MARK: Pictures
 
+    /// An agent's hooks that failed, as on a Mac where Codex's notify is
+    /// another program's: the reason shows under the step.
+    static let agentFailedRun = Array(goodRun.prefix(2)) + [
+        #"{"step":"hooks","status":"failed","detail":"hooks call ~/.agentman/bin/am; set up for claude; couldn't set up codex","agents":[{"agent":"claude","status":"changed"},{"agent":"codex","status":"failed","error":"/Users/me/.codex/config.toml already defines `notify` for another program; Agentman leaves it as it is, so Codex's turns reach Agentman more slowly"}]}"#,
+    ] + Array(goodRun.dropFirst(3).prefix(3)) + [
+        #"{"step":"summary","ok":false,"binary":"/Users/me/.agentman/bin/am","managed":true,"apiLevel":1,"socket":"/Users/me/.agentman/am.sock","log":"/Users/me/.agentman/serve.log","failed":["hooks"]}"#,
+    ]
+
     func testRenderSetupScreen() async throws {
         guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
         let folder = URL(fileURLWithPath: out)
@@ -535,6 +543,12 @@ final class DaemonSetupTests: XCTestCase {
             failed.setup.showsScreen = true
             await failed.setup.run()
             try render(SetupScreen(), size: size, dark: dark, store: failed, to: folder.appendingPathComponent("setup-failed-\(look).png"))
+
+            // An agent's hooks that failed: the reason under the step.
+            let agentFailed = store(FakeAm(setup: Self.agentFailedRun, status: 1, error: "am: setup: hooks didn't work, as said above"))
+            agentFailed.setup.showsScreen = true
+            await agentFailed.setup.run()
+            try render(SetupScreen(), size: size, dark: dark, store: agentFailed, to: folder.appendingPathComponent("setup-agent-failed-\(look).png"))
 
             // The footer's notes on a quiet run.
             defaults.set(true, forKey: DaemonSetup.welcomedKey)

@@ -242,6 +242,19 @@ private struct SetupStepRow: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
                     }
+                    // Why each agent that failed did: it was only in a
+                    // tooltip on its faded mark.
+                    ForEach(line?.agents?.filter { $0.status == "failed" && $0.error?.isEmpty == false } ?? [], id: \.agent) { agent in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            AgentMark(kind: agent.agent, size: 11)
+                            Text("\(AgentName.of(agent.agent)): \(DaemonSetup.plain(agent.error ?? ""))")
+                                .font(TextStyle.caption)
+                                .foregroundStyle(Palette.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                        }
+                        .padding(.top, 2)
+                    }
                 }
             }
             .padding(.horizontal, 14)
@@ -287,14 +300,23 @@ private struct FailureNote: View {
                     .foregroundStyle(Palette.text)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
-                HStack(spacing: 6) {
-                    Text("The daemon's log is \((failure.log as NSString).abbreviatingWithTildeInPath).")
+                // An agent's hooks or tools: the reason is on its row, and
+                // the daemon's log has nothing more to say about it.
+                if let step = failure.step, step == "hooks" || step == "tools" {
+                    Text("Everything else is set up, and Agentman works without it. Fix what it says above and try again, or close this.")
                         .font(TextStyle.caption)
                         .foregroundStyle(Palette.muted)
-                        .textSelection(.enabled)
-                    Button("Open Log") { NSWorkspace.shared.open(URL(fileURLWithPath: failure.log)) }
-                        .buttonStyle(.link)
-                        .font(TextStyle.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    HStack(spacing: 6) {
+                        Text("The daemon's log is \((failure.log as NSString).abbreviatingWithTildeInPath).")
+                            .font(TextStyle.caption)
+                            .foregroundStyle(Palette.muted)
+                            .textSelection(.enabled)
+                        Button("Open Log") { NSWorkspace.shared.open(URL(fileURLWithPath: failure.log)) }
+                            .buttonStyle(.link)
+                            .font(TextStyle.caption)
+                    }
                 }
             }
             Spacer(minLength: 0)

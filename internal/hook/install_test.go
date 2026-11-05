@@ -505,3 +505,66 @@ func contains(haystack, needle string) bool {
 			return false
 		})()
 }
+
+// Codex's Computer Use takes over notify and passes events on to the
+// command that was there before. Agentman's hook goes in that place, at the
+// am this install is from, even where a removed am was there; uninstalling
+// takes it out again and leaves Computer Use's notifier.
+func TestCodexNotifyChainsThroughComputerUse(t *testing.T) {
+	const client = "/Users/u/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient"
+	const stale = `notify = ["` + client + `", "turn-ended", "--previous-notify", "[\"\\/opt\\/homebrew\\/bin\\/am\",\"hook\",\"codex\",\"Stop\"]"]` + "\n"
+	const rest = "model = \"gpt-5.6-sol\"\n\n[tui]\nanimations = false\n"
+	home := t.TempDir()
+	path := codexConfigPath(home)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(stale+rest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in := Installer{Home: home, Binary: "/Users/u/.agentman/bin/am"}
+	applyAll(t, in, false)
+	got, _ := os.ReadFile(path)
+	want := `notify = ["` + client + `", "turn-ended", "--previous-notify", "[\"/Users/u/.agentman/bin/am\",\"hook\",\"codex\",\"Stop\"]"]` + "\n" + rest
+	if string(got) != want {
+		t.Fatalf("Computer Use's notify was not pointed at this am:\n%s", got)
+	}
+	applyAll(t, in, false)
+	again, _ := os.ReadFile(path)
+	if string(again) != want {
+		t.Fatal("installing twice changed the config")
+	}
+	applyAll(t, in, true)
+	after, _ := os.ReadFile(path)
+	if string(after) != `notify = ["`+client+`", "turn-ended"]`+"\n"+rest {
+		t.Fatalf("uninstall did not leave Computer Use's notifier alone:\n%s", after)
+	}
+	// Installed again on top of a notifier with nothing before it.
+	applyAll(t, in, false)
+	back, _ := os.ReadFile(path)
+	if string(back) != want {
+		t.Fatalf("Agentman's hook did not go back into Computer Use's notify:\n%s", back)
+	}
+}
+
+// Another program in Computer Use's place stays where it is.
+func TestCodexNotifyLeavesAnotherChainedCommand(t *testing.T) {
+	const line = `notify = ["/x/SkyComputerUseClient", "turn-ended", "--previous-notify", "[\"terminal-notifier\",\"-title\",\"Codex\"]"]` + "\n"
+	home := t.TempDir()
+	path := codexConfigPath(home)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plans, err := (Installer{Home: home, Binary: "/usr/local/bin/am"}).Plans("tok", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plan := range plans {
+		if plan.Kind == protocol.KindCodex && plan.Err == nil {
+			t.Fatal("installer would replace another program Computer Use passes events to")
+		}
+	}
+}
