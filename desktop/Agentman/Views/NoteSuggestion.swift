@@ -62,9 +62,10 @@ struct NoteSuggestionCard: View {
                 Spacer()
                 if editing {
                     Button("Cancel") { editing = false }
+                        .buttonStyle(.brandSecondary)
                         .disabled(busy)
                     Button("Save note") { save(edited: true) }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.brand)
                         .keyboardShortcut(.defaultAction)
                         .disabled(busy || title.trimmingCharacters(in: .whitespaces).isEmpty
                             || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -72,9 +73,10 @@ struct NoteSuggestionCard: View {
                     Button("Dismiss") { act { await store.manager.dismiss(card) } }
                         .disabled(busy)
                     Button("Edit") { beginEditing() }
+                        .buttonStyle(.brandSecondary)
                         .disabled(busy)
                     Button("Save note") { save(edited: false) }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.brand)
                         .disabled(busy)
                 }
             }

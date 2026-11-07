@@ -874,9 +874,10 @@ private struct ArtifactView: View {
                     }
                     Spacer()
                     Button("Ask for changes") { send(approve: false) }
+                        .buttonStyle(.brandSecondary)
                         .disabled(busy || comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     Button("Approve") { send(approve: true) }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.brand)
                         .disabled(busy)
                 }
             }

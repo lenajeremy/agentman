@@ -170,7 +170,7 @@ struct KnowledgeSettings: View {
                 }
                 Button(draft.original == nil ? "Add note" : "Save") { save() }
                     .keyboardShortcut("s", modifiers: .command)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.brand)
                     .disabled(saving || draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             .padding(.top, 10)

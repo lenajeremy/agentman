@@ -818,7 +818,7 @@ private struct TakeOverBar: View {
             }
             Spacer()
             Button("Take Over…", action: takeOver)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.brand)
                 .disabled(working)
         }
         .padding(14)
@@ -848,7 +848,7 @@ private struct ResumeBar: View {
             Button(action: resume) {
                 if resuming { ProgressView().controlSize(.small) } else { Text("Resume") }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.brand)
             .disabled(resuming)
         }
         .padding(14)

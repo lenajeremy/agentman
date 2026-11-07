@@ -346,14 +346,17 @@ struct CommitSheet: View {
             HStack(spacing: 8) {
                 Spacer()
                 Button("Cancel", action: cancel)
+                    .buttonStyle(.brandSecondary)
                     .keyboardShortcut(.cancelAction)
                 if then == .commitAndPush {
                     Button("Commit") { confirm(included.map(\.path), message, false) }
+                        .buttonStyle(.brandSecondary)
                         .disabled(included.isEmpty)
                 }
                 Button(then == .commitAndPush ? "Commit & push" : "Commit") {
                     confirm(included.map(\.path), message, then == .commitAndPush)
                 }
+                .buttonStyle(.brand)
                 .keyboardShortcut(.defaultAction)
                 .disabled(included.isEmpty)
             }

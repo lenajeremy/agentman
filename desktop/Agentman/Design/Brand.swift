@@ -151,3 +151,50 @@ struct OutlinedWord: View {
         .accessibilityLabel(text)
     }
 }
+
+/// The site's buttons for a sheet's or a card's actions: ink on a hard
+/// shadow for the one to press, white with the edge for the others.
+struct BrandButtonStyle: ButtonStyle {
+    var prominent = true
+
+    func makeBody(configuration: Configuration) -> some View {
+        BrandButtonBody(configuration: configuration, prominent: prominent)
+    }
+}
+
+private struct BrandButtonBody: View {
+    let configuration: ButtonStyleConfiguration
+    let prominent: Bool
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.controlSize) private var controlSize
+    @State private var hovering = false
+
+    var body: some View {
+        let large = controlSize == .large
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+        configuration.label
+            .font(Fonts.sans(large ? 13 : 12.5, .medium))
+            .foregroundStyle(prominent ? Palette.onInverse : Palette.text)
+            .padding(.horizontal, large ? 14 : 11)
+            .frame(minHeight: large ? 30 : 26)
+            .background(
+                shape.hardShadowFill(
+                    prominent ? Palette.inverse.opacity(hovering ? 0.88 : 1) : (hovering ? Palette.fill : Palette.surface),
+                    shadow: prominent ? Palette.inverseShadow : Palette.edge,
+                    depth: configuration.isPressed ? 0 : 2)
+            )
+            .overlay(shape.strokeBorder(prominent ? Color.clear : Palette.edge, lineWidth: 1.5))
+            .offset(y: configuration.isPressed ? 2 : 0)
+            .padding(.bottom, 2)
+            .opacity(enabled ? 1 : 0.45)
+            .contentShape(shape)
+            .onHover { hovering = $0 }
+    }
+}
+
+extension ButtonStyle where Self == BrandButtonStyle {
+    /// Ink on a hard shadow: the action to take.
+    static var brand: BrandButtonStyle { BrandButtonStyle() }
+    /// White with the site's edge: the others beside it.
+    static var brandSecondary: BrandButtonStyle { BrandButtonStyle(prominent: false) }
+}

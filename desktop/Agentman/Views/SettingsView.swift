@@ -770,7 +770,7 @@ private struct SaveBar: View {
                 }
             }
             .keyboardShortcut("s", modifiers: .command)
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.brand)
             .disabled(saving)
         }
         .padding(.horizontal, 20)

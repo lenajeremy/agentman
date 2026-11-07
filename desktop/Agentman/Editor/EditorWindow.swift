@@ -775,9 +775,10 @@ private struct DiskBanner: View {
                     Button("Close", action: close)
                 } else {
                     Button("Keep Mine") { document.keepMine() }
+                        .buttonStyle(.brandSecondary)
                         .help("Keep your edits; saving writes over the version on disk")
                     Button("Use the Disk Version") { document.reloadFromDisk() }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.brand)
                 }
             }
             .controlSize(.small)
