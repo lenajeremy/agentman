@@ -561,7 +561,7 @@ function DiffBody({
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: c.paper },
 
@@ -797,3 +797,248 @@ const makeStyles = (c: Palette) =>
     },
     hunkText: { color: c.workingText, ...font.mono, fontSize: scaled(11) },
   });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+
+    // A photo's own page. Black regardless of theme: it is what a picture is
+    // shown on, and the one ground that tints nothing at the edges.
+    photoPage: { flex: 1, backgroundColor: "#000000" },
+    photoBar: {
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      paddingHorizontal: space.lg,
+      paddingBottom: space.md,
+      // Nothing clips here: the scrim deliberately extends past this bar so
+      // the fade happens below the text rather than across it.
+    },
+    photoScrim: {
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: -56,
+    },
+    photoButton: {
+      width: 34,
+      height: 34,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "rgba(255, 255, 255, 0.14)",
+    },
+    photoFoot: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      alignItems: "center",
+      gap: space.sm,
+      paddingHorizontal: space.lg,
+      paddingTop: space.md,
+    },
+    // The same translucent white as the round buttons above, so the chrome
+    // over a photo is one family of controls rather than two.
+    saveButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      minHeight: 48,
+      paddingVertical: space.sm,
+      paddingHorizontal: space.lg,
+      borderRadius: radius.pill,
+      backgroundColor: "rgba(255, 255, 255, 0.16)",
+      overflow: "hidden",
+    },
+    saveTitle: {
+      ...font.sansMedium,
+      fontSize: size.caption,
+      color: "#FFFFFF",
+    },
+    saveDetail: {
+      ...font.mono,
+      fontSize: scaled(11),
+      color: "rgba(255, 255, 255, 0.62)",
+      marginTop: 1,
+    },
+    saveTrack: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: 3,
+      backgroundColor: "rgba(255, 255, 255, 0.12)",
+    },
+    saveFill: { height: 3, backgroundColor: "#FFFFFF" },
+    saveError: {
+      ...font.sans,
+      fontSize: size.caption,
+      color: "#FFFFFF",
+      textAlign: "center",
+    },
+    photoHeading: { flex: 1 },
+    photoTitle: {
+      ...font.sansMedium,
+      fontSize: size.caption,
+      color: "#FFFFFF",
+    },
+    photoPath: {
+      ...font.mono,
+      fontSize: scaled(11),
+      color: "rgba(255, 255, 255, 0.55)",
+      marginTop: 1,
+    },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingHorizontal: space.lg,
+      paddingTop: space.sm,
+      paddingBottom: space.md,
+    },
+    heading: { flex: 1 },
+    title: { color: c.text, ...font.sansBold, fontSize: size.title },
+    path: { color: c.muted, ...font.mono, fontSize: scaled(11) },
+    iconButton: {
+      width: 40,
+      height: 40,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    tabs: {
+      flexDirection: "row",
+      gap: space.xs,
+      paddingHorizontal: space.lg,
+      paddingBottom: space.md,
+    },
+    tab: {
+      paddingHorizontal: space.lg,
+      paddingVertical: space.sm,
+      borderRadius: radius.pill,
+      backgroundColor: c.fill,
+    },
+    tabActive: { backgroundColor: c.inverse },
+    tabText: {
+      color: c.muted,
+      ...font.sansMedium,
+      fontSize: size.caption,
+    },
+    tabTextActive: { color: c.onInverse },
+    center: { marginTop: space.xl },
+    message: { paddingHorizontal: space.lg, paddingTop: space.md },
+    // A document reads on the page, with the margins a page has.
+    document: { paddingHorizontal: space.xl, paddingTop: space.lg },
+    error: { color: c.errorText, ...font.sans, fontSize: size.body },
+    empty: { color: c.muted, ...font.sans, fontSize: size.body },
+    note: { color: c.muted, ...font.sans, fontSize: size.caption },
+    spacer: { flex: 1 },
+    wrapToggle: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+      paddingHorizontal: space.md,
+      paddingVertical: 7,
+      borderRadius: radius.pill,
+      backgroundColor: c.fill,
+    },
+    wrapToggleOn: { backgroundColor: c.inverse },
+    wrapLabel: { color: c.muted, ...font.sansMedium, fontSize: scaled(12) },
+    wrapLabelOn: { color: c.onInverse },
+
+    statBar: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingHorizontal: space.lg,
+      paddingBottom: space.sm,
+    },
+    statAdd: { color: c.ok, ...font.monoMedium, fontSize: scaled(12) },
+    statRemove: {
+      color: c.errorText,
+      ...font.monoMedium,
+      fontSize: scaled(12),
+    },
+    statNote: { color: c.faint, ...font.sans, fontSize: scaled(11.5) },
+    inlineStat: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingLeft: space.xxs,
+    },
+    statHash: {
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: radius.sm - 2,
+      backgroundColor: c.fill,
+    },
+    statHashText: { color: c.muted, ...font.mono, fontSize: scaled(11) },
+
+    diffFrame: {
+      backgroundColor: c.surface,
+      borderTopWidth: 1,
+      borderTopColor: c.line,
+    },
+    diffWrapBody: { width: "100%" },
+    diffRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      paddingRight: space.md,
+    },
+    // Fixed-width gutters: a number column that resizes per row makes the code
+    // column jitter as you scroll.
+    diffNo: {
+      width: 30,
+      textAlign: "right",
+      paddingRight: 6,
+      ...font.mono,
+      fontSize: scaled(10.5),
+      lineHeight: scaled(19),
+      color: c.faint,
+    },
+    diffMark: {
+      width: 14,
+      textAlign: "center",
+      ...font.monoMedium,
+      fontSize: scaled(12),
+      lineHeight: scaled(19),
+      color: c.faint,
+    },
+    markAdd: { color: c.ok },
+    markRemove: { color: c.errorText },
+    diffLine: {
+      ...font.mono,
+      fontSize: scaled(12),
+      lineHeight: scaled(19),
+      color: c.text,
+    },
+    diffLineWrap: { flex: 1 },
+    addedRow: { backgroundColor: c.okWash },
+    removedRow: { backgroundColor: c.errorWash },
+    hunkRow: {
+      paddingHorizontal: space.md,
+      paddingVertical: 5,
+      backgroundColor: c.workingWash,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderColor: c.workingSoft,
+    },
+    hunkText: { color: c.workingText, ...font.mono, fontSize: scaled(11) },
+  });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

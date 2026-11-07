@@ -210,7 +210,7 @@ function ArtifactRow({
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: c.paper },
     header: {
@@ -319,3 +319,123 @@ const makeStyles = (c: Palette) =>
       lineHeight: scaled(16),
     },
   });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingHorizontal: space.lg,
+      paddingTop: space.sm,
+      paddingBottom: space.md,
+    },
+    heading: { flex: 1, minWidth: 0 },
+    title: {
+      color: c.text,
+      ...font.sansBold,
+      fontSize: size.title,
+      letterSpacing: -0.3,
+    },
+    subtitle: { color: c.muted, ...font.mono, fontSize: scaled(11), marginTop: 1 },
+    iconButton: {
+      width: 36,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+
+    content: { paddingHorizontal: space.lg, paddingTop: space.xs },
+    // One surface with hairlines, as the workspace lists are: these are rows
+    // of one list, not cards of their own.
+    list: {
+      borderWidth: 1,
+      borderColor: c.line,
+      borderRadius: radius.lg,
+      backgroundColor: c.surface,
+      overflow: "hidden",
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      minHeight: 64,
+      paddingHorizontal: space.md,
+      paddingVertical: space.md,
+    },
+    rowDivided: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line },
+    kindTile: {
+      width: 32,
+      height: 32,
+      borderRadius: radius.sm,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.fill,
+      alignSelf: "flex-start",
+    },
+    kindTileReview: { backgroundColor: c.needsYouWash },
+    rowBody: { flex: 1, minWidth: 0, gap: 3 },
+    rowTop: { flexDirection: "row", alignItems: "baseline", gap: space.sm },
+    rowTitle: {
+      flex: 1,
+      color: c.text,
+      ...font.sansMedium,
+      fontSize: size.body,
+    },
+    rowTime: { color: c.faint, ...font.mono, fontSize: scaled(11) },
+    rowSummary: {
+      color: c.muted,
+      ...font.sans,
+      fontSize: size.caption,
+      lineHeight: scaled(18),
+    },
+    rowMeta: { flexDirection: "row", alignItems: "center", gap: space.sm, marginTop: 1 },
+    rowName: { flexShrink: 1, color: c.faint, ...font.mono, fontSize: scaled(11) },
+    // The same pill a question wears: the agent is waiting on you.
+    reviewPill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+      height: 20,
+      paddingHorizontal: space.sm,
+      borderRadius: radius.pill,
+      backgroundColor: c.needsYouWash,
+    },
+    reviewDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: c.needsYou },
+    reviewLabel: { color: c.needsYouText, ...font.sansBold, fontSize: scaled(11) },
+
+    emptyWrap: { alignItems: "center", gap: space.sm, paddingVertical: space.xxl },
+    empty: {
+      color: c.muted,
+      ...font.sans,
+      fontSize: size.caption,
+      textAlign: "center",
+    },
+    error: {
+      color: c.errorText,
+      ...font.sans,
+      fontSize: size.body,
+      paddingVertical: space.md,
+    },
+    center: { marginTop: space.xl },
+    note: {
+      color: c.faint,
+      ...font.sans,
+      fontSize: scaled(11.5),
+      marginTop: space.md,
+      lineHeight: scaled(16),
+    },
+  });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

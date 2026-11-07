@@ -199,7 +199,7 @@ function ToggleRow({
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: c.paper },
     content: { paddingHorizontal: space.lg },
@@ -271,3 +271,91 @@ const makeStyles = (c: Palette) =>
     link: { alignSelf: "flex-start", minHeight: 24, justifyContent: "center", marginTop: space.xs },
     linkText: { ...font.sansMedium, fontSize: size.label, color: c.workingText },
   });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    content: { paddingHorizontal: space.lg },
+    topBar: { flexDirection: "row", paddingTop: space.sm },
+    iconButton: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    title: {
+      ...font.sansBold,
+      fontSize: size.display,
+      letterSpacing: -1.2,
+      color: c.text,
+      marginTop: space.lg,
+      marginBottom: space.xs,
+    },
+    intro: { ...font.sans, fontSize: size.body, lineHeight: scaled(22), color: c.muted },
+    sectionLabel: {
+      ...font.sansBold,
+      fontSize: size.caption,
+      color: c.muted,
+      marginLeft: space.xxs,
+      marginTop: space.xl,
+      marginBottom: space.sm,
+    },
+    card: {
+      backgroundColor: c.surface,
+      borderRadius: radius.xl,
+      paddingHorizontal: space.lg,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.line },
+    body: { ...font.sans, fontSize: size.caption, color: c.muted, lineHeight: scaled(19) },
+    toggleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      paddingVertical: space.md,
+    },
+    toggleIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: radius.md,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.fill,
+    },
+    toggleCopy: { flex: 1, gap: 2 },
+    toggleLabel: { ...font.sansMedium, fontSize: size.body, color: c.text },
+    footnote: {
+      ...font.sans,
+      fontSize: size.label,
+      lineHeight: scaled(16),
+      color: c.faint,
+      marginTop: space.sm,
+      marginHorizontal: space.xxs,
+    },
+    blocked: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: space.md,
+      paddingVertical: space.md,
+      marginTop: space.lg,
+      backgroundColor: c.needsYouWash,
+      borderColor: c.needsYouEdge,
+    },
+    blockedCopy: { flex: 1, gap: space.xs },
+    blockedTitle: { ...font.sansBold, fontSize: size.body, color: c.text },
+    link: { alignSelf: "flex-start", minHeight: 24, justifyContent: "center", marginTop: space.xs },
+    linkText: { ...font.sansMedium, fontSize: size.label, color: c.workingText },
+  });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

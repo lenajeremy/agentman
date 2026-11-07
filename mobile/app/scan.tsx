@@ -26,8 +26,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Appear } from "../components/Appear";
 import { ContentColumn } from "../components/ContentColumn";
 import { StickerOnDots, hardShadow, heading } from "../components/Brand";
+import { PairIllustration } from "../components/Illustrations";
 import { MotionPressable } from "../components/MotionPressable";
-import { useStyles } from "../lib/appearance";
+import { useStyles, useTheme } from "../lib/appearance";
 import { pairWithToken } from "../lib/client";
 import { confirmPairingReplacement } from "../lib/confirm";
 import { parsePairingPayload } from "../lib/pairing";
@@ -51,6 +52,7 @@ export default function Scan() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
+  const { color } = useTheme();
   const [permission, requestPermission] = useCameraPermissions();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -115,9 +117,13 @@ export default function Scan() {
       <View style={[styles.page, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         <ContentColumn narrow style={styles.permissionContent}>
           <Appear style={styles.permissionCard}>
-            <View style={styles.art}>
-              <StickerOnDots name="phone" size={scaled(170)} />
-            </View>
+            {color.look === "site" ? (
+              <View style={styles.art}>
+                <StickerOnDots name="phone" size={scaled(170)} />
+              </View>
+            ) : (
+              <PairIllustration style={styles.art} />
+            )}
             <Text style={styles.title}>Allow the camera</Text>
             <Text style={styles.body}>
               Agentman uses it to read the one-time code from your terminal. Frames are
@@ -205,7 +211,7 @@ export default function Scan() {
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: c.paper },
     permissionContent: { flex: 1, justifyContent: "center", paddingHorizontal: space.lg },
@@ -360,6 +366,184 @@ const makeStyles = (c: Palette) =>
     },
     dismissText: { ...font.sansBold, fontSize: size.body, color: ON_CAMERA },
   });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    permissionContent: { flex: 1, justifyContent: "center", paddingHorizontal: space.lg },
+    permissionCard: { alignItems: "center" },
+    art: {
+      width: "100%",
+      aspectRatio: 340 / 214,
+      borderRadius: radius.sheet,
+      overflow: "hidden",
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+      marginBottom: space.xl,
+    },
+
+    overlay: {
+      ...StyleSheet.absoluteFill,
+      alignItems: "center",
+      justifyContent: "space-between",
+      backgroundColor: "rgba(4, 7, 12, 0.25)",
+    },
+    scanHeader: {
+      width: "100%",
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: space.lg,
+    },
+    closeButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.cameraScrim,
+    },
+    scanHeading: {
+      flex: 1,
+      alignItems: "center",
+      marginHorizontal: space.sm,
+    },
+    scanEyebrow: {
+      ...font.sansMedium,
+      fontSize: size.label,
+      color: "rgba(255,255,255,0.72)",
+    },
+    overlayTitle: {
+      ...font.sansBold,
+      fontSize: size.title,
+      color: ON_CAMERA,
+    },
+    headerSpacer: { width: 44 },
+    scanCentre: { width: "100%", alignItems: "center", gap: space.lg },
+    scanHint: {
+      maxWidth: 290,
+      ...font.sansMedium,
+      fontSize: size.caption,
+      lineHeight: scaled(18),
+      textAlign: "center",
+      color: ON_CAMERA,
+      backgroundColor: c.cameraScrim,
+      paddingVertical: space.sm,
+      paddingHorizontal: space.md,
+      borderRadius: radius.pill,
+      overflow: "hidden",
+    },
+    reticle: {
+      width: 248,
+      height: 248,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: radius.sheet,
+      overflow: "hidden",
+    },
+    corner: { position: "absolute", width: 46, height: 46, borderColor: ON_CAMERA },
+    cornerTopLeft: {
+      top: 0,
+      left: 0,
+      borderTopWidth: 4,
+      borderLeftWidth: 4,
+      borderTopLeftRadius: radius.sheet,
+    },
+    cornerTopRight: {
+      top: 0,
+      right: 0,
+      borderTopWidth: 4,
+      borderRightWidth: 4,
+      borderTopRightRadius: radius.sheet,
+    },
+    cornerBottomLeft: {
+      bottom: 0,
+      left: 0,
+      borderBottomWidth: 4,
+      borderLeftWidth: 4,
+      borderBottomLeftRadius: radius.sheet,
+    },
+    cornerBottomRight: {
+      bottom: 0,
+      right: 0,
+      borderBottomWidth: 4,
+      borderRightWidth: 4,
+      borderBottomRightRadius: radius.sheet,
+    },
+    scanLine: {
+      width: 200,
+      height: 2,
+      borderRadius: 1,
+      backgroundColor: "#8E9DFF",
+      shadowColor: "#8E9DFF",
+      shadowOpacity: 0.8,
+      shadowRadius: 8,
+    },
+
+    title: {
+      ...font.sansBold,
+      fontSize: scaled(28),
+      letterSpacing: -0.8,
+      color: c.text,
+      textAlign: "center",
+    },
+    body: {
+      ...font.sans,
+      fontSize: size.body,
+      color: c.muted,
+      lineHeight: scaled(22),
+      textAlign: "center",
+      marginTop: space.sm,
+      maxWidth: 340,
+    },
+    errorBox: {
+      maxWidth: 320,
+      backgroundColor: c.cameraScrim,
+      borderRadius: radius.lg,
+      paddingHorizontal: space.md,
+      paddingVertical: space.sm,
+    },
+    error: {
+      ...font.sansMedium,
+      fontSize: size.caption,
+      color: "#FF9A9E",
+      lineHeight: scaled(18),
+      textAlign: "center",
+    },
+
+    button: {
+      alignSelf: "stretch",
+      minHeight: 56,
+      backgroundColor: c.inverse,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      marginTop: space.xl,
+    },
+    buttonText: { ...font.sansBold, fontSize: scaled(16), color: c.onInverse },
+    secondaryButton: {
+      paddingVertical: space.md,
+      paddingHorizontal: space.lg,
+      marginTop: space.xs,
+    },
+    link: { ...font.sansMedium, fontSize: size.body, color: c.textSecondary },
+    dismiss: {
+      minHeight: 48,
+      justifyContent: "center",
+      paddingHorizontal: space.xl,
+      borderRadius: radius.pill,
+      backgroundColor: c.cameraScrim,
+    },
+    dismissText: { ...font.sansBold, fontSize: size.body, color: ON_CAMERA },
+  });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+
 
 function Corner({ style }: { style: StyleProp<ViewStyle> }) {
   const styles = useStyles(makeStyles);

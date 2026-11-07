@@ -68,8 +68,22 @@ export function Wordmark({ size = 22, color }: { size?: number; color?: string }
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
     row: { flexDirection: "row", alignItems: "center", gap: 10 },
     name: { ...font.sansBold, fontSize: scaled(18), letterSpacing: -0.4, color: c.text },
   });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    row: { flexDirection: "row", alignItems: "center", gap: 10 },
+    name: { ...font.sansBold, fontSize: scaled(18), letterSpacing: -0.4, color: c.text },
+  });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

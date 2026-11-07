@@ -59,7 +59,7 @@ export function AgentmanCard() {
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
     card: {
       flexDirection: "row",
@@ -89,3 +89,42 @@ const makeStyles = (c: Palette) =>
     },
     badgeText: { ...font.sansMedium, fontSize: size.label, color: c.onAccent },
   });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    card: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      paddingVertical: space.md,
+      paddingHorizontal: 14,
+      marginTop: space.xs,
+      marginBottom: space.lg,
+      borderRadius: radius.xl,
+      borderWidth: 1,
+      borderColor: c.line,
+      backgroundColor: c.surface,
+    },
+    words: { flex: 1, gap: 2 },
+    name: { ...font.sansMedium, fontSize: size.body, color: c.text },
+    summary: { ...font.sans, fontSize: size.caption, color: c.muted },
+    attention: { color: c.needsYouText },
+    badge: {
+      minWidth: 22,
+      height: 22,
+      paddingHorizontal: 6,
+      borderRadius: 11,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.working,
+    },
+    badgeText: { ...font.sansMedium, fontSize: size.label, color: c.onAccent },
+  });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

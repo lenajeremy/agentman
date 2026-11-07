@@ -73,7 +73,7 @@ export function FileMenu({
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
     card: {
       maxHeight: 300,
@@ -102,3 +102,42 @@ const makeStyles = (c: Palette) =>
     loading: { flexDirection: "row", alignItems: "center", gap: space.sm, padding: space.md },
     note: { ...font.sans, fontSize: size.caption, color: c.muted, padding: space.md },
   });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    card: {
+      maxHeight: 300,
+      marginBottom: space.sm,
+      paddingVertical: space.xs,
+      borderRadius: radius.lg,
+      backgroundColor: c.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.line,
+      shadowColor: "#000000",
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 3,
+    },
+    label: {
+      ...font.sansMedium,
+      fontSize: size.label,
+      color: c.faint,
+      paddingHorizontal: space.md,
+      paddingTop: space.xs,
+      paddingBottom: 2,
+    },
+    row: { flexDirection: "row", alignItems: "center", gap: space.sm, paddingHorizontal: space.md, paddingVertical: 9 },
+    name: { ...font.sansMedium, fontSize: size.caption, color: c.text, flexShrink: 0, maxWidth: "60%" },
+    folder: { flex: 1, ...font.sans, fontSize: scaled(12), color: c.faint },
+    loading: { flexDirection: "row", alignItems: "center", gap: space.sm, padding: space.md },
+    note: { ...font.sans, fontSize: size.caption, color: c.muted, padding: space.md },
+  });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

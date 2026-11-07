@@ -204,7 +204,7 @@ export function Problem({ text }: { text: string | null }) {
   return <Text style={styles.problem}>{text}</Text>;
 }
 
-export const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: c.paper },
     content: { paddingHorizontal: space.lg },
@@ -288,3 +288,108 @@ export const makeStyles = (c: Palette) =>
     topActionText: { ...font.sansBold, fontSize: size.caption, color: c.onInverse },
     problem: { ...font.sans, fontSize: size.label, color: c.errorText, marginTop: space.sm, marginHorizontal: space.xs },
   });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    content: { paddingHorizontal: space.lg },
+    topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: space.sm },
+    iconButton: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    title: {
+      ...font.sansBold,
+      fontSize: size.display,
+      letterSpacing: -1.2,
+      color: c.text,
+      marginTop: space.lg,
+      marginBottom: space.xs,
+    },
+    intro: { ...font.sans, fontSize: size.caption, lineHeight: scaled(19), color: c.muted, marginBottom: space.xs },
+    sectionLabel: {
+      ...font.sansBold,
+      fontSize: size.caption,
+      color: c.muted,
+      marginLeft: space.xxs,
+      marginTop: space.xl,
+      marginBottom: space.sm,
+    },
+    sectionGap: { height: space.lg },
+    card: {
+      backgroundColor: c.surface,
+      borderRadius: radius.xl,
+      paddingHorizontal: space.lg,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    footer: {
+      ...font.sans,
+      fontSize: size.label,
+      lineHeight: scaled(17),
+      color: c.faint,
+      marginTop: space.sm,
+      marginHorizontal: space.xs,
+    },
+    divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.line },
+    row: {
+      minHeight: 56,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: space.md,
+      paddingVertical: space.md,
+    },
+    rowWords: { flex: 1, gap: 2 },
+    rowLabel: { ...font.sansMedium, fontSize: size.body, color: c.text },
+    rowDetail: { ...font.sans, fontSize: size.label, lineHeight: scaled(17), color: c.muted },
+    rowValue: { flexShrink: 1, textAlign: "right", ...font.sans, fontSize: size.caption, color: c.muted },
+    linkLabel: { flexDirection: "row", alignItems: "center", gap: space.sm },
+    linkValue: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: space.sm },
+    segmented: { flexDirection: "row", padding: 4, gap: 4, borderRadius: radius.pill, backgroundColor: c.fill, marginVertical: space.sm },
+    segment: { flex: 1, minHeight: 36, borderRadius: radius.pill, alignItems: "center", justifyContent: "center" },
+    segmentActive: {
+      backgroundColor: c.surface,
+      shadowColor: c.shadow,
+      shadowOpacity: 0.08,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 1,
+    },
+    segmentLabel: { ...font.sansMedium, fontSize: size.caption, color: c.muted },
+    segmentLabelActive: { ...font.sansBold, color: c.text },
+    field: {
+      minHeight: 44,
+      paddingVertical: space.sm,
+      ...font.sans,
+      fontSize: size.body,
+      color: c.text,
+    },
+    fieldMultiline: { minHeight: 120, textAlignVertical: "top", lineHeight: scaled(21), paddingTop: space.md, paddingBottom: space.md },
+    fieldMono: { ...font.mono, fontSize: size.caption },
+    topAction: {
+      height: 36,
+      paddingHorizontal: space.lg,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.inverse,
+    },
+    topActionOff: { opacity: 0.35 },
+    topActionText: { ...font.sansBold, fontSize: size.caption, color: c.onInverse },
+    problem: { ...font.sans, fontSize: size.label, color: c.errorText, marginTop: space.sm, marginHorizontal: space.xs },
+  });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+export const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

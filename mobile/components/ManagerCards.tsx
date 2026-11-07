@@ -216,7 +216,7 @@ function NoteReceipt({ card }: { card: ManagerCard }) {
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
     card: {
       gap: space.md,
@@ -302,3 +302,98 @@ const makeStyles = (c: Palette) =>
     },
     primaryText: { ...font.sansMedium, fontSize: size.caption, color: c.onInverse },
   });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    card: {
+      gap: space.md,
+      padding: space.lg,
+      borderRadius: radius.xl,
+      borderWidth: 1,
+      borderColor: c.needsYouEdge,
+      backgroundColor: c.surface,
+    },
+    head: { flexDirection: "row", alignItems: "center", gap: space.sm },
+    headName: { flexShrink: 1 },
+    name: { ...font.sansMedium, fontSize: size.body, color: c.text },
+    dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: c.needsYou },
+    needs: { flex: 1, ...font.sans, fontSize: size.caption, color: c.needsYouText },
+    noteLabel: { color: c.workingText },
+    tier: { ...font.sans, fontSize: size.label, color: c.faint },
+    title: { ...font.sans, fontSize: size.body, lineHeight: scaled(22), color: c.text },
+    code: { padding: space.md, borderRadius: radius.md, backgroundColor: c.toolWell },
+    codeText: { ...font.mono, fontSize: scaled(12), lineHeight: scaled(18), color: c.textSecondary },
+    reason: { ...font.sans, fontSize: size.caption, color: c.needsYouText },
+    context: { ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.muted },
+    suggested: { ...font.sans, fontSize: size.caption, color: c.working },
+    replyField: {
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: space.sm,
+      paddingLeft: space.md,
+      paddingRight: 5,
+      paddingVertical: 5,
+      borderRadius: radius.xl,
+      backgroundColor: c.fill,
+    },
+    replyInput: {
+      flex: 1,
+      minHeight: 32,
+      maxHeight: 110,
+      paddingTop: 6,
+      ...font.sans,
+      fontSize: size.body,
+      color: c.text,
+    },
+    replySend: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.working,
+    },
+    replySendOff: { backgroundColor: c.fillStrong },
+    problem: { ...font.sans, fontSize: size.label, color: c.errorText },
+    receipt: { flexDirection: "row", alignItems: "center", gap: 6 },
+    receiptText: { flex: 1, ...font.sans, fontSize: size.caption, color: c.muted },
+    noteBody: { ...font.sans, fontSize: size.caption, lineHeight: scaled(19), color: c.textSecondary },
+    noteTitleInput: {
+      ...font.sansMedium,
+      fontSize: size.body,
+      color: c.text,
+      paddingVertical: space.xs,
+      borderBottomWidth: 1,
+      borderBottomColor: c.line,
+    },
+    noteBodyInput: {
+      minHeight: 90,
+      maxHeight: 220,
+      ...font.sans,
+      fontSize: size.caption,
+      lineHeight: scaled(19),
+      color: c.text,
+      textAlignVertical: "top",
+    },
+    actions: { flexDirection: "row", alignItems: "center", gap: space.sm },
+    secondary: { height: 34, paddingHorizontal: space.md, borderRadius: radius.pill, justifyContent: "center", backgroundColor: c.fill },
+    secondaryText: { ...font.sansMedium, fontSize: size.caption, color: c.textSecondary },
+    primary: {
+      height: 34,
+      minWidth: 96,
+      paddingHorizontal: space.lg,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.inverse,
+    },
+    primaryText: { ...font.sansMedium, fontSize: size.caption, color: c.onInverse },
+  });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

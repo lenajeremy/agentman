@@ -299,7 +299,7 @@ function ServerCard({ sessionId, server }: { sessionId: string; server: Server }
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: c.paper },
     content: { paddingHorizontal: space.lg },
@@ -454,3 +454,171 @@ const makeStyles = (c: Palette) =>
       marginHorizontal: space.xxs,
     },
   });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    content: { paddingHorizontal: space.lg },
+    topBar: { flexDirection: "row", paddingTop: space.sm },
+    iconButton: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    title: {
+      ...font.sansBold,
+      fontSize: size.display,
+      letterSpacing: -1.2,
+      color: c.text,
+      marginTop: space.lg,
+    },
+    sessionLine: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      marginTop: space.xs,
+      marginBottom: space.lg,
+    },
+    sessionName: { flex: 1, ...font.mono, fontSize: scaled(12), color: c.muted },
+
+    offline: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      padding: space.md,
+      borderRadius: radius.md,
+      backgroundColor: c.errorWash,
+      marginBottom: space.md,
+    },
+    offlineText: { flex: 1, ...font.sans, fontSize: size.caption, color: c.errorText },
+
+    list: { gap: space.sm },
+    card: {
+      backgroundColor: c.surface,
+      borderRadius: radius.xl,
+      borderWidth: 1,
+      borderColor: c.line,
+      overflow: "hidden",
+    },
+    cardMain: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingVertical: 13,
+      paddingHorizontal: 14,
+    },
+    // Only the identity opens the server; the two controls beside it are their
+    // own targets, so neither swallows the other's tap.
+    cardTap: { flex: 1, flexDirection: "row", alignItems: "center", gap: space.md, minWidth: 0 },
+    serverIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.md,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.fill,
+    },
+    cardBody: { flex: 1, gap: 3 },
+    serverName: { ...font.sansMedium, fontSize: size.body, color: c.text },
+    serverMeta: { ...font.mono, fontSize: scaled(12), color: c.muted },
+    openPill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.xs,
+      paddingVertical: 7,
+      paddingHorizontal: 12,
+      borderRadius: radius.pill,
+      backgroundColor: c.inverse,
+    },
+    openPillDisabled: { opacity: 0.35 },
+    openLabel: { ...font.sansMedium, fontSize: size.caption, color: c.onInverse },
+
+    // A bordered square rather than a filled pill: it sits next to the filled
+    // "Open" without competing with it for the eye.
+    stopButton: {
+      width: 34,
+      height: 34,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: c.errorEdge,
+      backgroundColor: c.errorWash,
+    },
+    error: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: space.sm,
+      marginHorizontal: 14,
+      marginBottom: space.md,
+      padding: space.sm,
+      borderRadius: radius.sm,
+      backgroundColor: c.errorWash,
+    },
+    errorText: { flex: 1, ...font.sans, fontSize: size.caption, color: c.errorText },
+
+    linkRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingVertical: space.sm,
+      paddingLeft: 14,
+      paddingRight: space.sm,
+      borderTopWidth: 1,
+      borderTopColor: c.line,
+      backgroundColor: c.fill,
+    },
+    link: { flex: 1, ...font.mono, fontSize: scaled(12), color: c.textSecondary },
+    linkAction: {
+      width: 32,
+      height: 32,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+
+    empty: {
+      alignItems: "center",
+      paddingVertical: space.xxl,
+      paddingHorizontal: space.xl,
+      gap: space.sm,
+    },
+    emptyIcon: {
+      width: 48,
+      height: 48,
+      borderRadius: radius.lg,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.fill,
+      marginBottom: space.xs,
+    },
+    emptyTitle: { ...font.sansBold, fontSize: size.title, color: c.text },
+    emptyBody: {
+      ...font.sans,
+      fontSize: size.caption,
+      lineHeight: scaled(19),
+      color: c.muted,
+      textAlign: "center",
+    },
+    footnote: {
+      ...font.sans,
+      fontSize: size.label,
+      lineHeight: scaled(17),
+      color: c.faint,
+      marginTop: space.lg,
+      marginHorizontal: space.xxs,
+    },
+  });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

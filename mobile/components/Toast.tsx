@@ -61,7 +61,7 @@ export function Toast({
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
     toast: {
       position: "absolute",
@@ -83,3 +83,33 @@ const makeStyles = (c: Palette) =>
     },
     text: { ...font.sansMedium, fontSize: size.caption, color: c.onInverse },
   });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    toast: {
+      position: "absolute",
+      alignSelf: "center",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingVertical: space.sm + 2,
+      paddingHorizontal: space.lg,
+      borderRadius: radius.pill,
+      backgroundColor: c.inverse,
+      shadowColor: c.shadow,
+      shadowOpacity: 0.2,
+      shadowRadius: 20,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 10,
+      zIndex: 10,
+    },
+    text: { ...font.sansMedium, fontSize: size.caption, color: c.onInverse },
+  });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

@@ -69,7 +69,7 @@ export function SlashMenu({
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
     card: {
       maxHeight: 300,
@@ -91,3 +91,35 @@ const makeStyles = (c: Palette) =>
     loading: { flexDirection: "row", alignItems: "center", gap: space.sm, padding: space.md },
     note: { ...font.sans, fontSize: size.caption, color: c.muted, padding: space.md },
   });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    card: {
+      maxHeight: 300,
+      marginBottom: space.sm,
+      paddingVertical: space.xs,
+      borderRadius: radius.lg,
+      backgroundColor: c.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.line,
+      shadowColor: "#000000",
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 3,
+    },
+    row: { paddingHorizontal: space.md, paddingVertical: 7, gap: 1 },
+    name: { ...font.monoMedium, fontSize: size.caption, color: c.text },
+    hint: { ...font.mono, color: c.faint },
+    description: { ...font.sans, fontSize: scaled(12.5), color: c.muted, lineHeight: scaled(17) },
+    loading: { flexDirection: "row", alignItems: "center", gap: space.sm, padding: space.md },
+    note: { ...font.sans, fontSize: size.caption, color: c.muted, padding: space.md },
+  });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

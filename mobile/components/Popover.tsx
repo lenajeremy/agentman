@@ -149,7 +149,7 @@ export function Popover({
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
     backdrop: { flex: 1, backgroundColor: c.scrim },
     card: {
@@ -195,3 +195,59 @@ const makeStyles = (c: Palette) =>
     labelDestructive: { color: c.errorText },
     detail: { ...font.monoMedium, fontSize: size.label, color: c.faint },
   });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    backdrop: { flex: 1, backgroundColor: c.scrim },
+    card: {
+      position: "absolute",
+      minWidth: 212,
+      borderRadius: radius.lg,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+      overflow: "hidden",
+      shadowColor: c.shadow,
+      shadowOpacity: 0.18,
+      shadowRadius: 24,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 12,
+    },
+    cardLeft: { left: space.lg },
+    // Sized to its rows, and shrunk by the card's maxHeight only when they
+    // do not fit; a growing ScrollView would always fill the cap.
+    scroll: { flexGrow: 0 },
+    cardRight: { right: space.lg },
+    title: {
+      ...font.sans,
+      fontSize: size.label,
+      lineHeight: scaled(16),
+      color: c.muted,
+      paddingHorizontal: space.lg,
+      paddingTop: space.md,
+      paddingBottom: space.sm,
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      minHeight: 46,
+      paddingHorizontal: space.lg,
+    },
+    // Hairlines between rows rather than around each: it is one object.
+    rowDivided: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line },
+    rowPressed: { backgroundColor: c.fill },
+    rowDisabled: { opacity: 0.4 },
+    label: { flex: 1, ...font.sansMedium, fontSize: size.caption, color: c.text },
+    labelMono: { ...font.monoMedium, fontSize: scaled(12.5) },
+    labelDestructive: { color: c.errorText },
+    detail: { ...font.monoMedium, fontSize: size.label, color: c.faint },
+  });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

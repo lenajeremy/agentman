@@ -103,7 +103,7 @@ function WindowRow({ window, tint, now }: { window: LimitWindow; tint: string; n
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
     head: { flexDirection: "row", alignItems: "center", gap: 7, marginTop: space.xl, marginBottom: space.sm, marginHorizontal: space.xxs },
     agentName: { ...heading(c, size.body), flexShrink: 1 },
@@ -130,3 +130,39 @@ const makeStyles = (c: Palette) =>
     empty: { marginTop: space.xxl, alignItems: "center", gap: space.sm, paddingHorizontal: space.lg },
     emptyTitle: { ...font.sansMedium, fontSize: size.title, color: c.text },
   });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    head: { flexDirection: "row", alignItems: "center", gap: 7, marginTop: space.xl, marginBottom: space.sm, marginHorizontal: space.xxs },
+    agentName: { ...font.sansBold, fontSize: size.body, color: c.text, flexShrink: 1 },
+    plan: {
+      ...font.sansMedium, fontSize: size.label, color: c.textSecondary, backgroundColor: c.fill,
+      borderRadius: radius.pill, paddingHorizontal: 7, paddingVertical: 1, overflow: "hidden",
+    },
+    checked: { ...font.sans, fontSize: size.label, color: c.muted, marginLeft: "auto", flexShrink: 1 },
+    problem: { marginBottom: space.sm, marginHorizontal: space.xxs },
+    card: { backgroundColor: c.surface, borderRadius: radius.xl, paddingHorizontal: space.lg, borderWidth: 1, borderColor: c.line },
+    divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.line },
+    row: { paddingVertical: space.md, gap: space.sm },
+    rowHead: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: space.sm },
+    label: { ...font.sansMedium, fontSize: size.caption, color: c.textSecondary, flexShrink: 1 },
+    left: { ...font.sansBold, fontSize: size.title, color: c.text, fontVariant: ["tabular-nums"] },
+    leftWord: { ...font.sans, fontSize: size.label, color: c.muted },
+    track: { height: scaled(10), borderRadius: 5, backgroundColor: c.fill, overflow: "hidden" },
+    fill: { position: "absolute", left: 0, top: 0, bottom: 0, borderRadius: 5, opacity: 0.45 },
+    tick: { position: "absolute", top: 1, bottom: 1, width: 2, marginLeft: -1, borderRadius: 1, backgroundColor: c.text },
+    rowFoot: { flexDirection: "row", justifyContent: "space-between", gap: space.sm },
+    caption: { ...font.sans, fontSize: size.label, color: c.muted, fontVariant: ["tabular-nums"] },
+    note: { ...font.sans, fontSize: size.caption, color: c.muted, lineHeight: size.caption * 1.4 },
+    footnote: { ...font.sans, fontSize: size.label, lineHeight: scaled(17), color: c.faint, marginTop: space.lg, marginHorizontal: space.xs },
+    empty: { marginTop: space.xxl, alignItems: "center", gap: space.sm, paddingHorizontal: space.lg },
+    emptyTitle: { ...font.sansMedium, fontSize: size.title, color: c.text },
+  });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

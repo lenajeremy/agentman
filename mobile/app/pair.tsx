@@ -22,6 +22,7 @@ import { Appear } from "../components/Appear";
 import { Wordmark } from "../components/BrandMark";
 import { DotFill, FloodBand, OutlinedText, Sticker, hardShadow } from "../components/Brand";
 import { ContentColumn } from "../components/ContentColumn";
+import { PairIllustration } from "../components/Illustrations";
 import { MotionPressable } from "../components/MotionPressable";
 import { useStyles, useTheme } from "../lib/appearance";
 import { pair, pairWithToken } from "../lib/client";
@@ -37,7 +38,8 @@ export default function Pair() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
-  const { color } = useTheme();
+  const { color, look } = useTheme();
+  const site = look === "site";
   const params = useLocalSearchParams<{
     relay?: string | string[];
     token?: string | string[];
@@ -131,19 +133,32 @@ export default function Pair() {
     }
   }
 
+  const lede = (
+    <Text style={styles.lede}>
+      Run <Text style={styles.ledeCode}>am pair</Text> on the computer where your agents
+      work, and scan the code it shows. New to Agentman? The setup steps are below.
+    </Text>
+  );
+
   return (
     <KeyboardAvoidingView
       style={styles.page}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       {/* White clock and battery over the orange band. */}
-      <StatusBar style="light" />
+      {site ? <StatusBar style="light" /> : null}
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xl }]}
+        contentContainerStyle={[
+          styles.content,
+          site
+            ? { paddingBottom: insets.bottom + space.xl }
+            : { paddingTop: insets.top + space.md, paddingBottom: insets.bottom + space.xl },
+        ]}
         keyboardShouldPersistTaps="handled"
       >
         {/* The website's first screen, as the phone's: the orange band with
             the phone sticker and an outlined title. */}
+        {site ? (
         <FloodBand style={{ paddingTop: insets.top + space.md }}>
           <ContentColumn narrow style={styles.bandColumn}>
             <Appear>
@@ -158,14 +173,23 @@ export default function Pair() {
             </Appear>
           </ContentColumn>
         </FloodBand>
+        ) : null}
 
         <ContentColumn narrow style={styles.column}>
-          <Appear delay={60}>
-            <Text style={styles.lede}>
-              Run <Text style={styles.ledeCode}>am pair</Text> on the computer where your agents
-              work, and scan the code it shows. New to Agentman? The setup steps are below.
-            </Text>
-          </Appear>
+          {site ? (
+            <Appear delay={60}>{lede}</Appear>
+          ) : (
+            <>
+              <Appear>
+                <Wordmark />
+              </Appear>
+              <Appear delay={45}>
+                <PairIllustration style={styles.art} />
+                <Text style={styles.title}>Pair with your Mac</Text>
+                {lede}
+              </Appear>
+            </>
+          )}
 
           {error && !manual ? <ErrorBox message={error} /> : null}
 
@@ -284,7 +308,7 @@ export default function Pair() {
  */
 function SetupGuide() {
   const styles = useStyles(makeStyles);
-  const { color } = useTheme();
+  const { color, look } = useTheme();
   const [copied, setCopied] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
@@ -299,7 +323,7 @@ function SetupGuide() {
 
   return (
     <View style={styles.guide}>
-      <DotFill radius={radius.xl - 2} />
+      {look === "site" ? <DotFill radius={radius.xl - 2} /> : null}
       <Text style={styles.guideTitle}>First time? Set up your computer</Text>
       {SETUP_STEPS.map((step, index) => (
         <View key={step.title} style={styles.step}>
@@ -360,7 +384,7 @@ function firstParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? "" : value ?? "";
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: c.paper },
     content: { flexGrow: 1 },
@@ -517,3 +541,162 @@ const makeStyles = (c: Palette) =>
     // a policy link is not one.
     policyLinkText: { ...font.sansMedium, fontSize: size.label, color: c.workingText },
   });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    content: { flexGrow: 1, paddingHorizontal: space.lg },
+    column: { flex: 1, gap: space.lg },
+
+    art: {
+      width: "100%",
+      aspectRatio: 340 / 214,
+      marginTop: space.md,
+      borderRadius: radius.sheet,
+      overflow: "hidden",
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    title: {
+      ...font.sansBold,
+      fontSize: scaled(30),
+      lineHeight: scaled(34),
+      letterSpacing: -1,
+      color: c.text,
+      marginTop: space.xl,
+    },
+    ledeCode: { ...font.mono, fontSize: scaled(14), color: c.text },
+    lede: {
+      ...font.sans,
+      fontSize: size.body,
+      color: c.muted,
+      lineHeight: scaled(22),
+      marginTop: space.sm,
+    },
+    commandPrompt: { ...font.mono, fontSize: scaled(14), color: c.faint },
+
+    guideTitle: { ...font.sansBold, fontSize: size.caption, color: c.muted },
+    guide: {
+      marginTop: space.sm,
+      backgroundColor: c.surface,
+      borderRadius: radius.xxl,
+      borderWidth: 1,
+      borderColor: c.line,
+      padding: space.lg,
+      gap: space.lg,
+    },
+    step: { flexDirection: "row", gap: space.md },
+    stepNumber: {
+      width: 26,
+      height: 26,
+      borderRadius: 8,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.fill,
+      marginTop: 1,
+    },
+    stepNumberText: { ...font.mono, fontSize: scaled(13), color: c.textSecondary },
+    stepCopy: { flex: 1, minWidth: 0, gap: 3 },
+    stepTitle: { ...font.sansBold, fontSize: size.body, color: c.text },
+    stepDetail: { ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.muted },
+    stepCommand: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      marginTop: space.sm,
+      paddingHorizontal: space.md,
+      paddingVertical: 11,
+      borderRadius: radius.lg,
+      backgroundColor: c.fill,
+    },
+    stepCommandText: { flex: 1, ...font.mono, fontSize: scaled(13), color: c.text },
+    guideLink: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start" },
+    guideLinkText: { ...font.sansMedium, fontSize: size.caption, color: c.textSecondary },
+
+    actions: { gap: space.xs, marginTop: space.sm },
+    primaryButton: {
+      minHeight: 56,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 10,
+      borderRadius: radius.pill,
+      backgroundColor: c.inverse,
+      paddingHorizontal: space.xl,
+    },
+    primaryButtonText: { ...font.sansBold, fontSize: scaled(16), color: c.onInverse },
+    buttonDisabled: { opacity: 0.35 },
+    textButton: {
+      minHeight: 44,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    textButtonLabel: { ...font.sansMedium, fontSize: size.body, color: c.textSecondary },
+
+    card: {
+      backgroundColor: c.surface,
+      borderRadius: radius.xxl,
+      borderWidth: 1,
+      borderColor: c.line,
+      padding: space.lg,
+      gap: space.lg,
+    },
+    field: { gap: space.sm },
+    fieldLabel: {
+      ...font.sansBold,
+      fontSize: size.caption,
+      color: c.muted,
+    },
+    input: {
+      minHeight: 52,
+      backgroundColor: c.fill,
+      borderRadius: radius.lg,
+      paddingHorizontal: space.lg,
+      paddingVertical: space.md,
+      ...font.mono,
+      fontSize: size.body,
+      color: c.text,
+      borderWidth: 1,
+      borderColor: "transparent",
+    },
+    inputFocused: { borderColor: c.working, backgroundColor: c.surface },
+    codeInput: { fontSize: scaled(24), letterSpacing: 6, textAlign: "center" },
+
+    errorBox: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: space.sm,
+      borderRadius: radius.lg,
+      padding: space.md,
+      backgroundColor: c.errorWash,
+    },
+    error: { flex: 1, ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.errorText },
+
+    disclosure: { marginTop: "auto", alignItems: "center", paddingTop: space.sm },
+    footnote: {
+      ...font.sans,
+      fontSize: size.label,
+      color: c.faint,
+      lineHeight: scaled(17),
+      textAlign: "center",
+    },
+    policyLink: {
+      minHeight: 32,
+      alignItems: "center",
+      justifyContent: "center",
+      marginTop: space.xs,
+      paddingHorizontal: space.md,
+    },
+    // Cobalt, like every other tappable thing. Green reads as a status, and
+    // a policy link is not one.
+    policyLinkText: { ...font.sansMedium, fontSize: size.label, color: c.workingText },
+  });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

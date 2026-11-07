@@ -321,7 +321,7 @@ function ReviewPanel({
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: c.paper },
     header: {
@@ -444,3 +444,137 @@ const makeStyles = (c: Palette) =>
       color: c.text,
     },
   });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingHorizontal: space.lg,
+      paddingTop: space.sm,
+      paddingBottom: space.md,
+    },
+    heading: { flex: 1, minWidth: 0 },
+    title: {
+      color: c.text,
+      ...font.sansBold,
+      fontSize: size.title,
+      letterSpacing: -0.3,
+    },
+    subtitle: { color: c.muted, ...font.mono, fontSize: scaled(11), marginTop: 1 },
+    iconButton: {
+      width: 36,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    kindTile: {
+      width: 30,
+      height: 30,
+      borderRadius: radius.sm,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.fill,
+    },
+
+    body: { flex: 1 },
+    document: { paddingTop: space.xs },
+    markdown: { paddingHorizontal: space.lg },
+    center: { marginTop: space.xl },
+    message: { paddingHorizontal: space.lg, paddingTop: space.md },
+    error: { color: c.errorText, ...font.sans, fontSize: size.body, lineHeight: scaled(21) },
+    note: { color: c.muted, ...font.sans, fontSize: size.caption },
+
+    // The session's question sheet, reused: docked, rounded on top, and on the
+    // surface colour so it reads as something to act on rather than more page.
+    sheet: {
+      backgroundColor: c.surface,
+      borderTopLeftRadius: radius.sheet,
+      borderTopRightRadius: radius.sheet,
+      paddingTop: space.lg,
+      shadowColor: c.shadow,
+      shadowOpacity: 0.12,
+      shadowRadius: 24,
+      shadowOffset: { width: 0, height: -6 },
+      elevation: 12,
+    },
+    sheetContent: { paddingHorizontal: 20 },
+    panel: { gap: space.md },
+    eyebrowRow: { flexDirection: "row" },
+    pill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      height: 24,
+      paddingHorizontal: 10,
+      borderRadius: radius.pill,
+      backgroundColor: c.needsYouWash,
+    },
+    pillDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: c.needsYou },
+    pillLabel: { ...font.sansBold, fontSize: size.label, color: c.needsYouText },
+    prompt: {
+      ...font.sans,
+      fontSize: size.body,
+      lineHeight: scaled(21),
+      color: c.textSecondary,
+    },
+    input: {
+      minHeight: 84,
+      maxHeight: 160,
+      borderRadius: radius.lg,
+      backgroundColor: c.fill,
+      color: c.text,
+      ...font.sans,
+      fontSize: size.body,
+      paddingHorizontal: space.lg,
+      paddingTop: space.md,
+      paddingBottom: space.md,
+      textAlignVertical: "top",
+    },
+    failed: { ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.errorText },
+    offline: { ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.muted },
+    buttons: { flexDirection: "row", gap: space.sm },
+    button: {
+      flex: 1,
+      minHeight: 48,
+      paddingHorizontal: space.md,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    buttonPrimary: { backgroundColor: c.inverse },
+    buttonSecondary: { backgroundColor: c.surface, borderWidth: 1, borderColor: c.fillStrong },
+    buttonDisabled: { opacity: 0.4 },
+    buttonLabel: { ...font.sansBold, fontSize: size.body, color: c.text },
+    buttonLabelPrimary: { color: c.onInverse },
+    sent: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      minHeight: 44,
+      paddingHorizontal: space.md,
+      borderRadius: radius.md,
+      backgroundColor: c.okWash,
+    },
+    sentText: {
+      flex: 1,
+      ...font.sansMedium,
+      fontSize: size.caption,
+      lineHeight: scaled(18),
+      color: c.text,
+    },
+  });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

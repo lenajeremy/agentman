@@ -17,6 +17,9 @@ import type { TextStyle } from "react-native";
  * undo bar's accent) are derived from its values.
  */
 const light = {
+  /** Which look this palette belongs to: the website's ("site") or today's
+   *  ("classic"). Screens keep both looks' styles and pick by it. */
+  look: "site",
   /** Page background. */
   paper: "#FAFAFA",
   /** Cards and sheets. */
@@ -153,9 +156,21 @@ const dark: Palette = {
   inverseShadow: "rgba(255, 255, 255, 0.22)",
   stickerSpot: "#F3E6D8",
   bubble: "#2A1F18",
+  look: "site",
 };
 
-export const palettes: Record<"light" | "dark", Palette> = { light, dark };
+/** The two looks: today's (Classic, the default) and the website's (New),
+ *  switched in Settings while New is refined. */
+export type Look = "classic" | "site";
+
+/** Today's palettes: the same colours, with the working ring's pink. */
+export const palettes: Record<"light" | "dark", Palette> = {
+  light: { ...light, look: "classic", loaderAccent: "#F0407F" },
+  dark: { ...dark, look: "classic", loaderAccent: "#FF5C9A" },
+};
+
+/** The website's look's palettes. */
+export const sitePalettes: Record<"light" | "dark", Palette> = { light, dark };
 
 /**
  * Google Sans for everything a person wrote or reads as interface; Google

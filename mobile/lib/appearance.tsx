@@ -19,36 +19,46 @@ import {
   resolveScheme,
   Scheme,
 } from "./appearance-policy";
-import { simulatorAppearance } from "./simulator";
-import { Palette, palettes } from "./theme";
+import { simulatorAppearance, simulatorLook } from "./simulator";
+import { Look, Palette, palettes, sitePalettes } from "./theme";
 
 interface Theme {
   color: Palette;
   scheme: Scheme;
   preference: AppearancePreference;
+  /** Today's look or the website's, chosen in Settings. */
+  look: Look;
   /** False until the stored preference has been read. */
   ready: boolean;
   setPreference(next: AppearancePreference): void;
+  setLook(next: Look): void;
 }
+
+const LOOK_STORAGE_KEY = "agentman.look.v1";
 
 const ThemeContext = createContext<Theme>({
   color: palettes.light,
   scheme: "light",
   preference: DEFAULT_APPEARANCE,
+  look: "classic",
   ready: false,
   setPreference: () => {},
+  setLook: () => {},
 });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [preference, setStoredPreference] = useState<AppearancePreference>(DEFAULT_APPEARANCE);
+  const [storedLook, setStoredLook] = useState<Look>("classic");
   const [ready, setReady] = useState(false);
   const system = useColorScheme();
 
   useEffect(() => {
     let active = true;
-    AsyncStorage.getItem(APPEARANCE_STORAGE_KEY)
-      .then((raw) => {
-        if (active) setStoredPreference(parseAppearance(raw));
+    Promise.all([AsyncStorage.getItem(APPEARANCE_STORAGE_KEY), AsyncStorage.getItem(LOOK_STORAGE_KEY)])
+      .then(([raw, look]) => {
+        if (!active) return;
+        setStoredPreference(parseAppearance(raw));
+        setStoredLook(look === "site" ? "site" : "classic");
       })
       .catch(() => {})
       .finally(() => {
@@ -76,10 +86,24 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     void AsyncStorage.setItem(APPEARANCE_STORAGE_KEY, next).catch(() => {});
   }, []);
 
+  const setLook = useCallback((next: Look) => {
+    setStoredLook(next);
+    void AsyncStorage.setItem(LOOK_STORAGE_KEY, next).catch(() => {});
+  }, []);
+
   const scheme = simulatorAppearance() ?? resolveScheme(preference, system);
+  const look = simulatorLook() ?? storedLook;
   const value = useMemo<Theme>(
-    () => ({ color: palettes[scheme], scheme, preference, ready, setPreference }),
-    [scheme, preference, ready, setPreference],
+    () => ({
+      color: (look === "site" ? sitePalettes : palettes)[scheme],
+      scheme,
+      preference,
+      look,
+      ready,
+      setPreference,
+      setLook,
+    }),
+    [scheme, preference, look, ready, setPreference, setLook],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
