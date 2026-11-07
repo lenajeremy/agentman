@@ -61,7 +61,7 @@ private struct ToastView: View {
         }
         .frame(width: AgentmanToasts.width)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.5))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
         .shadow(color: .black.opacity(0.14), radius: 14, y: 6)
         .onHover { hovering = $0 }
         // News goes after a while, unless the pointer rests on it.

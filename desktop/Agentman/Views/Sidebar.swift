@@ -174,8 +174,19 @@ struct Sidebar: View {
         }
         .overlay {
             if store.sessions.isEmpty, store.status == .connected {
-                EmptySidebar { store.selection = .newAgent }
-                    .padding(.top, 90)
+                if Look.site {
+                    EmptySidebar { store.selection = .newAgent }
+                        .padding(.top, 90)
+                } else {
+                    ContentUnavailableView {
+                        Label("No agents yet", systemImage: "sparkles")
+                    } description: {
+                        Text("Start one here, or with am claude or am codex in a terminal.")
+                    } actions: {
+                        SmallButton(title: "New Agent", symbol: "square.and.pencil", primary: true) { store.selection = .newAgent }
+                    }
+                    .padding(.top, 120)
+                }
             } else if Self.foundNothing(query: store.search, sections: store.sidebar, hits: store.sidebarHits) {
                 // A search with nothing to show says so, instead of a blank list.
                 ContentUnavailableView {
@@ -374,7 +385,15 @@ struct AgentmanCard: View {
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 8)
-            .edged(12, fill: background, depth: selected ? 3 : 2)
+            .look {
+                $0.edged(12, fill: background, depth: selected ? 3 : 2)
+            } classic: {
+                $0.background(background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Palette.line.opacity(selected ? 1 : 0))
+                    )
+            }
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -391,9 +410,15 @@ struct AgentmanCard: View {
     }
 
     /// Agentman's own card, in the site's cream with the edge; a shade
-    /// deeper while it is open or under the pointer.
+    /// deeper while it is open or under the pointer. In the Classic theme,
+    /// grey like a selected row when it is open; otherwise a card of its
+    /// own, white on a light sidebar, so it never passes for the selection.
     private var background: Color {
-        selected || hovering ? Palette.cream.mix(with: Palette.edge, by: 0.06) : Palette.cream
+        if Look.site {
+            return selected || hovering ? Palette.cream.mix(with: Palette.edge, by: 0.06) : Palette.cream
+        }
+        if selected { return Palette.fill }
+        return hovering ? Palette.fill.opacity(0.6) : .clear
     }
 
     /// What arrived since the user last looked at the conversation.
@@ -868,9 +893,9 @@ private struct SectionHeading: View {
     var body: some View {
         HStack(spacing: 6) {
             Text(title)
-                .font(Fonts.eyebrow)
-                .tracking(1.2)
-                .textCase(.uppercase)
+                .font(Look.site ? Fonts.eyebrow : Fonts.sans(12, .medium))
+                .tracking(Look.site ? 1.2 : 0)
+                .textCase(Look.site ? .uppercase : nil)
                 .foregroundStyle(tint ?? (hovering && open != nil ? Palette.text : Palette.muted))
             Spacer(minLength: 4)
             if let count {

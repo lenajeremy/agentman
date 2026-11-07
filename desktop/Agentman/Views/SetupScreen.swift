@@ -17,14 +17,21 @@ struct SetupScreen: View {
             Color.black.opacity(0.22)
                 .ignoresSafeArea()
             VStack(alignment: .leading, spacing: 0) {
-                header(setup)
-                Text(subtitle(setup))
-                    .font(TextStyle.body)
-                    .foregroundStyle(Palette.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 10)
-                    .padding(.bottom, 16)
+                if Look.site {
+                    header(setup)
+                    Text(subtitle(setup))
+                        .font(TextStyle.body)
+                        .foregroundStyle(Palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 10)
+                        .padding(.bottom, 16)
+                } else {
+                    classicHeader(setup)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 24)
+                        .padding(.bottom, 18)
+                }
                 VStack(alignment: .leading, spacing: 12) {
                     if setup.phase == .ready {
                         WelcomePoints()
@@ -46,11 +53,28 @@ struct SetupScreen: View {
             .frame(width: Self.width)
             .background(Palette.surface)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.5))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
             .shadow(color: .black.opacity(0.2), radius: 40, y: 16)
         }
         .transition(.opacity)
         .task { await setup.lookAtShell() }
+    }
+
+    /// The Classic theme's header: the badge beside the title and what it
+    /// does.
+    private func classicHeader(_ setup: DaemonSetup) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            AgentmanBadge(size: 44)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title(setup))
+                    .font(Fonts.sans(19, .semibold))
+                    .foregroundStyle(Palette.text)
+                Text(subtitle(setup))
+                    .font(TextStyle.body)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     /// The website's orange band, with its terminal sticker and the title in
@@ -160,20 +184,31 @@ private struct WelcomePoints: View {
                   "If you already run the helper (am serve) from Homebrew or a terminal, this one takes its place. The am command keeps working.")
         }
         // The site's cream card, on its edge and hard shadow.
-        .edged(14, fill: Palette.cream, depth: 3)
+        .look {
+            $0.edged(14, fill: Palette.cream, depth: 3)
+        } classic: {
+            $0.background(Palette.paper.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
+        }
     }
 
     private var divider: some View {
-        Rectangle().fill(Palette.edge.opacity(0.15)).frame(height: 1).padding(.leading, 56)
+        Rectangle().fill(Look.site ? Palette.edge.opacity(0.15) : Palette.line).frame(height: 1).padding(.leading, Look.site ? 56 : 50)
     }
 
     private func point(_ symbol: String, _ title: String, _ detail: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: symbol)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Palette.prompt)
-                .frame(width: 30, height: 30)
-                .edged(9, fill: Palette.surface)
+                .look {
+                    $0.font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Palette.prompt)
+                        .frame(width: 30, height: 30)
+                        .edged(9, fill: Palette.surface)
+                } classic: {
+                    $0.font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Palette.working)
+                        .frame(width: 22, height: 20)
+                }
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(TextStyle.bodyMedium)
@@ -207,7 +242,7 @@ struct SetupSteps: View {
             }
         }
         .background(Palette.paper.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.5))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
     }
 }
 

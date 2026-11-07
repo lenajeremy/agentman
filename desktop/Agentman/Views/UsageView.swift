@@ -795,8 +795,9 @@ struct Segments<Value: Hashable>: View {
                         .background {
                             if chosen {
                                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                    .fill(Palette.surface)
-                                    .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.2))
+                                    .fill(Look.site ? Palette.surface : Palette.segment)
+                                    .shadow(color: Look.site ? .clear : .black.opacity(0.1), radius: 0.5, y: 0.5)
+                                    .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Look.site ? Palette.edge : .clear, lineWidth: 1.2))
                             }
                         }
                         .contentShape(Rectangle())

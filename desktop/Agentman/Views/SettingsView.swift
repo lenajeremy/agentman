@@ -782,17 +782,29 @@ private struct SaveBar: View {
     }
 }
 
-/// Light, dark, or as the Mac is set.
+/// Light, dark, or as the Mac is set; and the theme: today's, or the
+/// website's look while it is being refined.
 private struct AppearanceSection: View {
     @AppStorage("appearance") private var appearance = "system"
 
     var body: some View {
-        SettingsSection(title: "Appearance") {
-            SettingsRow(title: "Look", divider: false) {
+        @Bindable var choice = ThemeChoice.shared
+        SettingsSection(title: "Appearance", footer: "New is the website's look, still being designed.") {
+            SettingsRow(title: "Look") {
                 Picker("", selection: $appearance) {
                     Text("Match the Mac").tag("system")
                     Text("Light").tag("light")
                     Text("Dark").tag("dark")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+            }
+            SettingsRow(title: "Theme", divider: false) {
+                Picker("", selection: $choice.theme) {
+                    ForEach(AppTheme.allCases) { theme in
+                        Text(theme.title).tag(theme)
+                    }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()

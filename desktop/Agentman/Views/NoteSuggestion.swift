@@ -84,7 +84,7 @@ struct NoteSuggestionCard: View {
         }
         .padding(18)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.5))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
         .onAppear {
             // For screenshots: the suggestion opened for editing.
             if ProcessInfo.processInfo.environment["AGENTMAN_EDIT_NOTE"] == "1", !editing { beginEditing() }
@@ -135,7 +135,7 @@ struct NoteSuggestionCard: View {
                 .padding(6)
                 .frame(minHeight: 90, maxHeight: 160)
                 .background(Palette.paper, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.5))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
             Picker("", selection: $tier) {
                 Text("Shared with your agents").tag("shared")
                 Text("Only Agentman").tag("private")

@@ -69,11 +69,17 @@ struct DecisionPanel: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(20)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous).hardShadowFill(Palette.surface, shadow: Palette.needsYou, depth: 4)
-            )
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.5))
-            .padding(.bottom, 4)
+            .look {
+                $0.background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous).hardShadowFill(Palette.surface, shadow: Palette.needsYou, depth: 4)
+                )
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
+                .padding(.bottom, 4)
+            } classic: {
+                $0.background(Palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.line))
+                    .shadow(color: .black.opacity(0.035), radius: 10, y: 3)
+            }
     }
 }
 
@@ -252,7 +258,7 @@ struct ChoiceButtonStyle: ButtonStyle {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .strokeBorder(primary ? Color.clear : Palette.edge, lineWidth: 1.5)
+                    .strokeBorder(primary ? Color.clear : Palette.edge, lineWidth: Palette.edgeWidth)
             )
             .opacity(configuration.isPressed ? 0.75 : 1)
     }

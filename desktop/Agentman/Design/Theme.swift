@@ -79,9 +79,11 @@ enum Palette {
     static let tokenOutput = Color(light: 0x7C5CD6, dark: 0xA48BF2)
     /// The chosen part of a segmented switch, over `fill`.
     static let segment = Color(light: 0xFFFFFF, dark: 0x363636)
-    /// The loader's colours, flowing one into the next: blue into the
-    /// website's orange.
-    static let loader = [working, Color(light: 0xFF5F1F, dark: 0xFF7A3D)]
+    /// The loader's colours, flowing one into the next: blue into pink, or
+    /// into the website's orange in its theme.
+    static var loader: [Color] {
+        [working, Look.site ? Color(light: 0xFF5F1F, dark: 0xFF7A3D) : Color(light: 0xF0407F, dark: 0xFF5C9A)]
+    }
     /// An agent needs you.
     static let needsYou = Color(light: 0xFF6A2B, dark: 0xFF7D45)
     static let needsYouText = Color(light: 0xC2451A, dark: 0xFF9A6C)
@@ -143,10 +145,10 @@ enum Fonts {
 /// The type scale, in the phone's sizes adjusted for a desktop's distance.
 enum TextStyle {
     /// Agentman's name on the entry page.
-    static let wordmark = Fonts.display(36)
-    /// Titles and headings in Rubik, as on the website.
-    static let display = Fonts.display(28)
-    static let title = Fonts.heading(16)
+    static var wordmark: Font { Fonts.display(36, classic: Fonts.sans(34)) }
+    /// Titles and headings, in Rubik in the website's theme.
+    static var display: Font { Fonts.display(28, classic: Fonts.sans(28, .medium)) }
+    static var title: Font { Fonts.heading(16, classic: Fonts.sans(16, .medium)) }
     static let body = Fonts.sans(14)
     static let bodyMedium = Fonts.sans(14, .medium)
     static let caption = Fonts.sans(12)
@@ -223,9 +225,11 @@ struct ChromeButton: View {
                 .foregroundStyle(active ? Palette.text : Palette.muted)
                 .frame(width: 28, height: 28)
                 // The site's edge while its panel is open (on cream) or
-                // under the pointer.
+                // under the pointer; today's grey in the Classic theme.
                 .background {
-                    if active || hovering {
+                    if !Look.site {
+                        RoundedRectangle(cornerRadius: 6).fill(active || hovering ? Palette.fill.opacity(0.55) : .clear)
+                    } else if active || hovering {
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
                             .fill(active ? Palette.cream : Palette.surface)
                             .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.2))

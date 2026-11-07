@@ -237,14 +237,18 @@ private struct EntryHero: View {
         VStack(spacing: 0) {
             Spacer(minLength: 48)
             // The website's Agentman mascot on its dots, over the name in
-            // Rubik.
-            VStack(spacing: 4) {
-                StickerOnDots(name: .mascot, size: 150)
+            // Rubik; the badge in the Classic theme.
+            VStack(spacing: Look.site ? 4 : 16) {
+                if Look.site {
+                    StickerOnDots(name: .mascot, size: 150)
+                } else {
+                    AgentmanBadge(size: 46)
+                }
                 Text("Agentman")
                     .font(TextStyle.wordmark)
                     .foregroundStyle(Palette.text)
             }
-            .padding(.bottom, 24)
+            .padding(.bottom, Look.site ? 24 : 28)
 
             ManagerBox(draft: $draft, attachments: $attachments, dropping: $dropping, sending: sending, large: true, send: send)
                 .frame(maxWidth: 620)
@@ -288,8 +292,13 @@ private struct StarterChip: View {
                 .padding(.horizontal, 12)
                 .frame(height: 28)
                 // The site's chips: cream, edged, on a hard shadow.
-                .edged(14, fill: hovering ? Palette.cream.mix(with: Palette.edge, by: 0.06) : Palette.cream, depth: 2)
-                .padding(.bottom, 2)
+                .look {
+                    $0.edged(14, fill: hovering ? Palette.cream.mix(with: Palette.edge, by: 0.06) : Palette.cream, depth: 2)
+                        .padding(.bottom, 2)
+                } classic: {
+                    $0.background(hovering ? Palette.fill : Palette.surface, in: Capsule())
+                        .overlay(Capsule().strokeBorder(Palette.line))
+                }
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
@@ -776,9 +785,9 @@ private struct ManagerComposer: View {
                 } label: {
                     Image(systemName: thinking ? "stop.fill" : "arrow.up")
                         .font(.system(size: thinking ? 11 : 13, weight: .bold))
-                        .foregroundStyle(canSend || thinking ? Color.white : Palette.muted)
+                        .foregroundStyle(Look.site ? (canSend || thinking ? Color.white : Palette.muted) : Palette.onInverse)
                         .frame(width: large ? 32 : 28, height: large ? 32 : 28)
-                        .background(thinking ? Palette.inverse : canSend ? Palette.flood : Palette.fillStrong, in: Circle())
+                        .background(Look.site ? (thinking ? Palette.inverse : canSend ? Palette.flood : Palette.fillStrong) : Palette.inverse.opacity(canSend || thinking ? 1 : 0.25), in: Circle())
                 }
                 .buttonStyle(.plain)
                 .disabled(!thinking && !canSend)
@@ -796,8 +805,9 @@ private struct ManagerComposer: View {
         }
         .overlay(
             RoundedRectangle(cornerRadius: large ? 26 : 22, style: .continuous)
-                .strokeBorder(Palette.edge, lineWidth: 1.5)
+                .strokeBorder(Look.site ? Palette.edge : (focused ? Palette.fillStrong : Palette.line), lineWidth: Palette.edgeWidth)
         )
+        .classicShadow(color: .black.opacity(large ? 0.06 : 0.04), radius: large ? 18 : 8, y: large ? 6 : 2)
         // The files for `@`, just above the box.
         .overlay(alignment: .top) {
             if let mentions, mentions.isOpen {
@@ -878,6 +888,7 @@ private struct KeyBox: View {
             .padding(.trailing, 8)
             .padding(.vertical, 9)
             .edged(26, depth: 3)
+            .classicShadow(color: .black.opacity(0.06), radius: 18, y: 6)
             if let problem {
                 Text(problem)
                     .font(TextStyle.caption)

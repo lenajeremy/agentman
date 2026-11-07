@@ -102,7 +102,7 @@ struct WorkspacePanel: View {
         .animation(.easeOut(duration: 0.18), value: expanded || !stack.isEmpty)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14))
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Palette.edge, lineWidth: 1.5))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
         // Again as the agent works: a turn changes files long before it ends.
         // A burst of activity asks once, a second after it settles.
         .task(id: Refresh(state: session.state, activity: store.activity(session.id).at, reread: reread)) {

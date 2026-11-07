@@ -66,8 +66,8 @@ private struct LimitsSection: View {
                         .foregroundStyle(Palette.textSecondary)
                         .padding(.horizontal, 7)
                         .frame(height: 18)
-                        .background(Palette.cream, in: Capsule())
-                        .overlay(Capsule().strokeBorder(Palette.edge, lineWidth: 1))
+                        .background(Look.site ? Palette.cream : Palette.fill, in: Capsule())
+                        .overlay(Capsule().strokeBorder(Look.site ? Palette.edge : .clear, lineWidth: 1))
                 }
                 Spacer(minLength: 12)
                 Text(LimitsFormat.checked(agent, now: now))

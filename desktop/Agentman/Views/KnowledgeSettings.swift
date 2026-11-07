@@ -93,7 +93,7 @@ struct KnowledgeSettings: View {
         VStack(alignment: .leading, spacing: 0) {
             TextField("Title", text: $draft.title, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(Fonts.heading(18))
+                .font(Fonts.heading(18, classic: Fonts.sans(18, .medium)))
                 .lineLimit(1...3)
                 .padding(.bottom, 10)
             HStack(spacing: 10) {

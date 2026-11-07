@@ -305,7 +305,7 @@ struct CommitSheet: View {
                     .scrollIndicators(.never)
                     .frame(height: 176)
                     .background(Palette.surface, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.edge, lineWidth: 1.5))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
                     HStack(spacing: 0) {
                         if hidden > 0 {
                             Text("\(hidden) file\(hidden == 1 ? "" : "s") holding secrets left out")
@@ -322,7 +322,7 @@ struct CommitSheet: View {
             .font(TextStyle.caption)
             .padding(12)
             .background(Palette.fill.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Palette.edge, lineWidth: 1.5))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
             VStack(alignment: .leading, spacing: 6) {
                 Text("Commit message (optional)").font(TextStyle.captionMedium).foregroundStyle(Palette.text)
                 TextEditor(text: $message)
@@ -331,7 +331,7 @@ struct CommitSheet: View {
                     .padding(6)
                     .frame(height: 76)
                     .background(Palette.surface, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.edge, lineWidth: 1.5))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
                     .overlay(alignment: .topLeading) {
                         if message.isEmpty {
                             Text("Leave empty to auto-generate")

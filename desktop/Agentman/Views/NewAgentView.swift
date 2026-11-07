@@ -76,7 +76,8 @@ struct NewAgentView: View {
                 RoundedRectangle(cornerRadius: 24, style: .continuous).hardShadowFill(Palette.surface, shadow: Palette.edge, depth: 3)
                     .onTapGesture { focused = true }
             }
-            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.5))
+            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
+            .classicShadow(color: .black.opacity(0.06), radius: 18, y: 6)
             .frame(maxWidth: 640)
 
             if let problem {

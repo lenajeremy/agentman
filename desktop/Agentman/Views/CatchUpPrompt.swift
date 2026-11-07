@@ -45,7 +45,7 @@ struct CatchUpPrompt: View {
             .padding(24)
             .frame(width: Self.width)
             .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.5))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
             .shadow(color: .black.opacity(0.2), radius: 40, y: 16)
         }
         .transition(.opacity)

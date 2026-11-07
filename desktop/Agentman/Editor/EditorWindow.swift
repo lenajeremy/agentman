@@ -375,7 +375,7 @@ private struct FileTree: View {
                 // with the same line under it, so the three read as one row.
                 HStack(spacing: 6) {
                     Text(store.name)
-                        .font(Fonts.heading(13))
+                        .font(Fonts.heading(13, classic: Fonts.sans(12.5, .semibold)))
                         .foregroundStyle(Palette.text)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -660,12 +660,17 @@ private struct EditorTab: View {
         .padding(.leading, 12)
         .padding(.trailing, 8)
         .frame(height: 38)
-        .background(hovering && !active ? Palette.fill.opacity(0.45) : .clear, in: RoundedRectangle(cornerRadius: 6))
+        .background(Look.site ? (hovering && !active ? Palette.fill.opacity(0.45) : .clear) : (active ? Palette.fill.opacity(0.55) : .clear), in: RoundedRectangle(cornerRadius: 6))
         .padding(.horizontal, 3)
-        // The open tab: the site's orange under it.
+        // The open tab: the site's orange under it (today, the tab's own
+        // fill, joined to the page by a line of it).
         .overlay(alignment: .bottom) {
             if active {
-                Capsule().fill(Palette.flood).frame(height: 2.5).padding(.horizontal, 8)
+                if Look.site {
+                    Capsule().fill(Palette.flood).frame(height: 2.5).padding(.horizontal, 8)
+                } else {
+                    Rectangle().fill(Palette.surface).frame(height: 1)
+                }
             }
         }
         .contentShape(Rectangle())
@@ -957,7 +962,7 @@ struct EditorEmpty: View {
             EmptyMark(symbol: "chevron.left.forwardslash.chevron.right")
                 .padding(.bottom, 18)
             Text(store.name)
-                .font(Fonts.display(24))
+                .font(Fonts.display(24, classic: Fonts.sans(20, .semibold)))
                 .tracking(-0.3)
                 .foregroundStyle(Palette.text)
                 .lineLimit(1)
@@ -1029,9 +1034,10 @@ private struct EmptyMark: View {
 
     private var tile: some View {
         RoundedRectangle(cornerRadius: 9, style: .continuous)
-            .hardShadowFill(Palette.cream, shadow: Palette.edge, depth: 2)
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.5))
+            .hardShadowFill(Look.site ? Palette.cream : Palette.surface, shadow: Palette.edge, depth: 2)
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
             .frame(width: 38, height: 38)
+            .classicShadow(color: .black.opacity(0.06), radius: 1.5, y: 1)
     }
 }
 

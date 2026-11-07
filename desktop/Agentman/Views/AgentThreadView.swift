@@ -1781,7 +1781,7 @@ struct Composer: View {
         }
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Palette.edge, lineWidth: 1.5)
+                .strokeBorder(Look.site ? Palette.edge : (focused ? Palette.fillStrong : Palette.line), lineWidth: Palette.edgeWidth)
         )
         // The commands for `/`, and the files for `@`, just above the box.
         .overlay(alignment: .top) {
@@ -1879,7 +1879,7 @@ struct Composer: View {
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(canSend ? Color.white : Palette.muted)
                     .frame(width: 28, height: 28)
-                    .background(canSend ? Palette.flood : Palette.fillStrong, in: Circle())
+                    .background(canSend ? (Look.site ? Palette.flood : Palette.working) : Palette.fillStrong, in: Circle())
             }
             .buttonStyle(.plain)
             .disabled(!canSend)
