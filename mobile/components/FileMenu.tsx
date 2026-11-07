@@ -5,6 +5,7 @@ import { useStyles, useTheme } from "../lib/appearance";
 import { splitPath } from "../lib/mentions";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { MotionPressable } from "./MotionPressable";
+import { edged } from "./Brand";
 
 /**
  * The session's files for an `@` being typed, over the message box: the name
@@ -80,8 +81,7 @@ const makeStyles = (c: Palette) =>
       paddingVertical: space.xs,
       borderRadius: radius.lg,
       backgroundColor: c.surface,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.line,
+      ...edged(c, 3),
       shadowColor: "#000000",
       shadowOpacity: 0.08,
       shadowRadius: 16,

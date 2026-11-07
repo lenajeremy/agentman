@@ -5,6 +5,7 @@ import Animated, { FadeInUp, FadeOut, useReducedMotion } from "react-native-rean
 
 import { useStyles, useTheme } from "../lib/appearance";
 import { font, Palette, radius, size, space } from "../lib/theme";
+import { hardShadow } from "./Brand";
 
 /** How long a confirmation stays. Long enough to read one word, no longer. */
 const SHOWN_MS = 1600;
@@ -70,8 +71,9 @@ const makeStyles = (c: Palette) =>
       gap: space.sm,
       paddingVertical: space.sm + 2,
       paddingHorizontal: space.lg,
-      borderRadius: radius.pill,
+      borderRadius: 14,
       backgroundColor: c.inverse,
+      ...hardShadow(c.inverseShadow),
       shadowColor: c.shadow,
       shadowOpacity: 0.2,
       shadowRadius: 20,

@@ -26,6 +26,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useStyles, useTheme } from "../lib/appearance";
 import { layoutMessageMenu, MENU_ROW_HEIGHT, type Frame } from "../lib/message-menu";
 import { font, Palette, radius, size, space } from "../lib/theme";
+import { edged } from "./Brand";
 
 export interface MessageMenuItem {
   key: string;
@@ -253,8 +254,7 @@ const makeStyles = (c: Palette) =>
       position: "absolute",
       borderRadius: radius.lg,
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c),
       overflow: "hidden",
       shadowColor: c.shadow,
       shadowOpacity: 0.18,

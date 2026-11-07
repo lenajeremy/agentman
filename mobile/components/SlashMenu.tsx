@@ -5,6 +5,7 @@ import { commandLabel } from "../lib/commands";
 import type { SlashCommand } from "../lib/protocol";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { MotionPressable } from "./MotionPressable";
+import { edged } from "./Brand";
 
 /**
  * The "/" menu, over the message box while a command's name is being typed:
@@ -76,8 +77,7 @@ const makeStyles = (c: Palette) =>
       paddingVertical: space.xs,
       borderRadius: radius.lg,
       backgroundColor: c.surface,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.line,
+      ...edged(c, 3),
       shadowColor: "#000000",
       shadowOpacity: 0.08,
       shadowRadius: 16,

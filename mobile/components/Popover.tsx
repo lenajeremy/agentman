@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useStyles, useTheme } from "../lib/appearance";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
+import { edged } from "./Brand";
 
 export interface PopoverItem {
   key: string;
@@ -156,8 +157,7 @@ const makeStyles = (c: Palette) =>
       minWidth: 212,
       borderRadius: radius.lg,
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 3),
       overflow: "hidden",
       shadowColor: c.shadow,
       shadowOpacity: 0.18,
