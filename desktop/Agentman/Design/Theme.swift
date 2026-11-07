@@ -6,7 +6,7 @@ import SwiftUI
 // agent state and actions; both appearances use the same hierarchy.
 
 extension Color {
-    fileprivate init(light: UInt32, dark: UInt32) {
+    init(light: UInt32, dark: UInt32) {
         self.init(nsColor: NSColor(name: nil) { appearance in
             let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             return NSColor(rgb: isDark ? dark : light)
@@ -79,8 +79,9 @@ enum Palette {
     static let tokenOutput = Color(light: 0x7C5CD6, dark: 0xA48BF2)
     /// The chosen part of a segmented switch, over `fill`.
     static let segment = Color(light: 0xFFFFFF, dark: 0x363636)
-    /// The loader's colours, flowing one into the next.
-    static let loader = [working, Color(light: 0xF0407F, dark: 0xFF5C9A)]
+    /// The loader's colours, flowing one into the next: blue into the
+    /// website's orange.
+    static let loader = [working, Color(light: 0xFF5F1F, dark: 0xFF7A3D)]
     /// An agent needs you.
     static let needsYou = Color(light: 0xFF6A2B, dark: 0xFF7D45)
     static let needsYouText = Color(light: 0xC2451A, dark: 0xFF9A6C)
@@ -142,9 +143,10 @@ enum Fonts {
 /// The type scale, in the phone's sizes adjusted for a desktop's distance.
 enum TextStyle {
     /// Agentman's name on the entry page.
-    static let wordmark = Fonts.sans(34)
-    static let display = Fonts.sans(28, .medium)
-    static let title = Fonts.sans(16, .medium)
+    static let wordmark = Fonts.display(36)
+    /// Titles and headings in Rubik, as on the website.
+    static let display = Fonts.display(28)
+    static let title = Fonts.heading(16)
     static let body = Fonts.sans(14)
     static let bodyMedium = Fonts.sans(14, .medium)
     static let caption = Fonts.sans(12)

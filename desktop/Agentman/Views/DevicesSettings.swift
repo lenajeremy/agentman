@@ -245,7 +245,7 @@ struct PairingPanel: View {
                 .frame(width: 132, height: 132)
                 .padding(10)
                 .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.5))
                 .accessibilityLabel("QR code. Scan it with the Agentman app to pair.")
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -292,7 +292,7 @@ struct PairingPanel: View {
             .padding(.horizontal, 10)
             .frame(height: 28)
             .background(Palette.fill.opacity(0.45), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Palette.line))
+            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.5))
     }
 
     @ViewBuilder private func copyButtons(_ code: PairCode) -> some View {
@@ -348,14 +348,18 @@ struct SmallButton: View {
             .foregroundStyle(primary ? Palette.onInverse : Palette.text)
             .padding(.horizontal, 10)
             .frame(height: 26)
+            // The site's buttons: ink with a hard shadow, or edged white
+            // with one.
             .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(primary ? Palette.inverse.opacity(hovering ? 0.85 : 1) : hovering ? Palette.fill : Palette.surface)
+                    .shadow(color: primary ? Palette.inverseShadow : Palette.edge, radius: 0, x: 0, y: 2)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(primary ? Color.clear : Palette.line)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(primary ? Color.clear : Palette.edge, lineWidth: 1.5)
             )
+            .padding(.bottom, 2)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
