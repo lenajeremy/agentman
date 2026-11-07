@@ -144,13 +144,13 @@ private struct PanelHeader: View {
         switch route {
         case .agents:
             Text("Agents")
-                .font(Fonts.sans(13, .semibold))
+                .font(Fonts.heading(13))
                 .foregroundStyle(Palette.text)
         case .agentman:
             HStack(spacing: 7) {
                 AgentmanBadge(size: 18)
                 Text("Agentman")
-                    .font(Fonts.sans(13, .semibold))
+                    .font(Fonts.heading(13))
                     .foregroundStyle(Palette.text)
                 if agents.manager.thinking {
                     Text("Thinking…")
@@ -163,7 +163,7 @@ private struct PanelHeader: View {
                 HStack(spacing: 7) {
                     AgentMark(kind: session.kind, size: 15)
                     Text(session.name)
-                        .font(Fonts.sans(13, .semibold))
+                        .font(Fonts.heading(13))
                         .foregroundStyle(Palette.text)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -300,8 +300,7 @@ private struct AgentmanRow: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 9)
         }
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
+        .edged(12, depth: 2)
     }
 
     private var attention: Bool {
