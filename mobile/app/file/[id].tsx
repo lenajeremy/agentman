@@ -27,6 +27,7 @@ import { WorkspaceResult } from "../../lib/protocol";
 import { appendPiece, discard, offerFile, scratchFile } from "../../lib/save-image";
 import { useStore } from "../../lib/store";
 import { font, Palette, radius, size, space, scaled } from "../../lib/theme";
+import { edged } from "../../components/Brand";
 
 export default function FileScreen() {
   const {
@@ -674,8 +675,7 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
       borderRadius: radius.pill,
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 2),
     },
     tabs: {
       flexDirection: "row",

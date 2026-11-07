@@ -17,6 +17,7 @@ import { MotionPressable } from "../components/MotionPressable";
 import { useStyles, useTheme } from "../lib/appearance";
 import { useStore } from "../lib/store";
 import { font, Palette, radius, size, space } from "../lib/theme";
+import { edged, eyebrow, hardShadow, screenTitle } from "../components/Brand";
 
 type LaunchKind = "claude" | "codex" | "cursor-cli" | "opencode" | "kiro" | "antigravity" | "muse";
 const agents: { kind: LaunchKind; label: string }[] = [
@@ -200,26 +201,25 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   page: { flex: 1, backgroundColor: c.paper },
   content: { paddingHorizontal: space.lg },
   back: { marginTop: space.md, width: 40, height: 40, borderRadius: radius.pill,
-    backgroundColor: c.surface, borderWidth: 1, borderColor: c.line,
+    backgroundColor: c.surface, ...edged(c, 2),
     alignItems: "center", justifyContent: "center" },
-  title: { marginTop: space.lg, color: c.text, ...font.sansBold,
-    fontSize: size.display, letterSpacing: -1.2 },
+  title: { marginTop: space.lg, ...screenTitle(c) },
   subtitle: { marginTop: space.xs, color: c.muted, ...font.sans,
     fontSize: size.body },
-  label: { marginTop: space.xl, marginBottom: space.sm, color: c.text,
-    ...font.sansBold, fontSize: size.label },
+  label: { marginTop: space.xl, marginBottom: space.sm, ...eyebrow(c) },
   agentGrid: { gap: space.sm },
   agentOption: { minHeight: 54, flexDirection: "row", alignItems: "center", gap: space.md,
     paddingHorizontal: space.md, borderRadius: radius.lg, backgroundColor: c.surface,
-    borderWidth: 1, borderColor: c.line },
-  selected: { borderColor: c.working },
+    ...edged(c) },
+  // The chosen agent: the site's cream, lifted on its hard shadow.
+  selected: { backgroundColor: c.cream, ...edged(c, 3) },
   agentName: { flex: 1, ...font.sansMedium, fontSize: size.body, color: c.text },
   pathBar: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: space.sm,
     paddingHorizontal: space.md, borderRadius: radius.lg, backgroundColor: c.fill },
   up: { padding: 6 },
   path: { flex: 1, ...font.mono, fontSize: size.label, color: c.text },
   folderList: { marginTop: space.sm, borderRadius: radius.lg, backgroundColor: c.surface,
-    borderWidth: 1, borderColor: c.line, overflow: "hidden" },
+    ...edged(c), overflow: "hidden" },
   folder: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: space.sm,
     paddingHorizontal: space.md, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: c.line },
   folderName: { flex: 1, ...font.sans, fontSize: size.body, color: c.text },
@@ -229,12 +229,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     fontSize: size.body, color: c.text },
   spinner: { margin: space.lg },
   prompt: { minHeight: 110, padding: space.md, borderRadius: radius.lg,
-    borderWidth: 1, borderColor: c.line, backgroundColor: c.surface,
+    ...edged(c), backgroundColor: c.surface,
     ...font.sans, fontSize: size.body, color: c.text },
   hint: { marginTop: space.xs, ...font.sans, fontSize: size.caption, color: c.muted },
   error: { marginTop: space.md, ...font.sans, fontSize: size.label, color: c.errorText },
-  start: { marginTop: space.xl, minHeight: 52, borderRadius: radius.pill,
-    backgroundColor: c.inverse, alignItems: "center", justifyContent: "center" },
+  start: { marginTop: space.xl, minHeight: 52, borderRadius: 14,
+    backgroundColor: c.inverse,
+    ...hardShadow(c.inverseShadow), alignItems: "center", justifyContent: "center" },
   disabled: { opacity: 0.45 },
   startText: { color: c.onInverse, ...font.sansBold, fontSize: size.body },
 });

@@ -23,6 +23,7 @@ import { artifactKind, artifactTitle, isMarkdown } from "../../lib/artifacts";
 import { Artifact, WorkspaceResult } from "../../lib/protocol";
 import { useStore } from "../../lib/store";
 import { agentLabel, font, Palette, radius, size, space, scaled } from "../../lib/theme";
+import { edged } from "../../components/Brand";
 
 type Review =
   | { step: "idle" }
@@ -346,8 +347,7 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
       borderRadius: radius.pill,
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 2),
     },
     kindTile: {
       width: 30,

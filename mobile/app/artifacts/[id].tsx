@@ -11,6 +11,7 @@ import { artifactKind, artifactTitle, sortArtifacts } from "../../lib/artifacts"
 import { Artifact } from "../../lib/protocol";
 import { useStore } from "../../lib/store";
 import { agentLabel, ago, font, Palette, radius, size, space, scaled } from "../../lib/theme";
+import { edged } from "../../components/Brand";
 
 /**
  * The documents one agent wrote for you apart from the conversation: an
@@ -235,8 +236,7 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
       borderRadius: radius.pill,
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 2),
     },
 
     content: { paddingHorizontal: space.lg, paddingTop: space.xs },

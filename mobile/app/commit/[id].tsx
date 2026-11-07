@@ -29,6 +29,7 @@ import {
 import { WorkspaceResult } from "../../lib/protocol";
 import { useStore } from "../../lib/store";
 import { font, Palette, radius, size, space, scaled } from "../../lib/theme";
+import { edged } from "../../components/Brand";
 
 /** The message's line height, and where a long one is cut: six lines is most
  *  messages whole, and leaves the files on the first screen of a long one. */
@@ -351,8 +352,7 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
       borderRadius: radius.pill,
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 2),
     },
 
     content: { paddingHorizontal: space.lg, paddingTop: space.md },

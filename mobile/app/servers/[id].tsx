@@ -22,6 +22,7 @@ import { useStyles, useTheme } from "../../lib/appearance";
 import { Server } from "../../lib/protocol";
 import { useStore } from "../../lib/store";
 import { agentLabel, font, Palette, radius, shortPath, size, space, scaled } from "../../lib/theme";
+import { edged, hardShadow, screenTitle } from "../../components/Brand";
 
 /**
  * The web servers one agent has started.
@@ -310,14 +311,10 @@ const makeStyles = (c: Palette) =>
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 2),
     },
     title: {
-      ...font.sansBold,
-      fontSize: size.display,
-      letterSpacing: -1.2,
-      color: c.text,
+      ...screenTitle(c),
       marginTop: space.lg,
     },
     sessionLine: {
@@ -344,8 +341,7 @@ const makeStyles = (c: Palette) =>
     card: {
       backgroundColor: c.surface,
       borderRadius: radius.xl,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 3),
       overflow: "hidden",
     },
     cardMain: {
@@ -375,8 +371,9 @@ const makeStyles = (c: Palette) =>
       gap: space.xs,
       paddingVertical: 7,
       paddingHorizontal: 12,
-      borderRadius: radius.pill,
+      borderRadius: 14,
       backgroundColor: c.inverse,
+      ...hardShadow(c.inverseShadow),
     },
     openPillDisabled: { opacity: 0.35 },
     openLabel: { ...font.sansMedium, fontSize: size.caption, color: c.onInverse },

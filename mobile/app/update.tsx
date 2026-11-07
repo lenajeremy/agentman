@@ -12,6 +12,7 @@ import { useStyles, useTheme } from "../lib/appearance";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { behindText, PromptKind, versionLabel } from "../lib/updates";
 import { useUpdates } from "../lib/updates-context";
+import { edged, eyebrow, hardShadow } from "../components/Brand";
 
 type FeatherName = ComponentProps<typeof Feather>["name"];
 
@@ -231,9 +232,7 @@ const makeStyles = (c: Palette) =>
       marginTop: space.xs,
     },
     sectionLabel: {
-      ...font.sansBold,
-      fontSize: size.caption,
-      color: c.muted,
+      ...eyebrow(c),
       marginLeft: space.xxs,
       marginTop: space.xl,
       marginBottom: space.sm,
@@ -241,8 +240,7 @@ const makeStyles = (c: Palette) =>
     card: {
       backgroundColor: c.surface,
       borderRadius: radius.xl,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 3),
       padding: space.lg,
       gap: space.sm,
       marginBottom: space.sm,
@@ -288,8 +286,9 @@ const makeStyles = (c: Palette) =>
       alignItems: "center",
       justifyContent: "center",
       gap: 10,
-      borderRadius: radius.pill,
+      borderRadius: 14,
       backgroundColor: c.inverse,
+      ...hardShadow(c.inverseShadow),
       paddingHorizontal: space.xl,
     },
     primaryButtonText: { ...font.sansBold, fontSize: scaled(16), color: c.onInverse },

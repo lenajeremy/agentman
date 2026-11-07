@@ -25,7 +25,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Appear } from "../components/Appear";
 import { ContentColumn } from "../components/ContentColumn";
-import { PairIllustration } from "../components/Illustrations";
+import { StickerOnDots, hardShadow, heading } from "../components/Brand";
 import { MotionPressable } from "../components/MotionPressable";
 import { useStyles } from "../lib/appearance";
 import { pairWithToken } from "../lib/client";
@@ -115,7 +115,9 @@ export default function Scan() {
       <View style={[styles.page, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         <ContentColumn narrow style={styles.permissionContent}>
           <Appear style={styles.permissionCard}>
-            <PairIllustration style={styles.art} />
+            <View style={styles.art}>
+              <StickerOnDots name="phone" size={scaled(170)} />
+            </View>
             <Text style={styles.title}>Allow the camera</Text>
             <Text style={styles.body}>
               Agentman uses it to read the one-time code from your terminal. Frames are
@@ -208,16 +210,7 @@ const makeStyles = (c: Palette) =>
     page: { flex: 1, backgroundColor: c.paper },
     permissionContent: { flex: 1, justifyContent: "center", paddingHorizontal: space.lg },
     permissionCard: { alignItems: "center" },
-    art: {
-      width: "100%",
-      aspectRatio: 340 / 214,
-      borderRadius: radius.sheet,
-      overflow: "hidden",
-      backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
-      marginBottom: space.xl,
-    },
+    art: { marginBottom: space.lg },
 
     overlay: {
       ...StyleSheet.absoluteFill,
@@ -316,13 +309,7 @@ const makeStyles = (c: Palette) =>
       shadowRadius: 8,
     },
 
-    title: {
-      ...font.sansBold,
-      fontSize: scaled(28),
-      letterSpacing: -0.8,
-      color: c.text,
-      textAlign: "center",
-    },
+    title: { ...heading(c, scaled(30)), textAlign: "center" },
     body: {
       ...font.sans,
       fontSize: size.body,
@@ -351,7 +338,8 @@ const makeStyles = (c: Palette) =>
       alignSelf: "stretch",
       minHeight: 56,
       backgroundColor: c.inverse,
-      borderRadius: radius.pill,
+      borderRadius: 14,
+      ...hardShadow(c.inverseShadow),
       alignItems: "center",
       justifyContent: "center",
       marginTop: space.xl,

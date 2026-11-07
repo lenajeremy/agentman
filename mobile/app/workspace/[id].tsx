@@ -26,6 +26,7 @@ import {
 } from "../../lib/protocol";
 import { useStore } from "../../lib/store";
 import { ago, font, Palette, radius, size, space, scaled } from "../../lib/theme";
+import { edged } from "../../components/Brand";
 
 /** A directory listing is worth filtering long before it is worth paging. */
 const FILTER_FROM_ENTRIES = 8;
@@ -672,8 +673,7 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
       borderRadius: radius.pill,
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 2),
     },
 
     tabs: { flexDirection: "row", gap: space.xs, marginTop: space.md },

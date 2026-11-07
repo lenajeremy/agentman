@@ -18,6 +18,7 @@ import { Folder } from "../lib/protocol";
 import { useStore } from "../lib/store";
 import { useDirectoryBrowser } from "../lib/use-directory-browser";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
+import { edged, eyebrow, hardShadow, screenTitle } from "../components/Brand";
 
 /**
  * Picking a folder to filter the agent list by.
@@ -289,10 +290,7 @@ function makeStyles(c: Palette) {
     },
     title: {
       marginTop: space.sm,
-      ...font.sansBold,
-      fontSize: size.display,
-      letterSpacing: -1.2,
-      color: c.text,
+      ...screenTitle(c),
     },
     subtitle: {
       marginTop: space.xs,
@@ -324,9 +322,7 @@ function makeStyles(c: Palette) {
       gap: space.sm,
     },
     headingLabel: {
-      ...font.sansBold,
-      fontSize: size.caption,
-      color: c.muted,
+      ...eyebrow(c),
     },
     headingNote: {
       flexShrink: 1,
@@ -338,8 +334,7 @@ function makeStyles(c: Palette) {
       marginTop: space.sm,
       backgroundColor: c.surface,
       borderRadius: radius.lg,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.line,
+      ...edged(c, 3),
       overflow: "hidden",
     },
     row: {
@@ -406,8 +401,9 @@ function makeStyles(c: Palette) {
       minHeight: 48,
       alignItems: "center",
       justifyContent: "center",
-      borderRadius: radius.pill,
+      borderRadius: 14,
       backgroundColor: c.inverse,
+      ...hardShadow(c.inverseShadow),
     },
     useDisabled: { backgroundColor: c.fill },
     useLabel: {
