@@ -96,7 +96,7 @@ struct NewAgentView: View {
         // A title row, as every page has; it was empty.
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack {
-                Text("New agent").font(Fonts.sans(14, .semibold))
+                Text("New agent").font(Fonts.heading(14))
                 Spacer()
             }
             .padding(.horizontal, 16)

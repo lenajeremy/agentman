@@ -222,7 +222,15 @@ struct ChromeButton: View {
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(active ? Palette.text : Palette.muted)
                 .frame(width: 28, height: 28)
-                .background(active || hovering ? Palette.fill.opacity(0.55) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                // The site's edge while its panel is open (on cream) or
+                // under the pointer.
+                .background {
+                    if active || hovering {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(active ? Palette.cream : Palette.surface)
+                            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.2))
+                    }
+                }
         }
         .buttonStyle(.plain)
         .help(help)

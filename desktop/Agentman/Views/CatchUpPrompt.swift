@@ -21,7 +21,7 @@ struct CatchUpPrompt: View {
                     AgentmanBadge(size: 40)
                     VStack(alignment: .leading, spacing: 5) {
                         Text("am serve was updated to \(version)")
-                            .font(Fonts.sans(17, .semibold))
+                            .font(Fonts.heading(17))
                             .foregroundStyle(Palette.text)
                         Text(subtitle(app: catchUp.appVersion))
                             .font(TextStyle.body)

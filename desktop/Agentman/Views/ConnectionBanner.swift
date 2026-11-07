@@ -19,7 +19,7 @@ struct ConnectionBanner: View {
                     .padding(.top, 2)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Agentman isn't connected")
-                        .font(Fonts.sans(13, .semibold))
+                        .font(Fonts.heading(13))
                         .foregroundStyle(Palette.text)
                     Text(problem ?? Self.explanation(canRestart: store.setup.allowed))
                         .font(TextStyle.caption)

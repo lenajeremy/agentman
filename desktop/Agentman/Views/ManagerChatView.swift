@@ -42,7 +42,7 @@ struct ManagerChatView: View {
                         // The sidebar beside it already says Agentman; the page
                         // names itself only while the sidebar is hidden.
                         if headerLeading > 0 {
-                            Text("Agentman").font(Fonts.sans(14, .semibold))
+                            Text("Agentman").font(Fonts.heading(14))
                         }
                         Spacer()
                         if !manager.schedules.isEmpty { SchedulesButton() }

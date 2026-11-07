@@ -109,7 +109,7 @@ struct Sidebar: View {
                     // The name, where it fits whole; at the narrowest the
                     // mark alone, rather than "Ag…".
                     ViewThatFits(in: .horizontal) {
-                        Text("Agentman").font(Fonts.sans(14, .semibold)).fixedSize()
+                        Text("Agentman").font(Fonts.heading(14)).fixedSize()
                         Color.clear.frame(width: 0, height: 0)
                     }
                     Spacer(minLength: 0)
