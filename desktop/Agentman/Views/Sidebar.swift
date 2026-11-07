@@ -174,14 +174,8 @@ struct Sidebar: View {
         }
         .overlay {
             if store.sessions.isEmpty, store.status == .connected {
-                ContentUnavailableView {
-                    Label("No agents yet", systemImage: "sparkles")
-                } description: {
-                    Text("Start one here, or with am claude or am codex in a terminal.")
-                } actions: {
-                    SmallButton(title: "New Agent", symbol: "square.and.pencil", primary: true) { store.selection = .newAgent }
-                }
-                .padding(.top, 120)
+                EmptySidebar { store.selection = .newAgent }
+                    .padding(.top, 90)
             } else if Self.foundNothing(query: store.search, sections: store.sidebar, hits: store.sidebarHits) {
                 // A search with nothing to show says so, instead of a blank list.
                 ContentUnavailableView {
@@ -380,11 +374,7 @@ struct AgentmanCard: View {
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 8)
-            .background(background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(Palette.line.opacity(selected ? 1 : 0))
-            )
+            .edged(12, fill: background, depth: selected ? 3 : 2)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -400,11 +390,10 @@ struct AgentmanCard: View {
         store.selection == .manager || store.selection == nil
     }
 
-    /// Grey like a selected row when it is open; otherwise a card of its
-    /// own, white on a light sidebar, so it never passes for the selection.
+    /// Agentman's own card, in the site's cream with the edge; a shade
+    /// deeper while it is open or under the pointer.
     private var background: Color {
-        if selected { return Palette.fill }
-        return hovering ? Palette.fill.opacity(0.6) : .clear
+        selected || hovering ? Palette.cream.mix(with: Palette.edge, by: 0.06) : Palette.cream
     }
 
     /// What arrived since the user last looked at the conversation.
@@ -879,7 +868,9 @@ private struct SectionHeading: View {
     var body: some View {
         HStack(spacing: 6) {
             Text(title)
-                .font(Fonts.sans(12, .medium))
+                .font(Fonts.eyebrow)
+                .tracking(1.2)
+                .textCase(.uppercase)
                 .foregroundStyle(tint ?? (hovering && open != nil ? Palette.text : Palette.muted))
             Spacer(minLength: 4)
             if let count {
@@ -964,5 +955,41 @@ enum FolderLogos {
         let image = NSImage(contentsOfFile: path)
         loaded[path] = image
         return image
+    }
+}
+
+/// No agent has run on this Mac yet: the website's terminal sticker on its
+/// dots, a Rubik title, the commands set as code so they never break across
+/// lines, and the site's orange button.
+private struct EmptySidebar: View {
+    let newAgent: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        VStack(spacing: 8) {
+            StickerOnDots(name: .terminal, size: 118)
+            Text("No agents yet")
+                .font(Fonts.heading(17))
+                .foregroundStyle(Palette.text)
+            (Text("Start one here, or with ") + Text("am claude").font(Fonts.mono(11.5, .medium))
+                + Text(" or ") + Text("am codex").font(Fonts.mono(11.5, .medium)) + Text(" in a terminal."))
+                .font(TextStyle.caption)
+                .foregroundStyle(Palette.muted)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 22)
+            Button(action: newAgent) {
+                Label("New Agent", systemImage: "square.and.pencil")
+                    .font(Fonts.sans(12.5, .semibold))
+                    .foregroundStyle(Color(light: 0x160D08, dark: 0x160D08))
+                    .padding(.horizontal, 12)
+                    .frame(height: 30)
+                    .edged(9, fill: Palette.flood.opacity(hovering ? 0.9 : 1), depth: 2)
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+            .padding(.top, 6)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
