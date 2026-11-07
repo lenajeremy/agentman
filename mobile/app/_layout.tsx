@@ -89,6 +89,8 @@ export default function RootLayout() {
     "GoogleSans-SemiBoldItalic": require("../assets/fonts/GoogleSans-SemiBoldItalic.ttf"),
     "GoogleSansCode-Regular": require("../assets/fonts/GoogleSansCode-Regular.ttf"),
     "GoogleSansCode-Medium": require("../assets/fonts/GoogleSansCode-Medium.ttf"),
+    "Rubik-Bold": require("../assets/fonts/Rubik-Bold.ttf"),
+    "Rubik-ExtraBold": require("../assets/fonts/Rubik-ExtraBold.ttf"),
   });
 
   useEffect(() => {

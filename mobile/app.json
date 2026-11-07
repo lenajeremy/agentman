@@ -62,7 +62,8 @@
           "microphonePermission": "Agentman listens while you record with the mic button, so you can speak a message to an agent or to Agentman instead of typing it. Your Mac has Celery write it out."
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      "expo-image"
     ],
     "experiments": {
       "typedRoutes": true

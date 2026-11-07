@@ -58,12 +58,12 @@ export function BrandMark({
 }
 
 /** Mark and name together, as the app's header lockup. */
-export function Wordmark({ size = 22 }: { size?: number }) {
+export function Wordmark({ size = 22, color }: { size?: number; color?: string }) {
   const styles = useStyles(makeStyles);
   return (
     <View style={styles.row}>
       <BrandMark size={size} />
-      <Text style={styles.name}>agentman</Text>
+      <Text style={[styles.name, color ? { color } : null]}>agentman</Text>
     </View>
   );
 }

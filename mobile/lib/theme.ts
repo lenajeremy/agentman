@@ -79,6 +79,21 @@ const light = {
   /** Controls drawn over the camera, which is dark whatever the theme. */
   cameraScrim: "rgba(10, 10, 10, 0.62)",
   shadow: "#101010",
+  /** The website's orange, behind first-run and empty screens, and the
+   *  white set on it. The same in both themes: it is the brand. */
+  flood: "#FF5F1F",
+  onFlood: "#FFFFFF",
+  /** The website's cards: cream with dots, an ink edge and a hard shadow. */
+  cream: "#FFF3E3",
+  creamDots: "rgba(22, 13, 8, 0.10)",
+  edge: "#160D08",
+  /** The $ before a command to copy, an orange that reads as text. */
+  prompt: "#E5480A",
+  /** The hard shadow under an inverse (ink) button. */
+  inverseShadow: "rgba(0, 0, 0, 0.28)",
+  /** Behind a sticker on the page: nothing on a light page, a cream disc on
+   *  a dark one, where the stickers' black outline would vanish. */
+  stickerSpot: "transparent",
 };
 
 export type Palette = { [K in keyof typeof light]: string };
@@ -124,6 +139,14 @@ const dark: Palette = {
   scrim: "rgba(0, 0, 0, 0.5)",
   cameraScrim: "rgba(10, 10, 10, 0.62)",
   shadow: "#000000",
+  flood: "#FF5F1F",
+  onFlood: "#FFFFFF",
+  cream: "#16110D",
+  creamDots: "rgba(255, 243, 227, 0.09)",
+  edge: "#EFE4DA",
+  prompt: "#FF8A55",
+  inverseShadow: "rgba(255, 255, 255, 0.22)",
+  stickerSpot: "#F3E6D8",
 };
 
 export const palettes: Record<"light" | "dark", Palette> = { light, dark };
@@ -148,6 +171,10 @@ export const font = {
   sansBoldItalic: { fontFamily: "GoogleSans-SemiBoldItalic" },
   mono: { fontFamily: "GoogleSansCode-Regular" },
   monoMedium: { fontFamily: "GoogleSansCode-Medium" },
+  /** Rubik, the website's headline face: big titles on first-run and empty
+   *  screens only, never running text. */
+  display: { fontFamily: "Rubik-ExtraBold" },
+  displayBold: { fontFamily: "Rubik-Bold" },
 } as const satisfies Record<string, TextStyle>;
 
 /**
