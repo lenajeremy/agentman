@@ -16,6 +16,7 @@ import { Question, QuestionAnswer, SendStatus } from "../lib/protocol";
 import { MAX_NOTE_CHARS, noteAnswer, submitAnswer, tapAnswer } from "../lib/question-answer";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { MotionPressable } from "./MotionPressable";
+import { edged, hardShadow, heading } from "./Brand";
 
 const AFFIRMATIVE = /^(yes|allow|approve|proceed)/i;
 
@@ -539,19 +540,8 @@ const makeStyles = (c: Palette) =>
     pillDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: c.needsYou },
     pillLabel: { ...font.sansBold, fontSize: size.label, color: c.needsYouText },
 
-    title: {
-      ...font.sansBold,
-      fontSize: size.heading,
-      lineHeight: scaled(27),
-      letterSpacing: -0.5,
-      color: c.text,
-    },
-    compactTitle: {
-      ...font.sansBold,
-      fontSize: size.title,
-      letterSpacing: -0.3,
-      color: c.text,
-    },
+    title: { ...heading(c, size.heading), lineHeight: scaled(28) },
+    compactTitle: heading(c, size.title),
     // Machine text, set in mono like every other command in the app.
     detail: {
       ...font.mono,
@@ -587,8 +577,8 @@ const makeStyles = (c: Palette) =>
       alignItems: "center",
       justifyContent: "center",
     },
-    quickPrimary: { backgroundColor: c.inverse },
-    quickSecondary: { backgroundColor: c.surface, borderWidth: 1, borderColor: c.fillStrong },
+    quickPrimary: { backgroundColor: c.inverse, ...hardShadow(c.inverseShadow) },
+    quickSecondary: { backgroundColor: c.surface, ...edged(c, 2) },
     // Fixed square: flex-basis must be set too, or web keeps the 0% basis
     // from `flex: 1` above and collapses it.
     quickMore: { flexGrow: 0, flexShrink: 0, flexBasis: 44, width: 44, paddingHorizontal: 0 },
@@ -607,11 +597,10 @@ const makeStyles = (c: Palette) =>
       paddingVertical: 15,
       borderRadius: radius.lg,
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.fillStrong,
+      ...edged(c, 3),
     },
-    optionPrimary: { backgroundColor: c.inverse, borderColor: c.inverse },
-    optionSelected: { backgroundColor: c.workingWash, borderColor: c.working },
+    optionPrimary: { backgroundColor: c.inverse, borderColor: c.inverse, ...hardShadow(c.inverseShadow) },
+    optionSelected: { backgroundColor: c.cream },
     controlDisabled: { opacity: 0.5 },
     optionKeyWrap: {
       minWidth: 24,
@@ -726,8 +715,9 @@ const makeStyles = (c: Palette) =>
       minHeight: 52,
       alignItems: "center",
       justifyContent: "center",
-      borderRadius: radius.pill,
+      borderRadius: 14,
       backgroundColor: c.inverse,
+      ...hardShadow(c.inverseShadow),
       paddingHorizontal: space.lg,
     },
     submitDisabled: { opacity: 0.35 },

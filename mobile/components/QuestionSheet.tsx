@@ -202,6 +202,10 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.surface,
       borderTopLeftRadius: radius.sheet,
       borderTopRightRadius: radius.sheet,
+      // The site's ink edge along the top and sides, over a soft shadow.
+      borderWidth: 1.5,
+      borderBottomWidth: 0,
+      borderColor: c.edge,
       shadowColor: c.shadow,
       shadowOpacity: 0.12,
       shadowRadius: 24,
