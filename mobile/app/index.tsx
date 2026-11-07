@@ -1,8 +1,11 @@
 import Feather from "@expo/vector-icons/Feather";
+import * as Clipboard from "expo-clipboard";
+import * as Haptics from "expo-haptics";
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Platform,
   RefreshControl,
   ScrollView,
   SectionList,
@@ -18,7 +21,7 @@ import { AgentIcon } from "../components/AgentIcon";
 import { AgentmanCard } from "../components/AgentmanCard";
 import { Loader } from "../components/Loader";
 import { ContentColumn } from "../components/ContentColumn";
-import { EmptyIllustration } from "../components/Illustrations";
+import { StickerOnDots, hardShadow } from "../components/Brand";
 import { MotionPressable } from "../components/MotionPressable";
 import { Pulse } from "../components/Pulse";
 import { QuestionCard } from "../components/QuestionCard";
@@ -121,6 +124,13 @@ export default function Agents() {
     [searching, store.visibleSessions, trimmed, found, color, store.folderFilter, store.folderRoot],
   );
   const hiddenCount = store.sessions.length - store.visibleSessions.length;
+  // Nothing has run on this Mac yet: the empty text says to tap +, so the +
+  // turns the site's orange until there is an agent.
+  const nothingRunning =
+    store.visibleSessions.length === 0 &&
+    store.daemonOnline &&
+    !store.folderFilter &&
+    emptyBoard(store.folderFilter, hiddenCount) !== "hidden";
   const incompatible = store.connection === "incompatible";
 
   // A newer app or Mac is offered here, on the board, once per version: never
@@ -193,11 +203,12 @@ export default function Agents() {
                 incompatible={incompatible}
               />
               <View style={styles.topActions}>
-                <MotionPressable hitSlop={12} style={styles.iconButton} pressedScale={0.94}
+                <MotionPressable hitSlop={12}
+                  style={[styles.iconButton, nothingRunning && styles.iconButtonFlood]} pressedScale={0.94}
                   onPress={() => router.push("/new-session")} accessibilityRole="button"
                   accessibilityLabel="New session" disabled={!store.daemonOnline}>
                   <Feather name="plus" size={22}
-                    color={store.daemonOnline ? color.text : color.faint} />
+                    color={nothingRunning ? color.edge : store.daemonOnline ? color.text : color.faint} />
                 </MotionPressable>
                 <MotionPressable hitSlop={12} style={styles.iconButton} pressedScale={0.94}
                   onPress={() => router.push("/settings")} accessibilityRole="button"
@@ -823,7 +834,7 @@ function AllHiddenState({ count, onShow }: { count: number; onShow(): void }) {
   const styles = useStyles(makeStyles);
   return (
     <View style={styles.empty}>
-      <EmptyIllustration style={styles.emptyArt} />
+      <StickerOnDots name="heart" size={scaled(150)} />
       <Text style={styles.emptyTitle}>All caught up</Text>
       <Text style={styles.emptyBody}>
         {count} idle {count === 1 ? "agent is" : "agents are"} hidden. They come
@@ -882,6 +893,36 @@ function ProtocolBanner() {
   );
 }
 
+/** A command to run on the Mac, copied with a tap, as on the pairing screen. */
+function CopyCommand({ command }: { command: string }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1600);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  return (
+    <MotionPressable
+      onPress={() => {
+        void Clipboard.setStringAsync(command);
+        if (Platform.OS !== "web") void Haptics.selectionAsync().catch(() => {});
+        setCopied(true);
+      }}
+      pressedScale={0.98}
+      style={styles.command}
+      accessibilityRole="button"
+      accessibilityLabel={`Copy ${command}`}
+      accessibilityHint="Copies the command so you can paste it into a terminal"
+    >
+      <Text style={styles.commandPrompt}>$</Text>
+      <Text style={styles.commandText}>{command}</Text>
+      <Feather name={copied ? "check" : "copy"} size={15} color={copied ? color.working : color.faint} />
+    </MotionPressable>
+  );
+}
+
 function EmptyState({ folder }: { folder: string | null }) {
   const styles = useStyles(makeStyles);
   // A filtered folder that turns up nothing is a different fact from having
@@ -890,7 +931,7 @@ function EmptyState({ folder }: { folder: string | null }) {
   if (folder) {
     return (
       <View style={styles.empty}>
-        <EmptyIllustration style={styles.emptyArt} />
+        <StickerOnDots name="notes" size={scaled(150)} />
         <Text style={styles.emptyTitle}>Nothing here yet</Text>
         <Text style={styles.emptyBody}>
           No agent has run in {folderLabel(folder)}. Pick another folder, or
@@ -901,18 +942,13 @@ function EmptyState({ folder }: { folder: string | null }) {
   }
   return (
     <View style={styles.empty}>
-      <EmptyIllustration style={styles.emptyArt} />
+      <StickerOnDots name="terminal" size={scaled(150)} />
       <Text style={styles.emptyTitle}>Nothing running</Text>
       <Text style={styles.emptyBody}>
         Tap + to start an agent in a folder on your Mac, or start one from its
         terminal. Cursor IDE sessions are view-only.
       </Text>
-      <View style={styles.command}>
-        <Text style={styles.commandPrompt}>$</Text>
-        <Text style={styles.commandText} selectable>
-          am claude
-        </Text>
-      </View>
+      <CopyCommand command="am claude" />
       <Text style={styles.emptyHint}>
         Also <Text style={styles.inlineMono}>am codex</Text> and{" "}
         <Text style={styles.inlineMono}>am opencode</Text>. Recent Cursor IDE
@@ -962,10 +998,11 @@ const makeStyles = (c: Palette) =>
       borderWidth: 1,
       borderColor: c.line,
     },
+    iconButtonFlood: { backgroundColor: c.flood, borderWidth: 1.5, borderColor: c.edge, ...hardShadow(c.edge, 2) },
     title: {
-      ...font.sansBold,
+      ...font.display,
       fontSize: size.display,
-      letterSpacing: -1.2,
+      letterSpacing: -size.display * 0.03,
       color: c.text,
       marginTop: space.lg,
     },
@@ -1245,20 +1282,10 @@ const makeStyles = (c: Palette) =>
       alignItems: "center",
       gap: space.sm,
     },
-    emptyArt: {
-      width: "100%",
-      aspectRatio: 340 / 214,
-      borderRadius: radius.sheet,
-      overflow: "hidden",
-      backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
-      marginBottom: space.md,
-    },
     emptyTitle: {
-      ...font.sansBold,
-      fontSize: scaled(26),
-      letterSpacing: -0.8,
+      ...font.displayBold,
+      fontSize: scaled(28),
+      letterSpacing: -scaled(28) * 0.02,
       color: c.text,
       textAlign: "center",
     },
@@ -1278,13 +1305,14 @@ const makeStyles = (c: Palette) =>
       marginTop: space.md,
       paddingHorizontal: space.lg,
       paddingVertical: 14,
-      borderRadius: radius.lg,
+      borderRadius: 14,
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
+      borderWidth: 1.5,
+      borderColor: c.edge,
+      ...hardShadow(c.edge),
     },
-    commandPrompt: { ...font.mono, fontSize: scaled(14), color: c.faint },
-    commandText: { ...font.mono, fontSize: scaled(14), color: c.text },
+    commandPrompt: { ...font.monoMedium, fontSize: scaled(14), color: c.prompt },
+    commandText: { flex: 1, ...font.mono, fontSize: scaled(14), color: c.text },
     emptyHint: {
       ...font.sans,
       fontSize: size.caption,
