@@ -296,7 +296,7 @@ struct UsagePage: View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(cost ? UsageFormat.money(usage.cost.total) : UsageFormat.tokens(usage.tokens.total))
-                    .font(Fonts.sans(36, .semibold))
+                    .font(Fonts.display(36))
                     .monospacedDigit()
                     .foregroundStyle(Palette.text)
                     .lineLimit(1)
