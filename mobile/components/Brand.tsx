@@ -6,6 +6,7 @@ import {
   View,
   type ImageStyle,
   type StyleProp,
+  type TextStyle,
   type ViewStyle,
 } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
@@ -22,6 +23,7 @@ import Svg, {
 } from "react-native-svg";
 
 import { useTheme } from "../lib/appearance";
+import { font, size, type Palette } from "../lib/theme";
 
 /**
  * The website's look, for the screens where nobody is working: first run,
@@ -34,6 +36,30 @@ import { useTheme } from "../lib/appearance";
 /** The site's hard shadow: a solid edge colour straight below, no blur. */
 export function hardShadow(color: string, depth = 3): ViewStyle {
   return { boxShadow: `0px ${depth}px 0px ${color}` };
+}
+
+/**
+ * The site's look as styles every screen shares. Things you tap or that hold
+ * something get the ink edge; the ones that stand out also get the hard
+ * shadow under it. Messages, code and diffs never do.
+ */
+export function edged(c: Palette, depth = 0): ViewStyle {
+  return { borderWidth: 1.5, borderColor: c.edge, ...(depth > 0 ? hardShadow(c.edge, depth) : null) };
+}
+
+/** A screen's big title, in Rubik as on the site. */
+export function screenTitle(c: Palette): TextStyle {
+  return { ...font.display, fontSize: size.display, letterSpacing: -size.display * 0.03, color: c.text };
+}
+
+/** A heading in a screen or a sheet, in Rubik. */
+export function heading(c: Palette, points: number = size.title): TextStyle {
+  return { ...font.displayBold, fontSize: points, letterSpacing: -points * 0.01, color: c.text };
+}
+
+/** The site's small labels: mono, upper case, spaced out. */
+export function eyebrow(c: Palette): TextStyle {
+  return { ...font.monoMedium, fontSize: size.label, letterSpacing: 1.3, textTransform: "uppercase", color: c.muted };
 }
 
 // One wave of the site's edge, 22 wide and 10 tall, filled below the curve.

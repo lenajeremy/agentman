@@ -21,7 +21,7 @@ import { AgentIcon } from "../components/AgentIcon";
 import { AgentmanCard } from "../components/AgentmanCard";
 import { Loader } from "../components/Loader";
 import { ContentColumn } from "../components/ContentColumn";
-import { StickerOnDots, hardShadow } from "../components/Brand";
+import { StickerOnDots, edged, eyebrow, hardShadow } from "../components/Brand";
 import { MotionPressable } from "../components/MotionPressable";
 import { Pulse } from "../components/Pulse";
 import { QuestionCard } from "../components/QuestionCard";
@@ -979,8 +979,7 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: space.md,
       borderRadius: radius.pill,
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c),
     },
     chipDot: { width: 7, height: 7, borderRadius: 4 },
     chipText: {
@@ -995,10 +994,9 @@ const makeStyles = (c: Palette) =>
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 2),
     },
-    iconButtonFlood: { backgroundColor: c.flood, borderWidth: 1.5, borderColor: c.edge, ...hardShadow(c.edge, 2) },
+    iconButtonFlood: { backgroundColor: c.flood },
     title: {
       ...font.display,
       fontSize: size.display,
@@ -1023,10 +1021,9 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: space.md,
       borderRadius: radius.pill,
       backgroundColor: c.surface,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.fillStrong,
+      ...edged(c),
     },
-    stateChipOn: { backgroundColor: c.inverse, borderColor: c.inverse },
+    stateChipOn: { backgroundColor: c.inverse },
     stateChipValue: {
       ...font.sansBold,
       fontSize: size.caption,
@@ -1058,10 +1055,9 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: space.md,
       borderRadius: radius.pill,
       backgroundColor: c.surface,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.fillStrong,
+      ...edged(c),
     },
-    filterOn: { backgroundColor: c.workingWash, borderColor: c.workingSoft },
+    filterOn: { backgroundColor: c.cream },
     filterLabel: {
       flexShrink: 1,
       ...font.sans,
@@ -1071,7 +1067,7 @@ const makeStyles = (c: Palette) =>
     filterLabelOn: {
       ...font.monoMedium,
       fontSize: size.caption,
-      color: c.workingText,
+      color: c.text,
     },
     filterClear: {
       width: 40,
@@ -1080,8 +1076,7 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
       borderRadius: radius.pill,
       backgroundColor: c.surface,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.fillStrong,
+      ...edged(c),
     },
     groupHeading: {
       flexDirection: "row",
@@ -1091,25 +1086,20 @@ const makeStyles = (c: Palette) =>
       marginTop: space.xl,
       marginBottom: space.sm,
     },
-    groupLabel: { ...font.sansBold, fontSize: size.caption },
-    groupCount: { ...font.mono, fontSize: size.label, color: c.faint },
+    groupLabel: { ...eyebrow(c) },
+    groupCount: { ...font.monoMedium, fontSize: size.label, color: c.faint },
 
     card: {
       borderRadius: radius.xl,
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
-      marginBottom: ROW_GAP,
+      ...edged(c, 3),
+      marginBottom: ROW_GAP + 3,
     },
+    // A question waiting on you: its shadow is the needs-you orange.
     askCard: {
       padding: space.lg,
       gap: space.md,
-      borderColor: c.needsYouEdge,
-      shadowColor: c.needsYou,
-      shadowOpacity: 0.12,
-      shadowRadius: 16,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 2,
+      ...hardShadow(c.needsYou, 4),
     },
     askHeader: { flexDirection: "row", alignItems: "center", gap: space.sm },
     pill: {
@@ -1141,23 +1131,26 @@ const makeStyles = (c: Palette) =>
       paddingVertical: 13,
       paddingHorizontal: 14,
     },
-    rowNeedsYou: { borderColor: c.needsYouEdge },
+    rowNeedsYou: { backgroundColor: c.needsYouWash },
     groupRow: {
       backgroundColor: c.surface,
-      borderLeftWidth: 1,
-      borderRightWidth: 1,
-      borderColor: c.line,
+      borderLeftWidth: 1.5,
+      borderRightWidth: 1.5,
+      borderColor: c.edge,
     },
     groupFirst: {
-      borderTopWidth: 1,
+      borderTopWidth: 1.5,
       borderTopLeftRadius: radius.xl,
       borderTopRightRadius: radius.xl,
     },
+    // The group's last row carries its hard shadow, so it shows under the
+    // whole group.
     groupLast: {
-      borderBottomWidth: 1,
+      borderBottomWidth: 1.5,
       borderBottomLeftRadius: radius.xl,
       borderBottomRightRadius: radius.xl,
-      marginBottom: ROW_GAP,
+      ...hardShadow(c.edge, 3),
+      marginBottom: ROW_GAP + 3,
     },
     groupDivider: {
       borderBottomWidth: StyleSheet.hairlineWidth,
@@ -1220,8 +1213,7 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: space.md,
       borderRadius: radius.pill,
       backgroundColor: c.surface,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.fillStrong,
+      ...edged(c),
     },
     searchInput: {
       flex: 1,

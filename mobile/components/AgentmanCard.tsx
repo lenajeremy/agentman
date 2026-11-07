@@ -9,6 +9,7 @@ import { useStore } from "../lib/store";
 import { font, Palette, radius, size, space } from "../lib/theme";
 import { BrandMark } from "./BrandMark";
 import { MotionPressable } from "./MotionPressable";
+import { edged } from "./Brand";
 
 /**
  * Agentman, pinned above the agents it manages: where the user spends most of
@@ -69,9 +70,9 @@ const makeStyles = (c: Palette) =>
       marginTop: space.xs,
       marginBottom: space.lg,
       borderRadius: radius.xl,
-      borderWidth: 1,
-      borderColor: c.line,
-      backgroundColor: c.surface,
+      // Agentman's own card, in the site's cream with the ink edge.
+      backgroundColor: c.cream,
+      ...edged(c, 3),
     },
     words: { flex: 1, gap: 2 },
     name: { ...font.sansMedium, fontSize: size.body, color: c.text },
