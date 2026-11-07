@@ -236,13 +236,15 @@ private struct EntryHero: View {
     var body: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 48)
-            VStack(spacing: 16) {
-                AgentmanBadge(size: 46)
+            // The website's Agentman mascot on its dots, over the name in
+            // Rubik.
+            VStack(spacing: 4) {
+                StickerOnDots(name: .mascot, size: 150)
                 Text("Agentman")
                     .font(TextStyle.wordmark)
                     .foregroundStyle(Palette.text)
             }
-            .padding(.bottom, 28)
+            .padding(.bottom, 24)
 
             ManagerBox(draft: $draft, attachments: $attachments, dropping: $dropping, sending: sending, large: true, send: send)
                 .frame(maxWidth: 620)
@@ -285,8 +287,9 @@ private struct StarterChip: View {
                 .foregroundStyle(hovering ? Palette.text : Palette.textSecondary)
                 .padding(.horizontal, 12)
                 .frame(height: 28)
-                .background(hovering ? Palette.fill : Palette.surface, in: Capsule())
-                .overlay(Capsule().strokeBorder(Palette.line))
+                // The site's chips: cream, edged, on a hard shadow.
+                .edged(14, fill: hovering ? Palette.cream.mix(with: Palette.edge, by: 0.06) : Palette.cream, depth: 2)
+                .padding(.bottom, 2)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
@@ -409,7 +412,7 @@ private struct ChatItemView: View {
                         TaggedText(text: entry.text, folder: nil)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
-                            .background(Palette.fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .background(Palette.bubble, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     }
                 }
                 .padding(.leading, 80)
@@ -432,8 +435,7 @@ private struct ChatItemView: View {
                         }
                     } else if card.isOpen {
                         CompactCard(card: card) { await store.manager.dismiss(card) }
-                            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.line))
+                            .edged(14, depth: 3)
                             .swipeToDismiss { await store.manager.dismiss(card) == nil }
                     } else {
                         CardReceipt(card: card)
@@ -614,8 +616,7 @@ private struct BriefCard: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 16)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.line))
+        .edged(16, depth: 3)
     }
 }
 
@@ -775,9 +776,9 @@ private struct ManagerComposer: View {
                 } label: {
                     Image(systemName: thinking ? "stop.fill" : "arrow.up")
                         .font(.system(size: thinking ? 11 : 13, weight: .bold))
-                        .foregroundStyle(Palette.onInverse)
+                        .foregroundStyle(canSend || thinking ? Color.white : Palette.muted)
                         .frame(width: large ? 32 : 28, height: large ? 32 : 28)
-                        .background(Palette.inverse.opacity(canSend || thinking ? 1 : 0.25), in: Circle())
+                        .background(thinking ? Palette.inverse : canSend ? Palette.flood : Palette.fillStrong, in: Circle())
                 }
                 .buttonStyle(.plain)
                 .disabled(!thinking && !canSend)
@@ -792,13 +793,13 @@ private struct ManagerComposer: View {
         .background {
             RoundedRectangle(cornerRadius: large ? 26 : 22, style: .continuous)
                 .fill(Palette.surface)
+                .shadow(color: Palette.edge, radius: 0, x: 0, y: 3)
                 .onTapGesture { focused = true }
         }
         .overlay(
             RoundedRectangle(cornerRadius: large ? 26 : 22, style: .continuous)
-                .strokeBorder(focused ? Palette.fillStrong : Palette.line, lineWidth: 1)
+                .strokeBorder(Palette.edge, lineWidth: 1.5)
         )
-        .shadow(color: .black.opacity(large ? 0.06 : 0.04), radius: large ? 18 : 8, y: large ? 6 : 2)
         // The files for `@`, just above the box.
         .overlay(alignment: .top) {
             if let mentions, mentions.isOpen {
@@ -878,9 +879,7 @@ private struct KeyBox: View {
             .padding(.leading, 20)
             .padding(.trailing, 8)
             .padding(.vertical, 9)
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(Palette.line))
-            .shadow(color: .black.opacity(0.06), radius: 18, y: 6)
+            .edged(26, depth: 3)
             if let problem {
                 Text(problem)
                     .font(TextStyle.caption)
