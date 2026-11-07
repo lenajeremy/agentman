@@ -46,8 +46,7 @@ struct KeysSettings: View {
                         .font(TextStyle.caption)
                         .foregroundStyle(Palette.muted)
                         .frame(maxWidth: .infinity, minHeight: 120)
-                        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
+                        .edged(12, depth: 2)
                 } else {
                     SettingsSection {
                         ForEach(Array(manager.keys.enumerated()), id: \.element.id) { index, key in

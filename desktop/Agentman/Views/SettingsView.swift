@@ -162,15 +162,13 @@ struct SettingsSection<Content: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             if let title {
                 Text(title)
-                    .font(TextStyle.captionMedium)
-                    .foregroundStyle(Palette.muted)
+                    .eyebrow()
                     .padding(.leading, 4)
             }
             VStack(spacing: 0) {
                 content
             }
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
+            .edged(12, depth: 3)
             if let footer {
                 Text(footer)
                     .font(TextStyle.caption)

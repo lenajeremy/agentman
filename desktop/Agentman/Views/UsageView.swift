@@ -608,8 +608,7 @@ private struct UsageChart: View {
         .padding(.horizontal, 11)
         .padding(.vertical, 9)
         .frame(width: 190)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Palette.line))
+        .edged(8)
         .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
     }
 

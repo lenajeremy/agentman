@@ -75,10 +75,10 @@ struct NewAgentView: View {
             .background {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .fill(Palette.surface)
+                    .shadow(color: Palette.edge, radius: 0, x: 0, y: 3)
                     .onTapGesture { focused = true }
             }
-            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Palette.line))
-            .shadow(color: .black.opacity(0.06), radius: 18, y: 6)
+            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.5))
             .frame(maxWidth: 640)
 
             if let problem {

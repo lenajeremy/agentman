@@ -72,7 +72,7 @@ struct FindBar: View {
             .padding(.trailing, 12)
             .padding(.vertical, 7)
             .background(Palette.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.line))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.5))
             .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
             .onAppear { focused = true }
         }

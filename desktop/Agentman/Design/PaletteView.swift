@@ -129,8 +129,7 @@ struct PaletteView: View {
                 }
             }
             .frame(width: 580)
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.line))
+            .edged(14)
             .shadow(color: .black.opacity(0.18), radius: 30, y: 12)
             .padding(.top, 70)
         }

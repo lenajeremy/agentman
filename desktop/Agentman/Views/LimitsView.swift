@@ -145,8 +145,7 @@ private struct LimitCard: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 15)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.line))
+        .edged(10, depth: 3)
         .accessibilityElement(children: .combine)
     }
 }

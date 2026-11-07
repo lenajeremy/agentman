@@ -44,8 +44,7 @@ struct KnowledgeSettings: View {
                     .padding(6)
                 }
                 .frame(width: 240)
-                .background(Palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
+                .edged(12, depth: 2)
                 .overlay {
                     if manager.notes.isEmpty {
                         VStack(spacing: 6) {
@@ -65,8 +64,7 @@ struct KnowledgeSettings: View {
                 }
 
                 editor
-                    .background(Palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
+                    .edged(12, depth: 2)
             }
         }
         .padding(.horizontal, 28)
@@ -95,7 +93,7 @@ struct KnowledgeSettings: View {
         VStack(alignment: .leading, spacing: 0) {
             TextField("Title", text: $draft.title, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(Fonts.sans(18, .medium))
+                .font(Fonts.heading(18))
                 .lineLimit(1...3)
                 .padding(.bottom, 10)
             HStack(spacing: 10) {
