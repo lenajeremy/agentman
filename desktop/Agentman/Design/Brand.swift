@@ -45,13 +45,27 @@ extension View {
     func edged(_ radius: CGFloat, fill: Color = Palette.surface, depth: CGFloat = 0, lineWidth: CGFloat = 1.5) -> some View {
         background(
             RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .fill(fill)
-                .shadow(color: depth > 0 ? Palette.edge : .clear, radius: 0, x: 0, y: depth)
+                .hardShadowFill(fill, shadow: depth > 0 ? Palette.edge : .clear, depth: depth)
         )
         .overlay(
             RoundedRectangle(cornerRadius: radius, style: .continuous)
                 .strokeBorder(Palette.edge, lineWidth: lineWidth)
         )
+    }
+}
+
+extension Shape {
+    /// The shape filled, over a copy of itself in `shadow` moved `depth`
+    /// points down: the site's hard shadow. Drawn rather than cast, because
+    /// a cast shadow's offset comes out upside down in some AppKit-hosted
+    /// lists (a thread's).
+    func hardShadowFill(_ fill: Color, shadow: Color, depth: CGFloat) -> some View {
+        ZStack {
+            if depth > 0 {
+                self.fill(shadow).offset(y: depth)
+            }
+            self.fill(fill)
+        }
     }
 }
 

@@ -70,9 +70,7 @@ struct DecisionPanel: ViewModifier {
         content
             .padding(20)
             .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Palette.surface)
-                    .shadow(color: Palette.needsYou, radius: 0, x: 0, y: 4)
+                RoundedRectangle(cornerRadius: 16, style: .continuous).hardShadowFill(Palette.surface, shadow: Palette.needsYou, depth: 4)
             )
             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.5))
             .padding(.bottom, 4)
@@ -250,8 +248,7 @@ struct ChoiceButtonStyle: ButtonStyle {
             // corners rather than turning into a lozenge.
             // The site's buttons: ink, or edged white, on a hard shadow.
             .background(
-                RoundedRectangle(cornerRadius: 15, style: .continuous).fill(primary ? Palette.inverse : Palette.surface)
-                    .shadow(color: primary ? Palette.inverseShadow : Palette.edge, radius: 0, x: 0, y: 2)
+                RoundedRectangle(cornerRadius: 15, style: .continuous).hardShadowFill(primary ? Palette.inverse : Palette.surface, shadow: primary ? Palette.inverseShadow : Palette.edge, depth: 2)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 15, style: .continuous)

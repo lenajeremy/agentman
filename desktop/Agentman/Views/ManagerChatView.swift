@@ -791,9 +791,7 @@ private struct ManagerComposer: View {
         // A click on the card around the text, not on a control, goes to
         // the text.
         .background {
-            RoundedRectangle(cornerRadius: large ? 26 : 22, style: .continuous)
-                .fill(Palette.surface)
-                .shadow(color: Palette.edge, radius: 0, x: 0, y: 3)
+            RoundedRectangle(cornerRadius: large ? 26 : 22, style: .continuous).hardShadowFill(Palette.surface, shadow: Palette.edge, depth: 3)
                 .onTapGesture { focused = true }
         }
         .overlay(

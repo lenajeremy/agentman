@@ -351,9 +351,7 @@ struct SmallButton: View {
             // The site's buttons: ink with a hard shadow, or edged white
             // with one.
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(primary ? Palette.inverse.opacity(hovering ? 0.85 : 1) : hovering ? Palette.fill : Palette.surface)
-                    .shadow(color: primary ? Palette.inverseShadow : Palette.edge, radius: 0, x: 0, y: 2)
+                RoundedRectangle(cornerRadius: 8, style: .continuous).hardShadowFill(primary ? Palette.inverse.opacity(hovering ? 0.85 : 1) : hovering ? Palette.fill : Palette.surface, shadow: primary ? Palette.inverseShadow : Palette.edge, depth: 2)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)

@@ -1776,9 +1776,7 @@ struct Composer: View {
         // A click on the card around the text, not on a control, goes to
         // the text.
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Palette.surface)
-                .shadow(color: Palette.edge, radius: 0, x: 0, y: 3)
+            RoundedRectangle(cornerRadius: 18, style: .continuous).hardShadowFill(Palette.surface, shadow: Palette.edge, depth: 3)
                 .onTapGesture { if enabled { focused = true } }
         }
         .overlay(
