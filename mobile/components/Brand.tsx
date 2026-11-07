@@ -133,7 +133,7 @@ export function OutlinedText({
           <SvgText
             x={strokeWidth}
             y={fontSize * 0.84}
-            fontFamily="Rubik-ExtraBold"
+            fontFamily="Rubik-Bold"
             fontSize={fontSize}
             letterSpacing={-fontSize * 0.03}
             fill="none"

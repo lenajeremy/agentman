@@ -86,7 +86,9 @@ const light = {
   /** The website's cards: cream with dots, an ink edge and a hard shadow. */
   cream: "#FFF3E3",
   creamDots: "rgba(22, 13, 8, 0.10)",
-  edge: "#160D08",
+  /** The site's ink edge, softened to a warm dark grey: pure ink against
+   *  the white page was too much contrast on a phone. */
+  edge: "#4A423C",
   /** The $ before a command to copy, an orange that reads as text. */
   prompt: "#E5480A",
   /** The hard shadow under an inverse (ink) button. */
@@ -145,7 +147,7 @@ const dark: Palette = {
   onFlood: "#FFFFFF",
   cream: "#16110D",
   creamDots: "rgba(255, 243, 227, 0.09)",
-  edge: "#EFE4DA",
+  edge: "#A69B92",
   prompt: "#FF8A55",
   inverseShadow: "rgba(255, 255, 255, 0.22)",
   stickerSpot: "#F3E6D8",
@@ -174,10 +176,11 @@ export const font = {
   sansBoldItalic: { fontFamily: "GoogleSans-SemiBoldItalic" },
   mono: { fontFamily: "GoogleSansCode-Regular" },
   monoMedium: { fontFamily: "GoogleSansCode-Medium" },
-  /** Rubik, the website's headline face: big titles on first-run and empty
-   *  screens only, never running text. */
-  display: { fontFamily: "Rubik-ExtraBold" },
-  displayBold: { fontFamily: "Rubik-Bold" },
+  /** Rubik, the website's headline face, for titles and headings, never
+   *  running text: Bold for a screen's title, SemiBold for the rest. A step
+   *  lighter than the site's, which read too heavy on a phone. */
+  display: { fontFamily: "Rubik-Bold" },
+  displayBold: { fontFamily: "Rubik-SemiBold" },
 } as const satisfies Record<string, TextStyle>;
 
 /**
