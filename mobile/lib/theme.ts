@@ -94,6 +94,8 @@ const light = {
   /** Behind a sticker on the page: nothing on a light page, a cream disc on
    *  a dark one, where the stickers' black outline would vanish. */
   stickerSpot: "transparent",
+  /** Your own messages' bubble: the site's cream. */
+  bubble: "#FFF3E3",
 };
 
 export type Palette = { [K in keyof typeof light]: string };
@@ -147,6 +149,7 @@ const dark: Palette = {
   prompt: "#FF8A55",
   inverseShadow: "rgba(255, 255, 255, 0.22)",
   stickerSpot: "#F3E6D8",
+  bubble: "#2A1F18",
 };
 
 export const palettes: Record<"light" | "dark", Palette> = { light, dark };

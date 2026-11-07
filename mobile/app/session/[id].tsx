@@ -78,6 +78,7 @@ import { Handoff, handoffError, handoffItem } from "../../lib/handoff";
 import { useStyles, useTheme } from "../../lib/appearance";
 import { PendingSend, useStore } from "../../lib/store";
 import { addSpoken } from "../../lib/voice";
+import { edged, eyebrow, heading } from "../../components/Brand";
 import {
   agentLabel,
   font,
@@ -2373,8 +2374,7 @@ const makeStyles = (c: Palette) =>
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 2),
     },
     // Spans the title and the line under it, as an avatar does beside a
     // name, so it sits level with both rather than with one.
@@ -2401,8 +2401,7 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: space.md,
       borderRadius: radius.md,
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 2),
     },
     workspaceLabel: {
       flex: 1,
@@ -2450,11 +2449,7 @@ const makeStyles = (c: Palette) =>
       lineHeight: scaled(12),
       color: c.onAccent,
     },
-    title: {
-      ...font.sansMedium,
-      fontSize: scaled(16),
-      color: c.text,
-    },
+    title: heading(c, scaled(17)),
     subtitleRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
     subtitle: {
       ...font.sans,
@@ -2486,7 +2481,7 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
     },
     switchButtonPrimary: { backgroundColor: c.inverse },
-    switchButtonSecondary: { backgroundColor: c.surface, borderWidth: 1, borderColor: c.fillStrong },
+    switchButtonSecondary: { backgroundColor: c.surface, ...edged(c, 2) },
     switchButtonDisabled: { opacity: 0.4 },
     switchButtonLabel: { ...font.sansBold, fontSize: size.caption, color: c.text },
     switchButtonLabelPrimary: { color: c.onInverse },
@@ -2509,7 +2504,8 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: space.md,
       paddingVertical: 10,
       borderRadius: radius.lg,
-      backgroundColor: c.fill,
+      backgroundColor: c.cream,
+      ...edged(c),
     },
     noteIcon: {
       width: 24,
@@ -2541,8 +2537,7 @@ const makeStyles = (c: Palette) =>
     },
     spinner: { marginVertical: space.lg },
     startOfSession: {
-      ...font.sans,
-      fontSize: size.caption,
+      ...eyebrow(c),
       color: c.faint,
       textAlign: "center",
       marginBottom: space.lg,
@@ -2560,7 +2555,7 @@ const makeStyles = (c: Palette) =>
     userRow: {
       alignSelf: "flex-end",
       maxWidth: "84%",
-      backgroundColor: c.fill,
+      backgroundColor: c.bubble,
       borderRadius: 18,
       paddingHorizontal: 15,
       paddingVertical: 10,
@@ -2630,14 +2625,13 @@ const makeStyles = (c: Palette) =>
     field: {
       backgroundColor: c.surface,
       borderRadius: 20,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 3),
       paddingLeft: 6,
       paddingRight: 6,
       paddingTop: 4,
       paddingBottom: 6,
     },
-    fieldFocused: { borderColor: c.fillStrong },
+    fieldFocused: {},
     fieldDisabled: { opacity: 0.55 },
     // Inset so the text starts where the + under it does.
     input: {
@@ -2691,11 +2685,12 @@ const makeStyles = (c: Palette) =>
       alignItems: "center",
       justifyContent: "center",
     },
+    // The site's orange, the one colour that asks for a tap.
     send: {
       width: 36,
       height: 36,
       borderRadius: radius.pill,
-      backgroundColor: c.working,
+      backgroundColor: c.flood,
       alignItems: "center",
       justifyContent: "center",
     },
