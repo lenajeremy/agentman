@@ -67,6 +67,7 @@ struct AwaySummary: View {
                     }
                     Spacer()
                     Button("Done", action: close)
+                        .buttonStyle(.brand)
                         .keyboardShortcut(.defaultAction)
                 }
                 .font(TextStyle.caption)

@@ -351,8 +351,10 @@ struct WorktreeNamer: View {
             HStack {
                 Spacer()
                 Button("Cancel") { done(nil) }
+                    .buttonStyle(.brandSecondary)
                     .keyboardShortcut(.cancelAction)
                 Button("Use", action: use)
+                    .buttonStyle(.brand)
                     .keyboardShortcut(.defaultAction)
                     .disabled(NewAgentView.branchName(name).isEmpty)
             }

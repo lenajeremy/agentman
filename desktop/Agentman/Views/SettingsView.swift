@@ -586,11 +586,13 @@ private struct NewRuleSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
+                    .buttonStyle(.brandSecondary)
                     .keyboardShortcut(.cancelAction)
                 Button("Add Rule") {
                     add(PermissionRule(action: action, kind: kind, pattern: pattern.trimmingCharacters(in: .whitespaces), folder: folder))
                     dismiss()
                 }
+                .buttonStyle(.brand)
                 .keyboardShortcut(.defaultAction)
                 .disabled(problem != nil)
             }
