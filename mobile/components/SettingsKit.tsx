@@ -19,6 +19,7 @@ import { simulatorScroll } from "../lib/simulator";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { ContentColumn } from "./ContentColumn";
 import { MotionPressable } from "./MotionPressable";
+import { edged, eyebrow, hardShadow, screenTitle } from "./Brand";
 
 /**
  * The pieces Agentman's settings pages are made of, in the Settings screen's
@@ -215,22 +216,16 @@ export const makeStyles = (c: Palette) =>
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 2),
     },
     title: {
-      ...font.sansBold,
-      fontSize: size.display,
-      letterSpacing: -1.2,
-      color: c.text,
+      ...screenTitle(c),
       marginTop: space.lg,
       marginBottom: space.xs,
     },
     intro: { ...font.sans, fontSize: size.caption, lineHeight: scaled(19), color: c.muted, marginBottom: space.xs },
     sectionLabel: {
-      ...font.sansBold,
-      fontSize: size.caption,
-      color: c.muted,
+      ...eyebrow(c),
       marginLeft: space.xxs,
       marginTop: space.xl,
       marginBottom: space.sm,
@@ -240,8 +235,8 @@ export const makeStyles = (c: Palette) =>
       backgroundColor: c.surface,
       borderRadius: radius.xl,
       paddingHorizontal: space.lg,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 3),
+      marginBottom: 3,
     },
     footer: {
       ...font.sans,
@@ -268,14 +263,7 @@ export const makeStyles = (c: Palette) =>
     linkValue: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: space.sm },
     segmented: { flexDirection: "row", padding: 4, gap: 4, borderRadius: radius.pill, backgroundColor: c.fill, marginVertical: space.sm },
     segment: { flex: 1, minHeight: 36, borderRadius: radius.pill, alignItems: "center", justifyContent: "center" },
-    segmentActive: {
-      backgroundColor: c.surface,
-      shadowColor: c.shadow,
-      shadowOpacity: 0.08,
-      shadowRadius: 6,
-      shadowOffset: { width: 0, height: 2 },
-      elevation: 1,
-    },
+    segmentActive: { backgroundColor: c.surface, ...edged(c, 2) },
     segmentLabel: { ...font.sansMedium, fontSize: size.caption, color: c.muted },
     segmentLabelActive: { ...font.sansBold, color: c.text },
     field: {
@@ -294,6 +282,7 @@ export const makeStyles = (c: Palette) =>
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: c.inverse,
+      ...hardShadow(c.inverseShadow),
     },
     topActionOff: { opacity: 0.35 },
     topActionText: { ...font.sansBold, fontSize: size.caption, color: c.onInverse },

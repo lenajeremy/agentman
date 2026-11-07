@@ -13,6 +13,7 @@ import { NotifyChoice } from "../lib/notification-prefs";
 import { isPushActive, pushFailureReason } from "../lib/push";
 import { useStore } from "../lib/store";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
+import { edged, eyebrow, screenTitle } from "../components/Brand";
 
 type FeatherName = ComponentProps<typeof Feather>["name"];
 
@@ -210,22 +211,16 @@ const makeStyles = (c: Palette) =>
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 2),
     },
     title: {
-      ...font.sansBold,
-      fontSize: size.display,
-      letterSpacing: -1.2,
-      color: c.text,
+      ...screenTitle(c),
       marginTop: space.lg,
       marginBottom: space.xs,
     },
     intro: { ...font.sans, fontSize: size.body, lineHeight: scaled(22), color: c.muted },
     sectionLabel: {
-      ...font.sansBold,
-      fontSize: size.caption,
-      color: c.muted,
+      ...eyebrow(c),
       marginLeft: space.xxs,
       marginTop: space.xl,
       marginBottom: space.sm,
@@ -234,8 +229,7 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.surface,
       borderRadius: radius.xl,
       paddingHorizontal: space.lg,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 3),
     },
     divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.line },
     body: { ...font.sans, fontSize: size.caption, color: c.muted, lineHeight: scaled(19) },

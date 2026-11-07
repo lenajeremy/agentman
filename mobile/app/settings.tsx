@@ -20,6 +20,7 @@ import { useStore } from "../lib/store";
 import { appSummary, macSummary } from "../lib/updates";
 import { useUpdates } from "../lib/updates-context";
 import { ago, font, Palette, radius, size, space, scaled } from "../lib/theme";
+import { edged, eyebrow, screenTitle } from "../components/Brand";
 
 const APPEARANCES: { value: AppearancePreference; label: string }[] = [
   { value: "light", label: "Light" },
@@ -348,22 +349,16 @@ const makeStyles = (c: Palette) =>
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 2),
     },
     title: {
-      ...font.sansBold,
-      fontSize: size.display,
-      letterSpacing: -1.2,
-      color: c.text,
+      ...screenTitle(c),
       marginTop: space.lg,
       marginBottom: space.xs,
     },
 
     sectionLabel: {
-      ...font.sansBold,
-      fontSize: size.caption,
-      color: c.muted,
+      ...eyebrow(c),
       marginLeft: space.xxs,
       marginTop: space.xl,
       marginBottom: space.sm,
@@ -372,8 +367,7 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.surface,
       borderRadius: radius.xl,
       paddingHorizontal: space.lg,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 3),
     },
     body: { ...font.sans, fontSize: size.caption, color: c.muted, lineHeight: scaled(19) },
 

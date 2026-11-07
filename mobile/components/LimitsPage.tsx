@@ -9,6 +9,7 @@ import {
 import type { AgentLimits, Limits, LimitWindow } from "../lib/protocol";
 import { agentLabel, font, type Palette, radius, scaled, size, space } from "../lib/theme";
 import { agentColor } from "../lib/usage";
+import { edged, heading } from "./Brand";
 
 /**
  * What is left of each agent's plan, as the Mac's Limits tab shows it: for
@@ -105,14 +106,14 @@ function WindowRow({ window, tint, now }: { window: LimitWindow; tint: string; n
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     head: { flexDirection: "row", alignItems: "center", gap: 7, marginTop: space.xl, marginBottom: space.sm, marginHorizontal: space.xxs },
-    agentName: { ...font.sansBold, fontSize: size.body, color: c.text, flexShrink: 1 },
+    agentName: { ...heading(c, size.body), flexShrink: 1 },
     plan: {
       ...font.sansMedium, fontSize: size.label, color: c.textSecondary, backgroundColor: c.fill,
       borderRadius: radius.pill, paddingHorizontal: 7, paddingVertical: 1, overflow: "hidden",
     },
     checked: { ...font.sans, fontSize: size.label, color: c.muted, marginLeft: "auto", flexShrink: 1 },
     problem: { marginBottom: space.sm, marginHorizontal: space.xxs },
-    card: { backgroundColor: c.surface, borderRadius: radius.xl, paddingHorizontal: space.lg, borderWidth: 1, borderColor: c.line },
+    card: { backgroundColor: c.surface, borderRadius: radius.xl, paddingHorizontal: space.lg, ...edged(c, 3), marginBottom: 3 },
     divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.line },
     row: { paddingVertical: space.md, gap: space.sm },
     rowHead: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: space.sm },
