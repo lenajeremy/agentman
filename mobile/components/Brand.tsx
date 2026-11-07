@@ -204,6 +204,7 @@ const STICKERS = {
   terminal: { moving: require("../assets/stickers/terminal.webp"), still: require("../assets/stickers/terminal.png") },
   heart: { moving: require("../assets/stickers/heart.webp"), still: require("../assets/stickers/heart.png") },
   notes: { moving: require("../assets/stickers/notes.webp"), still: require("../assets/stickers/notes.png") },
+  mascot: { moving: require("../assets/stickers/mascot.webp"), still: require("../assets/stickers/mascot.png") },
 } as const;
 
 export type StickerName = keyof typeof STICKERS;

@@ -39,6 +39,7 @@ import { useAttachments } from "../lib/use-attachments";
 import { chooseImageSource } from "../lib/image-source-sheet";
 import { addSpoken } from "../lib/voice";
 import { addPastedImagesListener, pasteTakesImages } from "../modules/image-paste";
+import { StickerOnDots, edged, heading } from "../components/Brand";
 
 /**
  * The conversation with Agentman: the one place to ask what every agent is
@@ -197,7 +198,7 @@ export default function AgentmanScreen() {
           <View style={styles.empty}>
             {manager.loaded || !reachable ? (
               <>
-                <BrandMark size={44} ring={color.paper} />
+                <StickerOnDots name="mascot" size={scaled(150)} />
                 <Text style={styles.emptyTitle}>Ask Agentman about your agents</Text>
                 <Text style={styles.emptyText}>
                   What everyone is doing, what changed, what needs you. It reads them so you don't have to.
@@ -591,7 +592,7 @@ const makeStyles = (c: Palette) =>
     },
     back: { width: 30, height: 38, alignItems: "center", justifyContent: "center" },
     headerBody: { flex: 1, marginLeft: 2 },
-    title: { ...font.sansMedium, fontSize: size.body, color: c.text },
+    title: heading(c, scaled(17)),
     subtitle: { ...font.sans, fontSize: size.label, color: c.muted },
     headerButton: {
       flexDirection: "row",
@@ -600,10 +601,11 @@ const makeStyles = (c: Palette) =>
       height: 32,
       paddingHorizontal: 11,
       borderRadius: radius.pill,
-      backgroundColor: c.fill,
+      backgroundColor: c.surface,
+      ...edged(c, 2),
     },
     headerButtonText: { ...font.sansMedium, fontSize: size.label, color: c.textSecondary },
-    headerIcon: { width: 36, height: 36, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", backgroundColor: c.fill },
+    headerIcon: { width: 36, height: 36, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", backgroundColor: c.surface, ...edged(c, 2) },
     divider: { flexDirection: "row", alignItems: "center", gap: space.sm },
     dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: c.line },
     dividerText: { ...font.sans, fontSize: size.label, color: c.faint },
@@ -611,12 +613,12 @@ const makeStyles = (c: Palette) =>
     list: { paddingHorizontal: space.lg, paddingVertical: space.lg, gap: space.lg },
     thinking: { paddingVertical: space.xs },
     empty: { alignItems: "center", gap: space.sm, paddingHorizontal: space.xl, paddingVertical: space.xxxl },
-    emptyTitle: { ...font.sansMedium, fontSize: size.body, color: c.text, marginTop: space.sm },
+    emptyTitle: { ...heading(c, scaled(24)), textAlign: "center", marginTop: space.xs },
     emptyText: { ...font.sans, fontSize: size.caption, color: c.muted, textAlign: "center", lineHeight: scaled(19) },
 
     userRow: { alignItems: "flex-end", gap: space.sm, paddingLeft: space.xxl },
     bubble: {
-      backgroundColor: c.fill,
+      backgroundColor: c.bubble,
       borderRadius: radius.lg,
       paddingHorizontal: 14,
       paddingVertical: 10,
@@ -655,8 +657,7 @@ const makeStyles = (c: Palette) =>
       gap: 6,
       padding: 14,
       borderRadius: radius.lg,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 3),
       backgroundColor: c.surface,
     },
     briefHead: { flexDirection: "row", alignItems: "center", gap: space.sm },
@@ -674,8 +675,7 @@ const makeStyles = (c: Palette) =>
       padding: space.md,
       gap: space.sm,
       borderRadius: radius.lg,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 3),
       backgroundColor: c.surface,
     },
     schedulesHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
@@ -693,7 +693,8 @@ const makeStyles = (c: Palette) =>
       gap: space.sm,
       padding: space.md,
       borderRadius: radius.lg,
-      backgroundColor: c.fill,
+      backgroundColor: c.cream,
+      ...edged(c),
     },
     noticeBody: { flex: 1, gap: space.xs },
     noticeText: { ...font.sans, fontSize: size.caption, lineHeight: scaled(19), color: c.textSecondary },
@@ -701,8 +702,7 @@ const makeStyles = (c: Palette) =>
     field: {
       backgroundColor: c.surface,
       borderRadius: radius.xxl,
-      borderWidth: 1,
-      borderColor: c.line,
+      ...edged(c, 3),
       paddingHorizontal: 6,
       paddingTop: 4,
       paddingBottom: 6,
@@ -735,7 +735,7 @@ const makeStyles = (c: Palette) =>
       width: 36,
       height: 36,
       borderRadius: radius.pill,
-      backgroundColor: c.working,
+      backgroundColor: c.flood,
       alignItems: "center",
       justifyContent: "center",
     },

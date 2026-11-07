@@ -13,6 +13,7 @@ import { AgentIcon } from "./AgentIcon";
 import { MotionPressable } from "./MotionPressable";
 import { QuestionCard } from "./QuestionCard";
 import { SwipeToDismiss } from "./SwipeToDismiss";
+import { edged, hardShadow } from "./Brand";
 
 /**
  * A decision Agentman put in front of the user, answerable where it stands:
@@ -221,8 +222,8 @@ const makeStyles = (c: Palette) =>
       gap: space.md,
       padding: space.lg,
       borderRadius: radius.xl,
-      borderWidth: 1,
-      borderColor: c.needsYouEdge,
+      ...edged(c),
+      ...hardShadow(c.needsYou, 4),
       backgroundColor: c.surface,
     },
     head: { flexDirection: "row", alignItems: "center", gap: space.sm },
