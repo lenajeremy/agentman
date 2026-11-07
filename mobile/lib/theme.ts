@@ -55,8 +55,9 @@ const light = {
   findMatch: "#FFEB99",
   findCurrent: "#FFB866",
   workingSoft: "#D9DFFF",
-  /** The working ring's second colour, which it flows into and back from. */
-  loaderPink: "#F0407F",
+  /** The working ring's second colour, which it flows into and back from:
+   *  the website's orange. */
+  loaderAccent: "#FF5F1F",
   /** An agent is blocked on the user — the most actionable state there is. */
   needsYou: "#FF6A2B",
   needsYouText: "#C2451A",
@@ -127,7 +128,7 @@ const dark: Palette = {
   findMatch: "#5A4A0C",
   findCurrent: "#9A5A12",
   workingSoft: "#28305E",
-  loaderPink: "#FF5C9A",
+  loaderAccent: "#FF7A3D",
   needsYou: "#FF7D45",
   needsYouText: "#FF9A6C",
   needsYouWash: "#2E1B12",
