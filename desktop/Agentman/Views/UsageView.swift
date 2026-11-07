@@ -79,7 +79,7 @@ struct UsageView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Text("Usage").font(Fonts.sans(14, .semibold))
+            Text("Usage").font(Fonts.heading(14))
             Segments(options: UsageTab.allCases, selection: tab) { $0.title }
                 .padding(.leading, 6)
             Spacer()
@@ -357,7 +357,7 @@ struct UsagePage: View {
     private var chart: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(unit.adjective + (cost ? " cost" : " processed tokens"))
-                .font(Fonts.sans(14, .semibold))
+                .font(Fonts.heading(14))
                 .foregroundStyle(Palette.text)
             UsageChart(usage: usage, metric: metric, agents: agents.map(\.kind), pointing: pointing)
                 .frame(height: 250)
@@ -370,7 +370,7 @@ struct UsagePage: View {
     private var totals: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Totals")
-                .font(Fonts.sans(14, .semibold))
+                .font(Fonts.heading(14))
                 .foregroundStyle(Palette.text)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 20, alignment: .leading)], alignment: .leading, spacing: 18) {
                 stat("Processed tokens", UsageFormat.tokens(usage.tokens.total))
@@ -418,7 +418,7 @@ struct UsagePage: View {
         let total = kinds.reduce(0) { $0 + $1.value }
         return VStack(alignment: .leading, spacing: 12) {
             Text(cost ? "Cost by type" : "Tokens by type")
-                .font(Fonts.sans(14, .semibold))
+                .font(Fonts.heading(14))
                 .foregroundStyle(Palette.text)
             GeometryReader { geometry in
                 let shown = kinds.filter { $0.value > 0 }
@@ -678,7 +678,7 @@ private struct UsageBreakdownTable: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Breakdown")
-                    .font(Fonts.sans(14, .semibold))
+                    .font(Fonts.heading(14))
                     .foregroundStyle(Palette.text)
                 Spacer()
                 Segments(options: UsageBreakdown.allCases, selection: $breakdown) {
@@ -795,8 +795,8 @@ struct Segments<Value: Hashable>: View {
                         .background {
                             if chosen {
                                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                    .fill(Palette.segment)
-                                    .shadow(color: .black.opacity(0.1), radius: 0.5, y: 0.5)
+                                    .fill(Palette.surface)
+                                    .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.2))
                             }
                         }
                         .contentShape(Rectangle())
