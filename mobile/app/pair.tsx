@@ -16,11 +16,12 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { StatusBar } from "expo-status-bar";
 
 import { Appear } from "../components/Appear";
 import { Wordmark } from "../components/BrandMark";
+import { DotFill, FloodBand, OutlinedText, Sticker, hardShadow } from "../components/Brand";
 import { ContentColumn } from "../components/ContentColumn";
-import { PairIllustration } from "../components/Illustrations";
 import { MotionPressable } from "../components/MotionPressable";
 import { useStyles, useTheme } from "../lib/appearance";
 import { pair, pairWithToken } from "../lib/client";
@@ -135,24 +136,31 @@ export default function Pair() {
       style={styles.page}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
+      {/* White clock and battery over the orange band. */}
+      <StatusBar style="light" />
       <ScrollView
-        contentContainerStyle={[
-          styles.content,
-          {
-            paddingTop: insets.top + space.md,
-            paddingBottom: insets.bottom + space.xl,
-          },
-        ]}
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xl }]}
         keyboardShouldPersistTaps="handled"
       >
-        <ContentColumn narrow style={styles.column}>
-          <Appear>
-            <Wordmark />
-          </Appear>
+        {/* The website's first screen, as the phone's: the orange band with
+            the phone sticker and an outlined title. */}
+        <FloodBand style={{ paddingTop: insets.top + space.md }}>
+          <ContentColumn narrow style={styles.bandColumn}>
+            <Appear>
+              <Wordmark color={color.onFlood} />
+            </Appear>
+            <Appear delay={45}>
+              <Sticker name="phone" size={scaled(176)} style={styles.art} />
+              <Text style={styles.title} accessibilityRole="header" accessibilityLabel="Pair with your Mac">
+                Pair with
+              </Text>
+              <OutlinedText text="your Mac" fontSize={scaled(38)} color={color.onFlood} />
+            </Appear>
+          </ContentColumn>
+        </FloodBand>
 
-          <Appear delay={45}>
-            <PairIllustration style={styles.art} />
-            <Text style={styles.title}>Pair with your Mac</Text>
+        <ContentColumn narrow style={styles.column}>
+          <Appear delay={60}>
             <Text style={styles.lede}>
               Run <Text style={styles.ledeCode}>am pair</Text> on the computer where your agents
               work, and scan the code it shows. New to Agentman? The setup steps are below.
@@ -291,6 +299,7 @@ function SetupGuide() {
 
   return (
     <View style={styles.guide}>
+      <DotFill radius={radius.xl - 2} />
       <Text style={styles.guideTitle}>First time? Set up your computer</Text>
       {SETUP_STEPS.map((step, index) => (
         <View key={step.title} style={styles.step}>
@@ -354,26 +363,17 @@ function firstParam(value: string | string[] | undefined): string {
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: c.paper },
-    content: { flexGrow: 1, paddingHorizontal: space.lg },
-    column: { flex: 1, gap: space.lg },
+    content: { flexGrow: 1 },
+    bandColumn: { paddingHorizontal: space.lg, paddingBottom: space.xl + space.sm },
+    column: { flex: 1, gap: space.lg, paddingHorizontal: space.lg, paddingTop: space.md },
 
-    art: {
-      width: "100%",
-      aspectRatio: 340 / 214,
-      marginTop: space.md,
-      borderRadius: radius.sheet,
-      overflow: "hidden",
-      backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.line,
-    },
+    art: { alignSelf: "center", marginTop: space.xs, marginBottom: -space.xs },
     title: {
-      ...font.sansBold,
-      fontSize: scaled(30),
-      lineHeight: scaled(34),
-      letterSpacing: -1,
-      color: c.text,
-      marginTop: space.xl,
+      ...font.display,
+      fontSize: scaled(38),
+      lineHeight: scaled(39),
+      letterSpacing: -scaled(38) * 0.03,
+      color: c.onFlood,
     },
     ledeCode: { ...font.mono, fontSize: scaled(14), color: c.text },
     lede: {
@@ -381,17 +381,23 @@ const makeStyles = (c: Palette) =>
       fontSize: size.body,
       color: c.muted,
       lineHeight: scaled(22),
-      marginTop: space.sm,
     },
-    commandPrompt: { ...font.mono, fontSize: scaled(14), color: c.faint },
+    commandPrompt: { ...font.monoMedium, fontSize: scaled(14), color: c.prompt },
 
-    guideTitle: { ...font.sansBold, fontSize: size.caption, color: c.muted },
+    guideTitle: {
+      ...font.monoMedium,
+      fontSize: size.label,
+      letterSpacing: 1.4,
+      textTransform: "uppercase",
+      color: c.textSecondary,
+    },
     guide: {
       marginTop: space.sm,
-      backgroundColor: c.surface,
-      borderRadius: radius.xxl,
-      borderWidth: 1,
-      borderColor: c.line,
+      backgroundColor: c.cream,
+      borderRadius: radius.xl,
+      borderWidth: 2,
+      borderColor: c.edge,
+      ...hardShadow(c.edge, 5),
       padding: space.lg,
       gap: space.lg,
     },
@@ -399,13 +405,13 @@ const makeStyles = (c: Palette) =>
     stepNumber: {
       width: 26,
       height: 26,
-      borderRadius: 8,
+      borderRadius: 13,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: c.fill,
+      backgroundColor: c.edge,
       marginTop: 1,
     },
-    stepNumberText: { ...font.mono, fontSize: scaled(13), color: c.textSecondary },
+    stepNumberText: { ...font.displayBold, fontSize: scaled(13), color: c.onInverse },
     stepCopy: { flex: 1, minWidth: 0, gap: 3 },
     stepTitle: { ...font.sansBold, fontSize: size.body, color: c.text },
     stepDetail: { ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.muted },
@@ -415,9 +421,11 @@ const makeStyles = (c: Palette) =>
       gap: space.sm,
       marginTop: space.sm,
       paddingHorizontal: space.md,
-      paddingVertical: 11,
-      borderRadius: radius.lg,
-      backgroundColor: c.fill,
+      paddingVertical: 10,
+      borderRadius: 11,
+      backgroundColor: c.surface,
+      borderWidth: 1.5,
+      borderColor: c.edge,
     },
     stepCommandText: { flex: 1, ...font.mono, fontSize: scaled(13), color: c.text },
     guideLink: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start" },
@@ -430,8 +438,9 @@ const makeStyles = (c: Palette) =>
       alignItems: "center",
       justifyContent: "center",
       gap: 10,
-      borderRadius: radius.pill,
+      borderRadius: 14,
       backgroundColor: c.inverse,
+      ...hardShadow(c.inverseShadow),
       paddingHorizontal: space.xl,
     },
     primaryButtonText: { ...font.sansBold, fontSize: scaled(16), color: c.onInverse },
@@ -441,13 +450,20 @@ const makeStyles = (c: Palette) =>
       alignItems: "center",
       justifyContent: "center",
     },
-    textButtonLabel: { ...font.sansMedium, fontSize: size.body, color: c.textSecondary },
+    textButtonLabel: {
+      ...font.sansBold,
+      fontSize: size.body,
+      color: c.text,
+      textDecorationLine: "underline",
+      textDecorationColor: c.faint,
+    },
 
     card: {
       backgroundColor: c.surface,
-      borderRadius: radius.xxl,
-      borderWidth: 1,
-      borderColor: c.line,
+      borderRadius: radius.xl,
+      borderWidth: 2,
+      borderColor: c.edge,
+      ...hardShadow(c.edge, 5),
       padding: space.lg,
       gap: space.lg,
     },
