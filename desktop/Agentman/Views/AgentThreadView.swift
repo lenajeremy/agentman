@@ -822,8 +822,7 @@ private struct TakeOverBar: View {
                 .disabled(working)
         }
         .padding(14)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.line))
+        .edged(18, depth: 3)
     }
 }
 
@@ -853,8 +852,7 @@ private struct ResumeBar: View {
             .disabled(resuming)
         }
         .padding(14)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.line))
+        .edged(18, depth: 3)
     }
 }
 
@@ -998,8 +996,7 @@ private struct ChangedBar: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.line))
+            .edged(10, depth: 2)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1140,7 +1137,7 @@ struct MessageRow: View {
                             LongText(text: sent.text)
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 12)
-                                .background(Palette.fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                .background(Palette.bubble, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                                 .contextMenu {
                                     Button("Copy") { Clipboard.copy(sent.text) }
                                 }
@@ -1781,11 +1778,12 @@ struct Composer: View {
         .background {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Palette.surface)
+                .shadow(color: Palette.edge, radius: 0, x: 0, y: 3)
                 .onTapGesture { if enabled { focused = true } }
         }
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(focused ? Palette.fillStrong : Palette.line, lineWidth: 1)
+                .strokeBorder(Palette.edge, lineWidth: 1.5)
         )
         // The commands for `/`, and the files for `@`, just above the box.
         .overlay(alignment: .top) {
@@ -1883,7 +1881,7 @@ struct Composer: View {
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(canSend ? Color.white : Palette.muted)
                     .frame(width: 28, height: 28)
-                    .background(canSend ? Palette.working : Palette.fillStrong, in: Circle())
+                    .background(canSend ? Palette.flood : Palette.fillStrong, in: Circle())
             }
             .buttonStyle(.plain)
             .disabled(!canSend)

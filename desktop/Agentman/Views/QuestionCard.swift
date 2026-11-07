@@ -62,15 +62,20 @@ extension Question {
     }
 }
 
-/// The panel a decision sits in: a quiet surface with a fine edge, the same
-/// for an agent's question in its thread and a card in Agentman's.
+/// The panel a decision sits in: the site's edge, lifted on the needs-you
+/// orange, the same for an agent's question in its thread and a card in
+/// Agentman's.
 struct DecisionPanel: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(20)
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.line))
-            .shadow(color: .black.opacity(0.035), radius: 10, y: 3)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Palette.surface)
+                    .shadow(color: Palette.needsYou, radius: 0, x: 0, y: 4)
+            )
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.edge, lineWidth: 1.5))
+            .padding(.bottom, 4)
     }
 }
 
@@ -243,12 +248,14 @@ struct ChoiceButtonStyle: ButtonStyle {
             .foregroundStyle(primary ? Palette.onInverse : Palette.text)
             // A capsule on one line; a long label that wraps keeps the same
             // corners rather than turning into a lozenge.
+            // The site's buttons: ink, or edged white, on a hard shadow.
             .background(
                 RoundedRectangle(cornerRadius: 15, style: .continuous).fill(primary ? Palette.inverse : Palette.surface)
+                    .shadow(color: primary ? Palette.inverseShadow : Palette.edge, radius: 0, x: 0, y: 2)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .strokeBorder(primary ? Color.clear : Palette.line, lineWidth: 1)
+                    .strokeBorder(primary ? Color.clear : Palette.edge, lineWidth: 1.5)
             )
             .opacity(configuration.isPressed ? 0.75 : 1)
     }
