@@ -23,7 +23,7 @@ import { artifactKind, artifactTitle, isMarkdown } from "../../lib/artifacts";
 import { Artifact, WorkspaceResult } from "../../lib/protocol";
 import { useStore } from "../../lib/store";
 import { agentLabel, font, Palette, radius, size, space, scaled } from "../../lib/theme";
-import { edged } from "../../components/Brand";
+import { edged, heading } from "../../components/Brand";
 
 type Review =
   | { step: "idle" }
@@ -334,8 +334,7 @@ const makeStyles = (c: Palette) =>
     },
     heading: { flex: 1, minWidth: 0 },
     title: {
-      color: c.text,
-      ...font.sansBold,
+      ...heading(c),
       fontSize: size.title,
       letterSpacing: -0.3,
     },

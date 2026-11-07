@@ -27,7 +27,7 @@ import { WorkspaceResult } from "../../lib/protocol";
 import { appendPiece, discard, offerFile, scratchFile } from "../../lib/save-image";
 import { useStore } from "../../lib/store";
 import { font, Palette, radius, size, space, scaled } from "../../lib/theme";
-import { edged } from "../../components/Brand";
+import { edged, heading } from "../../components/Brand";
 
 export default function FileScreen() {
   const {
@@ -666,7 +666,7 @@ const makeStyles = (c: Palette) =>
       paddingBottom: space.md,
     },
     heading: { flex: 1 },
-    title: { color: c.text, ...font.sansBold, fontSize: size.title },
+    title: heading(c),
     path: { color: c.muted, ...font.mono, fontSize: scaled(11) },
     iconButton: {
       width: 40,
@@ -687,9 +687,10 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: space.lg,
       paddingVertical: space.sm,
       borderRadius: radius.pill,
-      backgroundColor: c.fill,
+      backgroundColor: c.surface,
+      ...edged(c),
     },
-    tabActive: { backgroundColor: c.inverse },
+    tabActive: { backgroundColor: c.inverse, borderColor: c.inverse },
     tabText: {
       color: c.muted,
       ...font.sansMedium,

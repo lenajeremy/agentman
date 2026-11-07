@@ -26,7 +26,7 @@ import {
 } from "../../lib/protocol";
 import { useStore } from "../../lib/store";
 import { ago, font, Palette, radius, size, space, scaled } from "../../lib/theme";
-import { edged } from "../../components/Brand";
+import { edged, heading } from "../../components/Brand";
 
 /** A directory listing is worth filtering long before it is worth paging. */
 const FILTER_FROM_ENTRIES = 8;
@@ -655,8 +655,7 @@ const makeStyles = (c: Palette) =>
     // The old display-size title cost a fifth of the screen on a browser whose
     // whole job is showing as many rows as possible.
     title: {
-      color: c.text,
-      ...font.sansBold,
+      ...heading(c),
       fontSize: size.title,
       letterSpacing: -0.3,
     },
@@ -681,9 +680,10 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: space.lg,
       paddingVertical: 7,
       borderRadius: radius.pill,
-      backgroundColor: c.fill,
+      backgroundColor: c.surface,
+      ...edged(c),
     },
-    tabActive: { backgroundColor: c.inverse },
+    tabActive: { backgroundColor: c.inverse, borderColor: c.inverse },
     tabText: {
       color: c.muted,
       ...font.sansMedium,
