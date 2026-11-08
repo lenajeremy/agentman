@@ -436,7 +436,7 @@ func (m *Manager) reviewTurn(ctx context.Context, session protocol.Session, turn
 // sendBackFailure gives the agent its failing tests to fix, unless the user
 // is looking at it or this request has been sent back enough.
 func (m *Manager) sendBackFailure(ctx context.Context, session protocol.Session, askID string, result protocol.Verification) bool {
-	if m.viewed(session.ID) || session.Inject == protocol.InjectNone || session.Inject == "" || !m.verifies.spendSendBack(session.ID, askID) {
+	if trustLevel(m.currentSettings(), session.Cwd) == protocol.TrustWatch || m.viewed(session.ID) || session.Inject == protocol.InjectNone || session.Inject == "" || !m.verifies.spendSendBack(session.ID, askID) {
 		return false
 	}
 	text := fmt.Sprintf(sendBackOpening+"%s` after your last turn and it failed. The end of its output:\n\n```\n%s\n```\n\nPlease fix what's failing.", result.Command, result.Output)

@@ -168,6 +168,8 @@ type ManagerEntry struct {
 	// put in front of them to answer on the spot. When it is settled, the
 	// entry comes again with the card's new state.
 	Card *ManagerCard `json:"card,omitempty"`
+	// Approved says what Agentman approved, on an "approve" activity.
+	Approved *ApprovedRequest `json:"approved,omitempty"`
 	// Closed is set when the user closed the entry: apps leave it out of
 	// the conversation they show.
 	Closed bool `json:"closed,omitempty"`
@@ -194,6 +196,9 @@ const (
 	// CardNote is a note Agentman suggests keeping. Nothing is saved until
 	// the user approves it, as it is or as they edited it.
 	CardNote = "note"
+	// CardOffer is something Agentman offers to do, with the options to take
+	// it up or leave it. Offer says what, for the daemon to carry out.
+	CardOffer = "offer"
 )
 
 // Card states.
@@ -236,6 +241,8 @@ type ManagerCard struct {
 	Custom     bool             `json:"custom,omitempty"`
 	// KeyName is the key a key card is about.
 	KeyName string `json:"keyName,omitempty"`
+	// Offer is what an offer card proposes, read back when it is answered.
+	Offer map[string]string `json:"offer,omitempty"`
 	// Suggested is the option Agentman would pick, when the user asked it to
 	// answer and the answer needs their OK.
 	Suggested string `json:"suggested,omitempty"`
@@ -267,6 +274,11 @@ type ManagerSettings struct {
 	// An "ask" rule wins over everything. On a set, nil keeps what is
 	// stored and an empty list clears them.
 	Rules []PermissionRule `json:"rules,omitempty"`
+	// Trust sets how much Agentman does by itself in a folder, with the
+	// folders inside it. The closest entry wins; where none applies,
+	// AutoApprove decides. On a set, nil keeps what is stored and an empty
+	// list clears them.
+	Trust []FolderTrust `json:"trust,omitempty"`
 	// Autopilot is what Agentman does by itself beyond approving requests.
 	// All of it is off until the user turns it on. On a set, nil keeps what
 	// is stored.
@@ -285,6 +297,30 @@ type ManagerSettings struct {
 	GeminiKeySet    bool   `json:"geminiKeySet"`
 }
 
+// How much Agentman does by itself in a folder.
+const (
+	// TrustWatch: it reports and asks, and acts on nothing.
+	TrustWatch = "watch"
+	// TrustSuggest: it marks the answer it would give and waits.
+	TrustSuggest = "suggest"
+	// TrustHandle: it answers what the policy allows.
+	TrustHandle = "handle"
+)
+
+// FolderTrust is the user's trust level for a folder.
+type FolderTrust struct {
+	Folder string `json:"folder"`
+	Level  string `json:"level"`
+}
+
+// ApprovedRequest is what Agentman approved by itself, so the user can look
+// it over and have it ask next time.
+type ApprovedRequest struct {
+	Kind   string `json:"kind"`
+	Target string `json:"target"`
+	Folder string `json:"folder,omitempty"`
+}
+
 // Autopilot switches what Agentman does on its own. Each spends the user's
 // API key or changes what agents do, so each is the user's to turn on.
 type Autopilot struct {
@@ -295,6 +331,8 @@ type Autopilot struct {
 	// SendBack gives an agent the output of tests that failed, so it can fix
 	// them, a limited number of times for one request.
 	SendBack bool `json:"sendBack"`
+	// LearnRules offers to make a rule of what the user keeps approving.
+	LearnRules bool `json:"learnRules"`
 	// VerifyDaily is how many reviews by the model a day may cost; zero is
 	// the default. Running the tests costs none.
 	VerifyDaily int `json:"verifyDaily,omitempty"`

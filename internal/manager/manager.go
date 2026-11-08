@@ -78,6 +78,7 @@ type Manager struct {
 	schedules *scheduleStore
 	now       func() time.Time
 	verifies  *verifyStore
+	learned   *learnStore
 	runCheck  func(ctx context.Context, dir, program string, args ...string) (string, error)
 	// verifyDelay and verifySlots pace the checks of agents' work.
 	verifyDelay time.Duration
@@ -161,6 +162,7 @@ func New(cfg Config) (*Manager, error) {
 		schedules:    loadSchedules(cfg.Dir),
 		now:          cfg.Now,
 		verifies:     loadVerifications(cfg.Dir),
+		learned:      loadLearned(cfg.Dir),
 		runCheck:     cfg.RunCheck,
 		verifyDelay:  cfg.VerifyDelay,
 		verifySlots:  make(chan struct{}, maxConcurrentChecks),
@@ -437,8 +439,11 @@ func (m *Manager) setSettings(next *protocol.ManagerSettings) protocol.Event {
 	}
 	// An app that doesn't know the permission switches and rules leaves
 	// them out; that keeps them as they are rather than clearing them.
-	if next.Approve == nil || next.Rules == nil || next.Autopilot == nil {
+	if next.Approve == nil || next.Rules == nil || next.Autopilot == nil || next.Trust == nil {
 		current := m.currentSettings()
+		if next.Trust == nil {
+			next.Trust = current.Trust
+		}
 		if next.Autopilot == nil {
 			next.Autopilot = current.Autopilot
 		}

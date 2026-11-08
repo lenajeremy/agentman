@@ -137,6 +137,9 @@ func validateSettings(s protocol.ManagerSettings) error {
 	if len(s.Style) > maxStyle || len(s.Instructions) > maxStyle {
 		return errors.New("style and instructions are limited to 8000 characters each")
 	}
+	if err := validateTrust(s.Trust); err != nil {
+		return err
+	}
 	return validateRules(s.Rules)
 }
 

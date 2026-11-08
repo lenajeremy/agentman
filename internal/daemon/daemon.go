@@ -1241,6 +1241,7 @@ func (d *Daemon) HandleFrom(
 				ClientID: req.ClientID, Status: protocol.StatusFailed, Error: err.Error(),
 			}
 		}
+		d.managerAnswered(req)
 		// The next discovery sweep clears the question and updates the state,
 		// so nothing else has to be reported here.
 		return protocol.Event{
