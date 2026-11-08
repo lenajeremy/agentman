@@ -141,7 +141,7 @@ struct BoardView: View {
                 HStack(alignment: .top, spacing: Self.gap) {
                     BoardColumn(kind: .needsYou, sessions: sections.needsYou, outlined: outlined, offers: manager.offers, clearance: clearance)
                         .frame(width: column)
-                    BoardColumn(kind: .working, sessions: sections.working, outlined: outlined, clearance: clearance)
+                    BoardColumn(kind: .working, sessions: sections.working, outlined: outlined, missions: manager.runningMissions, clearance: clearance)
                         .frame(width: column)
                     BoardColumn(kind: .idle, sessions: sections.idle, outlined: outlined, hidden: sections.hidden, clearance: clearance)
                         .frame(width: column)
@@ -348,6 +348,8 @@ private struct BoardColumn: View {
     var hidden: [Session] = []
     /// What Agentman offers the user, above the agents waiting on them.
     var offers: [ManagerCard] = []
+    /// The teams at work, above the agents doing their parts.
+    var missions: [Mission] = []
     let clearance: CGFloat
 
     var body: some View {
@@ -355,6 +357,9 @@ private struct BoardColumn: View {
             header
             ScrollView {
                 LazyVStack(spacing: 6) {
+                    ForEach(missions) { mission in
+                        BoardMission(mission: mission)
+                    }
                     ForEach(offers) { offer in
                         CompactCard(card: offer) { await store.manager.dismiss(offer) }
                             .environment(\.roomyChoices, true)
@@ -366,7 +371,7 @@ private struct BoardColumn: View {
                         BoardCard(session: session, kind: kind, outlined: outlined.contains(session.id))
                             .transition(.scale(scale: 0.97).combined(with: .opacity))
                     }
-                    if sessions.isEmpty, offers.isEmpty {
+                    if sessions.isEmpty, offers.isEmpty, missions.isEmpty {
                         Text(kind.empty)
                             .font(Fonts.sans(12))
                             .foregroundStyle(Palette.boardMuted)
@@ -462,6 +467,12 @@ private struct BoardCard: View {
         VStack(alignment: .leading, spacing: 9) {
             VStack(alignment: .leading, spacing: 5) {
                 meta(digest)
+                if let mission = store.manager.mission(of: session.id) {
+                    Text(mission.goal)
+                        .font(Fonts.sans(12))
+                        .foregroundStyle(Palette.workingText)
+                        .lineLimit(1)
+                }
                 Text(session.name)
                     .font(Fonts.sans(13.5, .medium))
                     .foregroundStyle(Palette.text)
@@ -704,6 +715,39 @@ private struct BoardCard: View {
 extension GitAction {
     fileprivate var isIdle: Bool {
         if case .idle = self { true } else { false }
+    }
+}
+
+/// A team at work: its goal, how far along it is, and who is waiting.
+private struct BoardMission: View {
+    let mission: Mission
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(mission.goal)
+                .font(Fonts.sans(13, .medium))
+                .foregroundStyle(Palette.text)
+                .lineLimit(2)
+            Text(mission.progress)
+                .font(Fonts.sans(12))
+                .monospacedDigit()
+                .foregroundStyle(Palette.boardMuted)
+            ForEach(mission.tasks.filter { $0.state == "planned" }) { task in
+                HStack(spacing: 6) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Palette.faint)
+                    Text(task.title)
+                        .font(Fonts.sans(12))
+                        .foregroundStyle(Palette.boardMuted)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.horizontal, 5)
+        .padding(.bottom, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 }
 

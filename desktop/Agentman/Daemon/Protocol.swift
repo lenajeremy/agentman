@@ -82,6 +82,7 @@ enum RequestType: String, Codable, Sendable {
     case managerSetKey = "manager_set_key"
     case managerBriefs = "manager_briefs"
     case managerVerifications = "manager_verifications"
+    case managerMissions = "manager_missions"
     case managerCardReply = "manager_card_reply"
     case managerCardDismiss = "manager_card_dismiss"
     case managerEntryClose = "manager_entry_close"
@@ -228,6 +229,7 @@ struct DaemonEvent: Codable, Sendable {
     var briefs: [Brief]?
     var verification: Verification?
     var verifications: [Verification]?
+    var missions: [Mission]?
     /// What Agentman would do with a request, on "manager_permission".
     var permission: PermissionCheck?
     var more: Bool?
@@ -851,8 +853,37 @@ struct Autopilot: Codable, Sendable, Hashable {
     var unstick = false
     /// Notice agents working on the same files.
     var overlap = false
+    /// Suggest a note for what the user keeps telling agents.
+    var learnNotes = false
     /// Reviews by the model a day; nil is the daemon's default.
     var verifyDaily: Int?
+}
+
+/// A goal given to Agentman, as a team of agents.
+struct Mission: Codable, Sendable, Hashable, Identifiable {
+    struct Task: Codable, Sendable, Hashable, Identifiable {
+        var id: String
+        var title: String
+        var agent: String
+        /// "planned", "running", "done" or "failed".
+        var state: String
+        var sessionId: String?
+        var dependsOn: [String]?
+        var problem: String?
+    }
+
+    var id: String
+    var goal: String
+    /// "proposed", "running", "done" or "dismissed".
+    var state: String
+    var tasks: [Task]
+    var createdAt: Int64
+
+    var finished: Int { tasks.filter { $0.state == "done" }.count }
+    var waiting: Int { tasks.filter { $0.state == "planned" }.count }
+    var progress: String {
+        waiting > 0 ? "\(finished) of \(tasks.count) done, \(waiting) waiting" : "\(finished) of \(tasks.count) done"
+    }
 }
 
 /// What Agentman found checking an agent's latest work.

@@ -380,9 +380,10 @@ private struct PermissionsPage: View {
             }
 
             SettingsSection(title: "While agents work",
-                            footer: "Read from their transcripts, without using your API key. What happens next follows the folder's trust below.") {
+                            footer: "Noticing is read from their transcripts, without using your API key. What happens next follows the folder's trust below.") {
                 autopilotRow("Notice stuck agents", detail: "The same thing failing, long silences, a full context or a usage limit.", \.unstick)
-                autopilotRow("Notice agents on the same files", detail: "Two changing one file, or one changing what another has read.", \.overlap, divider: false)
+                autopilotRow("Notice agents on the same files", detail: "Two changing one file, or one changing what another has read.", \.overlap)
+                autopilotRow("Suggest notes for what I keep telling agents", detail: "Once a day, on your API key. You approve each note.", \.learnNotes, divider: false)
             }
 
             SettingsSection(title: "Trust by folder",

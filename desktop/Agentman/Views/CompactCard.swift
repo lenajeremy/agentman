@@ -49,7 +49,13 @@ struct CompactCard: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .help(card.title)
-            if let line = shownDetail {
+            if card.kind == "offer", let detail = card.detail, !detail.isEmpty {
+                Text(detail)
+                    .font(Fonts.sans(12.5))
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let line = shownDetail {
                 Text(line)
                     .font(Fonts.mono(11))
                     .foregroundStyle(Palette.textSecondary)

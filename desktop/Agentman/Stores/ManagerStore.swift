@@ -15,6 +15,14 @@ final class ManagerStore {
     private(set) var briefs: [String: Brief] = [:]
     /// What Agentman found checking each agent's latest work.
     private(set) var verifications: [String: Verification] = [:]
+    /// The teams Agentman has planned or is running.
+    private(set) var missions: [Mission] = []
+    /// The teams at work, for the Board.
+    var runningMissions: [Mission] { missions.filter { $0.state == "running" } }
+
+    func mission(of sessionId: String) -> Mission? {
+        runningMissions.first { $0.tasks.contains { $0.sessionId == sessionId } }
+    }
     /// The user's notes for their agents, without bodies, newest first.
     private(set) var notes: [Note] = []
     /// The keys Agentman keeps, by name.
@@ -105,6 +113,7 @@ final class ManagerStore {
         async let settingsReply = try? client.request(DaemonRequest(.managerSettings))
         async let briefsReply = try? client.request(DaemonRequest(.managerBriefs))
         async let verificationsReply = try? client.request(DaemonRequest(.managerVerifications))
+        async let missionsReply = try? client.request(DaemonRequest(.managerMissions))
         async let schedulesReply = try? client.request(DaemonRequest(.managerSchedules))
         var historyRequest = DaemonRequest(.managerHistory)
         historyRequest.limit = 80
@@ -119,6 +128,7 @@ final class ManagerStore {
         if let reply = await verificationsReply, let all = reply.verifications {
             verifications = Dictionary(all.map { ($0.sessionId, $0) }, uniquingKeysWith: { a, _ in a })
         }
+        if let reply = await missionsReply { missions = reply.missions ?? [] }
         if let reply = await historyReply {
             entries = reply.entries ?? []
             hasOlder = reply.more ?? false
@@ -425,6 +435,8 @@ final class ManagerStore {
             if let all = event.briefs {
                 for brief in all { briefs[brief.sessionId] = brief }
             }
+        case "manager_missions":
+            missions = event.missions ?? []
         case "manager_verification":
             if let check = event.verification {
                 verifications[check.sessionId] = check.state == "none" ? nil : check

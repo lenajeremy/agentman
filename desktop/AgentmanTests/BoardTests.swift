@@ -249,6 +249,12 @@ final class BoardTests: XCTestCase {
         var handled = DaemonEvent(type: "manager_entry")
         handled.entry = ManagerEntry(approved: ApprovedRequest(kind: "command", target: "go test ./..."), id: "h", role: "activity", text: "Approved for api: run `go test ./...`", ts: now, tool: "approve")
         store.apply(handled)
+        var team = DaemonEvent(type: "manager_missions")
+        team.missions = [Mission(id: "t", goal: "Harden the webhooks", state: "running", tasks: [
+            .init(id: "a", title: "Limit the rate", agent: "claude", state: "running", sessionId: "t"),
+            .init(id: "b", title: "Update the docs", agent: "antigravity", state: "planned", dependsOn: ["a"])
+        ], createdAt: now)]
+        store.apply(team)
         return store
     }
 
