@@ -19,6 +19,7 @@ final class ToolRunTests: XCTestCase {
             case .tools(let calls, _): "tools \(calls.map(\.id).joined())"
             case .image(let m, _): "image \(m.id)"
             case .images(let calls, _, _): "images \(calls.map(\.id).joined())"
+            case .worked(_, let seconds): "worked \(seconds)"
             }
         }
         XCTAssertEqual(shapes, ["message 1", "tools 23", "message 4", "tools 5"])

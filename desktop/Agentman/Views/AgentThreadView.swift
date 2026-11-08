@@ -307,11 +307,14 @@ struct AgentThreadView: View {
                                                    label: "Read " + (path as NSString).lastPathComponent, carded: true)
                                 case .images(let calls, let paths, let said):
                                     PicturesRun(sessionId: session.id, calls: calls, paths: paths, said: said)
+                                case .worked(_, let seconds):
+                                    WorkedLine(text: "Worked for " + WorkDuration.text(seconds))
                                 }
                             }
                             .id(item.id)
                             .firstMessage(item.id, if: item.id == items.first?.id)
                         }
+                        LatestTurnLine(session: session)
                         ForEach(Array((session.queued ?? []).enumerated()), id: \.offset) { _, text in
                             QueuedBubble(text: text, note: "Waiting for the agent to read it",
                                          onSendNow: canSendNow ? { await store.sendQueuedNow(session.id) } : nil)
@@ -1242,12 +1245,15 @@ enum ThreadItem: Identifiable {
     case image(Message, path: String)
     /// Images read one after another: one run, the pictures side by side.
     case images([Message], paths: [String], said: String)
+    /// A turn that has been followed by another: how long the agent took.
+    case worked(after: String, seconds: Int)
 
     /// The last message's ID, so scrolling to the newest message finds it.
     var id: String {
         switch self {
         case .message(let message), .image(let message, _): message.id
         case .tools(let calls, _), .images(let calls, _, _): calls.last?.id ?? ""
+        case .worked(let after, _): "worked-" + after
         }
     }
 
@@ -1266,11 +1272,44 @@ enum ThreadItem: Identifiable {
         return paths
     }
 
+    /// One request and the agent's work on it.
+    struct Turn {
+        var start: Message?
+        var last: Message?
+
+        mutating func add(_ message: Message) {
+            if message.startsTurn {
+                start = message
+            } else if start != nil, message.role != .system {
+                last = message
+            }
+        }
+
+        /// How long the agent took, to the second; nil before it has done
+        /// anything, or for a turn too short to mention.
+        var seconds: Int? {
+            guard let start, let last else { return nil }
+            let seconds = Int((last.ts - start.ts) / 1000)
+            return seconds >= 1 ? seconds : nil
+        }
+    }
+
+    /// The latest turn, for the line under the conversation.
+    static func latestTurn(in messages: [Message]) -> Turn {
+        var turn = Turn()
+        for message in messages {
+            if message.startsTurn { turn = Turn() }
+            turn.add(message)
+        }
+        return turn
+    }
+
     static func items(from messages: [Message]) -> [ThreadItem] {
         var items: [ThreadItem] = []
         var run: [Message] = []
         var pictures: [(message: Message, path: String)] = []
         var said = ""
+        var turn = Turn()
         func flush() {
             if !run.isEmpty {
                 items.append(.tools(run, said: said))
@@ -1286,6 +1325,16 @@ enum ThreadItem: Identifiable {
             pictures = []
         }
         for message in messages {
+            // The end of a turn, once there's a next one to mark it.
+            if message.startsTurn {
+                flush()
+                flushPictures()
+                if let seconds = turn.seconds, let start = turn.start {
+                    items.append(.worked(after: start.id, seconds: seconds))
+                }
+                turn = Turn()
+            }
+            turn.add(message)
             if message.role == .tool, ToolKind(message.tool?.name) == .read,
                let path = ImageThumbnail.imagePath(in: message.tool?.summary ?? message.text ?? "") {
                 flush()
@@ -1303,6 +1352,61 @@ enum ThreadItem: Identifiable {
         flush()
         flushPictures()
         return items
+    }
+}
+
+extension Message {
+    /// Whether the user asked for something here, which starts a turn.
+    var startsTurn: Bool { role == .user && isSidechain != true }
+}
+
+/// How long something took, in the fewest words: 12s, 4m 12s, 1h 5m.
+enum WorkDuration {
+    static func text(_ seconds: Int) -> String {
+        if seconds < 60 { return "\(seconds)s" }
+        if seconds < 3600 { return seconds % 60 == 0 ? "\(seconds / 60)m" : "\(seconds / 60)m \(seconds % 60)s" }
+        let minutes = seconds / 60
+        return minutes % 60 == 0 ? "\(minutes / 60)h" : "\(minutes / 60)h \(minutes % 60)m"
+    }
+}
+
+/// How long the agent took, between its work and what comes next.
+struct WorkedLine: View {
+    let text: String
+    var live = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if live { Loader(size: 9) }
+            Text(text)
+                .font(TextStyle.caption)
+                .monospacedDigit()
+                .foregroundStyle(Palette.muted)
+            Rectangle()
+                .fill(Palette.line)
+                .frame(height: 1)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text)
+    }
+}
+
+/// The latest turn's line: counting while the agent works, and what it came
+/// to once it stops. Nothing while it waits on the user.
+private struct LatestTurnLine: View {
+    @Environment(AgentsStore.self) private var store
+    let session: Session
+
+    var body: some View {
+        let turn = ThreadItem.latestTurn(in: store.messages[session.id] ?? [])
+        if session.state == .busy, let start = turn.start {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let seconds = max(0, Int(context.date.timeIntervalSince(start.date)))
+                WorkedLine(text: "Working for " + WorkDuration.text(seconds), live: true)
+            }
+        } else if session.state != .waitingInput, session.question == nil, let seconds = turn.seconds {
+            WorkedLine(text: "Worked for " + WorkDuration.text(seconds))
+        }
     }
 }
 

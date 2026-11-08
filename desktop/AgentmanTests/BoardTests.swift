@@ -399,3 +399,48 @@ final class BoardTests: XCTestCase {
         try render(empty, size: CGSize(width: 1280, height: 800), dark: false, to: shots.appendingPathComponent("board-empty.png"))
     }
 }
+
+@MainActor
+final class WorkedForTests: XCTestCase {
+    private func user(_ id: String, _ ts: Int64) -> Message { Message(id: id, sessionId: "a", role: .user, ts: ts, text: "Go") }
+    private func agent(_ id: String, _ ts: Int64) -> Message { Message(id: id, sessionId: "a", role: .assistant, ts: ts, text: "Done") }
+    private func tool(_ id: String, _ ts: Int64) -> Message {
+        Message(id: id, sessionId: "a", role: .tool, ts: ts, tool: ToolCall(name: "Bash", summary: "ls", status: "ok"))
+    }
+
+    private func worked(_ messages: [Message]) -> [Int] {
+        ThreadItem.items(from: messages).compactMap { if case .worked(_, let seconds) = $0 { seconds } else { nil } }
+    }
+
+    func testDurationsReadShort() {
+        XCTAssertEqual(WorkDuration.text(12), "12s")
+        XCTAssertEqual(WorkDuration.text(60), "1m")
+        XCTAssertEqual(WorkDuration.text(252), "4m 12s")
+        XCTAssertEqual(WorkDuration.text(3600), "1h")
+        XCTAssertEqual(WorkDuration.text(3900), "1h 5m")
+    }
+
+    func testATurnIsMarkedOnceTheNextOneStarts() {
+        let messages = [user("1", 0), tool("2", 5_000), agent("3", 72_000), user("4", 100_000), agent("5", 110_000)]
+        XCTAssertEqual(worked(messages), [72], "the latest turn is the line under the conversation")
+        let items = ThreadItem.items(from: messages)
+        guard case .worked = items[3], case .message(let next) = items[4] else { return XCTFail("\(items.map(\.id))") }
+        XCTAssertEqual(next.id, "4", "between the turn's work and the next request")
+        XCTAssertEqual(ThreadItem.latestTurn(in: messages).seconds, 10)
+    }
+
+    func testTurnsTooShortOrWithNoWorkAreNotMentioned() {
+        XCTAssertEqual(worked([user("1", 0), agent("2", 400), user("3", 1_000), user("4", 90_000), agent("5", 91_000)]), [])
+        XCTAssertNil(ThreadItem.latestTurn(in: [user("1", 0)]).seconds)
+    }
+
+    func testASubagentsPromptIsNotANewTurn() {
+        var inner = user("2", 1_000)
+        inner.isSidechain = true
+        XCTAssertEqual(worked([user("1", 0), inner, agent("3", 30_000), user("4", 40_000)]), [30])
+    }
+
+    func testAConversationThatStartsPartWayThroughATurnSaysNothingForIt() {
+        XCTAssertEqual(worked([agent("1", 0), tool("2", 50_000), user("3", 60_000)]), [])
+    }
+}
