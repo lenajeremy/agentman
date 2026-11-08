@@ -211,6 +211,24 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(BoardDigest.checklist("✔ A\n✕ Dropped\n○ B"), BoardDigest.Progress(done: 1, total: 2))
     }
 
+    func testACardFindsWhereTheQuestionIs() {
+        let digest = BoardDigest.make([Message(id: "1", sessionId: "a", role: .assistant, ts: 1, text: """
+        # Findings
+
+        It failed in the pairing step, on the
+        second try.
+
+        ```
+        code
+        ```
+
+        - Did it fail in the app or Safari?
+        - Should I commit this?
+        """)])
+        XCTAssertEqual(digest.said, "It failed in the pairing step, on the second try.")
+        XCTAssertEqual(digest.asked, "Did it fail in the app or Safari? Should I commit this?")
+    }
+
     func testWhatAnAgentSaidIsItsFirstSentence() {
         XCTAssertEqual(BoardDigest.firstLine("# Done\n\n```\ncode\n```\n- Apple Pay is in the checkout.\n- More"), "Apple Pay is in the checkout.")
         XCTAssertNil(BoardDigest.firstLine("```\ncode\n```"))

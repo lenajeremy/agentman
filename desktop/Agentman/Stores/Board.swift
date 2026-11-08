@@ -110,7 +110,10 @@ struct BoardDigest: Equatable {
     var steps: [Step] = []
     var command: String?
     var progress: Progress?
+    /// What it said last: where it began, which sums up finished work, and
+    /// where it ended, which is where a question comes.
     var said: String?
+    var asked: String?
     var turnStarted: Date?
 
     /// How much of the conversation is read: the end is all a card shows,
@@ -135,7 +138,9 @@ struct BoardDigest: Equatable {
                 digest.progress = checklist(text)
             }
             if digest.said == nil, message.role == .assistant, let text = message.text {
-                digest.said = firstLine(text)
+                let paragraphs = paragraphs(of: text)
+                digest.said = paragraphs.first
+                digest.asked = paragraphs.last
             }
             if digest.progress != nil, digest.said != nil { break }
         }
@@ -179,6 +184,37 @@ struct BoardDigest: Equatable {
             }
         }
         return progress.total >= 2 ? progress : nil
+    }
+
+    /// What it said, paragraph by paragraph, without code, headings, tables
+    /// or a list's bullets.
+    static func paragraphs(of text: String) -> [String] {
+        var paragraphs: [String] = []
+        var current: [String] = []
+        var fenced = false
+        func close() {
+            if !current.isEmpty { paragraphs.append(current.joined(separator: " ")) }
+            current = []
+        }
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            var line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("```") {
+                fenced.toggle()
+                close()
+                continue
+            }
+            if fenced { continue }
+            if line.isEmpty || line.hasPrefix("#") || line.hasPrefix("|") {
+                close()
+                continue
+            }
+            for bullet in ["- ", "* ", "> "] where line.hasPrefix(bullet) {
+                line = String(line.dropFirst(bullet.count))
+            }
+            current.append(line)
+        }
+        close()
+        return paragraphs
     }
 
     /// The first line of what it said that reads as a sentence, without

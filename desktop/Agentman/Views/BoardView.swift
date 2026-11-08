@@ -602,6 +602,7 @@ private struct BoardCard: View {
     @ViewBuilder private func needsYou(_ digest: BoardDigest) -> some View {
         let card = store.manager.openCards.first { $0.sessionId == session.id && ($0.kind == "question" || $0.kind == "needs_you") }
         if let question = session.question {
+            briefLine()
             line(question.title ?? "Needs your answer", lines: 3)
             if let detail = question.detail, !detail.isEmpty {
                 CodeBox(text: detail, compact: true)
@@ -632,7 +633,11 @@ private struct BoardCard: View {
                 }
             }
         } else {
-            line(brief?.needsYou ?? digest.said ?? "Waiting for your answer", lines: 3)
+            // Its question is at the end of what it said, and the brief says
+            // what it's all about.
+            let need = brief?.needsYou.flatMap { $0.isEmpty ? nil : $0 } ?? digest.asked ?? "Waiting for your answer"
+            line(need, lines: 5)
+            briefLine(unlike: need)
             if session.canReceive {
                 BoardReply(placeholder: "Reply to \(session.name)") { text in
                     await store.send(text, to: session.id)
@@ -644,7 +649,10 @@ private struct BoardCard: View {
     // MARK: - Working
 
     @ViewBuilder private func working(_ digest: BoardDigest) -> some View {
-        if let now = brief?.now, !now.isEmpty {
+        if let summary = brief?.summary ?? brief?.goal, !summary.isEmpty {
+            line(summary, lines: 3)
+        }
+        if let now = brief?.now, !now.isEmpty, now != brief?.summary {
             line(now, lines: 2)
         }
         if !digest.steps.isEmpty {
@@ -675,7 +683,7 @@ private struct BoardCard: View {
 
     @ViewBuilder private func idle(_ digest: BoardDigest) -> some View {
         if let text = brief?.summary ?? digest.said, !text.isEmpty {
-            line(text, lines: 2)
+            line(text, lines: 4)
         }
         if let check = store.manager.verifications[session.id] {
             BoardCheck(check: check)
@@ -721,12 +729,43 @@ private struct BoardCard: View {
 
     /// A card's one size of running text.
     private func line(_ text: String, lines: Int) -> some View {
-        Text(CompactCard.inline(text))
-            .font(Fonts.sans(12.5))
-            .foregroundStyle(Palette.textSecondary)
-            .lineSpacing(1.5)
-            .lineLimit(lines)
-            .fixedSize(horizontal: false, vertical: true)
+        BoardText(text: text, lines: lines)
+    }
+
+    /// What Agentman's brief says the agent is doing, when there is one and
+    /// it adds to what the card already says.
+    @ViewBuilder private func briefLine(unlike other: String? = nil) -> some View {
+        if let summary = brief?.summary, !summary.isEmpty, summary != other {
+            line(summary, lines: 3)
+        }
+    }
+}
+
+/// Text on a card, cut to a few lines with the rest a click away.
+private struct BoardText: View {
+    let text: String
+    let lines: Int
+    @State private var open = false
+
+    /// About how many characters fill a line of a column.
+    private static let lineLength = 58
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(CompactCard.inline(text))
+                .font(Fonts.sans(12.5))
+                .foregroundStyle(Palette.textSecondary)
+                .lineSpacing(1.5)
+                .lineLimit(open ? nil : lines)
+                .fixedSize(horizontal: false, vertical: true)
+                .help(open ? "" : text)
+            if text.count > lines * Self.lineLength {
+                Button(open ? "Less" : "More") { open.toggle() }
+                    .buttonStyle(.plain)
+                    .font(Fonts.sans(12, .medium))
+                    .foregroundStyle(Palette.muted)
+            }
+        }
     }
 }
 
