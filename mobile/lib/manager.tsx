@@ -10,8 +10,11 @@ import { isPushActive } from "./push";
 
 import {
   applyDelta,
+  applyVerifications,
+  offerCards,
   openCards as openCardsOf,
   prependOlder,
+  runningMissions as runningMissionsOf,
   unreadCount,
   upsertEntry,
 } from "./manager-feed";
@@ -25,8 +28,10 @@ import type {
   ManagerSchedule,
   ManagerSettings,
   ManagerStatus,
+  Mission,
   Note,
   QuestionAnswer,
+  Verification,
 } from "./protocol";
 import { useStore } from "./store";
 
@@ -40,6 +45,10 @@ export interface Manager {
   hasOlder: boolean;
   status: ManagerStatus;
   briefs: Record<string, Brief>;
+  /** What Agentman found checking each agent's finished work, by agent. */
+  verifications: Record<string, Verification>;
+  /** The teams at work. Empty on an older Mac, which has none. */
+  runningMissions: Mission[];
   schedules: ManagerSchedule[];
   settings: ManagerSettings | null;
   /** Whether the first page has arrived. */
@@ -50,6 +59,8 @@ export interface Manager {
   problem: string | null;
   unread: number;
   openCards: ManagerCard[];
+  /** The cards that are Agentman's own offers, for the top of the Board. */
+  offers: ManagerCard[];
   thinking: boolean;
   needsKey: boolean;
   reload(): Promise<void>;
@@ -118,6 +129,8 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
   const [hasOlder, setHasOlder] = useState(false);
   const [status, setStatus] = useState<ManagerStatus>(idle);
   const [briefs, setBriefs] = useState<Record<string, Brief>>({});
+  const [verifications, setVerifications] = useState<Record<string, Verification>>({});
+  const [missions, setMissions] = useState<Mission[]>([]);
   const [schedules, setSchedules] = useState<ManagerSchedule[]>([]);
   const [settings, setSettings] = useState<ManagerSettings | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -203,6 +216,12 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
       case "manager_reset":
         void reloadRef.current();
         break;
+      case "manager_verification":
+        setVerifications((current) => applyVerifications(current, event));
+        break;
+      case "manager_missions":
+        setMissions(event.missions ?? []);
+        break;
       case "manager_brief": {
         const updates = [...(event.briefs ?? []), ...(event.brief ? [event.brief] : [])];
         if (updates.length > 0) {
@@ -232,14 +251,20 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
       if (/unsupported request|unknown request/i.test(text)) setSupported(false);
       return;
     }
-    const [settingsReply, briefReply, scheduleReply] = await Promise.allSettled([
+    // The checks and the teams are newer than the rest: a Mac from before
+    // them refuses these two, and the Board goes on without.
+    const [settingsReply, briefReply, scheduleReply, checksReply, missionsReply] = await Promise.allSettled([
       store.ask({ type: "manager_settings" }),
       store.ask({ type: "manager_briefs" }),
       store.ask({ type: "manager_schedules" }),
+      store.ask({ type: "manager_verifications" }),
+      store.ask({ type: "manager_missions" }),
     ]);
     if (settingsReply.status === "fulfilled") apply(settingsReply.value);
     if (briefReply.status === "fulfilled") apply(briefReply.value);
     if (scheduleReply.status === "fulfilled") setSchedules(scheduleReply.value.schedules ?? []);
+    if (checksReply.status === "fulfilled") apply(checksReply.value);
+    if (missionsReply.status === "fulfilled") apply(missionsReply.value);
   }, [store, apply]);
 
   reloadRef.current = reload;
@@ -269,18 +294,25 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const openCards = useMemo(() => openCardsOf(entries), [entries]);
+  const offers = useMemo(() => offerCards(openCards), [openCards]);
+  const runningMissions = useMemo(() => runningMissionsOf(missions), [missions]);
+
   const value = useMemo<Manager>(() => ({
     entries,
     hasOlder,
     status,
     briefs,
+    verifications,
+    runningMissions,
     schedules,
     settings,
     loaded,
     supported,
     problem,
     unread: unreadCount(entries, lastRead),
-    openCards: openCardsOf(entries),
+    openCards,
+    offers,
     thinking: status.state === "thinking",
     needsKey: settings ? !settings.keySet : status.state === "needs_key",
     reload,
@@ -420,7 +452,7 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
         return null;
       }
     },
-  }), [entries, hasOlder, status, briefs, schedules, settings, notes, keys, loaded, supported, problem, lastRead, reload, perform, markRead, store]);
+  }), [entries, hasOlder, status, briefs, verifications, runningMissions, schedules, settings, notes, keys, loaded, supported, problem, lastRead, openCards, offers, reload, perform, markRead, store]);
 
   return <ManagerContext.Provider value={value}>{children}</ManagerContext.Provider>;
 }

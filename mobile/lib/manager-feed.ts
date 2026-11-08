@@ -1,4 +1,4 @@
-import type { ManagerCard, ManagerEntry, Question } from "./protocol";
+import type { ManagerCard, ManagerEntry, Mission, Question, Verification } from "./protocol";
 
 /**
  * The conversation with Agentman, as the daemon tells it: entries in order,
@@ -56,6 +56,43 @@ export function unreadCount(entries: readonly ManagerEntry[], lastRead: number):
 
 export function openCards(entries: readonly ManagerEntry[]): ManagerCard[] {
   return entries.flatMap((entry) => (entry.card && cardIsOpen(entry.card) ? [entry.card] : []));
+}
+
+/** What Agentman offers the user that belongs to no agent's own question. */
+export const offerCards = (cards: readonly ManagerCard[]): ManagerCard[] =>
+  cards.filter((card) => card.kind === "offer");
+
+/**
+ * The checks of each agent's work, after one event: a whole list replaces what
+ * was known, and a check that comes back "none" takes the agent's away.
+ */
+export function applyVerifications(
+  known: Readonly<Record<string, Verification>>,
+  event: { verification?: Verification; verifications?: Verification[] },
+): Record<string, Verification> {
+  const next: Record<string, Verification> = event.verifications ? {} : { ...known };
+  for (const check of [...(event.verifications ?? []), ...(event.verification ? [event.verification] : [])]) {
+    if (check.state === "none") delete next[check.sessionId];
+    else next[check.sessionId] = check;
+  }
+  return next;
+}
+
+/** The teams at work, the ones the Board shows. */
+export const runningMissions = (missions: readonly Mission[]): Mission[] =>
+  missions.filter((mission) => mission.state === "running");
+
+/** The running team an agent is part of. */
+export function missionOf(missions: readonly Mission[], sessionId: string): Mission | undefined {
+  return runningMissions(missions).find((mission) => mission.tasks.some((task) => task.sessionId === sessionId));
+}
+
+/** How far along a team is: "2 of 3 done, 1 waiting". */
+export function missionProgress(mission: Pick<Mission, "tasks">): string {
+  const finished = mission.tasks.filter((task) => task.state === "done").length;
+  const waiting = mission.tasks.filter((task) => task.state === "planned").length;
+  const done = `${finished} of ${mission.tasks.length} done`;
+  return waiting > 0 ? `${done}, ${waiting} waiting` : done;
 }
 
 /** The choices on a card: the agent's question, or whether to give a key. */
