@@ -123,7 +123,7 @@ func TestFailedChecksHoldTheNextAgentBack(t *testing.T) {
 	r.answer(t, r.propose(t, r.task("a", "Backend"), r.task("b", "Frontend", "a")), "start")
 	r.h.agents.setSessions([]protocol.Session{r.idle("s1")})
 	r.h.m.missionTurnEnded("s1")
-	r.h.m.verifies.put(protocol.Verification{SessionID: "s1", State: protocol.VerifyFailed})
+	r.h.m.verifies.put(protocol.Verification{SessionID: "s1", State: protocol.VerifyFailed, SentBack: true})
 	r.now = r.now.Add(missionSettle + time.Second)
 	r.h.m.advanceMissions(context.Background())
 	if len(r.starts) != 1 {
@@ -178,5 +178,55 @@ func TestBadPlansAreRefused(t *testing.T) {
 	}
 	if len(r.h.m.missions.all()) != 0 {
 		t.Fatal("a refused plan was kept")
+	}
+}
+
+func TestAChainBehindAFailureEndsTheTeam(t *testing.T) {
+	r := newMissionRig(t)
+	r.answer(t, r.propose(t, r.task("a", "A"), r.task("b", "B", "a"), r.task("c", "C", "b")), "start")
+	r.now = r.now.Add(5 * time.Minute)
+	r.h.m.advanceMissions(context.Background())
+	if got := r.h.m.missions.all()[0]; got.State != protocol.MissionDone {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestTestsThatStayFailingEndThatPart(t *testing.T) {
+	r := newMissionRig(t)
+	r.answer(t, r.propose(t, r.task("a", "A"), r.task("b", "B", "a")), "start")
+	r.h.agents.setSessions([]protocol.Session{r.idle("s1")})
+	r.h.m.missionTurnEnded("s1")
+	r.h.m.verifies.put(protocol.Verification{SessionID: "s1", State: protocol.VerifyFailed, SentBack: true})
+	r.now = r.now.Add(missionSettle + time.Second)
+	r.h.m.advanceMissions(context.Background())
+	if got := r.h.m.missions.all()[0]; got.State != protocol.MissionRunning {
+		t.Fatalf("sent back to fix, so still going: %+v", got)
+	}
+	r.h.m.verifies.put(protocol.Verification{SessionID: "s1", State: protocol.VerifyFailed})
+	r.h.m.advanceMissions(context.Background())
+	got := r.h.m.missions.all()[0]
+	if got.State != protocol.MissionDone || got.Tasks[0].State != protocol.TaskFailed || len(r.starts) != 1 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestATurnThatEndedWhileTheDaemonWasDownIsNoticed(t *testing.T) {
+	r := newMissionRig(t)
+	r.answer(t, r.propose(t, r.task("a", "A"), r.task("b", "B", "a")), "start")
+	r.h.agents.setSessions([]protocol.Session{r.idle("s1")})
+	worked := r.now.UnixMilli() + 1000
+	answer := r.h.agents.answer
+	r.h.agents.answer = func(req protocol.Request) protocol.Event {
+		if req.Type == protocol.ReqFetchMessages {
+			return protocol.Event{Page: &protocol.Page{Messages: []protocol.Message{{ID: "1", Role: protocol.RoleAssistant, Ts: worked, Text: "Done"}}}}
+		}
+		return answer(req)
+	}
+	r.now = r.now.Add(5 * time.Minute)
+	r.h.m.advanceMissions(context.Background())
+	r.now = r.now.Add(missionSettle + time.Second)
+	r.h.m.advanceMissions(context.Background())
+	if len(r.starts) != 2 {
+		t.Fatalf("%+v", r.h.m.missions.all())
 	}
 }

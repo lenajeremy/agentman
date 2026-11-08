@@ -136,7 +136,11 @@ func (m *Manager) queueWork(agent, folder, task string) (protocol.QueueItem, err
 	return item, nil
 }
 
-func runQueueTask(_ context.Context, m *Manager, input map[string]any) toolResult {
+func runQueueTask(ctx context.Context, m *Manager, input map[string]any) toolResult {
+	// Only the user lines work up, never a turn Agentman started itself.
+	if isAutonomous(ctx) {
+		return toolResult{text: "Only the user can queue work. Ask them.", isError: true}
+	}
 	agent, _ := input["agent"].(string)
 	folder, _ := input["folder"].(string)
 	task, _ := input["task"].(string)
@@ -223,7 +227,7 @@ func (m *Manager) runOvernight(ctx context.Context, settings protocol.ManagerSet
 	defer m.queueMu.Unlock()
 	changed := false
 	for _, item := range m.queue.all() {
-		if item.State == protocol.QueueRunning && m.settleQueued(item) {
+		if item.State == protocol.QueueRunning && m.settleQueued(ctx, item) {
 			changed = true
 		}
 	}
@@ -238,8 +242,13 @@ func (m *Manager) runOvernight(ctx context.Context, settings protocol.ManagerSet
 	}
 }
 
-func (m *Manager) settleQueued(item protocol.QueueItem) bool {
+func (m *Manager) settleQueued(ctx context.Context, item protocol.QueueItem) bool {
 	session, live := m.session(item.SessionID)
+	if item.TurnEndedAt == 0 && m.workedSince(ctx, session, live, item.StartedAt) {
+		item.TurnEndedAt = m.now().UnixMilli()
+		ended := item.TurnEndedAt
+		m.queue.change(item.ID, func(stored *protocol.QueueItem) { stored.TurnEndedAt = ended })
+	}
 	var state, problem string
 	switch {
 	case !live && item.TurnEndedAt > 0:

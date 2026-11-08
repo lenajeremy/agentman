@@ -60,7 +60,13 @@ var correctionsSchema = map[string]any{
 }
 
 // Words Agentman itself sends agents as their user, which aren't the user's.
-var ownMessages = []string{sendBackOpening, nudgeText, quietText, "Heads up: "}
+var ownMessages = []string{sendBackOpening, nudgeText, quietText, headsUpOpening}
+
+// isOwnMessage reports what Agentman sent, which starts no new request.
+func isOwnMessage(text string) bool {
+	text = strings.TrimSpace(text)
+	return slices.ContainsFunc(ownMessages, func(own string) bool { return strings.HasPrefix(text, own) })
+}
 
 type correctionsStore struct {
 	path string
@@ -130,7 +136,7 @@ func userWords(messages []protocol.Message) []string {
 			len(text) > correctionsMaxLength || len(strings.Fields(text)) < correctionsMinWords {
 			continue
 		}
-		if slices.ContainsFunc(ownMessages, func(own string) bool { return strings.HasPrefix(text, own) }) {
+		if isOwnMessage(text) {
 			continue
 		}
 		out = append(out, text)

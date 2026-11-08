@@ -26,14 +26,15 @@ const (
 	quietAfter        = 20 * time.Minute
 	quietCommandAfter = 45 * time.Minute
 	// failingRun is how many failures in a row, and repeatRun how many of
-	// the last repeatWindow steps being one and the same, count as stuck.
+	// one and the same step in a row, count as stuck.
 	failingRun    = 4
 	repeatRun     = 5
-	repeatWindow  = 10
 	contextFull   = 92
 	stuckMessages = 40
 	// limitRecent is how soon after a limit is mentioned it still matters.
 	limitRecent = 30 * time.Minute
+	// agentSendTimeout bounds what is sent to an agent under the cards' lock.
+	agentSendTimeout = 15 * time.Second
 )
 
 const offerStuck = "stuck"
@@ -58,6 +59,8 @@ type stuckFinding struct {
 	reason  string
 	summary string
 	key     string
+	// askID is the request it is stuck on, which a nudge is counted against.
+	askID string
 }
 
 func (m *Manager) watchStuck(ctx context.Context) {
@@ -105,6 +108,7 @@ func (m *Manager) diagnose(ctx context.Context, session protocol.Session, now ti
 	case protocol.StateBusy:
 		messages := m.tailMessages(ctx, session.ID)
 		if finding := failingFinding(session, messages); finding.reason != "" {
+			finding.askID = lastTurn(messages).askID
 			return finding
 		}
 		limit := quietAfter
@@ -138,8 +142,8 @@ func (m *Manager) tailMessages(ctx context.Context, sessionID string) []protocol
 func failingFinding(session protocol.Session, messages []protocol.Message) stuckFinding {
 	var tools []protocol.Message
 	for _, message := range messages {
-		if message.Role == protocol.RoleUser && message.Tool == nil && !message.IsSidechain {
-			// What the user said starts over.
+		if message.Role == protocol.RoleUser && message.Tool == nil && !message.IsSidechain && !isOwnMessage(message.Text) {
+			// What the user said starts over; a nudge doesn't.
 			tools = nil
 		}
 		if message.Tool != nil && !message.IsSidechain {
@@ -155,17 +159,16 @@ func failingFinding(session protocol.Session, messages []protocol.Message) stuck
 		return stuckFinding{reason: stuckFailing, key: stuckFailing + "|" + tools[len(tools)-run].ID,
 			summary: fmt.Sprintf("%s has failed %d times in a row, most recently at %s.", session.Name, run, stepName(last.Tool))}
 	}
-	recent := tools[max(0, len(tools)-repeatWindow):]
-	counts := map[string]int{}
-	for _, tool := range recent {
-		if tool.Tool.Summary != "" {
-			counts[tool.Tool.Name+"|"+tool.Tool.Summary]++
+	// One step over and over, with nothing else between. Editing a file and
+	// running the tests in turn is just work.
+	if last := len(tools) - 1; last >= 0 && tools[last].Tool.Summary != "" {
+		same := 0
+		for i := last; i >= 0 && tools[i].Tool.Name == tools[last].Tool.Name && tools[i].Tool.Summary == tools[last].Tool.Summary; i-- {
+			same++
 		}
-	}
-	for _, tool := range recent {
-		if counts[tool.Tool.Name+"|"+tool.Tool.Summary] >= repeatRun {
-			return stuckFinding{reason: stuckFailing, key: stuckFailing + "|" + tool.Tool.Name + "|" + tool.Tool.Summary,
-				summary: fmt.Sprintf("%s keeps repeating the same step: %s.", session.Name, stepName(tool.Tool))}
+		if same >= repeatRun {
+			return stuckFinding{reason: stuckFailing, key: stuckFailing + "|" + tools[last-same+1].ID,
+				summary: fmt.Sprintf("%s keeps repeating the same step: %s.", session.Name, stepName(tools[last].Tool))}
 		}
 	}
 	return stuckFinding{}
@@ -229,8 +232,11 @@ func (m *Manager) actOnStuck(ctx context.Context, settings protocol.ManagerSetti
 		return
 	}
 	m.stuck[session.ID] = finding.key
-	if finding.reason == stuckFailing && trustLevel(settings, session.Cwd) == protocol.TrustHandle && session.Question == nil {
-		if _, err := m.sendTo(ctx, session, nudgeText); err == nil {
+	if finding.reason == stuckFailing && trustLevel(settings, session.Cwd) == protocol.TrustHandle && session.Question == nil &&
+		m.verifies.spendNudge(session.ID, finding.askID) {
+		sendCtx, cancel := context.WithTimeout(ctx, agentSendTimeout)
+		defer cancel()
+		if _, err := m.sendTo(sendCtx, session, nudgeText); err == nil {
 			text := finding.summary + " Told it to stop and try something else."
 			m.addEntry(protocol.ManagerEntry{Role: "activity", Tool: "unstick", Text: text, SessionID: session.ID})
 			m.note(text)

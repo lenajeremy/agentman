@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -24,10 +25,16 @@ type shipState struct {
 	run *protocol.ShipRun
 }
 
+// current is a copy of the run, if there has been one.
 func (s *shipState) current() *protocol.ShipRun {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.run
+	if s.run == nil {
+		return nil
+	}
+	copied := *s.run
+	copied.Items = append([]protocol.ShipItem(nil), s.run.Items...)
+	return &copied
 }
 
 // begin takes the one run at a time.
@@ -66,7 +73,7 @@ func (m *Manager) startShip(ids []string) protocol.Event {
 		return protocol.Event{Type: protocol.EvtError, Error: "Agentman is already shipping. Wait for it to finish."}
 	}
 	go m.runShip(context.Background(), len(ids))
-	return protocol.Event{Type: protocol.EvtManagerShip, Ship: &run}
+	return protocol.Event{Type: protocol.EvtManagerShip, Ship: m.shipping.current()}
 }
 
 func (m *Manager) setShipItem(index int, state, note, url string) {
@@ -120,8 +127,13 @@ func (m *Manager) shipOne(ctx context.Context, sessionID string) (note, url stri
 	if session.State != protocol.StateIdle || session.Question != nil {
 		return "It's still working", "", true, nil
 	}
-	if check, ok := m.verifies.get(sessionID); ok && check.State == protocol.VerifyFailed {
-		return "Its tests fail", "", true, nil
+	if check, ok := m.verifies.get(sessionID); ok {
+		switch check.State {
+		case protocol.VerifyFailed:
+			return "Its tests fail", "", true, nil
+		case protocol.VerifyChecking:
+			return "It's still being checked", "", true, nil
+		}
 	}
 	git := m.agents.Request(ctx, protocol.Request{Type: protocol.ReqGitStatus, SessionID: sessionID}).Git
 	switch {
@@ -129,8 +141,10 @@ func (m *Manager) shipOne(ctx context.Context, sessionID string) (note, url stri
 		return "It isn't in a git repository", "", true, nil
 	case git.Branch == "":
 		return "No branch is checked out", "", true, nil
-	case git.Branch == git.DefaultBranch:
+	case isProtectedBranch(git.Branch, git.DefaultBranch):
 		return "It's on " + git.Branch + ", which is yours to push", "", true, nil
+	case isProtectedBranch(upstreamBranch(git.Upstream), git.DefaultBranch):
+		return "It tracks " + git.Upstream + ", which is yours to push", "", true, nil
 	case git.Behind > 0:
 		return "Its branch is behind its upstream", "", true, nil
 	case git.Upstream == "" && git.Remote == "":
@@ -162,6 +176,18 @@ func (m *Manager) shipOne(ctx context.Context, sessionID string) (note, url stri
 		return "Pushed, but opening the pull request failed: " + err.Error(), "", false, nil
 	}
 	return "Pull request open", after.URL, false, nil
+}
+
+// isProtectedBranch reports the default branch, and the names a default
+// branch goes by in a repository that can't say which is its own.
+func isProtectedBranch(branch, defaultBranch string) bool {
+	return branch != "" && (branch == defaultBranch || slices.Contains([]string{"main", "master", "trunk", "develop", "production"}, branch))
+}
+
+// upstreamBranch is origin/name without its remote.
+func upstreamBranch(upstream string) string {
+	_, branch, _ := strings.Cut(upstream, "/")
+	return branch
 }
 
 func (m *Manager) gitStep(ctx context.Context, req protocol.Request, into *protocol.GitState) error {

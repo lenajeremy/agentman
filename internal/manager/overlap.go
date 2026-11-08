@@ -20,7 +20,9 @@ const (
 	// overlapRecent is how recently an agent must have worked to count.
 	overlapRecent = 30 * time.Minute
 	offerOverlap  = "overlap"
-	maxNamedFiles = 3
+	// headsUpOpening starts what agents are told about each other.
+	headsUpOpening = "Heads up: "
+	maxNamedFiles  = 3
 )
 
 // Which way two agents overlap.
@@ -154,20 +156,19 @@ func namedFiles(files []string) string {
 
 func overlapMessages(kind string, a, b protocol.Session, files string) (forA, forB string) {
 	if kind == overlapDepends {
-		return "", fmt.Sprintf("Heads up: %s just changed %s, which you read earlier. Read it again before relying on it.", a.Name, files)
+		return "", fmt.Sprintf(headsUpOpening+"%s just changed %s, which you read earlier. Read it again before relying on it.", a.Name, files)
 	}
-	note := "Heads up: %s is also changing %s in this repository. Check what's there now before you edit it, and don't overwrite its work."
+	note := headsUpOpening + "%s is also changing %s in this repository. Check what's there now before you edit it, and don't overwrite its work."
 	return fmt.Sprintf(note, b.Name, files), fmt.Sprintf(note, a.Name, files)
 }
 
 func (m *Manager) raiseOverlap(ctx context.Context, settings protocol.ManagerSettings, kind string, a, b protocol.Session, files []string) {
 	key := kind + "|" + a.ID + "|" + b.ID + "|" + strings.Join(files, ",")
-	m.cardMu.Lock()
-	defer m.cardMu.Unlock()
-	if m.overlaps[key] {
+	if !m.verifies.once(key, m.now()) {
 		return
 	}
-	m.overlaps[key] = true
+	m.cardMu.Lock()
+	defer m.cardMu.Unlock()
 	named := namedFiles(files)
 	title := fmt.Sprintf("%s and %s are both changing %s.", a.Name, b.Name, named)
 	label := "Tell them both"
@@ -201,7 +202,10 @@ func (m *Manager) tellOverlap(ctx context.Context, a, b, forA, forB string) int 
 		if !live || each[1] == "" {
 			continue
 		}
-		if _, err := m.sendTo(ctx, session, each[1]); err == nil {
+		sendCtx, cancel := context.WithTimeout(ctx, agentSendTimeout)
+		_, err := m.sendTo(sendCtx, session, each[1])
+		cancel()
+		if err == nil {
 			told++
 		}
 	}

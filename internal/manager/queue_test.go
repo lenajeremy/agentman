@@ -172,3 +172,11 @@ func TestOnlyWaitingWorkCanBeRemoved(t *testing.T) {
 		t.Fatal("removed work under way")
 	}
 }
+
+func TestOnlyTheUserCanQueueWork(t *testing.T) {
+	r := newQueueRig(t, protocol.Autopilot{Overnight: true})
+	result := runQueueTask(withAutonomous(context.Background()), r.h.m, map[string]any{"agent": "claude", "folder": filepath.Join(r.home, "api"), "task": "Do it"})
+	if !result.isError || len(r.h.m.queue.all()) != 0 {
+		t.Fatalf("%+v", result)
+	}
+}

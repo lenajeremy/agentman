@@ -232,3 +232,45 @@ func TestLeavingAnOfferDoesNothing(t *testing.T) {
 		t.Fatal("something happened")
 	}
 }
+
+func TestANudgeIsOncePerRequest(t *testing.T) {
+	r := newStuckRig(t, protocol.TrustHandle)
+	r.messages = failedSteps(failingRun)
+	r.sweep()
+	// The nudge lands, the agent recovers, then fails again on the same request.
+	r.messages = append(r.messages, protocol.Message{ID: "n", Role: protocol.RoleUser, Text: nudgeText},
+		protocol.Message{ID: "ok", Role: protocol.RoleTool, Tool: &protocol.Tool{Name: "Edit", Summary: "x", Status: protocol.ToolOK}})
+	r.sweep()
+	for i := 0; i < failingRun; i++ {
+		r.messages = append(r.messages, protocol.Message{ID: "again" + string(rune('a'+i)), Role: protocol.RoleTool, Tool: &protocol.Tool{Name: "Bash", Summary: "go vet", Status: protocol.ToolError}})
+	}
+	r.sweep()
+	if sent := r.h.agents.sent(protocol.ReqSendMessage); len(sent) != 1 {
+		t.Fatalf("nudged %d times", len(sent))
+	}
+	if got := cards(r.h); len(got) != 1 {
+		t.Fatalf("the second time should be offered: %+v", got)
+	}
+}
+
+func TestEditingAndTestingInTurnIsJustWork(t *testing.T) {
+	r := newStuckRig(t, protocol.TrustHandle)
+	for i := 0; i < 6; i++ {
+		r.messages = append(r.messages,
+			protocol.Message{ID: "e" + string(rune('a'+i)), Role: protocol.RoleTool, Tool: &protocol.Tool{Name: "Edit", Summary: "foo.go", Status: protocol.ToolOK}},
+			protocol.Message{ID: "t" + string(rune('a'+i)), Role: protocol.RoleTool, Tool: &protocol.Tool{Name: "Bash", Summary: "go test ./...", Status: protocol.ToolOK}})
+	}
+	r.sweep()
+	if len(cards(r.h)) != 0 || len(r.h.agents.sent(protocol.ReqSendMessage)) != 0 {
+		t.Fatal("told a healthy agent it was stuck")
+	}
+}
+
+func TestAnOfferDoesNotPauseAutonomousTurns(t *testing.T) {
+	r := newStuckRig(t, protocol.TrustSuggest)
+	r.messages = failedSteps(failingRun)
+	r.sweep()
+	if got := r.h.m.pausingCards(); len(got) != 0 {
+		t.Fatalf("%+v", got)
+	}
+}

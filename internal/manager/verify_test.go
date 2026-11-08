@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -264,5 +265,95 @@ func TestAnAppThatDoesntKnowAutopilotLeavesItAlone(t *testing.T) {
 	h.m.setSettings(&older)
 	if got := h.m.currentSettings().Autopilot; got == nil || !got.Verify {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestTestsRunOnlyInAFolderOnHandle(t *testing.T) {
+	for _, level := range []string{protocol.TrustWatch, protocol.TrustSuggest} {
+		model := &scriptedModel{replies: []string{textReply(verifiedReply)}}
+		r := newVerifyRig(t, model, protocol.Autopilot{Verify: true})
+		r.h.m.mu.Lock()
+		r.h.m.settings.Trust = []protocol.FolderTrust{{Folder: r.cwd, Level: level}}
+		r.h.m.mu.Unlock()
+		got, _ := r.check(t)
+		if got.State != protocol.VerifyVerified || got.Command != "" {
+			t.Fatalf("%s: %+v", level, got)
+		}
+		for _, ran := range r.ran {
+			if !strings.HasPrefix(ran, "git diff --no-ext-diff") {
+				t.Fatalf("%s: ran %q", level, ran)
+			}
+		}
+	}
+}
+
+func TestFailuresGoBackOnlyFromAFolderOnHandle(t *testing.T) {
+	r := newVerifyRig(t, &scriptedModel{}, protocol.Autopilot{Verify: true, SendBack: true})
+	session, _ := r.h.m.session("a")
+	failure := protocol.Verification{Command: "go test", Output: "FAIL"}
+	r.h.m.mu.Lock()
+	r.h.m.settings.Trust = []protocol.FolderTrust{{Folder: r.cwd, Level: protocol.TrustSuggest}}
+	r.h.m.mu.Unlock()
+	if r.h.m.sendBackFailure(context.Background(), session, "ask", failure) {
+		t.Fatal("sent back from a folder on Suggest")
+	}
+	r.h.m.mu.Lock()
+	r.h.m.settings.Trust = []protocol.FolderTrust{{Folder: r.cwd, Level: protocol.TrustHandle}}
+	r.h.m.mu.Unlock()
+	if !r.h.m.sendBackFailure(context.Background(), session, "ask", failure) {
+		t.Fatal("not sent back from a folder on Handle")
+	}
+}
+
+func TestWhatAgentmanSendsIsNotANewRequest(t *testing.T) {
+	turn := lastTurn([]protocol.Message{
+		{ID: "1", Role: protocol.RoleUser, Text: "Do it"},
+		{ID: "2", Role: protocol.RoleUser, Text: nudgeText},
+		{ID: "3", Role: protocol.RoleUser, Text: headsUpOpening + "Other is changing x."},
+		{ID: "4", Role: protocol.RoleAssistant, Text: "On it"},
+	})
+	if turn.askID != "1" {
+		t.Fatalf("%+v", turn)
+	}
+}
+
+func TestATurnEndingDuringACheckGetsItsOwn(t *testing.T) {
+	store := loadVerifications(t.TempDir())
+	if !store.begin("a") || store.begin("a") {
+		t.Fatal("two at once")
+	}
+	if !store.end("a") {
+		t.Fatal("the turn in between was lost")
+	}
+	if !store.begin("a") || store.end("a") {
+		t.Fatal("ran again for nothing")
+	}
+}
+
+func TestAMissingTestToolIsNotAFailure(t *testing.T) {
+	model := &scriptedModel{replies: []string{textReply(verifiedReply)}}
+	r := newVerifyRig(t, model, protocol.Autopilot{Verify: true})
+	r.testErr = exec.ErrNotFound
+	if got, _ := r.check(t); got.State != protocol.VerifyVerified || got.Command != "" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestAChildThatOutlivesItsTestsCannotHoldTheCheck(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := runCheckProgram(ctx, t.TempDir(), "/bin/sh", "-c", "python3 -c 'import os,time; os.setsid(); time.sleep(30)' & wait")
+	if err == nil || time.Since(start) > checkKillWait+5*time.Second {
+		t.Fatalf("err %v after %v", err, time.Since(start))
+	}
+}
+
+func TestOutputCannotCloseItsFence(t *testing.T) {
+	if got := longerFence("a ````` b"); got != "``````" {
+		t.Fatalf("%q", got)
+	}
+	if got := longerFence("plain"); got != "```" {
+		t.Fatalf("%q", got)
 	}
 }

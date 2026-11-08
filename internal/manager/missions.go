@@ -59,10 +59,15 @@ func (s *missionStore) saveLocked() {
 	}
 }
 
+// all is a copy that shares nothing with the store.
 func (s *missionStore) all() []protocol.Mission {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return slices.Clone(s.list)
+	out := slices.Clone(s.list)
+	for i := range out {
+		out[i].Tasks = slices.Clone(out[i].Tasks)
+	}
+	return out
 }
 
 func (s *missionStore) add(mission protocol.Mission) {
@@ -245,7 +250,7 @@ func (m *Manager) advanceMissions(ctx context.Context) {
 		}
 		before, _ := json.Marshal(mission)
 		for i := range mission.Tasks {
-			m.settleTask(&mission.Tasks[i])
+			m.settleTask(ctx, &mission.Tasks[i])
 		}
 		for i := range mission.Tasks {
 			task := &mission.Tasks[i]
@@ -270,14 +275,20 @@ func (m *Manager) advanceMissions(ctx context.Context) {
 }
 
 // settleTask marks a running task finished, failed, or leaves it running.
-func (m *Manager) settleTask(task *protocol.MissionTask) {
+func (m *Manager) settleTask(ctx context.Context, task *protocol.MissionTask) {
 	if task.State != protocol.TaskRunning {
 		return
 	}
 	session, live := m.session(task.SessionID)
+	if task.TurnEndedAt == 0 && m.workedSince(ctx, session, live, task.StartedAt) {
+		task.TurnEndedAt = m.now().UnixMilli()
+	}
 	if !live {
 		if task.TurnEndedAt > 0 {
 			task.State = protocol.TaskDone
+			if check, ok := m.verifies.get(task.SessionID); ok && check.State == protocol.VerifyFailed {
+				task.State, task.Problem = protocol.TaskFailed, "It ended with its tests failing"
+			}
 		} else if m.now().Sub(time.UnixMilli(task.StartedAt)) > missionSettle*4 {
 			// Not registered in a minute or so, or ended without a turn.
 			task.State, task.Problem = protocol.TaskFailed, "It stopped before finishing a turn"
@@ -290,10 +301,32 @@ func (m *Manager) settleTask(task *protocol.MissionTask) {
 	if m.now().Sub(time.UnixMilli(task.TurnEndedAt)) < missionSettle {
 		return
 	}
-	if check, ok := m.verifies.get(task.SessionID); ok && (check.State == protocol.VerifyChecking || check.State == protocol.VerifyFailed) {
-		return
+	if check, ok := m.verifies.get(task.SessionID); ok {
+		switch {
+		case check.State == protocol.VerifyChecking, check.State == protocol.VerifyFailed && check.SentBack:
+			return
+		case check.State == protocol.VerifyFailed:
+			task.State, task.Problem = protocol.TaskFailed, "Its tests fail"
+			return
+		}
 	}
 	task.State = protocol.TaskDone
+}
+
+// workedSince reports an agent, now between turns, that has done something
+// since it was started: a turn that ended while the daemon wasn't watching,
+// so it was never told.
+func (m *Manager) workedSince(ctx context.Context, session protocol.Session, live bool, started int64) bool {
+	if !live || session.State != protocol.StateIdle || session.Question != nil ||
+		m.now().Sub(time.UnixMilli(started)) < missionSettle*4 {
+		return false
+	}
+	for _, message := range m.tailMessages(ctx, session.ID) {
+		if message.Ts >= started && message.Role != protocol.RoleUser {
+			return true
+		}
+	}
+	return false
 }
 
 func taskIsReady(tasks []protocol.MissionTask, task protocol.MissionTask) bool {
@@ -315,9 +348,11 @@ func missionFinished(tasks []protocol.MissionTask) bool {
 	return true
 }
 
+// dependsOnFailure follows the plan back, so what depends on something that
+// can never start can't start either.
 func dependsOnFailure(tasks []protocol.MissionTask, task protocol.MissionTask) bool {
 	for _, other := range tasks {
-		if slices.Contains(task.DependsOn, other.ID) && other.State == protocol.TaskFailed {
+		if slices.Contains(task.DependsOn, other.ID) && (other.State == protocol.TaskFailed || dependsOnFailure(tasks, other)) {
 			return true
 		}
 	}

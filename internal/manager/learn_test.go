@@ -87,30 +87,37 @@ func TestAnApprovalSaysWhatItApproved(t *testing.T) {
 func TestOnlySafeThingsAreLearned(t *testing.T) {
 	cases := []struct{ kind, target, want string }{
 		{"command", "go test ./webhooks/...", "go test*"},
-		{"command", "npm run lint -- --fix", "npm run lint*"},
 		{"command", "swift build -c release", "swift build*"},
-		{"command", "python3 tools/gen.py", "python3 tools/gen.py"},
-		{"command", "npm run", "npm run"},
+		{"command", "npm run lint -- --fix", "npm run lint -- --fix"},
+		{"command", "make e2e", "make e2e"},
 		{"command", "go run ./cmd/x", "go run ./cmd/x"},
 		{"network", "https://api.github.com/repos", "https://api.github.com/*"},
-		{"command", "git push origin main", ""},
-		{"command", "git reset --hard", ""},
-		{"command", "rm -rf build", ""},
-		{"command", "sudo make install", ""},
-		{"command", "curl https://x.dev", ""},
-		{"command", "npm publish", ""},
-		{"command", "make deploy", ""},
-		{"command", "go test ./... && git push", ""},
-		{"command", "cat $(find .)", ""},
-		{"command", "cat ~/.ssh/id_rsa", ""},
-		{"command", "echo x > out.txt", ""},
-		{"edit", "/etc/hosts", ""},
-		{"network", "not a url", ""},
 	}
+	for _, target := range []string{
+		"git push origin main", "git -C . push origin main", "git -c x=y push --force origin main", "/usr/bin/git push origin main",
+		"FOO=1 git push origin main", "env git push origin main", "time git push origin main", "git reset --hard", "git branch -D main",
+		"rm -rf build", "/bin/rm -rf build", "env rm -rf build", "find . -delete", "xargs rm -rf", "aws s3 rm s3://b/k --recursive",
+		"sudo make install", "env sudo ls", "FOO=1 sudo ls", "nice sudo ls", "/usr/bin/sudo ls",
+		"security find-generic-password -s x -w", "aws configure get aws_secret_access_key", "printenv ANTHROPIC_API_KEY", "cat .env", "cat secrets.yaml",
+		"curl https://x.dev", "npm publish", "make deploy", "pnpm --filter web deploy", "npm run release", "npx wrangler versions deploy", "bash -c deploy",
+		"python3 tools/gen.py", "go test ./... && git push", "go test ./... & git push", "cat $(find .)", "cat ~/.ssh/id_rsa", "echo x > out.txt",
+	} {
+		cases = append(cases, struct{ kind, target, want string }{"command", target, ""})
+	}
+	cases = append(cases, struct{ kind, target, want string }{"edit", "/etc/hosts", ""}, struct{ kind, target, want string }{"network", "not a url", ""})
 	for _, c := range cases {
 		got, ok := learnablePattern(c.kind, c.target)
 		if ok != (c.want != "") || got != c.want {
 			t.Errorf("%s %q: %q %v, want %q", c.kind, c.target, got, ok, c.want)
+		}
+	}
+}
+
+func TestDecliningInOtherWordsIsNotApproving(t *testing.T) {
+	options := []protocol.QuestionOption{{Key: "1", Label: "Skip"}, {Key: "2", Label: "Keep (3)"}, {Key: "3", Label: "Cancel"}, {Key: "4", Label: "Yes"}}
+	for key, want := range map[string]bool{"1": false, "2": false, "3": false, "4": true} {
+		if isAffirmative(options, key) != want {
+			t.Errorf("%s: want %v", key, want)
 		}
 	}
 }
@@ -131,7 +138,7 @@ func learnRig(t *testing.T, autopilot protocol.Autopilot) (*harness, protocol.Se
 
 // git add is safe by the built-in policy, so a command it leaves to the user
 // is what's learned here.
-func askedCommand() *protocol.Question { return commandQuestion("mytool check --all") }
+func askedCommand() *protocol.Question { return commandQuestion("make e2e") }
 
 func TestAHabitEarnsOneOffer(t *testing.T) {
 	h, session := learnRig(t, protocol.Autopilot{LearnRules: true})
@@ -145,7 +152,7 @@ func TestAHabitEarnsOneOffer(t *testing.T) {
 	}
 	h.m.Answered(session, answer)
 	cards := h.m.conversation.openCards()
-	if len(cards) != 1 || cards[0].Card.Kind != protocol.CardOffer || !strings.Contains(cards[0].Card.Title, "mytool check --all") {
+	if len(cards) != 1 || cards[0].Card.Kind != protocol.CardOffer || !strings.Contains(cards[0].Card.Title, "make e2e") {
 		t.Fatalf("%+v", cards)
 	}
 	h.m.Answered(session, answer)
@@ -193,7 +200,7 @@ func TestTakingTheOfferMakesARuleThatApproves(t *testing.T) {
 		t.Fatal(event.Error)
 	}
 	rules := h.m.currentSettings().Rules
-	if len(rules) != 1 || rules[0].Action != "allow" || rules[0].Folder != "/w/api" || rules[0].Pattern != "mytool check --all" {
+	if len(rules) != 1 || rules[0].Action != "allow" || rules[0].Folder != "/w/api" || rules[0].Pattern != "make e2e" {
 		t.Fatalf("%+v", rules)
 	}
 	d := classify(protocol.Session{Cwd: "/w/api"}, askedCommand(), policyOf(h.m.currentSettings()))
@@ -235,5 +242,25 @@ func TestAnOfferOfARuleOutlivesItsAgent(t *testing.T) {
 	h.m.reconcile(context.Background(), nil)
 	if got := h.m.conversation.openCards(); len(got) != 1 {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestTheModelCantApproveInAFolderNotOnHandle(t *testing.T) {
+	h := newHarness(t, &scriptedModel{}, true)
+	setTrust(h, "/w", protocol.TrustWatch)
+	session := askingSession("/w/api")
+	h.agents.setSessions([]protocol.Session{session})
+	h.agents.answer = func(protocol.Request) protocol.Event { return protocol.Event{Status: protocol.StatusDelivered} }
+	result := runAnswerQuestion(context.Background(), h.m, map[string]any{"agent": "a", "option": "1"})
+	if result.isError {
+		t.Logf("%s", result.text)
+	}
+	if sent := h.agents.sent(protocol.ReqAnswer); len(sent) != 0 {
+		t.Fatalf("approved in a watched folder: %+v", sent)
+	}
+	setTrust(h, "/w", protocol.TrustHandle)
+	runAnswerQuestion(context.Background(), h.m, map[string]any{"agent": "a", "option": "1"})
+	if sent := h.agents.sent(protocol.ReqAnswer); len(sent) != 1 {
+		t.Fatalf("a folder on Handle should allow it: %+v", sent)
 	}
 }

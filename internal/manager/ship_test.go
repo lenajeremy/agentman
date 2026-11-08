@@ -117,3 +117,30 @@ func TestOneRunAtATime(t *testing.T) {
 	}
 	_ = context.Background()
 }
+
+func TestABranchTrackingTheDefaultIsNotPushed(t *testing.T) {
+	r := newShipRig(t, "a")
+	r.git["a"].Upstream = "origin/main"
+	run := r.ship(t, "a")
+	if run.Items[0].State != protocol.ShipSkipped || len(r.h.agents.sent(protocol.ReqGitPush)) != 0 {
+		t.Fatalf("%+v", run.Items[0])
+	}
+}
+
+func TestBranchesThatLookDefaultAreLeftAloneWithoutAnOrigin(t *testing.T) {
+	for _, branch := range []string{"main", "master", "trunk", "develop"} {
+		r := newShipRig(t, "a")
+		r.git["a"].Branch, r.git["a"].DefaultBranch = branch, ""
+		if run := r.ship(t, "a"); run.Items[0].State != protocol.ShipSkipped {
+			t.Fatalf("%s: %+v", branch, run.Items[0])
+		}
+	}
+}
+
+func TestWorkStillBeingCheckedWaits(t *testing.T) {
+	r := newShipRig(t, "a")
+	r.h.m.verifies.put(protocol.Verification{SessionID: "a", State: protocol.VerifyChecking})
+	if run := r.ship(t, "a"); run.Items[0].State != protocol.ShipSkipped {
+		t.Fatalf("%+v", run.Items[0])
+	}
+}

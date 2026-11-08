@@ -42,6 +42,15 @@ const (
 	// agent before the user decides.
 	maxSendBacks  = 2
 	maxKeptChecks = 200
+	maxKeptOnce   = 500
+	// maxNudges is how many times one request's agent is told to stop and
+	// try something else, by itself.
+	maxNudges = 1
+	// maxCheckOutput is how much of a test run is kept: its end.
+	maxCheckOutput = 256 * 1024
+	// checkKillWait is how long a stopped run's children get to let go of
+	// its output before they are left behind.
+	checkKillWait = 3 * time.Second
 )
 
 // sendBackOpening starts what Agentman sends an agent about failing tests.
@@ -79,6 +88,10 @@ type verifyStore struct {
 	// sendBacks counts by agent, for the request named by askID.
 	sendBacks map[string]sendBackCount
 	running   map[string]bool
+	// waiting marks a turn that ended while its agent's check was running.
+	waiting map[string]bool
+	// seen is what has happened once, by key, and when.
+	seen map[string]int64
 }
 
 type sendBackCount struct {
@@ -91,12 +104,13 @@ type verifyFile struct {
 	Day       string                           `json:"day"`
 	Reviews   int                              `json:"reviews"`
 	SendBacks map[string]sendBackCount         `json:"sendBacks"`
+	Seen      map[string]int64                 `json:"seen,omitempty"`
 }
 
 func loadVerifications(dir string) *verifyStore {
 	store := &verifyStore{
 		path: filepath.Join(dir, "verifications.json"), items: map[string]protocol.Verification{},
-		sendBacks: map[string]sendBackCount{}, running: map[string]bool{},
+		sendBacks: map[string]sendBackCount{}, running: map[string]bool{}, waiting: map[string]bool{}, seen: map[string]int64{},
 	}
 	raw, err := os.ReadFile(store.path)
 	if err != nil {
@@ -117,6 +131,9 @@ func loadVerifications(dir string) *verifyStore {
 	if file.SendBacks != nil {
 		store.sendBacks = file.SendBacks
 	}
+	if file.Seen != nil {
+		store.seen = file.Seen
+	}
 	store.day, store.reviews = file.Day, file.Reviews
 	return store
 }
@@ -131,7 +148,7 @@ func (v *verifyStore) saveLocked() {
 		}
 		delete(v.items, oldest)
 	}
-	raw, err := json.MarshalIndent(verifyFile{Items: v.items, Day: v.day, Reviews: v.reviews, SendBacks: v.sendBacks}, "", "  ")
+	raw, err := json.MarshalIndent(verifyFile{Items: v.items, Day: v.day, Reviews: v.reviews, SendBacks: v.sendBacks, Seen: v.seen}, "", "  ")
 	if err != nil {
 		return
 	}
@@ -177,16 +194,42 @@ func (v *verifyStore) begin(sessionID string) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.running[sessionID] {
+		v.waiting[sessionID] = true
 		return false
 	}
 	v.running[sessionID] = true
 	return true
 }
 
-func (v *verifyStore) end(sessionID string) {
+// end frees the agent's check, and reports whether a turn ended during it.
+func (v *verifyStore) end(sessionID string) (again bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	again = v.waiting[sessionID]
 	delete(v.running, sessionID)
+	delete(v.waiting, sessionID)
+	return again
+}
+
+// once reports the first time key is seen, across restarts.
+func (v *verifyStore) once(key string, now time.Time) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if _, seen := v.seen[key]; seen {
+		return false
+	}
+	v.seen[key] = now.UnixMilli()
+	if len(v.seen) > maxKeptOnce {
+		oldest, at := "", int64(0)
+		for each, when := range v.seen {
+			if oldest == "" || when < at {
+				oldest, at = each, when
+			}
+		}
+		delete(v.seen, oldest)
+	}
+	v.saveLocked()
+	return true
 }
 
 // spendReview counts one review against today's limit, or refuses.
@@ -207,17 +250,26 @@ func (v *verifyStore) spendReview(now time.Time, limit int) bool {
 
 // spendSendBack counts one failure going back for this request, or refuses.
 func (v *verifyStore) spendSendBack(sessionID, askID string) bool {
+	return v.spend(sessionID, askID, maxSendBacks)
+}
+
+// spendNudge counts one nudge for this request, or refuses.
+func (v *verifyStore) spendNudge(sessionID, askID string) bool {
+	return v.spend("nudge|"+sessionID, askID, maxNudges)
+}
+
+func (v *verifyStore) spend(key, askID string, limit int) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	count := v.sendBacks[sessionID]
+	count := v.sendBacks[key]
 	if count.AskID != askID {
 		count = sendBackCount{AskID: askID}
 	}
-	if count.Count >= maxSendBacks {
+	if count.Count >= limit {
 		return false
 	}
 	count.Count++
-	v.sendBacks[sessionID] = count
+	v.sendBacks[key] = count
 	v.saveLocked()
 	return true
 }
@@ -226,10 +278,18 @@ func (v *verifyStore) spendSendBack(sessionID, askID string) bool {
 // asked for checks and the turn changed something.
 func (m *Manager) verifyTurn(ctx context.Context, sessionID string) {
 	autopilot := m.currentSettings().Autopilot
-	if autopilot == nil || !autopilot.Verify || !m.active() || !m.verifies.begin(sessionID) {
+	if autopilot == nil || !autopilot.Verify || !m.active() {
 		return
 	}
-	defer m.verifies.end(sessionID)
+	// One check at a time; a turn ending during one gets another after it.
+	if !m.verifies.begin(sessionID) {
+		return
+	}
+	defer func() {
+		if m.verifies.end(sessionID) {
+			go m.verifyTurn(ctx, sessionID)
+		}
+	}()
 	select {
 	case <-time.After(m.verifyDelay):
 	case <-ctx.Done():
@@ -254,23 +314,33 @@ func (m *Manager) verifyTurn(ctx context.Context, sessionID string) {
 		return
 	}
 
+	// Said before waiting for a turn to run, so nothing takes it for finished.
+	m.publishCheck(protocol.Verification{SessionID: sessionID, State: protocol.VerifyChecking, MessageID: turn.lastID, Summary: "Checking its work"})
 	select {
 	case m.verifySlots <- struct{}{}:
 		defer func() { <-m.verifySlots }()
 	case <-ctx.Done():
 		return
 	}
-	m.publishCheck(protocol.Verification{SessionID: sessionID, State: protocol.VerifyChecking, MessageID: turn.lastID, Summary: "Checking its work"})
 
 	result := protocol.Verification{SessionID: sessionID, MessageID: turn.lastID}
 	failed := false
-	if program, args := testCommand(session.Cwd); program != "" {
+	// The tests are code the agent can have written, so they run only where
+	// the user has already let it run tests by itself.
+	program, args := "", []string(nil)
+	if trustLevel(m.currentSettings(), session.Cwd) == protocol.TrustHandle {
+		program, args = testCommand(session.Cwd)
+	}
+	if program != "" {
 		result.Command = strings.TrimSpace(program + " " + strings.Join(args, " "))
 		testCtx, cancel := context.WithTimeout(ctx, testsTimeout)
 		output, err := m.runCheck(testCtx, session.Cwd, program, args...)
 		timedOut := testCtx.Err() != nil
 		cancel()
 		switch {
+		case errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist):
+			// The folder's tool isn't installed here: no result either way.
+			result.Command = ""
 		case timedOut:
 			result.Output = tail(output, maxShownOutput)
 			result.Summary = "The tests didn't finish in time"
@@ -291,7 +361,8 @@ func (m *Manager) verifyTurn(ctx context.Context, sessionID string) {
 
 	if failed {
 		result.State = protocol.VerifyFailed
-		result.SentBack = autopilot.SendBack && result.Output != "" && m.sendBackFailure(ctx, session, turn.askID, result)
+		now := m.currentSettings().Autopilot
+		result.SentBack = now != nil && now.SendBack && result.Output != "" && m.sendBackFailure(ctx, session, turn.askID, result)
 		m.finishCheck(session, result)
 		return
 	}
@@ -336,7 +407,7 @@ func lastTurn(messages []protocol.Message) turnRead {
 	for i := len(messages) - 1; i >= 0; i-- {
 		message := messages[i]
 		if message.Role == protocol.RoleUser && message.Tool == nil && !message.IsSidechain &&
-			strings.TrimSpace(message.Text) != "" && !strings.HasPrefix(message.Text, sendBackOpening) {
+			strings.TrimSpace(message.Text) != "" && !isOwnMessage(message.Text) {
 			start = i
 			break
 		}
@@ -392,7 +463,7 @@ func (m *Manager) reviewTurn(ctx context.Context, session protocol.Session, turn
 	if err != nil || model == nil || !m.verifies.spendReview(m.now(), limit) {
 		return "", "", nil, false
 	}
-	diff, _ := m.runCheck(ctx, session.Cwd, "git", "diff", "HEAD")
+	diff, _ := m.runCheck(ctx, session.Cwd, "git", "diff", "--no-ext-diff", "--no-textconv", "HEAD")
 	tests := "This folder has no test command Agentman recognises."
 	if command != "" {
 		tests = "`" + command + "` passed."
@@ -436,10 +507,11 @@ func (m *Manager) reviewTurn(ctx context.Context, session protocol.Session, turn
 // sendBackFailure gives the agent its failing tests to fix, unless the user
 // is looking at it or this request has been sent back enough.
 func (m *Manager) sendBackFailure(ctx context.Context, session protocol.Session, askID string, result protocol.Verification) bool {
-	if trustLevel(m.currentSettings(), session.Cwd) == protocol.TrustWatch || m.viewed(session.ID) || session.Inject == protocol.InjectNone || session.Inject == "" || !m.verifies.spendSendBack(session.ID, askID) {
+	if trustLevel(m.currentSettings(), session.Cwd) != protocol.TrustHandle || m.viewed(session.ID) || session.Inject == protocol.InjectNone || session.Inject == "" || !m.verifies.spendSendBack(session.ID, askID) {
 		return false
 	}
-	text := fmt.Sprintf(sendBackOpening+"%s` after your last turn and it failed. The end of its output:\n\n```\n%s\n```\n\nPlease fix what's failing.", result.Command, result.Output)
+	fence := longerFence(result.Output)
+	text := fmt.Sprintf(sendBackOpening+"%s` after your last turn and it failed. The end of its output:\n\n%s\n%s\n%s\n\nPlease fix what's failing.", result.Command, fence, result.Output, fence)
 	_, err := m.sendTo(ctx, session, text)
 	return err == nil
 }
@@ -551,27 +623,49 @@ func tail(text string, n int) string {
 	return text
 }
 
+// longerFence is a code fence that what's inside it can't close.
+func longerFence(text string) string {
+	longest, run := 2, 0
+	for _, char := range text {
+		if char == '`' {
+			run++
+			longest = max(longest, run)
+		} else {
+			run = 0
+		}
+	}
+	return strings.Repeat("`", longest+1)
+}
+
+// tailBuffer keeps the end of what's written to it, so a chatty test run
+// can't fill the daemon's memory.
+type tailBuffer struct {
+	data []byte
+}
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.data = append(t.data, p...)
+	if extra := len(t.data) - maxCheckOutput; extra > 0 {
+		t.data = append(t.data[:0], t.data[extra:]...)
+	}
+	return len(p), nil
+}
+
 // runCheckProgram runs a program in a folder without a terminal, in a group
 // of its own so a timeout takes its children too. CI is set so test runners
-// don't sit in watch mode.
+// don't sit in watch mode. A child that outlives it can't hold it open.
 func runCheckProgram(ctx context.Context, dir, program string, args ...string) (string, error) {
-	cmd := exec.Command(program, args...)
+	cmd := exec.CommandContext(ctx, program, args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "CI=1")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	var output bytes.Buffer
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = checkKillWait
+	var output tailBuffer
 	cmd.Stdout, cmd.Stderr = &output, &output
-	if err := cmd.Start(); err != nil {
-		return "", err
+	err := cmd.Run()
+	if errors.Is(err, exec.ErrWaitDelay) {
+		err = nil
 	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case err := <-done:
-		return output.String(), err
-	case <-ctx.Done():
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-done
-		return output.String(), errors.Join(ctx.Err(), errors.New("stopped"))
-	}
+	return string(output.data), err
 }

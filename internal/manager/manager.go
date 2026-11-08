@@ -88,9 +88,7 @@ type Manager struct {
 	// queueMu keeps two sweeps from starting one piece of work twice.
 	queueMu sync.Mutex
 	// stuck is what was last raised about each agent, guarded by cardMu.
-	stuck map[string]string
-	// overlaps is what has been raised about agents\' files, guarded by cardMu.
-	overlaps map[string]bool
+	stuck    map[string]string
 	runCheck func(ctx context.Context, dir, program string, args ...string) (string, error)
 	// verifyDelay and verifySlots pace the checks of agents' work.
 	verifyDelay time.Duration
@@ -179,7 +177,6 @@ func New(cfg Config) (*Manager, error) {
 		missions:     loadMissions(cfg.Dir),
 		queue:        loadQueue(cfg.Dir),
 		stuck:        map[string]string{},
-		overlaps:     map[string]bool{},
 		runCheck:     cfg.RunCheck,
 		verifyDelay:  cfg.VerifyDelay,
 		verifySlots:  make(chan struct{}, maxConcurrentChecks),

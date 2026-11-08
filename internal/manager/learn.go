@@ -135,15 +135,26 @@ func (l *learnStore) bump(key string, now time.Time) bool {
 	return earned
 }
 
-// Commands whose words after the second don't change what kind of thing
-// they do, so a rule can stop there.
-var learnableTools = []string{"go", "cargo", "npm", "pnpm", "yarn", "bun", "make", "swift", "gradle", "mvn", "xcodebuild", "git"}
+// The only programs a rule is ever offered for: developers' own tools, named
+// plainly. Anything that merely runs something else, reads keys or reaches a
+// server isn't here, so no way of writing it can get a rule offered.
+var learnablePrograms = []string{
+	"go", "cargo", "swift", "npm", "pnpm", "yarn", "bun", "make", "gradle", "mvn", "xcodebuild",
+	"pytest", "ruff", "eslint", "tsc", "prettier", "black", "mypy", "jest", "vitest",
+}
 
-// Subcommands that run whatever they are given: those are only learned
-// word for word.
-var openEndedSubcommands = []string{"run", "exec", "x", "dlx", "install", "add", "i"}
+// learnableVerbs are the subcommands a rule can stretch over, as their other
+// words only say what to test or build. Everything else is learned word for
+// word.
+var learnableVerbs = map[string][]string{
+	"go":     {"test", "build", "vet", "fmt"},
+	"cargo":  {"test", "build", "check", "clippy", "fmt"},
+	"swift":  {"test", "build"},
+	"gradle": {"test", "build"},
+	"mvn":    {"test", "compile", "verify"},
+}
 
-var outwardWords = []string{"deploy", "publish", "release", "upload", "destroy"}
+var outwardWords = []string{"deploy", "publish", "release", "upload", "destroy", "push", "delete", "remove", "secret", "token", "credential", "password"}
 
 // learnablePattern is the rule to offer for a request, or false when it is
 // not something to make standing.
@@ -163,43 +174,40 @@ func learnablePattern(kind, target string) (string, bool) {
 }
 
 func learnableCommand(command string) (string, bool) {
-	if command == "" || private(command) || strings.ContainsAny(command, "`><") || strings.Contains(command, "$(") {
-		return "", false
-	}
-	if len(splitCommand(command)) != 1 || runsAsRoot(command) {
+	if command == "" || private(command) || strings.ContainsAny(command, "`<>$\n") || len(splitCommand(command)) != 1 {
 		return "", false
 	}
 	words := strings.Fields(command)
-	if _, named := askReasons[words[0]]; named {
+	if !slices.Contains(learnablePrograms, words[0]) {
 		return "", false
 	}
-	// In what the command is, not its flags: `swift build -c release` is
-	// only a build.
-	head := strings.ToLower(strings.Join(words[:min(3, len(words))], " "))
-	for _, word := range outwardWords {
-		if strings.Contains(head, word) && !strings.HasSuffix(head, "-c "+word) {
+	for i, word := range words {
+		// `swift build -c release` is only a build.
+		if word == "release" && i > 0 && (words[i-1] == "-c" || words[i-1] == "--configuration") {
+			continue
+		}
+		lower := strings.ToLower(word)
+		if slices.ContainsFunc(outwardWords, func(outward string) bool { return strings.Contains(lower, outward) }) {
 			return "", false
 		}
 	}
-	if words[0] == "git" {
-		if len(words) < 2 {
-			return "", false
-		}
-		if _, named := gitReasons[words[1]]; named {
-			return "", false
+	if len(words) >= 2 && slices.Contains(learnableVerbs[words[0]], words[1]) {
+		return words[0] + " " + words[1] + "*", true
+	}
+	return command, true
+}
+
+// isAffirmative reports an option that says yes. Only those count as the
+// user approving: "Skip" or "Cancel" aren't always worded as a no.
+func isAffirmative(options []protocol.QuestionOption, key string) bool {
+	for _, option := range options {
+		if option.Key == key {
+			label := strings.ToLower(strings.TrimSpace(option.Label))
+			return strings.HasPrefix(label, "yes") || strings.HasPrefix(label, "allow") || strings.HasPrefix(label, "approve") ||
+				strings.HasPrefix(label, "continue") || strings.HasPrefix(label, "proceed")
 		}
 	}
-	if !slices.Contains(learnableTools, words[0]) || len(words) < 2 || strings.HasPrefix(words[1], "-") {
-		return command, true
-	}
-	if slices.Contains(openEndedSubcommands, words[1]) {
-		// `npm run lint` names one script; anything looser runs anything.
-		if words[1] == "run" && slices.Contains([]string{"npm", "pnpm", "yarn", "bun"}, words[0]) && len(words) >= 3 {
-			return strings.Join(words[:3], " ") + "*", true
-		}
-		return command, true
-	}
-	return words[0] + " " + words[1] + "*", true
+	return false
 }
 
 // Answered hears that the user answered an agent's question in the app,
@@ -220,7 +228,7 @@ func (m *Manager) recordApprovalLocked(session protocol.Session, q *protocol.Que
 	if q == nil || optionKey == "" || !m.active() || settings.Autopilot == nil || !settings.Autopilot.LearnRules {
 		return
 	}
-	if isDenial(q.Options, optionKey) {
+	if !isAffirmative(q.Options, optionKey) {
 		return
 	}
 	kind, target := requestOf(q)
