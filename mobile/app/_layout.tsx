@@ -10,7 +10,6 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ThemeProvider, useTheme } from "../lib/appearance";
 import { StoreProvider } from "../lib/store";
 import { ManagerProvider } from "../lib/manager";
-import { BoardPrefsProvider } from "../lib/board-prefs";
 import { UpdatesProvider } from "../lib/updates-context";
 import { simulatorRoute } from "../lib/simulator";
 import { palettes } from "../lib/theme";
@@ -45,7 +44,7 @@ function NotificationNavigation() {
       const sessionId = data?.sessionId;
       // Agentman's word, cards included, is in its conversation.
       if (data?.agentman === true) {
-        router.push("/agentman?chat=1");
+        router.push("/agentman");
       } else if (typeof sessionId === "string" && sessionId) {
         router.push(`/session/${encodeURIComponent(sessionId)}`);
       }
@@ -138,7 +137,6 @@ function ThemedApp({ fontsLoaded }: { fontsLoaded: boolean }) {
       <SafeAreaProvider>
         <StoreProvider>
           <ManagerProvider>
-          <BoardPrefsProvider>
           <UpdatesProvider>
             <NotificationNavigation />
             <SimulatorLaunch />
@@ -155,7 +153,6 @@ function ThemedApp({ fontsLoaded }: { fontsLoaded: boolean }) {
               <Stack.Screen name="update" options={{ presentation: "modal", animation: "default" }} />
             </Stack>
           </UpdatesProvider>
-          </BoardPrefsProvider>
           </ManagerProvider>
         </StoreProvider>
       </SafeAreaProvider>

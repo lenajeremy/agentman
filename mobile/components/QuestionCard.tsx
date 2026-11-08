@@ -1,6 +1,6 @@
 import Feather from "@expo/vector-icons/Feather";
 import * as Haptics from "expo-haptics";
-import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -13,14 +13,7 @@ import {
 import { questionSnapshotIdentity } from "../lib/action-state";
 import { useStyles, useTheme } from "../lib/appearance";
 import { Question, QuestionAnswer, SendStatus } from "../lib/protocol";
-import {
-  MAX_NOTE_CHARS,
-  choicesFitButtons,
-  choicesShareRow,
-  noteAnswer,
-  submitAnswer,
-  tapAnswer,
-} from "../lib/question-answer";
+import { MAX_NOTE_CHARS, noteAnswer, submitAnswer, tapAnswer } from "../lib/question-answer";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { MotionPressable } from "./MotionPressable";
 import { edged, hardShadow, heading } from "./Brand";
@@ -52,8 +45,6 @@ export function QuestionCard({
   question,
   onAnswer,
   compact,
-  bare,
-  suggestedKey,
   onOpen,
   disabled = false,
   submissionStatus,
@@ -64,11 +55,6 @@ export function QuestionCard({
   onAnswer: (answer: QuestionAnswer) => void;
   /** In a list row: the question with at most two quick answers. */
   compact?: boolean;
-  /** Only the answers, as thumb-sized buttons: the card around it shows the
-   *  question. */
-  bare?: boolean;
-  /** The option Agentman would pick, marked for the user to confirm. */
-  suggestedKey?: string;
   /** Where a compact card sends someone who needs every choice. */
   onOpen?: () => void;
   /** The daemon is unreachable, so no answer can safely leave the device. */
@@ -174,11 +160,10 @@ export function QuestionCard({
   // The first affirmative choice is the one most people are reaching for, so
   // it is the filled button. Only in single-tap questions: when choices are
   // being assembled, nothing should look pre-chosen.
-  const suggested = question.options.some((option) => option.key === suggestedKey) ? suggestedKey : undefined;
-  const affirmative = question.options.find((option) => AFFIRMATIVE.test(option.label))?.key;
-  // On a Board card only a real yes is filled: the first of a list of
-  // answers is no likelier than the rest.
-  const primaryKey = advanced ? undefined : suggested ?? affirmative ?? (bare ? undefined : question.options[0]?.key);
+  const primaryKey = advanced
+    ? undefined
+    : question.options.find((option) => AFFIRMATIVE.test(option.label))?.key ??
+      question.options[0]?.key;
 
   if (compact) {
     // Answering from the list is for the common two-way prompt. Anything
@@ -252,51 +237,27 @@ export function QuestionCard({
     );
   }
 
-  if (bare && !advanced && choicesFitButtons(question.options)) {
-    return (
-      <BareButtons
-        question={question}
-        filledKey={primaryKey}
-        disabled={interactionDisabled}
-        onChoose={choose}
-        noteFor={noteFor}
-        note={note}
-        onNote={setNote}
-        onSendNote={sendNote}
-        sending={submitting}
-      >
-        {submissionStatus || disabled ? (
-          <AnswerStatus status={submissionStatus} error={submissionError} offline={disabled} />
-        ) : null}
-      </BareButtons>
-    );
-  }
-
   return (
-    <View style={bare ? bareStyles.stack : styles.full}>
-      {bare ? null : (
-        <>
-          <View style={styles.eyebrowRow}>
-            <View style={styles.pill}>
-              <View style={styles.pillDot} />
-              <Text style={styles.pillLabel}>Needs you</Text>
-            </View>
-          </View>
-          <Text style={styles.title}>{question.title || "Decision needed"}</Text>
+    <View style={styles.full}>
+      <View style={styles.eyebrowRow}>
+        <View style={styles.pill}>
+          <View style={styles.pillDot} />
+          <Text style={styles.pillLabel}>Needs you</Text>
+        </View>
+      </View>
+      <Text style={styles.title}>{question.title || "Decision needed"}</Text>
 
-          {question.detail ? (
-            <View style={styles.detailBox}>
-              <Text style={styles.detail} selectable>
-                {question.detail}
-              </Text>
-            </View>
-          ) : null}
+      {question.detail ? (
+        <View style={styles.detailBox}>
+          <Text style={styles.detail} selectable>
+            {question.detail}
+          </Text>
+        </View>
+      ) : null}
 
-          {question.prompt ? <Text style={styles.prompt}>{question.prompt}</Text> : null}
-        </>
-      )}
+      {question.prompt ? <Text style={styles.prompt}>{question.prompt}</Text> : null}
 
-      <View style={bare ? bareStyles.options : styles.options}>
+      <View style={styles.options}>
         {question.options.map((option, index) => {
           // The CLI's own highlighted choice is its default. Marking it
           // helps, but nothing is preselected here — a tap is a decision.
@@ -315,7 +276,6 @@ export function QuestionCard({
                 disabled={interactionDisabled}
                 style={[
                   styles.option,
-                  bare && bareStyles.option,
                   primary && styles.optionPrimary,
                   advanced && isSelected && styles.optionSelected,
                   interactionDisabled && styles.controlDisabled,
@@ -350,13 +310,7 @@ export function QuestionCard({
                   </Text>
                 </View>
                 <View style={styles.optionCopy}>
-                  <Text
-                    style={[
-                      styles.optionLabel,
-                      primary && styles.optionLabelPrimary,
-                      bare && bareStyles.optionLabel,
-                    ]}
-                  >
+                  <Text style={[styles.optionLabel, primary && styles.optionLabelPrimary]}>
                     {option.label}
                   </Text>
                   {option.description ? (
@@ -464,81 +418,6 @@ export function QuestionCard({
  * as part of that choice rather than as a second question. Sending it empty
  * is the plain choice, so opening it never forces anyone to write.
  */
-/**
- * A few short answers as buttons, at least 44 points tall: side by side when
- * they share a row evenly, otherwise wrapping to the width of their words.
- */
-function BareButtons({
-  question,
-  filledKey,
-  disabled,
-  onChoose,
-  noteFor,
-  note,
-  onNote,
-  onSendNote,
-  sending,
-  children,
-}: {
-  question: Question;
-  filledKey?: string;
-  disabled: boolean;
-  onChoose(key: string): void;
-  noteFor: string | null;
-  note: string;
-  onNote(text: string): void;
-  onSendNote(key: string): void;
-  sending: boolean;
-  children?: ReactNode;
-}) {
-  const styles = useStyles(makeStyles);
-  const sharesRow = choicesShareRow(question.options);
-  const notedOption = question.options.find((option) => option.key === noteFor);
-  return (
-    <View style={bareStyles.stack}>
-      <View style={[bareStyles.buttons, !sharesRow && bareStyles.buttonsWrap]}>
-        {question.options.map((option) => {
-          const filled = option.key === filledKey;
-          return (
-            <MotionPressable
-              key={option.key}
-              onPress={() => onChoose(option.key)}
-              disabled={disabled}
-              style={[
-                styles.quick,
-                filled ? styles.quickPrimary : styles.quickSecondary,
-                bareStyles.button,
-                sharesRow ? bareStyles.buttonEven : bareStyles.buttonFit,
-                disabled && styles.controlDisabled,
-              ]}
-              pressedScale={0.97}
-              accessibilityRole="button"
-              accessibilityLabel={option.label}
-              accessibilityHint={option.withText ? "Opens a note to send with this choice. You can leave it empty." : undefined}
-              accessibilityState={{ disabled, expanded: option.withText ? noteFor === option.key : undefined }}
-            >
-              <Text style={[styles.quickLabel, bareStyles.buttonLabel, filled && styles.quickLabelPrimary]} numberOfLines={2}>
-                {option.label}
-              </Text>
-            </MotionPressable>
-          );
-        })}
-      </View>
-      {notedOption ? (
-        <NoteField
-          label={notedOption.label}
-          value={note}
-          onChange={onNote}
-          onSend={() => onSendNote(notedOption.key)}
-          sending={sending}
-          disabled={disabled}
-        />
-      ) : null}
-      {children}
-    </View>
-  );
-}
-
 function NoteField({
   label,
   value,
@@ -603,20 +482,6 @@ function NoteField({
     </View>
   );
 }
-
-const bareStyles = StyleSheet.create({
-  stack: { gap: space.sm },
-  options: { gap: space.sm },
-  option: { minHeight: 46, paddingVertical: 11, borderRadius: radius.md },
-  optionLabel: { fontSize: size.caption },
-  buttons: { flexDirection: "row", gap: space.sm, marginTop: space.xs },
-  buttonsWrap: { flexWrap: "wrap" },
-  button: { minHeight: 44 },
-  buttonEven: { flex: 1 },
-  // Fits its words; the row wraps when they run out of room.
-  buttonFit: { flexGrow: 0, flexShrink: 1, flexBasis: "auto", paddingHorizontal: 14 },
-  buttonLabel: { fontSize: size.caption },
-});
 
 function AnswerStatus({
   status,

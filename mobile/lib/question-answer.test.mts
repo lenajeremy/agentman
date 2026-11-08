@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { Question } from "./protocol.ts";
-import { MAX_NOTE_CHARS, choicesFitButtons, choicesShareRow, noteAnswer, submitAnswer, tapAnswer } from "./question-answer.ts";
+import { MAX_NOTE_CHARS, noteAnswer, submitAnswer, tapAnswer } from "./question-answer.ts";
 
 const approval: Question = {
   id: "q",
@@ -75,14 +75,4 @@ test("the full form waits for an answer, and for only one when only one is allow
   assert.equal(submitAnswer(form, [], "  "), null);
   assert.equal(submitAnswer(form, ["1"], "MySQL"), null);
   assert.equal(submitAnswer(form, ["1", "2"], ""), null);
-});
-
-test("short choices are buttons on a card, long ones take a row each", () => {
-  assert.equal(choicesFitButtons([{ label: "Yes" }, { label: "Always" }, { label: "No" }]), true);
-  assert.equal(choicesShareRow([{ label: "Yes" }, { label: "Always" }, { label: "No" }]), true);
-  assert.equal(choicesFitButtons([{ label: "A count in a dot" }, { label: "A dot only" }]), true);
-  assert.equal(choicesShareRow([{ label: "A count in a dot" }, { label: "A dot only" }]), false);
-  assert.equal(choicesFitButtons(approval.options), false, "a long label needs its whole row");
-  assert.equal(choicesFitButtons([{ label: "Yes", description: "Runs it now" }]), false);
-  assert.equal(choicesFitButtons([]), false);
 });

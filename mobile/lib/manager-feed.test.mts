@@ -1,21 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  applyDelta,
-  applyVerifications,
-  cardQuestion,
-  chatItems,
-  isNews,
-  missionOf,
-  missionProgress,
-  offerCards,
-  prependOlder,
-  runningMissions,
-  unreadCount,
-  upsertEntry,
-} from "./manager-feed.ts";
-import type { ManagerCard, ManagerEntry, Mission } from "./protocol.ts";
+import { applyDelta, cardQuestion, chatItems, isNews, prependOlder, unreadCount, upsertEntry } from "./manager-feed.ts";
+import type { ManagerEntry } from "./protocol.ts";
 
 const entry = (id: string, role: string, text = "", extra: Partial<ManagerEntry> = {}): ManagerEntry =>
   ({ id, role, text, ts: Number(id.replace(/\D/g, "")) || 1, ...extra });
@@ -81,44 +68,4 @@ test("what the user closed is left out of the conversation and isn't unread", ()
     ["u1", "a1"],
   );
   assert.equal(unreadCount([closed], 0), 0);
-});
-
-test("a check reaches its agent and can be dropped", () => {
-  let checks = applyVerifications({}, { verification: { sessionId: "a", state: "failed", summary: "Tests fail", updatedAt: 1 } });
-  assert.equal(checks.a.state, "failed");
-  checks = applyVerifications(checks, { verification: { sessionId: "a", state: "none", updatedAt: 2 } });
-  assert.equal(checks.a, undefined);
-});
-
-test("a whole list of checks replaces what was known", () => {
-  const known = { old: { sessionId: "old", state: "verified", updatedAt: 1 } };
-  const checks = applyVerifications(known, { verifications: [{ sessionId: "a", state: "passed", updatedAt: 2 }] });
-  assert.deepEqual(Object.keys(checks), ["a"]);
-});
-
-test("an offer is a question the Board can show", () => {
-  const card: ManagerCard = {
-    id: "c", kind: "offer", state: "open", sessionId: "a", agentName: "Agentman", title: "Always allow?",
-    options: [{ key: "here", label: "Always allow in api" }],
-  };
-  assert.deepEqual(offerCards([card, { ...card, id: "d", kind: "question" }]).map((item) => item.id), ["c"]);
-  assert.equal(cardQuestion(card)?.options[0].key, "here");
-});
-
-const team = (state: string, ...tasks: Partial<Mission["tasks"][number]>[]): Mission => ({
-  id: state, goal: "Ship billing", state, createdAt: 1,
-  tasks: tasks.map((task, index) => ({ id: `t${index}`, title: "", task: "", agent: "claude", folder: "/w", state: "running", ...task })),
-});
-
-test("only a running team shows, and an agent knows its team", () => {
-  const running = team("running", { sessionId: "a" });
-  const proposed = team("proposed", { sessionId: "b" });
-  assert.deepEqual(runningMissions([proposed, running]).map((mission) => mission.state), ["running"]);
-  assert.equal(missionOf([proposed, running], "a"), running);
-  assert.equal(missionOf([proposed, running], "b"), undefined);
-});
-
-test("a team says how far along it is", () => {
-  assert.equal(missionProgress(team("running", { state: "done" }, { state: "running" }, { state: "planned" })), "1 of 3 done, 1 waiting");
-  assert.equal(missionProgress(team("running", { state: "done" }, { state: "failed" })), "1 of 2 done");
 });

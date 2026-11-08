@@ -54,18 +54,3 @@ export function submitAnswer(
     answerText: customText || undefined,
   };
 }
-
-/**
- * Whether a question's choices fit as buttons on a card: a few short labels
- * with nothing more to read under them. Anything longer takes a row each, so
- * no label is ever cut in the middle of a decision.
- */
-export function choicesFitButtons(options: Pick<QuestionOption, "label" | "description">[]): boolean {
-  return options.length > 0 && options.length <= 4 &&
-    options.every((option) => !option.description && option.label.length <= 18);
-}
-
-/** Whether those buttons are short enough to share a row in equal widths. */
-export function choicesShareRow(options: Pick<QuestionOption, "label">[]): boolean {
-  return options.length <= 3 && options.every((option) => option.label.length <= 9);
-}
