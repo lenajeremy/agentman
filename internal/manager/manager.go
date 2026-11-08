@@ -52,6 +52,12 @@ type Config struct {
 	ProcessTree func(context.Context) (*tmux.ProcessTree, error)
 	// Now is the clock schedules run on. Tests replace it.
 	Now func() time.Time
+	// RunCheck runs a program in a folder for a check of an agent's work,
+	// returning what it printed. Tests replace it.
+	RunCheck func(ctx context.Context, dir, program string, args ...string) (string, error)
+	// VerifyDelay is how long a finished turn settles before it is checked.
+	// Tests shorten it.
+	VerifyDelay time.Duration
 }
 
 type Manager struct {
@@ -71,6 +77,11 @@ type Manager struct {
 	voice     voiceUploads
 	schedules *scheduleStore
 	now       func() time.Time
+	verifies  *verifyStore
+	runCheck  func(ctx context.Context, dir, program string, args ...string) (string, error)
+	// verifyDelay and verifySlots pace the checks of agents' work.
+	verifyDelay time.Duration
+	verifySlots chan struct{}
 
 	mu       sync.Mutex
 	settings protocol.ManagerSettings
@@ -149,6 +160,10 @@ func New(cfg Config) (*Manager, error) {
 		keys:         loadKeys(cfg.Dir),
 		schedules:    loadSchedules(cfg.Dir),
 		now:          cfg.Now,
+		verifies:     loadVerifications(cfg.Dir),
+		runCheck:     cfg.RunCheck,
+		verifyDelay:  cfg.VerifyDelay,
+		verifySlots:  make(chan struct{}, maxConcurrentChecks),
 		settings:     loadSettings(filepath.Join(cfg.Dir, "settings.json")),
 		briefDue:     map[string]time.Time{},
 		lastBriefAt:  map[string]time.Time{},
@@ -163,6 +178,12 @@ func New(cfg Config) (*Manager, error) {
 	}
 	if m.now == nil {
 		m.now = time.Now
+	}
+	if m.runCheck == nil {
+		m.runCheck = runCheckProgram
+	}
+	if m.verifyDelay == 0 {
+		m.verifyDelay = defaultVerifyDelay
 	}
 	if m.knowledge == nil {
 		m.knowledge = knowledge.Open(filepath.Join(cfg.Dir, "knowledge"))
@@ -200,7 +221,7 @@ func (m *Manager) Handles(kind protocol.RequestType) bool {
 		protocol.ReqManagerSchedules, protocol.ReqManagerScheduleCancel, protocol.ReqManagerImage,
 		protocol.ReqToolsTitle, protocol.ReqManagerOpenCards, protocol.ReqManagerCheckPermission,
 		protocol.ReqTranscribe, protocol.ReqVoiceAccount, protocol.ReqVoiceSignInStart, protocol.ReqVoiceSignInVerify,
-		protocol.ReqVoiceSignOut, protocol.ReqManagerViewing:
+		protocol.ReqVoiceSignOut, protocol.ReqManagerViewing, protocol.ReqManagerVerifications:
 		return true
 	}
 	return false
@@ -254,6 +275,8 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 		return m.setKey(ctx, providerNamed(string(req.Kind)), req.Text)
 	case protocol.ReqManagerBriefs:
 		return protocol.Event{Type: protocol.EvtManagerBrief, Briefs: m.briefs.all()}
+	case protocol.ReqManagerVerifications:
+		return protocol.Event{Type: protocol.EvtManagerVerification, Verifications: m.verifies.all()}
 	case protocol.ReqManagerCardReply:
 		return m.replyToCard(ctx, req)
 	case protocol.ReqManagerEntryClose:
@@ -290,6 +313,7 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 func (m *Manager) TurnComplete(session protocol.Session) {
 	m.scheduleBrief(session.ID, briefAfterTurn, briefTurnGap)
 	go m.watchEvent(session.ID, protocol.WatchTurnEnd, protocol.WatchIdle)
+	go m.verifyTurn(context.Background(), session.ID)
 }
 
 // NeedsAnswer hears that an agent is asking something. The daemon says so on
@@ -413,8 +437,11 @@ func (m *Manager) setSettings(next *protocol.ManagerSettings) protocol.Event {
 	}
 	// An app that doesn't know the permission switches and rules leaves
 	// them out; that keeps them as they are rather than clearing them.
-	if next.Approve == nil || next.Rules == nil {
+	if next.Approve == nil || next.Rules == nil || next.Autopilot == nil {
 		current := m.currentSettings()
+		if next.Autopilot == nil {
+			next.Autopilot = current.Autopilot
+		}
 		if next.Approve == nil {
 			next.Approve = current.Approve
 		}

@@ -61,6 +61,10 @@ const (
 	// holds. Agentman puts up no card and pushes nothing for an agent the
 	// user is looking at. Answered with EvtManagerViewing.
 	ReqManagerViewing RequestType = "manager_viewing"
+
+	// ReqManagerVerifications asks for what Agentman found checking each
+	// agent's finished work.
+	ReqManagerVerifications RequestType = "manager_verifications"
 )
 
 const (
@@ -80,6 +84,8 @@ const (
 	// EvtManagerBrief is an agent's brief, new or updated; on
 	// ReqManagerBriefs, Briefs holds them all.
 	EvtManagerBrief EventType = "manager_brief"
+	// EvtManagerVerification says how a check of an agent's work went.
+	EvtManagerVerification EventType = "manager_verification"
 	// EvtManagerSchedules is everything Agentman has scheduled, in
 	// Schedules, whenever that changes.
 	EvtManagerSchedules EventType = "manager_schedules"
@@ -261,6 +267,10 @@ type ManagerSettings struct {
 	// An "ask" rule wins over everything. On a set, nil keeps what is
 	// stored and an empty list clears them.
 	Rules []PermissionRule `json:"rules,omitempty"`
+	// Autopilot is what Agentman does by itself beyond approving requests.
+	// All of it is off until the user turns it on. On a set, nil keeps what
+	// is stored.
+	Autopilot *Autopilot `json:"autopilot,omitempty"`
 	// Style is how Agentman talks; Instructions is anything else it should
 	// know or do. Both go into its prompt.
 	Style        string `json:"style"`
@@ -273,6 +283,55 @@ type ManagerSettings struct {
 	Provider        string `json:"provider,omitempty"`
 	AnthropicKeySet bool   `json:"anthropicKeySet"`
 	GeminiKeySet    bool   `json:"geminiKeySet"`
+}
+
+// Autopilot switches what Agentman does on its own. Each spends the user's
+// API key or changes what agents do, so each is the user's to turn on.
+type Autopilot struct {
+	// Verify checks an agent's work when it finishes a turn that changed
+	// something: runs the folder's tests and compares the changes with what
+	// was asked.
+	Verify bool `json:"verify"`
+	// SendBack gives an agent the output of tests that failed, so it can fix
+	// them, a limited number of times for one request.
+	SendBack bool `json:"sendBack"`
+	// VerifyDaily is how many reviews by the model a day may cost; zero is
+	// the default. Running the tests costs none.
+	VerifyDaily int `json:"verifyDaily,omitempty"`
+}
+
+// How a check of an agent's work came out.
+const (
+	VerifyChecking = "checking"
+	// VerifyVerified: the change does what was asked, and tests pass if the
+	// folder has any.
+	VerifyVerified = "verified"
+	// VerifyPassed: the tests pass, and the change wasn't reviewed.
+	VerifyPassed = "passed"
+	// VerifyConcerns: the review found something missing or wrong.
+	VerifyConcerns = "concerns"
+	// VerifyFailed: the tests fail.
+	VerifyFailed = "failed"
+	// VerifyNone: nothing to report; a card drops what it showed.
+	VerifyNone = "none"
+)
+
+// Verification is what Agentman found checking one agent's latest work.
+type Verification struct {
+	SessionID string `json:"sessionId"`
+	State     string `json:"state"`
+	// Summary is the finding in a line.
+	Summary string   `json:"summary,omitempty"`
+	Issues  []string `json:"issues,omitempty"`
+	// Command is the test command run, when the folder has one.
+	Command string `json:"command,omitempty"`
+	// Output is the end of what the tests printed, when they failed.
+	Output string `json:"output,omitempty"`
+	// MessageID is the last message of the turn that was checked.
+	MessageID string `json:"messageId,omitempty"`
+	// SentBack says the failure went to the agent to fix.
+	SentBack  bool  `json:"sentBack,omitempty"`
+	UpdatedAt int64 `json:"updatedAt"`
 }
 
 // ManagerStatus is what Agentman is doing.
