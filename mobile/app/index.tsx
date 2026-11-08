@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Appear } from "../components/Appear";
 import { AgentIcon } from "../components/AgentIcon";
+import { AgentColorMark } from "../components/AgentColorMark";
 import { AgentmanCard } from "../components/AgentmanCard";
 import { Loader } from "../components/Loader";
 import { ContentColumn } from "../components/ContentColumn";
@@ -478,6 +479,7 @@ function AgentRow({
       // Not one big pressable: that would fold the answer buttons into a single
       // element for VoiceOver. The header opens the session; the buttons answer.
       <View style={[styles.card, styles.askCard]}>
+        <AgentColorMark session={session} />
         <MotionPressable
           onPress={open}
           style={styles.askHeader}
@@ -528,6 +530,7 @@ function AgentRow({
       accessibilityRole="button"
       accessibilityLabel={`${session.name}, ${stateStyle(displayState, color).label}`}
     >
+      <AgentColorMark session={session} />
       <View
         style={[
           styles.avatar,
