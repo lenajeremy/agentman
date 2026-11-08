@@ -164,6 +164,8 @@ interface Store {
   dismissPending(clientId: string): void;
   /** Hide an idle session until it does something again. */
   dismissSession(sessionId: string): void;
+  /** Agents swiped away from the list, for the Board's own rules. */
+  dismissals: Dismissals;
   /** Undo that. */
   restoreSession(sessionId: string): void;
   /** Bring back everything hidden. Without a way out, hiding a row would be a
@@ -372,6 +374,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [pending, setPending] = useState<PendingSend[]>([]);
   const [actions, setActions] = useState<PendingAgentAction[]>([]);
   const [dismissals, setDismissals] = useState<Dismissals>({});
+  /** How many open screens and Board cards are following each agent: one
+   *  leaving must not stop the live tail for the others. */
+  const followers = useRef(new Map<string, number>());
   const sessionsRef = useRef<Session[]>([]);
   const messagesRef = useRef<Record<string, Message[]>>({});
 
@@ -1186,6 +1191,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       lastSeenAt,
       sessions,
       visibleSessions,
+      dismissals,
       messages,
       pageState,
       pending,
@@ -1254,6 +1260,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
 
       openSession(sessionId) {
+        followers.current.set(sessionId, (followers.current.get(sessionId) ?? 0) + 1);
         desiredSubscriptions.current.add(sessionId);
         clientRef.current?.subscribe(sessionId);
 
@@ -1311,6 +1318,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
 
       closeSession(sessionId) {
+        const others = (followers.current.get(sessionId) ?? 1) - 1;
+        if (others > 0) {
+          followers.current.set(sessionId, others);
+          return;
+        }
+        followers.current.delete(sessionId);
         // Unsubscribing on blur is what keeps idle sessions free: the daemon
         // stops tailing a transcript nobody is looking at.
         desiredSubscriptions.current.delete(sessionId);

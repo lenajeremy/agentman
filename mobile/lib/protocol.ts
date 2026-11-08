@@ -259,6 +259,8 @@ export type RequestType =
   | "manager_entry_close"
   | "manager_schedules"
   | "manager_schedule_cancel"
+  | "manager_verifications"
+  | "manager_missions"
   | "manager_settings"
   | "manager_set_settings"
   | "manager_check_permission"
@@ -442,6 +444,8 @@ export type EventType =
   | "manager_settings"
   | "manager_permission"
   | "manager_reset"
+  | "manager_verification"
+  | "manager_missions"
   | "knowledge"
   | "keys"
   | "transcript"
@@ -743,6 +747,12 @@ export interface DaemonEvent {
   briefs?: Brief[];
   /** Everything Agentman has scheduled, on "manager_schedules". */
   schedules?: ManagerSchedule[];
+  /** How a check of an agent's work went, or all of them, on
+   *  "manager_verification". */
+  verification?: Verification;
+  verifications?: Verification[];
+  /** Every team Agentman has planned or is running, on "manager_missions". */
+  missions?: Mission[];
   /** How Agentman works, on "manager_settings". */
   managerSettings?: ManagerSettings;
   /** What Agentman would do with a request, on "manager_permission". */
@@ -869,8 +879,55 @@ export interface Brief {
   sessionId: string;
   name: string;
   summary: string;
+  goal?: string;
+  /** What it is on right now. */
+  now?: string;
   needsYou?: string;
   updatedAt: number;
+}
+
+/** What Agentman found checking one agent's latest work. */
+export interface Verification {
+  sessionId: string;
+  /** "checking", "verified", "passed", "concerns", "failed" or "none". */
+  state: string;
+  summary?: string;
+  issues?: string[];
+  command?: string;
+  /** The end of what the tests printed, when they failed. */
+  output?: string;
+  messageId?: string;
+  /** The failure went back to the agent to fix. */
+  sentBack?: boolean;
+  updatedAt: number;
+}
+
+/** One agent's part in a team. */
+export interface MissionTask {
+  id: string;
+  title: string;
+  task: string;
+  agent: string;
+  folder: string;
+  worktree?: string;
+  dependsOn?: string[];
+  /** "planned", "running", "done" or "failed". */
+  state: string;
+  /** Its agent, once started. */
+  sessionId?: string;
+  startedAt?: number;
+  turnEndedAt?: number;
+  problem?: string;
+}
+
+/** A goal the user gave Agentman, as a team of agents. */
+export interface Mission {
+  id: string;
+  goal: string;
+  /** "proposed", "running", "done" or "dismissed". */
+  state: string;
+  tasks: MissionTask[];
+  createdAt: number;
 }
 
 /** A reminder Agentman left itself, or a watch on an agent. */
@@ -1002,7 +1059,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     "session_ended", "artifacts", "tools_title",
     "manager_entry", "manager_delta", "manager_history", "manager_status",
     "manager_brief", "manager_schedules", "manager_settings",
-    "manager_permission", "manager_reset", "knowledge", "keys",
+    "manager_permission", "manager_reset", "manager_verification", "manager_missions", "knowledge", "keys",
     "transcript", "voice_account", "commands", "command_panel", "files", "attached", "usage",
     "limits", "search",
   ] as const)) return null;
@@ -1069,6 +1126,18 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
         if (!Array.isArray(value.briefs) || value.briefs.length > 10_000) return null;
         value.briefs = value.briefs.filter(isBrief);
       }
+      break;
+    case "manager_verification":
+      if (value.verification !== undefined && !isVerification(value.verification)) delete value.verification;
+      if (value.verifications !== undefined) {
+        if (!Array.isArray(value.verifications) || value.verifications.length > 10_000) return null;
+        value.verifications = value.verifications.filter(isVerification);
+      }
+      break;
+    case "manager_missions":
+      value.missions ??= [];
+      if (!Array.isArray(value.missions) || value.missions.length > 1_000) return null;
+      value.missions = value.missions.filter(isMission);
       break;
     case "manager_settings":
       if (!isRecord(value.managerSettings)) return null;
@@ -1555,8 +1624,50 @@ function isManagerEntry(value: unknown): value is ManagerEntry {
 function isBrief(value: unknown): value is Brief {
   if (!isRecord(value) || !boundedString(value.sessionId, 512, true) || !boundedString(value.name, 4096) ||
       !boundedString(value.summary, 64 * 1024)) return false;
-  if (!optionalBoundedString(value.needsYou, 64 * 1024)) delete value.needsYou;
+  for (const key of ["goal", "now", "needsYou"] as const) {
+    if (!optionalBoundedString(value[key], 64 * 1024)) delete value[key];
+  }
   if (!finiteNumber(value.updatedAt)) value.updatedAt = 0;
+  return true;
+}
+
+function isVerification(value: unknown): value is Verification {
+  if (!isRecord(value) || !boundedString(value.sessionId, 512, true) || !boundedString(value.state, 64, true)) return false;
+  for (const key of ["summary", "command", "messageId"] as const) {
+    if (!optionalBoundedString(value[key], 64 * 1024)) delete value[key];
+  }
+  if (!optionalBoundedString(value.output, 256 * 1024)) delete value.output;
+  if (value.issues !== undefined &&
+      !boundedArray(value.issues, 200, (issue): issue is string => boundedString(issue, 64 * 1024))) delete value.issues;
+  if (value.sentBack !== undefined && typeof value.sentBack !== "boolean") delete value.sentBack;
+  if (!finiteNumber(value.updatedAt)) value.updatedAt = 0;
+  return true;
+}
+
+function isMissionTask(value: unknown): value is MissionTask {
+  if (!isRecord(value) || !boundedString(value.id, 512, true) || !boundedString(value.state, 64, true)) return false;
+  for (const key of ["title", "task", "agent", "folder"] as const) {
+    value[key] ??= "";
+    if (!boundedString(value[key], 64 * 1024)) return false;
+  }
+  for (const key of ["worktree", "sessionId", "problem"] as const) {
+    if (!optionalBoundedString(value[key], 64 * 1024)) delete value[key];
+  }
+  if (value.dependsOn !== undefined &&
+      !boundedArray(value.dependsOn, 200, (id): id is string => boundedString(id, 512, true))) delete value.dependsOn;
+  for (const key of ["startedAt", "turnEndedAt"] as const) {
+    if (value[key] !== undefined && !finiteNumber(value[key])) delete value[key];
+  }
+  return true;
+}
+
+function isMission(value: unknown): value is Mission {
+  if (!isRecord(value) || !boundedString(value.id, 512, true) || !boundedString(value.goal, 64 * 1024) ||
+      !boundedString(value.state, 64, true)) return false;
+  value.tasks ??= [];
+  if (!Array.isArray(value.tasks) || value.tasks.length > 1_000) return false;
+  value.tasks = value.tasks.filter(isMissionTask);
+  if (!finiteNumber(value.createdAt)) value.createdAt = 0;
   return true;
 }
 

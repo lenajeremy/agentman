@@ -1,919 +1,578 @@
 import Feather from "@expo/vector-icons/Feather";
-import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useIsFocused, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Image,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
+  RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
+import Animated, { FadeIn, FadeOut, LinearTransition, useReducedMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AgentIcon } from "../components/AgentIcon";
-import { AttachmentStrip } from "../components/AttachmentStrip";
-import { BrandMark } from "../components/BrandMark";
-import { ManagerCardView } from "../components/ManagerCards";
-import { Markdown } from "../components/Markdown";
+import { AgentmanChat } from "../components/AgentmanChat";
+import { AskBar } from "../components/AskBar";
+import { BoardActions, BoardCard, BoardMissionRow, BoardOfferCard, type ViewRef } from "../components/BoardCard";
+import { BoardSheet, boardSheetTop } from "../components/BoardSheet";
+import { ContentColumn } from "../components/ContentColumn";
+import { Loader } from "../components/Loader";
 import { MotionPressable } from "../components/MotionPressable";
 import { Popover, type PopoverItem } from "../components/Popover";
-import { SwipeToDismiss } from "../components/SwipeToDismiss";
-import { KEEP_READING, ScrollToLatest, SCROLL_AWAY } from "../components/ScrollToLatest";
-import { SeenImage } from "../components/SeenImage";
-import { Thinking } from "../components/Thinking";
-import { VoiceButton } from "../components/VoiceButton";
+import { AGENT_COLOR_CHOICES, agentCardTint } from "../lib/agent-colors";
 import { useStyles, useTheme } from "../lib/appearance";
+import { boardBrief, boardSections, type BoardColumn } from "../lib/board";
+import { useBoardPrefs } from "../lib/board-prefs";
+import { folderContains, folderLabel } from "../lib/folders";
 import { useManager } from "../lib/manager";
-import { chatItems, type ChatItem } from "../lib/manager-feed";
-import { MANAGER_MODELS, modelName } from "../lib/manager-models";
-import type { ManagerEntry, ManagerSchedule } from "../lib/protocol";
+import { missionOf } from "../lib/manager-feed";
+import type { Session } from "../lib/protocol";
 import { useStore } from "../lib/store";
-import { font, Palette, radius, size, space, scaled } from "../lib/theme";
-import { useAttachments } from "../lib/use-attachments";
-import { chooseImageSource } from "../lib/image-source-sheet";
-import { addSpoken } from "../lib/voice";
-import { addPastedImagesListener, pasteTakesImages } from "../modules/image-paste";
-import { StickerOnDots, edged, heading } from "../components/Brand";
+import { font, Palette, radius, scaled, size, space } from "../lib/theme";
+
+type Anchor = { x: number; y: number; width: number; height: number };
+
+/** Measures the control that opened a menu, for hanging the menu off it. */
+function measure(view: ViewRef | null, then: (anchor: Anchor) => void) {
+  view?.measureInWindow((x, y, width, height) => then({ x, y, width, height }));
+}
+
+/** Re-renders on a timer, so "2m" becomes "3m" by itself. */
+function useTicking(everyMs: number) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick((value) => value + 1), everyMs);
+    return () => clearInterval(timer);
+  }, [everyMs]);
+}
 
 /**
- * The conversation with Agentman: the one place to ask what every agent is
- * doing, read what happened, and answer what needs you. The same
- * conversation the Mac shows.
+ * Agentman's screen: every agent as a card, stacked by what it wants from
+ * the user, with the brief as the title and a box to ask Agentman anything
+ * at the foot. Agents move between the sections by themselves as their states
+ * change. The conversation with Agentman opens over it as a sheet.
  */
-export default function AgentmanScreen() {
+export default function AgentmanBoard() {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const store = useStore();
   const manager = useManager();
-  const images = useAttachments(store.credentials);
-  const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
-  const [schedulesOpen, setSchedulesOpen] = useState(false);
-  const [modelMenu, setModelMenu] = useState(false);
-  const listRef = useRef<FlatList<ChatItem>>(null);
-  const [scrolledAway, setScrolledAway] = useState(false);
-  const [composerHeight, setComposerHeight] = useState(0);
-  // Paste in the box takes an image while it is focused, as in an agent's
-  // thread: a paste goes to whichever box has focus.
-  const [inputFocused, setInputFocused] = useState(false);
-  const { addPasted } = images;
+  const prefs = useBoardPrefs();
+  const window = useWindowDimensions();
+  const reduceMotion = useReducedMotion();
+  const focused = useIsFocused();
+  const { chat } = useLocalSearchParams<{ chat?: string }>();
+  const [chatOpen, setChatOpen] = useState(chat === "1");
+  const [refreshing, setRefreshing] = useState(false);
+  const [menu, setMenu] = useState<{ anchor: Anchor; items: PopoverItem[]; title?: string } | null>(null);
+  useTicking(30_000);
+
+  const closeChat = useCallback(() => setChatOpen(false), []);
+  const openChat = useCallback(() => setChatOpen(true), []);
+
+  // One object for the Board's life, reading the latest store: a card
+  // redraws when its own agent changes, not when any agent does.
+  const latest = useRef({ store, manager, router, prefs });
+  latest.current = { store, manager, router, prefs };
+  const actions = useMemo<BoardActions>(() => ({
+    open: (id) => latest.current.router.push(`/session/${encodeURIComponent(id)}`),
+    openChanges: (id) => latest.current.router.push(`/workspace/${encodeURIComponent(id)}?tab=changes`),
+    openServers: (id) => latest.current.router.push(`/servers/${encodeURIComponent(id)}`),
+    openDocuments: (id) => latest.current.router.push(`/artifacts/${encodeURIComponent(id)}`),
+    answer: (id, answer) => latest.current.store.answerQuestion(id, answer),
+    replyToCard: (card, answer) => latest.current.manager.reply(card, answer),
+    dismissCard: (card) => latest.current.manager.dismiss(card),
+    send: (id, text) => void latest.current.store.sendMessage(id, text),
+    follow: (id) => {
+      latest.current.store.openSession(id);
+      return () => latest.current.store.closeSession(id);
+    },
+    changedFiles: async (id) => {
+      const result = await latest.current.store.workspace(id, "list_changes");
+      return result.changes?.length ?? 0;
+    },
+    menu: (session, anchor) => measure(anchor, (position) => {
+      const items: PopoverItem[] = [
+        {
+          key: "open",
+          label: "Open conversation",
+          icon: "message-square",
+          onPress: () => latest.current.router.push(`/session/${encodeURIComponent(session.id)}`),
+        },
+      ];
+      // Hiding an agent that needs the user is how it sits untouched for an hour.
+      if (!session.question && session.state !== "waiting_input") {
+        items.push({
+          key: "hide",
+          label: "Hide from the Board",
+          icon: "eye-off",
+          onPress: () => latest.current.prefs.hide(session.id),
+        });
+      }
+      setMenu({ anchor: position, items });
+    }),
+  }), []);
+
+  const { folderFilter, folderRoot, sessions, dismissals } = store;
+  const waiting = useMemo(
+    () => new Set(manager.openCards.filter((card) => card.kind === "question" || card.kind === "needs_you").map((card) => card.sessionId)),
+    [manager.openCards],
+  );
+  const sections = useMemo(
+    () => boardSections(sessions, {
+      hidden: prefs.hidden,
+      waiting,
+      dismissals,
+      inFolder: folderFilter ? (cwd) => folderContains(folderFilter, folderRoot, cwd) : undefined,
+    }),
+    [sessions, prefs.hidden, waiting, dismissals, folderFilter, folderRoot],
+  );
+  const { needsYou, working, idle, hidden } = sections;
+  const connected = store.connection === "online" && store.daemonOnline;
+  const brief = boardBrief(sections, connected);
+  const showsStart = connected && needsYou.length + working.length + idle.length + hidden.length === 0;
+
+  // Open cards the Board has no place for: a key an agent asked for, a note
+  // Agentman suggests, a question whose agent has gone. They stay in the
+  // conversation, and the Board says so.
+  const shownAgents = useMemo(() => new Set(needsYou.map((session) => session.id)), [needsYou]);
+  const moreCards = manager.openCards.filter((card) =>
+    card.kind !== "offer" && !shownAgents.has(card.sessionId)).length;
+  const offers = manager.offers;
+  const missions = manager.runningMissions;
+
+  // A reply box or an answer's note low on the Board, kept clear of the
+  // keyboard and the Ask box as the keyboard comes up.
+  const askBarHeight = useRef(0);
+  const scrollOffset = useRef(0);
+  const chatIsOpen = useRef(chatOpen);
+  chatIsOpen.current = chatOpen;
   useEffect(() => {
-    if (!inputFocused) return;
-    const subscription = addPastedImagesListener((pasted) => void addPasted(pasted));
-    return () => subscription?.remove();
-  }, [inputFocused, addPasted]);
-  const settings = manager.settings;
-  const modelItems: PopoverItem[] = MANAGER_MODELS.map((model) => {
-    const keyed = model.provider === "gemini" ? settings?.geminiKeySet : (settings?.anthropicKeySet ?? settings?.keySet);
-    return {
-      key: model.id,
-      label: model.name,
-      checked: settings?.chatModel === model.id,
-      disabled: keyed === false,
-      detail: keyed === false ? "No key" : undefined,
-      onPress: () => {
-        void manager.setChatModel(model.id).then((problem) => problem && images.setError(problem));
-      },
-    };
+    const subscription = Keyboard.addListener("keyboardDidShow", (event) => {
+      const field = TextInput.State.currentlyFocusedInput?.() as ViewRef | null;
+      if (!field || chatIsOpen.current) return;
+      const clear = event.endCoordinates.screenY - askBarHeight.current - space.md;
+      field.measureInWindow((_x, y, _width, height) => {
+        const over = y + height - clear;
+        if (over > 0) scrollRef.current?.scrollTo({ y: scrollOffset.current + over, animated: true });
+      });
+    });
+    return () => subscription.remove();
+  }, []);
+
+  // Where each section's heading sits, for its chip to jump to.
+  const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
+  const chipsHeight = useRef(0);
+  const headings = useRef<Partial<Record<BoardColumn, ViewRef | null>>>({});
+  // Where it is now, not where it was first laid out: cards above it grow
+  // as messages arrive.
+  const jumpTo = (column: BoardColumn) => measure(headings.current[column] ?? null, ({ y }) => {
+    const target = scrollOffset.current + y - insets.top - chipsHeight.current - space.sm;
+    scrollRef.current?.scrollTo({ y: Math.max(0, target), animated: !reduceMotion });
   });
 
-  // Newest first, for a list that opens on the latest and stays there.
-  const rows = useMemo(() => chatItems(manager.entries).reverse(), [manager.entries]);
+  const colorAnchor = useRef<ViewRef>(null);
+  const hiddenAnchor = useRef<ViewRef>(null);
+  const openColorMenu = () => measure(colorAnchor.current, (anchor) => setMenu({
+    anchor,
+    title: "Color agents by",
+    items: AGENT_COLOR_CHOICES.map((choice) => ({
+      key: choice.value,
+      label: choice.label,
+      checked: prefs.colorBy === choice.value,
+      onPress: () => prefs.setColorBy(choice.value),
+    })),
+  }));
+  const openHiddenMenu = () => measure(hiddenAnchor.current, (anchor) => setMenu({
+    anchor,
+    title: "They come back by themselves when they need you.",
+    items: [
+      ...hidden.map((session) => ({
+        key: session.id,
+        label: session.name,
+        onPress: () => prefs.show(session.id),
+      })),
+      { key: "__all", label: "Show all", icon: "eye" as const, onPress: prefs.showAll },
+    ],
+  }));
 
-  // Whatever arrives while the conversation is open has been seen.
-  const [focused, setFocused] = useState(false);
-  useFocusEffect(useCallback(() => {
-    setFocused(true);
-    return () => setFocused(false);
-  }, []));
-  const { markRead, entries } = manager;
-  useEffect(() => {
-    if (focused) markRead();
-  }, [focused, entries, markRead]);
-
-  const reachable = store.connection === "online" && store.daemonOnline;
-  const confirmNewChat = () => {
-    Alert.alert(
-      "Start a new chat?",
-      "This conversation is set aside, and Agentman keeps what matters from it in its private notes. Cards still waiting stay.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "New chat",
-          onPress: () => {
-            void manager.reset().then((problem) => problem && images.setError(problem));
-          },
-        },
-      ],
-    );
+  const tintFor = (session: Session) => {
+    const hue = prefs.colorOf(session);
+    return hue ? agentCardTint(hue, color.surface) : undefined;
   };
-  const canSend = reachable && !manager.needsKey && !sending &&
-    (draft.trim().length > 0 || images.attachments.length > 0);
 
-  const send = async () => {
-    if (!canSend) return;
-    setSending(true);
-    // Sending always comes back to the latest, wherever the reader was.
-    listRef.current?.scrollToOffset({ offset: 0, animated: true });
-    try {
-      const uploadIds = await images.upload();
-      if (await manager.send(draft.trim(), uploadIds)) {
-        setDraft("");
-        images.clear();
-      }
-    } catch (reason) {
-      images.setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setSending(false);
-    }
+  const renderCard = (session: Session, column: BoardColumn) => (
+    <Animated.View
+      key={session.id}
+      layout={reduceMotion ? undefined : LinearTransition.duration(240)}
+      entering={reduceMotion ? undefined : FadeIn.duration(180)}
+      exiting={reduceMotion ? undefined : FadeOut.duration(140)}
+    >
+      <BoardCard
+        session={session}
+        column={column}
+        messages={store.messages[session.id]}
+        brief={manager.briefs[session.id]}
+        check={manager.verifications[session.id]}
+        goal={missionOf(missions, session.id)?.goal}
+        card={manager.openCards.find((card) =>
+          card.sessionId === session.id && (card.kind === "question" || card.kind === "needs_you"))}
+        answerAction={store.actions.find((action) => action.sessionId === session.id && action.kind === "answer")}
+        sendFailed={store.pending.some((item) => item.sessionId === session.id && item.status === "failed")}
+        online={store.daemonOnline}
+        focused={focused}
+        tint={tintFor(session)}
+        actions={actions}
+      />
+    </Animated.View>
+  );
+
+  const heading = (column: BoardColumn, title: string, count: number, trailing?: ReactNode) => (
+    <Animated.View
+      key={`heading-${column}`}
+      layout={reduceMotion ? undefined : LinearTransition.duration(240)}
+    >
+      <View
+        ref={(view) => {
+          headings.current[column] = view;
+        }}
+        collapsable={false}
+        style={styles.heading}
+      >
+      <View style={styles.headingGlyph}>
+        {column === "needsYou" && count > 0 ? (
+          <Feather name="alert-circle" size={14} color={color.needsYou} />
+        ) : column === "working" && count > 0 ? (
+          <Loader size={12} />
+        ) : (
+          <Feather name="circle" size={14} color={color.faint} />
+        )}
+      </View>
+      <Text style={styles.headingTitle} accessibilityRole="header">{title}</Text>
+      <Text style={styles.headingCount}>{count}</Text>
+      <View style={styles.headingGap} />
+      {trailing}
+      </View>
+    </Animated.View>
+  );
+
+  const anchorPosition = (anchor: Anchor) => {
+    // Near the foot of the screen a menu opens upward, clear of the Ask box.
+    if (anchor.y > window.height * 0.58) return { bottom: window.height - anchor.y + space.xs };
+    return { top: anchor.y + anchor.height + space.xs - insets.top };
   };
+
+  const needsYouCount = needsYou.length + offers.length;
 
   return (
     <KeyboardAvoidingView
       style={[styles.page, { paddingTop: insets.top }]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <View style={styles.header}>
-        <MotionPressable onPress={() => router.back()} hitSlop={12} style={styles.back}
-          accessibilityRole="button" accessibilityLabel="Back">
-          <Feather name="chevron-left" size={26} color={color.text} />
-        </MotionPressable>
-        <BrandMark size={34} ring={color.paper} />
-        <View style={styles.headerBody}>
-          <Text style={styles.title}>Agentman</Text>
-          <Text style={styles.subtitle} numberOfLines={1}>
-            {!reachable ? "Waiting for your Mac" : manager.thinking ? "Thinking…" : "Manages your agents"}
-          </Text>
-        </View>
-        {manager.entries.length > 0 ? (
-          <MotionPressable onPress={confirmNewChat} style={styles.headerIcon} hitSlop={8}
-            accessibilityRole="button" accessibilityLabel="New chat">
-            <Feather name="edit" size={17} color={color.textSecondary} />
-          </MotionPressable>
-        ) : null}
-        {manager.schedules.length > 0 ? (
-          <MotionPressable onPress={() => setSchedulesOpen((open) => !open)} style={styles.headerButton}
-            accessibilityRole="button" accessibilityLabel={`${manager.schedules.length} scheduled`}>
-            <Feather name="clock" size={15} color={color.textSecondary} />
-            <Text style={styles.headerButtonText}>{manager.schedules.length}</Text>
-          </MotionPressable>
-        ) : null}
-      </View>
-
-      {schedulesOpen ? <Schedules onClose={() => setSchedulesOpen(false)} /> : null}
-
-      <View style={styles.feed}>
-      <FlatList
-        ref={listRef}
-        style={styles.feed}
-        data={rows}
-        inverted
-        maintainVisibleContentPosition={KEEP_READING}
+      <ScrollView
+        ref={scrollRef}
+        style={styles.scroll}
+        contentContainerStyle={{ paddingBottom: space.xl }}
+        stickyHeaderIndices={[1]}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         onScroll={(event) => {
-          const away = event.nativeEvent.contentOffset.y > SCROLL_AWAY;
-          if (away !== scrolledAway) setScrolledAway(away);
+          scrollOffset.current = event.nativeEvent.contentOffset.y;
         }}
         scrollEventThrottle={64}
-        keyExtractor={(item) => item.key}
-        renderItem={({ item }) => <Row item={item} />}
-        contentContainerStyle={styles.list}
-        keyboardDismissMode="interactive"
-        keyboardShouldPersistTaps="handled"
-        onEndReached={() => void manager.loadOlder()}
-        onEndReachedThreshold={0.4}
-        ListHeaderComponent={
-          manager.thinking && manager.entries.at(-1)?.streaming !== true ? (
-            <View style={styles.thinking}><Thinking label="Thinking" /></View>
-          ) : undefined
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            tintColor={color.faint}
+            onRefresh={() => {
+              setRefreshing(true);
+              store.refresh();
+              void manager.reload();
+              setTimeout(() => setRefreshing(false), 600);
+            }}
+          />
         }
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            {manager.loaded || !reachable ? (
-              <>
-                {color.look === "site" ? (
-                  <StickerOnDots name="mascot" size={scaled(150)} />
-                ) : (
-                  <BrandMark size={44} ring={color.paper} />
-                )}
-                <Text style={styles.emptyTitle}>Ask Agentman about your agents</Text>
-                <Text style={styles.emptyText}>
-                  What everyone is doing, what changed, what needs you. It reads them so you don't have to.
-                </Text>
-              </>
-            ) : (
-              <ActivityIndicator color={color.faint} />
-            )}
-          </View>
-        }
-      />
-      <ScrollToLatest
-        visible={scrolledAway}
-        onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
-      />
-      </View>
-
-      <View
-        style={[styles.composer, { paddingBottom: Math.max(insets.bottom, space.sm) }]}
-        onLayout={(event) => setComposerHeight(event.nativeEvent.layout.height)}
       >
-        {manager.problem ? <Text style={styles.problem}>{manager.problem}</Text> : null}
-        {images.error ? <Text style={styles.problem}>{images.error}</Text> : null}
-        {manager.needsKey ? (
-          <View style={styles.notice}>
-            <Feather name="key" size={14} color={color.muted} />
-            <View style={styles.noticeBody}>
-              <Text style={styles.noticeText}>
-                {settings?.provider === "gemini" ? "This model runs on your Gemini API key" : "This model runs on your Anthropic API key"}.
-                Add it in Agentman on your Mac; it never leaves the Mac.
+        <ContentColumn style={styles.gutter}>
+          <View style={styles.topBar}>
+            <MotionPressable onPress={() => router.back()} hitSlop={10} style={styles.back}
+              accessibilityRole="button" accessibilityLabel="Back">
+              <Feather name="chevron-left" size={26} color={color.text} />
+            </MotionPressable>
+            <View style={styles.connection}>
+              <View style={[styles.connectionDot, { backgroundColor: connected ? color.ok : color.error }]} />
+              <Text style={styles.connectionText} numberOfLines={1}>
+                {connected ? "Mac connected" : store.connection === "incompatible" ? "Update required" : "Reconnecting"}
               </Text>
-              {settings ? (
-                <MotionPressable onPress={() => setModelMenu(true)} hitSlop={8} accessibilityRole="button">
-                  <Text style={styles.noticeAction}>Switch model</Text>
-                </MotionPressable>
-              ) : null}
             </View>
-          </View>
-        ) : (
-          <View style={[styles.field, images.attachments.length > 0 && styles.fieldWithImages]}>
-            <AttachmentStrip attachments={images.attachments} onRemove={images.remove} />
-            {/* Where the box's own Paste can take an image (iOS and the web),
-              that is how a copied screenshot goes in; elsewhere a long press
-              pastes it. */}
-            <Pressable
-              onLongPress={
-                pasteTakesImages
-                  ? undefined
-                  : () => {
-                      if (images.clipboardReady && images.canAdd) void images.paste();
-                    }
-              }
-              delayLongPress={400}
-              accessibilityLabel={images.clipboardReady && !pasteTakesImages ? "Hold to paste the image on the clipboard" : undefined}
-            >
-              <TextInput
-                style={styles.input}
-                value={draft}
-                onChangeText={setDraft}
-                onFocus={() => setInputFocused(true)}
-                onBlur={() => setInputFocused(false)}
-                placeholder={reachable ? "Ask Agentman about your agents" : "Waiting for your Mac…"}
-                placeholderTextColor={color.faint}
-                multiline
-                editable={reachable}
-              />
-            </Pressable>
-            <View style={styles.toolbar}>
-              <MotionPressable
-                onPress={() =>
-                  chooseImageSource(images.clipboardReady, (source) =>
-                    void (source === "paste" ? images.paste() : images.pick()),
-                  )
-                }
-                style={styles.attach}
-                disabled={!reachable || !images.canAdd || images.busy}
-                accessibilityRole="button"
-                accessibilityLabel="Add an image"
-              >
-                {images.busy ? (
-                  <ActivityIndicator size="small" color={color.faint} />
-                ) : (
-                  <Feather name="plus" size={20} color={reachable ? color.textSecondary : color.faint} />
-                )}
+            <View style={styles.topGap} />
+            <View ref={colorAnchor} collapsable={false}>
+              <MotionPressable onPress={openColorMenu} hitSlop={6} style={styles.iconButton} pressedScale={0.94}
+                accessibilityRole="button" accessibilityLabel="Color agents by">
+                <Feather name="droplet" size={17} color={prefs.colorBy === "none" ? color.textSecondary : color.working} />
               </MotionPressable>
-              <View style={styles.toolbarGap} />
-              {settings ? (
-                <MotionPressable onPress={() => setModelMenu(true)} style={styles.modelButton} hitSlop={6}
-                  accessibilityRole="button" accessibilityLabel={`Model ${modelName(settings.chatModel)}. Switch model`}>
-                  <Text style={styles.modelText} numberOfLines={1}>{modelName(settings.chatModel)}</Text>
-                  <Feather name="chevron-down" size={13} color={color.muted} />
+            </View>
+            {manager.supported ? (
+              <MotionPressable onPress={openChat} hitSlop={6} style={styles.iconButton} pressedScale={0.94}
+                accessibilityRole="button"
+                accessibilityLabel={`Open the conversation with Agentman${manager.unread > 0 ? `. ${manager.unread} new` : ""}`}>
+                <Feather name="message-circle" size={18} color={color.textSecondary} />
+                {manager.unread > 0 ? <View style={styles.unreadDot} /> : null}
+              </MotionPressable>
+            ) : null}
+            <MotionPressable onPress={() => router.push("/new-session")} disabled={!store.daemonOnline}
+              hitSlop={6} style={styles.iconButton} pressedScale={0.94}
+              accessibilityRole="button" accessibilityLabel="New agent">
+              <Feather name="plus" size={20} color={store.daemonOnline ? color.textSecondary : color.faint} />
+            </MotionPressable>
+            <MotionPressable onPress={() => router.push("/settings")} hitSlop={6} style={styles.iconButton}
+              pressedScale={0.94} accessibilityRole="button" accessibilityLabel="Settings">
+              <Feather name="settings" size={17} color={color.textSecondary} />
+            </MotionPressable>
+          </View>
+
+          <Text style={styles.title} accessibilityRole="header">{brief.title}</Text>
+          {brief.detail ? <Text style={styles.detail}>{brief.detail}</Text> : null}
+          {showsStart ? (
+            <MotionPressable onPress={() => router.push("/new-session")} style={styles.startButton}
+              accessibilityRole="button" accessibilityLabel="New agent">
+              <Feather name="plus" size={16} color={color.onInverse} />
+              <Text style={styles.startText}>New agent</Text>
+            </MotionPressable>
+          ) : null}
+        </ContentColumn>
+
+        <View
+          style={styles.chipBand}
+          onLayout={(event) => {
+            chipsHeight.current = event.nativeEvent.layout.height;
+          }}
+        >
+          {needsYouCount + working.length + idle.length > 0 || folderFilter ? (
+          <ContentColumn>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}
+              keyboardShouldPersistTaps="handled">
+              {folderFilter ? (
+                <MotionPressable onPress={() => store.setFolderFilter(null)} style={[styles.chip, styles.folderChip]}
+                  pressedScale={0.96} accessibilityRole="button"
+                  accessibilityLabel={`Showing ${folderLabel(folderFilter)}. Show every folder`}>
+                  <Feather name="folder" size={13} color={color.muted} />
+                  <Text style={styles.chipLabel} numberOfLines={1}>{folderLabel(folderFilter)}</Text>
+                  <Feather name="x" size={13} color={color.faint} />
                 </MotionPressable>
               ) : null}
-              <VoiceButton
-                disabled={!reachable}
-                onText={(spoken) => setDraft((current) => addSpoken(current, spoken))}
-                onProblem={(message) => Alert.alert("Voice", message)}
-              />
-              {manager.thinking ? (
-                <MotionPressable onPress={manager.stop} style={styles.send}
-                  accessibilityRole="button" accessibilityLabel="Stop Agentman">
-                  <Feather name="square" size={13} color={color.onAccent} />
+              <StateChip label="Needs you" count={needsYouCount} tint={color.needsYouText} onPress={() => jumpTo("needsYou")} />
+              <StateChip label="Working" count={working.length} tint={color.working} onPress={() => jumpTo("working")} />
+              <StateChip label="Idle" count={idle.length} tint={color.muted} onPress={() => jumpTo("idle")} />
+            </ScrollView>
+          </ContentColumn>
+          ) : null}
+        </View>
+
+        <ContentColumn style={styles.gutter}>
+          <View style={styles.stack}>
+            {needsYouCount > 0 || moreCards > 0 ? heading("needsYou", "Needs you", needsYouCount) : null}
+            {moreCards > 0 ? (
+              <Animated.View key="more-cards" layout={reduceMotion ? undefined : LinearTransition.duration(240)}>
+                <MotionPressable onPress={openChat} pressedScale={0.99} style={styles.moreCards}
+                  accessibilityRole="button" accessibilityLabel={`${moreCards} more in your conversation with Agentman. Open`}>
+                  <Text style={styles.moreCardsText}>
+                    {moreCards} more in your conversation with Agentman
+                  </Text>
+                  <Feather name="chevron-right" size={15} color={color.faint} />
                 </MotionPressable>
-              ) : (
-                <MotionPressable onPress={() => void send()} disabled={!canSend}
-                  style={[styles.send, !canSend && styles.sendDisabled]}
-                  accessibilityRole="button" accessibilityLabel="Send to Agentman">
-                  {sending ? (
-                    <ActivityIndicator size="small" color={color.onAccent} />
-                  ) : (
-                    <Feather name="arrow-up" size={18} color={canSend ? color.onAccent : color.faint} />
-                  )}
-                </MotionPressable>
-              )}
-            </View>
+              </Animated.View>
+            ) : null}
+            {offers.map((card) => (
+              <Animated.View key={`offer-${card.id}`} layout={reduceMotion ? undefined : LinearTransition.duration(240)}>
+                <BoardOfferCard card={card} online={store.daemonOnline} actions={actions} />
+              </Animated.View>
+            ))}
+            {needsYou.map((session) => renderCard(session, "needsYou"))}
+
+            {working.length > 0 || missions.length > 0 ? heading("working", "Working", working.length) : null}
+            {missions.map((mission) => (
+              <Animated.View key={`mission-${mission.id}`} layout={reduceMotion ? undefined : LinearTransition.duration(240)}>
+                <BoardMissionRow mission={mission} />
+              </Animated.View>
+            ))}
+            {working.map((session) => renderCard(session, "working"))}
+
+            {idle.length > 0 || hidden.length > 0
+              ? heading("idle", "Idle", idle.length, hidden.length > 0 ? (
+                  <View ref={hiddenAnchor} collapsable={false}>
+                    <MotionPressable onPress={openHiddenMenu} hitSlop={12} style={styles.hiddenControl}
+                      accessibilityRole="button" accessibilityLabel={`${hidden.length} hidden. Show them`}>
+                      <Feather name="eye-off" size={12} color={color.muted} />
+                      <Text style={styles.hiddenText}>{hidden.length} hidden</Text>
+                    </MotionPressable>
+                  </View>
+                ) : null)
+              : null}
+            {idle.map((session) => renderCard(session, "idle"))}
           </View>
-        )}
-      </View>
-      {modelMenu ? (
+        </ContentColumn>
+      </ScrollView>
+
+      {manager.supported ? (
+        <View onLayout={(event) => { askBarHeight.current = event.nativeEvent.layout.height; }}>
+          <AskBar onOpenConversation={openChat} />
+        </View>
+      ) : null}
+
+      <BoardSheet open={chatOpen} onClose={closeChat}>
+        <AgentmanChat open={chatOpen} onClose={closeChat} keyboardOffset={boardSheetTop(insets.top)} />
+      </BoardSheet>
+
+      {menu ? (
         <Popover
           visible
-          onDismiss={() => setModelMenu(false)}
-          bottom={composerHeight + space.xs}
+          onDismiss={() => setMenu(null)}
+          {...anchorPosition(menu.anchor)}
           align="right"
-          title="Agentman runs on"
-          items={modelItems}
+          title={menu.title}
+          items={menu.items}
         />
       ) : null}
     </KeyboardAvoidingView>
   );
 }
 
-function Row({ item }: { item: ChatItem }) {
-  if (item.kind === "activities") return <ActivityRun entries={item.entries} />;
-  if (item.kind === "image") return <ImageActivity entry={item.entry} />;
-  return <EntryRow entry={item.entry} />;
-}
-
-function EntryRow({ entry }: { entry: ManagerEntry }) {
+function StateChip({
+  label,
+  count,
+  tint,
+  onPress,
+}: {
+  label: string;
+  count: number;
+  tint: string;
+  onPress(): void;
+}) {
   const styles = useStyles(makeStyles);
-  const { color } = useTheme();
-  switch (entry.role) {
-    case "user":
-      return (
-        <View style={styles.userRow}>
-          {entry.images && entry.images.length > 0 ? <KeptImages names={entry.images} /> : null}
-          {entry.text ? (
-            <View style={styles.bubble}>
-              <Text style={styles.bubbleText} selectable>{entry.text}</Text>
-            </View>
-          ) : null}
-        </View>
-      );
-    case "assistant":
-      return entry.text ? <Markdown>{entry.text}</Markdown> : <Thinking label="Writing" />;
-    case "brief":
-    case "agent":
-      return <BriefCard entry={entry} />;
-    case "card":
-      return entry.card ? <ManagerCardView card={entry.card} /> : null;
-    case "scheduled":
-      return (
-        <View style={styles.quietLine}>
-          <Feather name="clock" size={12} color={color.faint} />
-          <Text style={styles.quietText}>{entry.text}</Text>
-        </View>
-      );
-    case "compacted":
-      return (
-        <View style={styles.divider} accessibilityLabel={entry.text}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>{entry.text}</Text>
-          <View style={styles.dividerLine} />
-        </View>
-      );
-    case "error":
-      return (
-        <View style={styles.quietLine}>
-          <Feather name="alert-circle" size={12} color={color.errorText} />
-          <Text style={[styles.quietText, { color: color.errorText }]}>{entry.text}</Text>
-        </View>
-      );
-    default:
-      return <Text style={styles.quietText}>{entry.text}</Text>;
-  }
-}
-
-/** An icon for what Agentman did. */
-function activityIcon(tool?: string): keyof typeof Feather.glyphMap {
-  switch (tool) {
-    case "send_to_agent": return "send";
-    case "answer_question": return "message-square";
-    case "approve": return "shield";
-    case "interrupt": return "stop-circle";
-    case "dismiss_card": return "x-circle";
-    case "give_key": return "key";
-    case "search_knowledge":
-    case "read_knowledge":
-    case "save_knowledge": return "book-open";
-    case "update_instructions": return "file-text";
-    case "view_image": return "image";
-    default: return "eye";
-  }
-}
-
-/** Agentman's tool calls, in the same soft card as an agent's: one line for
- *  one thing it did, a line that opens for several. */
-function ActivityRun({ entries }: { entries: ManagerEntry[] }) {
-  const styles = useStyles(makeStyles);
-  const { color } = useTheme();
-  const [open, setOpen] = useState(false);
-  const last = entries[entries.length - 1];
-  const step = (entry: ManagerEntry) => (
-    <View key={entry.id} style={styles.activityRow}>
-      <Feather name={activityIcon(entry.tool)} size={12} color={color.faint} />
-      <Text style={styles.activityText} numberOfLines={2}>{entry.text}</Text>
-    </View>
-  );
-  if (entries.length === 1) return <View style={styles.toolCard}>{step(last)}</View>;
-  return (
-    <View style={styles.toolCard}>
-      <MotionPressable onPress={() => setOpen((value) => !value)} style={styles.activityRow} pressedScale={0.995}
-        accessibilityRole="button" accessibilityState={{ expanded: open }}>
-        <Feather name={activityIcon(last.tool)} size={12} color={color.muted} />
-        <Text style={[styles.activityText, styles.activityHead]} numberOfLines={1}>{last.text}</Text>
-        <Text style={styles.activityMore}>and {entries.length - 1} more</Text>
-        <Feather name={open ? "chevron-down" : "chevron-right"} size={14} color={color.faint} />
-      </MotionPressable>
-      {open ? <View style={styles.activitySteps}>{entries.map(step)}</View> : null}
-    </View>
-  );
-}
-
-/** An image Agentman looked at: the step in its card, the picture under it. */
-function ImageActivity({ entry }: { entry: ManagerEntry }) {
-  const styles = useStyles(makeStyles);
-  const { color } = useTheme();
-  if (!entry.sessionId || !entry.path) return null;
-  return (
-    <View style={styles.imageActivity}>
-      <View style={styles.toolCard}>
-        <View style={styles.activityRow}>
-          <Feather name="image" size={12} color={color.faint} />
-          <Text style={styles.activityText} numberOfLines={1}>{entry.text}</Text>
-        </View>
-      </View>
-      <SeenImage sessionId={entry.sessionId} target={{ path: entry.path, request: "read_seen_file" }} />
-    </View>
-  );
-}
-
-/** News from one agent, as Agentman put it, with the way to that agent. */
-function BriefCard({ entry }: { entry: ManagerEntry }) {
-  const styles = useStyles(makeStyles);
-  const { color } = useTheme();
-  const store = useStore();
-  const manager = useManager();
-  const router = useRouter();
-  const session = entry.sessionId ? store.findSession(entry.sessionId) : undefined;
-  const brief = entry.sessionId ? manager.briefs[entry.sessionId] : undefined;
-  const name = session?.name ?? brief?.name ?? "An agent";
-  return (
-    <SwipeToDismiss onDismiss={() => void manager.close(entry)} accessibilityLabel={`News about ${name}`}>
-      <MotionPressable
-        onPress={() => session && router.push(`/session/${encodeURIComponent(session.id)}`)}
-        disabled={!session}
-        style={styles.brief}
-        pressedScale={0.99}
-        accessibilityRole={session ? "button" : "text"}
-      >
-        <View style={styles.briefHead}>
-          <AgentIcon kind={session?.kind ?? ""} size={20} />
-          <Text style={styles.briefName} numberOfLines={1}>{name}</Text>
-          {session ? <Feather name="chevron-right" size={16} color={color.faint} /> : null}
-          {/* Closes it here and on the Mac; so does a swipe. */}
-          <MotionPressable onPress={() => void manager.close(entry)} hitSlop={10} style={styles.briefClose}
-            accessibilityRole="button" accessibilityLabel={`Close the news about ${name}`}>
-            <Feather name="x" size={16} color={color.muted} />
-          </MotionPressable>
-        </View>
-        <Text style={styles.briefText} selectable>{entry.text}</Text>
-        {brief?.needsYou ? <Text style={styles.briefNeeds}>{brief.needsYou}</Text> : null}
-      </MotionPressable>
-    </SwipeToDismiss>
-  );
-}
-
-/** Pictures the user sent Agentman, read back from the Mac. */
-function KeptImages({ names }: { names: string[] }) {
-  const styles = useStyles(makeStyles);
-  return (
-    <View style={styles.keptRow}>
-      {names.map((name) => <KeptImage key={name} name={name} />)}
-    </View>
-  );
-}
-
-function KeptImage({ name }: { name: string }) {
-  const styles = useStyles(makeStyles);
-  const { color } = useTheme();
-  const manager = useManager();
-  const router = useRouter();
-  const [uri, setUri] = useState<string | null>(null);
-  const [gone, setGone] = useState(false);
-  useEffect(() => {
-    let current = true;
-    void manager.keptImage(name).then((found) => {
-      if (!current) return;
-      if (found) setUri(found);
-      else setGone(true);
-    });
-    return () => {
-      current = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name]);
-  if (gone) {
-    return (
-      <View style={[styles.kept, styles.keptGone]}>
-        <Feather name="image" size={16} color={color.muted} />
-        <Text style={styles.keptGoneText}>Sent image</Text>
-      </View>
-    );
-  }
   return (
     <MotionPressable
-      onPress={() => router.push(`/agentman-image?name=${encodeURIComponent(name)}`)}
-      disabled={!uri}
-      style={styles.kept}
-      accessibilityRole="imagebutton"
-      accessibilityLabel="Sent image. Open full screen"
+      onPress={onPress}
+      disabled={count === 0}
+      style={styles.chip}
+      pressedScale={0.96}
+      accessibilityRole="button"
+      accessibilityLabel={`${count} ${label}. Jump to them`}
     >
-      {uri ? <Image source={{ uri }} style={styles.keptImage} resizeMode="cover" /> : null}
+      <Text style={[styles.chipCount, { color: count > 0 ? tint : styles.chipLabel.color }]}>{count}</Text>
+      <Text style={styles.chipLabel}>{label}</Text>
     </MotionPressable>
   );
 }
 
-/** What Agentman has scheduled for itself, each one cancellable. */
-function Schedules({ onClose }: { onClose(): void }) {
-  const styles = useStyles(makeStyles);
-  const { color } = useTheme();
-  const manager = useManager();
-  const [problem, setProblem] = useState<string | null>(null);
-  const describe = (schedule: ManagerSchedule) => {
-    const when = new Date(schedule.due).toLocaleString(undefined, {
-      weekday: "short", hour: "numeric", minute: "2-digit",
-    });
-    if (schedule.kind === "watch") return `Watching ${schedule.agentName ?? "an agent"} · until ${when}`;
-    return schedule.every ? `Every ${Math.round(schedule.every / 60)} min · next ${when}` : when;
-  };
-  return (
-    <View style={styles.schedules}>
-      <View style={styles.schedulesHead}>
-        <Text style={styles.schedulesTitle}>Scheduled</Text>
-        <MotionPressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
-          <Feather name="x" size={16} color={color.muted} />
-        </MotionPressable>
-      </View>
-      {manager.schedules.map((schedule) => (
-        <View key={schedule.id} style={styles.scheduleRow}>
-          <Feather name={schedule.kind === "watch" ? "eye" : "clock"} size={13} color={color.muted} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.scheduleText} numberOfLines={2}>{schedule.text}</Text>
-            <Text style={styles.scheduleWhen}>{describe(schedule)}</Text>
-          </View>
-          <MotionPressable
-            onPress={() => void manager.cancelSchedule(schedule).then(setProblem)}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Cancel"
-          >
-            <Text style={styles.cancel}>Cancel</Text>
-          </MotionPressable>
-        </View>
-      ))}
-      {problem ? <Text style={styles.problem}>{problem}</Text> : null}
-    </View>
-  );
-}
-
-const makeSiteStyles = (c: Palette) =>
+const makeStyles = (c: Palette) =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: c.paper },
-    header: {
+    scroll: { flex: 1 },
+    gutter: { paddingHorizontal: space.lg },
+    topBar: { flexDirection: "row", alignItems: "center", gap: 6, paddingTop: space.md },
+    back: { width: 26, height: 38, alignItems: "center", justifyContent: "center", marginLeft: -4 },
+    connection: {
+      flexShrink: 1,
       flexDirection: "row",
       alignItems: "center",
-      gap: space.sm,
+      gap: 7,
+      height: 32,
       paddingHorizontal: space.md,
-      paddingTop: space.xs,
-      paddingBottom: space.sm,
-    },
-    back: { width: 30, height: 38, alignItems: "center", justifyContent: "center" },
-    headerBody: { flex: 1, marginLeft: 2 },
-    title: heading(c, scaled(17)),
-    subtitle: { ...font.sans, fontSize: size.label, color: c.muted },
-    headerButton: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 5,
-      height: 32,
-      paddingHorizontal: 11,
       borderRadius: radius.pill,
-      backgroundColor: c.surface,
-      ...edged(c, 2),
-    },
-    headerButtonText: { ...font.sansMedium, fontSize: size.label, color: c.textSecondary },
-    headerIcon: { width: 36, height: 36, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", backgroundColor: c.surface, ...edged(c, 2) },
-    divider: { flexDirection: "row", alignItems: "center", gap: space.sm },
-    dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: c.line },
-    dividerText: { ...font.sans, fontSize: size.label, color: c.faint },
-    feed: { flex: 1 },
-    list: { paddingHorizontal: space.lg, paddingVertical: space.lg, gap: space.lg },
-    thinking: { paddingVertical: space.xs },
-    empty: { alignItems: "center", gap: space.sm, paddingHorizontal: space.xl, paddingVertical: space.xxxl },
-    emptyTitle: { ...heading(c, scaled(24)), textAlign: "center", marginTop: space.xs },
-    emptyText: { ...font.sans, fontSize: size.caption, color: c.muted, textAlign: "center", lineHeight: scaled(19) },
-
-    userRow: { alignItems: "flex-end", gap: space.sm, paddingLeft: space.xxl },
-    bubble: {
-      backgroundColor: c.bubble,
-      borderRadius: radius.lg,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-    },
-    bubbleText: { ...font.sans, fontSize: size.reading, lineHeight: scaled(23), color: c.text },
-    keptRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: space.sm },
-    kept: {
-      width: 110,
-      height: 110,
-      borderRadius: radius.lg,
-      overflow: "hidden",
-      backgroundColor: c.fill,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.line,
-    },
-    keptImage: { width: "100%", height: "100%" },
-    keptGone: { alignItems: "center", justifyContent: "center", gap: space.xs },
-    keptGoneText: { ...font.sans, fontSize: size.caption, color: c.muted },
-
-    toolCard: {
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-      borderRadius: radius.md,
       borderWidth: 1,
-      borderColor: c.toolCardEdge,
-      backgroundColor: c.toolCard,
-    },
-    activityRow: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 22 },
-    activityText: { flex: 1, ...font.sans, fontSize: size.caption, color: c.textSecondary },
-    activityHead: { color: c.muted },
-    activityMore: { ...font.sans, fontSize: size.caption, color: c.faint },
-    activitySteps: { gap: 6, paddingTop: 6, paddingLeft: space.lg },
-    imageActivity: { gap: space.sm },
-
-    brief: {
-      gap: 6,
-      padding: 14,
-      borderRadius: radius.lg,
-      ...edged(c, 3),
+      borderColor: c.line,
       backgroundColor: c.surface,
     },
-    briefHead: { flexDirection: "row", alignItems: "center", gap: space.sm },
-    briefName: { flex: 1, ...font.sansMedium, fontSize: size.body, color: c.text },
-    briefClose: { width: 24, height: 24, marginRight: -4, alignItems: "center", justifyContent: "center" },
-    briefText: { ...font.sans, fontSize: size.reading, lineHeight: scaled(23), color: c.textSecondary },
-    briefNeeds: { ...font.sans, fontSize: size.caption, color: c.needsYouText },
-
-    quietLine: { flexDirection: "row", alignItems: "center", gap: 6 },
-    quietText: { flex: 1, ...font.sans, fontSize: size.caption, color: c.faint },
-
-    schedules: {
-      marginHorizontal: space.lg,
-      marginBottom: space.sm,
-      padding: space.md,
-      gap: space.sm,
-      borderRadius: radius.lg,
-      ...edged(c, 3),
-      backgroundColor: c.surface,
-    },
-    schedulesHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-    schedulesTitle: { ...font.sansMedium, fontSize: size.caption, color: c.muted },
-    scheduleRow: { flexDirection: "row", alignItems: "center", gap: space.sm },
-    scheduleText: { ...font.sans, fontSize: size.caption, color: c.text },
-    scheduleWhen: { ...font.sans, fontSize: size.label, color: c.faint },
-    cancel: { ...font.sansMedium, fontSize: size.label, color: c.errorText },
-
-    composer: { paddingHorizontal: space.lg, paddingTop: space.sm, gap: space.xs, backgroundColor: c.paper },
-    problem: { ...font.sans, fontSize: size.label, color: c.errorText, paddingHorizontal: space.xs },
-    notice: {
-      flexDirection: "row",
-      alignItems: "flex-start",
-      gap: space.sm,
-      padding: space.md,
-      borderRadius: radius.lg,
-      backgroundColor: c.cream,
-      ...edged(c),
-    },
-    noticeBody: { flex: 1, gap: space.xs },
-    noticeText: { ...font.sans, fontSize: size.caption, lineHeight: scaled(19), color: c.textSecondary },
-    noticeAction: { ...font.sansMedium, fontSize: size.caption, color: c.working },
-    field: {
-      backgroundColor: c.surface,
-      borderRadius: radius.xxl,
-      ...edged(c, 3),
-      paddingHorizontal: 6,
-      paddingTop: 4,
-      paddingBottom: 6,
-    },
-    fieldWithImages: { borderRadius: radius.lg, paddingTop: space.sm, paddingLeft: space.sm },
-    input: {
-      minHeight: 38,
-      maxHeight: 120,
-      paddingHorizontal: 10,
-      paddingTop: space.sm,
-      paddingBottom: space.xs,
-      ...font.sans,
-      fontSize: size.body,
-      color: c.text,
-    },
-    toolbar: { flexDirection: "row", alignItems: "center", gap: space.xs },
-    modelButton: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 3,
-      height: 32,
-      maxWidth: 200,
-      paddingHorizontal: 10,
+    connectionDot: { width: 7, height: 7, borderRadius: 4 },
+    connectionText: { flexShrink: 1, ...font.sansMedium, fontSize: size.label, color: c.textSecondary },
+    topGap: { flex: 1 },
+    iconButton: {
+      width: 38,
+      height: 38,
       borderRadius: radius.pill,
-    },
-    modelText: { flexShrink: 1, ...font.sansMedium, fontSize: scaled(13), color: c.muted },
-    toolbarGap: { flex: 1 },
-    attach: { width: 34, height: 34, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
-    send: {
-      width: 36,
-      height: 36,
-      borderRadius: radius.pill,
-      backgroundColor: c.flood,
       alignItems: "center",
       justifyContent: "center",
-    },
-    sendDisabled: { backgroundColor: c.fill },
-  });
-
-const makeClassicStyles = (c: Palette) =>
-  StyleSheet.create({
-    page: { flex: 1, backgroundColor: c.paper },
-    header: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: space.sm,
-      paddingHorizontal: space.md,
-      paddingTop: space.xs,
-      paddingBottom: space.sm,
-    },
-    back: { width: 30, height: 38, alignItems: "center", justifyContent: "center" },
-    headerBody: { flex: 1, marginLeft: 2 },
-    title: { ...font.sansMedium, fontSize: size.body, color: c.text },
-    subtitle: { ...font.sans, fontSize: size.label, color: c.muted },
-    headerButton: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 5,
-      height: 32,
-      paddingHorizontal: 11,
-      borderRadius: radius.pill,
-      backgroundColor: c.fill,
-    },
-    headerButtonText: { ...font.sansMedium, fontSize: size.label, color: c.textSecondary },
-    headerIcon: { width: 36, height: 36, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", backgroundColor: c.fill },
-    divider: { flexDirection: "row", alignItems: "center", gap: space.sm },
-    dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: c.line },
-    dividerText: { ...font.sans, fontSize: size.label, color: c.faint },
-    feed: { flex: 1 },
-    list: { paddingHorizontal: space.lg, paddingVertical: space.lg, gap: space.lg },
-    thinking: { paddingVertical: space.xs },
-    empty: { alignItems: "center", gap: space.sm, paddingHorizontal: space.xl, paddingVertical: space.xxxl },
-    emptyTitle: { ...font.sansMedium, fontSize: size.body, color: c.text, marginTop: space.sm },
-    emptyText: { ...font.sans, fontSize: size.caption, color: c.muted, textAlign: "center", lineHeight: scaled(19) },
-
-    userRow: { alignItems: "flex-end", gap: space.sm, paddingLeft: space.xxl },
-    bubble: {
-      backgroundColor: c.fill,
-      borderRadius: radius.lg,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-    },
-    bubbleText: { ...font.sans, fontSize: size.reading, lineHeight: scaled(23), color: c.text },
-    keptRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: space.sm },
-    kept: {
-      width: 110,
-      height: 110,
-      borderRadius: radius.lg,
-      overflow: "hidden",
-      backgroundColor: c.fill,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.line,
-    },
-    keptImage: { width: "100%", height: "100%" },
-    keptGone: { alignItems: "center", justifyContent: "center", gap: space.xs },
-    keptGoneText: { ...font.sans, fontSize: size.caption, color: c.muted },
-
-    toolCard: {
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: c.toolCardEdge,
-      backgroundColor: c.toolCard,
-    },
-    activityRow: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 22 },
-    activityText: { flex: 1, ...font.sans, fontSize: size.caption, color: c.textSecondary },
-    activityHead: { color: c.muted },
-    activityMore: { ...font.sans, fontSize: size.caption, color: c.faint },
-    activitySteps: { gap: 6, paddingTop: 6, paddingLeft: space.lg },
-    imageActivity: { gap: space.sm },
-
-    brief: {
-      gap: 6,
-      padding: 14,
-      borderRadius: radius.lg,
       borderWidth: 1,
       borderColor: c.line,
       backgroundColor: c.surface,
     },
-    briefHead: { flexDirection: "row", alignItems: "center", gap: space.sm },
-    briefName: { flex: 1, ...font.sansMedium, fontSize: size.body, color: c.text },
-    briefClose: { width: 24, height: 24, marginRight: -4, alignItems: "center", justifyContent: "center" },
-    briefText: { ...font.sans, fontSize: size.reading, lineHeight: scaled(23), color: c.textSecondary },
-    briefNeeds: { ...font.sans, fontSize: size.caption, color: c.needsYouText },
-
-    quietLine: { flexDirection: "row", alignItems: "center", gap: 6 },
-    quietText: { flex: 1, ...font.sans, fontSize: size.caption, color: c.faint },
-
-    schedules: {
-      marginHorizontal: space.lg,
-      marginBottom: space.sm,
-      padding: space.md,
-      gap: space.sm,
-      borderRadius: radius.lg,
+    unreadDot: {
+      position: "absolute",
+      top: 7,
+      right: 8,
+      width: 7,
+      height: 7,
+      borderRadius: 4,
+      backgroundColor: c.needsYou,
       borderWidth: 1,
-      borderColor: c.line,
-      backgroundColor: c.surface,
+      borderColor: c.surface,
     },
-    schedulesHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-    schedulesTitle: { ...font.sansMedium, fontSize: size.caption, color: c.muted },
-    scheduleRow: { flexDirection: "row", alignItems: "center", gap: space.sm },
-    scheduleText: { ...font.sans, fontSize: size.caption, color: c.text },
-    scheduleWhen: { ...font.sans, fontSize: size.label, color: c.faint },
-    cancel: { ...font.sansMedium, fontSize: size.label, color: c.errorText },
-
-    composer: { paddingHorizontal: space.lg, paddingTop: space.sm, gap: space.xs, backgroundColor: c.paper },
-    problem: { ...font.sans, fontSize: size.label, color: c.errorText, paddingHorizontal: space.xs },
-    notice: {
-      flexDirection: "row",
-      alignItems: "flex-start",
-      gap: space.sm,
-      padding: space.md,
-      borderRadius: radius.lg,
-      backgroundColor: c.fill,
-    },
-    noticeBody: { flex: 1, gap: space.xs },
-    noticeText: { ...font.sans, fontSize: size.caption, lineHeight: scaled(19), color: c.textSecondary },
-    noticeAction: { ...font.sansMedium, fontSize: size.caption, color: c.working },
-    field: {
-      backgroundColor: c.surface,
-      borderRadius: radius.xxl,
-      borderWidth: 1,
-      borderColor: c.line,
-      paddingHorizontal: 6,
-      paddingTop: 4,
-      paddingBottom: 6,
-    },
-    fieldWithImages: { borderRadius: radius.lg, paddingTop: space.sm, paddingLeft: space.sm },
-    input: {
-      minHeight: 38,
-      maxHeight: 120,
-      paddingHorizontal: 10,
-      paddingTop: space.sm,
-      paddingBottom: space.xs,
-      ...font.sans,
-      fontSize: size.body,
+    title: {
+      ...font.sansBold,
+      fontSize: scaled(25),
+      lineHeight: scaled(31),
+      letterSpacing: -0.3,
       color: c.text,
+      marginTop: space.lg,
     },
-    toolbar: { flexDirection: "row", alignItems: "center", gap: space.xs },
-    modelButton: {
+    detail: { ...font.sans, fontSize: size.caption, lineHeight: scaled(19), color: c.muted, marginTop: space.xs },
+    startButton: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 3,
-      height: 32,
-      maxWidth: 200,
-      paddingHorizontal: 10,
+      alignSelf: "flex-start",
+      gap: 6,
+      minHeight: 44,
+      paddingHorizontal: space.lg,
+      marginTop: space.lg,
       borderRadius: radius.pill,
+      backgroundColor: c.inverse,
     },
-    modelText: { flexShrink: 1, ...font.sansMedium, fontSize: scaled(13), color: c.muted },
-    toolbarGap: { flex: 1 },
-    attach: { width: 34, height: 34, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
-    send: {
-      width: 36,
-      height: 36,
-      borderRadius: radius.pill,
-      backgroundColor: c.working,
+    startText: { ...font.sansMedium, fontSize: size.caption, color: c.onInverse },
+
+    chipBand: { backgroundColor: c.paper, paddingTop: space.lg, paddingBottom: space.md },
+    chips: { flexDirection: "row", gap: space.sm, paddingHorizontal: space.lg },
+    chip: {
+      flexDirection: "row",
       alignItems: "center",
-      justifyContent: "center",
+      gap: 6,
+      minHeight: 36,
+      paddingHorizontal: space.md,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      borderColor: c.line,
+      backgroundColor: c.surface,
     },
-    sendDisabled: { backgroundColor: c.fill },
+    folderChip: { maxWidth: 190 },
+    chipCount: { ...font.sansBold, fontSize: size.caption, fontVariant: ["tabular-nums"] },
+    chipLabel: { flexShrink: 1, ...font.sans, fontSize: size.caption, color: c.muted },
+
+    stack: { gap: 10, paddingTop: space.xs },
+    heading: { flexDirection: "row", alignItems: "center", gap: 7, minHeight: 30, marginTop: space.sm, paddingHorizontal: 2 },
+    headingGlyph: { width: 14, height: 14, alignItems: "center", justifyContent: "center" },
+    headingTitle: { ...font.sansMedium, fontSize: size.caption, color: c.text },
+    headingCount: { ...font.sans, fontSize: size.caption, color: c.faint, fontVariant: ["tabular-nums"] },
+    headingGap: { flex: 1 },
+    hiddenControl: { flexDirection: "row", alignItems: "center", gap: 5, minHeight: 30 },
+    hiddenText: { ...font.sans, fontSize: size.label, color: c.muted },
+
+    moreCards: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      minHeight: 44,
+      paddingHorizontal: 14,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: c.line,
+      backgroundColor: c.surface,
+    },
+    moreCardsText: { flex: 1, ...font.sans, fontSize: size.caption, color: c.textSecondary },
   });
-
-// Today's styles for the Classic theme, the website's look's above them
-// (see lib/theme: a palette's look). Keys only the new look has keep its
-// values, for what only the new look shows.
-type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
-const makeStyles = (c: Palette): Styles =>
-  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
-
