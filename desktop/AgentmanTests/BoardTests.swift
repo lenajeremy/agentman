@@ -365,6 +365,18 @@ final class BoardTests: XCTestCase {
 
     /// Runs with TEST_RUNNER_AGENTMAN_CLICKS=1, on its own: a window taking
     /// real clicks can end the test app part way through a full run.
+    func testClickingACardsTitleOpensItsAgent() throws {
+        guard ProcessInfo.processInfo.environment["AGENTMAN_CLICKS"] != nil else { throw XCTSkip("takes real clicks; run on its own") }
+        let store = try sampleStore()
+        let window = window(store)
+        defer { window.orderOut(nil) }
+        // Down the middle-left of the Idle column, which has no team row.
+        for y in stride(from: 120 as CGFloat, to: 320, by: 6) where store.selection == .manager {
+            click(window, x: 900, fromTop: y)
+        }
+        XCTAssertEqual(store.selection, .agent("p"))
+    }
+
     func testActingOnACardDoesNotOpenIt() throws {
         guard ProcessInfo.processInfo.environment["AGENTMAN_CLICKS"] != nil else { throw XCTSkip("takes real clicks; run on its own") }
         let store = try sampleStore()

@@ -293,13 +293,17 @@ func (m *Manager) takeStuckOffer(ctx context.Context, card *protocol.ManagerCard
 	}
 	switch option {
 	case "nudge":
-		if _, err := m.sendTo(ctx, session, nudgeText); err != nil {
+		sendCtx, cancel := context.WithTimeout(ctx, agentSendTimeout)
+		defer cancel()
+		if _, err := m.sendTo(sendCtx, session, nudgeText); err != nil {
 			return "", err
 		}
 		return "Told it to try something else", nil
 	case "ask":
-		m.agents.Request(ctx, protocol.Request{Type: protocol.ReqInterrupt, SessionID: session.ID})
-		if _, err := m.sendTo(ctx, session, quietText); err != nil {
+		sendCtx, cancel := context.WithTimeout(ctx, agentSendTimeout)
+		defer cancel()
+		m.agents.Request(sendCtx, protocol.Request{Type: protocol.ReqInterrupt, SessionID: session.ID})
+		if _, err := m.sendTo(sendCtx, session, quietText); err != nil {
 			return "", err
 		}
 		return "Interrupted it and asked", nil

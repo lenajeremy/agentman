@@ -506,12 +506,17 @@ private struct BoardCard: View {
                         .foregroundStyle(Palette.workingText)
                         .lineLimit(1)
                 }
-                Text(session.name)
-                    .font(Fonts.sans(13.5, .medium))
-                    .foregroundStyle(Palette.text)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .help(session.name)
+                Button(action: open) {
+                    Text(session.name)
+                        .font(Fonts.sans(13.5, .medium))
+                        .foregroundStyle(Palette.text)
+                        .underline(hovering)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .buttonStyle(.plain)
+                .help("Open \(session.name)")
             }
             switch kind {
             case .needsYou: needsYou(digest)
