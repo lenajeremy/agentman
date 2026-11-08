@@ -244,6 +244,9 @@ final class BoardTests: XCTestCase {
         """
         let idle = """
         {"type":"messages","sessionId":"p","messages":[
+         {"id":"0a","sessionId":"p","role":"user","ts":\(now - 900_000),"text":"Add Apple Pay to the checkout sheet"},
+         {"id":"0b","sessionId":"p","role":"assistant","ts":\(now - 648_000),"text":"Added the button and the merchant setup."},
+         {"id":"0c","sessionId":"p","role":"user","ts":\(now - 400_000),"text":"Now run the tests and fix what fails"},
          {"id":"1","sessionId":"p","role":"assistant","ts":\(now - 120_000),"text":"Apple Pay is in the checkout sheet. 52 tests pass."}
         ]}
         """
@@ -378,6 +381,10 @@ final class BoardTests: XCTestCase {
         try render(store, size: CGSize(width: 1040, height: 640), dark: false, to: shots.appendingPathComponent("board-min.png"))
         try render(store, size: CGSize(width: 1560, height: 980), dark: true, to: shots.appendingPathComponent("board-dark.png"))
         try render(store, size: CGSize(width: 1920, height: 1100), dark: false, to: shots.appendingPathComponent("board-wide.png"))
+
+        store.selection = .agent("p")
+        try render(store, size: CGSize(width: 1280, height: 800), dark: false, to: shots.appendingPathComponent("thread-worked.png"))
+        store.selection = .manager
 
         var user = DaemonEvent(type: "manager_entry")
         user.entry = ManagerEntry(id: "u", role: "user", text: "What's left before the storefront can ship?", ts: 10)
