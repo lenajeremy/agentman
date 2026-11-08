@@ -1,8 +1,11 @@
 import Feather from "@expo/vector-icons/Feather";
+import * as Clipboard from "expo-clipboard";
+import * as Haptics from "expo-haptics";
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Platform,
   RefreshControl,
   ScrollView,
   SectionList,
@@ -18,6 +21,7 @@ import { AgentIcon } from "../components/AgentIcon";
 import { AgentmanCard } from "../components/AgentmanCard";
 import { Loader } from "../components/Loader";
 import { ContentColumn } from "../components/ContentColumn";
+import { StickerOnDots, edged, eyebrow, hardShadow } from "../components/Brand";
 import { EmptyIllustration } from "../components/Illustrations";
 import { MotionPressable } from "../components/MotionPressable";
 import { Pulse } from "../components/Pulse";
@@ -121,6 +125,14 @@ export default function Agents() {
     [searching, store.visibleSessions, trimmed, found, color, store.folderFilter, store.folderRoot],
   );
   const hiddenCount = store.sessions.length - store.visibleSessions.length;
+  // Nothing has run on this Mac yet: the empty text says to tap +, so the +
+  // turns the site's orange until there is an agent.
+  const nothingRunning =
+    color.look === "site" &&
+    store.visibleSessions.length === 0 &&
+    store.daemonOnline &&
+    !store.folderFilter &&
+    emptyBoard(store.folderFilter, hiddenCount) !== "hidden";
   const incompatible = store.connection === "incompatible";
 
   // A newer app or Mac is offered here, on the board, once per version: never
@@ -193,11 +205,12 @@ export default function Agents() {
                 incompatible={incompatible}
               />
               <View style={styles.topActions}>
-                <MotionPressable hitSlop={12} style={styles.iconButton} pressedScale={0.94}
+                <MotionPressable hitSlop={12}
+                  style={[styles.iconButton, nothingRunning && styles.iconButtonFlood]} pressedScale={0.94}
                   onPress={() => router.push("/new-session")} accessibilityRole="button"
                   accessibilityLabel="New session" disabled={!store.daemonOnline}>
                   <Feather name="plus" size={22}
-                    color={store.daemonOnline ? color.text : color.faint} />
+                    color={nothingRunning ? color.edge : store.daemonOnline ? color.text : color.faint} />
                 </MotionPressable>
                 <MotionPressable hitSlop={12} style={styles.iconButton} pressedScale={0.94}
                   onPress={() => router.push("/settings")} accessibilityRole="button"
@@ -823,7 +836,7 @@ function AllHiddenState({ count, onShow }: { count: number; onShow(): void }) {
   const styles = useStyles(makeStyles);
   return (
     <View style={styles.empty}>
-      <EmptyIllustration style={styles.emptyArt} />
+      <EmptyArt sticker="heart" />
       <Text style={styles.emptyTitle}>All caught up</Text>
       <Text style={styles.emptyBody}>
         {count} idle {count === 1 ? "agent is" : "agents are"} hidden. They come
@@ -882,15 +895,54 @@ function ProtocolBanner() {
   );
 }
 
+/** An empty list's picture: the website's sticker on dots, or today's
+ *  drawing in a card in the Classic theme. */
+function EmptyArt({ sticker }: { sticker: "heart" | "notes" | "terminal" }) {
+  const styles = useStyles(makeStyles);
+  const { look } = useTheme();
+  return look === "site" ? <StickerOnDots name={sticker} size={scaled(150)} /> : <EmptyIllustration style={styles.emptyArt} />;
+}
+
+/** A command to run on the Mac, copied with a tap, as on the pairing screen. */
+function CopyCommand({ command }: { command: string }) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1600);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  return (
+    <MotionPressable
+      onPress={() => {
+        void Clipboard.setStringAsync(command);
+        if (Platform.OS !== "web") void Haptics.selectionAsync().catch(() => {});
+        setCopied(true);
+      }}
+      pressedScale={0.98}
+      style={styles.command}
+      accessibilityRole="button"
+      accessibilityLabel={`Copy ${command}`}
+      accessibilityHint="Copies the command so you can paste it into a terminal"
+    >
+      <Text style={styles.commandPrompt}>$</Text>
+      <Text style={styles.commandText}>{command}</Text>
+      <Feather name={copied ? "check" : "copy"} size={15} color={copied ? color.working : color.faint} />
+    </MotionPressable>
+  );
+}
+
 function EmptyState({ folder }: { folder: string | null }) {
   const styles = useStyles(makeStyles);
+  const { look } = useTheme();
   // A filtered folder that turns up nothing is a different fact from having
   // no agents at all, and the advice for it is different too: the fix is to
   // widen the filter, not to open a terminal.
   if (folder) {
     return (
       <View style={styles.empty}>
-        <EmptyIllustration style={styles.emptyArt} />
+        <EmptyArt sticker="notes" />
         <Text style={styles.emptyTitle}>Nothing here yet</Text>
         <Text style={styles.emptyBody}>
           No agent has run in {folderLabel(folder)}. Pick another folder, or
@@ -901,18 +953,22 @@ function EmptyState({ folder }: { folder: string | null }) {
   }
   return (
     <View style={styles.empty}>
-      <EmptyIllustration style={styles.emptyArt} />
+      <EmptyArt sticker="terminal" />
       <Text style={styles.emptyTitle}>Nothing running</Text>
       <Text style={styles.emptyBody}>
         Tap + to start an agent in a folder on your Mac, or start one from its
         terminal. Cursor IDE sessions are view-only.
       </Text>
-      <View style={styles.command}>
-        <Text style={styles.commandPrompt}>$</Text>
-        <Text style={styles.commandText} selectable>
-          am claude
-        </Text>
-      </View>
+      {look === "site" ? (
+        <CopyCommand command="am claude" />
+      ) : (
+        <View style={styles.command}>
+          <Text style={styles.commandPrompt}>$</Text>
+          <Text style={styles.commandText} selectable>
+            am claude
+          </Text>
+        </View>
+      )}
       <Text style={styles.emptyHint}>
         Also <Text style={styles.inlineMono}>am codex</Text> and{" "}
         <Text style={styles.inlineMono}>am opencode</Text>. Recent Cursor IDE
@@ -922,7 +978,412 @@ function EmptyState({ folder }: { folder: string | null }) {
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    scroll: { flex: 1 },
+    gutter: { paddingHorizontal: space.lg },
+
+    topBar: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingTop: space.md,
+    },
+    topActions: { flexDirection: "row", gap: space.sm },
+    chip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+      height: 32,
+      paddingHorizontal: space.md,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      ...edged(c),
+    },
+    chipDot: { width: 7, height: 7, borderRadius: 4 },
+    chipText: {
+      ...font.sansMedium,
+      fontSize: size.caption,
+      color: c.textSecondary,
+    },
+    iconButton: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+      ...edged(c, 2),
+    },
+    iconButtonFlood: { backgroundColor: c.flood },
+    title: {
+      ...font.display,
+      fontSize: size.display,
+      letterSpacing: -size.display * 0.03,
+      color: c.text,
+      marginTop: space.lg,
+    },
+
+
+    filterBar: { marginTop: space.lg, marginHorizontal: -space.lg },
+    filterBarRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingHorizontal: space.lg,
+    },
+    stateChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.xs,
+      minHeight: 36,
+      paddingHorizontal: space.md,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      ...edged(c),
+    },
+    stateChipOn: { backgroundColor: c.inverse },
+    stateChipValue: {
+      ...font.sansBold,
+      fontSize: size.caption,
+      fontVariant: ["tabular-nums"],
+    },
+    stateChipLabel: {
+      ...font.sans,
+      fontSize: size.caption,
+      color: c.muted,
+    },
+    stateChipLabelOn: { color: c.onInverse },
+    rowEnded: { backgroundColor: c.paper },
+    avatarEnded: { opacity: 0.55 },
+    nameEnded: { color: c.textSecondary },
+    // No top margin: the filter row that contains this owns the spacing now.
+    filterRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+    },
+    filter: {
+      // Bounded rather than flexible: inside a horizontal scroller nothing
+      // would shrink it, so a deep path would push every chip off-screen.
+      maxWidth: 230,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      minHeight: 40,
+      paddingHorizontal: space.md,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      ...edged(c),
+    },
+    filterOn: { backgroundColor: c.cream },
+    filterLabel: {
+      flexShrink: 1,
+      ...font.sans,
+      fontSize: size.body,
+      color: c.textSecondary,
+    },
+    filterLabelOn: {
+      ...font.monoMedium,
+      fontSize: size.caption,
+      color: c.text,
+    },
+    filterClear: {
+      width: 40,
+      height: 40,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      ...edged(c),
+    },
+    groupHeading: {
+      flexDirection: "row",
+      alignItems: "baseline",
+      justifyContent: "space-between",
+      paddingHorizontal: space.xxs,
+      marginTop: space.xl,
+      marginBottom: space.sm,
+    },
+    groupLabel: { ...eyebrow(c) },
+    groupCount: { ...font.monoMedium, fontSize: size.label, color: c.faint },
+
+    card: {
+      borderRadius: radius.xl,
+      backgroundColor: c.surface,
+      ...edged(c, 3),
+      marginBottom: ROW_GAP + 3,
+    },
+    // A question waiting on you: its shadow is the needs-you orange.
+    askCard: {
+      padding: space.lg,
+      gap: space.md,
+      ...hardShadow(c.needsYou, 4),
+    },
+    askHeader: { flexDirection: "row", alignItems: "center", gap: space.sm },
+    pill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      height: 22,
+      paddingHorizontal: 9,
+      borderRadius: radius.pill,
+      backgroundColor: c.needsYouWash,
+    },
+    pillDot: { width: 6, height: 6, borderRadius: 3 },
+    pillLabel: {
+      ...font.sansBold,
+      fontSize: scaled(11.5),
+      color: c.needsYouText,
+    },
+    askName: {
+      flex: 1,
+      ...font.sansMedium,
+      fontSize: size.caption,
+      color: c.textSecondary,
+    },
+
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      paddingVertical: 13,
+      paddingHorizontal: 14,
+    },
+    rowNeedsYou: { backgroundColor: c.needsYouWash },
+    groupRow: {
+      backgroundColor: c.surface,
+      borderLeftWidth: 1.5,
+      borderRightWidth: 1.5,
+      borderColor: c.edge,
+    },
+    groupFirst: {
+      borderTopWidth: 1.5,
+      borderTopLeftRadius: radius.xl,
+      borderTopRightRadius: radius.xl,
+    },
+    // The group's last row carries its hard shadow, so it shows under the
+    // whole group.
+    groupLast: {
+      borderBottomWidth: 1.5,
+      borderBottomLeftRadius: radius.xl,
+      borderBottomRightRadius: radius.xl,
+      ...hardShadow(c.edge, 3),
+      marginBottom: ROW_GAP + 3,
+    },
+    groupDivider: {
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.line,
+    },
+    avatar: {
+      width: 36,
+      height: 36,
+      borderRadius: radius.md,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.fill,
+    },
+    serversLine: { flexDirection: "row", alignItems: "center", gap: 5 },
+    serversText: { ...font.mono, fontSize: scaled(12), color: c.muted },
+    avatarLoader: {
+      position: "absolute",
+      right: -5,
+      bottom: -5,
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+    },
+    avatarPulse: {
+      position: "absolute",
+      right: -8,
+      bottom: -8,
+    },
+    rowBody: { flex: 1, gap: 3 },
+    rowTop: { flexDirection: "row", alignItems: "baseline", gap: space.sm },
+    name: {
+      flex: 1,
+      ...font.sansMedium,
+      fontSize: size.body,
+      color: c.text,
+    },
+    age: { ...font.sans, fontSize: size.label, color: c.faint },
+    metaRow: { flexDirection: "row", alignItems: "center" },
+    // The model holds its width and the path gives way from its front: a
+    // path's last segment is the one that says which project this is.
+    metaPath: { flexShrink: 1 },
+    meta: { ...font.sans, fontSize: size.caption, color: c.muted },
+    snippet: {
+      ...font.sans,
+      fontSize: size.caption,
+      lineHeight: scaled(18),
+      color: c.muted,
+      marginTop: space.xs,
+    },
+    snippetMatch: { ...font.sansBold, color: c.text },
+    searchField: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      minHeight: 42,
+      marginTop: space.md,
+      paddingHorizontal: space.md,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      ...edged(c),
+    },
+    searchInput: {
+      flex: 1,
+      ...font.sans,
+      fontSize: size.body,
+      color: c.text,
+      paddingVertical: space.sm,
+    },
+    searchStatus: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      marginTop: space.lg,
+      paddingHorizontal: space.xxs,
+    },
+    searchStatusText: { ...font.sans, fontSize: size.caption, color: c.muted, flexShrink: 1 },
+    needsYouNote: {
+      ...font.sansMedium,
+      fontSize: size.caption,
+      color: c.needsYouText,
+      marginTop: space.xxs,
+    },
+
+    banner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      marginTop: space.lg,
+      padding: space.md,
+      borderRadius: radius.xl,
+      backgroundColor: c.errorWash,
+      borderWidth: 1,
+      borderColor: c.errorEdge,
+    },
+    bannerIcon: {
+      width: 32,
+      height: 32,
+      borderRadius: radius.md,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+    },
+    bannerCopy: { flex: 1 },
+    bannerText: {
+      ...font.sansBold,
+      fontSize: size.caption,
+      color: c.text,
+    },
+    bannerHint: {
+      ...font.sans,
+      fontSize: size.caption,
+      color: c.muted,
+      marginTop: 2,
+    },
+
+    empty: {
+      marginTop: space.xl,
+      alignItems: "center",
+      gap: space.sm,
+    },
+    emptyTitle: {
+      ...font.displayBold,
+      fontSize: scaled(28),
+      letterSpacing: -scaled(28) * 0.02,
+      color: c.text,
+      textAlign: "center",
+    },
+    emptyBody: {
+      ...font.sans,
+      fontSize: size.body,
+      color: c.muted,
+      lineHeight: scaled(22),
+      textAlign: "center",
+      maxWidth: 320,
+    },
+    command: {
+      alignSelf: "stretch",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      marginTop: space.md,
+      paddingHorizontal: space.lg,
+      paddingVertical: 14,
+      borderRadius: 14,
+      backgroundColor: c.surface,
+      borderWidth: 1.5,
+      borderColor: c.edge,
+      ...hardShadow(c.edge),
+    },
+    commandPrompt: { ...font.monoMedium, fontSize: scaled(14), color: c.prompt },
+    commandText: { flex: 1, ...font.mono, fontSize: scaled(14), color: c.text },
+    emptyHint: {
+      ...font.sans,
+      fontSize: size.caption,
+      color: c.faint,
+      marginTop: space.xs,
+    },
+    inlineMono: { ...font.mono, color: c.muted },
+    secondaryButton: {
+      marginTop: space.sm,
+      minHeight: 44,
+      paddingHorizontal: space.xl,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.fillStrong,
+    },
+    secondaryButtonText: {
+      ...font.sansBold,
+      fontSize: size.body,
+      color: c.text,
+    },
+
+    undoBar: {
+      position: "absolute",
+      alignSelf: "center",
+      width: "90%",
+      maxWidth: 520,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: space.md,
+      paddingVertical: space.md,
+      paddingHorizontal: space.lg,
+      borderRadius: radius.pill,
+      backgroundColor: c.inverse,
+      shadowColor: c.shadow,
+      shadowOpacity: 0.2,
+      shadowRadius: 20,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 6,
+      zIndex: 20,
+    },
+    undoText: {
+      flex: 1,
+      ...font.sans,
+      fontSize: size.body,
+      color: c.onInverse,
+    },
+    undoAction: {
+      ...font.sansBold,
+      fontSize: size.body,
+      color: c.inverseAccent,
+    },
+    undoButton: { paddingVertical: space.xs, paddingHorizontal: space.sm },
+  });
+
+const makeClassicStyles = (c: Palette) =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: c.paper },
     scroll: { flex: 1 },
@@ -1342,3 +1803,11 @@ const makeStyles = (c: Palette) =>
     },
     undoButton: { paddingVertical: space.xs, paddingHorizontal: space.sm },
   });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

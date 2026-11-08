@@ -78,6 +78,7 @@ import { Handoff, handoffError, handoffItem } from "../../lib/handoff";
 import { useStyles, useTheme } from "../../lib/appearance";
 import { PendingSend, useStore } from "../../lib/store";
 import { addSpoken } from "../../lib/voice";
+import { edged, eyebrow, heading } from "../../components/Brand";
 import {
   agentLabel,
   font,
@@ -2319,7 +2320,384 @@ function PendingRow({
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    keyboardAvoider: { flex: 1 },
+    feed: { flex: 1 },
+    findBar: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      paddingHorizontal: space.lg,
+      paddingVertical: space.sm,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.line,
+      backgroundColor: c.surface,
+    },
+    findInput: {
+      flex: 1,
+      ...font.sans,
+      fontSize: size.body,
+      color: c.text,
+      paddingVertical: space.xs,
+    },
+    findCount: { ...font.mono, fontSize: size.caption, color: c.muted, minWidth: 34, textAlign: "right" },
+
+    // Top-aligned: the controls row makes the body three lines tall, and
+    // centred buttons ended up beside the folder instead of the title.
+    header: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: space.xs,
+      paddingHorizontal: space.md,
+      paddingTop: space.xs,
+      paddingBottom: space.sm,
+    },
+    // No circle and no border: the chevron is unmistakable on its own, and the
+    // chrome around it was pushing the title a quarter of the way across the
+    // row before it started.
+    backButton: {
+      width: 30,
+      // The logo's height, so the chevron sits level with its middle.
+      height: 38,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    iconButton: {
+      width: 40,
+      height: 40,
+      // Centred on the logo, like the back button: a point taller than it,
+      // so a point above it.
+      marginTop: -1,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+      ...edged(c, 2),
+    },
+    // Spans the title and the line under it, as an avatar does beside a
+    // name, so it sits level with both rather than with one.
+    agentTile: {
+      width: 38,
+      height: 38,
+      marginRight: space.xs,
+      borderRadius: radius.md,
+      overflow: "hidden",
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.fill,
+    },
+    headerBody: { flex: 1 },
+    // Full width rather than indented under the title. It is a banner about
+    // the session, not another line of the header's text, and inset it read as
+    // a stray tab stop.
+    workspaceBar: { paddingHorizontal: space.md, paddingBottom: space.sm },
+    workspaceButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      minHeight: 38,
+      paddingHorizontal: space.md,
+      borderRadius: radius.md,
+      backgroundColor: c.surface,
+      ...edged(c, 2),
+    },
+    workspaceLabel: {
+      flex: 1,
+      color: c.text,
+      ...font.sansMedium,
+      fontSize: size.caption,
+    },
+    // A count on the overflow control, so a running server is still visible
+    // without opening anything: it is a fact about the session, not an action.
+    serverDot: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      minWidth: 15,
+      height: 15,
+      borderRadius: 8,
+      paddingHorizontal: 3,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.working,
+    },
+    serverDotText: {
+      ...font.sansMedium,
+      fontSize: scaled(9.5),
+      lineHeight: scaled(12),
+      color: "#FFFFFF",
+    },
+    // The same badge as the server count, in the colour that asks for a tap:
+    // a review is the agent waiting on you.
+    reviewBadge: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      minWidth: 15,
+      height: 15,
+      borderRadius: 8,
+      paddingHorizontal: 3,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.needsYou,
+    },
+    reviewBadgeText: {
+      ...font.sansMedium,
+      fontSize: scaled(9.5),
+      lineHeight: scaled(12),
+      color: c.onAccent,
+    },
+    title: heading(c, scaled(17)),
+    subtitleRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
+    subtitle: {
+      ...font.sans,
+      fontSize: size.label,
+      color: c.muted,
+    },
+    // The model holds its width and the path gives way. Without the explicit
+    // 0 both shrink, and you end up with two half-truncated facts instead of
+    // one whole one.
+    subtitleModel: { flexShrink: 0 },
+    subtitlePath: { flexShrink: 1 },
+    // Gives way with the path when the row runs out, and inside it the mode
+    // name gives way first: the percentage is the part worth keeping whole.
+    // Starts under the logo, past the screen edge and the back button, so
+    // the logo, the title and the chips read as one block.
+    // A fact, not a control: outlined rather than filled, and quieter.
+    switchPressed: { opacity: 0.6 },
+    // On its way: the value being switched to, in the working colour.
+    switchPending: { color: c.workingText },
+    switchConfirm: { flexDirection: "column", alignItems: "stretch", gap: space.sm },
+    switchConfirmTop: { flexDirection: "row", alignItems: "center", gap: 10 },
+    switchConfirmButtons: { flexDirection: "row", justifyContent: "flex-end", gap: space.sm },
+    switchButton: {
+      minHeight: 36,
+      minWidth: 84,
+      paddingHorizontal: space.lg,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    switchButtonPrimary: { backgroundColor: c.inverse },
+    switchButtonSecondary: { backgroundColor: c.surface, ...edged(c, 2) },
+    switchButtonDisabled: { opacity: 0.4 },
+    switchButtonLabel: { ...font.sansBold, fontSize: size.caption, color: c.text },
+    switchButtonLabelPrimary: { color: c.onInverse },
+    // No box around it. This was a 28pt touch target from when the dot was a
+    // control in the top row; on a line of text it centred a six point dot in
+    // twenty-eight, which pushed it clear of the title's left edge. It is a
+    // fact now, not a control, so it occupies exactly itself and starts where
+    // the title starts.
+    stateDot: { marginRight: 6 },
+    stateLine: { flexDirection: "row", alignItems: "center", gap: 5, flexShrink: 0 },
+    stateDotSmall: { width: 6, height: 6, borderRadius: 3 },
+    folderBadge: { width: 16, height: 16, marginRight: 6, alignItems: "center", justifyContent: "center" },
+
+    note: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      marginHorizontal: space.lg,
+      marginBottom: space.sm,
+      paddingHorizontal: space.md,
+      paddingVertical: 10,
+      borderRadius: radius.lg,
+      backgroundColor: c.cream,
+      ...edged(c),
+    },
+    noteIcon: {
+      width: 24,
+      height: 24,
+      borderRadius: 8,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+    },
+    noteText: {
+      flex: 1,
+      ...font.sans,
+      fontSize: size.caption,
+      lineHeight: scaled(18),
+      color: c.textSecondary,
+    },
+    connectionNote: { backgroundColor: c.errorWash },
+    interruptFailed: { backgroundColor: c.errorWash },
+
+    // Inverted, so paddingTop is the gap under the newest row. Without it the
+    // last message sits behind the composer and gets clipped.
+    list: {
+      alignSelf: "center",
+      width: "100%",
+      maxWidth: layout.contentMax,
+      padding: space.lg,
+      paddingTop: space.md,
+      gap: 18,
+    },
+    spinner: { marginVertical: space.lg },
+    startOfSession: {
+      ...eyebrow(c),
+      color: c.faint,
+      textAlign: "center",
+      marginBottom: space.lg,
+    },
+    emptyFeed: {
+      ...font.sans,
+      fontSize: size.body,
+      color: c.faint,
+      textAlign: "center",
+      marginTop: space.xxl,
+    },
+
+    // The user's own words get a bubble; the agent's sit on the page. That is
+    // enough to tell them apart without turning a transcript into a chat app.
+    userRow: {
+      alignSelf: "flex-end",
+      maxWidth: "84%",
+      backgroundColor: c.bubble,
+      borderRadius: 18,
+      paddingHorizontal: 15,
+      paddingVertical: 10,
+    },
+    userText: {
+      ...font.sans,
+      fontSize: size.reading,
+      color: c.text,
+      lineHeight: scaled(23),
+    },
+    summaryHeader: { flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 4 },
+    summaryLabel: { ...font.sans, fontSize: size.caption, color: c.muted },
+    summaryText: {
+      ...font.sans,
+      fontSize: size.caption,
+      lineHeight: scaled(19),
+      color: c.muted,
+      marginTop: 6,
+    },
+    // The message in the list while its lifted copy is showing.
+    heldSource: { opacity: 0 },
+    pendingPressed: { opacity: 0.85 },
+
+    assistantRow: { gap: space.xs },
+    sidechain: {
+      alignSelf: "flex-start",
+      ...font.sansBold,
+      fontSize: scaled(11),
+      color: c.muted,
+      backgroundColor: c.fill,
+      borderRadius: radius.pill,
+      overflow: "hidden",
+      paddingHorizontal: space.sm,
+      paddingVertical: 2,
+    },
+
+    systemText: {
+      ...font.sans,
+      fontSize: size.caption,
+      color: c.faint,
+      textAlign: "center",
+    },
+
+    pendingRow: { opacity: 0.7 },
+    pendingFaded: { opacity: 0.7 },
+    pendingFooter: { flexDirection: "row", alignItems: "center", gap: space.sm, marginTop: space.xs },
+    pendingFooterLabel: { flexShrink: 1, marginTop: 0 },
+    sendNow: { justifyContent: "center" },
+    sendNowPressed: { opacity: 0.5 },
+    sendNowText: { ...font.sansMedium, fontSize: size.label, color: c.workingText },
+    pendingFailed: { opacity: 1, backgroundColor: c.errorWash },
+    pendingStatus: {
+      ...font.sans,
+      fontSize: size.label,
+      color: c.muted,
+      marginTop: space.xs,
+    },
+
+    thinking: { paddingTop: space.sm },
+    composerShell: { backgroundColor: c.paper },
+    composer: { paddingHorizontal: space.lg, paddingTop: space.sm },
+    // Input and send share one container, so the send button reads as part of
+    // the field instead of sitting next to it. The text has the full width
+    // and the controls a row of their own under it, as in Claude's and
+    // ChatGPT's apps: beside the text, the model's name would take the room
+    // a sentence needs.
+    field: {
+      backgroundColor: c.surface,
+      borderRadius: 20,
+      ...edged(c, 3),
+      paddingLeft: 6,
+      paddingRight: 6,
+      paddingTop: 4,
+      paddingBottom: 6,
+    },
+    fieldFocused: {},
+    fieldDisabled: { opacity: 0.55 },
+    // Inset so the text starts where the + under it does.
+    input: {
+      minHeight: 38,
+      maxHeight: 120,
+      paddingHorizontal: 10,
+      paddingTop: space.sm,
+      paddingBottom: space.xs,
+      ...font.sans,
+      fontSize: size.body,
+      color: c.text,
+    },
+    // Thumbnails square off the pill: a row of 64pt pictures inside a fully
+    // rounded container loses its corners to the radius.
+    fieldWithImages: {
+      borderRadius: radius.lg,
+      paddingTop: space.sm,
+      paddingLeft: space.sm,
+    },
+    toolbar: { flexDirection: "row", alignItems: "center", gap: space.xs },
+    toolbarGap: { flex: 1 },
+    modelButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+      height: 32,
+      maxWidth: 200,
+      paddingHorizontal: 10,
+      borderRadius: radius.pill,
+    },
+    modelButtonPressed: { backgroundColor: c.fill },
+    modelText: { flexShrink: 1, ...font.sansMedium, fontSize: scaled(13), color: c.muted },
+    contextText: { ...font.sans, fontSize: scaled(12), color: c.faint, fontVariant: ["tabular-nums"] },
+    // A wrapper so the long press has something to land on: the gesture cannot
+    // be attached to the TextInput itself without swallowing taps that should
+    // place the caret.
+    inputWrap: {},
+    attachError: {
+      ...font.sans,
+      fontSize: size.label,
+      color: c.errorText,
+      paddingHorizontal: space.md,
+      paddingBottom: space.xs,
+    },
+    // Square and unfilled against the send button's filled circle: one is the
+    // action, the other is a way of adding to it.
+    attach: {
+      width: 34,
+      height: 34,
+      borderRadius: radius.md,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    // The site's orange, the one colour that asks for a tap.
+    send: {
+      width: 36,
+      height: 36,
+      borderRadius: radius.pill,
+      backgroundColor: c.flood,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    sendDisabled: { backgroundColor: c.fillStrong },
+  });
+
+const makeClassicStyles = (c: Palette) =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: c.paper },
     keyboardAvoider: { flex: 1 },
@@ -2701,3 +3079,11 @@ const makeStyles = (c: Palette) =>
     },
     sendDisabled: { backgroundColor: c.fillStrong },
   });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

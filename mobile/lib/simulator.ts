@@ -19,6 +19,14 @@ export function simulatorRoute(): string | null {
  * light|dark`, for screenshots of both themes; null otherwise. The app keeps
  * its own setting, so the simulator's appearance alone does not change it.
  */
+/** The theme a simulator started with `-AGENTMAN_LOOK site|classic` shows,
+ *  for screenshots; null otherwise. */
+export function simulatorLook(): "site" | "classic" | null {
+  if (Platform.OS !== "ios" || Constants.isDevice) return null;
+  const value = Settings.get("AGENTMAN_LOOK");
+  return value === "site" || value === "classic" ? value : null;
+}
+
 export function simulatorAppearance(): "light" | "dark" | null {
   if (Platform.OS !== "ios" || Constants.isDevice) return null;
   const value = Settings.get("AGENTMAN_APPEARANCE");

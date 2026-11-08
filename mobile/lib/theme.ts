@@ -17,6 +17,9 @@ import type { TextStyle } from "react-native";
  * undo bar's accent) are derived from its values.
  */
 const light = {
+  /** Which look this palette belongs to: the website's ("site") or today's
+   *  ("classic"). Screens keep both looks' styles and pick by it. */
+  look: "site",
   /** Page background. */
   paper: "#FAFAFA",
   /** Cards and sheets. */
@@ -55,8 +58,9 @@ const light = {
   findMatch: "#FFEB99",
   findCurrent: "#FFB866",
   workingSoft: "#D9DFFF",
-  /** The working ring's second colour, which it flows into and back from. */
-  loaderPink: "#F0407F",
+  /** The working ring's second colour, which it flows into and back from:
+   *  the website's orange. */
+  loaderAccent: "#FF5F1F",
   /** An agent is blocked on the user — the most actionable state there is. */
   needsYou: "#FF6A2B",
   needsYouText: "#C2451A",
@@ -79,6 +83,25 @@ const light = {
   /** Controls drawn over the camera, which is dark whatever the theme. */
   cameraScrim: "rgba(10, 10, 10, 0.62)",
   shadow: "#101010",
+  /** The website's orange, behind first-run and empty screens, and the
+   *  white set on it. The same in both themes: it is the brand. */
+  flood: "#FF5F1F",
+  onFlood: "#FFFFFF",
+  /** The website's cards: cream with dots, an ink edge and a hard shadow. */
+  cream: "#FFF3E3",
+  creamDots: "rgba(22, 13, 8, 0.10)",
+  /** The site's ink edge, softened to a warm dark grey: pure ink against
+   *  the white page was too much contrast on a phone. */
+  edge: "#4A423C",
+  /** The $ before a command to copy, an orange that reads as text. */
+  prompt: "#E5480A",
+  /** The hard shadow under an inverse (ink) button. */
+  inverseShadow: "rgba(0, 0, 0, 0.28)",
+  /** Behind a sticker on the page: nothing on a light page, a cream disc on
+   *  a dark one, where the stickers' black outline would vanish. */
+  stickerSpot: "transparent",
+  /** Your own messages' bubble: the site's cream. */
+  bubble: "#FFF3E3",
 };
 
 export type Palette = { [K in keyof typeof light]: string };
@@ -108,7 +131,7 @@ const dark: Palette = {
   findMatch: "#5A4A0C",
   findCurrent: "#9A5A12",
   workingSoft: "#28305E",
-  loaderPink: "#FF5C9A",
+  loaderAccent: "#FF7A3D",
   needsYou: "#FF7D45",
   needsYouText: "#FF9A6C",
   needsYouWash: "#2E1B12",
@@ -124,9 +147,30 @@ const dark: Palette = {
   scrim: "rgba(0, 0, 0, 0.5)",
   cameraScrim: "rgba(10, 10, 10, 0.62)",
   shadow: "#000000",
+  flood: "#FF5F1F",
+  onFlood: "#FFFFFF",
+  cream: "#16110D",
+  creamDots: "rgba(255, 243, 227, 0.09)",
+  edge: "#A69B92",
+  prompt: "#FF8A55",
+  inverseShadow: "rgba(255, 255, 255, 0.22)",
+  stickerSpot: "#F3E6D8",
+  bubble: "#2A1F18",
+  look: "site",
 };
 
-export const palettes: Record<"light" | "dark", Palette> = { light, dark };
+/** The two looks: today's (Classic, the default) and the website's (New),
+ *  switched in Settings while New is refined. */
+export type Look = "classic" | "site";
+
+/** Today's palettes: the same colours, with the working ring's pink. */
+export const palettes: Record<"light" | "dark", Palette> = {
+  light: { ...light, look: "classic", loaderAccent: "#F0407F" },
+  dark: { ...dark, look: "classic", loaderAccent: "#FF5C9A" },
+};
+
+/** The website's look's palettes. */
+export const sitePalettes: Record<"light" | "dark", Palette> = { light, dark };
 
 /**
  * Google Sans for everything a person wrote or reads as interface; Google
@@ -148,6 +192,11 @@ export const font = {
   sansBoldItalic: { fontFamily: "GoogleSans-SemiBoldItalic" },
   mono: { fontFamily: "GoogleSansCode-Regular" },
   monoMedium: { fontFamily: "GoogleSansCode-Medium" },
+  /** Rubik, the website's headline face, for titles and headings, never
+   *  running text: Bold for a screen's title, SemiBold for the rest. A step
+   *  lighter than the site's, which read too heavy on a phone. */
+  display: { fontFamily: "Rubik-Bold" },
+  displayBold: { fontFamily: "Rubik-SemiBold" },
 } as const satisfies Record<string, TextStyle>;
 
 /**

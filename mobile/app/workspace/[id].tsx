@@ -26,6 +26,7 @@ import {
 } from "../../lib/protocol";
 import { useStore } from "../../lib/store";
 import { ago, font, Palette, radius, size, space, scaled } from "../../lib/theme";
+import { edged, heading } from "../../components/Brand";
 
 /** A directory listing is worth filtering long before it is worth paging. */
 const FILTER_FROM_ENTRIES = 8;
@@ -641,7 +642,201 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    header: {
+      paddingHorizontal: space.lg,
+      paddingTop: space.sm,
+      paddingBottom: space.sm,
+    },
+    topBar: { flexDirection: "row", alignItems: "center", gap: space.sm },
+    heading: { flex: 1, minWidth: 0 },
+    // The old display-size title cost a fifth of the screen on a browser whose
+    // whole job is showing as many rows as possible.
+    title: {
+      ...heading(c),
+      fontSize: size.title,
+      letterSpacing: -0.3,
+    },
+    subtitle: {
+      color: c.muted,
+      ...font.mono,
+      fontSize: scaled(11),
+      marginTop: 1,
+    },
+    iconButton: {
+      width: 36,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      ...edged(c, 2),
+    },
+
+    tabs: { flexDirection: "row", gap: space.xs, marginTop: space.md },
+    tab: {
+      paddingHorizontal: space.lg,
+      paddingVertical: 7,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      ...edged(c),
+    },
+    tabActive: { backgroundColor: c.inverse, borderColor: c.inverse },
+    tabText: {
+      color: c.muted,
+      ...font.sansMedium,
+      fontSize: size.caption,
+    },
+    tabTextActive: { color: c.onInverse },
+
+    crumbBar: { marginTop: space.md, flexGrow: 0 },
+    crumbs: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+      paddingRight: space.lg,
+    },
+    crumbItem: { flexDirection: "row", alignItems: "center", gap: 3 },
+    crumb: { color: c.workingText, ...font.mono, fontSize: scaled(12) },
+    crumbCurrent: { color: c.text, ...font.monoMedium },
+
+    toolRow: { flexDirection: "row", gap: space.sm, marginTop: space.md },
+    branch: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      flexShrink: 1,
+      maxWidth: "62%",
+      height: 40,
+      paddingHorizontal: space.md,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: c.line,
+      backgroundColor: c.surface,
+    },
+    branchSpinner: { transform: [{ scale: 0.7 }], width: 13, height: 13 },
+    branchName: {
+      flexShrink: 1,
+      color: c.textSecondary,
+      ...font.monoMedium,
+      fontSize: scaled(12),
+    },
+    search: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      height: 40,
+      paddingHorizontal: space.md,
+      borderRadius: radius.md,
+      backgroundColor: c.fill,
+    },
+    // The field fills the row and centres its own text. `padding: 0` alone left
+    // the placeholder sitting off the row's centre line, and without an explicit
+    // lineHeight the two platforms disagreed about where the baseline sits.
+    searchField: { flex: 1, height: "100%", justifyContent: "center" },
+    searchPlaceholder: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      color: c.faint,
+      ...font.sans,
+      fontSize: size.caption,
+    },
+    searchInput: {
+      height: "100%",
+      color: c.text,
+      ...font.sans,
+      fontSize: size.caption,
+      lineHeight: scaled(18),
+      paddingVertical: 0,
+      paddingHorizontal: 0,
+      includeFontPadding: false,
+      textAlignVertical: "center",
+    },
+
+    content: { paddingHorizontal: space.lg, paddingTop: space.sm },
+    list: {
+      borderWidth: 1,
+      borderColor: c.line,
+      borderRadius: radius.lg,
+      backgroundColor: c.surface,
+      overflow: "hidden",
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      minHeight: 44,
+      paddingHorizontal: space.md,
+    },
+    rowDivided: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: c.line,
+    },
+    rowName: { flex: 1, color: c.text, ...font.mono, fontSize: scaled(13) },
+    rowFolder: { ...font.monoMedium },
+    rowMeta: { color: c.faint, ...font.mono, fontSize: scaled(11) },
+
+    viewing: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      paddingHorizontal: space.xxs,
+      marginBottom: space.xs,
+    },
+    viewingText: {
+      flexShrink: 1,
+      color: c.faint,
+      ...font.sans,
+      fontSize: scaled(11.5),
+    },
+    older: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: space.sm,
+      minHeight: 44,
+      marginTop: space.md,
+      borderRadius: radius.pill,
+      backgroundColor: c.fill,
+    },
+    olderText: {
+      color: c.text,
+      ...font.sansMedium,
+      fontSize: size.caption,
+    },
+
+    emptyWrap: {
+      alignItems: "center",
+      gap: space.sm,
+      paddingVertical: space.xxl,
+    },
+    empty: {
+      color: c.muted,
+      ...font.sans,
+      fontSize: size.caption,
+      textAlign: "center",
+    },
+    error: {
+      color: c.errorText,
+      ...font.sans,
+      fontSize: size.body,
+      paddingVertical: space.md,
+    },
+    center: { marginTop: space.xl },
+    note: {
+      color: c.faint,
+      ...font.sans,
+      fontSize: scaled(11.5),
+      marginTop: space.md,
+      lineHeight: scaled(16),
+    },
+  });
+
+const makeClassicStyles = (c: Palette) =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: c.paper },
     header: {
@@ -835,3 +1030,11 @@ const makeStyles = (c: Palette) =>
       lineHeight: scaled(16),
     },
   });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

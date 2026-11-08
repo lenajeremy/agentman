@@ -61,7 +61,7 @@ export function Loader({ size = 11 }: { size?: number }) {
   const stroke = Math.max(1.6, size * 0.18);
   const r = (size - stroke) / 2;
   const around = 2 * Math.PI * r;
-  const colors = [color.working, color.loaderPink];
+  const colors = [color.working, color.loaderAccent];
 
   const spin = useAnimatedStyle(() => ({
     transform: [{ rotate: `${(time.value * 400) % 360}deg` }],

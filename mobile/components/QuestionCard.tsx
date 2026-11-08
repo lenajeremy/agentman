@@ -16,6 +16,7 @@ import { Question, QuestionAnswer, SendStatus } from "../lib/protocol";
 import { MAX_NOTE_CHARS, noteAnswer, submitAnswer, tapAnswer } from "../lib/question-answer";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { MotionPressable } from "./MotionPressable";
+import { edged, hardShadow, heading } from "./Brand";
 
 const AFFIRMATIVE = /^(yes|allow|approve|proceed)/i;
 
@@ -521,7 +522,234 @@ function AnswerStatus({
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
+  StyleSheet.create({
+    full: { gap: space.md },
+    compact: { gap: space.sm },
+
+    eyebrowRow: { flexDirection: "row" },
+    pill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      height: 24,
+      paddingHorizontal: 10,
+      borderRadius: radius.pill,
+      backgroundColor: c.needsYouWash,
+    },
+    pillDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: c.needsYou },
+    pillLabel: { ...font.sansBold, fontSize: size.label, color: c.needsYouText },
+
+    title: { ...heading(c, size.heading), lineHeight: scaled(28) },
+    compactTitle: heading(c, size.title),
+    // Machine text, set in mono like every other command in the app.
+    detail: {
+      ...font.mono,
+      fontSize: size.caption,
+      color: c.text,
+      lineHeight: scaled(19),
+    },
+    detailBox: {
+      backgroundColor: c.fill,
+      borderRadius: radius.md,
+      paddingHorizontal: space.md,
+      paddingVertical: 10,
+    },
+    prompt: {
+      ...font.sans,
+      fontSize: size.body,
+      lineHeight: scaled(21),
+      color: c.textSecondary,
+    },
+    compactPrompt: {
+      ...font.sans,
+      fontSize: size.caption,
+      lineHeight: scaled(18),
+      color: c.muted,
+    },
+
+    quickRow: { flexDirection: "row", gap: space.sm, marginTop: space.xs },
+    quick: {
+      flex: 1,
+      minHeight: 44,
+      paddingHorizontal: space.md,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    quickPrimary: { backgroundColor: c.inverse, ...hardShadow(c.inverseShadow) },
+    quickSecondary: { backgroundColor: c.surface, ...edged(c, 2) },
+    // Fixed square: flex-basis must be set too, or web keeps the 0% basis
+    // from `flex: 1` above and collapses it.
+    quickMore: { flexGrow: 0, flexShrink: 0, flexBasis: 44, width: 44, paddingHorizontal: 0 },
+    quickLabel: { ...font.sansBold, fontSize: size.body, color: c.text },
+    quickLabelPrimary: { color: c.onInverse },
+
+    options: { gap: space.sm, marginTop: space.xs },
+    // The number sits on the label's first line, not halfway down a long
+    // description; a one-line option is as tall as before and stays even.
+    option: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: space.md,
+      minHeight: 54,
+      paddingHorizontal: space.lg,
+      paddingVertical: 15,
+      borderRadius: radius.lg,
+      backgroundColor: c.surface,
+      ...edged(c, 3),
+    },
+    optionPrimary: { backgroundColor: c.inverse, borderColor: c.inverse, ...hardShadow(c.inverseShadow) },
+    optionSelected: { backgroundColor: c.cream },
+    controlDisabled: { opacity: 0.5 },
+    optionKeyWrap: {
+      minWidth: 24,
+      height: 24,
+      paddingHorizontal: space.xs,
+      borderRadius: 7,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.fill,
+    },
+    // Neutral grey reads on the ink fill in both themes (dark ink in light,
+    // light ink in dark).
+    optionKeyWrapPrimary: { backgroundColor: "rgba(128,128,128,0.22)" },
+    optionKey: {
+      ...font.monoMedium,
+      fontSize: size.label,
+      color: c.muted,
+    },
+    optionKeyPrimary: { color: c.onInverse },
+    // Centres the label's first line on the 24-point number beside it.
+    optionCopy: { flex: 1, gap: space.xxs, paddingTop: 2 },
+    optionLabel: { ...font.sansMedium, fontSize: size.body, color: c.text },
+    optionLabelPrimary: { ...font.sansBold, color: c.onInverse },
+    optionDescription: {
+      ...font.sans,
+      fontSize: size.caption,
+      lineHeight: scaled(18),
+      color: c.muted,
+    },
+    optionDescriptionPrimary: { color: c.onInverse, opacity: 0.72 },
+    previewBox: {
+      gap: space.sm,
+      padding: space.md,
+      borderRadius: radius.md,
+      backgroundColor: c.fill,
+    },
+    previewEyebrow: {
+      ...font.sansBold,
+      fontSize: size.label,
+      color: c.muted,
+    },
+    previewText: {
+      ...font.mono,
+      fontSize: size.caption,
+      lineHeight: scaled(19),
+      color: c.text,
+    },
+    checkMark: {
+      width: 22,
+      height: 22,
+      marginTop: 1,
+      borderRadius: 11,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.working,
+    },
+    checkMarkPrimary: { backgroundColor: c.onInverse },
+    noteIcon: { marginTop: 4 },
+    customInput: {
+      minHeight: 54,
+      borderRadius: radius.lg,
+      backgroundColor: c.fill,
+      color: c.text,
+      ...font.sans,
+      fontSize: size.body,
+      paddingHorizontal: space.lg,
+      paddingVertical: 14,
+    },
+    note: {
+      gap: space.sm,
+      padding: space.sm,
+      borderRadius: radius.lg,
+      backgroundColor: c.fill,
+    },
+    noteInput: {
+      minHeight: 44,
+      maxHeight: 120,
+      borderRadius: radius.md,
+      backgroundColor: c.surface,
+      color: c.text,
+      ...font.sans,
+      fontSize: size.body,
+      paddingHorizontal: space.md,
+      paddingTop: space.sm + 2,
+      paddingBottom: space.sm + 2,
+      textAlignVertical: "top",
+    },
+    noteActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      paddingLeft: space.xs,
+    },
+    noteHint: {
+      flex: 1,
+      ...font.sans,
+      fontSize: size.label,
+      lineHeight: scaled(16),
+      color: c.muted,
+    },
+    noteSend: {
+      minWidth: 76,
+      minHeight: 40,
+      paddingHorizontal: space.lg,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.inverse,
+    },
+    noteSendLabel: { ...font.sansBold, fontSize: size.body, color: c.onInverse },
+    submit: {
+      minHeight: 52,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 14,
+      backgroundColor: c.inverse,
+      ...hardShadow(c.inverseShadow),
+      paddingHorizontal: space.lg,
+    },
+    submitDisabled: { opacity: 0.35 },
+    submitLabel: {
+      color: c.onInverse,
+      ...font.sansBold,
+      fontSize: size.body,
+    },
+    answerStatus: {
+      minHeight: 40,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingHorizontal: space.md,
+      paddingVertical: space.sm,
+      borderRadius: radius.md,
+      backgroundColor: c.fill,
+    },
+    answerStatusFailed: {
+      backgroundColor: c.errorWash,
+    },
+    answerStatusText: {
+      flex: 1,
+      ...font.sans,
+      fontSize: size.caption,
+      lineHeight: scaled(18),
+      color: c.muted,
+    },
+    answerStatusTextFailed: { color: c.errorText },
+  });
+
+const makeClassicStyles = (c: Palette) =>
   StyleSheet.create({
     full: { gap: space.md },
     compact: { gap: space.sm },
@@ -758,3 +986,11 @@ const makeStyles = (c: Palette) =>
     },
     answerStatusTextFailed: { color: c.errorText },
   });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

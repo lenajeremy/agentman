@@ -29,6 +29,7 @@ import {
 import { WorkspaceResult } from "../../lib/protocol";
 import { useStore } from "../../lib/store";
 import { font, Palette, radius, size, space, scaled } from "../../lib/theme";
+import { edged, heading } from "../../components/Brand";
 
 /** The message's line height, and where a long one is cut: six lines is most
  *  messages whole, and leaves the files on the first screen of a long one. */
@@ -320,7 +321,211 @@ export default function CommitScreen() {
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingHorizontal: space.lg,
+      paddingTop: space.sm,
+      paddingBottom: space.sm,
+    },
+    heading: { flex: 1, minWidth: 0 },
+    title: {
+      ...heading(c),
+      fontSize: size.title,
+      letterSpacing: -0.3,
+    },
+    subtitle: {
+      color: c.muted,
+      ...font.mono,
+      fontSize: scaled(11),
+      marginTop: 1,
+    },
+    iconButton: {
+      width: 36,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      ...edged(c, 2),
+    },
+
+    content: { paddingHorizontal: space.lg, paddingTop: space.md },
+    subject: {
+      color: c.text,
+      ...font.sansBold,
+      fontSize: scaled(20),
+      lineHeight: scaled(26),
+      letterSpacing: -0.4,
+    },
+
+    authorRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      marginTop: space.lg,
+    },
+    // A neutral mark rather than a colour per person: colour in this app
+    // says what an agent is doing, and nothing decorative should compete.
+    monogram: {
+      width: 34,
+      height: 34,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.fill,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    monogramText: {
+      color: c.muted,
+      ...font.sansBold,
+      fontSize: scaled(12),
+      letterSpacing: 0.3,
+    },
+    authorText: { flex: 1, minWidth: 0, gap: 1 },
+    author: { color: c.text, ...font.sansMedium, fontSize: scaled(14) },
+    when: { color: c.muted, ...font.sans, fontSize: scaled(12) },
+    hashChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      height: 30,
+      paddingHorizontal: 10,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    hashChipCopied: { backgroundColor: c.okWash, borderColor: c.okWash },
+    hash: { color: c.textSecondary, ...font.monoMedium, fontSize: scaled(12) },
+    hashCopied: { color: c.ok, ...font.sansMedium },
+
+    bodyBlock: { marginTop: space.lg },
+    body: {
+      color: c.textSecondary,
+      ...font.sans,
+      fontSize: size.body - 0.5,
+      lineHeight: BODY_LINE,
+    },
+    bodyClip: { height: BODY_CUT, overflow: "hidden" },
+    bodyFloating: { position: "absolute", top: 0, left: 0, right: 0 },
+    // The last two lines fade into the page, which says "there is more"
+    // before the button does.
+    fade: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: BODY_LINE * 2,
+    },
+    fadeBand: { flex: 1, backgroundColor: c.paper },
+    readMore: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+      alignSelf: "flex-start",
+      marginTop: space.sm,
+    },
+    readMoreText: {
+      color: c.workingText,
+      ...font.sansMedium,
+      fontSize: size.caption,
+    },
+
+    // Trailers are data about the commit, so they read as a small table
+    // under the message rather than as one more paragraph of it.
+    trailers: {
+      marginTop: space.lg,
+      borderRadius: radius.md,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+      paddingHorizontal: space.md,
+    },
+    trailer: { paddingVertical: 10, gap: 3 },
+    trailerDivided: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: c.line,
+    },
+    trailerKey: {
+      color: c.faint,
+      ...font.sansMedium,
+      fontSize: scaled(10.5),
+      letterSpacing: 0.6,
+      textTransform: "uppercase",
+    },
+    trailerValue: {
+      color: c.textSecondary,
+      ...font.sans,
+      fontSize: scaled(13.5),
+      lineHeight: scaled(19),
+    },
+
+    summary: { marginTop: space.xl, marginBottom: space.md, gap: space.sm },
+    summaryRow: {
+      flexDirection: "row",
+      alignItems: "baseline",
+      justifyContent: "space-between",
+      paddingHorizontal: space.xxs,
+    },
+    summaryLabel: {
+      color: c.muted,
+      ...font.sansBold,
+      fontSize: size.caption,
+    },
+    // How the change splits between lines added and lines removed, at a
+    // glance: mostly green is new work, mostly red is a clean-up.
+    bar: {
+      flexDirection: "row",
+      height: 4,
+      gap: 2,
+      borderRadius: radius.pill,
+      overflow: "hidden",
+    },
+    barAdded: { backgroundColor: c.ok, borderRadius: radius.pill },
+    barRemoved: { backgroundColor: c.error, borderRadius: radius.pill },
+    mergeNote: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 6,
+      paddingHorizontal: space.xxs,
+    },
+    mergeText: {
+      flex: 1,
+      color: c.faint,
+      ...font.sans,
+      fontSize: scaled(11.5),
+      lineHeight: scaled(16),
+    },
+
+    center: { marginTop: space.xl },
+    failure: { alignItems: "flex-start", gap: space.md, paddingVertical: space.md },
+    error: { color: c.errorText, ...font.sans, fontSize: size.body },
+    retry: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      height: 38,
+      paddingHorizontal: space.lg,
+      borderRadius: radius.pill,
+      backgroundColor: c.fill,
+    },
+    retryText: { color: c.text, ...font.sansMedium, fontSize: size.caption },
+    note: {
+      color: c.faint,
+      ...font.sans,
+      fontSize: scaled(11.5),
+      marginTop: space.md,
+      lineHeight: scaled(16),
+    },
+  });
+
+const makeClassicStyles = (c: Palette) =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: c.paper },
     header: {
@@ -525,3 +730,11 @@ const makeStyles = (c: Palette) =>
       lineHeight: scaled(16),
     },
   });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+
