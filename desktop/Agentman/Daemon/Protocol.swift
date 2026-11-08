@@ -83,6 +83,10 @@ enum RequestType: String, Codable, Sendable {
     case managerBriefs = "manager_briefs"
     case managerVerifications = "manager_verifications"
     case managerMissions = "manager_missions"
+    case managerShip = "manager_ship"
+    case managerQueue = "manager_queue"
+    case managerQueueAdd = "manager_queue_add"
+    case managerQueueRemove = "manager_queue_remove"
     case managerCardReply = "manager_card_reply"
     case managerCardDismiss = "manager_card_dismiss"
     case managerEntryClose = "manager_entry_close"
@@ -164,6 +168,11 @@ struct DaemonRequest: Codable, Sendable {
     var alerts: Bool?
     /// The agents in front of the user, on manager_viewing.
     var viewing: [String]?
+    /// The agents a manager_ship is for.
+    var sessionIds: [String]?
+    /// The work for a manager_queue_add; what a manager_queue_remove takes.
+    var queue: QueueItem?
+    var queueId: String?
     /// One part of a recording to write out, on transcribe.
     var voice: VoiceClip?
     /// One part of a file sent to an agent, on "attach_file".
@@ -230,6 +239,8 @@ struct DaemonEvent: Codable, Sendable {
     var verification: Verification?
     var verifications: [Verification]?
     var missions: [Mission]?
+    var ship: ShipRun?
+    var queue: [QueueItem]?
     /// What Agentman would do with a request, on "manager_permission".
     var permission: PermissionCheck?
     var more: Bool?
@@ -855,8 +866,45 @@ struct Autopilot: Codable, Sendable, Hashable {
     var overlap = false
     /// Suggest a note for what the user keeps telling agents.
     var learnNotes = false
+    /// Start queued work in the night, and report in the morning.
+    var overnight = false
+    /// "HH:MM"; nil takes the daemon's default.
+    var nightStart: String?
+    var nightEnd: String?
+    var nightAgents: Int?
     /// Reviews by the model a day; nil is the daemon's default.
     var verifyDaily: Int?
+}
+
+/// Several finished agents being shipped together.
+struct ShipRun: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    /// "running" or "done".
+    var state: String
+    var items: [ShipItem]
+}
+
+struct ShipItem: Codable, Sendable, Hashable, Identifiable {
+    var sessionId: String
+    var name: String
+    /// "waiting", "working", "shipped", "skipped" or "failed".
+    var state: String
+    var note: String?
+    var url: String?
+
+    var id: String { sessionId }
+}
+
+/// Work lined up for tonight.
+struct QueueItem: Codable, Sendable, Hashable, Identifiable {
+    var id = ""
+    var agent: String
+    var folder: String
+    var task: String
+    /// "waiting", "running", "done" or "failed".
+    var state = ""
+    var problem: String?
+    var createdAt: Int64 = 0
 }
 
 /// A goal given to Agentman, as a team of agents.

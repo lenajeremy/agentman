@@ -136,6 +136,30 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(store.manager.offers.first?.question?.options.first?.key, "here")
     }
 
+    func testShippingLeavesAloneWhatTheDaemonWould() {
+        let idle = Session(id: "a", kind: "claude", name: "A", cwd: "/w", state: .idle)
+        var git = GitState(sessionId: "a", branch: "feat/x", defaultBranch: "main", ahead: 0, behind: 0, aheadOfDefault: 1, remote: "origin", changes: 2)
+        XCTAssertNil(ShipCheck.reason(session: idle, git: git, check: nil))
+        XCTAssertEqual(ShipCheck.summary(git), "feat/x · 2 changed files")
+        XCTAssertEqual(ShipCheck.reason(session: idle, git: git, check: Verification(sessionId: "a", state: "failed", updatedAt: 1)), "Its tests fail")
+        var busy = idle
+        busy.state = .busy
+        XCTAssertEqual(ShipCheck.reason(session: busy, git: git, check: nil), "Still working")
+        XCTAssertEqual(ShipCheck.reason(session: idle, git: nil, check: nil), "Not in a git repository")
+        git.branch = "main"
+        XCTAssertEqual(ShipCheck.reason(session: idle, git: git, check: nil), "On main, which is yours to push")
+        git.branch = "feat/x"
+        git.behind = 1
+        XCTAssertEqual(ShipCheck.reason(session: idle, git: git, check: nil), "Behind its upstream")
+        git.behind = 0
+        git.remote = nil
+        XCTAssertEqual(ShipCheck.reason(session: idle, git: git, check: nil), "No remote to push to")
+        git.remote = "origin"
+        git.changes = 0
+        git.aheadOfDefault = 0
+        XCTAssertEqual(ShipCheck.reason(session: idle, git: git, check: nil), "Nothing to ship")
+    }
+
     func testTheBoardsSidebarGoesWithTheNextVisit() {
         let store = AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-board.sock"))
         store.selection = .manager
@@ -250,7 +274,7 @@ final class BoardTests: XCTestCase {
         handled.entry = ManagerEntry(approved: ApprovedRequest(kind: "command", target: "go test ./..."), id: "h", role: "activity", text: "Approved for api: run `go test ./...`", ts: now, tool: "approve")
         store.apply(handled)
         var team = DaemonEvent(type: "manager_missions")
-        team.missions = [Mission(id: "t", goal: "Harden the webhooks", state: "running", tasks: [
+        team.missions = [Mission(id: "team", goal: "Harden the webhooks", state: "running", tasks: [
             .init(id: "a", title: "Limit the rate", agent: "claude", state: "running", sessionId: "t"),
             .init(id: "b", title: "Update the docs", agent: "antigravity", state: "planned", dependsOn: ["a"])
         ], createdAt: now)]

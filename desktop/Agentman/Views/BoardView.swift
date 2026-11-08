@@ -72,6 +72,7 @@ struct BoardView: View {
             }
             Spacer()
             HandledButton()
+            TonightButton()
             folderMenu
                 .padding(.trailing, 4)
             if !manager.schedules.isEmpty { SchedulesButton() }
@@ -351,6 +352,7 @@ private struct BoardColumn: View {
     /// The teams at work, above the agents doing their parts.
     var missions: [Mission] = []
     let clearance: CGFloat
+    @State private var shipping = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -401,6 +403,22 @@ private struct BoardColumn: View {
                 .foregroundStyle(Palette.boardMuted)
             Spacer()
             if !hidden.isEmpty { hiddenMenu }
+            if kind == .idle, !sessions.isEmpty {
+                Button { shipping = true } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.up.circle")
+                            .font(.system(size: 11))
+                        Text("Ship")
+                            .font(Fonts.sans(12))
+                    }
+                    .foregroundStyle(Palette.boardMuted)
+                    .frame(height: 22)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Commit, push and open pull requests for finished agents")
+                .sheet(isPresented: $shipping) { ShipSheet(sessions: sessions) }
+            }
         }
         .padding(.horizontal, 12)
         .frame(height: 38)

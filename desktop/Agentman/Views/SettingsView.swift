@@ -386,6 +386,13 @@ private struct PermissionsPage: View {
                 autopilotRow("Suggest notes for what I keep telling agents", detail: "Once a day, on your API key. You approve each note.", \.learnNotes, divider: false)
             }
 
+            SettingsSection(title: "Overnight",
+                            footer: "Only what you line up on the Board starts, a few at a time and one to a folder, and you get a report when the night ends.") {
+                autopilotRow("Run my queue overnight", detail: nil, \.overnight)
+                hourRow("Starts", key: \.nightStart, fallback: "23:00", divider: true)
+                hourRow("Ends", key: \.nightEnd, fallback: "07:00", divider: false)
+            }
+
             SettingsSection(title: "Trust by folder",
                             footer: "Watch reports and asks. Suggest marks the answer it would give and waits. Handle answers what the rules here allow. A folder without a level follows the switch at the top.") {
                 let trust = binding.wrappedValue.trust ?? []
@@ -483,7 +490,27 @@ private struct PermissionsPage: View {
         }
     }
 
-    private func autopilotRow(_ title: String, detail: String, _ key: WritableKeyPath<Autopilot, Bool>, divider: Bool = true) -> some View {
+    private func hourRow(_ title: String, key: WritableKeyPath<Autopilot, String?>, fallback: String, divider: Bool) -> some View {
+        SettingsRow(title: title, divider: divider) {
+            Picker("", selection: Binding(
+                get: { (draft?.autopilot ?? Autopilot())[keyPath: key] ?? fallback },
+                set: { value in
+                    var autopilot = draft?.autopilot ?? Autopilot()
+                    autopilot[keyPath: key] = value
+                    draft?.autopilot = autopilot
+                }
+            )) {
+                ForEach(0..<24, id: \.self) { hour in
+                    let value = String(format: "%02d:00", hour)
+                    Text(value).tag(value)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+        }
+    }
+
+    private func autopilotRow(_ title: String, detail: String?, _ key: WritableKeyPath<Autopilot, Bool>, divider: Bool = true) -> some View {
         SettingsRow(title: title, detail: detail, divider: divider) {
             Toggle("", isOn: Binding(
                 get: { (draft?.autopilot ?? Autopilot())[keyPath: key] },

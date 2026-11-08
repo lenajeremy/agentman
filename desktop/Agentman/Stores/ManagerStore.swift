@@ -17,6 +17,10 @@ final class ManagerStore {
     private(set) var verifications: [String: Verification] = [:]
     /// The teams Agentman has planned or is running.
     private(set) var missions: [Mission] = []
+    /// The latest shipping run, if there has been one.
+    private(set) var shipRun: ShipRun?
+    /// The work lined up for tonight.
+    private(set) var queue: [QueueItem] = []
     /// The teams at work, for the Board.
     var runningMissions: [Mission] { missions.filter { $0.state == "running" } }
 
@@ -114,6 +118,7 @@ final class ManagerStore {
         async let briefsReply = try? client.request(DaemonRequest(.managerBriefs))
         async let verificationsReply = try? client.request(DaemonRequest(.managerVerifications))
         async let missionsReply = try? client.request(DaemonRequest(.managerMissions))
+        async let queueReply = try? client.request(DaemonRequest(.managerQueue))
         async let schedulesReply = try? client.request(DaemonRequest(.managerSchedules))
         var historyRequest = DaemonRequest(.managerHistory)
         historyRequest.limit = 80
@@ -129,6 +134,7 @@ final class ManagerStore {
             verifications = Dictionary(all.map { ($0.sessionId, $0) }, uniquingKeysWith: { a, _ in a })
         }
         if let reply = await missionsReply { missions = reply.missions ?? [] }
+        if let reply = await queueReply { queue = reply.queue ?? [] }
         if let reply = await historyReply {
             entries = reply.entries ?? []
             hasOlder = reply.more ?? false
@@ -216,6 +222,39 @@ final class ManagerStore {
         if reply.type == "error" { return reply.error }
         apply(reply)
         return nil
+    }
+
+    struct Failure: Error { let message: String }
+
+    /// Ships these agents. Gives the run to follow.
+    func ship(_ ids: [String]) async -> Result<String, Failure> {
+        var request = DaemonRequest(.managerShip)
+        request.sessionIds = ids
+        guard let reply = try? await client.request(request) else { return .failure(Failure(message: "Couldn't reach am serve.")) }
+        if reply.type == "error" { return .failure(Failure(message: reply.error ?? "That didn't work.")) }
+        apply(reply)
+        guard let run = reply.ship else { return .failure(Failure(message: "Update am serve to ship from here.")) }
+        return .success(run.id)
+    }
+
+    func addToQueue(agent: String, folder: String, task: String) async -> String? {
+        var request = DaemonRequest(.managerQueueAdd)
+        request.queue = QueueItem(agent: agent, folder: folder, task: task)
+        return await perform(request)
+    }
+
+    func removeFromQueue(_ id: String) async -> String? {
+        var request = DaemonRequest(.managerQueueRemove)
+        request.queueId = id
+        return await perform(request)
+    }
+
+    func setOvernight(_ on: Bool) async -> String? {
+        guard var next = settings else { return "Agentman isn't connected." }
+        var autopilot = next.autopilot ?? Autopilot()
+        autopilot.overnight = on
+        next.autopilot = autopilot
+        return await save(next)
     }
 
     /// What Agentman approved by itself today, newest first.
@@ -437,6 +476,10 @@ final class ManagerStore {
             }
         case "manager_missions":
             missions = event.missions ?? []
+        case "manager_ship":
+            shipRun = event.ship
+        case "manager_queue":
+            queue = event.queue ?? []
         case "manager_verification":
             if let check = event.verification {
                 verifications[check.sessionId] = check.state == "none" ? nil : check
