@@ -12,6 +12,7 @@ import { useStyles, useTheme } from "../lib/appearance";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { behindText, PromptKind, versionLabel } from "../lib/updates";
 import { useUpdates } from "../lib/updates-context";
+import { edged, eyebrow, hardShadow } from "../components/Brand";
 
 type FeatherName = ComponentProps<typeof Feather>["name"];
 
@@ -193,7 +194,109 @@ function shortDate(ms: number): string {
   return new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    content: { paddingHorizontal: space.lg },
+    grabber: {
+      alignSelf: "center",
+      width: 36,
+      height: 5,
+      borderRadius: radius.pill,
+      backgroundColor: c.fillStrong,
+      marginTop: space.sm,
+    },
+    iconTile: {
+      width: 48,
+      height: 48,
+      borderRadius: radius.lg,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+      marginTop: space.xl,
+    },
+    title: {
+      ...font.sansBold,
+      fontSize: size.heading + 4,
+      letterSpacing: -0.6,
+      color: c.text,
+      marginTop: space.lg,
+    },
+    lede: {
+      ...font.sans,
+      fontSize: size.body,
+      lineHeight: scaled(22),
+      color: c.muted,
+      marginTop: space.xs,
+    },
+    sectionLabel: {
+      ...eyebrow(c),
+      marginLeft: space.xxs,
+      marginTop: space.xl,
+      marginBottom: space.sm,
+    },
+    card: {
+      backgroundColor: c.surface,
+      borderRadius: radius.xl,
+      ...edged(c, 3),
+      padding: space.lg,
+      gap: space.sm,
+      marginBottom: space.sm,
+    },
+    cardHeading: { ...font.sansBold, fontSize: size.body, color: c.text },
+    change: { flexDirection: "row", gap: space.sm },
+    bullet: {
+      width: 5,
+      height: 5,
+      borderRadius: radius.pill,
+      backgroundColor: c.faint,
+      marginTop: 8,
+    },
+    changeText: { flex: 1, ...font.sans, fontSize: size.caption + 1, lineHeight: scaled(20), color: c.textSecondary },
+    command: {
+      backgroundColor: c.fill,
+      borderRadius: radius.md,
+      paddingHorizontal: space.md,
+      paddingVertical: space.md,
+    },
+    commandText: { ...font.mono, fontSize: size.caption, lineHeight: scaled(19), color: c.text },
+    footnote: {
+      ...font.sans,
+      fontSize: size.label,
+      lineHeight: scaled(16),
+      color: c.faint,
+      marginTop: space.sm,
+      marginHorizontal: space.xxs,
+    },
+    link: { alignSelf: "flex-start", minHeight: 24, justifyContent: "center", marginTop: space.sm },
+    linkText: { ...font.sansMedium, fontSize: size.label + 1, color: c.workingText },
+    footer: {
+      paddingHorizontal: space.lg,
+      paddingTop: space.md,
+      gap: space.xs,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: c.line,
+      backgroundColor: c.paper,
+    },
+    primaryButton: {
+      minHeight: 56,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 10,
+      borderRadius: 14,
+      backgroundColor: c.inverse,
+      ...hardShadow(c.inverseShadow),
+      paddingHorizontal: space.xl,
+    },
+    primaryButtonText: { ...font.sansBold, fontSize: scaled(16), color: c.onInverse },
+    textButton: { minHeight: 44, alignItems: "center", justifyContent: "center" },
+    textButtonLabel: { ...font.sansMedium, fontSize: size.body, color: c.textSecondary },
+  });
+
+const makeClassicStyles = (c: Palette) =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: c.paper },
     content: { paddingHorizontal: space.lg },
@@ -296,3 +399,11 @@ const makeStyles = (c: Palette) =>
     textButton: { minHeight: 44, alignItems: "center", justifyContent: "center" },
     textButtonLabel: { ...font.sansMedium, fontSize: size.body, color: c.textSecondary },
   });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

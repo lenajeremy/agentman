@@ -11,6 +11,7 @@ import { MotionPressable } from "../components/MotionPressable";
 import { LinkRow } from "../components/SettingsKit";
 import { useStyles, useTheme } from "../lib/appearance";
 import { AppearancePreference } from "../lib/appearance-policy";
+import type { Look } from "../lib/theme";
 import { useManager } from "../lib/manager";
 import { modelName } from "../lib/manager-models";
 import { NotifyPrefs } from "../lib/notification-prefs";
@@ -20,11 +21,18 @@ import { useStore } from "../lib/store";
 import { appSummary, macSummary } from "../lib/updates";
 import { useUpdates } from "../lib/updates-context";
 import { ago, font, Palette, radius, size, space, scaled } from "../lib/theme";
+import { edged, eyebrow, screenTitle } from "../components/Brand";
 
 const APPEARANCES: { value: AppearancePreference; label: string }[] = [
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
   { value: "system", label: "Match phone" },
+];
+
+/** Today's look, or the website's while it is being refined. */
+const LOOKS: { value: Look; label: string }[] = [
+  { value: "classic", label: "Classic" },
+  { value: "site", label: "New" },
 ];
 
 export default function Settings() {
@@ -41,7 +49,7 @@ export default function Settings() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
-  const { color, preference, setPreference } = useTheme();
+  const { color, preference, setPreference, look, setLook } = useTheme();
 
   const unpair = () => {
     const perform = () => {
@@ -203,6 +211,27 @@ export default function Settings() {
                 );
               })}
             </View>
+            <Text style={styles.sectionLabel}>Theme</Text>
+            <View style={styles.segmented} accessibilityRole="radiogroup">
+              {LOOKS.map((option) => {
+                const active = option.value === look;
+                return (
+                  <MotionPressable
+                    key={option.value}
+                    onPress={() => setLook(option.value)}
+                    style={[styles.segment, active && styles.segmentActive]}
+                    pressedScale={0.97}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: active }}
+                  >
+                    <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>
+                      {option.label}
+                    </Text>
+                  </MotionPressable>
+                );
+              })}
+            </View>
+            <Text style={styles.themeNote}>New is the website's look, still being designed.</Text>
           </Appear>
 
           <Appear delay={60}>
@@ -336,8 +365,154 @@ function Row({
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
+    themeNote: { ...font.sans, fontSize: size.label, color: c.faint, marginTop: space.sm, marginLeft: space.xxs },
+    page: { flex: 1, backgroundColor: c.paper },
+    content: { paddingHorizontal: space.lg },
+    topBar: { flexDirection: "row", paddingTop: space.sm },
+    iconButton: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface,
+      ...edged(c, 2),
+    },
+    title: {
+      ...screenTitle(c),
+      marginTop: space.lg,
+      marginBottom: space.xs,
+    },
+
+    sectionLabel: {
+      ...eyebrow(c),
+      marginLeft: space.xxs,
+      marginTop: space.xl,
+      marginBottom: space.sm,
+    },
+    card: {
+      backgroundColor: c.surface,
+      borderRadius: radius.xl,
+      paddingHorizontal: space.lg,
+      ...edged(c, 3),
+    },
+    body: { ...font.sans, fontSize: size.caption, color: c.muted, lineHeight: scaled(19) },
+
+    row: {
+      minHeight: 56,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: space.md,
+      paddingVertical: space.md,
+    },
+    rowLabel: { ...font.sansMedium, fontSize: size.body, color: c.text },
+    valueWrap: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-end",
+      gap: space.sm,
+    },
+    statusDot: { width: 7, height: 7, borderRadius: 4 },
+    rowValue: {
+      flexShrink: 1,
+      textAlign: "right",
+      ...font.sans,
+      fontSize: size.caption,
+      color: c.muted,
+    },
+    divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.line },
+    linkRow: {
+      minHeight: 56,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: space.md,
+    },
+
+    segmented: {
+      flexDirection: "row",
+      padding: 4,
+      gap: 4,
+      borderRadius: radius.pill,
+      backgroundColor: c.fill,
+    },
+    segment: {
+      flex: 1,
+      minHeight: 40,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    segmentActive: {
+      backgroundColor: c.surface,
+      shadowColor: c.shadow,
+      shadowOpacity: 0.08,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 1,
+    },
+    segmentLabel: { ...font.sansMedium, fontSize: size.caption, color: c.muted },
+    segmentLabelActive: { ...font.sansBold, color: c.text },
+
+    privacyCard: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: space.md,
+      paddingVertical: space.md,
+    },
+    privacyIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: radius.md,
+      alignItems: "center",
+      justifyContent: "center",
+      // Neutral: `ok` means connected, delivered, added. A lock is none of
+      // those, and the system keeps that colour small and literal.
+      backgroundColor: c.fill,
+    },
+    privacyCopy: { flex: 1, gap: space.xs },
+    privacyTitle: { ...font.sansBold, fontSize: size.body, color: c.text },
+    privacyLink: { alignSelf: "flex-start", justifyContent: "center", minHeight: 24, marginTop: space.xs },
+    // Cobalt, the brand and the colour of anything tappable. Green said
+    // "connected", which is not what a policy link means.
+    privacyLinkText: { ...font.sansMedium, fontSize: size.label, color: c.workingText },
+
+    unpair: {
+      minHeight: 52,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.errorWash,
+      marginTop: space.xl,
+    },
+    unpairText: { ...font.sansBold, fontSize: size.body, color: c.errorText },
+    unpairHint: {
+      ...font.sans,
+      fontSize: size.label,
+      color: c.faint,
+      textAlign: "center",
+      lineHeight: scaled(16),
+      marginTop: space.sm,
+      paddingHorizontal: space.lg,
+    },
+    signature: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: space.sm,
+      marginTop: space.xxl,
+      opacity: 0.55,
+    },
+    signatureText: { ...font.sansBold, fontSize: size.caption, color: c.text },
+  });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    themeNote: { ...font.sans, fontSize: size.label, color: c.faint, marginTop: space.sm, marginLeft: space.xxs },
     page: { flex: 1, backgroundColor: c.paper },
     content: { paddingHorizontal: space.lg },
     topBar: { flexDirection: "row", paddingTop: space.sm },
@@ -486,3 +661,11 @@ const makeStyles = (c: Palette) =>
     },
     signatureText: { ...font.sansBold, fontSize: size.caption, color: c.text },
   });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

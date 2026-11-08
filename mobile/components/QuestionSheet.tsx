@@ -193,7 +193,41 @@ function rubberband(overshoot: number): number {
   return (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot));
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
+  StyleSheet.create({
+    sheet: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      backgroundColor: c.surface,
+      borderTopLeftRadius: radius.sheet,
+      borderTopRightRadius: radius.sheet,
+      // The site's ink edge along the top and sides, over a soft shadow.
+      borderWidth: 1.5,
+      borderBottomWidth: 0,
+      borderColor: c.edge,
+      shadowColor: c.shadow,
+      shadowOpacity: 0.12,
+      shadowRadius: 24,
+      shadowOffset: { width: 0, height: -6 },
+      elevation: 12,
+    },
+    grabberArea: {
+      height: GRABBER_AREA,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    grabber: {
+      width: 38,
+      height: 5,
+      borderRadius: 3,
+      backgroundColor: c.fillStrong,
+    },
+    scroll: { flex: 1 },
+    content: { paddingHorizontal: 20, paddingTop: space.xs, paddingBottom: space.xs },
+  });
+
+const makeClassicStyles = (c: Palette) =>
   StyleSheet.create({
     sheet: {
       position: "absolute",
@@ -222,3 +256,11 @@ const makeStyles = (c: Palette) =>
     scroll: { flex: 1 },
     content: { paddingHorizontal: 20, paddingTop: space.xs, paddingBottom: space.xs },
   });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

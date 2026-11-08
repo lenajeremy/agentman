@@ -39,6 +39,7 @@ import { useAttachments } from "../lib/use-attachments";
 import { chooseImageSource } from "../lib/image-source-sheet";
 import { addSpoken } from "../lib/voice";
 import { addPastedImagesListener, pasteTakesImages } from "../modules/image-paste";
+import { StickerOnDots, edged, heading } from "../components/Brand";
 
 /**
  * The conversation with Agentman: the one place to ask what every agent is
@@ -197,7 +198,11 @@ export default function AgentmanScreen() {
           <View style={styles.empty}>
             {manager.loaded || !reachable ? (
               <>
-                <BrandMark size={44} ring={color.paper} />
+                {color.look === "site" ? (
+                  <StickerOnDots name="mascot" size={scaled(150)} />
+                ) : (
+                  <BrandMark size={44} ring={color.paper} />
+                )}
                 <Text style={styles.emptyTitle}>Ask Agentman about your agents</Text>
                 <Text style={styles.emptyText}>
                   What everyone is doing, what changed, what needs you. It reads them so you don't have to.
@@ -578,7 +583,170 @@ function Schedules({ onClose }: { onClose(): void }) {
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingHorizontal: space.md,
+      paddingTop: space.xs,
+      paddingBottom: space.sm,
+    },
+    back: { width: 30, height: 38, alignItems: "center", justifyContent: "center" },
+    headerBody: { flex: 1, marginLeft: 2 },
+    title: heading(c, scaled(17)),
+    subtitle: { ...font.sans, fontSize: size.label, color: c.muted },
+    headerButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+      height: 32,
+      paddingHorizontal: 11,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      ...edged(c, 2),
+    },
+    headerButtonText: { ...font.sansMedium, fontSize: size.label, color: c.textSecondary },
+    headerIcon: { width: 36, height: 36, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", backgroundColor: c.surface, ...edged(c, 2) },
+    divider: { flexDirection: "row", alignItems: "center", gap: space.sm },
+    dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: c.line },
+    dividerText: { ...font.sans, fontSize: size.label, color: c.faint },
+    feed: { flex: 1 },
+    list: { paddingHorizontal: space.lg, paddingVertical: space.lg, gap: space.lg },
+    thinking: { paddingVertical: space.xs },
+    empty: { alignItems: "center", gap: space.sm, paddingHorizontal: space.xl, paddingVertical: space.xxxl },
+    emptyTitle: { ...heading(c, scaled(24)), textAlign: "center", marginTop: space.xs },
+    emptyText: { ...font.sans, fontSize: size.caption, color: c.muted, textAlign: "center", lineHeight: scaled(19) },
+
+    userRow: { alignItems: "flex-end", gap: space.sm, paddingLeft: space.xxl },
+    bubble: {
+      backgroundColor: c.bubble,
+      borderRadius: radius.lg,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+    },
+    bubbleText: { ...font.sans, fontSize: size.reading, lineHeight: scaled(23), color: c.text },
+    keptRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: space.sm },
+    kept: {
+      width: 110,
+      height: 110,
+      borderRadius: radius.lg,
+      overflow: "hidden",
+      backgroundColor: c.fill,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.line,
+    },
+    keptImage: { width: "100%", height: "100%" },
+    keptGone: { alignItems: "center", justifyContent: "center", gap: space.xs },
+    keptGoneText: { ...font.sans, fontSize: size.caption, color: c.muted },
+
+    toolCard: {
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: c.toolCardEdge,
+      backgroundColor: c.toolCard,
+    },
+    activityRow: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 22 },
+    activityText: { flex: 1, ...font.sans, fontSize: size.caption, color: c.textSecondary },
+    activityHead: { color: c.muted },
+    activityMore: { ...font.sans, fontSize: size.caption, color: c.faint },
+    activitySteps: { gap: 6, paddingTop: 6, paddingLeft: space.lg },
+    imageActivity: { gap: space.sm },
+
+    brief: {
+      gap: 6,
+      padding: 14,
+      borderRadius: radius.lg,
+      ...edged(c, 3),
+      backgroundColor: c.surface,
+    },
+    briefHead: { flexDirection: "row", alignItems: "center", gap: space.sm },
+    briefName: { flex: 1, ...font.sansMedium, fontSize: size.body, color: c.text },
+    briefClose: { width: 24, height: 24, marginRight: -4, alignItems: "center", justifyContent: "center" },
+    briefText: { ...font.sans, fontSize: size.reading, lineHeight: scaled(23), color: c.textSecondary },
+    briefNeeds: { ...font.sans, fontSize: size.caption, color: c.needsYouText },
+
+    quietLine: { flexDirection: "row", alignItems: "center", gap: 6 },
+    quietText: { flex: 1, ...font.sans, fontSize: size.caption, color: c.faint },
+
+    schedules: {
+      marginHorizontal: space.lg,
+      marginBottom: space.sm,
+      padding: space.md,
+      gap: space.sm,
+      borderRadius: radius.lg,
+      ...edged(c, 3),
+      backgroundColor: c.surface,
+    },
+    schedulesHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+    schedulesTitle: { ...font.sansMedium, fontSize: size.caption, color: c.muted },
+    scheduleRow: { flexDirection: "row", alignItems: "center", gap: space.sm },
+    scheduleText: { ...font.sans, fontSize: size.caption, color: c.text },
+    scheduleWhen: { ...font.sans, fontSize: size.label, color: c.faint },
+    cancel: { ...font.sansMedium, fontSize: size.label, color: c.errorText },
+
+    composer: { paddingHorizontal: space.lg, paddingTop: space.sm, gap: space.xs, backgroundColor: c.paper },
+    problem: { ...font.sans, fontSize: size.label, color: c.errorText, paddingHorizontal: space.xs },
+    notice: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: space.sm,
+      padding: space.md,
+      borderRadius: radius.lg,
+      backgroundColor: c.cream,
+      ...edged(c),
+    },
+    noticeBody: { flex: 1, gap: space.xs },
+    noticeText: { ...font.sans, fontSize: size.caption, lineHeight: scaled(19), color: c.textSecondary },
+    noticeAction: { ...font.sansMedium, fontSize: size.caption, color: c.working },
+    field: {
+      backgroundColor: c.surface,
+      borderRadius: radius.xxl,
+      ...edged(c, 3),
+      paddingHorizontal: 6,
+      paddingTop: 4,
+      paddingBottom: 6,
+    },
+    fieldWithImages: { borderRadius: radius.lg, paddingTop: space.sm, paddingLeft: space.sm },
+    input: {
+      minHeight: 38,
+      maxHeight: 120,
+      paddingHorizontal: 10,
+      paddingTop: space.sm,
+      paddingBottom: space.xs,
+      ...font.sans,
+      fontSize: size.body,
+      color: c.text,
+    },
+    toolbar: { flexDirection: "row", alignItems: "center", gap: space.xs },
+    modelButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+      height: 32,
+      maxWidth: 200,
+      paddingHorizontal: 10,
+      borderRadius: radius.pill,
+    },
+    modelText: { flexShrink: 1, ...font.sansMedium, fontSize: scaled(13), color: c.muted },
+    toolbarGap: { flex: 1 },
+    attach: { width: 34, height: 34, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
+    send: {
+      width: 36,
+      height: 36,
+      borderRadius: radius.pill,
+      backgroundColor: c.flood,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    sendDisabled: { backgroundColor: c.fill },
+  });
+
+const makeClassicStyles = (c: Palette) =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: c.paper },
     header: {
@@ -741,3 +909,11 @@ const makeStyles = (c: Palette) =>
     },
     sendDisabled: { backgroundColor: c.fill },
   });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

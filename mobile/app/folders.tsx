@@ -18,6 +18,7 @@ import { Folder } from "../lib/protocol";
 import { useStore } from "../lib/store";
 import { useDirectoryBrowser } from "../lib/use-directory-browser";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
+import { edged, eyebrow, hardShadow, screenTitle } from "../components/Brand";
 
 /**
  * Picking a folder to filter the agent list by.
@@ -276,7 +277,145 @@ function Row({
   );
 }
 
-function makeStyles(c: Palette) {
+function makeSiteStyles(c: Palette) {
+  return StyleSheet.create({
+    page: { flex: 1, backgroundColor: c.paper },
+    content: { paddingHorizontal: space.lg },
+    back: {
+      width: 36,
+      height: 36,
+      marginLeft: -space.sm,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    title: {
+      marginTop: space.sm,
+      ...screenTitle(c),
+    },
+    subtitle: {
+      marginTop: space.xs,
+      ...font.sans,
+      fontSize: size.caption,
+      color: c.muted,
+    },
+    clear: {
+      marginTop: space.md,
+      alignSelf: "flex-start",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.xs,
+      minHeight: 36,
+      paddingHorizontal: space.md,
+      borderRadius: radius.pill,
+      backgroundColor: c.fill,
+    },
+    clearLabel: {
+      ...font.sansMedium,
+      fontSize: size.caption,
+      color: c.muted,
+    },
+    heading: {
+      marginTop: space.xl,
+      flexDirection: "row",
+      alignItems: "baseline",
+      justifyContent: "space-between",
+      gap: space.sm,
+    },
+    headingLabel: {
+      ...eyebrow(c),
+    },
+    headingNote: {
+      flexShrink: 1,
+      ...font.mono,
+      fontSize: size.label,
+      color: c.faint,
+    },
+    group: {
+      marginTop: space.sm,
+      backgroundColor: c.surface,
+      borderRadius: radius.lg,
+      ...edged(c, 3),
+      overflow: "hidden",
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      minHeight: 52,
+      paddingHorizontal: space.md,
+      paddingVertical: space.sm,
+    },
+    rowDivided: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: c.line,
+    },
+    rowBody: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
+    rowLabel: { ...font.sansMedium, fontSize: scaled(14.5), color: c.text },
+    rowLabelMono: { ...font.monoMedium },
+    rowLabelMuted: { color: c.textSecondary },
+    rowNote: {
+      marginTop: space.xxs,
+      ...font.mono,
+      fontSize: size.label,
+      lineHeight: scaled(18),
+      color: c.muted,
+    },
+    liveDot: {
+      width: 6,
+      height: 6,
+      borderRadius: radius.pill,
+      backgroundColor: c.working,
+    },
+    loading: { paddingVertical: space.xl, alignItems: "center" },
+    empty: {
+      padding: space.lg,
+      ...font.sans,
+      fontSize: size.caption,
+      color: c.faint,
+    },
+    error: {
+      marginTop: space.sm,
+      ...font.sans,
+      fontSize: size.caption,
+      color: c.errorText,
+    },
+    bar: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      paddingHorizontal: space.lg,
+      paddingTop: space.md,
+      backgroundColor: c.paper,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: c.line,
+    },
+    barNote: {
+      textAlign: "center",
+      ...font.mono,
+      fontSize: size.label,
+      color: c.muted,
+    },
+    use: {
+      marginTop: space.sm,
+      minHeight: 48,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 14,
+      backgroundColor: c.inverse,
+      ...hardShadow(c.inverseShadow),
+    },
+    useDisabled: { backgroundColor: c.fill },
+    useLabel: {
+      ...font.sansBold,
+      fontSize: size.body,
+      color: c.onInverse,
+    },
+    useLabelDisabled: { color: c.faint },
+  });
+}
+
+function makeClassicStyles(c: Palette) {
   return StyleSheet.create({
     page: { flex: 1, backgroundColor: c.paper },
     content: { paddingHorizontal: space.lg },
@@ -418,3 +557,11 @@ function makeStyles(c: Palette) {
     useLabelDisabled: { color: c.faint },
   });
 }
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+

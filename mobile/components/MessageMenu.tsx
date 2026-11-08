@@ -26,6 +26,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useStyles, useTheme } from "../lib/appearance";
 import { layoutMessageMenu, MENU_ROW_HEIGHT, type Frame } from "../lib/message-menu";
 import { font, Palette, radius, size, space } from "../lib/theme";
+import { edged } from "./Brand";
 
 export interface MessageMenuItem {
   key: string;
@@ -233,7 +234,47 @@ export function MessageMenu({
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
+  StyleSheet.create({
+    // The system's own scrim, at half strength over a blur. At full strength
+    // it is tuned to stand alone, and over a blur it went muddy.
+    dim: { backgroundColor: c.scrim, opacity: Platform.OS === "ios" ? 0.5 : 1 },
+    lifted: {
+      shadowColor: c.shadow,
+      shadowOpacity: 0.22,
+      shadowRadius: 24,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 12,
+      // A shadow disappears on a dark ground; a hairline does not.
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.line,
+    },
+    clipped: { overflow: "hidden" },
+    menu: {
+      position: "absolute",
+      borderRadius: radius.lg,
+      backgroundColor: c.surface,
+      ...edged(c),
+      overflow: "hidden",
+      shadowColor: c.shadow,
+      shadowOpacity: 0.18,
+      shadowRadius: 24,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 16,
+    },
+    row: {
+      height: MENU_ROW_HEIGHT,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.md,
+      paddingHorizontal: space.lg,
+    },
+    rowDivided: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line },
+    rowPressed: { backgroundColor: c.fill },
+    label: { flex: 1, ...font.sansMedium, fontSize: size.body, color: c.text },
+  });
+
+const makeClassicStyles = (c: Palette) =>
   StyleSheet.create({
     // The system's own scrim, at half strength over a blur. At full strength
     // it is tuned to stand alone, and over a blur it went muddy.
@@ -273,3 +314,11 @@ const makeStyles = (c: Palette) =>
     rowPressed: { backgroundColor: c.fill },
     label: { flex: 1, ...font.sansMedium, fontSize: size.body, color: c.text },
   });
+
+// Today's styles for the Classic theme, the website's look's above them
+// (see lib/theme: a palette's look). Keys only the new look has keep its
+// values, for what only the new look shows.
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;
+
