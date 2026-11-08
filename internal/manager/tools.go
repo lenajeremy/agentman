@@ -189,6 +189,18 @@ func init() {
 			run:      runPlanTeam,
 		},
 		{
+			name: "queue_task",
+			description: "Line up work for tonight, when the user asks for something to happen overnight or while they're away. " +
+				"It starts in the night, a few at a time and one to a folder, and the user gets a report in the morning.",
+			properties: map[string]any{
+				"agent":  map[string]any{"type": "string", "enum": launchKindNames},
+				"folder": map[string]any{"type": "string", "description": "The folder, as for start_agent."},
+				"task":   map[string]any{"type": "string", "description": "What the agent should do, with everything it needs to know."},
+			},
+			required: []string{"agent", "folder", "task"},
+			run:      runQueueTask,
+		},
+		{
 			name: "create_worktree",
 			description: "Make a git worktree of a repository, when the user asks: a folder of its own under ~/Agentman/Worktrees, " +
 				"on a new branch named after it from what the repository's folder has checked out, with its .env files copied in. " +

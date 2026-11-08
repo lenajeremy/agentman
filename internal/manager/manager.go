@@ -84,6 +84,9 @@ type Manager struct {
 	// missionMu keeps two sweeps from starting one team member twice.
 	missionMu sync.Mutex
 	shipping  shipState
+	queue     *queueStore
+	// queueMu keeps two sweeps from starting one piece of work twice.
+	queueMu sync.Mutex
 	// stuck is what was last raised about each agent, guarded by cardMu.
 	stuck map[string]string
 	// overlaps is what has been raised about agents\' files, guarded by cardMu.
@@ -174,6 +177,7 @@ func New(cfg Config) (*Manager, error) {
 		learned:      loadLearned(cfg.Dir),
 		corrections:  loadCorrections(cfg.Dir),
 		missions:     loadMissions(cfg.Dir),
+		queue:        loadQueue(cfg.Dir),
 		stuck:        map[string]string{},
 		overlaps:     map[string]bool{},
 		runCheck:     cfg.RunCheck,
@@ -237,7 +241,8 @@ func (m *Manager) Handles(kind protocol.RequestType) bool {
 		protocol.ReqManagerSchedules, protocol.ReqManagerScheduleCancel, protocol.ReqManagerImage,
 		protocol.ReqToolsTitle, protocol.ReqManagerOpenCards, protocol.ReqManagerCheckPermission,
 		protocol.ReqTranscribe, protocol.ReqVoiceAccount, protocol.ReqVoiceSignInStart, protocol.ReqVoiceSignInVerify,
-		protocol.ReqVoiceSignOut, protocol.ReqManagerViewing, protocol.ReqManagerVerifications, protocol.ReqManagerMissions, protocol.ReqManagerShip:
+		protocol.ReqVoiceSignOut, protocol.ReqManagerViewing, protocol.ReqManagerVerifications, protocol.ReqManagerMissions, protocol.ReqManagerShip,
+		protocol.ReqManagerQueue, protocol.ReqManagerQueueAdd, protocol.ReqManagerQueueRemove:
 		return true
 	}
 	return false
@@ -291,6 +296,8 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 		return m.setKey(ctx, providerNamed(string(req.Kind)), req.Text)
 	case protocol.ReqManagerBriefs:
 		return protocol.Event{Type: protocol.EvtManagerBrief, Briefs: m.briefs.all()}
+	case protocol.ReqManagerQueue, protocol.ReqManagerQueueAdd, protocol.ReqManagerQueueRemove:
+		return m.handleQueueRequest(req)
 	case protocol.ReqManagerShip:
 		return m.startShip(req.SessionIDs)
 	case protocol.ReqManagerMissions:
@@ -335,6 +342,7 @@ func (m *Manager) TurnComplete(session protocol.Session) {
 	go m.watchEvent(session.ID, protocol.WatchTurnEnd, protocol.WatchIdle)
 	go m.verifyTurn(context.Background(), session.ID)
 	m.missionTurnEnded(session.ID)
+	m.queueTurnEnded(session.ID)
 }
 
 // NeedsAnswer hears that an agent is asking something. The daemon says so on

@@ -313,6 +313,10 @@ type Request struct {
 	Viewing []string `json:"viewing,omitempty"`
 	// SessionIDs are the agents a manager_ship is for.
 	SessionIDs []string `json:"sessionIds,omitempty"`
+	// Queue is the work for a manager_queue_add; QueueID what a
+	// manager_queue_remove takes out.
+	Queue   *QueueItem `json:"queue,omitempty"`
+	QueueID string     `json:"queueId,omitempty"`
 	// WithFile asks a ReqCommitDiff for the file as the commit left it as
 	// well, in the result's Text: the unchanged lines around a change, read
 	// when someone opens them rather than sent with every diff.
@@ -437,6 +441,7 @@ type Event struct {
 	Verifications   []Verification   `json:"verifications,omitempty"`
 	Missions        []Mission        `json:"missions,omitempty"`
 	Ship            *ShipRun         `json:"ship,omitempty"`
+	Queue           []QueueItem      `json:"queue,omitempty"`
 	Permission      *PermissionCheck `json:"permission,omitempty"`
 	// More says older manager entries remain, on EvtManagerHistory.
 	More bool `json:"more,omitempty"`

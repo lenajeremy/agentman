@@ -89,6 +89,7 @@ func (m *Manager) checkStuck(ctx context.Context) {
 	}
 	m.checkOverlaps(ctx, settings, sessions)
 	m.learnFromCorrections(ctx, settings, sessions)
+	m.runOvernight(ctx, settings)
 }
 
 func (m *Manager) diagnose(ctx context.Context, session protocol.Session, now time.Time) stuckFinding {

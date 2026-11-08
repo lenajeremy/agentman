@@ -344,21 +344,14 @@ func (m *Manager) startTask(ctx context.Context, mission protocol.Mission, task 
 		}
 		folder = made.Worktree.Path
 	}
-	rel, err := filepath.Rel(home, folder)
+	text := fmt.Sprintf("You are one of %d agents working towards: %s\n\nYour part: %s", len(mission.Tasks), mission.Goal, task.Task)
+	sessionID, err := m.launch(ctx, task.Agent, folder, text)
 	if err != nil {
 		task.State, task.Problem = protocol.TaskFailed, err.Error()
 		return
 	}
-	text := fmt.Sprintf("You are one of %d agents working towards: %s\n\nYour part: %s", len(mission.Tasks), mission.Goal, task.Task)
-	started := m.agents.Request(ctx, protocol.Request{
-		Type: protocol.ReqStartSession, Kind: launchKinds[task.Agent], Path: rel, Text: text, ClientID: "agentman-" + newID(),
-	})
-	if started.Type == protocol.EvtError || started.SessionID == "" {
-		task.State, task.Problem = protocol.TaskFailed, "Couldn't start it: "+plainError(started.Error)
-		return
-	}
-	task.State, task.SessionID, task.StartedAt = protocol.TaskRunning, started.SessionID, m.now().UnixMilli()
-	m.addEntry(protocol.ManagerEntry{Role: "activity", Tool: "start_agent", SessionID: started.SessionID,
+	task.State, task.SessionID, task.StartedAt = protocol.TaskRunning, sessionID, m.now().UnixMilli()
+	m.addEntry(protocol.ManagerEntry{Role: "activity", Tool: "start_agent", SessionID: sessionID,
 		Text: fmt.Sprintf("Started %s on “%s”", agentLabel(launchKinds[task.Agent]), task.Title)})
 }
 

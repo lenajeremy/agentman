@@ -65,6 +65,12 @@ const (
 	// ReqManagerMissions asks for the teams Agentman has planned or is running.
 	ReqManagerMissions RequestType = "manager_missions"
 
+	// ReqManagerQueue lists the work queued for tonight; ReqManagerQueueAdd
+	// adds Queue to it; ReqManagerQueueRemove takes out QueueID.
+	ReqManagerQueue       RequestType = "manager_queue"
+	ReqManagerQueueAdd    RequestType = "manager_queue_add"
+	ReqManagerQueueRemove RequestType = "manager_queue_remove"
+
 	// ReqManagerShip commits, pushes and opens pull requests for the agents
 	// named in SessionIDs, one after another.
 	ReqManagerShip RequestType = "manager_ship"
@@ -93,6 +99,8 @@ const (
 	EvtManagerBrief EventType = "manager_brief"
 	// EvtManagerMissions is every team, sent whenever one changes.
 	EvtManagerMissions EventType = "manager_missions"
+	// EvtManagerQueue is the work queued for tonight.
+	EvtManagerQueue EventType = "manager_queue"
 	// EvtManagerShip says how shipping is going.
 	EvtManagerShip EventType = "manager_ship"
 	// EvtManagerVerification says how a check of an agent's work went.
@@ -350,6 +358,13 @@ type Autopilot struct {
 	Overlap bool `json:"overlap"`
 	// LearnNotes suggests a note for what the user keeps telling agents.
 	LearnNotes bool `json:"learnNotes"`
+	// Overnight starts queued work between NightStart and NightEnd, "HH:MM"
+	// on the 24-hour clock, NightAgents at a time; NightEnd is also when the
+	// morning's report is written. Empty or zero take the defaults.
+	Overnight   bool   `json:"overnight"`
+	NightStart  string `json:"nightStart,omitempty"`
+	NightEnd    string `json:"nightEnd,omitempty"`
+	NightAgents int    `json:"nightAgents,omitempty"`
 	// VerifyDaily is how many reviews by the model a day may cost; zero is
 	// the default. Running the tests costs none.
 	VerifyDaily int `json:"verifyDaily,omitempty"`
@@ -398,6 +413,29 @@ type MissionTask struct {
 	StartedAt   int64  `json:"startedAt,omitempty"`
 	TurnEndedAt int64  `json:"turnEndedAt,omitempty"`
 	Problem     string `json:"problem,omitempty"`
+}
+
+// Where a queued piece of work stands.
+const (
+	QueueWaiting = "waiting"
+	QueueRunning = "running"
+	QueueDone    = "done"
+	QueueFailed  = "failed"
+)
+
+// QueueItem is work lined up for tonight.
+type QueueItem struct {
+	ID          string `json:"id"`
+	Agent       string `json:"agent"`
+	Folder      string `json:"folder"`
+	Task        string `json:"task"`
+	State       string `json:"state"`
+	SessionID   string `json:"sessionId,omitempty"`
+	Problem     string `json:"problem,omitempty"`
+	CreatedAt   int64  `json:"createdAt"`
+	StartedAt   int64  `json:"startedAt,omitempty"`
+	TurnEndedAt int64  `json:"turnEndedAt,omitempty"`
+	Reported    bool   `json:"reported,omitempty"`
 }
 
 // How shipping is going, for a run and for one agent in it.

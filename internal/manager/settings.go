@@ -140,6 +140,9 @@ func validateSettings(s protocol.ManagerSettings) error {
 	if err := validateTrust(s.Trust); err != nil {
 		return err
 	}
+	if err := validateAutopilot(s.Autopilot); err != nil {
+		return err
+	}
 	return validateRules(s.Rules)
 }
 
