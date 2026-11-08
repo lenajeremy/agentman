@@ -67,6 +67,7 @@ struct AwaySummary: View {
                     }
                     Spacer()
                     Button("Done", action: close)
+                        .buttonStyle(.brand)
                         .keyboardShortcut(.defaultAction)
                 }
                 .font(TextStyle.caption)
@@ -75,7 +76,7 @@ struct AwaySummary: View {
             }
             .frame(width: 560)
             .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.line))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
             .shadow(color: .black.opacity(0.2), radius: 40, y: 16)
         }
         .transition(.opacity)

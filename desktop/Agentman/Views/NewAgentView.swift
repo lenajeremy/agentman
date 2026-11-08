@@ -73,12 +73,11 @@ struct NewAgentView: View {
             }
             .padding(10)
             .background {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(Palette.surface)
+                RoundedRectangle(cornerRadius: 24, style: .continuous).hardShadowFill(Palette.surface, shadow: Palette.edge, depth: 3)
                     .onTapGesture { focused = true }
             }
-            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Palette.line))
-            .shadow(color: .black.opacity(0.06), radius: 18, y: 6)
+            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
+            .classicShadow(color: .black.opacity(0.06), radius: 18, y: 6)
             .frame(maxWidth: 640)
 
             if let problem {
@@ -98,7 +97,7 @@ struct NewAgentView: View {
         // A title row, as every page has; it was empty.
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack {
-                Text("New agent").font(Fonts.sans(14, .semibold))
+                Text("New agent").font(Fonts.heading(14))
                 Spacer()
             }
             .padding(.horizontal, 16)
@@ -353,8 +352,10 @@ struct WorktreeNamer: View {
             HStack {
                 Spacer()
                 Button("Cancel") { done(nil) }
+                    .buttonStyle(.brandSecondary)
                     .keyboardShortcut(.cancelAction)
                 Button("Use", action: use)
+                    .buttonStyle(.brand)
                     .keyboardShortcut(.defaultAction)
                     .disabled(NewAgentView.branchName(name).isEmpty)
             }

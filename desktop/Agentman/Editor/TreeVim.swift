@@ -750,7 +750,7 @@ struct TreeKeysSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Tree keys")
-                    .font(Fonts.sans(13, .semibold))
+                    .font(Fonts.heading(13))
                     .foregroundStyle(Palette.text)
                 Spacer()
                 Button(action: close) {

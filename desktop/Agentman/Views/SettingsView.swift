@@ -162,15 +162,13 @@ struct SettingsSection<Content: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             if let title {
                 Text(title)
-                    .font(TextStyle.captionMedium)
-                    .foregroundStyle(Palette.muted)
+                    .eyebrow()
                     .padding(.leading, 4)
             }
             VStack(spacing: 0) {
                 content
             }
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
+            .edged(12, depth: 3)
             if let footer {
                 Text(footer)
                     .font(TextStyle.caption)
@@ -588,11 +586,13 @@ private struct NewRuleSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
+                    .buttonStyle(.brandSecondary)
                     .keyboardShortcut(.cancelAction)
                 Button("Add Rule") {
                     add(PermissionRule(action: action, kind: kind, pattern: pattern.trimmingCharacters(in: .whitespaces), folder: folder))
                     dismiss()
                 }
+                .buttonStyle(.brand)
                 .keyboardShortcut(.defaultAction)
                 .disabled(problem != nil)
             }
@@ -772,7 +772,7 @@ private struct SaveBar: View {
                 }
             }
             .keyboardShortcut("s", modifiers: .command)
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.brand)
             .disabled(saving)
         }
         .padding(.horizontal, 20)
@@ -782,17 +782,29 @@ private struct SaveBar: View {
     }
 }
 
-/// Light, dark, or as the Mac is set.
+/// Light, dark, or as the Mac is set; and the theme: today's, or the
+/// website's look while it is being refined.
 private struct AppearanceSection: View {
     @AppStorage("appearance") private var appearance = "system"
 
     var body: some View {
-        SettingsSection(title: "Appearance") {
-            SettingsRow(title: "Look", divider: false) {
+        @Bindable var choice = ThemeChoice.shared
+        SettingsSection(title: "Appearance", footer: "New is the website's look, still being designed.") {
+            SettingsRow(title: "Look") {
                 Picker("", selection: $appearance) {
                     Text("Match the Mac").tag("system")
                     Text("Light").tag("light")
                     Text("Dark").tag("dark")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+            }
+            SettingsRow(title: "Theme", divider: false) {
+                Picker("", selection: $choice.theme) {
+                    ForEach(AppTheme.allCases) { theme in
+                        Text(theme.title).tag(theme)
+                    }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()

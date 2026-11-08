@@ -58,7 +58,7 @@ private struct LimitsSection: View {
             HStack(spacing: 8) {
                 AgentMark(kind: agent.kind, size: 16)
                 Text(AgentName.of(agent.kind))
-                    .font(Fonts.sans(14, .semibold))
+                    .font(Fonts.heading(14))
                     .foregroundStyle(Palette.text)
                 if let plan = agent.plan, !plan.isEmpty {
                     Text(plan)
@@ -66,7 +66,8 @@ private struct LimitsSection: View {
                         .foregroundStyle(Palette.textSecondary)
                         .padding(.horizontal, 7)
                         .frame(height: 18)
-                        .background(Palette.fill, in: Capsule())
+                        .background(Look.site ? Palette.cream : Palette.fill, in: Capsule())
+                        .overlay(Capsule().strokeBorder(Look.site ? Palette.edge : .clear, lineWidth: 1))
                 }
                 Spacer(minLength: 12)
                 Text(LimitsFormat.checked(agent, now: now))
@@ -109,7 +110,7 @@ private struct LimitCard: View {
                     .help(window.label)
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text("\(left)%")
-                        .font(Fonts.sans(28, .semibold))
+                        .font(Fonts.display(28))
                         .monospacedDigit()
                         .foregroundStyle(left == 0 ? Palette.errorText : Palette.text)
                     Text("left")
@@ -145,8 +146,7 @@ private struct LimitCard: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 15)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.line))
+        .edged(10, depth: 3)
         .accessibilityElement(children: .combine)
     }
 }

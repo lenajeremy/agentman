@@ -534,7 +534,7 @@ struct DiffPanel: View, Equatable {
                 PanelButton(symbol: "rectangle.split.2x1", help: "Split diff view", on: split) { split = true }
             }
             .padding(1)
-            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Palette.line))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
             PanelButton(symbol: "arrow.turn.down.left", help: wrap ? "Don't wrap long lines" : "Wrap long lines", on: wrap) { wrap.toggle() }
             PanelButton(symbol: "paragraphsign", help: ignoreWhitespace ? "Show whitespace changes" : "Hide whitespace changes",
                         on: ignoreWhitespace) { ignoreWhitespace.toggle() }

@@ -17,10 +17,21 @@ struct SetupScreen: View {
             Color.black.opacity(0.22)
                 .ignoresSafeArea()
             VStack(alignment: .leading, spacing: 0) {
-                header(setup)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 24)
-                    .padding(.bottom, 18)
+                if Look.site {
+                    header(setup)
+                    Text(subtitle(setup))
+                        .font(TextStyle.body)
+                        .foregroundStyle(Palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 10)
+                        .padding(.bottom, 16)
+                } else {
+                    classicHeader(setup)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 24)
+                        .padding(.bottom, 18)
+                }
                 VStack(alignment: .leading, spacing: 12) {
                     if setup.phase == .ready {
                         WelcomePoints()
@@ -40,15 +51,18 @@ struct SetupScreen: View {
                     .padding(.vertical, 18)
             }
             .frame(width: Self.width)
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.line))
+            .background(Palette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
             .shadow(color: .black.opacity(0.2), radius: 40, y: 16)
         }
         .transition(.opacity)
         .task { await setup.lookAtShell() }
     }
 
-    private func header(_ setup: DaemonSetup) -> some View {
+    /// The Classic theme's header: the badge beside the title and what it
+    /// does.
+    private func classicHeader(_ setup: DaemonSetup) -> some View {
         HStack(alignment: .top, spacing: 14) {
             AgentmanBadge(size: 44)
             VStack(alignment: .leading, spacing: 5) {
@@ -61,6 +75,38 @@ struct SetupScreen: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    /// The website's orange band, with its terminal sticker and the title in
+    /// Rubik: before setting up, "Set up" over "Agentman" outlined.
+    private func header(_ setup: DaemonSetup) -> some View {
+        FloodBand {
+            HStack(alignment: .top, spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Agentman for Mac").eyebrow(Palette.onFlood.opacity(0.9))
+                    if setup.phase == .ready {
+                        VStack(alignment: .leading, spacing: -4) {
+                            Text("Set up").font(Fonts.display(36)).foregroundStyle(Palette.onFlood)
+                            OutlinedWord(text: "Agentman", font: Fonts.display(36))
+                        }
+                    } else {
+                        Text(title(setup))
+                            .font(Fonts.display(30))
+                            .foregroundStyle(Palette.onFlood)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.top, 22)
+                .padding(.bottom, 18)
+                Spacer(minLength: 8)
+                Sticker(name: .terminal, size: 150)
+                    .padding(.top, -6)
+                    .padding(.bottom, -22)
+            }
+            .padding(.leading, 24)
+            .padding(.trailing, 12)
+        }
+        .zIndex(1)
     }
 
     private func title(_ setup: DaemonSetup) -> String {
@@ -137,20 +183,32 @@ private struct WelcomePoints: View {
             point("arrow.triangle.swap", "Replaces one you started yourself",
                   "If you already run the helper (am serve) from Homebrew or a terminal, this one takes its place. The am command keeps working.")
         }
-        .background(Palette.paper.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
+        // The site's cream card, on its edge and hard shadow.
+        .look {
+            $0.edged(14, fill: Palette.cream, depth: 3)
+        } classic: {
+            $0.background(Palette.paper.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
+        }
     }
 
     private var divider: some View {
-        Rectangle().fill(Palette.line).frame(height: 1).padding(.leading, 50)
+        Rectangle().fill(Look.site ? Palette.edge.opacity(0.15) : Palette.line).frame(height: 1).padding(.leading, Look.site ? 56 : 50)
     }
 
     private func point(_ symbol: String, _ title: String, _ detail: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: symbol)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Palette.working)
-                .frame(width: 22, height: 20)
+                .look {
+                    $0.font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Palette.prompt)
+                        .frame(width: 30, height: 30)
+                        .edged(9, fill: Palette.surface)
+                } classic: {
+                    $0.font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Palette.working)
+                        .frame(width: 22, height: 20)
+                }
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(TextStyle.bodyMedium)
@@ -184,7 +242,7 @@ struct SetupSteps: View {
             }
         }
         .background(Palette.paper.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
     }
 }
 

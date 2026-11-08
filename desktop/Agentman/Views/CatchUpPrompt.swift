@@ -21,7 +21,7 @@ struct CatchUpPrompt: View {
                     AgentmanBadge(size: 40)
                     VStack(alignment: .leading, spacing: 5) {
                         Text("am serve was updated to \(version)")
-                            .font(Fonts.sans(17, .semibold))
+                            .font(Fonts.heading(17))
                             .foregroundStyle(Palette.text)
                         Text(subtitle(app: catchUp.appVersion))
                             .font(TextStyle.body)
@@ -45,7 +45,7 @@ struct CatchUpPrompt: View {
             .padding(24)
             .frame(width: Self.width)
             .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.line))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
             .shadow(color: .black.opacity(0.2), radius: 40, y: 16)
         }
         .transition(.opacity)

@@ -818,12 +818,11 @@ private struct TakeOverBar: View {
             }
             Spacer()
             Button("Take Over…", action: takeOver)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.brand)
                 .disabled(working)
         }
         .padding(14)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.line))
+        .edged(18, depth: 3)
     }
 }
 
@@ -849,12 +848,11 @@ private struct ResumeBar: View {
             Button(action: resume) {
                 if resuming { ProgressView().controlSize(.small) } else { Text("Resume") }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.brand)
             .disabled(resuming)
         }
         .padding(14)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Palette.line))
+        .edged(18, depth: 3)
     }
 }
 
@@ -998,8 +996,7 @@ private struct ChangedBar: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.line))
+            .edged(10, depth: 2)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1140,7 +1137,7 @@ struct MessageRow: View {
                             LongText(text: sent.text)
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 12)
-                                .background(Palette.fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                .background(Palette.bubble, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                                 .contextMenu {
                                     Button("Copy") { Clipboard.copy(sent.text) }
                                 }
@@ -1779,13 +1776,12 @@ struct Composer: View {
         // A click on the card around the text, not on a control, goes to
         // the text.
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Palette.surface)
+            RoundedRectangle(cornerRadius: 18, style: .continuous).hardShadowFill(Palette.surface, shadow: Palette.edge, depth: 3)
                 .onTapGesture { if enabled { focused = true } }
         }
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(focused ? Palette.fillStrong : Palette.line, lineWidth: 1)
+                .strokeBorder(Look.site ? Palette.edge : (focused ? Palette.fillStrong : Palette.line), lineWidth: Palette.edgeWidth)
         )
         // The commands for `/`, and the files for `@`, just above the box.
         .overlay(alignment: .top) {
@@ -1883,7 +1879,7 @@ struct Composer: View {
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(canSend ? Color.white : Palette.muted)
                     .frame(width: 28, height: 28)
-                    .background(canSend ? Palette.working : Palette.fillStrong, in: Circle())
+                    .background(canSend ? (Look.site ? Palette.flood : Palette.working) : Palette.fillStrong, in: Circle())
             }
             .buttonStyle(.plain)
             .disabled(!canSend)

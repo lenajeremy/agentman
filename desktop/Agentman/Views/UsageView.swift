@@ -79,7 +79,7 @@ struct UsageView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Text("Usage").font(Fonts.sans(14, .semibold))
+            Text("Usage").font(Fonts.heading(14))
             Segments(options: UsageTab.allCases, selection: tab) { $0.title }
                 .padding(.leading, 6)
             Spacer()
@@ -296,7 +296,7 @@ struct UsagePage: View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(cost ? UsageFormat.money(usage.cost.total) : UsageFormat.tokens(usage.tokens.total))
-                    .font(Fonts.sans(36, .semibold))
+                    .font(Fonts.display(36))
                     .monospacedDigit()
                     .foregroundStyle(Palette.text)
                     .lineLimit(1)
@@ -357,7 +357,7 @@ struct UsagePage: View {
     private var chart: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(unit.adjective + (cost ? " cost" : " processed tokens"))
-                .font(Fonts.sans(14, .semibold))
+                .font(Fonts.heading(14))
                 .foregroundStyle(Palette.text)
             UsageChart(usage: usage, metric: metric, agents: agents.map(\.kind), pointing: pointing)
                 .frame(height: 250)
@@ -370,7 +370,7 @@ struct UsagePage: View {
     private var totals: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Totals")
-                .font(Fonts.sans(14, .semibold))
+                .font(Fonts.heading(14))
                 .foregroundStyle(Palette.text)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 20, alignment: .leading)], alignment: .leading, spacing: 18) {
                 stat("Processed tokens", UsageFormat.tokens(usage.tokens.total))
@@ -418,7 +418,7 @@ struct UsagePage: View {
         let total = kinds.reduce(0) { $0 + $1.value }
         return VStack(alignment: .leading, spacing: 12) {
             Text(cost ? "Cost by type" : "Tokens by type")
-                .font(Fonts.sans(14, .semibold))
+                .font(Fonts.heading(14))
                 .foregroundStyle(Palette.text)
             GeometryReader { geometry in
                 let shown = kinds.filter { $0.value > 0 }
@@ -608,8 +608,7 @@ private struct UsageChart: View {
         .padding(.horizontal, 11)
         .padding(.vertical, 9)
         .frame(width: 190)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Palette.line))
+        .edged(8)
         .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
     }
 
@@ -679,7 +678,7 @@ private struct UsageBreakdownTable: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Breakdown")
-                    .font(Fonts.sans(14, .semibold))
+                    .font(Fonts.heading(14))
                     .foregroundStyle(Palette.text)
                 Spacer()
                 Segments(options: UsageBreakdown.allCases, selection: $breakdown) {
@@ -796,8 +795,9 @@ struct Segments<Value: Hashable>: View {
                         .background {
                             if chosen {
                                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                    .fill(Palette.segment)
-                                    .shadow(color: .black.opacity(0.1), radius: 0.5, y: 0.5)
+                                    .fill(Look.site ? Palette.surface : Palette.segment)
+                                    .shadow(color: Look.site ? .clear : .black.opacity(0.1), radius: 0.5, y: 0.5)
+                                    .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Look.site ? Palette.edge : .clear, lineWidth: 1.2))
                             }
                         }
                         .contentShape(Rectangle())

@@ -62,9 +62,10 @@ struct NoteSuggestionCard: View {
                 Spacer()
                 if editing {
                     Button("Cancel") { editing = false }
+                        .buttonStyle(.brandSecondary)
                         .disabled(busy)
                     Button("Save note") { save(edited: true) }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.brand)
                         .keyboardShortcut(.defaultAction)
                         .disabled(busy || title.trimmingCharacters(in: .whitespaces).isEmpty
                             || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -72,9 +73,10 @@ struct NoteSuggestionCard: View {
                     Button("Dismiss") { act { await store.manager.dismiss(card) } }
                         .disabled(busy)
                     Button("Edit") { beginEditing() }
+                        .buttonStyle(.brandSecondary)
                         .disabled(busy)
                     Button("Save note") { save(edited: false) }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.brand)
                         .disabled(busy)
                 }
             }
@@ -82,7 +84,7 @@ struct NoteSuggestionCard: View {
         }
         .padding(18)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.line))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
         .onAppear {
             // For screenshots: the suggestion opened for editing.
             if ProcessInfo.processInfo.environment["AGENTMAN_EDIT_NOTE"] == "1", !editing { beginEditing() }
@@ -133,7 +135,7 @@ struct NoteSuggestionCard: View {
                 .padding(6)
                 .frame(minHeight: 90, maxHeight: 160)
                 .background(Palette.paper, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Palette.line))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
             Picker("", selection: $tier) {
                 Text("Shared with your agents").tag("shared")
                 Text("Only Agentman").tag("private")

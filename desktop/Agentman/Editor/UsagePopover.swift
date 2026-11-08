@@ -17,7 +17,7 @@ struct UsagePopover: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Usage")
-                    .font(Fonts.sans(14, .semibold))
+                    .font(Fonts.heading(14))
                     .foregroundStyle(Palette.text)
                 Spacer()
                 if let usage {
