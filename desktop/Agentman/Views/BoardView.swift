@@ -20,6 +20,7 @@ struct BoardView: View {
     @Environment(AgentsStore.self) private var store
     @Environment(\.detailHeaderLeading) private var headerLeading
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(AgentColors.settingKey) private var colorBy: AgentColorBy = .none
     @State private var chatAutofocus = ChatAutofocus()
     @State private var draft = ""
     @State private var attachments: [Attachment] = []
@@ -73,6 +74,19 @@ struct BoardView: View {
             Spacer()
             HandledButton()
             TonightButton()
+            Menu { AgentColorMenuItems() } label: {
+                Image(systemName: colorBy == .none ? "paintpalette" : "paintpalette.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(colorBy == .none ? Palette.muted : Palette.text)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Color agents by state, project or folder")
+            .accessibilityLabel("Color agents by")
             folderMenu
                 .padding(.trailing, 4)
             if !manager.schedules.isEmpty { SchedulesButton() }
@@ -473,6 +487,7 @@ private struct BoardCard: View {
     let session: Session
     let kind: BoardColumnKind
     let outlined: Bool
+    @AppStorage(AgentColors.settingKey) private var colorBy: AgentColorBy = .none
     @State private var hovering = false
     @State private var git: GitState?
 
@@ -512,8 +527,9 @@ private struct BoardCard: View {
         }
         .padding(11)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint?.opacity(0.08) ?? .clear, in: Self.shape)
         .background(Palette.surface, in: Self.shape)
-        .overlay(Self.shape.strokeBorder(hovering ? Palette.fillStrong : Palette.line))
+        .overlay(Self.shape.strokeBorder(tint?.opacity(hovering ? 0.75 : 0.45) ?? (hovering ? Palette.fillStrong : Palette.line)))
         .overlay {
             // The cards Agentman's answer is about.
             if outlined { Self.shape.strokeBorder(Palette.working, lineWidth: 1.5) }
@@ -534,6 +550,8 @@ private struct BoardCard: View {
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: "Open conversation", open)
     }
+
+    private var tint: Color? { AgentColors.color(for: session, by: colorBy) }
 
     private func open() {
         store.selection = .agent(session.id)

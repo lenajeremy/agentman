@@ -408,6 +408,13 @@ final class BoardTests: XCTestCase {
         try render(store, size: CGSize(width: 1280, height: 800), dark: false, to: shots.appendingPathComponent("thread-worked.png"))
         store.selection = .manager
 
+        UserDefaults.standard.set("project", forKey: AgentColors.settingKey)
+        store.boardShowsSidebar = true
+        try render(store, size: CGSize(width: 1560, height: 980), dark: false, to: shots.appendingPathComponent("board-color-project.png"))
+        try render(store, size: CGSize(width: 1560, height: 980), dark: true, to: shots.appendingPathComponent("board-color-dark.png"))
+        store.boardShowsSidebar = false
+        UserDefaults.standard.removeObject(forKey: AgentColors.settingKey)
+
         var user = DaemonEvent(type: "manager_entry")
         user.entry = ManagerEntry(id: "u", role: "user", text: "What's left before the storefront can ship?", ts: 10)
         store.apply(user)
@@ -426,6 +433,45 @@ final class BoardTests: XCTestCase {
         empty.statusChanged(.connected)
         empty.selection = .manager
         try render(empty, size: CGSize(width: 1280, height: 800), dark: false, to: shots.appendingPathComponent("board-empty.png"))
+    }
+}
+
+@MainActor
+final class AgentColorsTests: XCTestCase {
+    private func defaults() -> UserDefaults {
+        let name = "agent-colors-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        addTeardownBlock { defaults.removePersistentDomain(forName: name) }
+        return defaults
+    }
+
+    func testAKeyKeepsItsColorAndFewKeysNeverShareOne() {
+        let store = defaults()
+        let first = AgentColors.index(for: "project|api", defaults: store)
+        let all = (0..<AgentColors.hues.count - 1).map { AgentColors.index(for: "project|p\($0)", defaults: store) }
+        XCTAssertEqual(Set(all + [first]).count, AgentColors.hues.count, "each new one takes an unused colour")
+        XCTAssertEqual(AgentColors.index(for: "project|api", defaults: store), first)
+    }
+
+    func testWorktreesAreOneProjectButTheirOwnFolders() {
+        let root = Worktrees.root
+        XCTAssertEqual(AgentColors.projectName(root + "/api/limits"), "api")
+        XCTAssertEqual(AgentColors.projectName(root + "/api/retries"), "api")
+        XCTAssertEqual(AgentColors.projectName("/work/site"), "site")
+        let store = defaults()
+        let one = Session(id: "a", kind: "claude", name: "A", cwd: root + "/api/limits", state: .idle)
+        var two = one
+        two.cwd = root + "/api/retries"
+        XCTAssertEqual(AgentColors.color(for: one, by: .project, defaults: store), AgentColors.color(for: two, by: .project, defaults: store))
+        XCTAssertNotEqual(AgentColors.color(for: one, by: .folder, defaults: store), AgentColors.color(for: two, by: .folder, defaults: store))
+    }
+
+    func testNoColorByDefaultAndStateFollowsTheAgent() {
+        var session = Session(id: "a", kind: "claude", name: "A", cwd: "/w", state: .busy)
+        XCTAssertNil(AgentColors.color(for: session, by: .none))
+        XCTAssertEqual(AgentColors.color(for: session, by: .state), Palette.working)
+        session.question = Question(prompt: "Go?", options: [])
+        XCTAssertEqual(AgentColors.color(for: session, by: .state), Palette.needsYou)
     }
 }
 
