@@ -13,6 +13,7 @@ import {
   paragraphs,
   plainInline,
   promptRepeatsDetail,
+  sameWords,
   stillHidden,
   worktreeParts,
 } from "./board.ts";
@@ -206,4 +207,10 @@ test("a worktree is known by its repository and its name", () => {
 test("only text longer than its lines is cut", () => {
   assert.equal(boardTextIsLong("short", 3, 358), false);
   assert.equal(boardTextIsLong("x".repeat(300), 3, 358), true);
+});
+
+test("a card doesn't say the same thing twice", () => {
+  assert.equal(sameWords("Wants to push to main", "wants to push to main."), true);
+  assert.equal(sameWords("Pick a badge style", "Pick a badge style for the cart"), true);
+  assert.equal(sameWords("Wants to push", "Which badge style?"), false);
 });

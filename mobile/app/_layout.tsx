@@ -45,7 +45,7 @@ function NotificationNavigation() {
       const sessionId = data?.sessionId;
       // Agentman's word, cards included, is in its conversation.
       if (data?.agentman === true) {
-        router.push("/agentman");
+        router.push("/agentman?chat=1");
       } else if (typeof sessionId === "string" && sessionId) {
         router.push(`/session/${encodeURIComponent(sessionId)}`);
       }

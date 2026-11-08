@@ -287,6 +287,14 @@ export function plainInline(text: string): string {
     .replace(/\s*\n\s*/g, " ");
 }
 
+/** Whether two lines say the same thing: one the other, ignoring case and
+ *  punctuation, so a card doesn't say it twice. */
+export function sameWords(a: string, b: string): boolean {
+  const words = (text: string) => text.toLowerCase().replace(/[\p{P}\p{S}]/gu, " ").replace(/\s+/g, " ").trim();
+  const [first, second] = [words(a), words(b)];
+  return first === second || first.includes(second) || second.includes(first);
+}
+
 /**
  * Whether a question's prompt only says its command again ("Run git push
  * origin main?" under that command): then it is left out, and the command is
