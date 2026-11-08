@@ -75,6 +75,7 @@ func (m *Manager) watchStuck(ctx context.Context) {
 
 // checkStuck looks at every agent once, when the user has asked for this.
 func (m *Manager) checkStuck(ctx context.Context) {
+	m.advanceMissions(ctx)
 	settings := m.currentSettings()
 	if settings.Autopilot == nil || !m.active() {
 		return
@@ -87,6 +88,7 @@ func (m *Manager) checkStuck(ctx context.Context) {
 		}
 	}
 	m.checkOverlaps(ctx, settings, sessions)
+	m.learnFromCorrections(ctx, settings, sessions)
 }
 
 func (m *Manager) diagnose(ctx context.Context, session protocol.Session, now time.Time) stuckFinding {

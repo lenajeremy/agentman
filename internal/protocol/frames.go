@@ -433,6 +433,7 @@ type Event struct {
 	Briefs          []Brief          `json:"briefs,omitempty"`
 	Verification    *Verification    `json:"verification,omitempty"`
 	Verifications   []Verification   `json:"verifications,omitempty"`
+	Missions        []Mission        `json:"missions,omitempty"`
 	Permission      *PermissionCheck `json:"permission,omitempty"`
 	// More says older manager entries remain, on EvtManagerHistory.
 	More bool `json:"more,omitempty"`

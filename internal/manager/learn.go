@@ -261,6 +261,8 @@ func (m *Manager) answerOfferCardLocked(ctx context.Context, entry protocol.Mana
 	switch card.Offer["type"] {
 	case offerRule:
 		outcome, err = m.takeRuleOffer(card, req.OptionKey)
+	case offerMission:
+		outcome, err = m.takeMissionOffer(ctx, card, req.OptionKey)
 	case offerOverlap:
 		outcome, err = m.takeOverlapOffer(ctx, card, req.OptionKey)
 	case offerStuck:

@@ -165,6 +165,30 @@ func init() {
 			run:        runEndAgent,
 		},
 		{
+			name: "plan_team",
+			description: "Propose a team of agents for a goal too big for one, when the user gives you such a goal: who does what, in which folder, in what order. " +
+				"The user sees the plan and decides; nothing starts unless they approve it, and agents wait for the ones they depend on. " +
+				"For parallel work on one repository give each agent a worktree. Don't start the agents yourself.",
+			properties: map[string]any{
+				"goal": map[string]any{"type": "string", "description": "The goal, in the user's terms, in a line."},
+				"tasks": map[string]any{"type": "array", "description": "Two to six parts.", "items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id":         map[string]any{"type": "string", "description": "A short id for this part, for depends_on."},
+						"title":      map[string]any{"type": "string", "description": "The part, in a few words."},
+						"agent":      map[string]any{"type": "string", "description": "Which agent: " + strings.Join(launchKindNames, ", ") + "."},
+						"folder":     map[string]any{"type": "string", "description": "The folder, as for start_agent."},
+						"task":       map[string]any{"type": "string", "description": "What this agent should do, with what it needs to know."},
+						"worktree":   map[string]any{"type": "string", "description": "A short name to give it a worktree of its own. Leave out to work in the folder itself."},
+						"depends_on": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "The ids of the parts that must finish first."},
+					},
+					"required": []string{"id", "title", "agent", "folder", "task"},
+				}},
+			},
+			required: []string{"goal", "tasks"},
+			run:      runPlanTeam,
+		},
+		{
 			name: "create_worktree",
 			description: "Make a git worktree of a repository, when the user asks: a folder of its own under ~/Agentman/Worktrees, " +
 				"on a new branch named after it from what the repository's folder has checked out, with its .env files copied in. " +

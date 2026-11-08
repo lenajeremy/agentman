@@ -74,11 +74,15 @@ type Manager struct {
 	knowledge    *knowledge.Store
 	keys         *keyStore
 	// voice holds recordings whose parts are still arriving.
-	voice     voiceUploads
-	schedules *scheduleStore
-	now       func() time.Time
-	verifies  *verifyStore
-	learned   *learnStore
+	voice       voiceUploads
+	schedules   *scheduleStore
+	now         func() time.Time
+	verifies    *verifyStore
+	learned     *learnStore
+	corrections *correctionsStore
+	missions    *missionStore
+	// missionMu keeps two sweeps from starting one team member twice.
+	missionMu sync.Mutex
 	// stuck is what was last raised about each agent, guarded by cardMu.
 	stuck map[string]string
 	// overlaps is what has been raised about agents\' files, guarded by cardMu.
@@ -167,6 +171,8 @@ func New(cfg Config) (*Manager, error) {
 		now:          cfg.Now,
 		verifies:     loadVerifications(cfg.Dir),
 		learned:      loadLearned(cfg.Dir),
+		corrections:  loadCorrections(cfg.Dir),
+		missions:     loadMissions(cfg.Dir),
 		stuck:        map[string]string{},
 		overlaps:     map[string]bool{},
 		runCheck:     cfg.RunCheck,
@@ -230,7 +236,7 @@ func (m *Manager) Handles(kind protocol.RequestType) bool {
 		protocol.ReqManagerSchedules, protocol.ReqManagerScheduleCancel, protocol.ReqManagerImage,
 		protocol.ReqToolsTitle, protocol.ReqManagerOpenCards, protocol.ReqManagerCheckPermission,
 		protocol.ReqTranscribe, protocol.ReqVoiceAccount, protocol.ReqVoiceSignInStart, protocol.ReqVoiceSignInVerify,
-		protocol.ReqVoiceSignOut, protocol.ReqManagerViewing, protocol.ReqManagerVerifications:
+		protocol.ReqVoiceSignOut, protocol.ReqManagerViewing, protocol.ReqManagerVerifications, protocol.ReqManagerMissions:
 		return true
 	}
 	return false
@@ -284,6 +290,8 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 		return m.setKey(ctx, providerNamed(string(req.Kind)), req.Text)
 	case protocol.ReqManagerBriefs:
 		return protocol.Event{Type: protocol.EvtManagerBrief, Briefs: m.briefs.all()}
+	case protocol.ReqManagerMissions:
+		return protocol.Event{Type: protocol.EvtManagerMissions, Missions: m.missions.all()}
 	case protocol.ReqManagerVerifications:
 		return protocol.Event{Type: protocol.EvtManagerVerification, Verifications: m.verifies.all()}
 	case protocol.ReqManagerCardReply:
@@ -323,6 +331,7 @@ func (m *Manager) TurnComplete(session protocol.Session) {
 	m.scheduleBrief(session.ID, briefAfterTurn, briefTurnGap)
 	go m.watchEvent(session.ID, protocol.WatchTurnEnd, protocol.WatchIdle)
 	go m.verifyTurn(context.Background(), session.ID)
+	m.missionTurnEnded(session.ID)
 }
 
 // NeedsAnswer hears that an agent is asking something. The daemon says so on

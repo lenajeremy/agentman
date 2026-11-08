@@ -62,6 +62,9 @@ const (
 	// user is looking at. Answered with EvtManagerViewing.
 	ReqManagerViewing RequestType = "manager_viewing"
 
+	// ReqManagerMissions asks for the teams Agentman has planned or is running.
+	ReqManagerMissions RequestType = "manager_missions"
+
 	// ReqManagerVerifications asks for what Agentman found checking each
 	// agent's finished work.
 	ReqManagerVerifications RequestType = "manager_verifications"
@@ -84,6 +87,8 @@ const (
 	// EvtManagerBrief is an agent's brief, new or updated; on
 	// ReqManagerBriefs, Briefs holds them all.
 	EvtManagerBrief EventType = "manager_brief"
+	// EvtManagerMissions is every team, sent whenever one changes.
+	EvtManagerMissions EventType = "manager_missions"
 	// EvtManagerVerification says how a check of an agent's work went.
 	EvtManagerVerification EventType = "manager_verification"
 	// EvtManagerSchedules is everything Agentman has scheduled, in
@@ -337,9 +342,56 @@ type Autopilot struct {
 	Unstick bool `json:"unstick"`
 	// Overlap notices agents working on the same files.
 	Overlap bool `json:"overlap"`
+	// LearnNotes suggests a note for what the user keeps telling agents.
+	LearnNotes bool `json:"learnNotes"`
 	// VerifyDaily is how many reviews by the model a day may cost; zero is
 	// the default. Running the tests costs none.
 	VerifyDaily int `json:"verifyDaily,omitempty"`
+}
+
+// Where a team stands.
+const (
+	MissionProposed  = "proposed"
+	MissionRunning   = "running"
+	MissionDone      = "done"
+	MissionDismissed = "dismissed"
+)
+
+// Where one member's part stands.
+const (
+	TaskPlanned = "planned"
+	TaskRunning = "running"
+	TaskDone    = "done"
+	TaskFailed  = "failed"
+)
+
+// Mission is a goal the user gave Agentman, as a team of agents.
+type Mission struct {
+	ID        string        `json:"id"`
+	Goal      string        `json:"goal"`
+	State     string        `json:"state"`
+	Tasks     []MissionTask `json:"tasks"`
+	CreatedAt int64         `json:"createdAt"`
+}
+
+// MissionTask is one agent's part in a team.
+type MissionTask struct {
+	ID string `json:"id"`
+	// Title is the part in a few words; Task is what the agent is told.
+	Title string `json:"title"`
+	Task  string `json:"task"`
+	// Agent is which agent does it, by start_agent's name for it.
+	Agent  string `json:"agent"`
+	Folder string `json:"folder"`
+	// Worktree, when set, gives it a worktree of its own by that name.
+	Worktree  string   `json:"worktree,omitempty"`
+	DependsOn []string `json:"dependsOn,omitempty"`
+	State     string   `json:"state"`
+	// SessionID is its agent, once started.
+	SessionID   string `json:"sessionId,omitempty"`
+	StartedAt   int64  `json:"startedAt,omitempty"`
+	TurnEndedAt int64  `json:"turnEndedAt,omitempty"`
+	Problem     string `json:"problem,omitempty"`
 }
 
 // How a check of an agent's work came out.

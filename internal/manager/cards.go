@@ -395,7 +395,7 @@ func (m *Manager) reconcile(ctx context.Context, sessions []protocol.Session) {
 	for _, entry := range m.conversation.openCards() {
 		card := entry.Card
 		// A suggested note waits for the user, whatever the agents do.
-		if card.Kind == protocol.CardNote || (card.Kind == protocol.CardOffer && card.Offer["type"] == offerRule) {
+		if card.Kind == protocol.CardNote || (card.Kind == protocol.CardOffer && (card.Offer["type"] == offerRule || card.Offer["type"] == offerMission)) {
 			continue
 		}
 		s, live := byID[card.SessionID]

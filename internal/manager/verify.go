@@ -454,6 +454,7 @@ func (m *Manager) publishCheck(result protocol.Verification) {
 // line when all is well, as news when it isn't.
 func (m *Manager) finishCheck(session protocol.Session, result protocol.Verification) {
 	m.publishCheck(result)
+	defer func() { go m.advanceMissions(context.Background()) }()
 	text := ""
 	role, tool := "activity", "verify"
 	switch result.State {
