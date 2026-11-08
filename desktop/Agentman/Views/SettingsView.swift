@@ -369,6 +369,14 @@ private struct PermissionsPage: View {
             .disabled(!binding.wrappedValue.autoApprove)
             .opacity(binding.wrappedValue.autoApprove ? 1 : 0.5)
 
+            SettingsSection(title: "When an agent finishes",
+                            footer: "Runs the folder's own tests, then has your Agentman model compare the change with what was asked, up to \(Self.dailyReviews) reviews a day on your API key.") {
+                autopilotRow("Check its work", detail: "The card on the Board says whether it holds up.", \.verify)
+                autopilotRow("Send failing tests back to the agent", detail: "At most twice for one request, and never while you're looking at it.", \.sendBack, divider: false)
+                    .disabled(!(binding.wrappedValue.autopilot?.verify ?? false))
+                    .opacity(binding.wrappedValue.autopilot?.verify == true ? 1 : 0.5)
+            }
+
             SettingsSection(title: "Your rules",
                             footer: "An “Always ask” rule wins over everything. No rule lets an agent touch keys and credentials or run anything as root. Use * for anything and ? for one character.") {
                 let rules = binding.wrappedValue.rules ?? []
@@ -413,6 +421,23 @@ private struct PermissionsPage: View {
             ForEach(Array(Self.asked.enumerated()), id: \.offset) { index, item in
                 RuleRow(icon: "hand.raised", tint: Palette.needsYou, text: item, divider: index < Self.asked.count - 1)
             }
+        }
+    }
+
+    private static let dailyReviews = 30
+
+    private func autopilotRow(_ title: String, detail: String, _ key: WritableKeyPath<Autopilot, Bool>, divider: Bool = true) -> some View {
+        SettingsRow(title: title, detail: detail, divider: divider) {
+            Toggle("", isOn: Binding(
+                get: { (draft?.autopilot ?? Autopilot())[keyPath: key] },
+                set: { on in
+                    var autopilot = draft?.autopilot ?? Autopilot()
+                    autopilot[keyPath: key] = on
+                    draft?.autopilot = autopilot
+                }
+            ))
+            .toggleStyle(.switch)
+            .labelsHidden()
         }
     }
 

@@ -104,6 +104,17 @@ final class BoardTests: XCTestCase {
         XCTAssertTrue(store.boardHidden.isEmpty)
     }
 
+    func testACheckOfAnAgentsWorkReachesItsCardAndCanBeDropped() {
+        let store = AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-board.sock"))
+        var event = DaemonEvent(type: "manager_verification")
+        event.verification = Verification(sessionId: "a", state: "failed", summary: "Tests fail", updatedAt: 1)
+        store.apply(event)
+        XCTAssertEqual(store.manager.verifications["a"]?.state, "failed")
+        event.verification = Verification(sessionId: "a", state: "none", updatedAt: 2)
+        store.apply(event)
+        XCTAssertNil(store.manager.verifications["a"])
+    }
+
     func testTheBoardsSidebarGoesWithTheNextVisit() {
         let store = AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-board.sock"))
         store.selection = .manager
@@ -202,6 +213,13 @@ final class BoardTests: XCTestCase {
         }
         store.statusChanged(.connected)
         store.selection = .manager
+        var verified = DaemonEvent(type: "manager_verification")
+        verified.verification = Verification(sessionId: "p", state: "verified", summary: "Apple Pay shows in the checkout sheet, as asked. 52 tests pass.", updatedAt: now)
+        store.apply(verified)
+        var concerns = DaemonEvent(type: "manager_verification")
+        concerns.verification = Verification(sessionId: "o", state: "concerns", summary: "Only two of the three screens are wired up.",
+                                             issues: ["WelcomeView never opens PermissionsView"], updatedAt: now)
+        store.apply(concerns)
         return store
     }
 

@@ -13,6 +13,8 @@ final class ManagerStore {
     private(set) var status = ManagerStatus(state: "idle", keySet: false)
     private(set) var settings: ManagerSettings?
     private(set) var briefs: [String: Brief] = [:]
+    /// What Agentman found checking each agent's latest work.
+    private(set) var verifications: [String: Verification] = [:]
     /// The user's notes for their agents, without bodies, newest first.
     private(set) var notes: [Note] = []
     /// The keys Agentman keeps, by name.
@@ -102,6 +104,7 @@ final class ManagerStore {
     func reload() async {
         async let settingsReply = try? client.request(DaemonRequest(.managerSettings))
         async let briefsReply = try? client.request(DaemonRequest(.managerBriefs))
+        async let verificationsReply = try? client.request(DaemonRequest(.managerVerifications))
         async let schedulesReply = try? client.request(DaemonRequest(.managerSchedules))
         var historyRequest = DaemonRequest(.managerHistory)
         historyRequest.limit = 80
@@ -112,6 +115,9 @@ final class ManagerStore {
         }
         if let reply = await briefsReply, let all = reply.briefs {
             briefs = Dictionary(all.map { ($0.sessionId, $0) }, uniquingKeysWith: { a, _ in a })
+        }
+        if let reply = await verificationsReply, let all = reply.verifications {
+            verifications = Dictionary(all.map { ($0.sessionId, $0) }, uniquingKeysWith: { a, _ in a })
         }
         if let reply = await historyReply {
             entries = reply.entries ?? []
@@ -389,6 +395,10 @@ final class ManagerStore {
             if let brief = event.brief { briefs[brief.sessionId] = brief }
             if let all = event.briefs {
                 for brief in all { briefs[brief.sessionId] = brief }
+            }
+        case "manager_verification":
+            if let check = event.verification {
+                verifications[check.sessionId] = check.state == "none" ? nil : check
             }
         default:
             break

@@ -554,6 +554,9 @@ private struct BoardCard: View {
         if let text = brief?.summary ?? digest.said, !text.isEmpty {
             line(text, lines: 2)
         }
+        if let check = store.manager.verifications[session.id] {
+            BoardCheck(check: check)
+        }
         let links = links
         if !links.isEmpty {
             FlowLayout(spacing: 5) {
@@ -607,6 +610,72 @@ private struct BoardCard: View {
 extension GitAction {
     fileprivate var isIdle: Bool {
         if case .idle = self { true } else { false }
+    }
+}
+
+/// What Agentman found checking the agent's finished work.
+private struct BoardCheck: View {
+    let check: Verification
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                icon.frame(width: 13)
+                Text(CompactCard.inline(check.summary ?? fallback))
+                    .font(Fonts.sans(12.5, .medium))
+                    .foregroundStyle(tint)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(check.issues ?? [], id: \.self) { issue in
+                Text(CompactCard.inline(issue))
+                    .font(Fonts.sans(12.5))
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 19)
+            }
+            if check.sentBack == true {
+                Text("Sent back for it to fix")
+                    .font(Fonts.sans(12))
+                    .foregroundStyle(Palette.muted)
+                    .padding(.leading, 19)
+            }
+        }
+        .help(check.output ?? check.summary ?? fallback)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var fallback: String {
+        switch check.state {
+        case "verified": "Verified"
+        case "passed": "Tests pass"
+        case "concerns": "Something looks off"
+        case "failed": "Tests fail"
+        default: "Checking its work"
+        }
+    }
+
+    @ViewBuilder private var icon: some View {
+        switch check.state {
+        case "verified", "passed":
+            Image(systemName: "checkmark.seal.fill").font(.system(size: 11)).foregroundStyle(Palette.ok)
+        case "concerns":
+            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 10)).foregroundStyle(Palette.needsYou)
+        case "failed":
+            Image(systemName: "xmark.circle.fill").font(.system(size: 11)).foregroundStyle(Palette.error)
+        default:
+            Loader(size: 10)
+        }
+    }
+
+    private var tint: Color {
+        switch check.state {
+        case "concerns": Palette.needsYouText
+        case "failed": Palette.errorText
+        case "verified", "passed": Palette.text
+        default: Palette.muted
+        }
     }
 }
 

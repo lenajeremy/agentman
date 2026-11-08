@@ -81,6 +81,7 @@ enum RequestType: String, Codable, Sendable {
     case managerSetSettings = "manager_set_settings"
     case managerSetKey = "manager_set_key"
     case managerBriefs = "manager_briefs"
+    case managerVerifications = "manager_verifications"
     case managerCardReply = "manager_card_reply"
     case managerCardDismiss = "manager_card_dismiss"
     case managerEntryClose = "manager_entry_close"
@@ -225,6 +226,8 @@ struct DaemonEvent: Codable, Sendable {
     var managerSettings: ManagerSettings?
     var brief: Brief?
     var briefs: [Brief]?
+    var verification: Verification?
+    var verifications: [Verification]?
     /// What Agentman would do with a request, on "manager_permission".
     var permission: PermissionCheck?
     var more: Bool?
@@ -802,6 +805,31 @@ struct ManagerCard: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
+/// What Agentman does on its own. Each is the user's to turn on.
+struct Autopilot: Codable, Sendable, Hashable {
+    /// Check an agent's work when it finishes a turn that changed something.
+    var verify = false
+    /// Give an agent the output of its failing tests to fix.
+    var sendBack = false
+    /// Reviews by the model a day; nil is the daemon's default.
+    var verifyDaily: Int?
+}
+
+/// What Agentman found checking an agent's latest work.
+struct Verification: Codable, Sendable, Hashable, Identifiable {
+    var sessionId: String
+    /// "checking", "verified", "passed", "concerns", "failed" or "none".
+    var state: String
+    var summary: String?
+    var issues: [String]?
+    var command: String?
+    var output: String?
+    var sentBack: Bool?
+    var updatedAt: Int64
+
+    var id: String { sessionId }
+}
+
 struct ManagerSettings: Codable, Sendable, Hashable {
     var chatModel: String
     var briefModel: String
@@ -813,6 +841,8 @@ struct ManagerSettings: Codable, Sendable, Hashable {
     var approve: ApproveKinds?
     /// The user's own rules, checked first; an "ask" rule wins over all.
     var rules: [PermissionRule]?
+    /// What Agentman does by itself beyond approving; all off to begin with.
+    var autopilot: Autopilot?
     var style: String
     var instructions: String
     /// Whether the chat model's engine has its key, so Agentman can run.
