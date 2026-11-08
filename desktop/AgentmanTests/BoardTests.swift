@@ -115,6 +115,27 @@ final class BoardTests: XCTestCase {
         XCTAssertNil(store.manager.verifications["a"])
     }
 
+    func testTrustIsTheClosestFoldersOrFollowsTheSwitch() {
+        var settings = ManagerSettings(chatModel: "m", briefModel: "m", effort: "low", briefs: true, autoApprove: true, style: "", instructions: "", keySet: true)
+        settings.trust = [FolderTrust(folder: "/w", level: "watch"), FolderTrust(folder: "/w/api", level: "suggest")]
+        XCTAssertEqual(FolderTrust.level(for: "/w/api/cmd", in: settings), "suggest")
+        XCTAssertEqual(FolderTrust.level(for: "/w/site", in: settings), "watch")
+        XCTAssertEqual(FolderTrust.level(for: "/w2", in: settings), "handle", "not a folder inside /w")
+        settings.autoApprove = false
+        XCTAssertEqual(FolderTrust.level(for: "/elsewhere", in: settings), "watch")
+    }
+
+    func testAnOfferIsAQuestionTheBoardCanShow() {
+        let store = AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-board.sock"))
+        var event = DaemonEvent(type: "manager_entry")
+        let card = ManagerCard(id: "c", kind: "offer", state: "open", sessionId: "a", agentName: "Agentman", title: "Always allow?",
+                               options: [QuestionOption(key: "here", label: "Always allow in api")])
+        event.entry = ManagerEntry(id: "c", role: "card", text: "Always allow?", ts: 1, card: card)
+        store.apply(event)
+        XCTAssertEqual(store.manager.offers.map(\.id), ["c"])
+        XCTAssertEqual(store.manager.offers.first?.question?.options.first?.key, "here")
+    }
+
     func testTheBoardsSidebarGoesWithTheNextVisit() {
         let store = AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-board.sock"))
         store.selection = .manager
@@ -220,6 +241,14 @@ final class BoardTests: XCTestCase {
         concerns.verification = Verification(sessionId: "o", state: "concerns", summary: "Only two of the three screens are wired up.",
                                              issues: ["WelcomeView never opens PermissionsView"], updatedAt: now)
         store.apply(concerns)
+        var offer = DaemonEvent(type: "manager_entry")
+        offer.entry = ManagerEntry(id: "offer", role: "card", text: "Always allow?", ts: now, card: ManagerCard(
+            id: "offer", kind: "offer", state: "open", sessionId: "t", agentName: "Agentman", title: "You've approved `go vet*` 3 times in api. Always allow it?",
+            options: [QuestionOption(key: "here", label: "Always allow in api"), QuestionOption(key: "everywhere", label: "Always allow everywhere"), QuestionOption(key: "no", label: "Keep asking me")]))
+        store.apply(offer)
+        var handled = DaemonEvent(type: "manager_entry")
+        handled.entry = ManagerEntry(approved: ApprovedRequest(kind: "command", target: "go test ./..."), id: "h", role: "activity", text: "Approved for api: run `go test ./...`", ts: now, tool: "approve")
+        store.apply(handled)
         return store
     }
 

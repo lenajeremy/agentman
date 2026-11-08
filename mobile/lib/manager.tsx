@@ -309,7 +309,7 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
       }
     },
     reply(card, answer) {
-      const question = card.kind === "question" || card.kind === "key";
+      const question = card.kind === "question" || card.kind === "key" || card.kind === "offer";
       return perform({
         type: "manager_card_reply",
         cardId: card.id,

@@ -736,6 +736,8 @@ struct WorkspaceBranch: Codable, Sendable, Hashable, Identifiable {
 
 /// One entry in the conversation with Agentman.
 struct ManagerEntry: Codable, Sendable, Identifiable, Hashable {
+    /// What Agentman approved, on an "approve" activity.
+    var approved: ApprovedRequest?
     var id: String
     /// "user", "assistant", "activity", "brief" or "error".
     var role: String
@@ -797,12 +799,44 @@ struct ManagerCard: Codable, Sendable, Hashable, Identifiable {
             guard let questionId else { return nil }
             return Question(id: questionId, prompt: "", title: nil, detail: nil,
                             options: options ?? [], multiple: multiple, custom: custom)
-        case "key":
+        case "key", "offer":
             return Question(id: id, prompt: "", title: nil, detail: nil, options: options ?? [], multiple: false, custom: false)
         default:
             return nil
         }
     }
+}
+
+/// How much Agentman does by itself in a folder.
+struct FolderTrust: Codable, Sendable, Hashable {
+    var folder: String
+    /// "watch", "suggest" or "handle".
+    var level: String
+
+    static let levels: [(id: String, title: String, detail: String)] = [
+        ("watch", "Watch", "Reports and asks. Acts on nothing."),
+        ("suggest", "Suggest", "Marks the answer it would give, and waits."),
+        ("handle", "Handle", "Answers what the permission rules allow."),
+    ]
+
+    /// The level that applies to a folder: the closest entry, or what the
+    /// approving switch means where there is none.
+    static func level(for folder: String, in settings: ManagerSettings?) -> String {
+        guard let settings else { return "watch" }
+        let home = NSHomeDirectory()
+        func expanded(_ path: String) -> String { path.hasPrefix("~") ? home + path.dropFirst() : path }
+        let closest = (settings.trust ?? [])
+            .filter { folder == expanded($0.folder) || folder.hasPrefix(expanded($0.folder) + "/") }
+            .max { expanded($0.folder).count < expanded($1.folder).count }
+        return closest?.level ?? (settings.autoApprove ? "handle" : "watch")
+    }
+}
+
+/// What Agentman approved by itself.
+struct ApprovedRequest: Codable, Sendable, Hashable {
+    var kind: String
+    var target: String
+    var folder: String?
 }
 
 /// What Agentman does on its own. Each is the user's to turn on.
@@ -811,6 +845,8 @@ struct Autopilot: Codable, Sendable, Hashable {
     var verify = false
     /// Give an agent the output of its failing tests to fix.
     var sendBack = false
+    /// Offer to make a rule of what the user keeps approving.
+    var learnRules = false
     /// Reviews by the model a day; nil is the daemon's default.
     var verifyDaily: Int?
 }
@@ -843,6 +879,8 @@ struct ManagerSettings: Codable, Sendable, Hashable {
     var rules: [PermissionRule]?
     /// What Agentman does by itself beyond approving; all off to begin with.
     var autopilot: Autopilot?
+    /// How much Agentman does by itself in a folder; nil keeps what's stored.
+    var trust: [FolderTrust]?
     var style: String
     var instructions: String
     /// Whether the chat model's engine has its key, so Agentman can run.

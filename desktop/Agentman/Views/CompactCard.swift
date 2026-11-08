@@ -19,17 +19,24 @@ struct CompactCard: View {
         let name = session?.name ?? card.agentName
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                AgentMark(kind: session?.kind ?? "", size: 14)
-                Text(name)
-                    .font(TextStyle.captionMedium)
-                    .foregroundStyle(Palette.text)
-                    .lineLimit(1)
-                Circle().fill(Palette.needsYou).frame(width: 5, height: 5)
-                Text("needs you")
-                    .font(TextStyle.caption)
-                    .foregroundStyle(Palette.needsYouText)
+                if card.kind == "offer" {
+                    AgentmanBadge(size: 14)
+                    Text("Agentman offers")
+                        .font(TextStyle.captionMedium)
+                        .foregroundStyle(Palette.text)
+                } else {
+                    AgentMark(kind: session?.kind ?? "", size: 14)
+                    Text(name)
+                        .font(TextStyle.captionMedium)
+                        .foregroundStyle(Palette.text)
+                        .lineLimit(1)
+                    Circle().fill(Palette.needsYou).frame(width: 5, height: 5)
+                    Text("needs you")
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.needsYouText)
+                }
                 Spacer(minLength: 6)
-                if session != nil {
+                if session != nil, card.kind != "offer" {
                     iconButton("arrow.up.right", help: "Open \(name)") { store.selection = .agent(card.sessionId) }
                 }
                 iconButton("xmark", help: closeHelp) {

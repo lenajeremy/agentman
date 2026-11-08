@@ -208,6 +208,35 @@ final class ManagerStore {
         return nil
     }
 
+    /// What Agentman approved by itself today, newest first.
+    var handledToday: [ManagerEntry] {
+        let start = Int64(Calendar.current.startOfDay(for: .now).timeIntervalSince1970 * 1000)
+        return entries.filter { $0.tool == "approve" && $0.ts >= start }.reversed()
+    }
+
+    /// What Agentman offers the user that belongs to no agent's own question.
+    var offers: [ManagerCard] { openCards.filter { $0.kind == "offer" } }
+
+    /// Sets how much Agentman does by itself in a folder.
+    func setTrust(_ level: String, for folder: String) async -> String? {
+        guard var next = settings else { return "Agentman isn't connected." }
+        var trust = next.trust ?? []
+        trust.removeAll { $0.folder == folder }
+        trust.append(FolderTrust(folder: folder, level: level))
+        next.trust = trust
+        return await save(next)
+    }
+
+    /// Has Agentman ask about what it approved, from now on.
+    func alwaysAsk(about request: ApprovedRequest) async -> String? {
+        guard var next = settings else { return "Agentman isn't connected." }
+        let rule = PermissionRule(action: "ask", kind: request.kind, pattern: request.target, folder: request.folder)
+        var rules = next.rules ?? []
+        if !rules.contains(rule) { rules.append(rule) }
+        next.rules = rules
+        return await save(next)
+    }
+
     // MARK: - Cards
 
     /// Answers a card: the agent's question, or a reply to an agent waiting
@@ -215,7 +244,7 @@ final class ManagerStore {
     func reply(to card: ManagerCard, with reply: QuestionReply) async -> String? {
         var request = DaemonRequest(.managerCardReply)
         request.cardId = card.id
-        if card.kind == "question" || card.kind == "key" {
+        if card.kind == "question" || card.kind == "key" || card.kind == "offer" {
             request.optionKey = reply.optionKey
             request.optionKeys = reply.optionKeys
             request.answerText = reply.text

@@ -347,6 +347,7 @@ struct KeySection: View {
 
 /// What Agentman may approve without asking.
 private struct PermissionsPage: View {
+    @Environment(AgentsStore.self) private var store
     @Binding var draft: ManagerSettings?
     @State private var adding = false
 
@@ -371,11 +372,37 @@ private struct PermissionsPage: View {
 
             SettingsSection(title: "When an agent finishes",
                             footer: "Runs the folder's own tests, then has your Agentman model compare the change with what was asked, up to \(Self.dailyReviews) reviews a day on your API key.") {
+                autopilotRow("Offer rules for what I keep approving", detail: "After three approvals of the same safe thing. Never for pushes, deletes, deploys or keys.", \.learnRules)
                 autopilotRow("Check its work", detail: "The card on the Board says whether it holds up.", \.verify)
                 autopilotRow("Send failing tests back to the agent", detail: "At most twice for one request, and never while you're looking at it.", \.sendBack, divider: false)
                     .disabled(!(binding.wrappedValue.autopilot?.verify ?? false))
                     .opacity(binding.wrappedValue.autopilot?.verify == true ? 1 : 0.5)
             }
+
+            SettingsSection(title: "Trust by folder",
+                            footer: "Watch reports and asks. Suggest marks the answer it would give and waits. Handle answers what the rules here allow. A folder without a level follows the switch at the top.") {
+                let trust = binding.wrappedValue.trust ?? []
+                ForEach(Array(trust.enumerated()), id: \.element.folder) { index, entry in
+                    trustRow(entry, index: index, count: trust.count)
+                }
+                HStack {
+                    Menu {
+                        ForEach(store.folders.filter { folder in !trust.contains { $0.folder == folder.path } }.prefix(20)) { folder in
+                            Button((folder.path as NSString).lastPathComponent) {
+                                draft?.trust = trust + [FolderTrust(folder: folder.path, level: "suggest")]
+                            }
+                        }
+                    } label: {
+                        Label("Add Folder", systemImage: "plus")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            }
+            .task { await store.loadFolders() }
 
             SettingsSection(title: "Your rules",
                             footer: "An “Always ask” rule wins over everything. No rule lets an agent touch keys and credentials or run anything as root. Use * for anything and ? for one character.") {
@@ -425,6 +452,29 @@ private struct PermissionsPage: View {
     }
 
     private static let dailyReviews = 30
+
+    private func trustRow(_ entry: FolderTrust, index: Int, count: Int) -> some View {
+        SettingsRow(title: (entry.folder as NSString).lastPathComponent, detail: entry.folder, divider: true) {
+            HStack(spacing: 8) {
+                Picker("", selection: Binding(
+                    get: { entry.level },
+                    set: { draft?.trust?[index].level = $0 }
+                )) {
+                    ForEach(FolderTrust.levels, id: \.id) { Text($0.title).tag($0.id) }
+                }
+                .labelsHidden()
+                .fixedSize()
+                Button {
+                    draft?.trust?.remove(at: index)
+                } label: {
+                    Image(systemName: "minus.circle")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.muted)
+                .help("Follow the switch at the top instead")
+            }
+        }
+    }
 
     private func autopilotRow(_ title: String, detail: String, _ key: WritableKeyPath<Autopilot, Bool>, divider: Bool = true) -> some View {
         SettingsRow(title: title, detail: detail, divider: divider) {

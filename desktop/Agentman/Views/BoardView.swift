@@ -71,6 +71,7 @@ struct BoardView: View {
                     .foregroundStyle(Palette.textSecondary)
             }
             Spacer()
+            HandledButton()
             folderMenu
                 .padding(.trailing, 4)
             if !manager.schedules.isEmpty { SchedulesButton() }
@@ -138,7 +139,7 @@ struct BoardView: View {
                 .frame(maxWidth: .infinity)
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: Self.gap) {
-                    BoardColumn(kind: .needsYou, sessions: sections.needsYou, outlined: outlined, clearance: clearance)
+                    BoardColumn(kind: .needsYou, sessions: sections.needsYou, outlined: outlined, offers: manager.offers, clearance: clearance)
                         .frame(width: column)
                     BoardColumn(kind: .working, sessions: sections.working, outlined: outlined, clearance: clearance)
                         .frame(width: column)
@@ -248,6 +249,76 @@ struct BoardView: View {
     }
 }
 
+/// What Agentman has approved by itself today, each with the way to have it
+/// ask next time.
+private struct HandledButton: View {
+    @Environment(AgentsStore.self) private var store
+    @State private var open = false
+
+    var body: some View {
+        let handled = store.manager.handledToday
+        if !handled.isEmpty {
+            Button { open.toggle() } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle")
+                        .font(.system(size: 11))
+                    Text("\(handled.count) handled")
+                        .font(Fonts.sans(12))
+                        .monospacedDigit()
+                }
+                .foregroundStyle(Palette.muted)
+                .padding(.horizontal, 8)
+                .frame(height: 24)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("What Agentman approved for you today")
+            .popover(isPresented: $open, arrowEdge: .bottom) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Approved for you today")
+                            .font(Fonts.sans(13, .medium))
+                            .foregroundStyle(Palette.text)
+                            .padding(.bottom, 8)
+                        ForEach(handled) { entry in
+                            HandledRow(entry: entry)
+                        }
+                    }
+                    .padding(14)
+                }
+                .frame(width: 400)
+                .frame(maxHeight: 420)
+            }
+        }
+    }
+}
+
+private struct HandledRow: View {
+    @Environment(AgentsStore.self) private var store
+    let entry: ManagerEntry
+    @State private var asked = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(CompactCard.inline(entry.text))
+                .font(Fonts.sans(12.5))
+                .foregroundStyle(Palette.textSecondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            if let approved = entry.approved {
+                Button(asked ? "Will ask" : "Ask next time") {
+                    Task { asked = await store.manager.alwaysAsk(about: approved) == nil }
+                }
+                .buttonStyle(.link)
+                .font(Fonts.sans(12))
+                .disabled(asked)
+            }
+        }
+        .padding(.vertical, 5)
+    }
+}
+
 /// What a column holds, and how it says so.
 private enum BoardColumnKind {
     case needsYou, working, idle
@@ -275,6 +346,8 @@ private struct BoardColumn: View {
     let sessions: [Session]
     let outlined: Set<String>
     var hidden: [Session] = []
+    /// What Agentman offers the user, above the agents waiting on them.
+    var offers: [ManagerCard] = []
     let clearance: CGFloat
 
     var body: some View {
@@ -282,11 +355,18 @@ private struct BoardColumn: View {
             header
             ScrollView {
                 LazyVStack(spacing: 6) {
+                    ForEach(offers) { offer in
+                        CompactCard(card: offer) { await store.manager.dismiss(offer) }
+                            .environment(\.roomyChoices, true)
+                            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Palette.line))
+                            .transition(.scale(scale: 0.97).combined(with: .opacity))
+                    }
                     ForEach(sessions) { session in
                         BoardCard(session: session, kind: kind, outlined: outlined.contains(session.id))
                             .transition(.scale(scale: 0.97).combined(with: .opacity))
                     }
-                    if sessions.isEmpty {
+                    if sessions.isEmpty, offers.isEmpty {
                         Text(kind.empty)
                             .font(Fonts.sans(12))
                             .foregroundStyle(Palette.boardMuted)
@@ -310,7 +390,7 @@ private struct BoardColumn: View {
             Text(kind.title)
                 .font(Fonts.sans(13, .medium))
                 .foregroundStyle(Palette.text)
-            Text("\(sessions.count)")
+            Text("\(sessions.count + offers.count)")
                 .font(Fonts.sans(13))
                 .monospacedDigit()
                 .foregroundStyle(Palette.boardMuted)
@@ -323,7 +403,7 @@ private struct BoardColumn: View {
 
     /// Colour and motion only while the column holds something.
     @ViewBuilder private var glyph: some View {
-        switch (kind, sessions.isEmpty) {
+        switch (kind, sessions.isEmpty && offers.isEmpty) {
         case (.needsYou, false):
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 13))
@@ -467,6 +547,20 @@ private struct BoardCard: View {
         Button("Open Conversation", action: open)
         if kind != .needsYou {
             Button("Hide from the Board") { store.hideFromBoard(session.id) }
+        }
+        Menu("Trust This Folder") {
+            let level = FolderTrust.level(for: session.cwd, in: store.manager.settings)
+            ForEach(FolderTrust.levels, id: \.id) { option in
+                Button {
+                    Task { await store.manager.setTrust(option.id, for: session.cwd) }
+                } label: {
+                    if option.id == level {
+                        Label(option.title, systemImage: "checkmark")
+                    } else {
+                        Text(option.title)
+                    }
+                }
+            }
         }
         if kind == .idle {
             Divider()
