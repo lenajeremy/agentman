@@ -333,6 +333,10 @@ type Autopilot struct {
 	SendBack bool `json:"sendBack"`
 	// LearnRules offers to make a rule of what the user keeps approving.
 	LearnRules bool `json:"learnRules"`
+	// Unstick notices agents that have stopped getting anywhere.
+	Unstick bool `json:"unstick"`
+	// Overlap notices agents working on the same files.
+	Overlap bool `json:"overlap"`
 	// VerifyDaily is how many reviews by the model a day may cost; zero is
 	// the default. Running the tests costs none.
 	VerifyDaily int `json:"verifyDaily,omitempty"`

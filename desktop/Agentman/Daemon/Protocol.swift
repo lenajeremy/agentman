@@ -847,6 +847,10 @@ struct Autopilot: Codable, Sendable, Hashable {
     var sendBack = false
     /// Offer to make a rule of what the user keeps approving.
     var learnRules = false
+    /// Notice agents that have stopped getting anywhere.
+    var unstick = false
+    /// Notice agents working on the same files.
+    var overlap = false
     /// Reviews by the model a day; nil is the daemon's default.
     var verifyDaily: Int?
 }

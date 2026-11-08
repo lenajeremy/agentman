@@ -79,7 +79,11 @@ type Manager struct {
 	now       func() time.Time
 	verifies  *verifyStore
 	learned   *learnStore
-	runCheck  func(ctx context.Context, dir, program string, args ...string) (string, error)
+	// stuck is what was last raised about each agent, guarded by cardMu.
+	stuck map[string]string
+	// overlaps is what has been raised about agents\' files, guarded by cardMu.
+	overlaps map[string]bool
+	runCheck func(ctx context.Context, dir, program string, args ...string) (string, error)
 	// verifyDelay and verifySlots pace the checks of agents' work.
 	verifyDelay time.Duration
 	verifySlots chan struct{}
@@ -163,6 +167,8 @@ func New(cfg Config) (*Manager, error) {
 		now:          cfg.Now,
 		verifies:     loadVerifications(cfg.Dir),
 		learned:      loadLearned(cfg.Dir),
+		stuck:        map[string]string{},
+		overlaps:     map[string]bool{},
 		runCheck:     cfg.RunCheck,
 		verifyDelay:  cfg.VerifyDelay,
 		verifySlots:  make(chan struct{}, maxConcurrentChecks),
@@ -207,6 +213,7 @@ func (m *Manager) Run(ctx context.Context) {
 	go m.watchSessions(ctx)
 	go m.runSchedules(ctx)
 	go m.watchViewing(ctx)
+	go m.watchStuck(ctx)
 	m.runBriefs(ctx)
 }
 

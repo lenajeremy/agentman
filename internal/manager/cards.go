@@ -230,7 +230,7 @@ func (m *Manager) replyToCard(ctx context.Context, req protocol.Request) protoco
 	}
 	// Nor does an offer need its agent still to be there.
 	if card.Kind == protocol.CardOffer {
-		return m.answerOfferCardLocked(entry, req)
+		return m.answerOfferCardLocked(ctx, entry, req)
 	}
 	session, live := m.session(card.SessionID)
 	if !live {

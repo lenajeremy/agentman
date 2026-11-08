@@ -379,6 +379,12 @@ private struct PermissionsPage: View {
                     .opacity(binding.wrappedValue.autopilot?.verify == true ? 1 : 0.5)
             }
 
+            SettingsSection(title: "While agents work",
+                            footer: "Read from their transcripts, without using your API key. What happens next follows the folder's trust below.") {
+                autopilotRow("Notice stuck agents", detail: "The same thing failing, long silences, a full context or a usage limit.", \.unstick)
+                autopilotRow("Notice agents on the same files", detail: "Two changing one file, or one changing what another has read.", \.overlap, divider: false)
+            }
+
             SettingsSection(title: "Trust by folder",
                             footer: "Watch reports and asks. Suggest marks the answer it would give and waits. Handle answers what the rules here allow. A folder without a level follows the switch at the top.") {
                 let trust = binding.wrappedValue.trust ?? []

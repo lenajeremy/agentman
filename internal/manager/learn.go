@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -251,7 +252,7 @@ func (m *Manager) recordApprovalLocked(session protocol.Session, q *protocol.Que
 }
 
 // answerOfferCardLocked carries out what the user chose on an offer.
-func (m *Manager) answerOfferCardLocked(entry protocol.ManagerEntry, req protocol.Request) protocol.Event {
+func (m *Manager) answerOfferCardLocked(ctx context.Context, entry protocol.ManagerEntry, req protocol.Request) protocol.Event {
 	card := entry.Card
 	var (
 		outcome string
@@ -260,6 +261,10 @@ func (m *Manager) answerOfferCardLocked(entry protocol.ManagerEntry, req protoco
 	switch card.Offer["type"] {
 	case offerRule:
 		outcome, err = m.takeRuleOffer(card, req.OptionKey)
+	case offerOverlap:
+		outcome, err = m.takeOverlapOffer(ctx, card, req.OptionKey)
+	case offerStuck:
+		outcome, err = m.takeStuckOffer(ctx, card, req.OptionKey)
 	default:
 		err = errors.New("that offer can't be taken up here")
 	}
