@@ -12,7 +12,52 @@ import type { Message } from "./protocol";
  */
 export type FeedItem =
   | { kind: "message"; message: Message }
-  | { kind: "tools"; key: string; calls: Message[]; said: string; pictures?: boolean };
+  | { kind: "tools"; key: string; calls: Message[]; said: string; pictures?: boolean }
+  // A turn followed by another: how long the agent took.
+  | { kind: "worked"; key: string; seconds: number };
+
+/** Whether the user asked for something here, which starts a turn. */
+function startsTurn(message: Message): boolean {
+  return message.role === "user" && !message.isSidechain;
+}
+
+/** One request and the agent's work on it. */
+export type Turn = { start: Message | null; last: Message | null };
+
+function addToTurn(turn: Turn, message: Message): void {
+  if (startsTurn(message)) turn.start = message;
+  else if (turn.start && message.role !== "system") turn.last = message;
+}
+
+/** How long a turn took, to the second; null before the agent has done
+ *  anything, or for a turn too short to mention. */
+export function turnSeconds(turn: Turn): number | null {
+  if (!turn.start || !turn.last) return null;
+  const seconds = Math.floor((turn.last.ts - turn.start.ts) / 1000);
+  return seconds >= 1 ? seconds : null;
+}
+
+/** The latest turn, for the line under the conversation. */
+export function latestTurn(messages: readonly Message[]): Turn {
+  let turn: Turn = { start: null, last: null };
+  for (const message of messages) {
+    if (startsTurn(message)) turn = { start: null, last: null };
+    addToTurn(turn, message);
+  }
+  return turn;
+}
+
+/** How long something took, in the fewest words: 12s, 4m 12s, 1h 5m. */
+export function workDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) {
+    const rest = seconds % 60;
+    return rest === 0 ? `${Math.floor(seconds / 60)}m` : `${Math.floor(seconds / 60)}m ${rest}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${Math.floor(minutes / 60)}h` : `${Math.floor(minutes / 60)}h ${rest}m`;
+}
 
 export function groupTools(
   messages: readonly Message[],
@@ -23,6 +68,7 @@ export function groupTools(
   let run: Message[] = [];
   let pictures: Message[] = [];
   let said = "";
+  let turn: Turn = { start: null, last: null };
   const flush = () => {
     if (run.length === 1) items.push({ kind: "message", message: run[0] });
     else if (run.length > 1) items.push({ kind: "tools", key: toolRunKey(run), calls: run, said });
@@ -36,6 +82,15 @@ export function groupTools(
     pictures = [];
   };
   for (const message of messages) {
+    // The end of a turn, once there's a next one to mark it.
+    if (startsTurn(message)) {
+      flush();
+      flushPictures();
+      const seconds = turnSeconds(turn);
+      if (seconds !== null && turn.start) items.push({ kind: "worked", key: `worked-${turn.start.id}`, seconds });
+      turn = { start: null, last: null };
+    }
+    addToTurn(turn, message);
     if (message.role === "tool" && message.tool && readsPicture(message)) {
       flush();
       pictures.push(message);

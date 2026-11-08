@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { Message } from "./protocol.ts";
-import { groupTools, runCounts, runFinished } from "./toolgroups.ts";
+import { groupTools, latestTurn, runCounts, runFinished, turnSeconds, workDuration } from "./toolgroups.ts";
 
 const said = (id: string, text: string): Message => ({ id, sessionId: "s", role: "assistant", ts: 1, text });
 const call = (id: string, title?: string, status: "running" | "ok" = "ok"): Message => ({
@@ -61,4 +61,28 @@ test("pictures read one after another are one run, shown side by side", () => {
   const first = items[1];
   assert.ok(first.kind === "tools" && first.said === "Looking at both screenshots.");
   assert.equal(runCounts(first.kind === "tools" ? first.calls : []), "Looked at 2 images");
+});
+
+const asked = (id: string, ts: number, isSidechain = false): Message => ({ id, sessionId: "s", role: "user", ts, text: "Go", isSidechain });
+const replied = (id: string, ts: number): Message => ({ id, sessionId: "s", role: "assistant", ts, text: "Done" });
+const worked = (messages: Message[]) => groupTools(messages).flatMap((item) => (item.kind === "worked" ? [item.seconds] : []));
+
+test("durations read short, as on the Mac", () => {
+  assert.deepEqual([12, 60, 252, 3600, 3900].map(workDuration), ["12s", "1m", "4m 12s", "1h", "1h 5m"]);
+});
+
+test("a turn is marked once the next one starts", () => {
+  const messages = [asked("1", 0), replied("2", 72_000), asked("3", 100_000), replied("4", 110_000)];
+  assert.deepEqual(worked(messages), [72]);
+  assert.deepEqual(groupTools(messages).map((item) => item.kind), ["message", "message", "worked", "message", "message"]);
+  assert.equal(turnSeconds(latestTurn(messages)), 10);
+});
+
+test("turns too short, or with no work, say nothing", () => {
+  assert.deepEqual(worked([asked("1", 0), replied("2", 400), asked("3", 1000), asked("4", 90_000)]), []);
+  assert.equal(turnSeconds(latestTurn([asked("1", 0)])), null);
+});
+
+test("a subagent's prompt is not a new turn", () => {
+  assert.deepEqual(worked([asked("1", 0), asked("2", 1000, true), replied("3", 30_000), asked("4", 40_000)]), [30]);
 });
