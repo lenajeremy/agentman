@@ -7,13 +7,21 @@ enum ShipCheck {
     static func reason(session: Session, git: GitState?, check: Verification?) -> String? {
         if session.state != .idle || session.question != nil { return "Still working" }
         if check?.state == "failed" { return "Its tests fail" }
+        if check?.state == "checking" { return "Still being checked" }
         guard let git else { return "Not in a git repository" }
         guard let branch = git.branch else { return "No branch checked out" }
-        if git.onDefaultBranch { return "On \(branch), which is yours to push" }
+        if protected(branch, git) { return "On \(branch), which is yours to push" }
+        if let upstream = git.upstream, let tracked = upstream.split(separator: "/", maxSplits: 1).last, protected(String(tracked), git) {
+            return "Tracks \(upstream), which is yours to push"
+        }
         if git.behind > 0 { return "Behind its upstream" }
         if git.upstream == nil, git.remote == nil { return "No remote to push to" }
         if git.changes == 0, git.ahead == 0, git.aheadOfDefault == 0 { return "Nothing to ship" }
         return nil
+    }
+
+    private static func protected(_ branch: String, _ git: GitState) -> Bool {
+        branch == git.defaultBranch || ["main", "master", "trunk", "develop", "production"].contains(branch)
     }
 
     /// What will go out, in a few words.

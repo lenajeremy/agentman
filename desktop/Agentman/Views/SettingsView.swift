@@ -371,10 +371,10 @@ private struct PermissionsPage: View {
             .opacity(binding.wrappedValue.autoApprove ? 1 : 0.5)
 
             SettingsSection(title: "When an agent finishes",
-                            footer: "Runs the folder's own tests, then has your Agentman model compare the change with what was asked, up to \(Self.dailyReviews) reviews a day on your API key.") {
+                            footer: "Has your Agentman model compare the change with what was asked, up to \(Self.dailyReviews) reviews a day on your API key. In folders on Handle it runs their tests first, and only there can failures go back.") {
                 autopilotRow("Offer rules for what I keep approving", detail: "After three approvals of the same safe thing. Never for pushes, deletes, deploys or keys.", \.learnRules)
                 autopilotRow("Check its work", detail: "The card on the Board says whether it holds up.", \.verify)
-                autopilotRow("Send failing tests back to the agent", detail: "At most twice for one request, and never while you're looking at it.", \.sendBack, divider: false)
+                autopilotRow("Send failing tests back to the agent", detail: "In folders on Handle, at most twice for one request, and never while you're looking at it.", \.sendBack, divider: false)
                     .disabled(!(binding.wrappedValue.autopilot?.verify ?? false))
                     .opacity(binding.wrappedValue.autopilot?.verify == true ? 1 : 0.5)
             }

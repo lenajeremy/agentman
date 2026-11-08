@@ -149,6 +149,10 @@ final class BoardTests: XCTestCase {
         git.branch = "main"
         XCTAssertEqual(ShipCheck.reason(session: idle, git: git, check: nil), "On main, which is yours to push")
         git.branch = "feat/x"
+        git.upstream = "origin/main"
+        XCTAssertEqual(ShipCheck.reason(session: idle, git: git, check: nil), "Tracks origin/main, which is yours to push")
+        git.upstream = nil
+        XCTAssertEqual(ShipCheck.reason(session: idle, git: git, check: Verification(sessionId: "a", state: "checking", updatedAt: 1)), "Still being checked")
         git.behind = 1
         XCTAssertEqual(ShipCheck.reason(session: idle, git: git, check: nil), "Behind its upstream")
         git.behind = 0
