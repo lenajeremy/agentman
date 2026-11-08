@@ -245,7 +245,7 @@ var (
 		"ls", "cat", "head", "tail", "grep", "egrep", "fgrep", "rg", "pwd", "echo", "printf", "wc",
 		"sort", "uniq", "cut", "tr", "diff", "cmp", "which", "whereis", "type", "file", "stat", "du",
 		"df", "tree", "jq", "basename", "dirname", "realpath", "readlink", "date", "true", "false",
-		"test", "[", "sleep", "seq", "nl", "column", "awk", "md5", "md5sum", "shasum", "sha256sum",
+		"test", "[", "sleep", "seq", "nl", "column", "md5", "md5sum", "shasum", "sha256sum",
 		"xxd", "od", "hexdump", "strings", "uname", "whoami", "hostname", "id", "ps",
 	}
 	checkCommands = []string{
@@ -302,7 +302,10 @@ func commandAllowed(command, folder string, p policy) (bool, string) {
 	}
 	// A cd moves where the relative paths after it land, so each part is
 	// checked from the folder the cds before it left the command in.
-	_, wholeAllowed := p.match("allow", "command", command, folder)
+	// A rule covers the whole of a chain only word for word: a wildcard
+	// would stretch over whatever else was chained on.
+	whole, wholeMatched := p.match("allow", "command", command, folder)
+	wholeAllowed := wholeMatched && (len(splitCommand(command)) == 1 || !strings.ContainsAny(whole.Pattern, "*?"))
 	base := folder
 	for _, part := range splitCommand(command) {
 		if words := strings.Fields(part); len(words) > 0 && words[0] == "cd" {
@@ -359,9 +362,36 @@ var privatePlaces = []string{".ssh", ".aws", ".gnupg", "id_rsa", "id_ed25519", "
 
 var commandSeparators = regexp.MustCompile(`\s*(?:&&|\|\||;|\||\n)\s*`)
 
+// backgrounded turns a lone `&`, which runs what follows as a command of its
+// own, into a separator. `&&` and the `&` of a redirect (`2>&1`, `&>file`)
+// are left as they are.
+func backgrounded(command string) string {
+	var b strings.Builder
+	for i := 0; i < len(command); i++ {
+		if command[i] != '&' {
+			b.WriteByte(command[i])
+			continue
+		}
+		next := byte(0)
+		if i+1 < len(command) {
+			next = command[i+1]
+		}
+		switch {
+		case next == '&':
+			b.WriteString("&&")
+			i++
+		case next == '>' || (i > 0 && command[i-1] == '>'):
+			b.WriteByte('&')
+		default:
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
 func splitCommand(command string) []string {
 	var parts []string
-	for _, part := range commandSeparators.Split(command, -1) {
+	for _, part := range commandSeparators.Split(backgrounded(command), -1) {
 		if part = strings.TrimSpace(part); part != "" {
 			parts = append(parts, part)
 		}
@@ -405,6 +435,8 @@ func partIsSafe(part, base, folder string) (bool, string) {
 	name := filepath.Base(words[0])
 	args := words[1:]
 	switch {
+	case name == "sort" && slices.ContainsFunc(args, func(arg string) bool { return strings.HasPrefix(arg, "-o") || strings.HasPrefix(arg, "--output") }):
+		return false, "it writes to a file"
 	case slices.Contains(readOnlyCommands, name), slices.Contains(checkCommands, name):
 		return true, ""
 	case name == "find":

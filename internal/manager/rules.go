@@ -127,8 +127,20 @@ func globMatch(pattern, text string) bool {
 
 // runsAsRoot reports a command part no rule may approve.
 func runsAsRoot(part string) bool {
-	words := strings.Fields(part)
-	return len(words) > 0 && (words[0] == "sudo" || words[0] == "su" || words[0] == "doas")
+	for _, word := range strings.Fields(part) {
+		name := filepath.Base(word)
+		switch {
+		case name == "sudo" || name == "su" || name == "doas":
+			return true
+		// What only sets up the command: look at what it runs.
+		case strings.Contains(word, "=") && !strings.HasPrefix(word, "-"),
+			strings.HasPrefix(word, "-"),
+			name == "env", name == "time", name == "nice", name == "nohup", name == "command", name == "exec":
+			continue
+		}
+		return false
+	}
+	return false
 }
 
 func validateRules(rules []protocol.PermissionRule) error {
