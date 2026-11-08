@@ -311,6 +311,8 @@ type Request struct {
 	IgnoreWhitespace bool `json:"ignoreWhitespace,omitempty"`
 	// Viewing is the agents in front of the user, on ReqManagerViewing.
 	Viewing []string `json:"viewing,omitempty"`
+	// SessionIDs are the agents a manager_ship is for.
+	SessionIDs []string `json:"sessionIds,omitempty"`
 	// WithFile asks a ReqCommitDiff for the file as the commit left it as
 	// well, in the result's Text: the unchanged lines around a change, read
 	// when someone opens them rather than sent with every diff.
@@ -434,6 +436,7 @@ type Event struct {
 	Verification    *Verification    `json:"verification,omitempty"`
 	Verifications   []Verification   `json:"verifications,omitempty"`
 	Missions        []Mission        `json:"missions,omitempty"`
+	Ship            *ShipRun         `json:"ship,omitempty"`
 	Permission      *PermissionCheck `json:"permission,omitempty"`
 	// More says older manager entries remain, on EvtManagerHistory.
 	More bool `json:"more,omitempty"`

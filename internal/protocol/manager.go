@@ -65,6 +65,10 @@ const (
 	// ReqManagerMissions asks for the teams Agentman has planned or is running.
 	ReqManagerMissions RequestType = "manager_missions"
 
+	// ReqManagerShip commits, pushes and opens pull requests for the agents
+	// named in SessionIDs, one after another.
+	ReqManagerShip RequestType = "manager_ship"
+
 	// ReqManagerVerifications asks for what Agentman found checking each
 	// agent's finished work.
 	ReqManagerVerifications RequestType = "manager_verifications"
@@ -89,6 +93,8 @@ const (
 	EvtManagerBrief EventType = "manager_brief"
 	// EvtManagerMissions is every team, sent whenever one changes.
 	EvtManagerMissions EventType = "manager_missions"
+	// EvtManagerShip says how shipping is going.
+	EvtManagerShip EventType = "manager_ship"
 	// EvtManagerVerification says how a check of an agent's work went.
 	EvtManagerVerification EventType = "manager_verification"
 	// EvtManagerSchedules is everything Agentman has scheduled, in
@@ -392,6 +398,35 @@ type MissionTask struct {
 	StartedAt   int64  `json:"startedAt,omitempty"`
 	TurnEndedAt int64  `json:"turnEndedAt,omitempty"`
 	Problem     string `json:"problem,omitempty"`
+}
+
+// How shipping is going, for a run and for one agent in it.
+const (
+	ShipRunning = "running"
+	ShipDone    = "done"
+
+	ShipWaiting = "waiting"
+	ShipWorking = "working"
+	ShipShipped = "shipped"
+	ShipSkipped = "skipped"
+	ShipFailed  = "failed"
+)
+
+// ShipRun is several finished agents being shipped together.
+type ShipRun struct {
+	ID        string     `json:"id"`
+	State     string     `json:"state"`
+	Items     []ShipItem `json:"items"`
+	StartedAt int64      `json:"startedAt"`
+}
+
+// ShipItem is one agent in a ShipRun.
+type ShipItem struct {
+	SessionID string `json:"sessionId"`
+	Name      string `json:"name"`
+	State     string `json:"state"`
+	Note      string `json:"note,omitempty"`
+	URL       string `json:"url,omitempty"`
 }
 
 // How a check of an agent's work came out.

@@ -83,6 +83,7 @@ type Manager struct {
 	missions    *missionStore
 	// missionMu keeps two sweeps from starting one team member twice.
 	missionMu sync.Mutex
+	shipping  shipState
 	// stuck is what was last raised about each agent, guarded by cardMu.
 	stuck map[string]string
 	// overlaps is what has been raised about agents\' files, guarded by cardMu.
@@ -236,7 +237,7 @@ func (m *Manager) Handles(kind protocol.RequestType) bool {
 		protocol.ReqManagerSchedules, protocol.ReqManagerScheduleCancel, protocol.ReqManagerImage,
 		protocol.ReqToolsTitle, protocol.ReqManagerOpenCards, protocol.ReqManagerCheckPermission,
 		protocol.ReqTranscribe, protocol.ReqVoiceAccount, protocol.ReqVoiceSignInStart, protocol.ReqVoiceSignInVerify,
-		protocol.ReqVoiceSignOut, protocol.ReqManagerViewing, protocol.ReqManagerVerifications, protocol.ReqManagerMissions:
+		protocol.ReqVoiceSignOut, protocol.ReqManagerViewing, protocol.ReqManagerVerifications, protocol.ReqManagerMissions, protocol.ReqManagerShip:
 		return true
 	}
 	return false
@@ -290,6 +291,8 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 		return m.setKey(ctx, providerNamed(string(req.Kind)), req.Text)
 	case protocol.ReqManagerBriefs:
 		return protocol.Event{Type: protocol.EvtManagerBrief, Briefs: m.briefs.all()}
+	case protocol.ReqManagerShip:
+		return m.startShip(req.SessionIDs)
 	case protocol.ReqManagerMissions:
 		return protocol.Event{Type: protocol.EvtManagerMissions, Missions: m.missions.all()}
 	case protocol.ReqManagerVerifications:
