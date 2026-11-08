@@ -279,6 +279,57 @@ final class AgentsStore {
 
     func isPinned(_ id: String) -> Bool { sidebarChoices.pinned.contains(id) }
 
+    // MARK: - The Board
+
+    /// Whether Agentman's conversation is open beside the Board.
+    var boardChatOpen = false {
+        didSet {
+            guard boardChatOpen != oldValue else { return }
+            seeManagerIfShown()
+        }
+    }
+
+    /// The sidebar, brought out over the Board for now; it goes again with
+    /// the next visit.
+    var boardShowsSidebar = false
+
+    /// The agents taken off the Board by hand, until they next need the
+    /// user. Kept across launches.
+    private(set) var boardHidden = Set(UserDefaults.standard.stringArray(forKey: "boardHidden") ?? []) {
+        didSet { UserDefaults.standard.set(boardHidden.sorted(), forKey: "boardHidden") }
+    }
+
+    /// An agent's git row to act as soon as it shows, for "Commit & push" on
+    /// a card.
+    var gitActionRequest: String?
+
+    /// The Board's columns, for the folder the sidebar is filtered to.
+    var board: BoardSections {
+        let waiting = Set(manager.openCards.filter { $0.kind == "question" || $0.kind == "needs_you" }.map(\.sessionId))
+        return BoardSections.make(sessions, choices: sidebarChoices, hidden: boardHidden, waiting: waiting, folder: folderFilter)
+    }
+
+    /// Whether the Board is the page showing: it is Agentman's.
+    var showingBoard: Bool { selection == .manager || selection == nil }
+
+    /// The Board, with the conversation with Agentman open beside it.
+    func openAgentmanChat() {
+        selection = .manager
+        boardChatOpen = true
+    }
+
+    func hideFromBoard(_ id: String) { boardHidden.insert(id) }
+    func showOnBoard(_ id: String) { boardHidden.remove(id) }
+    func showAllOnBoard() { boardHidden = [] }
+
+    /// A hidden agent that needs the user is back for good, not only while
+    /// it waits.
+    private func bringBackHiddenAgents() {
+        guard !boardHidden.isEmpty else { return }
+        let back = sessions.filter { boardHidden.contains($0.id) && Self.filterState($0) == .waitingInput }.map(\.id)
+        if !back.isEmpty { boardHidden.subtract(back) }
+    }
+
     func isArchived(_ session: Session) -> Bool {
         SidebarSections.isArchived(session, choices: sidebarChoices, now: .now)
     }
@@ -372,7 +423,11 @@ final class AgentsStore {
         case "usage":
             selection = .usage
         case "home":
-            selection = .manager
+            if url.path().contains("conversation") {
+                openAgentmanChat()
+            } else {
+                selection = .manager
+            }
         default:
             break
         }
@@ -862,6 +917,7 @@ final class AgentsStore {
             // A daemon too old to say anything of itself is level 0.
             setup.daemonReported(event.daemon ?? DaemonInfo(version: ""))
             followTakeovers()
+            bringBackHiddenAgents()
         case "turn_complete":
             if let id = event.sessionId { away.record(.finished(event.preview), sessionId: id) }
             guard let id = event.sessionId, !looking(at: id), speaks(id),
@@ -891,6 +947,7 @@ final class AgentsStore {
             sessions.sort(by: Self.boardOrder)
             activities[session.id]?.update(session.lastActivityAt)
             followTakeovers()
+            bringBackHiddenAgents()
         case "session_gone":
             sessions.removeAll { $0.id == event.sessionId }
         case "devices":
@@ -930,7 +987,11 @@ final class AgentsStore {
     // MARK: - Agentman's news
 
     /// Whether the user is looking at the conversation with Agentman.
-    var viewingManager: Bool { (selection == .manager || inPanels[Self.agentmanPanel] != nil) && appActive }
+    var viewingManager: Bool { ((showingBoard && boardChatOpen) || inPanels[Self.agentmanPanel] != nil) && appActive }
+
+    /// Whether the Board is in front, whose cards say what an agent's news
+    /// would.
+    private var viewingBoard: Bool { showingBoard && appActive }
 
     /// News from Agentman: seen at once if the user is looking, a
     /// notification if not.
@@ -939,6 +1000,9 @@ final class AgentsStore {
             manager.markRead()
         } else if let id = entry.sessionId, looking(at: id) {
             // About the agent in front of the user: nothing to tell.
+        } else if viewingBoard, entry.role != "assistant" {
+            // On a card already. Only Agentman's own reply isn't.
+            manager.markReadExceptReplies()
         } else if appActive, Self.toasts(entry) {
             showToast(entry)
         } else {
@@ -991,7 +1055,15 @@ final class AgentsStore {
     }
 
     private func seeManagerIfShown() {
-        guard viewingManager else { return }
+        guard viewingManager else {
+            if viewingBoard {
+                // The cards show what the agents' toasts said.
+                toasts.removeAll { $0.sessionId != nil }
+                manager.markReadExceptReplies()
+                refreshBadge()
+            }
+            return
+        }
         // Agentman's conversation shows all of it.
         toasts.removeAll()
         manager.markRead()
@@ -1005,6 +1077,8 @@ final class AgentsStore {
 
     private func selectionChanged(from old: SidebarItem?) {
         guard old != selection else { return }
+        if case .agent = old { gitActionRequest = nil }
+        boardShowsSidebar = false
         seeManagerIfShown()
         tellOnScreen()
         // Opened, an agent's own thread says what its toasts did.

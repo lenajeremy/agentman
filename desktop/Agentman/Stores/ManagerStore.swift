@@ -83,6 +83,12 @@ final class ManagerStore {
         defaults.set(latest, forKey: Self.lastReadKey)
     }
 
+    /// Everything but a reply of Agentman's has been seen, as the Board
+    /// shows the rest; a reply waits until the conversation is opened.
+    func markReadExceptReplies() {
+        if !unread.contains(where: { $0.role == "assistant" }) { markRead() }
+    }
+
     var thinking: Bool { status.state == "thinking" }
     /// Agentman can run, having its key: it speaks for the agents.
     var on: Bool { settings?.keySet ?? status.keySet }

@@ -142,7 +142,8 @@ extension SiteShotsTests {
     func testOrchestratorChangingLayoutPreservesWhereTheUserIsTyping() throws {
         for moveAway in [false, true] {
             let world = try world(fresh: true, customize: { $0.managerEntries = [] })
-            world.store.selection = .manager
+            // The conversation beside the Board is what changes layout.
+            world.store.openAgentmanChat()
             let window = normalWindow(ContentView(), size: Self.common, store: world.store, wait: 0.4)
             let host = try XCTUnwrap(window.contentView)
             let first = try XCTUnwrap(Self.views(MessageTextView.self, in: host).first)
@@ -159,7 +160,8 @@ extension SiteShotsTests {
             event.entry = ManagerEntry(id: "reply", role: "assistant", text: "Ready.", ts: 1)
             world.store.apply(event)
             settle(0.4)
-            let next = try XCTUnwrap(Self.views(MessageTextView.self, in: host).first)
+            // The list may keep the welcome's box, hidden, for reuse.
+            let next = try XCTUnwrap(Self.views(MessageTextView.self, in: host).first { !$0.isHiddenOrHasHiddenAncestor })
             XCTAssertFalse(first === next, "Welcome is replaced by the conversation")
             if moveAway {
                 XCTAssertTrue(window.firstResponder === other, "A reply must not take focus from search")

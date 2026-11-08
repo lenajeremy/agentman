@@ -56,7 +56,7 @@ struct AwaySummary: View {
                     if store.manager.settings?.keySet == true {
                         Button {
                             let time = digest.since.formatted(date: .omitted, time: .shortened)
-                            store.selection = .manager
+                            store.openAgentmanChat()
                             Task { _ = await store.manager.send("Catch me up: what did my agents do since \(time), and what needs me?") }
                             close()
                         } label: {

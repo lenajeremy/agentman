@@ -86,18 +86,20 @@ struct DecisionPanel: ViewModifier {
 /// Text shown as it was written, such as a command or a diff.
 struct CodeBox: View {
     let text: String
+    /// Small, on a card of the Board.
+    var compact = false
 
     var body: some View {
         Text(text)
-            .font(TextStyle.code)
+            .font(compact ? Fonts.mono(11.5) : TextStyle.code)
             .foregroundStyle(Palette.text)
             .textSelection(.enabled)
             // Always whole: what is being approved must never be cut short.
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(Palette.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(.horizontal, compact ? 8 : 12)
+            .padding(.vertical, compact ? 6 : 10)
+            .background(Palette.fill, in: RoundedRectangle(cornerRadius: compact ? 6 : 10, style: .continuous))
     }
 }
 
@@ -115,6 +117,8 @@ extension EnvironmentValues {
     /// Choices drawn small, for a card in a toast or in Agentman's chat:
     /// smaller type and rows, an option's description left out.
     @Entry var compactChoices = false
+    /// Compact choices with room to read them, on a card of the Board.
+    @Entry var roomyChoices = false
 }
 
 struct QuestionChoices: View {
@@ -275,6 +279,7 @@ private struct OptionRow: View {
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.compactChoices) private var compact
+    @Environment(\.roomyChoices) private var roomy
 
     var body: some View {
         Button(action: action) {
@@ -282,13 +287,13 @@ private struct OptionRow: View {
                 Text("\(number)")
                     .font(TextStyle.label)
                     .monospacedDigit()
-                    .foregroundStyle(Palette.muted)
-                    .frame(width: compact ? 17 : 20, height: compact ? 17 : 20)
-                    .background(Palette.fill, in: RoundedRectangle(cornerRadius: compact ? 5 : 6, style: .continuous))
+                    .foregroundStyle(roomy ? Palette.faint : Palette.muted)
+                    .frame(width: roomy ? 12 : compact ? 17 : 20, height: compact ? 17 : 20)
+                    .background(roomy ? Color.clear : Palette.fill, in: RoundedRectangle(cornerRadius: compact ? 5 : 6, style: .continuous))
                     .alignmentGuide(.firstTextBaseline) { $0[.firstTextBaseline] }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(option.label)
-                        .font(compact ? TextStyle.caption : TextStyle.body)
+                        .font(roomy ? Fonts.sans(13) : compact ? TextStyle.caption : TextStyle.body)
                         .foregroundStyle(Palette.text)
                         .lineSpacing(compact ? 2 : 4)
                         .multilineTextAlignment(.leading)
@@ -320,11 +325,11 @@ private struct OptionRow: View {
                         .foregroundStyle(Palette.faint)
                 }
             }
-            .padding(.horizontal, compact ? 8 : 12)
-            .padding(.vertical, compact ? 5 : 10)
+            .padding(.horizontal, roomy ? 6 : compact ? 8 : 12)
+            .padding(.vertical, roomy ? 4 : compact ? 5 : 10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous)
+                RoundedRectangle(cornerRadius: roomy ? 6 : compact ? 8 : 10, style: .continuous)
                     .fill(hovering ? Palette.fillStrong : (leading || pick ? Palette.fill : Color.clear))
             )
             .contentShape(Rectangle())

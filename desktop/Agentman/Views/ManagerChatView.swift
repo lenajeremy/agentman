@@ -307,13 +307,16 @@ private struct StarterChip: View {
 
 /// The box to talk to Agentman: a message, its API key before it has one,
 /// or a note that am serve isn't running.
-private struct ManagerBox: View {
+struct ManagerBox: View {
     @Environment(AgentsStore.self) private var store
     @Binding var draft: String
     @Binding var attachments: [Attachment]
     @Binding var dropping: Bool
     var sending: Bool
     var large = false
+    /// The room kept under it for a word about the connection or the key,
+    /// which the Board only gives when there is one.
+    var keepsFooter = true
     var send: () -> Void
 
     var body: some View {
@@ -334,6 +337,7 @@ private struct ManagerBox: View {
                 manager.problem = nil
             })
 
+            if keepsFooter || store.status != .connected || manager.needsKey {
             Group {
                 if case .unavailable = store.status {
                     Text("Not connected.")
@@ -355,6 +359,7 @@ private struct ManagerBox: View {
             .foregroundStyle(Palette.muted)
             .padding(.top, 14)
             .frame(height: 34, alignment: .top)
+            }
         }
     }
 }
@@ -932,7 +937,7 @@ private struct ScheduledLine: View {
 
 /// The clock in the title bar while Agentman has something scheduled, with
 /// the list to see and cancel it.
-private struct SchedulesButton: View {
+struct SchedulesButton: View {
     @Environment(AgentsStore.self) private var store
     @State private var open = false
 

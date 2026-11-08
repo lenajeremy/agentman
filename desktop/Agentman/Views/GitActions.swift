@@ -150,6 +150,13 @@ struct GitActionsRow: View {
                 }
             }
         }
+        // "Commit & push" on the Board's card, once there is something to
+        // show in the sheet.
+        .task(id: requestReady) {
+            guard requestReady else { return }
+            store.gitActionRequest = nil
+            start(GitAction.quick(state))
+        }
         .sheet(item: $committing) { then in
             CommitSheet(state: state, changes: changes, hidden: hidden, then: then) { paths, message, push in
                 committing = nil
@@ -168,6 +175,11 @@ struct GitActionsRow: View {
         } message: {
             Text(confirmMessage)
         }
+    }
+
+    private var requestReady: Bool {
+        guard store.gitActionRequest == session.id, let state else { return false }
+        return state.changes == 0 || !changes.isEmpty
     }
 
     private func start(_ action: GitAction) {
