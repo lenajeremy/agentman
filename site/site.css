@@ -1078,6 +1078,100 @@ html[data-zone="blue"] .zone .phone-tile {
   box-shadow: 0 10px 0 var(--blue-deep);
 }
 
+/* MARK: The Board */
+
+.works:has(.fleet) {
+  padding-bottom: clamp(80px, 9vw, 110px);
+}
+.fleet {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: clamp(10px, 2vw, 22px);
+  max-width: 620px;
+  margin: 52px auto 0;
+}
+.fleet i,
+.fleet-key i {
+  display: block;
+  aspect-ratio: 1;
+  border-radius: 50%;
+}
+.fleet .w,
+.fleet-key .w {
+  background: var(--ink);
+}
+.fleet .i,
+.fleet-key .i {
+  box-shadow: inset 0 0 0 1.5px var(--ink);
+  opacity: 0.45;
+}
+.fleet .n,
+.fleet-key .n {
+  background: var(--accent);
+}
+.fleet .n {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+.motion .fleet .n {
+  animation: fleet-waiting 1.8s ease-in-out infinite;
+}
+@keyframes fleet-waiting {
+  50% {
+    outline-offset: 5px;
+    outline-color: transparent;
+  }
+}
+.fleet-key {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px 32px;
+  margin: 36px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 16px;
+}
+.fleet-key li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fleet-key i {
+  width: 12px;
+}
+.column-card {
+  gap: 16px;
+  padding: 24px 0 24px;
+  overflow: hidden;
+}
+.column-crop {
+  height: 300px;
+  overflow: hidden;
+  border-block: 2.5px solid var(--ink);
+  background: #f4f4f4;
+}
+.column-crop img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.column-note {
+  margin: 0;
+  padding-inline: 24px;
+  font-size: 15px;
+  color: var(--muted);
+}
+.toast-tile {
+  padding: 0;
+  background: #f9f9f9;
+}
+.toast-tile img {
+  width: 100%;
+  margin-bottom: 0;
+  transform: none;
+}
+
 /* MARK: Patterns */
 
 /* Dots on the cream bands. */

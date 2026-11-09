@@ -153,18 +153,7 @@ struct Sidebar: View {
         // What the conversations said, a moment after typing stops: the
         // daemon answers in milliseconds, so this only spares it a query
         // per key.
-        .task(id: store.search) {
-            let query = store.search.trimmingCharacters(in: .whitespaces)
-            guard AgentsStore.searchable(query) else {
-                store.messageHits = nil
-                return
-            }
-            try? await Task.sleep(for: .milliseconds(150))
-            guard !Task.isCancelled else { return }
-            let results = await store.searchMessages(query)
-            guard !Task.isCancelled else { return }
-            store.messageHits = results
-        }
+        .task(id: store.search) { await store.refreshMessageHits() }
         // The branch under each agent's title, kept current as agents switch.
         .task {
             while !Task.isCancelled {
