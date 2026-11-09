@@ -1085,9 +1085,9 @@ html[data-zone="blue"] .zone .phone-tile {
 }
 .fleet {
   display: grid;
-  grid-template-columns: repeat(25, 1fr);
-  gap: clamp(4px, 0.9vw, 12px);
-  max-width: 860px;
+  grid-template-columns: repeat(10, 1fr);
+  gap: clamp(10px, 2vw, 22px);
+  max-width: 620px;
   margin: 52px auto 0;
 }
 .fleet i,
