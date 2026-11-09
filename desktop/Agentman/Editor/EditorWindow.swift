@@ -44,6 +44,7 @@ enum EditorOpener {
 struct EditorWindow: View {
     @State private var headerLeading: CGFloat = 82
     @Environment(AgentsStore.self) private var agents
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var store: EditorStore
     @State private var naming: Naming?
     @State private var keyMonitor: Any?
@@ -121,11 +122,15 @@ struct EditorWindow: View {
                             PanelDivider(height: $terminalHeight, maximum: size.height * 0.75)
                                 .padding(.vertical, -3)
                                 .zIndex(1)
+                                .transition(.opacity)
                             TerminalPanel(store: store, hide: { store.showTerminal = false })
                                 .frame(height: Self.terminalHeight(dragged: terminalHeight, window: size.height))
+                                .transition(.move(edge: .bottom))
                         }
                     }
                     .frame(minWidth: 320)
+                    .clipped()
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: store.showTerminal)
                     .overlay {
                         if store.quickOpen {
                             GoToFile(store: store)

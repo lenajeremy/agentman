@@ -24,6 +24,7 @@ struct AgentThreadView: View {
     @State private var showFiles = true
     @Environment(\.openWindow) private var openWindow
     @Environment(\.detailHeaderLeading) private var headerLeading
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var confirmTakeOver = false
     /// A move in flight, and whether its terminal is to be shown once the
     /// session is in its pane.
@@ -120,12 +121,16 @@ struct AgentThreadView: View {
                                 PanelDivider(height: $bottomTerminalHeight, maximum: tallest)
                                     .padding(.vertical, -3)
                                     .zIndex(1)
+                                    .transition(.opacity)
                                 FolderTerminal(folder: session.cwd, hide: { bottomTerminal = false }, move: .toSide)
                                     .equatable()
                                     .id(session.cwd)
                                     .frame(height: min(max(bottomTerminalHeight, 120), tallest))
+                                    .transition(.move(edge: .bottom))
                             }
                         }
+                        .clipped()
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: bottomTerminalShows)
                     }
                     if panelOpen {
                         RightPanel(session: session, maximised: $panelMaximised) {
