@@ -16,6 +16,7 @@ struct BoardView: View {
     private static let widest: CGFloat = 400
     /// What the columns' last cards keep clear of the floating box.
     private static let askClearance: CGFloat = 92
+    private static let searchWidth: CGFloat = 380
 
     @Environment(AgentsStore.self) private var store
     @Environment(\.detailHeaderLeading) private var headerLeading
@@ -154,16 +155,16 @@ struct BoardView: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 38)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
             .strokeBorder(searchFocused ? Palette.text.opacity(0.35) : Palette.line))
+        .shadow(color: .black.opacity(0.06), radius: 12, y: 3)
         .background {
             Button("Search the Board") { searchFocused = true }
                 .keyboardShortcut("f", modifiers: .command)
                 .opacity(0)
                 .accessibilityHidden(true)
         }
-        .padding(.top, 2)
     }
 
     private var folderMenu: some View {
@@ -204,14 +205,16 @@ struct BoardView: View {
         let width = column * 3 + Self.gap * 2
         let scrolls = width + Self.margin * 2 > room.width
         return VStack(alignment: .leading, spacing: 0) {
-            // The search over the last column, its edges on the column's.
-            HStack(alignment: .center, spacing: Self.gap) {
+            // The headline, and the search at the columns' far edge, with
+            // room left between them however narrow the window.
+            let row = min(width, room.width - Self.margin * 2)
+            HStack(alignment: .center, spacing: 32) {
                 brief(sections)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 searchField
-                    .frame(width: column)
+                    .frame(width: min(Self.searchWidth, row * 0.45))
             }
-            .frame(width: min(width, room.width - Self.margin * 2))
+            .frame(width: row)
             .frame(maxWidth: .infinity)
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: Self.gap) {
