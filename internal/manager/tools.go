@@ -355,7 +355,7 @@ func init() {
 		},
 		{
 			name: "update_instructions",
-			description: "Write the user's shared notes marked always into one agent's project instructions " +
+			description: "Copy the user's shared notes marked always into one agent's project instructions (they already reach every agent without this) " +
 				"(CLAUDE.md for Claude Code, AGENTS.md for the others), in a block Agentman keeps; the rest of the file is untouched. " +
 				"Only when the user asks.",
 			properties: map[string]any{"agent": agentProperty},
@@ -895,7 +895,7 @@ func runDeleteNote(_ context.Context, m *Manager, input map[string]any) toolResu
 	}
 	text := fmt.Sprintf("Deleted %s (%s).", note.Name, note.Tier)
 	if note.Always {
-		text += " It was in every project's instructions: project instruction files keep it until update_instructions runs for them."
+		text += " Every agent was following it: it comes out of their own instructions by itself, but a project's instruction file keeps it until update_instructions runs for that project."
 	}
 	return toolResult{text: text, activity: "Deleted your note “" + note.Title + "”"}
 }
