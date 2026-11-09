@@ -1161,9 +1161,7 @@ final class AgentsStore {
         // in between would be missing until it was scrolled to.
         let since = messages[sessionId]?.map(\.ts).max()
         Task {
-            var request = DaemonRequest(.fetchMessages, sessionId: sessionId)
-            request.limit = 40
-            guard var page = try? await client.request(request).page else { return }
+            guard var page = await firstPage(of: sessionId) else { return }
             merge(page.messages, into: sessionId)
             var pages = 1
             while let since, Self.needsAnotherPage(page.messages, hasMore: page.hasMore, since: since, pages: pages),
@@ -1180,6 +1178,23 @@ final class AgentsStore {
             hasMore[sessionId] = page.hasMore
         }
     }
+
+    /// The newest page of a conversation being opened. Tried again if it
+    /// fails: given up on, the chat stayed empty until it was left and opened
+    /// again, the only other thing that asked.
+    private func firstPage(of sessionId: String) async -> Page? {
+        var request = DaemonRequest(.fetchMessages, sessionId: sessionId)
+        request.limit = 40
+        for wait in Self.firstPageRetries {
+            if let page = try? await client.request(request, timeout: 15).page { return page }
+            guard following[sessionId] != nil else { return nil }
+            try? await Task.sleep(for: wait)
+        }
+        return try? await client.request(request, timeout: 15).page
+    }
+
+    /// How long to wait before asking again for a conversation's first page.
+    nonisolated static let firstPageRetries: [Duration] = [.milliseconds(300), .milliseconds(800), .seconds(2)]
 
     /// Pages a catch-up reads at most: a long absence stops there, and the
     /// rest is still there to scroll to. As the phone's (mobile/lib/catchup.ts).

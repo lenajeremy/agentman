@@ -1,3 +1,4 @@
+import OSLog
 import SwiftUI
 
 /// One agent's conversation, live, with a box to message it and its question
@@ -25,6 +26,10 @@ struct AgentThreadView: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.detailHeaderLeading) private var headerLeading
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Whether any row of the conversation has been drawn yet.
+    @State private var rowsDrawn = false
+    /// Goes up to build the scroll view again; see drawOrRebuild.
+    @State private var rebuilds = 0
     @State private var confirmTakeOver = false
     /// A move in flight, and whether its terminal is to be shown once the
     /// session is in its pane.
@@ -304,6 +309,7 @@ struct AgentThreadView: View {
                                 switch item {
                                 case .message(let message):
                                     MessageRow(message: message)
+                                        .onAppear { if !rowsDrawn { rowsDrawn = true } }
                                 case .tools(let calls, let said):
                                     ToolRun(calls: calls, said: said)
                                 case .image(_, let path):
@@ -347,6 +353,11 @@ struct AgentThreadView: View {
                     .environment(\.findMarks, finding?.marks)
                 }
                 .scrollIndicators(.never)
+                .id(rebuilds)
+                .task(id: (store.messages[session.id]?.isEmpty ?? true) ? "" : session.id) {
+                    guard store.messages[session.id]?.isEmpty == false else { return }
+                    await drawOrRebuild()
+                }
                 .offersQuotes(when: session.canReceive && session.question == nil) { text in
                     store.replyQuotes[session.id, default: []].append(ReplyQuote(text: text))
                 }
@@ -626,6 +637,19 @@ struct AgentThreadView: View {
             }
         }
     }
+
+    /// A conversation with messages that drew none of them, as if it had
+    /// none, gets built again: leaving and coming back did the same.
+    private func drawOrRebuild() async {
+        for _ in 0..<2 {
+            try? await Task.sleep(for: .milliseconds(900))
+            if Task.isCancelled || rowsDrawn { return }
+            Self.log.notice("\(session.kind, privacy: .public) chat has messages but drew none; building it again")
+            rebuilds += 1
+        }
+    }
+
+    private static let log = Logger(subsystem: "dev.agentman.mac", category: "thread")
 
     private var isEmpty: Bool {
         (store.messages[session.id] ?? []).isEmpty && (session.queued ?? []).isEmpty &&
