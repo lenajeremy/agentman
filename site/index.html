@@ -27,7 +27,7 @@
       if (!matchMedia("(prefers-reduced-motion: reduce)").matches) document.documentElement.classList.add("motion");
     </script>
     <link rel="stylesheet" href="/third-party/lenis-1.3.26.css" />
-    <link rel="stylesheet" href="/site.css?v=20261105" />
+    <link rel="stylesheet" href="/site.css?v=20261109" />
     <script src="/third-party/lenis-1.3.26.min.js" defer></script>
     <script src="/site.js?v=20261105" defer></script>
     <script src="/mascot.js" defer></script>
@@ -60,7 +60,7 @@
           ><img src="/apple-touch-icon.png" alt="" width="28" height="28" /><span>Agentman</span></a
         >
         <div class="nav-links">
-          <a href="/mac">Mac</a><a href="/ios">iPhone</a><a href="/start">Setup</a
+          <a href="/board">Board</a><a href="/mac">Mac</a><a href="/ios">iPhone</a><a href="/start">Setup</a
           ><a href="https://github.com/lenajeremy/agentman">GitHub</a>
         </div>
         <a class="pill pill-white pill-small" href="https://github.com/lenajeremy/agentman/releases/download/v0.41.2/Agentman.dmg"
@@ -68,8 +68,8 @@
         >
       </nav>
 
-      <a class="announce edge-top edge-bottom" href="/mac">
-        <span>New: Agentman for Mac now sets itself up, and keeps itself up to date</span>
+      <a class="announce edge-top edge-bottom" href="/board">
+        <span>New: the Board. Every agent, sorted by what it needs from you</span>
         <svg aria-hidden="true"><use href="#i-arrow" /></svg>
       </a>
 
@@ -103,10 +103,10 @@
 
       <figure class="hero-shot wrap" data-tilt>
         <img
-          src="/media/mac-agentman.webp"
-          alt="Agentman for Mac: the sidebar of agents by what they're doing, and Agentman's answer about the Apple Pay work, with one agent waiting for approval to push to main"
+          src="/media/board-hero.webp"
+          alt="The Board in Agentman for Mac: four agents waiting on you, ten working and six idle, each as a card in its column"
           width="2560"
-          height="1640"
+          height="1642"
           fetchpriority="high"
         />
       </figure>
@@ -176,6 +176,20 @@
             </div>
           </li>
         </ul>
+      </section>
+
+      <section class="block block-tight" aria-labelledby="board-heading">
+        <div class="wrap center">
+          <h2 id="board-heading" data-split>Two hundred agents.<br />One <span class="outline">look.</span></h2>
+          <p class="lede" data-reveal style="--d: 120ms">
+            The Board sorts every agent by what it needs from you, and tells you the moment one finishes or
+            needs you.
+          </p>
+          <a class="link" data-reveal style="--d: 200ms" href="/board">See how the Board works <svg aria-hidden="true"><use href="#i-arrow" /></svg></a>
+        </div>
+        <figure class="shot wrap" data-reveal="rise">
+          <img src="/media/board-color.webp" width="2400" height="1539" loading="lazy" alt="The Board with every agent tinted by its project, and the sidebar listing them by what they need" />
+        </figure>
       </section>
 
       <div class="outline-strip" aria-hidden="true">
@@ -290,7 +304,7 @@
           ><small>MIT licensed</small></a
         >
         <nav aria-label="Footer">
-          <a href="https://github.com/lenajeremy/agentman">GitHub</a><a href="/mac">Mac</a><a href="/ios">iPhone</a
+          <a href="https://github.com/lenajeremy/agentman">GitHub</a><a href="/board">Board</a><a href="/mac">Mac</a><a href="/ios">iPhone</a
           ><a href="/start">Setup</a><a href="https://github.com/lenajeremy/agentman#readme">Docs</a
           ><a href="/privacy">Privacy</a>
         </nav>
