@@ -157,9 +157,9 @@ func init() {
 		},
 		{
 			name: "end_agent",
-			description: "End an agent's session and close its terminal, when the user asks you to. Only for agents running in a terminal " +
-				"Agentman started (from the apps, by you, or with am); one in the user's own terminal they close themselves. " +
-				"Its conversation is kept, and reopen_agent brings it back. To stop what it is doing but keep it open, use interrupt.",
+			description: "End an agent's session, when the user asks you to. One in a terminal Agentman started has that terminal closed, even while it works. " +
+				"Any other comes off the list once it has stopped working, and if it is open in the user's own terminal it keeps running there. " +
+				"Its conversation is kept in its folder's history. To stop what it is doing but keep it open, use interrupt.",
 			properties: map[string]any{"agent": agentProperty},
 			required:   []string{"agent"},
 			run:        runEndAgent,

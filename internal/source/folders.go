@@ -340,5 +340,6 @@ func (r *Registry) lastKnown() []protocol.Session {
 	for _, sessions := range r.last {
 		all = append(all, sessions...)
 	}
-	return all
+	// One the user ended is history now, not something running.
+	return r.ended.without(all)
 }

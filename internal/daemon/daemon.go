@@ -1116,10 +1116,11 @@ func (d *Daemon) HandleFrom(
 		return protocol.Event{Type: protocol.EvtSessionReleased, SessionID: req.SessionID}
 
 	case protocol.ReqEndSession:
+		_, closes := d.registry.PaneFor(req.SessionID)
 		if err := d.endSession(ctx, req.SessionID); err != nil {
 			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
 		}
-		return protocol.Event{Type: protocol.EvtSessionEnded, SessionID: req.SessionID}
+		return protocol.Event{Type: protocol.EvtSessionEnded, SessionID: req.SessionID, Closed: closes}
 
 	case protocol.ReqCreateDirectory:
 		created, err := createLaunchDirectory(req.Path)

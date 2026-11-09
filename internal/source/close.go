@@ -40,7 +40,7 @@ func (r *Registry) EndSession(ctx context.Context, sessionID string) error {
 			}
 			// Its transcript would otherwise list it again as an idle agent.
 			if listed {
-				r.ended.add(sessionID, session.LastActivityAt)
+				r.ended.add(session)
 			}
 			return nil
 		}
@@ -51,7 +51,7 @@ func (r *Registry) EndSession(ctx context.Context, sessionID string) error {
 	if session.State == protocol.StateBusy || session.State == protocol.StateWaitingInput {
 		return errors.New("source: it's still working; stop it first, then end it")
 	}
-	r.ended.add(sessionID, session.LastActivityAt)
+	r.ended.add(session)
 	return nil
 }
 

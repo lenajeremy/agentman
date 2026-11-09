@@ -32,10 +32,7 @@ func launchHarness(t *testing.T) (*harness, string) {
 		case protocol.ReqStartSession:
 			return protocol.Event{Type: protocol.EvtSessionStarted, SessionID: "codex:tmux-am-codex-1"}
 		case protocol.ReqEndSession:
-			if req.SessionID == "codex:b" {
-				return protocol.Event{Type: protocol.EvtError, Error: "source: this session is not running in a pane Agentman started"}
-			}
-			return protocol.Event{Type: protocol.EvtSessionEnded, SessionID: req.SessionID}
+			return protocol.Event{Type: protocol.EvtSessionEnded, SessionID: req.SessionID, Closed: req.SessionID == "claude:a"}
 		case protocol.ReqResumeSession:
 			return protocol.Event{Type: protocol.EvtSessionStarted, SessionID: "claude:old"}
 		case protocol.ReqSendMessage:
@@ -160,15 +157,15 @@ func TestAHandoffCarriesTheFirstAgentsWork(t *testing.T) {
 func TestEndAndReopenAnAgent(t *testing.T) {
 	h, _ := launchHarness(t)
 	ended := h.m.runTool(context.Background(), "end_agent", []byte(`{"agent":"site"}`))
-	if ended.isError || ended.activity != "Ended site" {
+	if ended.isError || ended.activity != "Ended site" || !strings.Contains(ended.text, "closed its terminal") {
 		t.Fatalf("end_agent: %+v", ended)
 	}
 	if sent := h.agents.sent(protocol.ReqEndSession); len(sent) != 1 || sent[0].SessionID != "claude:a" {
 		t.Errorf("end requests = %+v", sent)
 	}
-	// One in the user's own terminal: theirs to close.
+	// One in the user's own terminal comes off the list, and keeps running.
 	own := h.m.runTool(context.Background(), "end_agent", []byte(`{"agent":"api"}`))
-	if !own.isError || !strings.Contains(own.text, "the user's own terminal") {
+	if own.isError || !strings.Contains(own.text, "keeps running there") {
 		t.Errorf("end_agent on the user's terminal: %+v", own)
 	}
 	if again := h.m.runTool(context.Background(), "end_agent", []byte(`{"agent":"old"}`)); again.isError || len(h.agents.sent(protocol.ReqEndSession)) != 2 {
