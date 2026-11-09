@@ -368,6 +368,11 @@ type Autopilot struct {
 	// VerifyDaily is how many reviews by the model a day may cost; zero is
 	// the default. Running the tests costs none.
 	VerifyDaily int `json:"verifyDaily,omitempty"`
+	// ReplyCommit and ReplyInstall answer yes, in folders on Handle, to an
+	// agent asking only whether to commit finished work, or to install a
+	// finished build on the user's own phone or Mac.
+	ReplyCommit  bool `json:"replyCommit"`
+	ReplyInstall bool `json:"replyInstall"`
 }
 
 // Where a team stands.

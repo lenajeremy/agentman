@@ -60,7 +60,7 @@ var correctionsSchema = map[string]any{
 }
 
 // Words Agentman itself sends agents as their user, which aren't the user's.
-var ownMessages = []string{sendBackOpening, nudgeText, quietText, headsUpOpening}
+var ownMessages = []string{sendBackOpening, nudgeText, quietText, headsUpOpening, standingOpening}
 
 // isOwnMessage reports what Agentman sent, which starts no new request.
 func isOwnMessage(text string) bool {
