@@ -303,6 +303,10 @@ final class AgentsStore {
     /// a card.
     var gitActionRequest: String?
 
+    /// Passages of what an agent said, waiting to go with the next message
+    /// to it, by session; ReplyQuotes.agentman holds Agentman's own.
+    var replyQuotes: [String: [ReplyQuote]] = [:]
+
     /// The Board's columns, for the folder the sidebar is filtered to.
     var board: BoardSections {
         let waiting = Set(manager.openCards.filter { $0.kind == "question" || $0.kind == "needs_you" }.map(\.sessionId))

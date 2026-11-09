@@ -343,6 +343,9 @@ struct AgentThreadView: View {
                     .environment(\.findMarks, finding?.marks)
                 }
                 .scrollIndicators(.never)
+                .offersQuotes(when: session.canReceive && session.question == nil) { text in
+                    store.replyQuotes[session.id, default: []].append(ReplyQuote(text: text))
+                }
                 .modifier(FollowsEnd(following: following, earlier: store.hasMore[session.id] == true ? { await store.loadOlder(session.id) } : nil))
                 .modifier(TopFade())
                 .overlay {
@@ -439,6 +442,7 @@ struct AgentThreadView: View {
                     mentions: mentions,
                     text: $draft,
                     attachments: session.canReceive ? $attachments : nil,
+                    quotes: quotes,
                     session: session,
                     placeholder: placeholder,
                     enabled: session.canReceive && !sending && !readingPanel && store.status == .connected
@@ -621,6 +625,12 @@ struct AgentThreadView: View {
         return "Message \(session.name)"
     }
 
+    /// What is waiting to be quoted in the next message.
+    private var quotes: Binding<[ReplyQuote]> {
+        let id = session.id
+        return Binding(get: { [store] in store.replyQuotes[id] ?? [] }, set: { [store] in store.replyQuotes[id] = $0.isEmpty ? nil : $0 })
+    }
+
     private func send() {
         var text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { return }
@@ -677,11 +687,15 @@ struct AgentThreadView: View {
                     return
                 }
             }
-            let message = references.isEmpty ? text
-                : references.joined(separator: " ") + (text.isEmpty ? "" : "\n\n" + text)
+            // A slash command has to come first to be one: quotes wait.
+            let quoted = text.hasPrefix("/") ? [] : quotes.wrappedValue.map(\.text)
+            let words = ReplyQuotes.message(quoted, words: text)
+            let message = references.isEmpty ? words
+                : references.joined(separator: " ") + (words.isEmpty ? "" : "\n\n" + words)
             if await store.send(message, images: images, to: session.id) {
                 draft = ""
                 attachments = []
+                if !quoted.isEmpty { quotes.wrappedValue = [] }
             }
             sending = false
         }
@@ -1137,7 +1151,7 @@ struct MessageRow: View {
                     if !sent.text.isEmpty {
                         HStack {
                             Spacer(minLength: 80)
-                            LongText(text: sent.text)
+                            QuotedMessage(text: sent.text) { LongText(text: $0) }
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 12)
                                 .background(Palette.bubble, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -1721,7 +1735,9 @@ private struct QueuedBubble: View {
         HStack {
             Spacer(minLength: 80)
             VStack(alignment: .trailing, spacing: 4) {
-                TaggedText(text: text, folder: folder, skills: skills, color: Palette.textSecondary, lineSpacing: 0, selectable: false)
+                QuotedMessage(text: text) {
+                    TaggedText(text: $0, folder: folder, skills: skills, color: Palette.textSecondary, lineSpacing: 0, selectable: false)
+                }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(
@@ -1763,6 +1779,8 @@ struct Composer: View {
     @Binding var text: String
     /// Nil for an agent that can't be messaged, so nothing offers images.
     var attachments: Binding<[Attachment]>?
+    /// Passages of the conversation going with the message.
+    var quotes: Binding<[ReplyQuote]>? = nil
     /// The agent being written to, for its mode and model.
     var session: Session? = nil
     var placeholder: String
@@ -1789,6 +1807,11 @@ struct Composer: View {
                 AttachmentStrip(attachments: attachments)
                     .padding(.leading, 5)
                     .padding(.top, -4)
+            }
+            if let quotes, !quotes.wrappedValue.isEmpty {
+                QuoteStrip(quotes: quotes)
+                    .padding(.horizontal, 5)
+                    .padding(.top, -2)
             }
             MessageField(
                 text: $text,
@@ -1857,6 +1880,10 @@ struct Composer: View {
                 }
                 sendButton
             }
+        }
+        // Quoted, the next thing is to say why.
+        .onChange(of: quotes?.wrappedValue.count ?? 0) { before, now in
+            if now > before { focused = true }
         }
         // The text 13 points in from the box's edge and 10 down: room
         // enough, as Agentman's own box has.
@@ -2006,6 +2033,7 @@ private struct AgentReply: View {
         HStack(alignment: .top, spacing: 6) {
             MarkdownView(text)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .quotable()
             Button {
                 Clipboard.copy(text)
                 copied = true
