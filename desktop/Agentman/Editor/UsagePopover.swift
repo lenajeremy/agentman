@@ -29,7 +29,7 @@ struct UsagePopover: View {
             }
             Group {
                 if let limits, !limits.agents.isEmpty {
-                    LimitsPage(limits: limits)
+                    PopoverLimits(limits: limits)
                 } else if reading {
                     HStack(spacing: 8) {
                         Loader(size: 12)
@@ -77,5 +77,27 @@ struct UsagePopover: View {
             problem = error.localizedDescription
         }
         usage = await spent
+    }
+}
+
+/// What is left of each plan, in a popover: only as tall as it needs, and
+/// scrolling once that is more than the screen has room for. With several
+/// agents it used to run off the top of the screen, with no way to reach it.
+struct PopoverLimits: View {
+    let limits: Limits
+    var now: Date?
+
+    /// The most it may take of a screen this tall, leaving room for the
+    /// popover's heading and link, and the status bar it hangs from.
+    static func tallest(screen: CGFloat) -> CGFloat { max(screen - 200, 260) }
+
+    var body: some View {
+        ScrollView {
+            LimitsPage(limits: limits, now: now)
+                // The cards' shadows, which fall to the right and below.
+                .padding(.trailing, 4)
+                .padding(.bottom, 4)
+        }
+        .frame(maxHeight: Self.tallest(screen: NSScreen.main?.visibleFrame.height ?? 800))
     }
 }
