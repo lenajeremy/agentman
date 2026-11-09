@@ -379,11 +379,18 @@ func runServe(ctx context.Context, args []string) error {
 	// reads every agent for the user. It runs on the user's own Claude API
 	// key, set from Agentman for Mac and kept in the Keychain.
 	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
+		notes := knowledge.Open(filepath.Join(dir, "knowledge"))
+		// The notes marked for every agent go into each agent's own files. A
+		// daemon with its own config home is a test one, beside the user's
+		// real agents: its empty notes must not take theirs out.
+		if homes, err := knowledge.HomesFromEnv(); err == nil && *configHome == "" {
+			agent.SetSharedNotes(notes, homes, filepath.Join(dir, "shared-notes.json"))
+		}
 		boss, err := manager.New(manager.Config{
 			Dir:       filepath.Join(dir, "manager"),
 			Secrets:   secrets.Default(dir),
 			Agents:    managerAgents{daemon: agent},
-			Knowledge: knowledge.Open(filepath.Join(dir, "knowledge")),
+			Knowledge: notes,
 			Emit: func(event protocol.Event) {
 				_ = sink.Send(event)
 				// Its key set or taken away turns Agentman on or off, which

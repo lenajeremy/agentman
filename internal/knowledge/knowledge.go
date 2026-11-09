@@ -24,6 +24,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -66,6 +67,17 @@ var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 // Store is the notes on disk.
 type Store struct {
 	dir string
+	// changed runs after a note is written or deleted; see OnChange.
+	changed atomic.Pointer[func()]
+}
+
+// OnChange runs fn after every note written or deleted.
+func (s *Store) OnChange(fn func()) { s.changed.Store(&fn) }
+
+func (s *Store) notifyChanged() {
+	if fn := s.changed.Load(); fn != nil {
+		(*fn)()
+	}
 }
 
 // Open keeps notes under dir, ~/.agentman/knowledge.
@@ -210,6 +222,7 @@ func (s *Store) Write(note Note) (Note, error) {
 	if old, err := s.path(other, note.Name); err == nil {
 		_ = os.Remove(old)
 	}
+	s.notifyChanged()
 	return s.Read(note.Tier, note.Name)
 }
 
@@ -224,6 +237,7 @@ func (s *Store) Delete(tier, name string) error {
 	} else if err != nil {
 		return err
 	}
+	s.notifyChanged()
 	return nil
 }
 

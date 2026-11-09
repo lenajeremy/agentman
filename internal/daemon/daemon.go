@@ -106,6 +106,8 @@ type Daemon struct {
 	files fileUploads
 	// names is the user's names for sessions, applied as they are found.
 	names *sessionNames
+	// sharedNotes keeps the notes marked for every agent where each reads them.
+	sharedNotes *sharedNotes
 	// agentAlerts is the agents the user asked to hear from directly while
 	// Agentman is on.
 	agentAlerts *agentAlerts
@@ -497,6 +499,7 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 	// lock is released. Sharing the map here creates a real concurrent
 	// iteration/write panic window.
 	d.sessions = cloneSessionMap(current)
+	sharedNotes := d.sharedNotes
 	var arrived []waitingSubscription
 	for sessionID, subscribers := range d.waiting {
 		if _, live := current[sessionID]; !live {
@@ -508,6 +511,7 @@ func (d *Daemon) refresh(ctx context.Context, initial bool) {
 		delete(d.waiting, sessionID)
 	}
 	d.mu.Unlock()
+	sharedNotes.observe(found)
 	for _, wait := range arrived {
 		_ = d.startFollow(wait.subscriber, wait.session)
 	}

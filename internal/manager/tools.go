@@ -326,7 +326,7 @@ func init() {
 				"body":   map[string]any{"type": "string", "description": "The note, in Markdown, short."},
 				"why":    map[string]any{"type": "string", "description": "What you noticed that makes it worth keeping, in a line, said to the user: \"You said you always use pnpm.\""},
 				"tier":   map[string]any{"type": "string", "enum": []string{"shared", "private"}, "description": "Default shared."},
-				"always": map[string]any{"type": "boolean", "description": "Put it in every project's instructions. Default false."},
+				"always": map[string]any{"type": "boolean", "description": "Every agent follows it, without being asked: it goes into each agent's own instructions. Default false."},
 				"name":   map[string]any{"type": "string", "description": "An existing note's name, to suggest a change to it."},
 			},
 			required: []string{"title", "body"},
