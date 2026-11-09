@@ -22,6 +22,15 @@ import (
 // has a preference (source.AttachmentPlacer).
 func (d *Daemon) deliver(ctx context.Context, sessionID, text string, paths []string) (protocol.InjectMode, error) {
 	text, skills := d.namingSkills(ctx, sessionID, text)
+	text, delivered := d.withSharedNotes(ctx, sessionID, text)
+	mode, err := d.deliverText(ctx, sessionID, text, skills, paths)
+	if err == nil {
+		delivered()
+	}
+	return mode, err
+}
+
+func (d *Daemon) deliverText(ctx context.Context, sessionID, text string, skills, paths []string) (protocol.InjectMode, error) {
 	if len(paths) == 0 {
 		if len(skills) > 0 {
 			if mode, handled, err := d.registry.InjectWithSkills(ctx, sessionID, text, skills); handled {

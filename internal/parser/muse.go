@@ -68,7 +68,7 @@ func MuseMessage(sessionID string, item MuseItem) (protocol.Message, bool) {
 			return message, false
 		}
 		message.Role = protocol.RoleUser
-		message.Text = strings.TrimSpace(firstNonEmpty(item.DisplayText, item.Text))
+		message.Text = StripSharedNotes(strings.TrimSpace(firstNonEmpty(item.DisplayText, item.Text)))
 		for _, attachment := range item.Attachments {
 			if attachment.Path != "" && (attachment.Kind == "" || attachment.Kind == "image") {
 				message.Images = append(message.Images, attachment.Path)
