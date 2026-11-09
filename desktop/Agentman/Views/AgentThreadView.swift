@@ -466,6 +466,13 @@ struct AgentThreadView: View {
         // An unsent draft waits for the user's return, as on the phone.
         .onAppear { draft = store.drafts[session.id] ?? "" }
         .onChange(of: draft) { _, now in store.saveDraft(now, for: session.id) }
+        // "Review document" on the Board's card.
+        .task(id: store.documentsRequest == session.id) {
+            guard store.documentsRequest == session.id else { return }
+            store.documentsRequest = nil
+            filesTab = .plans
+            showFiles = true
+        }
         // `@` offers the folder's files when no editor is around the thread.
         .task(id: session.cwd) {
             if editorMentions == nil, session.canReceive, FileManager.default.fileExists(atPath: session.cwd) {

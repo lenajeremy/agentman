@@ -24,12 +24,203 @@ enum ShipCheck {
         branch == git.defaultBranch || ["main", "master", "trunk", "develop", "production"].contains(branch)
     }
 
+    /// Whether a push from here lands on a default branch, or one that
+    /// goes by a default branch's name.
+    static func pushesToProtected(_ git: GitState) -> Bool {
+        guard let branch = git.branch else { return false }
+        if protected(branch, git) { return true }
+        guard let upstream = git.upstream, let tracked = upstream.split(separator: "/", maxSplits: 1).last else { return false }
+        return protected(String(tracked), git)
+    }
+
     /// What will go out, in a few words.
     static func summary(_ git: GitState) -> String {
         var parts = [git.branch ?? ""]
         if git.changes > 0 { parts.append(git.changes == 1 ? "1 changed file" : "\(git.changes) changed files") }
         if git.ahead > 0 { parts.append(git.ahead == 1 ? "1 commit to push" : "\(git.ahead) commits to push") }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// Commit from the Board: the agent page's modal, then a way to push what
+/// was just committed, without leaving it.
+struct BoardCommitSheet: View {
+    private enum Stage: Equatable {
+        case loading
+        case form
+        /// `commit` is nil when there was nothing here to commit.
+        case committed(commit: String?, message: String?)
+    }
+
+    @Environment(AgentsStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let sessionId: String
+    @State private var stage = Stage.loading
+    @State private var git: GitState?
+    @State private var changes: [WorkspaceChange] = []
+    @State private var hidden = 0
+    @State private var busy: String?
+    @State private var problem: String?
+    @State private var pushedTo: String?
+
+    var body: some View {
+        Group {
+            switch stage {
+            case .loading:
+                HStack(spacing: 8) {
+                    Loader(size: 11)
+                    Text("Reading the changes")
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.muted)
+                }
+                .frame(width: 520, height: 120)
+            case .form:
+                CommitSheet(state: git, changes: changes, hidden: hidden, then: .commit, busy: busy, problem: problem) { paths, message, _ in
+                    commit(paths, message: message)
+                } cancel: {
+                    dismiss()
+                }
+            case .committed(let commit, let message):
+                committed(commit, message: message)
+            }
+        }
+        .background(Palette.paper)
+        .task { await load() }
+    }
+
+    private func committed(_ commit: String?, message: String?) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(pushedTo != nil ? "Pushed" : commit != nil ? "Committed" : "Nothing to commit")
+                    .font(TextStyle.title)
+                    .foregroundStyle(Palette.text)
+                Text(summary(commit))
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let commit {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.ok)
+                    Text(commit)
+                        .font(Fonts.mono(11.5))
+                        .foregroundStyle(Palette.muted)
+                    Text(message ?? "")
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.text)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                    Spacer(minLength: 0)
+                }
+                .padding(12)
+                .background(Palette.fill.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
+            }
+            if let problem {
+                Text(problem)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.errorText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            HStack(spacing: 8) {
+                if let busy {
+                    Loader(size: 11)
+                    Text(busy)
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.muted)
+                }
+                Spacer()
+                Button("Done") { dismiss() }
+                    .buttonStyle(.brandSecondary)
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(busy != nil)
+                // Never on Return: a push is asked for, not fallen into.
+                if canPush {
+                    Button(pushTitle, action: push)
+                        .buttonStyle(.brand)
+                        .tint(.accentColor)
+                        .disabled(busy != nil)
+                }
+            }
+            .controlSize(.large)
+        }
+        .padding(22)
+        .frame(width: 520)
+    }
+
+    private var canPush: Bool { pushedTo == nil && GitAction.canPush(git) }
+
+    private var pushTitle: String {
+        guard let git, ShipCheck.pushesToProtected(git), let branch = git.branch else { return "Push" }
+        return "Push to \(branch)"
+    }
+
+    /// Where the branch stands now, in a line.
+    private func summary(_ commit: String?) -> String {
+        if let pushedTo { return "Everything on \(git?.branch ?? "this branch") is on \(pushedTo)." }
+        guard let git else { return "" }
+        if canPush {
+            let commits = git.ahead == 1 ? "1 commit" : "\(git.ahead) commits"
+            return "\(commits) on \(git.branch ?? "this branch") to push to \(git.upstream ?? "\(git.remote ?? "origin")/\(git.branch ?? "")")."
+        }
+        if commit == nil {
+            return hidden > 0
+                ? "Only files holding secrets are left, and those aren't committed from here."
+                : "Everything here is already committed."
+        }
+        return GitAction.quick(git).hint ?? "Saved on \(git.branch ?? "this branch")."
+    }
+
+    private func load() async {
+        guard stage == .loading else { return }
+        do {
+            let state = try await store.git(.gitStatus, session: sessionId)
+            let listed = try await store.workspace(.listChanges, session: sessionId)
+            git = state
+            changes = listed.changes ?? []
+            hidden = listed.hidden ?? 0
+            stage = changes.isEmpty ? .committed(commit: nil, message: nil) : .form
+        } catch {
+            problem = error.localizedDescription
+            stage = .form
+        }
+    }
+
+    private func commit(_ paths: [String], message: String) {
+        let step = GitStep.commit(paths: paths, message: message)
+        problem = nil
+        busy = step.running
+        Task {
+            do {
+                let after = try await store.git(.gitCommit, session: sessionId, message: message, paths: paths)
+                git = after
+                stage = .committed(commit: after.commit, message: after.message)
+                store.boardGitChanged[sessionId, default: 0] += 1
+            } catch {
+                problem = error.localizedDescription
+            }
+            busy = nil
+        }
+    }
+
+    private func push() {
+        problem = nil
+        busy = GitStep.push.running
+        Task {
+            do {
+                let after = try await store.git(.gitPush, session: sessionId)
+                git = after
+                pushedTo = after.upstream ?? "the remote"
+                store.boardGitChanged[sessionId, default: 0] += 1
+            } catch {
+                problem = error.localizedDescription
+            }
+            busy = nil
+        }
     }
 }
 

@@ -54,6 +54,9 @@ struct BoardView: View {
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: store.boardChatOpen)
         .environment(\.chatAutofocus, chatAutofocus)
+        .sheet(item: Binding(get: { store.boardCommitSession.map(BoardCommitTarget.init) }, set: { store.boardCommitSession = $0?.id })) { target in
+            BoardCommitSheet(sessionId: target.id)
+        }
         .confirmationDialog("Start a new chat?", isPresented: $confirmNewChat) {
             Button("New Chat") {
                 Task { manager.problem = await manager.reset() }
@@ -262,6 +265,11 @@ struct BoardView: View {
             Rectangle().fill(Palette.line).frame(width: 1)
         }
     }
+}
+
+/// Which agent the Board's commit modal is for.
+private struct BoardCommitTarget: Identifiable {
+    let id: String
 }
 
 /// What Agentman has approved by itself today, each with the way to have it
@@ -484,6 +492,7 @@ private struct BoardColumn: View {
 /// or followable on the spot. Clicking anywhere else opens its conversation.
 private struct BoardCard: View {
     @Environment(AgentsStore.self) private var store
+    @Environment(\.openWindow) private var openWindow
     let session: Session
     let kind: BoardColumnKind
     let outlined: Bool
@@ -547,13 +556,21 @@ private struct BoardCard: View {
         .contextMenu { menuItems }
         .onAppear { store.watch(session.id) }
         .onDisappear { store.unwatch(session.id) }
-        // What is left to commit, read again whenever it did something.
-        .task(id: kind == .idle ? session.lastActivityAt : nil) {
+        // What is left to commit, read again whenever it did something and
+        // whenever a button here has finished.
+        .task(id: gitReadKey) {
             guard kind == .idle else { return }
             git = try? await store.git(.gitStatus, session: session.id)
         }
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: "Open conversation", open)
+    }
+
+    private var gitReadKey: String? {
+        guard kind == .idle else { return nil }
+        let run = store.boardGitRuns[session.id]
+        let settled = run.flatMap { $0.isRunning ? nil : $0.id.uuidString } ?? ""
+        return "\(session.lastActivityAt ?? 0)/\(settled)/\(store.boardGitChanged[session.id] ?? 0)"
     }
 
     private var tint: Color? { AgentColors.color(for: session, by: colorBy) }
@@ -711,34 +728,53 @@ private struct BoardCard: View {
         if let check = store.manager.verifications[session.id] {
             BoardCheck(check: check)
         }
-        let links = links
-        if !links.isEmpty {
+        let run = store.boardGitRuns[session.id]
+        let action = GitAction.quick(git)
+        let showsGit = run != nil || (git != nil && !action.isIdle)
+        let opening = opening
+        let elsewhere = elsewhere
+        if showsGit || !opening.isEmpty || !elsewhere.isEmpty {
             FlowLayout(spacing: 5) {
-                ForEach(links) { link in
-                    BoardLink(link: link)
+                ForEach(opening) { BoardLink(link: $0) }
+                if showsGit {
+                    BoardGitChip(session: session, action: action, state: git)
                 }
+                ForEach(elsewhere) { BoardLink(link: $0) }
             }
+        }
+        if case .failed(_, let detail, _)? = run?.phase {
+            Text(detail)
+                .font(Fonts.sans(12))
+                .foregroundStyle(Palette.errorText)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .help(detail)
         }
     }
 
-    private var links: [BoardLink.Item] {
+    /// Goes to the agent's changes: before the button that commits them.
+    private var opening: [BoardLink.Item] {
+        guard let changes = git?.changes, changes > 0 else { return [] }
+        let id = session.id
+        return [.init(title: changes == 1 ? "Review 1 file" : "Review \(changes) files", symbol: "plus.forwardslash.minus") { [store] in
+            store.selection = .agent(id)
+            RightPanel.show(.diff)
+        }]
+    }
+
+    /// The other places a card goes.
+    private var elsewhere: [BoardLink.Item] {
         var links: [BoardLink.Item] = []
         let id = session.id
-        if let changes = git?.changes, changes > 0 {
-            links.append(.init(title: changes == 1 ? "Review 1 file" : "Review \(changes) files", symbol: "plus.forwardslash.minus") { [store] in
-                store.selection = .agent(id)
-                RightPanel.show(.diff)
-            })
-        }
-        let action = GitAction.quick(git)
-        if git != nil, !action.isIdle {
-            links.append(.init(title: action.label, symbol: action.symbol) { [store] in
-                store.selection = .agent(id)
-                store.gitActionRequest = id
+        if !session.cwd.isEmpty {
+            let folder = session.cwd
+            links.append(.init(title: "View", symbol: "chevron.left.forwardslash.chevron.right") { [openWindow] in
+                EditorOpener.open(folder: folder, with: openWindow)
             })
         }
         if let documents = session.artifactsToReview, documents > 0 {
             links.append(.init(title: documents == 1 ? "Review document" : "Review \(documents) documents", symbol: "doc.text") { [store] in
+                store.documentsRequest = id
                 store.selection = .agent(id)
             })
         }
@@ -789,12 +825,6 @@ private struct BoardText: View {
                     .foregroundStyle(Palette.muted)
             }
         }
-    }
-}
-
-extension GitAction {
-    fileprivate var isIdle: Bool {
-        if case .idle = self { true } else { false }
     }
 }
 
@@ -973,6 +1003,8 @@ private struct BoardLink: View {
     }
 
     let link: Item
+    /// Asking to be sure, before something that can't be taken back.
+    var warns = false
     @State private var hovering = false
     private static let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
 
@@ -981,19 +1013,118 @@ private struct BoardLink: View {
             HStack(spacing: 4) {
                 Image(systemName: link.symbol)
                     .font(.system(size: 10))
-                    .foregroundStyle(Palette.muted)
+                    .foregroundStyle(warns ? Palette.needsYouText : Palette.muted)
                 Text(link.title)
                     .font(Fonts.sans(12))
-                    .foregroundStyle(hovering ? Palette.text : Palette.textSecondary)
+                    .foregroundStyle(warns ? Palette.needsYouText : hovering ? Palette.text : Palette.textSecondary)
             }
             .padding(.horizontal, 7)
             .frame(height: 22)
-            .background(hovering ? Palette.fill : .clear, in: Self.shape)
-            .overlay(Self.shape.strokeBorder(Palette.line))
+            .background(warns ? Palette.needsYouWash : hovering ? Palette.fill : .clear, in: Self.shape)
+            .overlay(Self.shape.strokeBorder(warns ? Palette.needsYouEdge : Palette.line))
             .contentShape(Self.shape)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+    }
+}
+
+/// Commit opens its modal; push and open a pull request are done from the
+/// card, where the chip says what it is doing, then what came of it. A push
+/// to a default branch asks once, on the chip itself.
+private struct BoardGitChip: View {
+    @Environment(AgentsStore.self) private var store
+    let session: Session
+    let action: GitAction
+    let state: GitState?
+    @State private var armed = false
+    private static let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+
+    private var run: BoardGitRun? { store.boardGitRuns[session.id] }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            switch run?.phase {
+            case .running(let words)?:
+                status(words, help: words) { Loader(size: 10) }
+            case .done(let words, let detail, let url)?:
+                status(words, color: Palette.ok, help: detail) {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 10)).foregroundStyle(Palette.ok)
+                }
+                if let link = url.flatMap(URL.init(string:)) {
+                    BoardLink(link: .init(title: "View PR", symbol: "arrow.up.right") { NSWorkspace.shared.open(link) })
+                }
+            case .failed(let title, let detail, let retry)?:
+                status(title, color: Palette.errorText, help: detail) {
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 10)).foregroundStyle(Palette.error)
+                }
+                BoardLink(link: .init(title: "Retry", symbol: "arrow.clockwise") { store.perform(retry, on: session.id) })
+                BoardLink(link: .init(title: "Open", symbol: "arrow.up.right") { openAgent() })
+                    .help("Do this from the agent's page instead")
+                Button { store.boardGitRuns[session.id] = nil } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Palette.faint)
+                        .frame(width: 16, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss")
+                .accessibilityLabel("Dismiss")
+            case nil:
+                BoardLink(link: .init(title: title, symbol: armed ? "exclamationmark.triangle" : action.symbol, action: press), warns: armed)
+                    .help(armed ? "Click again to push to \(state?.branch ?? "this branch")" : title)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: run?.phase)
+        // Unconfirmed, it goes back to what it was.
+        .task(id: armed) {
+            guard armed else { return }
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            armed = false
+        }
+    }
+
+    /// Committing is always just that here: the modal offers the push.
+    private var title: String {
+        if case .commit = action { return "Commit" }
+        guard armed, let branch = state?.branch else { return action.label }
+        return "\(action.label) to \(branch)?"
+    }
+
+    private func press() {
+        if case .commit = action {
+            store.boardCommitSession = session.id
+            return
+        }
+        if action.pushesToProtected(state), !armed {
+            armed = true
+            return
+        }
+        armed = false
+        store.perform(action, on: session.id)
+    }
+
+    private func openAgent() {
+        store.boardGitRuns[session.id] = nil
+        store.selection = .agent(session.id)
+        store.gitActionRequest = session.id
+    }
+
+    private func status<Icon: View>(_ words: String, color: Color = Palette.textSecondary, help: String, @ViewBuilder icon: () -> Icon) -> some View {
+        HStack(spacing: 4) {
+            icon()
+            Text(words)
+                .font(Fonts.sans(12))
+                .foregroundStyle(color)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 7)
+        .frame(height: 22)
+        .overlay(Self.shape.strokeBorder(Palette.line))
+        .help(help)
+        .accessibilityElement(children: .combine)
     }
 }
 

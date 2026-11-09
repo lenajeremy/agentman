@@ -303,6 +303,21 @@ final class AgentsStore {
     /// a card.
     var gitActionRequest: String?
 
+    /// An agent's documents to open as soon as its page shows, for "Review
+    /// document" on a card.
+    var documentsRequest: String?
+
+    /// Each agent's git button on the Board, while it works and for a
+    /// moment after: here because a card can leave the screen meanwhile.
+    var boardGitRuns: [String: BoardGitRun] = [:]
+
+    /// The agent whose changes the Board's commit modal is open on.
+    var boardCommitSession: String?
+
+    /// Counts commits and pushes made from that modal, so the agent's card
+    /// reads its branch again.
+    var boardGitChanged: [String: Int] = [:]
+
     /// Passages of what an agent said, waiting to go with the next message
     /// to it, by session; ReplyQuotes.agentman holds Agentman's own.
     var replyQuotes: [String: [ReplyQuote]] = [:]
@@ -1081,7 +1096,10 @@ final class AgentsStore {
 
     private func selectionChanged(from old: SidebarItem?) {
         guard old != selection else { return }
-        if case .agent = old { gitActionRequest = nil }
+        if case .agent = old {
+            gitActionRequest = nil
+            documentsRequest = nil
+        }
         boardShowsSidebar = false
         seeManagerIfShown()
         tellOnScreen()
