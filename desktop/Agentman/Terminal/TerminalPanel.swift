@@ -14,11 +14,15 @@ struct TerminalPanel: View {
     var move: TerminalMove?
 
     var body: some View {
+        panel.modifier(BrutalCard())
+    }
+
+    private var panel: some View {
         VStack(spacing: 0) {
             HStack(spacing: 2) {
                 Text("TERMINAL")
-                    .font(TextStyle.label)
-                    .foregroundStyle(Palette.faint)
+                    .font(Look.site ? Fonts.heading(12.5) : TextStyle.label)
+                    .foregroundStyle(Look.site ? Palette.prompt : Palette.faint)
                     .padding(.trailing, 8)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 2) {
@@ -54,9 +58,11 @@ struct TerminalPanel: View {
                 }
             }
             .padding(.horizontal, 12)
-            .frame(height: 32)
-            .background(Palette.paper)
-            .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 1) }
+            .frame(height: Look.site ? 34 : 32)
+            .background(Look.site ? Palette.cream : Palette.paper)
+            .overlay(alignment: Look.site ? .bottom : .top) {
+                Rectangle().fill(Look.site ? Palette.edge : Palette.line).frame(height: Look.site ? 1.5 : 1)
+            }
 
             // Every shell keeps its place here, shown or not, so none is
             // made again when tabs change; a split tab shows two side by side.
@@ -64,12 +70,16 @@ struct TerminalPanel: View {
                 let right = store.splitPartner(of: store.activeTerminalID)?.id
                 let half = right == nil ? geometry.size.width : (geometry.size.width - 1) / 2
                 ZStack(alignment: .topLeading) {
-                    Palette.paper
+                    Look.site ? TerminalColors.page : Palette.paper
                     ForEach(store.terminals) { session in
                         let isRight = session.id == right
                         TerminalHost(session: session, visible: session.id == store.activeTerminalID || isRight)
                             .padding(.leading, 10)
                             .padding(.top, 6)
+                            // Clear of the card's rounded corners, which
+                            // don't clip a shell's own view.
+                            .padding(.trailing, Look.site ? 8 : 0)
+                            .padding(.bottom, Look.site ? 8 : 0)
                             .frame(width: half, height: geometry.size.height)
                             .offset(x: isRight ? half + 1 : 0)
                     }
@@ -98,6 +108,32 @@ struct TerminalPanel: View {
         }
         .buttonStyle(.plain)
         .help(help)
+    }
+}
+
+/// The page behind a shell in the New theme, the shell's own background.
+private enum TerminalColors {
+    static let page = Color(light: 0xFFFFFF, dark: 0x000000)
+}
+
+/// The New theme's terminal: a card with the theme's edge and a small hard
+/// shadow, down and to the right. Today's look, untouched, in Classic.
+private struct BrutalCard: ViewModifier {
+    func body(content: Content) -> some View {
+        if Look.site {
+            let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+            content
+                .clipShape(shape)
+                .overlay(shape.strokeBorder(Palette.edge, lineWidth: 1.5))
+                .background(shape.fill(Palette.edge).offset(x: 3, y: 3))
+                .padding(.leading, 10)
+                .padding(.top, 10)
+                .padding(.trailing, 13)
+                .padding(.bottom, 13)
+                .background(Palette.paper)
+        } else {
+            content
+        }
     }
 }
 
@@ -153,10 +189,38 @@ private struct TerminalTab: View {
         }
         .padding(.horizontal, 9)
         .frame(height: 24)
-        .background(active ? Palette.fill : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .modifier(TerminalTabLook(active: active, hovering: hovering))
         .contentShape(Rectangle())
         .onTapGesture { store.activeTerminalID = session.id }
         .onHover { hovering = $0 }
+    }
+}
+
+/// A terminal tab's ground: today's quiet fill, or in the New theme the open
+/// tab as a small card on the bar.
+private struct TerminalTabLook: ViewModifier {
+    let active: Bool
+    let hovering: Bool
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        if Look.site {
+            content
+                .background {
+                    if active {
+                        ZStack {
+                            shape.fill(Palette.edge).offset(x: 1.5, y: 1.5)
+                            shape.fill(Palette.surface)
+                            shape.strokeBorder(Palette.edge, lineWidth: 1.5)
+                        }
+                    } else if hovering {
+                        shape.fill(Palette.fill.opacity(0.5))
+                    }
+                }
+                .padding(.trailing, active ? 3 : 0)
+        } else {
+            content.background(active ? Palette.fill : .clear, in: shape)
+        }
     }
 }
 
