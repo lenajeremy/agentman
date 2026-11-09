@@ -30,6 +30,10 @@ import (
 // serviceLabel names the launchd job and the systemd unit.
 const serviceLabel = "dev.agentman.serve"
 
+// serviceAppBundle is the app macOS's Login Items list shows the service
+// under, rather than a bare "am".
+const serviceAppBundle = "dev.agentman.mac"
+
 // serviceEnv marks am serve as started by the service, which then reads the
 // login shell's environment it would have had from a terminal.
 const serviceEnv = "AGENTMAN_SERVICE"
@@ -261,6 +265,8 @@ func renderServicePlist(p servicePlist) string {
 <dict>
 	<key>Label</key>
 	<string>` + serviceLabel + `</string>
+	<key>AssociatedBundleIdentifiers</key>
+	<string>` + serviceAppBundle + `</string>
 	<key>ProgramArguments</key>
 	<array>
 ` + args + `	</array>
