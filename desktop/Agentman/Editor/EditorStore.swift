@@ -288,7 +288,12 @@ final class EditorStore {
         if let document = documents.first(where: { $0.path == path && !$0.readOnly }) { return document }
         let document = EditorDocument(root: root, path: path)
         documents.append(document)
-        if activeID == nil { activeID = document.id }
+        if activeID == nil {
+            // Opened behind whatever is showing, an agent's diff included.
+            let showing = workspaceTab
+            activeID = document.id
+            workspaceTab = showing
+        }
         Task { await updateGitBases() }
         return document
     }
