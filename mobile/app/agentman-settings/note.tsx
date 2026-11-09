@@ -85,8 +85,8 @@ export default function NoteEditor() {
         {tier === "shared" ? (
           <>
             <Divider />
-            <SwitchRow label="In project instructions"
-              detail="Agentman writes it into CLAUDE.md or AGENTS.md when you ask it to update an agent's instructions."
+            <SwitchRow label="Every agent follows this"
+              detail="Agentman puts it in each agent's own instructions, including agents already running."
               value={always} onChange={setAlways} />
           </>
         ) : null}

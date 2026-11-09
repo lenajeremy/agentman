@@ -48,7 +48,7 @@ export default function NotesSettings() {
                 <View style={styles.meta}>
                   <Feather name={note.tier === "shared" ? "users" : "lock"} size={11} color={color.muted} />
                   <Text style={styles.metaText}>
-                    {note.tier === "shared" ? "Shared" : "Private"}{note.always ? " · In project instructions" : ""}
+                    {note.tier === "shared" ? "Shared" : "Private"}{note.always ? " · Every agent" : ""}
                   </Text>
                 </View>
               </View>

@@ -125,11 +125,11 @@ struct KnowledgeSettings: View {
                 .help(draft.tier == "shared"
                     ? "Any agent can read it through Agentman" : "Only Agentman reads it; agents get what it tells them")
                 if draft.tier == "shared" {
-                    Toggle("In project instructions", isOn: $draft.always)
+                    Toggle("Every agent follows this", isOn: $draft.always)
                         .toggleStyle(.checkbox)
                         .font(TextStyle.caption)
                         .foregroundStyle(Palette.textSecondary)
-                        .help("Agentman writes it into CLAUDE.md or AGENTS.md when you ask it to update an agent's instructions.")
+                        .help("Agentman puts it in each agent's own instructions, including agents already running.")
                 }
                 Spacer(minLength: 0)
             }
@@ -212,7 +212,7 @@ private struct NoteRow: View {
                     Image(systemName: note.tier == "shared" ? "person.2" : "lock")
                     Text(note.tier == "shared" ? "Shared" : "Private")
                     if note.always == true {
-                        Text("· In instructions")
+                        Text("· Every agent")
                     }
                 }
                 .font(TextStyle.caption)
