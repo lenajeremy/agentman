@@ -37,6 +37,8 @@ type Registry struct {
 	folderBuiltAt time.Time
 	// pastByDir caches one directory's finished sessions; see pastListingTTL.
 	pastByDir map[string]pastListing
+	// ended is the sessions the user ended that have no pane to close.
+	ended *endedSessions
 }
 
 // MaxPageMessages bounds a direct history request. The relay-facing daemon
@@ -58,6 +60,7 @@ func NewRegistry() *Registry {
 	return &Registry{
 		sources: map[protocol.Kind]Source{},
 		last:    map[protocol.Kind][]protocol.Session{},
+		ended:   newEndedSessions(""),
 	}
 }
 
@@ -134,6 +137,7 @@ func (r *Registry) Discover(ctx context.Context) ([]protocol.Session, error) {
 	}
 	wg.Wait()
 
+	all = r.ended.without(all)
 	SortSessions(all)
 
 	if len(failures) > 0 {
@@ -298,6 +302,7 @@ func (r *Registry) Release(ctx context.Context, sessionID string, stop bool) err
 // false when the session's adapter has no such thing, and the daemon reopens
 // it the usual way instead.
 func (r *Registry) Reopen(ctx context.Context, sessionID string) (bool, error) {
+	r.ended.forget(sessionID)
 	s, err := r.forSession(sessionID)
 	if err != nil {
 		return false, nil

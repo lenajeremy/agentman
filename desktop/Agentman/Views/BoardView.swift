@@ -761,6 +761,9 @@ private struct BoardCard: View {
         if kind != .needsYou {
             Button("Hide from the Board") { store.hideFromBoard(session.id) }
         }
+        if AgentThreadView.endable(session) {
+            Button("End Session…") { store.confirmEnd = session.id }
+        }
         Menu("Trust This Folder") {
             let level = FolderTrust.level(for: session.cwd, in: store.manager.settings)
             ForEach(FolderTrust.levels, id: \.id) { option in

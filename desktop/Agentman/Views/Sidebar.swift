@@ -247,6 +247,9 @@ struct Sidebar: View {
                 } else {
                     Button("Archive") { store.archive(session.id) }
                 }
+                if AgentThreadView.endable(session) {
+                    Button("End Session…") { store.confirmEnd = session.id }
+                }
                 Divider()
                 // Agentman speaks for the agents while it is on;
                 // this one can speak for itself as well.

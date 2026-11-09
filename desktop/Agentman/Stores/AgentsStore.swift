@@ -303,6 +303,9 @@ final class AgentsStore {
     /// a card.
     var gitActionRequest: String?
 
+    /// The session being asked about ending.
+    var confirmEnd: String?
+
     /// An agent's documents to open as soon as its page shows, for "Review
     /// document" on a card.
     var documentsRequest: String?
@@ -789,6 +792,8 @@ final class AgentsStore {
             if reply.type == "error" {
                 return (reply.error ?? "It couldn't be ended.").replacingOccurrences(of: "^daemon: ", with: "", options: .regularExpression)
             }
+            // Nothing is left to show of it here.
+            if selection == .agent(sessionId), session(sessionId)?.inject != "tmux" { selection = .manager }
             return nil
         } catch {
             return error.localizedDescription

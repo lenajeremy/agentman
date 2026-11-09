@@ -323,6 +323,7 @@ func runServe(ctx context.Context, args []string) error {
 	// while Agentman speaks for the rest, before the first sweep.
 	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
 		agent.SetNamesFile(filepath.Join(dir, "names.json"))
+		registry.KeepEnded(filepath.Join(dir, "ended.json"))
 		agent.SetAlertsFile(filepath.Join(dir, "alerts.json"))
 		// Every conversation's words, for search in the apps.
 		agent.SetSearchFile(filepath.Join(dir, "search.db"))

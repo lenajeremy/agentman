@@ -69,6 +69,7 @@ func (m *folderMemory) get(id string) (protocol.Session, bool) {
 // comes back. That is what makes this safe to call on open, without the app
 // having to know which case it is in.
 func (d *Daemon) resumeSession(ctx context.Context, sessionID string) (string, error) {
+	d.registry.ForgetEnded(sessionID)
 	if sessionID == "" {
 		return "", errors.New("daemon: a session is required")
 	}

@@ -515,6 +515,17 @@ final class BoardSearchTests: XCTestCase {
         XCTAssertEqual(store.board.working.map(\.id), ["a"])
     }
 
+    func testWhatCanBeEnded() throws {
+        func make(_ kind: String, _ state: String, _ inject: String) throws -> Session {
+            let data = try JSONSerialization.data(withJSONObject: ["type": "sessions", "sessions": [["id": "x", "kind": kind, "name": "x", "cwd": "/w", "state": state, "inject": inject]]])
+            return try XCTUnwrap(JSONDecoder().decode(DaemonEvent.self, from: data).sessions?.first)
+        }
+        XCTAssertTrue(AgentThreadView.endable(try make("claude", "busy", "tmux")), "a terminal Agentman runs closes at any time")
+        XCTAssertTrue(AgentThreadView.endable(try make("muse", "idle", "api")), "with nothing to close, it comes off the list")
+        XCTAssertFalse(AgentThreadView.endable(try make("muse", "busy", "api")), "not while it's working")
+        XCTAssertFalse(AgentThreadView.endable(try make("claude", "ended", "none")), "it already has")
+    }
+
     func testTheHeadlineSaysWhatWasFound() {
         var found = BoardSearch(query: "cart")
         XCTAssertEqual(BoardView.headline(of: found, shown: 0), "No agent matches \u{201C}cart\u{201D}")

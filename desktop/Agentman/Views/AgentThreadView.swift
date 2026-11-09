@@ -24,7 +24,6 @@ struct AgentThreadView: View {
     @State private var showFiles = true
     @Environment(\.openWindow) private var openWindow
     @Environment(\.detailHeaderLeading) private var headerLeading
-    @State private var confirmEnd = false
     @State private var confirmTakeOver = false
     /// A move in flight, and whether its terminal is to be shown once the
     /// session is in its pane.
@@ -157,10 +156,6 @@ struct AgentThreadView: View {
                     showAgentTerminal()
                 }
             }
-            .confirmationDialog("End this session?", isPresented: $confirmEnd) {
-                Button("End session") { Task { store.actionError[session.id] = await store.end(session.id) } }
-                Button("Cancel", role: .cancel) {}
-            }
             .confirmationDialog("Remove the \(Worktrees.parts(of: session.cwd)?.name ?? "") worktree?", isPresented: $confirmRemoveWorktree) {
                 Button("Remove Worktree", role: .destructive) { removeWorktree(force: false) }
                 Button("Cancel", role: .cancel) {}
@@ -249,7 +244,7 @@ struct AgentThreadView: View {
                         Button(item.title) { if item.confirms { confirmTakeOver = true } else { move() } }
                             .disabled(!item.enabled)
                     }
-                    if Self.endable(session) { Button("End Session…") { confirmEnd = true } }
+                    if Self.endable(session) { Button("End Session…") { store.confirmEnd = session.id } }
                 } label: { Image(systemName: "ellipsis").frame(width: 24, height: 26) }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
@@ -576,9 +571,23 @@ struct AgentThreadView: View {
         return nil
     }
 
-    /// A session running in a terminal agentman can close and reopen.
+    /// Whether it can be ended now: one in a terminal Agentman can close at
+    /// any time, and any other once it has stopped working.
     static func endable(_ session: Session) -> Bool {
-        session.inject == "tmux" && resumableKinds.contains(session.kind)
+        guard session.state != .ended else { return false }
+        if session.inject == "tmux" && resumableKinds.contains(session.kind) { return true }
+        return session.state == .idle && session.question == nil
+    }
+
+    /// What ending it does, for the question that asks.
+    static func endNote(_ session: Session) -> String {
+        if session.inject == "tmux" && resumableKinds.contains(session.kind) {
+            return "This closes its terminal and stops the agent. The conversation stays in the folder's history."
+        }
+        if session.canReceive {
+            return "This takes it off your list. The conversation stays in the folder's history, and you can pick it up from there."
+        }
+        return "This takes it off your list. If it's still open in a terminal, it keeps running there."
     }
 
     /// The "…" menu's entry that moves the session: Open in Terminal for one
