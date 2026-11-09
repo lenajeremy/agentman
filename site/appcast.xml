@@ -14,6 +14,19 @@
     <description>Updates to Agentman for Mac.</description>
     <language>en</language>
     <item>
+      <title>Agentman 0.42.0</title>
+      <link>https://github.com/lenajeremy/agentman/releases/tag/v0.42.0</link>
+      <pubDate>Sun, 08 Nov 2026 07:47:13 GMT</pubDate>
+      <sparkle:version>49</sparkle:version>
+      <sparkle:shortVersionString>0.42.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <sparkle:fullReleaseNotesLink>https://github.com/lenajeremy/agentman/releases/tag/v0.42.0</sparkle:fullReleaseNotesLink>
+      <description sparkle:format="markdown"><![CDATA[## Agentman 0.42.0
+
+- **A new look to try.** Settings › General › Appearance › Theme now offers **New**: the website's look, with Rubik headings, warm edges, cream cards, orange accents and animated stickers on the setup and empty screens. It's still being designed; **Classic**, the look you know, stays the default.]]></description>
+      <enclosure url="https://github.com/lenajeremy/agentman/releases/download/v0.42.0/Agentman.dmg" length="44352422" type="application/octet-stream" sparkle:edSignature="vy2FYtExKYJjqvQ0NrFGQhaTdGp6CNXhgXQtQHE1Zfe3FrA8WcxhbkWvfUJ3Y/5+SA892bGHJ2XLUCQqVYP4Bg=="/>
+    </item>
+    <item>
       <title>Agentman 0.41.2</title>
       <link>https://github.com/lenajeremy/agentman/releases/tag/v0.41.2</link>
       <pubDate>Thu, 05 Nov 2026 16:03:19 GMT</pubDate>
