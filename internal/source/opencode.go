@@ -58,7 +58,7 @@ const (
 	// still counts as live. The API reports which sessions are *running*, but
 	// an idle session is still one the user may want to look at, so recency
 	// fills the gap.
-	openCodeIdleWindow = 12 * time.Hour
+	openCodeIdleWindow = idleListing
 )
 
 // OpenCodeSource talks to a local `opencode serve` instance.

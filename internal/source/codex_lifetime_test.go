@@ -680,7 +680,7 @@ func TestCodexKeepsAPausedSessionBoundToItsOpenPane(t *testing.T) {
 	}
 
 	// Nothing typed for longer than the live window, pane still open.
-	touch(t, rollout, now.Add(-45*time.Minute))
+	touch(t, rollout, now.Add(-codexLiveWindow-45*time.Minute))
 	second, err := src.Discover(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -722,7 +722,7 @@ func TestCodexDropsAPausedSessionOnceItsPaneIsGone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	touch(t, rollout, now.Add(-45*time.Minute))
+	touch(t, rollout, now.Add(-codexLiveWindow-45*time.Minute))
 	src.listPanes = noPanes
 	found, err := src.Discover(context.Background())
 	if err != nil {

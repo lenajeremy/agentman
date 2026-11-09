@@ -314,7 +314,7 @@ func TestCodexDiscoverAndPage(t *testing.T) {
 
 func TestCodexIgnoresStaleRollouts(t *testing.T) {
 	// Older than codexLiveWindow: the session ended long ago.
-	home := fakeCodexHome(t, "01900000-aaaa-bbbb-cccc-000000000002", "/Users/me/old", 2*time.Hour)
+	home := fakeCodexHome(t, "01900000-aaaa-bbbb-cccc-000000000002", "/Users/me/old", codexLiveWindow+time.Hour)
 	src, _ := NewCodexSource(home)
 	src.processCheck = alwaysRunning
 	src.listPanes = noPanes

@@ -127,7 +127,7 @@ func TestCursorDiscoverSkipsStaleAndJunk(t *testing.T) {
 		obj{"role": "user", "message": obj{"content": []any{
 			obj{"type": "text", "text": "old"}}}},
 	})
-	old := time.Now().Add(-2 * time.Hour)
+	old := time.Now().Add(-cursorLiveWindow - time.Hour)
 	if err := os.Chtimes(stale, old, old); err != nil {
 		t.Fatal(err)
 	}

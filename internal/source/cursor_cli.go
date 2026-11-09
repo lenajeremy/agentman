@@ -25,7 +25,7 @@ import (
 // transcripts. A chat can be read from its local SQLite store, but only an
 // `am cursor` tmux pane gives Agentman a supported terminal input channel.
 const (
-	cursorCLIWindow    = 12 * time.Hour
+	cursorCLIWindow    = idleListing
 	cursorCLIDBTimeout = 5 * time.Second
 	// cursorCLIBusyTimeout is how long a read waits for Cursor to finish
 	// writing before giving up.

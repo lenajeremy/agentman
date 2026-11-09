@@ -24,7 +24,7 @@ import (
 const (
 	// museLiveWindow keeps a session listed for this long after its last
 	// activity, as Codex's are.
-	museLiveWindow = 30 * time.Minute
+	museLiveWindow = idleListing
 	// musePoll is how often a thread hosted by a plain terminal, which the
 	// daemon cannot watch, is read again while someone has it open.
 	musePoll   = 2 * time.Second
