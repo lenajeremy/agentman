@@ -171,6 +171,7 @@ var (
 	codexCommand   = regexp.MustCompile(`(?m)^\s*\$ (.+)$`)
 	claudeEditTo   = regexp.MustCompile(`(?i)(?:make this edit to|create|write to|overwrite) (.+?)\?`)
 	pathWithStats  = regexp.MustCompile(`^(\S+)\s{2,}[+-]`)
+	otherFolder    = regexp.MustCompile(`\sin\s+\S+$`)
 	continuePhrase = regexp.MustCompile(`(?i)^(do you want to |would you like to )?(continue|proceed|go ahead|keep going)\??$`)
 )
 
@@ -200,16 +201,35 @@ func requestOf(q *protocol.Question) (kind, target string) {
 			return "command", strings.TrimSpace(command)
 		}
 		return "command", detail
-	// Antigravity: "Requesting permission for:" with the command as detail.
-	case strings.HasPrefix(title, "Requesting permission for") && strings.Contains(lowerPrompt, "run this command"):
-		return "command", detail
-	case strings.Contains(lowerPrompt, "file edit") || strings.Contains(lowerPrompt, "creation of this file"):
-		if m := pathWithStats.FindStringSubmatch(title); m != nil {
-			return "edit", m[1]
+	// Cursor and Kiro: the command, then why it needs asking.
+	case title == "Shell command" && prompt == "Run this command?":
+		if command := shellCommandIn(detail); command != "" {
+			return "command", command
 		}
-		return "edit", title
+	// Antigravity under a "Command" heading, or the older "Requesting
+	// permission for:"; Muse, whose title is the ask. The detail is the
+	// command.
+	case detail != "" && (prompt == "Run this command?" || title == "Run this command?") &&
+		(title == "Command" || strings.HasPrefix(title, "Requesting permission for") || title == "Run this command?"):
+		return "command", detail
+	// Antigravity leads a change's detail with its path. A heading like
+	// "Pending edit" must never be taken for one: as a relative path it would
+	// count as inside the agent's folder, wherever the change really is.
+	case strings.Contains(lowerPrompt, "file edit") || strings.Contains(lowerPrompt, "creation of this file"):
+		for _, line := range []string{firstLine(detail), title} {
+			if m := pathWithStats.FindStringSubmatch(line); m != nil {
+				return "edit", m[1]
+			}
+		}
+		if strings.Contains(title, "/") && !strings.ContainsAny(title, " \t") {
+			return "edit", title
+		}
 	case strings.HasPrefix(title, "Read: "):
 		return "read", strings.TrimPrefix(title, "Read: ")
+	case title == "File access" && strings.HasPrefix(firstLine(detail), "Read: "):
+		return "read", strings.TrimSpace(strings.TrimPrefix(firstLine(detail), "Read: "))
+	case title == "Read URL" && detail != "":
+		return "network", firstLine(detail)
 	case strings.Contains(lowerPrompt, "url") || strings.HasPrefix(title, "http://") ||
 		strings.HasPrefix(title, "https://") || title == "Fetch" || strings.Contains(strings.ToLower(title), "web search"):
 		return "network", title
@@ -221,6 +241,30 @@ func requestOf(q *protocol.Question) (kind, target string) {
 		return "continue", ""
 	}
 	return "question", ""
+}
+
+func firstLine(text string) string {
+	line, _, _ := strings.Cut(text, "\n")
+	return strings.TrimSpace(line)
+}
+
+// shellCommandIn is the command in a Cursor or Kiro approval: its first
+// paragraph, when all that follows only says why it is being asked. Empty when
+// that can't be told, so a command is never judged on part of itself.
+func shellCommandIn(detail string) string {
+	command, reasons, _ := strings.Cut(detail, "\n\n")
+	for _, line := range strings.Split(reasons, "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "Not in allowlist") {
+			return ""
+		}
+	}
+	command = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(command), " in ."))
+	// Cursor's pane ends a command run elsewhere with "in <folder>", and the
+	// rules would judge it from the wrong place.
+	if otherFolder.MatchString(command) {
+		return ""
+	}
+	return command
 }
 
 // insideFolder reports whether path is in the agent's folder. A relative
