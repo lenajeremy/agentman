@@ -89,7 +89,14 @@ func (c Cache) Environment(ctx context.Context) (env []string, fresh bool, err e
 func lasting(env []string) []string {
 	kept := make([]string, 0, len(env))
 	for _, entry := range env {
-		if name, _, ok := strings.Cut(entry, "="); ok && !perLogin[name] {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		// A socket the profile points at, such as a password manager's, is
+		// the same every login; macOS's own is not.
+		stable := name == "SSH_AUTH_SOCK" && !strings.HasPrefix(value, "/private/tmp/") && !strings.HasPrefix(value, "/tmp/")
+		if !perLogin[name] || stable {
 			kept = append(kept, entry)
 		}
 	}

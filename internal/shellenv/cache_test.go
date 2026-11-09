@@ -40,7 +40,7 @@ func newCacheLab(t *testing.T) *cacheLab {
 			if lab.fail {
 				return nil, errors.New("the shell timed out")
 			}
-			return []string{"OPENAI_API_KEY=sk-very-secret", "PATH=/a", "SSH_AUTH_SOCK=/old/socket"}, nil
+			return []string{"OPENAI_API_KEY=sk-very-secret", "PATH=/a", "SSH_AUTH_SOCK=/private/tmp/com.apple.launchd.old/Listeners"}, nil
 		},
 	}
 	if err := os.WriteFile(filepath.Join(lab.home, ".zshrc"), []byte("export A=1\n"), 0o644); err != nil {
@@ -89,6 +89,16 @@ func TestASavedCopyLeavesOutWhatChangesEachLogin(t *testing.T) {
 	again, fresh := lab.get(t)
 	if fresh || len(again) != 2 || strings.Contains(strings.Join(again, " "), "SSH_AUTH_SOCK") {
 		t.Fatalf("fresh %v env %v", fresh, again)
+	}
+}
+
+func TestASocketTheProfileChoseIsKept(t *testing.T) {
+	kept := lasting([]string{"SSH_AUTH_SOCK=/Users/me/.1password/agent.sock", "PATH=/a"})
+	if len(kept) != 2 {
+		t.Fatalf("got %v", kept)
+	}
+	if got := lasting([]string{"SSH_AUTH_SOCK=/private/tmp/com.apple.launchd.x/Listeners"}); len(got) != 0 {
+		t.Fatalf("got %v", got)
 	}
 }
 
