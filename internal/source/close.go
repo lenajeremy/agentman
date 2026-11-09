@@ -56,7 +56,19 @@ func (r *Registry) EndSession(ctx context.Context, sessionID string) error {
 }
 
 // ForgetEnded lists a session again: it is being picked back up.
-func (r *Registry) ForgetEnded(sessionID string) { r.ended.forget(sessionID) }
+func (r *Registry) ForgetEnded(sessionID string) {
+	r.ended.forget(sessionID)
+	// Ended under the conversation's name; asked for by another.
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, sessions := range r.last {
+		for _, session := range sessions {
+			if session.ID == sessionID {
+				r.ended.forget(endedKey(session))
+			}
+		}
+	}
+}
 
 // KeepEnded keeps the sessions the user ended in a file, so a restart doesn't
 // bring them back.

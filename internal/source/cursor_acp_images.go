@@ -115,7 +115,7 @@ func cursorACPPrompt(turn cursorACPTurn) ([]map[string]string, string) {
 	// The phone keeps its own copy of what was sent until the transcript
 	// shows the same text, so the text is recorded exactly as sent.
 	shown := parser.StripSharedNotes(turn.Text)
-	if text == "" {
+	if strings.TrimSpace(shown) == "" {
 		shown = strings.TrimSpace(strings.Repeat("[image]\n", images))
 	}
 	if missing > 0 {

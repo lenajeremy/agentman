@@ -148,16 +148,42 @@ func TestEndingFollowsTheConversationNotThePane(t *testing.T) {
 	}
 }
 
-func TestAnAgentsOwnEndedRowStaysSoItCanBePickedUp(t *testing.T) {
+func TestATranscriptLeftMidTurnDoesntBringItBack(t *testing.T) {
 	registry, source := endRegistry(t, museIdle("a", 10))
 	if err := registry.EndSession(context.Background(), "muse:a"); err != nil {
 		t.Fatal(err)
 	}
-	ended := museIdle("a", 10)
-	ended.State = protocol.StateEnded
-	source.sessions = []protocol.Session{ended}
-	if got := listedIDs(t, registry); len(got) != 1 {
+	endedSessionsAtPast(registry, "muse:a")
+	stuck := museIdle("a", 10)
+	stuck.State = protocol.StateBusy
+	source.sessions = []protocol.Session{stuck}
+	if got := listedIDs(t, registry); len(got) != 0 {
 		t.Fatalf("listed %v", got)
+	}
+}
+
+// endedSessionsAtPast acts as if the grace after ending has run out.
+func endedSessionsAtPast(registry *Registry, id string) {
+	registry.ended.mu.Lock()
+	defer registry.ended.mu.Unlock()
+	registry.ended.at[id] = 11
+}
+
+func TestResumingFindsTheMarkerHoweverTheSessionIsNamed(t *testing.T) {
+	inACP := protocol.Session{ID: "cursor-cli:acp:X", Kind: protocol.KindCursorCLI, NativeID: "X", State: protocol.StateIdle, LastActivityAt: 10}
+	registry := NewRegistry()
+	stub := &endTestSource{sessions: []protocol.Session{inACP}, kind: protocol.KindCursorCLI}
+	registry.Add(stub)
+	listedIDs(t, registry)
+	if err := registry.EndSession(context.Background(), inACP.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := listedIDs(t, registry); len(got) != 0 {
+		t.Fatalf("listed %v", got)
+	}
+	registry.ForgetEnded(inACP.ID)
+	if got := listedIDs(t, registry); len(got) != 1 {
+		t.Fatalf("still hidden: %v", got)
 	}
 }
 

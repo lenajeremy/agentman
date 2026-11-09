@@ -793,7 +793,7 @@ final class AgentsStore {
                 return (reply.error ?? "It couldn't be ended.").replacingOccurrences(of: "^daemon: ", with: "", options: .regularExpression)
             }
             // Nothing is left to show of it here.
-            if selection == .agent(sessionId), session(sessionId)?.inject != "tmux" { selection = .manager }
+            if selection == .agent(sessionId) { selection = .manager }
             return nil
         } catch {
             return error.localizedDescription
@@ -1304,7 +1304,7 @@ final class AgentsStore {
         var index: [String: Int] = [:]
         for (i, message) in all.enumerated() { index[message.id] = i }
         var added: [Message] = []
-        for message in new where !isKeptCopy(message, in: current) {
+        for message in placedKeptCopies(new, among: current) where !isKeptCopy(message, in: current) {
             if let i = index[message.id] {
                 let finished = all[i].tool.map { $0.status != "running" } ?? false
                 if finished, message.tool?.status == "running" { continue }
@@ -1322,9 +1322,31 @@ final class AgentsStore {
 
     /// A message Muse kept from before a compaction, under an id of its own,
     /// whose original is already here: shown again, the chat would read twice.
+    /// Muse cuts what it keeps at 1,000 characters.
     nonisolated static func isKeptCopy(_ message: Message, in current: [Message]) -> Bool {
-        guard message.id.hasPrefix("earlier:"), let text = message.text?.prefix(200), !text.isEmpty else { return false }
-        return current.contains { !$0.id.hasPrefix("earlier:") && $0.role == message.role && ($0.text ?? "").hasPrefix(text) }
+        guard message.id.hasPrefix("earlier:"), let text = message.text, !text.isEmpty else { return false }
+        let cut = text.count >= 1000
+        return current.contains { held in
+            guard !held.id.hasPrefix("earlier:"), held.role == message.role, let whole = held.text else { return false }
+            let original = whole.trimmingCharacters(in: .whitespacesAndNewlines)
+            return cut ? original.hasPrefix(text) : original == text
+        }
+    }
+
+    /// What Muse kept and this Mac never saw is older than anything held:
+    /// it goes first, in its own order.
+    nonisolated static func placedKeptCopies(_ new: [Message], among current: [Message]) -> [Message] {
+        guard let oldest = current.filter({ !$0.id.hasPrefix("earlier:") }).map(\.ts).min() else { return new }
+        let copies = new.filter { $0.id.hasPrefix("earlier:") && !isKeptCopy($0, in: current) }
+        guard !copies.isEmpty else { return new }
+        var at = oldest - Int64(copies.count)
+        return new.map { message in
+            guard message.id.hasPrefix("earlier:"), !isKeptCopy(message, in: current), message.ts >= oldest else { return message }
+            var placed = message
+            placed.ts = at
+            at += 1
+            return placed
+        }
     }
 
     nonisolated static func boardOrder(_ a: Session, _ b: Session) -> Bool {

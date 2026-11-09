@@ -174,7 +174,12 @@ func (d *Daemon) withSharedNotes(ctx context.Context, sessionID, text string) (s
 		return text, func() {}
 	}
 	return notes.attach(session, func() int {
-		if compactions, ok := d.registry.Compactions(ctx, sessionID); ok {
+		// A chat in a pane is named after the pane; its transcript, the chat.
+		id := sessionID
+		if session.NativeID != "" {
+			id = string(session.Kind) + ":" + session.NativeID
+		}
+		if compactions, ok := d.registry.Compactions(ctx, id); ok {
 			return compactions
 		}
 		return -1

@@ -86,16 +86,15 @@ func (e *endedSessions) without(sessions []protocol.Session) []protocol.Session 
 	}
 	kept := sessions[:0:0]
 	changed := false
-	now := time.Now().UnixMilli()
 	for _, session := range sessions {
 		key := endedKey(session)
 		at, ended := e.at[key]
-		active := session.State == protocol.StateBusy || session.State == protocol.StateWaitingInput
 		switch {
-		case !ended, session.State == protocol.StateEnded:
-			// An agent's own "ended" row is how it is picked up again.
+		case !ended:
 			kept = append(kept, session)
-		case (active && now >= at) || session.LastActivityAt > at:
+		// Only new activity counts, not looking busy: a transcript left
+		// mid-turn reads as busy for good.
+		case session.LastActivityAt > at:
 			delete(e.at, key)
 			changed = true
 			kept = append(kept, session)

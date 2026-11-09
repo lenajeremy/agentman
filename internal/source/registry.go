@@ -302,7 +302,7 @@ func (r *Registry) Release(ctx context.Context, sessionID string, stop bool) err
 // false when the session's adapter has no such thing, and the daemon reopens
 // it the usual way instead.
 func (r *Registry) Reopen(ctx context.Context, sessionID string) (bool, error) {
-	r.ended.forget(sessionID)
+	r.ForgetEnded(sessionID)
 	s, err := r.forSession(sessionID)
 	if err != nil {
 		return false, nil

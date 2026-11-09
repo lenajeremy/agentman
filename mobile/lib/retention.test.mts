@@ -22,9 +22,14 @@ test("retention deduplicates updates and keeps the newest bounded window", () =>
 test("a compacted Muse chat doesn't read twice", () => {
   const result = mergeRetainedMessages(
     [message("a", 10, "fix the login bug")],
-    [message("earlier:e-0", 5, "fix the login bug"), message("earlier:e-1", 6, "never seen here")],
+    [message("earlier:e-0", 500, "fix the login bug"), message("earlier:e-1", 501, "never seen here")],
   );
   assert.deepEqual(result.messages.map((item) => item.id), ["earlier:e-1", "a"]);
+});
+
+test("a short kept message only matches a whole one", () => {
+  const result = mergeRetainedMessages([message("a", 10, "ok great")], [message("earlier:e-0", 5, "ok")]);
+  assert.deepEqual(result.messages.map((item) => item.id), ["earlier:e-0", "a"]);
 });
 
 test("retention reports an uncapped page honestly", () => {

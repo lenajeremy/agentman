@@ -11,14 +11,28 @@ export interface RetainedMessages {
 
 /**
  * A message Muse kept from before a compaction, under an id of its own, whose
- * original is already here: shown again, the chat would read twice.
+ * original is already here: shown again, the chat would read twice. Muse cuts
+ * what it keeps at 1,000 characters.
  */
 function isKeptCopy(message: Message, existing: readonly Message[]): boolean {
   if (!message.id.startsWith("earlier:") || !message.text) return false;
-  const start = message.text.slice(0, 200);
-  return existing.some(
-    (known) =>
-      !known.id.startsWith("earlier:") && known.role === message.role && (known.text ?? "").startsWith(start),
+  const text = message.text;
+  return existing.some((held) => {
+    if (held.id.startsWith("earlier:") || held.role !== message.role || !held.text) return false;
+    const original = held.text.trim();
+    return text.length >= 1000 ? original.startsWith(text) : original === text;
+  });
+}
+
+/** What Muse kept and this phone never saw is older than anything held. */
+function placedKeptCopies(incoming: readonly Message[], existing: readonly Message[]): readonly Message[] {
+  const held = existing.filter((message) => !message.id.startsWith("earlier:")).map((message) => message.ts);
+  if (held.length === 0) return incoming;
+  const oldest = Math.min(...held);
+  const lost = incoming.filter((message) => message.id.startsWith("earlier:") && !isKeptCopy(message, existing));
+  let at = oldest - lost.length;
+  return incoming.map((message) =>
+    lost.includes(message) && message.ts >= oldest ? { ...message, ts: at++ } : message,
   );
 }
 
@@ -31,7 +45,7 @@ export function mergeRetainedMessages(
   if (limit <= 0) return { messages: [], limited: existing.length + incoming.length > 0 };
   const byId = new Map<string, Message>();
   for (const message of existing) byId.set(message.id, message);
-  for (const message of incoming) {
+  for (const message of placedKeptCopies(incoming, existing)) {
     if (isKeptCopy(message, existing)) continue;
     // A later copy replaces the earlier one, which is how a running tool call
     // arrives finished. Never the reverse: a history page read before the

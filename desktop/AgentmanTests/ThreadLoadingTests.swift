@@ -50,4 +50,17 @@ final class KeptCopyTests: XCTestCase {
         XCTAssertEqual(all.map(\.id), ["earlier:e-1", "a"])
         XCTAssertEqual(added.map(\.id), ["earlier:e-1"])
     }
+
+    func testShortCopiesOnlyMatchWholeMessages() throws {
+        let held = try message("a", "ok great, ship it", ts: 10)
+        let copy = try message("earlier:e-0", "ok", ts: 5)
+        XCTAssertEqual(AgentsStore.merged([held], with: [copy]).all.map(\.id), ["earlier:e-0", "a"])
+    }
+
+    func testACopyThisMacNeverSawGoesBeforeWhatItHolds() throws {
+        let held = try message("a", "held", ts: 100)
+        let first = try message("earlier:e-0", "older one", ts: 500)
+        let second = try message("earlier:e-1", "older two", ts: 501)
+        XCTAssertEqual(AgentsStore.merged([held], with: [first, second]).all.map(\.id), ["earlier:e-0", "earlier:e-1", "a"])
+    }
 }
