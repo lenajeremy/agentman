@@ -363,9 +363,7 @@ func (s *MuseSource) readWithStatus(ctx context.Context, sessionID string) ([]pr
 	messages := make([]protocol.Message, 0, len(read.History.Items)+1)
 	after := -1
 	for _, item := range read.History.Items {
-		if message, ok := parser.MuseMessage(sessionID, item); ok {
-			messages = append(messages, message)
-		}
+		messages = append(messages, parser.MuseRows(sessionID, item)...)
 		if read.LastTurn != nil && item.TurnID != "" && item.TurnID == read.LastTurn.TurnID {
 			after = len(messages)
 		}
