@@ -19,6 +19,14 @@ test("retention deduplicates updates and keeps the newest bounded window", () =>
   assert.equal(result.messages[0].text, "updated");
 });
 
+test("a compacted Muse chat doesn't read twice", () => {
+  const result = mergeRetainedMessages(
+    [message("a", 10, "fix the login bug")],
+    [message("earlier:e-0", 5, "fix the login bug"), message("earlier:e-1", 6, "never seen here")],
+  );
+  assert.deepEqual(result.messages.map((item) => item.id), ["earlier:e-1", "a"]);
+});
+
 test("retention reports an uncapped page honestly", () => {
   const result = mergeRetainedMessages([], [message("one", 1)], 3);
   assert.equal(result.limited, false);

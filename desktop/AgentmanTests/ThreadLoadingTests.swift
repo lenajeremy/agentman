@@ -35,3 +35,19 @@ extension SiteShotsTests {
         XCTAssertTrue(attempts.done, "it gave up after \(2 - attempts.failuresLeft) failures")
     }
 }
+
+final class KeptCopyTests: XCTestCase {
+    private func message(_ id: String, _ text: String, ts: Int64) throws -> Message {
+        let json: [String: Any] = ["id": id, "sessionId": "s", "ts": ts, "role": "user", "text": text]
+        return try JSONDecoder().decode(Message.self, from: JSONSerialization.data(withJSONObject: json))
+    }
+
+    func testACompactedChatDoesntReadTwice() throws {
+        let original = try message("a", "fix the login bug please", ts: 10)
+        let copy = try message("earlier:e-0", "fix the login bug please", ts: 5)
+        let onlyCopy = try message("earlier:e-1", "something this Mac never saw", ts: 6)
+        let (all, added) = AgentsStore.merged([original], with: [copy, onlyCopy])
+        XCTAssertEqual(all.map(\.id), ["earlier:e-1", "a"])
+        XCTAssertEqual(added.map(\.id), ["earlier:e-1"])
+    }
+}

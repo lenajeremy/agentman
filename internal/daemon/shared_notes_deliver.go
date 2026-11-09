@@ -35,9 +35,10 @@ func notesTargetFor(session protocol.Session) (string, bool) {
 }
 
 // attach is text with the notes this session doesn't have added to it, and
-// what to call once it has been delivered. compactions is how many times the
-// session has compacted, or -1 when that can't be told.
-func (n *sharedNotes) attach(session protocol.Session, compactions int, text string) (string, func()) {
+// what to call once it has been delivered. count says how many times the
+// session has compacted, or -1 when that can't be told; it reads the whole
+// transcript, so it is asked only when the answer could change something.
+func (n *sharedNotes) attach(session protocol.Session, count func() int, text string) (string, func()) {
 	nothing := func() {}
 	if n == nil {
 		return text, nothing
@@ -56,20 +57,26 @@ func (n *sharedNotes) attach(session protocol.Session, compactions int, text str
 	}
 
 	n.mu.Lock()
-	defer n.mu.Unlock()
+	sentByMessage := n.state.Sessions[session.ID] != nil && len(n.state.Sessions[session.ID].Delivered) > 0
+	n.mu.Unlock()
+	compactions := -1
+	if sentByMessage {
+		compactions = count()
+	}
+
+	n.mu.Lock()
 	now := n.now().UnixMilli()
 	record := n.state.Sessions[session.ID]
-	if record == nil {
-		record = &notesSession{Delivered: map[string]string{}, Compactions: max(compactions, 0)}
-		n.state.Sessions[session.ID] = record
-	}
-	if record.Delivered == nil {
-		record.Delivered = map[string]string{}
-	}
-	record.Seen = now
-	if compactions > record.Compactions {
-		record.Delivered = map[string]string{}
-		record.Compactions = compactions
+	delivered := map[string]string{}
+	if record != nil {
+		record.Seen = now
+		if compactions > record.Compactions {
+			record.Delivered = map[string]string{}
+			record.Compactions = compactions
+		}
+		for name, hash := range record.Delivered {
+			delivered[name] = hash
+		}
 	}
 
 	onDisk := n.state.Targets[target]
@@ -81,7 +88,7 @@ func (n *sharedNotes) attach(session protocol.Session, compactions int, text str
 	for _, note := range always {
 		live[note.Name] = true
 		hash := noteHash(note)
-		if record.Delivered[note.Name] == hash {
+		if delivered[note.Name] == hash {
 			continue
 		}
 		if kept, known := onDisk[note.Name]; known && kept.Hash == hash && kept.RemovedAt == 0 && opened(kept.At) {
@@ -95,26 +102,46 @@ func (n *sharedNotes) attach(session protocol.Session, compactions int, text str
 	var stop []string
 	var stopped []string
 	for name, kept := range onDisk {
-		if live[name] || kept.RemovedAt == 0 || record.Delivered[name] == removedNote {
+		if live[name] || kept.RemovedAt == 0 || delivered[name] == removedNote {
 			continue
 		}
-		_, sent := record.Delivered[name]
+		_, sent := delivered[name]
 		if sent || (opened(kept.At) && session.StartedAt < kept.RemovedAt) {
 			stop, stopped = append(stop, kept.Title), append(stopped, name)
 		}
 	}
+	first := record == nil
+	n.mu.Unlock()
 	if len(add) == 0 && len(stop) == 0 {
 		return text, nothing
+	}
+	// The first time anything goes by message: where the count stands, so
+	// only a compaction after this one counts.
+	baseline := 0
+	if first || !sentByMessage {
+		baseline = max(count(), 0)
 	}
 	withNotes := strings.TrimRight(text, " \t\r\n") + "\n\n" + sharedNotesMessage(add, stop)
 	return withNotes, func() {
 		n.mu.Lock()
 		defer n.mu.Unlock()
+		kept := n.state.Sessions[session.ID]
+		if kept == nil {
+			kept = &notesSession{}
+			n.state.Sessions[session.ID] = kept
+		}
+		if kept.Delivered == nil {
+			kept.Delivered = map[string]string{}
+		}
+		if !sentByMessage {
+			kept.Compactions = baseline
+		}
+		kept.Seen = n.now().UnixMilli()
 		for i, note := range add {
-			record.Delivered[note.Name] = hashes[i]
+			kept.Delivered[note.Name] = hashes[i]
 		}
 		for _, name := range stopped {
-			record.Delivered[name] = removedNote
+			kept.Delivered[name] = removedNote
 		}
 		n.saveLocked()
 	}
@@ -123,7 +150,7 @@ func (n *sharedNotes) attach(session protocol.Session, compactions int, text str
 func sharedNotesMessage(add []knowledge.Note, stop []string) string {
 	var b strings.Builder
 	b.WriteString(parser.SharedNotesOpen + "\n")
-	b.WriteString("From Agentman, not the user's message: the user's shared notes for all their agents. Follow them from now on, in place of any earlier version. You don't need to reply about them.\n")
+	b.WriteString(parser.SharedNotesHeader + " the user's shared notes for all their agents. Follow them from now on, in place of any earlier version. You don't need to reply about them.\n")
 	for _, note := range add {
 		b.WriteString("\n### " + note.Title + "\n\n" + strings.TrimSpace(note.Body) + "\n")
 	}
@@ -146,9 +173,10 @@ func (d *Daemon) withSharedNotes(ctx context.Context, sessionID, text string) (s
 	if _, ok := notesTargetFor(session); !ok {
 		return text, func() {}
 	}
-	compactions, ok := d.registry.Compactions(ctx, sessionID)
-	if !ok {
-		compactions = -1
-	}
-	return notes.attach(session, compactions, text)
+	return notes.attach(session, func() int {
+		if compactions, ok := d.registry.Compactions(ctx, sessionID); ok {
+			return compactions
+		}
+		return -1
+	}, text)
 }

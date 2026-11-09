@@ -285,9 +285,6 @@ struct AgentThreadView: View {
                 ChangedBar(count: changed) {
                     if let openChanges {
                         openChanges()
-                    } else if inPanel {
-                        filesTab = .changes
-                        showFiles = true
                     } else {
                         RightPanel.show(.diff)
                     }
@@ -309,7 +306,6 @@ struct AgentThreadView: View {
                                 switch item {
                                 case .message(let message):
                                     MessageRow(message: message)
-                                        .onAppear { if !rowsDrawn { rowsDrawn = true } }
                                 case .tools(let calls, let said):
                                     ToolRun(calls: calls, said: said)
                                 case .image(_, let path):
@@ -321,6 +317,7 @@ struct AgentThreadView: View {
                                     WorkedLine(text: "Worked for " + WorkDuration.text(seconds))
                                 }
                             }
+                            .onAppear { if !rowsDrawn { rowsDrawn = true } }
                             .id(item.id)
                             .firstMessage(item.id, if: item.id == items.first?.id)
                         }
@@ -598,7 +595,7 @@ struct AgentThreadView: View {
     /// What ending it does, for the question that asks.
     static func endNote(_ session: Session) -> String {
         if session.inject == "tmux" && resumableKinds.contains(session.kind) {
-            return "This closes its terminal and stops the agent. The conversation stays in the folder's history."
+            return "If Agentman opened its terminal, this closes it and stops the agent. If you opened it yourself, the agent keeps running there and comes off your list. The conversation stays in the folder's history."
         }
         if session.canReceive {
             return "This takes it off your list. The conversation stays in the folder's history, and you can pick it up from there."

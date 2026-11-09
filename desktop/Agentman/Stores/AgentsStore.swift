@@ -1185,12 +1185,14 @@ final class AgentsStore {
     private func firstPage(of sessionId: String) async -> Page? {
         var request = DaemonRequest(.fetchMessages, sessionId: sessionId)
         request.limit = 40
-        for wait in Self.firstPageRetries {
-            if let page = try? await client.request(request, timeout: 15).page { return page }
+        let waits: [Duration?] = Self.firstPageRetries + [nil]
+        for wait in waits {
+            // Left again meanwhile: nothing is waiting for it.
             guard following[sessionId] != nil else { return nil }
-            try? await Task.sleep(for: wait)
+            if let page = try? await client.request(request).page { return page }
+            if let wait { try? await Task.sleep(for: wait) }
         }
-        return try? await client.request(request, timeout: 15).page
+        return nil
     }
 
     /// How long to wait before asking again for a conversation's first page.
@@ -1302,7 +1304,7 @@ final class AgentsStore {
         var index: [String: Int] = [:]
         for (i, message) in all.enumerated() { index[message.id] = i }
         var added: [Message] = []
-        for message in new {
+        for message in new where !isKeptCopy(message, in: current) {
             if let i = index[message.id] {
                 let finished = all[i].tool.map { $0.status != "running" } ?? false
                 if finished, message.tool?.status == "running" { continue }
@@ -1316,6 +1318,13 @@ final class AgentsStore {
         }
         all.sort { $0.ts < $1.ts }
         return (all, added)
+    }
+
+    /// A message Muse kept from before a compaction, under an id of its own,
+    /// whose original is already here: shown again, the chat would read twice.
+    nonisolated static func isKeptCopy(_ message: Message, in current: [Message]) -> Bool {
+        guard message.id.hasPrefix("earlier:"), let text = message.text?.prefix(200), !text.isEmpty else { return false }
+        return current.contains { !$0.id.hasPrefix("earlier:") && $0.role == message.role && ($0.text ?? "").hasPrefix(text) }
     }
 
     nonisolated static func boardOrder(_ a: Session, _ b: Session) -> Bool {

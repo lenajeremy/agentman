@@ -130,7 +130,7 @@ func openedAt(lab *notesLab, kind protocol.Kind, offset time.Duration) protocol.
 }
 
 func deliver(lab *notesLab, session protocol.Session, compactions int, text string) string {
-	out, done := lab.notes.attach(session, compactions, text)
+	out, done := lab.notes.attach(session, func() int { return compactions }, text)
 	done()
 	return out
 }
@@ -269,7 +269,7 @@ func TestANoteOnlyCountsAsSentOnceItWas(t *testing.T) {
 	session := openedAt(lab, protocol.KindMuse, 0)
 	lab.write(t, "Use pnpm", "Always pnpm.")
 	lab.tick(t)
-	lab.notes.attach(session, 0, "failed to send") // never told it went
+	lab.notes.attach(session, func() int { return 0 }, "failed to send") // never told it went
 	if got := deliver(lab, session, 0, "hello"); !strings.Contains(got, "Always pnpm.") {
 		t.Fatalf("got %q", got)
 	}
@@ -309,4 +309,14 @@ type notesInjectSource struct {
 func (s *notesInjectSource) Inject(_ context.Context, _, text string) (protocol.InjectMode, error) {
 	s.text = text
 	return protocol.InjectAPI, nil
+}
+
+func TestWithNothingToSayTheTranscriptIsntRead(t *testing.T) {
+	lab := newNotesLab(t)
+	asked := 0
+	out, done := lab.notes.attach(openedAt(lab, protocol.KindMuse, 0), func() int { asked++; return 0 }, "hello")
+	done()
+	if out != "hello" || asked != 0 {
+		t.Fatalf("out %q, asked %d times", out, asked)
+	}
 }

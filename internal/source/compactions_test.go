@@ -46,3 +46,16 @@ func TestCursorCompactionsAreCounted(t *testing.T) {
 		t.Fatalf("got %d, %v", got, ok)
 	}
 }
+
+// The registry holds the group, so that is where the count has to be found.
+func TestCursorCompactionsReachTheRegistry(t *testing.T) {
+	home := t.TempDir()
+	writeUnder(t, filepath.Join(home, ".cursor", "projects", "p", "agent-transcripts", "abc", "abc.jsonl"),
+		"<available_subagent_types>\n")
+	registry := NewRegistry()
+	registry.Add(&CursorCLIGroup{terminal: &CursorCLISource{home: home}})
+	got, ok := registry.Compactions(context.Background(), "cursor-cli:abc")
+	if !ok || got != 1 {
+		t.Fatalf("got %d, %v", got, ok)
+	}
+}

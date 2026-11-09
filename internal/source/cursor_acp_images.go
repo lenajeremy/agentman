@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/lenajeremy/agentman/internal/parser"
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
 
@@ -113,7 +114,7 @@ func cursorACPPrompt(turn cursorACPTurn) ([]map[string]string, string) {
 	}
 	// The phone keeps its own copy of what was sent until the transcript
 	// shows the same text, so the text is recorded exactly as sent.
-	shown := turn.Text
+	shown := parser.StripSharedNotes(turn.Text)
 	if text == "" {
 		shown = strings.TrimSpace(strings.Repeat("[image]\n", images))
 	}

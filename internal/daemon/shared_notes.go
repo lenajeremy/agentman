@@ -152,11 +152,7 @@ func (n *sharedNotes) sync() {
 		Logf("shared notes: %v", err)
 		return
 	}
-	results, err := n.store.SyncPersonal(n.homes)
-	if err != nil {
-		Logf("shared notes: %v", err)
-		return
-	}
+	results := n.store.SyncPersonal(n.homes, always)
 	museOnDisk := false
 	for _, result := range results {
 		if result.Err != nil {
@@ -181,7 +177,7 @@ func (n *sharedNotes) sync() {
 			gone[folder] = true
 			continue
 		}
-		carried, err := n.store.SyncProject(folder)
+		carried, err := knowledge.SyncProject(folder, always)
 		if err != nil {
 			Logf("shared notes: %s: %v", folder, err)
 		}

@@ -60,9 +60,11 @@ func block(notes []Note) string {
 	b.WriteString(beginMarker + "\n")
 	b.WriteString("## From Agentman\n\n")
 	b.WriteString("Kept by Agentman from the user's shared notes. Edits here are replaced; change the notes in Agentman instead.\n")
+	// A note quoting the markers mustn't end the block early.
+	safe := strings.NewReplacer(beginMarker, "<!-- agentman begin -->", endMarker, "<!-- agentman end -->")
 	for _, note := range notes {
-		b.WriteString("\n### " + note.Title + "\n\n")
-		b.WriteString(strings.TrimSpace(note.Body) + "\n")
+		b.WriteString("\n### " + safe.Replace(note.Title) + "\n\n")
+		b.WriteString(safe.Replace(strings.TrimSpace(note.Body)) + "\n")
 	}
 	b.WriteString(endMarker + "\n")
 	return b.String()
@@ -77,7 +79,12 @@ func withBlock(text, block string) string {
 		if end < len(text) && text[end] == '\n' {
 			end++
 		}
-		return text[:start] + block + text[end:]
+		before := text[:start]
+		// Taken out, so is the blank line that set it apart.
+		if block == "" && strings.HasSuffix(before, "\n\n") {
+			before = before[:len(before)-1]
+		}
+		return before + block + text[end:]
 	}
 	if block == "" {
 		return text

@@ -8,6 +8,19 @@ import (
 	"testing"
 )
 
+func personal(s *Store, h Homes) ([]PersonalResult, error) {
+	always, err := s.Always()
+	return s.SyncPersonal(h, always), err
+}
+
+func project(s *Store, dir string) (bool, error) {
+	always, err := s.Always()
+	if err != nil {
+		return false, err
+	}
+	return SyncProject(dir, always)
+}
+
 func alwaysNote(t *testing.T, s *Store, title, body string) Note {
 	t.Helper()
 	note, err := s.Write(Note{Tier: Shared, Title: title, Body: body, Always: true})
@@ -41,7 +54,7 @@ func TestATickedNoteReachesEveryInstalledAgentsOwnFile(t *testing.T) {
 	store := Open(t.TempDir())
 	alwaysNote(t, store, "Use pnpm", "Always pnpm.")
 	homes := labHomes(t, ".claude", ".codex", ".config/opencode", ".gemini", ".kiro", ".config/muse")
-	results, err := store.SyncPersonal(homes)
+	results, err := personal(store, homes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +75,7 @@ func TestAnAgentThatIsntInstalledGetsNothing(t *testing.T) {
 	store := Open(t.TempDir())
 	alwaysNote(t, store, "Use pnpm", "Always pnpm.")
 	homes := labHomes(t, ".claude")
-	results, err := store.SyncPersonal(homes)
+	results, err := personal(store, homes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +101,7 @@ func TestTheUsersOwnInstructionsAreLeftAlone(t *testing.T) {
 	if err := os.WriteFile(path, []byte(mine), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SyncPersonal(homes); err != nil {
+	if _, err := personal(store, homes); err != nil {
 		t.Fatal(err)
 	}
 	got := read(t, path)
@@ -103,7 +116,7 @@ func TestTheUsersOwnInstructionsAreLeftAlone(t *testing.T) {
 	if _, err := store.Write(note); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SyncPersonal(homes); err != nil {
+	if _, err := personal(store, homes); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.TrimRight(read(t, path), "\n"); got != strings.TrimRight(mine, "\n") {
@@ -116,11 +129,11 @@ func TestSyncingTwiceChangesNothing(t *testing.T) {
 	alwaysNote(t, store, "Use pnpm", "Always pnpm.")
 	homes := labHomes(t, ".claude")
 	path := filepath.Join(homes.Home, ".claude", "CLAUDE.md")
-	if _, err := store.SyncPersonal(homes); err != nil {
+	if _, err := personal(store, homes); err != nil {
 		t.Fatal(err)
 	}
 	first := read(t, path)
-	if _, err := store.SyncPersonal(homes); err != nil {
+	if _, err := personal(store, homes); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, path); got != first {
@@ -140,7 +153,7 @@ func TestALinkedInstructionFileStaysALink(t *testing.T) {
 	if err := os.Symlink(real, link); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SyncPersonal(homes); err != nil {
+	if _, err := personal(store, homes); err != nil {
 		t.Fatal(err)
 	}
 	if info, _ := os.Lstat(link); info.Mode()&os.ModeSymlink == 0 {
@@ -156,7 +169,7 @@ func TestKirosFileGoesWhenTheLastNoteDoes(t *testing.T) {
 	note := alwaysNote(t, store, "Use pnpm", "Always pnpm.")
 	homes := labHomes(t, ".kiro")
 	path := filepath.Join(homes.Home, ".kiro", "steering", "agentman-shared-notes.md")
-	if _, err := store.SyncPersonal(homes); err != nil {
+	if _, err := personal(store, homes); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(read(t, path), "Always pnpm.") {
@@ -165,7 +178,7 @@ func TestKirosFileGoesWhenTheLastNoteDoes(t *testing.T) {
 	if err := store.Delete(Shared, note.Name); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SyncPersonal(homes); err != nil {
+	if _, err := personal(store, homes); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Dir(path)); err == nil {
@@ -197,7 +210,7 @@ func TestAProjectGetsTheNotesAndGitDoesntSeeThem(t *testing.T) {
 	store := Open(t.TempDir())
 	note := alwaysNote(t, store, "Use pnpm", "Always pnpm.")
 	dir := repo(t)
-	carried, err := store.SyncProject(dir)
+	carried, err := project(store, dir)
 	if err != nil || !carried {
 		t.Fatalf("carried %v err %v", carried, err)
 	}
@@ -211,7 +224,7 @@ func TestAProjectGetsTheNotesAndGitDoesntSeeThem(t *testing.T) {
 	if err := store.Delete(Shared, note.Name); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SyncProject(dir); err != nil {
+	if _, err := project(store, dir); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); err == nil {
@@ -231,7 +244,7 @@ func TestATrackedAgentsFileIsNeverWritten(t *testing.T) {
 	}
 	git(t, dir, "add", "AGENTS.md")
 	git(t, dir, "commit", "-qm", "rules")
-	carried, err := store.SyncProject(dir)
+	carried, err := project(store, dir)
 	if err != nil || carried {
 		t.Fatalf("carried %v err %v", carried, err)
 	}
@@ -247,7 +260,7 @@ func TestAnUntrackedAgentsFileOfTheUsersIsLeftAlone(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("draft\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	carried, err := store.SyncProject(dir)
+	carried, err := project(store, dir)
 	if err != nil || carried {
 		t.Fatalf("carried %v err %v", carried, err)
 	}
@@ -260,7 +273,7 @@ func TestAFolderThatIsntARepositoryGetsNoFile(t *testing.T) {
 	store := Open(t.TempDir())
 	alwaysNote(t, store, "Use pnpm", "Always pnpm.")
 	dir := t.TempDir()
-	carried, err := store.SyncProject(dir)
+	carried, err := project(store, dir)
 	if err != nil || carried {
 		t.Fatalf("carried %v err %v", carried, err)
 	}
@@ -279,5 +292,75 @@ func TestChangingANoteSaysSo(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("called %d times", calls)
+	}
+}
+
+func TestTickingAndUntickingDoesntGrowTheFile(t *testing.T) {
+	store := Open(t.TempDir())
+	note := alwaysNote(t, store, "Use pnpm", "Always pnpm.")
+	homes := labHomes(t, ".claude")
+	path := filepath.Join(homes.Home, ".claude", "CLAUDE.md")
+	if err := os.WriteFile(path, []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		note.Always = true
+		if _, err := store.Write(note); err != nil {
+			t.Fatal(err)
+		}
+		personal(store, homes)
+		note.Always = false
+		if _, err := store.Write(note); err != nil {
+			t.Fatal(err)
+		}
+		personal(store, homes)
+		if got := read(t, path); got != "mine\n" {
+			t.Fatalf("round %d: got %q", i, got)
+		}
+	}
+}
+
+func TestANoteQuotingTheMarkersDoesntBreakTheBlock(t *testing.T) {
+	store := Open(t.TempDir())
+	note := alwaysNote(t, store, "Markers", "The end is "+endMarker+" here.")
+	homes := labHomes(t, ".claude")
+	path := filepath.Join(homes.Home, ".claude", "CLAUDE.md")
+	personal(store, homes)
+	if got := strings.Count(read(t, path), endMarker); got != 1 {
+		t.Fatalf("%d end markers", got)
+	}
+	if err := store.Delete(Shared, note.Name); err != nil {
+		t.Fatal(err)
+	}
+	personal(store, homes)
+	if got := read(t, path); strings.Contains(got, "agentman") {
+		t.Fatalf("left behind: %q", got)
+	}
+}
+
+func TestKirosOwnEmptyFolderIsLeftAlone(t *testing.T) {
+	store := Open(t.TempDir())
+	homes := labHomes(t, ".kiro/steering")
+	personal(store, homes)
+	if _, err := os.Stat(filepath.Join(homes.Home, ".kiro", "steering")); err != nil {
+		t.Fatal("removed a folder it never wrote into")
+	}
+}
+
+func TestWhatTheUserAddedStaysVisibleToGit(t *testing.T) {
+	store := Open(t.TempDir())
+	note := alwaysNote(t, store, "Use pnpm", "Always pnpm.")
+	dir := repo(t)
+	project(store, dir)
+	file := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(file, []byte(read(t, file)+"\nMy own rules.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Delete(Shared, note.Name); err != nil {
+		t.Fatal(err)
+	}
+	project(store, dir)
+	if status := git(t, dir, "status", "--porcelain"); !strings.Contains(status, "AGENTS.md") {
+		t.Fatalf("git can't see the user's file: %q", status)
 	}
 }

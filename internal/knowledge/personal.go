@@ -101,11 +101,7 @@ func (s *Store) Always() ([]Note, error) {
 // SyncPersonal writes the notes marked "always" into the personal file of
 // every agent on this machine, and takes them out again as they are unticked.
 // Only Agentman's block is ever changed.
-func (s *Store) SyncPersonal(h Homes) ([]PersonalResult, error) {
-	always, err := s.Always()
-	if err != nil {
-		return nil, err
-	}
+func (s *Store) SyncPersonal(h Homes, always []Note) []PersonalResult {
 	kept := block(always)
 	var results []PersonalResult
 	for _, file := range personalFiles(h) {
@@ -122,15 +118,18 @@ func (s *Store) SyncPersonal(h Homes) ([]PersonalResult, error) {
 		}
 		results = append(results, result)
 	}
-	return results, nil
+	return results
 }
 
 func syncWhole(path, kept string) error {
 	if kept == "" {
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := os.Remove(path); errors.Is(err, os.ErrNotExist) {
+			return nil
+		} else if err != nil {
 			return err
 		}
-		// Only ever the folder this made; one with anything else stays.
+		// With the file went the reason for the folder, unless it holds
+		// anything else; one this never wrote into stays.
 		_ = os.Remove(filepath.Dir(path))
 		return nil
 	}
@@ -199,11 +198,7 @@ const (
 // carries them. It won't, and is left alone, when the folder isn't the top of
 // a repository, when AGENTS.md is tracked (the notes would land in the user's
 // commits), or when it is the user's own.
-func (s *Store) SyncProject(dir string) (bool, error) {
-	always, err := s.Always()
-	if err != nil {
-		return false, err
-	}
+func SyncProject(dir string, always []Note) (bool, error) {
 	top, err := runGit(dir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return false, nil
@@ -236,7 +231,11 @@ func (s *Store) SyncProject(dir string) (bool, error) {
 			}
 			return false, setExcluded(dir, false)
 		}
-		return false, writeKept(path, next)
+		if err := writeKept(path, next); err != nil {
+			return false, err
+		}
+		// What is left is the user's, and git should see it.
+		return false, setExcluded(dir, false)
 	}
 	if err := setExcluded(dir, true); err != nil {
 		return false, err

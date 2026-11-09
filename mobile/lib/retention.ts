@@ -9,6 +9,19 @@ export interface RetainedMessages {
   limited: boolean;
 }
 
+/**
+ * A message Muse kept from before a compaction, under an id of its own, whose
+ * original is already here: shown again, the chat would read twice.
+ */
+function isKeptCopy(message: Message, existing: readonly Message[]): boolean {
+  if (!message.id.startsWith("earlier:") || !message.text) return false;
+  const start = message.text.slice(0, 200);
+  return existing.some(
+    (known) =>
+      !known.id.startsWith("earlier:") && known.role === message.role && (known.text ?? "").startsWith(start),
+  );
+}
+
 /** Merge by stable id, order chronologically, and retain the newest window. */
 export function mergeRetainedMessages(
   existing: readonly Message[],
@@ -19,6 +32,7 @@ export function mergeRetainedMessages(
   const byId = new Map<string, Message>();
   for (const message of existing) byId.set(message.id, message);
   for (const message of incoming) {
+    if (isKeptCopy(message, existing)) continue;
     // A later copy replaces the earlier one, which is how a running tool call
     // arrives finished. Never the reverse: a history page read before the
     // result was written must not set a finished call running again.

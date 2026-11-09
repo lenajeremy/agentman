@@ -368,6 +368,7 @@ func (s *MuseSource) readWithStatus(ctx context.Context, sessionID string) ([]pr
 			after = len(messages)
 		}
 	}
+	parser.PlaceMuseEarlier(messages)
 	if read.LastTurn != nil && after >= 0 {
 		at := int64(0)
 		if after > 0 {

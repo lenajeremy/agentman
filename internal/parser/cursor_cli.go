@@ -263,7 +263,7 @@ func cursorCLIUserText(body string) string {
 			return ""
 		}
 	}
-	return trimmed
+	return StripSharedNotes(trimmed)
 }
 
 var cursorCLIImagePath = regexp.MustCompile(`(?i)^/\S+\.(png|jpe?g|gif|webp)$`)

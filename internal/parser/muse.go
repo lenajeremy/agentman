@@ -61,7 +61,33 @@ func MuseMessages(sessionID string, items []MuseItem) []protocol.Message {
 	for _, item := range items {
 		messages = append(messages, MuseRows(sessionID, item)...)
 	}
+	PlaceMuseEarlier(messages)
 	return messages
+}
+
+// MuseEarlierPrefix starts the id of a row copied from what Muse kept before
+// a compaction. The apps may already hold the original under its own id, and
+// leave the copy out.
+const MuseEarlierPrefix = "earlier:"
+
+// PlaceMuseEarlier dates what Muse kept from before a compaction just ahead
+// of the first row after it, in order, whatever date the item itself has.
+func PlaceMuseEarlier(rows []protocol.Message) {
+	count, next := 0, int64(0)
+	for _, row := range rows {
+		if strings.HasPrefix(row.ID, MuseEarlierPrefix) {
+			count++
+		} else {
+			next = row.Ts
+			break
+		}
+	}
+	if count == 0 || next == 0 {
+		return
+	}
+	for i := 0; i < count; i++ {
+		rows[i].Ts = next - int64(count-i)
+	}
 }
 
 // MuseRows is the rows one item makes: none or one, or for what Muse kept from
@@ -96,7 +122,7 @@ func MuseRows(sessionID string, item MuseItem) []protocol.Message {
 			continue
 		}
 		rows = append(rows, protocol.Message{
-			ID: fmt.Sprintf("%s-%d", item.ItemID, i), SessionID: sessionID, Ts: at + int64(i), Role: role, Text: text,
+			ID: fmt.Sprintf("%s%s-%d", MuseEarlierPrefix, item.ItemID, i), SessionID: sessionID, Ts: at + int64(i), Role: role, Text: text,
 		})
 	}
 	return rows
