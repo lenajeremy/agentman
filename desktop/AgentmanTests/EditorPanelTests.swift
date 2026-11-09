@@ -15,6 +15,30 @@ final class EditorPanelTests: XCTestCase {
         super.tearDown()
     }
 
+    // "4 files changed" fills the editor with the agent's changes, in a tab
+    // of their own, and opening a file goes back to the code.
+    func testAnAgentsChangesTakeTheEditorsPlaceUntilAFileIsOpened() throws {
+        let root = try folder(["a.txt", "b.txt"])
+        let store = EditorStore(root: root)
+        store.open("a.txt")
+        let code = store.activeID
+
+        store.showChanges(of: "claude:a")
+        XCTAssertEqual(store.changesSession, "claude:a")
+        XCTAssertTrue(store.showingChanges)
+        XCTAssertEqual(store.activeID, code, "the code stays open behind it")
+
+        store.open("b.txt")
+        XCTAssertFalse(store.showingChanges, "a file comes to the front")
+        XCTAssertEqual(store.changesSession, "claude:a", "the tab stays, to go back to")
+
+        store.showingChanges = true
+        store.closeChanges()
+        XCTAssertNil(store.changesSession)
+        XCTAssertFalse(store.showingChanges)
+        XCTAssertNotNil(store.active, "the code is still there")
+    }
+
     /// A folder with files in it, removed after the test.
     private func folder(_ files: [String]) throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

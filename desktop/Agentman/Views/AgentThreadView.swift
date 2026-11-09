@@ -10,6 +10,8 @@ struct AgentThreadView: View {
     /// In an editor's agent panel: narrow, with no toolbar or title of its
     /// own, as the panel has its own header.
     var inPanel = false
+    /// What "4 files changed" does in an editor: its changes fill the editor.
+    var openChanges: (() -> Void)? = nil
     @State private var draft = ""
     @State private var attachments: [Attachment] = []
     @State private var dropping = false
@@ -276,7 +278,9 @@ struct AgentThreadView: View {
             }
             if changed > 0, inPanel || (!showFiles && !panelOpen) {
                 ChangedBar(count: changed) {
-                    if inPanel {
+                    if let openChanges {
+                        openChanges()
+                    } else if inPanel {
                         filesTab = .changes
                         showFiles = true
                     } else {

@@ -92,10 +92,10 @@ struct EditorWindow: View {
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
-                        if !store.documents.isEmpty {
+                        if !store.documents.isEmpty || store.changesSession != nil {
                             TabStrip(store: store)
                         }
-                        if let document = store.active {
+                        if let document = store.active, !store.showingChanges {
                             PathBar(store: store, document: document)
                             DiskBanner(document: document, close: { store.close(document) })
                         }
@@ -111,6 +111,9 @@ struct EditorWindow: View {
                             }
                             if store.active == nil, store.panes.count == 1 {
                                 EditorEmpty(store: store)
+                            }
+                            if store.showingChanges, let id = store.changesSession {
+                                EditorChanges(session: agents.session(id))
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -291,8 +294,12 @@ struct EditorWindow: View {
             }
             guard event.window === store.window,
                   event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-                  event.charactersIgnoringModifiers == "w",
-                  let document = store.active else { return event }
+                  event.charactersIgnoringModifiers == "w" else { return event }
+            if store.showingChanges {
+                store.closeChanges()
+                return nil
+            }
+            guard let document = store.active else { return event }
             store.requestClose(document)
             return nil
         }
@@ -595,9 +602,12 @@ private struct TabStrip: View {
         let names = Dictionary(grouping: store.documents, by: \.name)
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
+                if store.changesSession != nil {
+                    ChangesTab(store: store)
+                }
                 ForEach(store.documents) { document in
                     EditorTab(store: store, document: document,
-                              active: document.id == store.activeID,
+                              active: !store.showingChanges && document.id == store.activeID,
                               folder: (names[document.name]?.count ?? 0) > 1 ? (document.path as NSString).deletingLastPathComponent : nil)
                 }
             }
@@ -613,6 +623,79 @@ private struct TabStrip: View {
                 Button("Close Others") { store.closeOthers(than: active) }
             }
         }
+    }
+}
+
+/// Everything an agent changed, file after file, in place of the code. The
+/// code stays open behind it, with its scroll and undo, for when this closes.
+private struct EditorChanges: View {
+    @Environment(AgentsStore.self) private var agents
+    let session: Session?
+
+    var body: some View {
+        Group {
+            if let session {
+                DiffPanel(sessionID: session.id, cwd: session.cwd, state: session.state, activity: agents.activity(session.id).at)
+                    .equatable()
+                    .id(session.id)
+            } else {
+                Text("This agent's changes are no longer here.")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(Palette.surface)
+    }
+}
+
+/// The tab of an agent's changes, first in the strip.
+private struct ChangesTab: View {
+    let store: EditorStore
+    @State private var hovering = false
+
+    private var active: Bool { store.showingChanges }
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "plus.forwardslash.minus")
+                .font(.system(size: 11))
+                .foregroundStyle(active ? Palette.text : Palette.muted)
+            Text("Changes")
+                .font(Fonts.sans(12.5, active ? .medium : .regular))
+                .foregroundStyle(active ? Palette.text : Palette.muted)
+            Button {
+                store.closeChanges()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8.5, weight: .bold))
+                    .foregroundStyle(Palette.muted)
+                    .frame(width: 16, height: 16)
+                    .background(hovering ? Palette.fill : .clear, in: RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .opacity(hovering || active ? 1 : 0)
+            .help("Close (⌘W)")
+            .accessibilityLabel("Close Changes")
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
+        .frame(height: 38)
+        .background(Look.site ? (hovering && !active ? Palette.fill.opacity(0.45) : .clear) : (active ? Palette.fill.opacity(0.55) : .clear), in: RoundedRectangle(cornerRadius: 6))
+        .padding(.horizontal, 3)
+        .overlay(alignment: .bottom) {
+            if active {
+                if Look.site {
+                    Capsule().fill(Palette.flood).frame(height: 2.5).padding(.horizontal, 8)
+                } else {
+                    Rectangle().fill(Palette.surface).frame(height: 1)
+                }
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { store.showingChanges = true }
+        .onHover { hovering = $0 }
+        .help("Everything the agent changed")
     }
 }
 

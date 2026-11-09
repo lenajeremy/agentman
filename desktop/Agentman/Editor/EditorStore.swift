@@ -95,7 +95,26 @@ final class EditorStore {
             if !panes.indices.contains(focusedPane) { focusedPane = max(panes.count - 1, 0) }
             if panes.isEmpty { panes = [nil] }
             panes[focusedPane] = newValue
+            showingChanges = false
         }
+    }
+    /// The agent whose changes have a tab of their own, and whether that
+    /// tab is in front, in place of the code.
+    var changesSession: String?
+    var showingChanges = false
+
+    /// Fills the editor with everything an agent changed, file after file.
+    func showChanges(of session: String) {
+        changesSession = session
+        showingChanges = true
+        // The code is still there behind it: keys mustn't type into it.
+        window?.makeFirstResponder(nil)
+    }
+
+    /// Back to the code the tab was in front of.
+    func closeChanges() {
+        changesSession = nil
+        showingChanges = false
     }
     /// The tree's selected row.
     var selection: String?
