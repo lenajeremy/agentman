@@ -306,7 +306,7 @@ final class AgentsStore {
     /// The Board's columns, for the folder the sidebar is filtered to.
     var board: BoardSections {
         let waiting = Set(manager.openCards.filter { $0.kind == "question" || $0.kind == "needs_you" }.map(\.sessionId))
-        return BoardSections.make(sessions, choices: sidebarChoices, hidden: boardHidden, waiting: waiting, folder: folderFilter)
+        return BoardSections.make(sessions, choices: sidebarChoices, hidden: boardHidden, waiting: waiting, folder: folderFilter, matching: boardSearch?.ids)
     }
 
     /// Whether the Board is the page showing: it is Agentman's.

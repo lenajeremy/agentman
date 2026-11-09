@@ -448,6 +448,84 @@ final class BoardTests: XCTestCase {
     }
 }
 
+@MainActor
+final class BoardSearchTests: XCTestCase {
+    private func session(_ id: String, _ name: String, _ state: String = "busy", cwd: String = "/work/api") -> [String: Any] {
+        ["id": id, "kind": "claude", "name": name, "cwd": cwd, "state": state, "inject": "tmux",
+         "lastActivityAt": Int64(Date().timeIntervalSince1970 * 1000)]
+    }
+
+    private func store(_ sessions: [[String: Any]]) throws -> AgentsStore {
+        let store = AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-board-search.sock"))
+        let data = try JSONSerialization.data(withJSONObject: ["type": "sessions", "sessions": sessions])
+        store.apply(try JSONDecoder().decode(DaemonEvent.self, from: data))
+        return store
+    }
+
+    private func hit(_ session: Session, _ text: String) -> SearchHit {
+        SearchHit(session: session, messageId: "m", role: .assistant, ts: nil, snippet: text, matches: 1)
+    }
+
+    func testNothingSearchedShowsEveryone() throws {
+        let store = try store([session("a", "Throttle webhooks"), session("b", "Fix cart", "idle")])
+        XCTAssertNil(store.boardSearch)
+        XCTAssertEqual(store.board.working.map(\.id), ["a"])
+        XCTAssertEqual(store.board.idle.map(\.id), ["b"])
+    }
+
+    func testAgentsMatchByNameOrFolder() throws {
+        let store = try store([session("a", "Throttle webhooks"), session("b", "Fix cart", "idle", cwd: "/work/storefront")])
+        store.search = "WEBHOOK"
+        XCTAssertEqual(store.board.working.map(\.id), ["a"], "not case sensitive")
+        XCTAssertTrue(store.board.idle.isEmpty)
+        store.search = "storefront"
+        XCTAssertEqual(store.board.idle.map(\.id), ["b"], "by its folder")
+        XCTAssertTrue(store.board.working.isEmpty)
+    }
+
+    func testWhatWasSaidFindsAgentsAndPastConversations() throws {
+        let store = try store([session("a", "Throttle webhooks"), session("b", "Fix cart", "idle"), session("z", "Long done", "ended")])
+        store.search = "invoice"
+        XCTAssertTrue(store.board.working.isEmpty)
+        let live = try XCTUnwrap(store.sessions.first { $0.id == "b" })
+        let ended = try XCTUnwrap(store.sessions.first { $0.id == "z" })
+        store.messageHits = MessageSearchResults(query: "invoice", hits: [hit(live, "the invoice job"), hit(ended, "an old invoice")])
+        let found = try XCTUnwrap(store.boardSearch)
+        XCTAssertEqual(store.board.idle.map(\.id), ["b"], "the agent that said it")
+        XCTAssertEqual(found.bySession["b"]?.snippet, "the invoice job", "and what it said")
+        XCTAssertEqual(found.past.map { $0.session?.id }, ["z"], "ended, so not a card")
+        XCTAssertFalse(found.searching)
+    }
+
+    func testHiddenAgentsAreStillFound() throws {
+        let store = try store([session("a", "Throttle webhooks", "idle")])
+        store.hideFromBoard("a")
+        XCTAssertEqual(store.board.hidden.map(\.id), ["a"])
+        XCTAssertTrue(store.board.idle.isEmpty)
+        store.search = "throttle"
+        XCTAssertEqual(store.board.idle.map(\.id), ["a"], "a search looks everywhere")
+        XCTAssertTrue(store.board.hidden.isEmpty)
+        store.showOnBoard("a")
+    }
+
+    func testTheFolderFilterStillApplies() throws {
+        let store = try store([session("a", "Fix webhooks"), session("b", "Fix cart", cwd: "/work/storefront")])
+        store.folderFilter = "/work/api"
+        store.search = "fix"
+        XCTAssertEqual(store.board.working.map(\.id), ["a"])
+    }
+
+    func testTheHeadlineSaysWhatWasFound() {
+        var found = BoardSearch(query: "cart")
+        XCTAssertEqual(BoardView.headline(of: found, shown: 0), "No agent matches \u{201C}cart\u{201D}")
+        XCTAssertEqual(BoardView.headline(of: found, shown: 1), "1 agent matches \u{201C}cart\u{201D}")
+        XCTAssertEqual(BoardView.headline(of: found, shown: 3), "3 agents match \u{201C}cart\u{201D}")
+        found.searching = true
+        XCTAssertEqual(BoardView.headline(of: found, shown: 0), "Searching for \u{201C}cart\u{201D}")
+        XCTAssertEqual(BoardView.detail(of: found), "Searching messages…")
+    }
+}
+
 final class StandingAnswersTests: XCTestCase {
     // An older daemon doesn't send them, and that mustn't lose the settings.
     func testAnOlderDaemonDecodesWithThemOff() throws {

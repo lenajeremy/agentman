@@ -27,6 +27,7 @@ struct BoardView: View {
     @State private var sending = false
     @State private var dropping = false
     @State private var confirmNewChat = false
+    @FocusState private var searchFocused: Bool
 
     private var manager: ManagerStore { store.manager }
 
@@ -53,6 +54,7 @@ struct BoardView: View {
             }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: store.boardChatOpen)
+        .task(id: store.search) { await store.refreshMessageHits() }
         .environment(\.chatAutofocus, chatAutofocus)
         .confirmationDialog("Start a new chat?", isPresented: $confirmNewChat) {
             Button("New Chat") {
@@ -112,6 +114,58 @@ struct BoardView: View {
         .windowTopBar()
     }
 
+    /// The sidebar's search, as the sidebar steps aside here: agents by name,
+    /// folder or branch, and everything said in their conversations.
+    private var searchField: some View {
+        @Bindable var store = store
+        return HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(searchFocused ? Palette.text : Palette.muted)
+            TextField("Search agents and messages", text: $store.search)
+                .textFieldStyle(.plain)
+                .font(Fonts.sans(14))
+                .focused($searchFocused)
+                .accessibilityLabel("Search agents and messages")
+                .onExitCommand {
+                    store.search = ""
+                    searchFocused = false
+                }
+            if !store.search.isEmpty {
+                Button {
+                    store.search = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.faint)
+                }
+                .buttonStyle(.plain)
+                .help("Clear the search")
+                .accessibilityLabel("Clear the search")
+            } else if !searchFocused {
+                Text("⌘F")
+                    .font(Fonts.sans(11.5, .medium))
+                    .foregroundStyle(Palette.muted)
+                    .padding(.horizontal, 6)
+                    .frame(height: 20)
+                    .background(Palette.boardWell, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 38)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+            .strokeBorder(searchFocused ? Palette.text.opacity(0.35) : Palette.line))
+        .background {
+            Button("Search the Board") { searchFocused = true }
+                .keyboardShortcut("f", modifiers: .command)
+                .opacity(0)
+                .accessibilityHidden(true)
+        }
+        .padding(.top, 2)
+    }
+
     private var folderMenu: some View {
         Menu {
             Button("All Folders") { store.folderFilter = nil }
@@ -145,20 +199,27 @@ struct BoardView: View {
 
     /// The brief, and the columns under it, sharing their edges.
     private func board(_ sections: BoardSections, outlined: Set<String>, room: CGSize) -> some View {
+        let found = store.boardSearch
         let column = max(Self.narrowest, min(Self.widest, (room.width - Self.margin * 2 - Self.gap * 2) / 3))
         let width = column * 3 + Self.gap * 2
         let scrolls = width + Self.margin * 2 > room.width
         return VStack(alignment: .leading, spacing: 0) {
-            brief(sections)
-                .frame(width: min(width, room.width - Self.margin * 2), alignment: .leading)
-                .frame(maxWidth: .infinity)
+            // The search over the last column, its edges on the column's.
+            HStack(alignment: .center, spacing: Self.gap) {
+                brief(sections)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                searchField
+                    .frame(width: column)
+            }
+            .frame(width: min(width, room.width - Self.margin * 2))
+            .frame(maxWidth: .infinity)
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: Self.gap) {
-                    BoardColumn(kind: .needsYou, sessions: sections.needsYou, outlined: outlined, offers: manager.offers, clearance: clearance)
+                    BoardColumn(kind: .needsYou, sessions: sections.needsYou, outlined: outlined, found: found, offers: manager.offers, clearance: clearance)
                         .frame(width: column)
-                    BoardColumn(kind: .working, sessions: sections.working, outlined: outlined, missions: manager.runningMissions, clearance: clearance)
+                    BoardColumn(kind: .working, sessions: sections.working, outlined: outlined, found: found, missions: manager.runningMissions, clearance: clearance)
                         .frame(width: column)
-                    BoardColumn(kind: .idle, sessions: sections.idle, outlined: outlined, hidden: sections.hidden, clearance: clearance)
+                    BoardColumn(kind: .idle, sessions: sections.idle, outlined: outlined, found: found, hidden: sections.hidden, clearance: clearance)
                         .frame(width: column)
                 }
                 .padding(.horizontal, Self.margin)
@@ -175,7 +236,8 @@ struct BoardView: View {
 
     private func brief(_ sections: BoardSections) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(sections.headline(connected: store.status == .connected && store.sessionsLoaded))
+            Text(store.boardSearch.map { Self.headline(of: $0, shown: sections.shown) }
+                ?? sections.headline(connected: store.status == .connected && store.sessionsLoaded))
                 .font(Fonts.sans(20, .semibold))
                 .tracking(-0.2)
                 .foregroundStyle(Palette.text)
@@ -200,10 +262,28 @@ struct BoardView: View {
 
     /// With nothing on the Board at all, the way to put something there.
     private func showsStart(_ sections: BoardSections) -> Bool {
-        sections.shown == 0 && sections.hidden.isEmpty && store.status == .connected && store.sessionsLoaded
+        store.search.trimmingCharacters(in: .whitespaces).isEmpty && sections.shown == 0 && sections.hidden.isEmpty && store.status == .connected && store.sessionsLoaded
+    }
+
+    nonisolated static func headline(of found: BoardSearch, shown: Int) -> String {
+        switch shown {
+        case 0: found.searching ? "Searching for \u{201C}\(found.query)\u{201D}" : "No agent matches \u{201C}\(found.query)\u{201D}"
+        case 1: "1 agent matches \u{201C}\(found.query)\u{201D}"
+        default: "\(shown) agents match \u{201C}\(found.query)\u{201D}"
+        }
+    }
+
+    nonisolated static func detail(of found: BoardSearch) -> String {
+        if found.searching { return found.indexing ? "Reading your conversations…" : "Searching messages…" }
+        switch found.past.count {
+        case 0: return " "
+        case 1: return "Also said in 1 past conversation."
+        default: return "Also said in \(found.past.count) past conversations."
+        }
     }
 
     private func detail(_ sections: BoardSections) -> String {
+        if let found = store.boardSearch { return Self.detail(of: found) }
         if showsStart(sections) { return "Start one and it shows up here." }
         return sections.detail.isEmpty ? " " : sections.detail
     }
@@ -360,6 +440,8 @@ private struct BoardColumn: View {
     let kind: BoardColumnKind
     let sessions: [Session]
     let outlined: Set<String>
+    /// The search, when one is running.
+    var found: BoardSearch?
     var hidden: [Session] = []
     /// What Agentman offers the user, above the agents waiting on them.
     var offers: [ManagerCard] = []
@@ -384,11 +466,14 @@ private struct BoardColumn: View {
                             .transition(.scale(scale: 0.97).combined(with: .opacity))
                     }
                     ForEach(sessions) { session in
-                        BoardCard(session: session, kind: kind, outlined: outlined.contains(session.id))
+                        BoardCard(session: session, kind: kind, outlined: outlined.contains(session.id), match: found?.bySession[session.id])
                             .transition(.scale(scale: 0.97).combined(with: .opacity))
                     }
-                    if sessions.isEmpty, offers.isEmpty, missions.isEmpty {
-                        Text(kind.empty)
+                    if kind == .idle, let found, !found.past.isEmpty {
+                        BoardPastHits(hits: found.past, query: found.query)
+                    }
+                    if sessions.isEmpty, offers.isEmpty, missions.isEmpty, kind != .idle || (found?.past.isEmpty ?? true) {
+                        Text(found == nil ? kind.empty : "No matches")
                             .font(Fonts.sans(12))
                             .foregroundStyle(Palette.boardMuted)
                             .frame(maxWidth: .infinity)
@@ -482,11 +567,56 @@ private struct BoardColumn: View {
 
 /// One agent: where it is, what it is called, and what it wants, answerable
 /// or followable on the spot. Clicking anywhere else opens its conversation.
+/// Conversations that have ended and said what was searched for, at the foot
+/// of the last column: they aren't on the Board, but they are what was asked.
+private struct BoardPastHits: View {
+    @Environment(AgentsStore.self) private var store
+    let hits: [SearchHit]
+    let query: String
+    private static let shown = 8
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("In past conversations")
+                .font(Fonts.sans(12))
+                .foregroundStyle(Palette.boardMuted)
+                .padding(.horizontal, 8)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
+            ForEach(hits.prefix(Self.shown)) { hit in
+                Button {
+                    store.open(hit, query: query)
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(hit.session?.name ?? "Conversation")
+                            .font(Fonts.sans(13, .medium))
+                            .foregroundStyle(Palette.text)
+                            .lineLimit(1)
+                        Text(SearchWords.snippet(hit, query: query))
+                            .font(Fonts.sans(12))
+                            .foregroundStyle(Palette.textSecondary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(hit.snippet)
+            }
+        }
+    }
+}
+
 private struct BoardCard: View {
     @Environment(AgentsStore.self) private var store
     let session: Session
     let kind: BoardColumnKind
     let outlined: Bool
+    /// What a search found in its conversation, which a click opens at.
+    var match: SearchHit?
     @AppStorage(AgentColors.settingKey) private var colorBy: AgentColorBy = .none
     @State private var hovering = false
     @State private var git: GitState?
@@ -517,6 +647,13 @@ private struct BoardCard: View {
                 }
                 .buttonStyle(.plain)
                 .help("Open \(session.name)")
+                if let match {
+                    Text(SearchWords.snippet(match, query: store.messageHits?.query ?? ""))
+                        .font(Fonts.sans(12))
+                        .foregroundStyle(Palette.textSecondary)
+                        .lineLimit(2)
+                        .help(match.snippet)
+                }
             }
             switch kind {
             case .needsYou: needsYou(digest)
@@ -559,7 +696,11 @@ private struct BoardCard: View {
     private var tint: Color? { AgentColors.color(for: session, by: colorBy) }
 
     private func open() {
-        store.selection = .agent(session.id)
+        if let match, let query = store.messageHits?.query {
+            store.open(match, query: query)
+        } else {
+            store.selection = .agent(session.id)
+        }
     }
 
     private func meta(_ digest: BoardDigest) -> some View {

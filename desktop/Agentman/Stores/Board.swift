@@ -19,15 +19,16 @@ nonisolated struct BoardSections: Equatable, Sendable {
     /// user beats being hidden or archived; an agent that has ended, or
     /// that the sidebar has archived, is not on the Board at all.
     static func make(_ sessions: [Session], choices: SidebarSections.Choices, hidden: Set<String>, waiting: Set<String> = [],
-                     folder: String? = nil, now: Date = .now) -> BoardSections {
+                     folder: String? = nil, matching: Set<String>? = nil, now: Date = .now) -> BoardSections {
         var sections = BoardSections()
-        for session in sessions where session.state != .ended && AgentsStore.inFolder(session.cwd, folder) {
+        for session in sessions where session.state != .ended && AgentsStore.inFolder(session.cwd, folder)
+            && (matching?.contains(session.id) ?? true) {
             let state = AgentsStore.filterState(session)
             if state == .waitingInput || waiting.contains(session.id) {
                 sections.needsYou.append(session)
-            } else if SidebarSections.isArchived(session, choices: choices, now: now) {
+            } else if matching == nil, SidebarSections.isArchived(session, choices: choices, now: now) {
                 continue
-            } else if hidden.contains(session.id) {
+            } else if matching == nil, hidden.contains(session.id) {
                 sections.hidden.append(session)
             } else if state == .busy {
                 sections.working.append(session)
