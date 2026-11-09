@@ -18,15 +18,26 @@ import (
 // Running the login shell at every start can bring up a macOS permission
 // dialog at login, with no agent running, when a profile touches a protected
 // folder. So what it sets up is kept, and read again only when a startup file
-// changes or a week has passed. It can hold API keys a profile exports, so it
+// changes or a day has passed. It can hold API keys a profile exports, so it
 // is kept encrypted, with the key in the Keychain; it is never on disk as text.
 
 const (
 	// MaxCacheAge is how long a saved environment is trusted. Startup files
-	// can source others that the fingerprint can't see.
-	MaxCacheAge  = 7 * 24 * time.Hour
+	// can source others that the fingerprint can't see, and a value can come
+	// from a command, such as a login token.
+	MaxCacheAge  = 24 * time.Hour
 	cacheKeyName = "shell-env-key"
 )
+
+// perLogin are set afresh for each login, or expire within hours. A saved copy
+// would be out of date, and would replace the current value: an old
+// SSH_AUTH_SOCK breaks every agent's git over SSH.
+var perLogin = map[string]bool{
+	"SSH_AUTH_SOCK": true, "SSH_AGENT_PID": true, "SSH_CONNECTION": true, "SSH_CLIENT": true, "SSH_TTY": true,
+	"TMPDIR": true, "XPC_SERVICE_NAME": true, "XPC_FLAGS": true, "__CFBundleIdentifier": true,
+	"__CF_USER_TEXT_ENCODING": true, "SECURITYSESSIONID": true, "LaunchInstanceID": true,
+	"Apple_PubSub_Socket_Render": true, "DISPLAY": true, "AWS_SESSION_TOKEN": true, "AWS_SECURITY_TOKEN": true,
+}
 
 // Keys is where the encryption key lives.
 type Keys interface {
@@ -51,28 +62,60 @@ type Cache struct {
 }
 
 // Environment is the login shell's environment, from the saved copy when it
-// is current. fresh says the shell was run.
+// is current. fresh says the shell was run. A shell that fails falls back on
+// a saved copy of any age, which is better than none: without one, agents
+// can't even find node.
 func (c Cache) Environment(ctx context.Context) (env []string, fresh bool, err error) {
-	fingerprint := Fingerprint(c.Home, os.Getenv("SHELL"))
-	if saved, ok := c.read(ctx); ok && saved.Fingerprint == fingerprint &&
+	saved, have := c.read(ctx)
+	if have && saved.Fingerprint == Fingerprint(c.Home, os.Getenv("SHELL"), saved.Env) &&
 		c.Now().Sub(time.UnixMilli(saved.SavedAt)) < MaxCacheAge {
 		return saved.Env, false, nil
 	}
 	env, err = c.Load(ctx)
 	if err != nil {
+		if have {
+			return saved.Env, false, nil
+		}
 		return nil, true, err
 	}
 	// Not being able to save only means the shell runs again next time.
-	_ = c.write(ctx, cached{Fingerprint: fingerprint, SavedAt: c.Now().UnixMilli(), Env: env})
+	_ = c.write(ctx, cached{
+		Fingerprint: Fingerprint(c.Home, os.Getenv("SHELL"), env),
+		SavedAt:     c.Now().UnixMilli(), Env: lasting(env),
+	})
 	return env, true, nil
 }
 
-// Fingerprint changes when the shell or any of its startup files do.
-func Fingerprint(home, shell string) string {
+func lasting(env []string) []string {
+	kept := make([]string, 0, len(env))
+	for _, entry := range env {
+		if name, _, ok := strings.Cut(entry, "="); ok && !perLogin[name] {
+			kept = append(kept, entry)
+		}
+	}
+	return kept
+}
+
+// Fingerprint changes when the shell or any of its startup files do, wherever
+// the environment says zsh keeps them.
+func Fingerprint(home, shell string, env []string) string {
 	parts := []string{shell}
-	for _, name := range []string{".zshenv", ".zprofile", ".zshrc", ".zlogin", ".bash_profile", ".bashrc", ".profile"} {
+	dirs := []string{home}
+	for _, entry := range env {
+		if dir, ok := strings.CutPrefix(entry, "ZDOTDIR="); ok && dir != "" && dir != home {
+			dirs = append(dirs, dir)
+		}
+	}
+	for _, dir := range dirs {
+		for _, name := range []string{".zshenv", ".zprofile", ".zshrc", ".zlogin", ".bash_profile", ".bashrc", ".profile"} {
+			if info, err := os.Stat(filepath.Join(dir, name)); err == nil {
+				parts = append(parts, fmt.Sprintf("%s/%s:%d:%d", dir, name, info.Size(), info.ModTime().UnixNano()))
+			}
+		}
+	}
+	for _, name := range []string{".config/fish/config.fish", ".config/fish/conf.d"} {
 		if info, err := os.Stat(filepath.Join(home, name)); err == nil {
-			parts = append(parts, fmt.Sprintf("%s:%d:%d", name, info.Size(), info.ModTime().UnixNano()))
+			parts = append(parts, fmt.Sprintf("%s:%d", name, info.ModTime().UnixNano()))
 		}
 	}
 	return strings.Join(parts, "|")

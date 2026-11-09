@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -24,6 +25,7 @@ type cacheLab struct {
 	cache Cache
 	home  string
 	runs  int
+	fail  bool
 	clock time.Time
 }
 
@@ -35,7 +37,10 @@ func newCacheLab(t *testing.T) *cacheLab {
 		Now: func() time.Time { return lab.clock },
 		Load: func(context.Context) ([]string, error) {
 			lab.runs++
-			return []string{"OPENAI_API_KEY=sk-very-secret", "PATH=/a"}, nil
+			if lab.fail {
+				return nil, errors.New("the shell timed out")
+			}
+			return []string{"OPENAI_API_KEY=sk-very-secret", "PATH=/a", "SSH_AUTH_SOCK=/old/socket"}, nil
 		},
 	}
 	if err := os.WriteFile(filepath.Join(lab.home, ".zshrc"), []byte("export A=1\n"), 0o644); err != nil {
@@ -75,7 +80,46 @@ func TestChangingAStartupFileReadsTheShellAgain(t *testing.T) {
 	}
 }
 
-func TestAWeekOldCopyIsReadAgain(t *testing.T) {
+func TestASavedCopyLeavesOutWhatChangesEachLogin(t *testing.T) {
+	lab := newCacheLab(t)
+	first, _ := lab.get(t)
+	if len(first) != 3 {
+		t.Fatalf("the shell's own answer should be whole: %v", first)
+	}
+	again, fresh := lab.get(t)
+	if fresh || len(again) != 2 || strings.Contains(strings.Join(again, " "), "SSH_AUTH_SOCK") {
+		t.Fatalf("fresh %v env %v", fresh, again)
+	}
+}
+
+func TestAShellThatFailsFallsBackOnTheSavedCopy(t *testing.T) {
+	lab := newCacheLab(t)
+	lab.get(t)
+	lab.clock = lab.clock.Add(MaxCacheAge + time.Hour)
+	lab.fail = true
+	env, fresh := lab.get(t)
+	if fresh || len(env) != 2 {
+		t.Fatalf("fresh %v env %v", fresh, env)
+	}
+}
+
+func TestZshsOwnFolderCounts(t *testing.T) {
+	lab := newCacheLab(t)
+	folder := t.TempDir()
+	if err := os.WriteFile(filepath.Join(folder, ".zshrc"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"ZDOTDIR=" + folder}
+	before := Fingerprint(lab.home, "/bin/zsh", env)
+	if err := os.WriteFile(filepath.Join(folder, ".zshrc"), []byte("abc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if Fingerprint(lab.home, "/bin/zsh", env) == before {
+		t.Fatal("a change in ZDOTDIR went unnoticed")
+	}
+}
+
+func TestADayOldCopyIsReadAgain(t *testing.T) {
 	lab := newCacheLab(t)
 	lab.get(t)
 	lab.clock = lab.clock.Add(MaxCacheAge + time.Minute)

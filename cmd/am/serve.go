@@ -201,11 +201,15 @@ func runServe(ctx context.Context, args []string) error {
 	// a terminal would have given it; the login shell's puts it back, for
 	// itself and every agent it starts.
 	if inService() {
-		if env, err := serviceShellEnv(ctx, *configHome); err != nil {
+		if env, fresh, err := serviceShellEnv(ctx, *configHome); err != nil {
 			fmt.Printf("%s\n", dim("service    couldn't read your shell's environment ("+err.Error()+"); agents get launchd's"))
 		} else {
 			shellenv.Apply(env)
-			fmt.Printf("%s\n", dim("service    running at login, with your shell's environment"))
+			source := "your shell's environment"
+			if !fresh {
+				source = "your shell's saved environment"
+			}
+			fmt.Printf("%s\n", dim("service    running at login, with "+source))
 		}
 	}
 
@@ -701,15 +705,15 @@ func spaced(code string) string {
 
 // serviceShellEnv is the login shell's environment for the service. On a Mac
 // the shell isn't run at every login: see shellenv.Cache.
-func serviceShellEnv(ctx context.Context, configHome string) ([]string, error) {
-	dir, err := hook.ConfigDir(configHome)
+func serviceShellEnv(ctx context.Context, configHome string) (env []string, fresh bool, err error) {
+	dir, dirErr := hook.ConfigDir(configHome)
 	home, homeErr := os.UserHomeDir()
-	if runtime.GOOS != "darwin" || err != nil || homeErr != nil {
-		return shellenv.Load(ctx)
+	if runtime.GOOS != "darwin" || dirErr != nil || homeErr != nil {
+		env, err = shellenv.Load(ctx)
+		return env, true, err
 	}
-	env, _, err := shellenv.Cache{
+	return shellenv.Cache{
 		Path: filepath.Join(dir, "shell-env"), Keys: secrets.Default(dir), Home: home,
 		Now: time.Now, Load: shellenv.Load,
 	}.Environment(ctx)
-	return env, err
 }
