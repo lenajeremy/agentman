@@ -81,6 +81,12 @@ enum RequestType: String, Codable, Sendable {
     case managerSetSettings = "manager_set_settings"
     case managerSetKey = "manager_set_key"
     case managerBriefs = "manager_briefs"
+    case managerVerifications = "manager_verifications"
+    case managerMissions = "manager_missions"
+    case managerShip = "manager_ship"
+    case managerQueue = "manager_queue"
+    case managerQueueAdd = "manager_queue_add"
+    case managerQueueRemove = "manager_queue_remove"
     case managerCardReply = "manager_card_reply"
     case managerCardDismiss = "manager_card_dismiss"
     case managerEntryClose = "manager_entry_close"
@@ -162,6 +168,11 @@ struct DaemonRequest: Codable, Sendable {
     var alerts: Bool?
     /// The agents in front of the user, on manager_viewing.
     var viewing: [String]?
+    /// The agents a manager_ship is for.
+    var sessionIds: [String]?
+    /// The work for a manager_queue_add; what a manager_queue_remove takes.
+    var queue: QueueItem?
+    var queueId: String?
     /// One part of a recording to write out, on transcribe.
     var voice: VoiceClip?
     /// One part of a file sent to an agent, on "attach_file".
@@ -225,6 +236,11 @@ struct DaemonEvent: Codable, Sendable {
     var managerSettings: ManagerSettings?
     var brief: Brief?
     var briefs: [Brief]?
+    var verification: Verification?
+    var verifications: [Verification]?
+    var missions: [Mission]?
+    var ship: ShipRun?
+    var queue: [QueueItem]?
     /// What Agentman would do with a request, on "manager_permission".
     var permission: PermissionCheck?
     var more: Bool?
@@ -733,6 +749,8 @@ struct WorkspaceBranch: Codable, Sendable, Hashable, Identifiable {
 
 /// One entry in the conversation with Agentman.
 struct ManagerEntry: Codable, Sendable, Identifiable, Hashable {
+    /// What Agentman approved, on an "approve" activity.
+    var approved: ApprovedRequest?
     var id: String
     /// "user", "assistant", "activity", "brief" or "error".
     var role: String
@@ -794,12 +812,157 @@ struct ManagerCard: Codable, Sendable, Hashable, Identifiable {
             guard let questionId else { return nil }
             return Question(id: questionId, prompt: "", title: nil, detail: nil,
                             options: options ?? [], multiple: multiple, custom: custom)
-        case "key":
+        case "key", "offer":
             return Question(id: id, prompt: "", title: nil, detail: nil, options: options ?? [], multiple: false, custom: false)
         default:
             return nil
         }
     }
+}
+
+/// How much Agentman does by itself in a folder.
+struct FolderTrust: Codable, Sendable, Hashable {
+    var folder: String
+    /// "watch", "suggest" or "handle".
+    var level: String
+
+    static let levels: [(id: String, title: String, detail: String)] = [
+        ("watch", "Watch", "Reports and asks. Acts on nothing."),
+        ("suggest", "Suggest", "Marks the answer it would give, and waits."),
+        ("handle", "Handle", "Answers what the permission rules allow."),
+    ]
+
+    /// The level that applies to a folder: the closest entry, or what the
+    /// approving switch means where there is none.
+    static func level(for folder: String, in settings: ManagerSettings?) -> String {
+        guard let settings else { return "watch" }
+        let home = NSHomeDirectory()
+        func expanded(_ path: String) -> String { path.hasPrefix("~") ? home + path.dropFirst() : path }
+        let closest = (settings.trust ?? [])
+            .filter { folder == expanded($0.folder) || folder.hasPrefix(expanded($0.folder) + "/") }
+            .max { expanded($0.folder).count < expanded($1.folder).count }
+        return closest?.level ?? (settings.autoApprove ? "handle" : "watch")
+    }
+}
+
+/// What Agentman approved by itself.
+struct ApprovedRequest: Codable, Sendable, Hashable {
+    var kind: String
+    var target: String
+    var folder: String?
+}
+
+/// What Agentman does on its own. Each is the user's to turn on.
+struct Autopilot: Codable, Sendable, Hashable {
+    /// Check an agent's work when it finishes a turn that changed something.
+    var verify = false
+    /// Give an agent the output of its failing tests to fix.
+    var sendBack = false
+    /// Offer to make a rule of what the user keeps approving.
+    var learnRules = false
+    /// Notice agents that have stopped getting anywhere.
+    var unstick = false
+    /// Notice agents working on the same files.
+    var overlap = false
+    /// Suggest a note for what the user keeps telling agents.
+    var learnNotes = false
+    /// Start queued work in the night, and report in the morning.
+    var overnight = false
+    /// "HH:MM"; nil takes the daemon's default.
+    var nightStart: String?
+    var nightEnd: String?
+    var nightAgents: Int?
+    /// Reviews by the model a day; nil is the daemon's default.
+    var verifyDaily: Int?
+    /// Yes to an agent asking only whether to commit finished work. Optional
+    /// so an older daemon, which doesn't send it, still decodes.
+    var replyCommit: Bool?
+    /// Yes to an agent asking only whether to install a finished build on the
+    /// user's own phone or Mac.
+    var replyInstall: Bool?
+
+    var answersCommit: Bool {
+        get { replyCommit ?? false }
+        set { replyCommit = newValue }
+    }
+
+    var answersInstall: Bool {
+        get { replyInstall ?? false }
+        set { replyInstall = newValue }
+    }
+}
+
+/// Several finished agents being shipped together.
+struct ShipRun: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    /// "running" or "done".
+    var state: String
+    var items: [ShipItem]
+}
+
+struct ShipItem: Codable, Sendable, Hashable, Identifiable {
+    var sessionId: String
+    var name: String
+    /// "waiting", "working", "shipped", "skipped" or "failed".
+    var state: String
+    var note: String?
+    var url: String?
+
+    var id: String { sessionId }
+}
+
+/// Work lined up for tonight.
+struct QueueItem: Codable, Sendable, Hashable, Identifiable {
+    var id = ""
+    var agent: String
+    var folder: String
+    var task: String
+    /// "waiting", "running", "done" or "failed".
+    var state = ""
+    var problem: String?
+    var createdAt: Int64 = 0
+}
+
+/// A goal given to Agentman, as a team of agents.
+struct Mission: Codable, Sendable, Hashable, Identifiable {
+    struct Task: Codable, Sendable, Hashable, Identifiable {
+        var id: String
+        var title: String
+        var agent: String
+        /// "planned", "running", "done" or "failed".
+        var state: String
+        var sessionId: String?
+        var dependsOn: [String]?
+        var problem: String?
+    }
+
+    var id: String
+    var goal: String
+    /// "proposed", "running", "done" or "dismissed".
+    var state: String
+    var tasks: [Task]
+    var createdAt: Int64
+
+    var finished: Int { tasks.filter { $0.state == "done" }.count }
+    var waiting: Int { tasks.filter { $0.state == "planned" }.count }
+    var progress: String {
+        waiting > 0 ? "\(finished) of \(tasks.count) done, \(waiting) waiting" : "\(finished) of \(tasks.count) done"
+    }
+}
+
+/// What Agentman found checking an agent's latest work.
+struct Verification: Codable, Sendable, Hashable, Identifiable {
+    var sessionId: String
+    /// "checking", "verified", "passed", "concerns", "failed" or "none".
+    var state: String
+    var summary: String?
+    var issues: [String]?
+    var command: String?
+    var output: String?
+    var sentBack: Bool?
+    var updatedAt: Int64
+
+    var id: String { sessionId }
 }
 
 struct ManagerSettings: Codable, Sendable, Hashable {
@@ -813,6 +976,10 @@ struct ManagerSettings: Codable, Sendable, Hashable {
     var approve: ApproveKinds?
     /// The user's own rules, checked first; an "ask" rule wins over all.
     var rules: [PermissionRule]?
+    /// What Agentman does by itself beyond approving; all off to begin with.
+    var autopilot: Autopilot?
+    /// How much Agentman does by itself in a folder; nil keeps what's stored.
+    var trust: [FolderTrust]?
     var style: String
     var instructions: String
     /// Whether the chat model's engine has its key, so Agentman can run.

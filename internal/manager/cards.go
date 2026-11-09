@@ -44,11 +44,15 @@ func (m *Manager) takeQuestion(ctx context.Context, session protocol.Session) {
 	}
 	settings := m.currentSettings()
 	d := classify(session, q, policyOf(settings))
-	if d.auto && settings.AutoApprove {
+	level := trustLevel(settings, session.Cwd)
+	if d.auto && level == protocol.TrustHandle {
 		err := m.answer(ctx, session.ID, protocol.Request{QuestionID: q.ID, OptionKey: d.optionKey})
 		if err == nil {
 			text := fmt.Sprintf("Approved for %s: %s", session.Name, d.summary)
-			m.addEntry(protocol.ManagerEntry{Role: "activity", Text: text, Tool: "approve", SessionID: session.ID})
+			m.addEntry(protocol.ManagerEntry{
+				Role: "activity", Text: text, Tool: "approve", SessionID: session.ID,
+				Approved: &protocol.ApprovedRequest{Kind: d.kind, Target: d.target, Folder: session.Cwd},
+			})
 			m.note(text)
 			return
 		}
@@ -59,7 +63,11 @@ func (m *Manager) takeQuestion(ctx context.Context, session protocol.Session) {
 		m.holdQuestion(session.ID, q.ID)
 		return
 	}
-	m.postQuestionCardLocked(session, d, "")
+	suggested := ""
+	if d.auto && level == protocol.TrustSuggest {
+		suggested, d.reason = d.optionKey, "you check what Agentman would answer in this folder"
+	}
+	m.postQuestionCardLocked(session, d, suggested)
 }
 
 // answer answers an agent's question through the daemon.
@@ -220,6 +228,10 @@ func (m *Manager) replyToCard(ctx context.Context, req protocol.Request) protoco
 	if card.Kind == protocol.CardNote {
 		return m.answerNoteCardLocked(entry, req)
 	}
+	// Nor does an offer need its agent still to be there.
+	if card.Kind == protocol.CardOffer {
+		return m.answerOfferCardLocked(ctx, entry, req)
+	}
 	session, live := m.session(card.SessionID)
 	if !live {
 		m.settleCardLocked(entry, "The agent ended")
@@ -243,6 +255,7 @@ func (m *Manager) replyToCard(ctx context.Context, req protocol.Request) protoco
 			return protocol.Event{Type: protocol.EvtError, Error: "Couldn't answer " + card.AgentName + ": " + err.Error()}
 		}
 		outcome = "You chose " + chosenText(card.Options, req)
+		m.recordApprovalLocked(session, session.Question, req.OptionKey)
 	case protocol.CardKey:
 		result, err := m.answerKeyCardLocked(ctx, session, card, req.OptionKey)
 		if err != nil {
@@ -382,7 +395,7 @@ func (m *Manager) reconcile(ctx context.Context, sessions []protocol.Session) {
 	for _, entry := range m.conversation.openCards() {
 		card := entry.Card
 		// A suggested note waits for the user, whatever the agents do.
-		if card.Kind == protocol.CardNote {
+		if card.Kind == protocol.CardNote || (card.Kind == protocol.CardOffer && (card.Offer["type"] == offerRule || card.Offer["type"] == offerMission)) {
 			continue
 		}
 		s, live := byID[card.SessionID]

@@ -455,8 +455,12 @@ func pasteMultiline(ctx context.Context, name, text string) error {
 	// same time, and sharing one name lets one prompt overwrite the other's
 	// staged contents before either paste completes.
 	buffer := "agentman-" + uniqueSuffix()
-	if _, err := run(ctx, "load-buffer", "-b", buffer, file.Name()); err != nil {
-		return fmt.Errorf("tmux: could not stage the message: %w", err)
+	// On the pane's own server, which the paste reads from: load-buffer names
+	// no session, so left to itself it would go to Agentman's server, and an
+	// agent in the user's own tmux would be pasted a buffer that isn't there.
+	pane := serverFor([]string{"-t", name})
+	if _, err := runOutputOn(ctx, pane, "load-buffer", "-b", buffer, file.Name()); err != nil {
+		return fmt.Errorf("tmux: could not stage the message: %w", commandError(err))
 	}
 	// paste-buffer -d normally removes it, but a missing pane or cancelled
 	// paste fails before -d takes effect. Always attempt cleanup with a fresh
@@ -464,7 +468,7 @@ func pasteMultiline(ctx context.Context, name, text string) error {
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		_, _ = run(cleanupCtx, "delete-buffer", "-b", buffer)
+		_, _ = runOutputOn(cleanupCtx, pane, "delete-buffer", "-b", buffer)
 	}()
 	// -p uses bracketed paste; -d deletes the buffer afterwards.
 	if _, err := run(ctx, "paste-buffer", "-d", "-p", "-b", buffer, "-t", name); err != nil {

@@ -13,6 +13,20 @@ final class ManagerStore {
     private(set) var status = ManagerStatus(state: "idle", keySet: false)
     private(set) var settings: ManagerSettings?
     private(set) var briefs: [String: Brief] = [:]
+    /// What Agentman found checking each agent's latest work.
+    private(set) var verifications: [String: Verification] = [:]
+    /// The teams Agentman has planned or is running.
+    private(set) var missions: [Mission] = []
+    /// The latest shipping run, if there has been one.
+    private(set) var shipRun: ShipRun?
+    /// The work lined up for tonight.
+    private(set) var queue: [QueueItem] = []
+    /// The teams at work, for the Board.
+    var runningMissions: [Mission] { missions.filter { $0.state == "running" } }
+
+    func mission(of sessionId: String) -> Mission? {
+        runningMissions.first { $0.tasks.contains { $0.sessionId == sessionId } }
+    }
     /// The user's notes for their agents, without bodies, newest first.
     private(set) var notes: [Note] = []
     /// The keys Agentman keeps, by name.
@@ -83,6 +97,12 @@ final class ManagerStore {
         defaults.set(latest, forKey: Self.lastReadKey)
     }
 
+    /// Everything but a reply of Agentman's has been seen, as the Board
+    /// shows the rest; a reply waits until the conversation is opened.
+    func markReadExceptReplies() {
+        if !unread.contains(where: { $0.role == "assistant" }) { markRead() }
+    }
+
     var thinking: Bool { status.state == "thinking" }
     /// Agentman can run, having its key: it speaks for the agents.
     var on: Bool { settings?.keySet ?? status.keySet }
@@ -96,6 +116,9 @@ final class ManagerStore {
     func reload() async {
         async let settingsReply = try? client.request(DaemonRequest(.managerSettings))
         async let briefsReply = try? client.request(DaemonRequest(.managerBriefs))
+        async let verificationsReply = try? client.request(DaemonRequest(.managerVerifications))
+        async let missionsReply = try? client.request(DaemonRequest(.managerMissions))
+        async let queueReply = try? client.request(DaemonRequest(.managerQueue))
         async let schedulesReply = try? client.request(DaemonRequest(.managerSchedules))
         var historyRequest = DaemonRequest(.managerHistory)
         historyRequest.limit = 80
@@ -107,6 +130,11 @@ final class ManagerStore {
         if let reply = await briefsReply, let all = reply.briefs {
             briefs = Dictionary(all.map { ($0.sessionId, $0) }, uniquingKeysWith: { a, _ in a })
         }
+        if let reply = await verificationsReply, let all = reply.verifications {
+            verifications = Dictionary(all.map { ($0.sessionId, $0) }, uniquingKeysWith: { a, _ in a })
+        }
+        if let reply = await missionsReply { missions = reply.missions ?? [] }
+        if let reply = await queueReply { queue = reply.queue ?? [] }
         if let reply = await historyReply {
             entries = reply.entries ?? []
             hasOlder = reply.more ?? false
@@ -196,6 +224,68 @@ final class ManagerStore {
         return nil
     }
 
+    struct Failure: Error { let message: String }
+
+    /// Ships these agents. Gives the run to follow.
+    func ship(_ ids: [String]) async -> Result<String, Failure> {
+        var request = DaemonRequest(.managerShip)
+        request.sessionIds = ids
+        guard let reply = try? await client.request(request) else { return .failure(Failure(message: "Couldn't reach am serve.")) }
+        if reply.type == "error" { return .failure(Failure(message: reply.error ?? "That didn't work.")) }
+        apply(reply)
+        guard let run = reply.ship else { return .failure(Failure(message: "Update am serve to ship from here.")) }
+        return .success(run.id)
+    }
+
+    func addToQueue(agent: String, folder: String, task: String) async -> String? {
+        var request = DaemonRequest(.managerQueueAdd)
+        request.queue = QueueItem(agent: agent, folder: folder, task: task)
+        return await perform(request)
+    }
+
+    func removeFromQueue(_ id: String) async -> String? {
+        var request = DaemonRequest(.managerQueueRemove)
+        request.queueId = id
+        return await perform(request)
+    }
+
+    func setOvernight(_ on: Bool) async -> String? {
+        guard var next = settings else { return "Agentman isn't connected." }
+        var autopilot = next.autopilot ?? Autopilot()
+        autopilot.overnight = on
+        next.autopilot = autopilot
+        return await save(next)
+    }
+
+    /// What Agentman approved by itself today, newest first.
+    var handledToday: [ManagerEntry] {
+        let start = Int64(Calendar.current.startOfDay(for: .now).timeIntervalSince1970 * 1000)
+        return entries.filter { $0.tool == "approve" && $0.ts >= start }.reversed()
+    }
+
+    /// What Agentman offers the user that belongs to no agent's own question.
+    var offers: [ManagerCard] { openCards.filter { $0.kind == "offer" } }
+
+    /// Sets how much Agentman does by itself in a folder.
+    func setTrust(_ level: String, for folder: String) async -> String? {
+        guard var next = settings else { return "Agentman isn't connected." }
+        var trust = next.trust ?? []
+        trust.removeAll { $0.folder == folder }
+        trust.append(FolderTrust(folder: folder, level: level))
+        next.trust = trust
+        return await save(next)
+    }
+
+    /// Has Agentman ask about what it approved, from now on.
+    func alwaysAsk(about request: ApprovedRequest) async -> String? {
+        guard var next = settings else { return "Agentman isn't connected." }
+        let rule = PermissionRule(action: "ask", kind: request.kind, pattern: request.target, folder: request.folder)
+        var rules = next.rules ?? []
+        if !rules.contains(rule) { rules.append(rule) }
+        next.rules = rules
+        return await save(next)
+    }
+
     // MARK: - Cards
 
     /// Answers a card: the agent's question, or a reply to an agent waiting
@@ -203,7 +293,7 @@ final class ManagerStore {
     func reply(to card: ManagerCard, with reply: QuestionReply) async -> String? {
         var request = DaemonRequest(.managerCardReply)
         request.cardId = card.id
-        if card.kind == "question" || card.kind == "key" {
+        if card.kind == "question" || card.kind == "key" || card.kind == "offer" {
             request.optionKey = reply.optionKey
             request.optionKeys = reply.optionKeys
             request.answerText = reply.text
@@ -383,6 +473,16 @@ final class ManagerStore {
             if let brief = event.brief { briefs[brief.sessionId] = brief }
             if let all = event.briefs {
                 for brief in all { briefs[brief.sessionId] = brief }
+            }
+        case "manager_missions":
+            missions = event.missions ?? []
+        case "manager_ship":
+            shipRun = event.ship
+        case "manager_queue":
+            queue = event.queue ?? []
+        case "manager_verification":
+            if let check = event.verification {
+                verifications[check.sessionId] = check.state == "none" ? nil : check
             }
         default:
             break

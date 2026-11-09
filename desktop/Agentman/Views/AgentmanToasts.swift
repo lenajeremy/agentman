@@ -136,7 +136,7 @@ private struct NewsToast: View {
         if let id = entry.sessionId, store.session(id) != nil {
             store.selection = .agent(id)
         } else {
-            store.selection = .manager
+            store.openAgentmanChat()
         }
         close()
     }

@@ -58,6 +58,94 @@ enum GitAction: Equatable {
     }
 }
 
+extension GitAction {
+    var isIdle: Bool {
+        if case .idle = self { true } else { false }
+    }
+
+    /// Why there is nothing to do, when there isn't.
+    var hint: String? {
+        if case .idle(_, let hint) = self { hint } else { nil }
+    }
+
+    /// Whether it sends work to a branch that is the user's to push, which
+    /// a button asks about once before doing.
+    func pushesToProtected(_ state: GitState?) -> Bool {
+        guard self == .push, let state else { return false }
+        return ShipCheck.pushesToProtected(state)
+    }
+}
+
+/// One thing git is asked to do, as part of a run of them.
+enum GitStep: Equatable {
+    /// With no message Agentman writes one.
+    case commit(paths: [String], message: String)
+    case push
+    case createPR
+
+    var running: String {
+        switch self {
+        case .commit(_, let message): message.isEmpty ? "Writing the message…" : "Committing…"
+        case .push: "Pushing…"
+        case .createPR: "Opening the PR…"
+        }
+    }
+
+    var failed: String {
+        switch self {
+        case .commit: "Commit failed"
+        case .push: "Push failed"
+        case .createPR: "PR failed"
+        }
+    }
+}
+
+/// What a run of git steps came to, in a sentence.
+struct GitOutcome: Equatable {
+    let text: String
+    var url: String?
+    var failed = false
+}
+
+extension AgentsStore {
+    /// Takes the steps in order, saying which it is on, and stops at the
+    /// first that fails, saying what got done before it.
+    func run(_ steps: [GitStep], session: String, progress: (String) -> Void) async -> GitOutcome {
+        var said: [String] = []
+        var url: String?
+        for step in steps {
+            progress(step.running)
+            do {
+                let after = try await take(step, session: session)
+                switch after.done {
+                case "committed": said.append("Committed \(after.commit ?? "")")
+                case "pushed": said.append("pushed to \(after.upstream ?? "the remote")")
+                case "pr_created":
+                    said.append("opened the pull request")
+                    url = after.url
+                default: break
+                }
+            } catch {
+                let before = said.isEmpty ? "" : said.joined(separator: ", ") + ", but "
+                return GitOutcome(text: before + error.localizedDescription, failed: true)
+            }
+        }
+        let text = said.joined(separator: ", ")
+        return GitOutcome(text: text.prefix(1).uppercased() + text.dropFirst() + ".", url: url)
+    }
+
+    private func take(_ step: GitStep, session: String) async throws -> GitState {
+        switch step {
+        case .commit(let paths, let message):
+            return try await git(.gitCommit, session: session, message: message, paths: paths)
+        case .push:
+            return try await git(.gitPush, session: session)
+        case .createPR:
+            return try await git(.gitCreatePR, session: session)
+        }
+    }
+}
+
 /// The card's git row: its action, a menu of the rest, then what the last
 /// one did or why it failed.
 struct GitActionsRow: View {
@@ -71,19 +159,7 @@ struct GitActionsRow: View {
     @State private var committing: CommitSheet.Then?
     @State private var confirming: GitAction?
     @State private var running: String?
-    @State private var outcome: Outcome?
-
-    private struct Outcome: Equatable {
-        let text: String
-        var url: String?
-        var failed = false
-    }
-
-    private enum Step {
-        case commit(paths: [String], message: String)
-        case push
-        case createPR
-    }
+    @State private var outcome: GitOutcome?
 
     var body: some View {
         let action = GitAction.quick(state)
@@ -150,6 +226,13 @@ struct GitActionsRow: View {
                 }
             }
         }
+        // "Commit & push" on the Board's card, once there is something to
+        // show in the sheet.
+        .task(id: requestReady) {
+            guard requestReady else { return }
+            store.gitActionRequest = nil
+            start(GitAction.quick(state))
+        }
         .sheet(item: $committing) { then in
             CommitSheet(state: state, changes: changes, hidden: hidden, then: then) { paths, message, push in
                 committing = nil
@@ -168,6 +251,11 @@ struct GitActionsRow: View {
         } message: {
             Text(confirmMessage)
         }
+    }
+
+    private var requestReady: Bool {
+        guard store.gitActionRequest == session.id, let state else { return false }
+        return state.changes == 0 || !changes.isEmpty
     }
 
     private func start(_ action: GitAction) {
@@ -195,49 +283,11 @@ struct GitActionsRow: View {
         return "\(commits) go to \(target)."
     }
 
-    private func run(_ steps: [Step]) {
+    private func run(_ steps: [GitStep]) {
         outcome = nil
         Task {
-            var said: [String] = []
-            var url: String?
-            for step in steps {
-                let type: RequestType
-                var paths: [String]?
-                var message: String?
-                switch step {
-                case .commit(let files, let text):
-                    running = text.isEmpty ? "Writing the message…" : "Committing…"
-                    type = .gitCommit
-                    paths = files
-                    message = text
-                case .push:
-                    running = "Pushing…"
-                    type = .gitPush
-                case .createPR:
-                    running = "Opening the PR…"
-                    type = .gitCreatePR
-                }
-                do {
-                    let after = try await store.git(type, session: session.id, message: message, paths: paths)
-                    switch after.done {
-                    case "committed": said.append("Committed \(after.commit ?? "")")
-                    case "pushed": said.append("pushed to \(after.upstream ?? "the remote")")
-                    case "pr_created":
-                        said.append("opened the pull request")
-                        url = after.url
-                    default: break
-                    }
-                } catch {
-                    let before = said.isEmpty ? "" : said.joined(separator: ", ") + ", but "
-                    outcome = Outcome(text: before + error.localizedDescription, failed: true)
-                    running = nil
-                    changed()
-                    return
-                }
-            }
+            outcome = await store.run(steps, session: session.id) { running = $0 }
             running = nil
-            let text = said.joined(separator: ", ")
-            outcome = Outcome(text: text.prefix(1).uppercased() + text.dropFirst() + ".", url: url)
             changed()
         }
     }
@@ -255,6 +305,10 @@ struct CommitSheet: View {
     let changes: [WorkspaceChange]
     let hidden: Int
     let then: Then
+    /// What it is doing, while the commit runs here in the sheet.
+    var busy: String? = nil
+    /// Why the commit failed, with what was typed still here to try again.
+    var problem: String? = nil
     let confirm: (_ paths: [String], _ message: String, _ push: Bool) -> Void
     let cancel: () -> Void
     @State private var message = ""
@@ -343,22 +397,36 @@ struct CommitSheet: View {
                         }
                     }
             }
+            if let problem {
+                Text(problem)
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.errorText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
             HStack(spacing: 8) {
+                if let busy {
+                    Loader(size: 11)
+                    Text(busy)
+                        .font(TextStyle.caption)
+                        .foregroundStyle(Palette.muted)
+                }
                 Spacer()
                 Button("Cancel", action: cancel)
                     .buttonStyle(.brandSecondary)
                     .keyboardShortcut(.cancelAction)
+                    .disabled(busy != nil)
                 if then == .commitAndPush {
                     Button("Commit") { confirm(included.map(\.path), message, false) }
                         .buttonStyle(.brandSecondary)
-                        .disabled(included.isEmpty)
+                        .disabled(included.isEmpty || busy != nil)
                 }
                 Button(then == .commitAndPush ? "Commit & push" : "Commit") {
                     confirm(included.map(\.path), message, then == .commitAndPush)
                 }
                 .buttonStyle(.brand)
                 .keyboardShortcut(.defaultAction)
-                .disabled(included.isEmpty)
+                .disabled(included.isEmpty || busy != nil)
             }
             .controlSize(.large)
         }

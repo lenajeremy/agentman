@@ -134,10 +134,11 @@ var briefSchema = map[string]any{
 		"blocked":  map[string]any{"type": "string"},
 		"needsYou": map[string]any{"type": "string"},
 		"heldBack": map[string]any{"type": "string"},
+		"standing": map[string]any{"type": "string"},
 		"files":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 		"notable":  map[string]any{"type": "boolean"},
 	},
-	"required":             []string{"summary", "goal", "done", "now", "blocked", "needsYou", "heldBack", "files", "notable"},
+	"required":             []string{"summary", "goal", "done", "now", "blocked", "needsYou", "heldBack", "standing", "files", "notable"},
 	"additionalProperties": false,
 }
 
@@ -261,6 +262,7 @@ func (m *Manager) writeBrief(ctx context.Context, sessionID string) {
 		Blocked  string   `json:"blocked"`
 		NeedsYou string   `json:"needsYou"`
 		HeldBack string   `json:"heldBack"`
+		Standing string   `json:"standing"`
 		Files    []string `json:"files"`
 		Notable  bool     `json:"notable"`
 	}
@@ -275,6 +277,15 @@ func (m *Manager) writeBrief(ctx context.Context, sessionID string) {
 	lastID := ""
 	if len(page.Messages) > 0 {
 		lastID = page.Messages[len(page.Messages)-1].ID
+	}
+	// A need the user has said how to answer is answered, and needs no one.
+	if strings.TrimSpace(brief.NeedsYou) != "" && session.Question == nil {
+		m.cardMu.Lock()
+		answered := m.answerStandingLocked(ctx, session, brief.NeedsYou, fields.Standing, page.Messages)
+		m.cardMu.Unlock()
+		if answered {
+			brief.NeedsYou = ""
+		}
 	}
 	post, err := m.briefs.put(brief, lastID)
 	if err != nil {

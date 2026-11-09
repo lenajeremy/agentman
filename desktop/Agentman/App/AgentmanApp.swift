@@ -134,7 +134,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        MainActor.assumeIsolated {
+        // Under tests a window closing can look like the last one going, and
+        // would end the run; the test runner ends the app itself.
+        if AgentmanApp.underTests { return .terminateCancel }
+        return MainActor.assumeIsolated {
             let unsaved = EditorRegistry.shared.unsaved
             guard !unsaved.isEmpty else { return .terminateNow }
             let alert = NSAlert()

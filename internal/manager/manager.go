@@ -52,6 +52,12 @@ type Config struct {
 	ProcessTree func(context.Context) (*tmux.ProcessTree, error)
 	// Now is the clock schedules run on. Tests replace it.
 	Now func() time.Time
+	// RunCheck runs a program in a folder for a check of an agent's work,
+	// returning what it printed. Tests replace it.
+	RunCheck func(ctx context.Context, dir, program string, args ...string) (string, error)
+	// VerifyDelay is how long a finished turn settles before it is checked.
+	// Tests shorten it.
+	VerifyDelay time.Duration
 }
 
 type Manager struct {
@@ -68,9 +74,25 @@ type Manager struct {
 	knowledge    *knowledge.Store
 	keys         *keyStore
 	// voice holds recordings whose parts are still arriving.
-	voice     voiceUploads
-	schedules *scheduleStore
-	now       func() time.Time
+	voice       voiceUploads
+	schedules   *scheduleStore
+	now         func() time.Time
+	verifies    *verifyStore
+	learned     *learnStore
+	corrections *correctionsStore
+	missions    *missionStore
+	// missionMu keeps two sweeps from starting one team member twice.
+	missionMu sync.Mutex
+	shipping  shipState
+	queue     *queueStore
+	// queueMu keeps two sweeps from starting one piece of work twice.
+	queueMu sync.Mutex
+	// stuck is what was last raised about each agent, guarded by cardMu.
+	stuck    map[string]string
+	runCheck func(ctx context.Context, dir, program string, args ...string) (string, error)
+	// verifyDelay and verifySlots pace the checks of agents' work.
+	verifyDelay time.Duration
+	verifySlots chan struct{}
 
 	mu       sync.Mutex
 	settings protocol.ManagerSettings
@@ -149,6 +171,15 @@ func New(cfg Config) (*Manager, error) {
 		keys:         loadKeys(cfg.Dir),
 		schedules:    loadSchedules(cfg.Dir),
 		now:          cfg.Now,
+		verifies:     loadVerifications(cfg.Dir),
+		learned:      loadLearned(cfg.Dir),
+		corrections:  loadCorrections(cfg.Dir),
+		missions:     loadMissions(cfg.Dir),
+		queue:        loadQueue(cfg.Dir),
+		stuck:        map[string]string{},
+		runCheck:     cfg.RunCheck,
+		verifyDelay:  cfg.VerifyDelay,
+		verifySlots:  make(chan struct{}, maxConcurrentChecks),
 		settings:     loadSettings(filepath.Join(cfg.Dir, "settings.json")),
 		briefDue:     map[string]time.Time{},
 		lastBriefAt:  map[string]time.Time{},
@@ -163,6 +194,12 @@ func New(cfg Config) (*Manager, error) {
 	}
 	if m.now == nil {
 		m.now = time.Now
+	}
+	if m.runCheck == nil {
+		m.runCheck = runCheckProgram
+	}
+	if m.verifyDelay == 0 {
+		m.verifyDelay = defaultVerifyDelay
 	}
 	if m.knowledge == nil {
 		m.knowledge = knowledge.Open(filepath.Join(cfg.Dir, "knowledge"))
@@ -184,6 +221,7 @@ func (m *Manager) Run(ctx context.Context) {
 	go m.watchSessions(ctx)
 	go m.runSchedules(ctx)
 	go m.watchViewing(ctx)
+	go m.watchStuck(ctx)
 	m.runBriefs(ctx)
 }
 
@@ -200,7 +238,8 @@ func (m *Manager) Handles(kind protocol.RequestType) bool {
 		protocol.ReqManagerSchedules, protocol.ReqManagerScheduleCancel, protocol.ReqManagerImage,
 		protocol.ReqToolsTitle, protocol.ReqManagerOpenCards, protocol.ReqManagerCheckPermission,
 		protocol.ReqTranscribe, protocol.ReqVoiceAccount, protocol.ReqVoiceSignInStart, protocol.ReqVoiceSignInVerify,
-		protocol.ReqVoiceSignOut, protocol.ReqManagerViewing:
+		protocol.ReqVoiceSignOut, protocol.ReqManagerViewing, protocol.ReqManagerVerifications, protocol.ReqManagerMissions, protocol.ReqManagerShip,
+		protocol.ReqManagerQueue, protocol.ReqManagerQueueAdd, protocol.ReqManagerQueueRemove:
 		return true
 	}
 	return false
@@ -254,6 +293,14 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 		return m.setKey(ctx, providerNamed(string(req.Kind)), req.Text)
 	case protocol.ReqManagerBriefs:
 		return protocol.Event{Type: protocol.EvtManagerBrief, Briefs: m.briefs.all()}
+	case protocol.ReqManagerQueue, protocol.ReqManagerQueueAdd, protocol.ReqManagerQueueRemove:
+		return m.handleQueueRequest(req)
+	case protocol.ReqManagerShip:
+		return m.startShip(req.SessionIDs)
+	case protocol.ReqManagerMissions:
+		return protocol.Event{Type: protocol.EvtManagerMissions, Missions: m.missions.all()}
+	case protocol.ReqManagerVerifications:
+		return protocol.Event{Type: protocol.EvtManagerVerification, Verifications: m.verifies.all()}
 	case protocol.ReqManagerCardReply:
 		return m.replyToCard(ctx, req)
 	case protocol.ReqManagerEntryClose:
@@ -290,6 +337,9 @@ func (m *Manager) Handle(ctx context.Context, req protocol.Request) protocol.Eve
 func (m *Manager) TurnComplete(session protocol.Session) {
 	m.scheduleBrief(session.ID, briefAfterTurn, briefTurnGap)
 	go m.watchEvent(session.ID, protocol.WatchTurnEnd, protocol.WatchIdle)
+	go m.verifyTurn(context.Background(), session.ID)
+	m.missionTurnEnded(session.ID)
+	m.queueTurnEnded(session.ID)
 }
 
 // NeedsAnswer hears that an agent is asking something. The daemon says so on
@@ -413,8 +463,14 @@ func (m *Manager) setSettings(next *protocol.ManagerSettings) protocol.Event {
 	}
 	// An app that doesn't know the permission switches and rules leaves
 	// them out; that keeps them as they are rather than clearing them.
-	if next.Approve == nil || next.Rules == nil {
+	if next.Approve == nil || next.Rules == nil || next.Autopilot == nil || next.Trust == nil {
 		current := m.currentSettings()
+		if next.Trust == nil {
+			next.Trust = current.Trust
+		}
+		if next.Autopilot == nil {
+			next.Autopilot = current.Autopilot
+		}
 		if next.Approve == nil {
 			next.Approve = current.Approve
 		}

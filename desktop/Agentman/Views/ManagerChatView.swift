@@ -23,6 +23,12 @@ struct ManagerChatView: View {
 
     private var manager: ManagerStore { store.manager }
 
+    /// What is waiting to be quoted in the next message.
+    private var quotes: Binding<[ReplyQuote]> {
+        Binding(get: { [store] in store.replyQuotes[ReplyQuotes.agentman] ?? [] },
+                set: { [store] in store.replyQuotes[ReplyQuotes.agentman] = $0.isEmpty ? nil : $0 })
+    }
+
     private var entry: Bool { Self.showsEntry(manager) }
 
     /// The entry page: Agentman and one box, with nothing else competing.
@@ -120,6 +126,9 @@ struct ManagerChatView: View {
                     }
                     .modifier(FollowsEnd(following: following, earlier: manager.hasOlder ? { await manager.loadOlder() } : nil))
                     .scrollIndicators(.never)
+                    .offersQuotes(when: store.status == .connected && !manager.needsKey) { text in
+                        quotes.wrappedValue.append(ReplyQuote(text: text))
+                    }
                     .modifier(TopFade())
                     .overlay(alignment: .bottom) {
                         JumpToLatestOverlay(following: following, hidden: entry) {
@@ -156,7 +165,7 @@ struct ManagerChatView: View {
                                 send(draft)
                             }
                         } else {
-                            ManagerComposer(text: $draft, attachments: $attachments, thinking: manager.thinking, sending: sending,
+                            ManagerComposer(text: $draft, attachments: $attachments, quotes: quotes, thinking: manager.thinking, sending: sending,
                                             onDropTargeted: { dropping = $0 }) {
                                 send(draft)
                             } onStop: {
@@ -213,10 +222,13 @@ struct ManagerChatView: View {
         sending = true
         followRequest += 1
         let images = attachments
+        let quoted = quotes.wrappedValue.map(\.text)
+        message = ReplyQuotes.message(quoted, words: message)
         Task {
             if await manager.send(message, images: images) {
                 draft = ""
                 attachments = []
+                quotes.wrappedValue = []
             }
             sending = false
         }
@@ -307,13 +319,16 @@ private struct StarterChip: View {
 
 /// The box to talk to Agentman: a message, its API key before it has one,
 /// or a note that am serve isn't running.
-private struct ManagerBox: View {
+struct ManagerBox: View {
     @Environment(AgentsStore.self) private var store
     @Binding var draft: String
     @Binding var attachments: [Attachment]
     @Binding var dropping: Bool
     var sending: Bool
     var large = false
+    /// The room kept under it for a word about the connection or the key,
+    /// which the Board only gives when there is one.
+    var keepsFooter = true
     var send: () -> Void
 
     var body: some View {
@@ -334,6 +349,7 @@ private struct ManagerBox: View {
                 manager.problem = nil
             })
 
+            if keepsFooter || store.status != .connected || manager.needsKey {
             Group {
                 if case .unavailable = store.status {
                     Text("Not connected.")
@@ -355,6 +371,7 @@ private struct ManagerBox: View {
             .foregroundStyle(Palette.muted)
             .padding(.top, 14)
             .frame(height: 34, alignment: .top)
+            }
         }
     }
 }
@@ -418,7 +435,7 @@ private struct ChatItemView: View {
                     }
                     if !entry.text.isEmpty {
                         // Files are named to Agentman by their full paths.
-                        TaggedText(text: entry.text, folder: nil)
+                        QuotedMessage(text: entry.text) { TaggedText(text: $0, folder: nil) }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
                             .background(Palette.bubble, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -482,6 +499,7 @@ private struct AssistantReply: View {
                     ThinkingDots()
                 } else {
                     MarkdownView(entry.text)
+                        .quotable()
                 }
             }
         }
@@ -730,6 +748,7 @@ private struct ManagerComposer: View {
     @Environment(\.fileMentions) private var mentions
     @Binding var text: String
     var attachments: Binding<[Attachment]> = .constant([])
+    var quotes: Binding<[ReplyQuote]> = .constant([])
     var thinking: Bool
     var sending: Bool
     var large = false
@@ -746,6 +765,10 @@ private struct ManagerComposer: View {
         VStack(alignment: .leading, spacing: 4) {
             if !attachments.wrappedValue.isEmpty {
                 AttachmentStrip(attachments: attachments)
+            }
+            if !quotes.wrappedValue.isEmpty {
+                QuoteStrip(quotes: quotes)
+                    .padding(.bottom, 4)
             }
             HStack(alignment: .bottom, spacing: 10) {
                 Button(action: attach) {
@@ -793,6 +816,9 @@ private struct ManagerComposer: View {
                 .disabled(!thinking && !canSend)
                 .help(thinking ? "Stop" : "Send")
             }
+        }
+        .onChange(of: quotes.wrappedValue.count) { before, now in
+            if now > before { focused = true }
         }
         .padding(.leading, large ? 12 : 10)
         .padding(.trailing, 8)
@@ -932,7 +958,7 @@ private struct ScheduledLine: View {
 
 /// The clock in the title bar while Agentman has something scheduled, with
 /// the list to see and cancel it.
-private struct SchedulesButton: View {
+struct SchedulesButton: View {
     @Environment(AgentsStore.self) private var store
     @State private var open = false
 

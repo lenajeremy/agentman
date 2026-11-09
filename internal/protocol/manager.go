@@ -61,6 +61,23 @@ const (
 	// holds. Agentman puts up no card and pushes nothing for an agent the
 	// user is looking at. Answered with EvtManagerViewing.
 	ReqManagerViewing RequestType = "manager_viewing"
+
+	// ReqManagerMissions asks for the teams Agentman has planned or is running.
+	ReqManagerMissions RequestType = "manager_missions"
+
+	// ReqManagerQueue lists the work queued for tonight; ReqManagerQueueAdd
+	// adds Queue to it; ReqManagerQueueRemove takes out QueueID.
+	ReqManagerQueue       RequestType = "manager_queue"
+	ReqManagerQueueAdd    RequestType = "manager_queue_add"
+	ReqManagerQueueRemove RequestType = "manager_queue_remove"
+
+	// ReqManagerShip commits, pushes and opens pull requests for the agents
+	// named in SessionIDs, one after another.
+	ReqManagerShip RequestType = "manager_ship"
+
+	// ReqManagerVerifications asks for what Agentman found checking each
+	// agent's finished work.
+	ReqManagerVerifications RequestType = "manager_verifications"
 )
 
 const (
@@ -80,6 +97,14 @@ const (
 	// EvtManagerBrief is an agent's brief, new or updated; on
 	// ReqManagerBriefs, Briefs holds them all.
 	EvtManagerBrief EventType = "manager_brief"
+	// EvtManagerMissions is every team, sent whenever one changes.
+	EvtManagerMissions EventType = "manager_missions"
+	// EvtManagerQueue is the work queued for tonight.
+	EvtManagerQueue EventType = "manager_queue"
+	// EvtManagerShip says how shipping is going.
+	EvtManagerShip EventType = "manager_ship"
+	// EvtManagerVerification says how a check of an agent's work went.
+	EvtManagerVerification EventType = "manager_verification"
 	// EvtManagerSchedules is everything Agentman has scheduled, in
 	// Schedules, whenever that changes.
 	EvtManagerSchedules EventType = "manager_schedules"
@@ -162,6 +187,8 @@ type ManagerEntry struct {
 	// put in front of them to answer on the spot. When it is settled, the
 	// entry comes again with the card's new state.
 	Card *ManagerCard `json:"card,omitempty"`
+	// Approved says what Agentman approved, on an "approve" activity.
+	Approved *ApprovedRequest `json:"approved,omitempty"`
 	// Closed is set when the user closed the entry: apps leave it out of
 	// the conversation they show.
 	Closed bool `json:"closed,omitempty"`
@@ -188,6 +215,9 @@ const (
 	// CardNote is a note Agentman suggests keeping. Nothing is saved until
 	// the user approves it, as it is or as they edited it.
 	CardNote = "note"
+	// CardOffer is something Agentman offers to do, with the options to take
+	// it up or leave it. Offer says what, for the daemon to carry out.
+	CardOffer = "offer"
 )
 
 // Card states.
@@ -230,6 +260,8 @@ type ManagerCard struct {
 	Custom     bool             `json:"custom,omitempty"`
 	// KeyName is the key a key card is about.
 	KeyName string `json:"keyName,omitempty"`
+	// Offer is what an offer card proposes, read back when it is answered.
+	Offer map[string]string `json:"offer,omitempty"`
 	// Suggested is the option Agentman would pick, when the user asked it to
 	// answer and the answer needs their OK.
 	Suggested string `json:"suggested,omitempty"`
@@ -261,6 +293,15 @@ type ManagerSettings struct {
 	// An "ask" rule wins over everything. On a set, nil keeps what is
 	// stored and an empty list clears them.
 	Rules []PermissionRule `json:"rules,omitempty"`
+	// Trust sets how much Agentman does by itself in a folder, with the
+	// folders inside it. The closest entry wins; where none applies,
+	// AutoApprove decides. On a set, nil keeps what is stored and an empty
+	// list clears them.
+	Trust []FolderTrust `json:"trust,omitempty"`
+	// Autopilot is what Agentman does by itself beyond approving requests.
+	// All of it is off until the user turns it on. On a set, nil keeps what
+	// is stored.
+	Autopilot *Autopilot `json:"autopilot,omitempty"`
 	// Style is how Agentman talks; Instructions is anything else it should
 	// know or do. Both go into its prompt.
 	Style        string `json:"style"`
@@ -273,6 +314,196 @@ type ManagerSettings struct {
 	Provider        string `json:"provider,omitempty"`
 	AnthropicKeySet bool   `json:"anthropicKeySet"`
 	GeminiKeySet    bool   `json:"geminiKeySet"`
+}
+
+// How much Agentman does by itself in a folder.
+const (
+	// TrustWatch: it reports and asks, and acts on nothing.
+	TrustWatch = "watch"
+	// TrustSuggest: it marks the answer it would give and waits.
+	TrustSuggest = "suggest"
+	// TrustHandle: it answers what the policy allows.
+	TrustHandle = "handle"
+)
+
+// FolderTrust is the user's trust level for a folder.
+type FolderTrust struct {
+	Folder string `json:"folder"`
+	Level  string `json:"level"`
+}
+
+// ApprovedRequest is what Agentman approved by itself, so the user can look
+// it over and have it ask next time.
+type ApprovedRequest struct {
+	Kind   string `json:"kind"`
+	Target string `json:"target"`
+	Folder string `json:"folder,omitempty"`
+}
+
+// Autopilot switches what Agentman does on its own. Each spends the user's
+// API key or changes what agents do, so each is the user's to turn on.
+type Autopilot struct {
+	// Verify checks an agent's work when it finishes a turn that changed
+	// something: runs the folder's tests and compares the changes with what
+	// was asked.
+	Verify bool `json:"verify"`
+	// SendBack gives an agent the output of tests that failed, so it can fix
+	// them, a limited number of times for one request.
+	SendBack bool `json:"sendBack"`
+	// LearnRules offers to make a rule of what the user keeps approving.
+	LearnRules bool `json:"learnRules"`
+	// Unstick notices agents that have stopped getting anywhere.
+	Unstick bool `json:"unstick"`
+	// Overlap notices agents working on the same files.
+	Overlap bool `json:"overlap"`
+	// LearnNotes suggests a note for what the user keeps telling agents.
+	LearnNotes bool `json:"learnNotes"`
+	// Overnight starts queued work between NightStart and NightEnd, "HH:MM"
+	// on the 24-hour clock, NightAgents at a time; NightEnd is also when the
+	// morning's report is written. Empty or zero take the defaults.
+	Overnight   bool   `json:"overnight"`
+	NightStart  string `json:"nightStart,omitempty"`
+	NightEnd    string `json:"nightEnd,omitempty"`
+	NightAgents int    `json:"nightAgents,omitempty"`
+	// VerifyDaily is how many reviews by the model a day may cost; zero is
+	// the default. Running the tests costs none.
+	VerifyDaily int `json:"verifyDaily,omitempty"`
+	// ReplyCommit and ReplyInstall answer yes, in folders on Handle, to an
+	// agent asking only whether to commit finished work, or to install a
+	// finished build on the user's own phone or Mac.
+	ReplyCommit  bool `json:"replyCommit"`
+	ReplyInstall bool `json:"replyInstall"`
+}
+
+// Where a team stands.
+const (
+	MissionProposed  = "proposed"
+	MissionRunning   = "running"
+	MissionDone      = "done"
+	MissionDismissed = "dismissed"
+)
+
+// Where one member's part stands.
+const (
+	TaskPlanned = "planned"
+	TaskRunning = "running"
+	TaskDone    = "done"
+	TaskFailed  = "failed"
+)
+
+// Mission is a goal the user gave Agentman, as a team of agents.
+type Mission struct {
+	ID        string        `json:"id"`
+	Goal      string        `json:"goal"`
+	State     string        `json:"state"`
+	Tasks     []MissionTask `json:"tasks"`
+	CreatedAt int64         `json:"createdAt"`
+}
+
+// MissionTask is one agent's part in a team.
+type MissionTask struct {
+	ID string `json:"id"`
+	// Title is the part in a few words; Task is what the agent is told.
+	Title string `json:"title"`
+	Task  string `json:"task"`
+	// Agent is which agent does it, by start_agent's name for it.
+	Agent  string `json:"agent"`
+	Folder string `json:"folder"`
+	// Worktree, when set, gives it a worktree of its own by that name.
+	Worktree  string   `json:"worktree,omitempty"`
+	DependsOn []string `json:"dependsOn,omitempty"`
+	State     string   `json:"state"`
+	// SessionID is its agent, once started.
+	SessionID   string `json:"sessionId,omitempty"`
+	StartedAt   int64  `json:"startedAt,omitempty"`
+	TurnEndedAt int64  `json:"turnEndedAt,omitempty"`
+	Problem     string `json:"problem,omitempty"`
+}
+
+// Where a queued piece of work stands.
+const (
+	QueueWaiting = "waiting"
+	QueueRunning = "running"
+	QueueDone    = "done"
+	QueueFailed  = "failed"
+)
+
+// QueueItem is work lined up for tonight.
+type QueueItem struct {
+	ID          string `json:"id"`
+	Agent       string `json:"agent"`
+	Folder      string `json:"folder"`
+	Task        string `json:"task"`
+	State       string `json:"state"`
+	SessionID   string `json:"sessionId,omitempty"`
+	Problem     string `json:"problem,omitempty"`
+	CreatedAt   int64  `json:"createdAt"`
+	StartedAt   int64  `json:"startedAt,omitempty"`
+	TurnEndedAt int64  `json:"turnEndedAt,omitempty"`
+	Reported    bool   `json:"reported,omitempty"`
+}
+
+// How shipping is going, for a run and for one agent in it.
+const (
+	ShipRunning = "running"
+	ShipDone    = "done"
+
+	ShipWaiting = "waiting"
+	ShipWorking = "working"
+	ShipShipped = "shipped"
+	ShipSkipped = "skipped"
+	ShipFailed  = "failed"
+)
+
+// ShipRun is several finished agents being shipped together.
+type ShipRun struct {
+	ID        string     `json:"id"`
+	State     string     `json:"state"`
+	Items     []ShipItem `json:"items"`
+	StartedAt int64      `json:"startedAt"`
+}
+
+// ShipItem is one agent in a ShipRun.
+type ShipItem struct {
+	SessionID string `json:"sessionId"`
+	Name      string `json:"name"`
+	State     string `json:"state"`
+	Note      string `json:"note,omitempty"`
+	URL       string `json:"url,omitempty"`
+}
+
+// How a check of an agent's work came out.
+const (
+	VerifyChecking = "checking"
+	// VerifyVerified: the change does what was asked, and tests pass if the
+	// folder has any.
+	VerifyVerified = "verified"
+	// VerifyPassed: the tests pass, and the change wasn't reviewed.
+	VerifyPassed = "passed"
+	// VerifyConcerns: the review found something missing or wrong.
+	VerifyConcerns = "concerns"
+	// VerifyFailed: the tests fail.
+	VerifyFailed = "failed"
+	// VerifyNone: nothing to report; a card drops what it showed.
+	VerifyNone = "none"
+)
+
+// Verification is what Agentman found checking one agent's latest work.
+type Verification struct {
+	SessionID string `json:"sessionId"`
+	State     string `json:"state"`
+	// Summary is the finding in a line.
+	Summary string   `json:"summary,omitempty"`
+	Issues  []string `json:"issues,omitempty"`
+	// Command is the test command run, when the folder has one.
+	Command string `json:"command,omitempty"`
+	// Output is the end of what the tests printed, when they failed.
+	Output string `json:"output,omitempty"`
+	// MessageID is the last message of the turn that was checked.
+	MessageID string `json:"messageId,omitempty"`
+	// SentBack says the failure went to the agent to fix.
+	SentBack  bool  `json:"sentBack,omitempty"`
+	UpdatedAt int64 `json:"updatedAt"`
 }
 
 // ManagerStatus is what Agentman is doing.

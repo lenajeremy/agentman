@@ -37,7 +37,7 @@ import { SentImages } from "../../components/SentImages";
 import { SentFileChips } from "../../components/SentFileChips";
 import { ToolGroup } from "../../components/ToolGroup";
 import { KEEP_READING, ScrollToLatest, SCROLL_AWAY } from "../../components/ScrollToLatest";
-import { groupTools } from "../../lib/toolgroups";
+import { groupTools, latestTurn, turnSeconds } from "../../lib/toolgroups";
 import { readImage } from "../../lib/imagepath";
 import { sentMessageParts, splitSentMessage } from "../../lib/sentimages";
 import { MotionPressable } from "../../components/MotionPressable";
@@ -46,7 +46,7 @@ import { Loader } from "../../components/Loader";
 import { Pulse } from "../../components/Pulse";
 import { QuestionCard } from "../../components/QuestionCard";
 import { QuestionSheet } from "../../components/QuestionSheet";
-import { Thinking } from "../../components/Thinking";
+import { WorkedLine, WorkingFor } from "../../components/WorkedLine";
 import { ToolRow } from "../../components/ToolRow";
 import { AttachmentStrip } from "../../components/AttachmentStrip";
 import { Popover, type PopoverItem } from "../../components/Popover";
@@ -95,6 +95,7 @@ import {
 type Row =
   | { kind: "message"; message: Message }
   | { kind: "tools"; key: string; calls: Message[]; said: string; pictures?: boolean }
+  | { kind: "worked"; key: string; seconds: number }
   | { kind: "pending"; pending: PendingSend }
   // A message the agent is holding until its current step ends, sent from
   // the phone or typed at the Mac.
@@ -346,12 +347,20 @@ export default function SessionScreen() {
       ...groupTools(messages.filter((message) => showsInFeed(message) && !waitingIds.has(message.id)), (message) =>
         Boolean(message.tool && readImage(message.tool.name, message.tool.summary ?? "", session?.cwd ?? "")),
       ),
+      // What the latest turn came to, once the agent has stopped; nothing
+      // while it waits on the user.
+      ...(() => {
+        const seconds = session && session.state !== "busy" && session.state !== "waiting_input" && !session.question
+          ? turnSeconds(latestTurn(messages))
+          : null;
+        return seconds === null ? [] : [{ kind: "worked" as const, key: "worked-latest", seconds }];
+      })(),
       ...sent,
       ...waiting,
     ];
     // Reversed to feed an inverted list — see the FlatList below.
     return chronological.reverse();
-  }, [messages, store.pending, sessionId, queued, queuedRows, session?.cwd]);
+  }, [messages, store.pending, sessionId, queued, queuedRows, session?.cwd, session?.state, session?.question]);
   // The find bar's words, and the message whose match is shown.
   const words = useMemo(() => markWords(finding?.searched ?? ""), [finding?.searched]);
   const currentMatch = finding && finding.index !== null ? finding.matches[finding.index]?.messageId : undefined;
@@ -1293,6 +1302,8 @@ export default function SessionScreen() {
               </FindContext.Provider>
             ) : item.kind === "tools" ? (
               <ToolGroup calls={item.calls} said={item.said} cwd={session?.cwd ?? ""} pictures={item.pictures} />
+            ) : item.kind === "worked" ? (
+              <WorkedLine seconds={item.seconds} />
             ) : item.kind === "pending" ? (
               <PendingRow
                 pending={item.pending}
@@ -1319,7 +1330,7 @@ export default function SessionScreen() {
           ListHeaderComponent={
             session?.state === "busy" ? (
               <Animated.View style={styles.thinking} entering={STATE_IN} exiting={STATE_OUT}>
-                <Thinking />
+                <WorkingFor since={latestTurn(messages).start?.ts ?? null} />
               </Animated.View>
             ) : undefined
           }

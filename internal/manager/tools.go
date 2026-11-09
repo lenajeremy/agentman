@@ -165,6 +165,42 @@ func init() {
 			run:        runEndAgent,
 		},
 		{
+			name: "plan_team",
+			description: "Propose a team of agents for a goal too big for one, when the user gives you such a goal: who does what, in which folder, in what order. " +
+				"The user sees the plan and decides; nothing starts unless they approve it, and agents wait for the ones they depend on. " +
+				"For parallel work on one repository give each agent a worktree. Don't start the agents yourself.",
+			properties: map[string]any{
+				"goal": map[string]any{"type": "string", "description": "The goal, in the user's terms, in a line."},
+				"tasks": map[string]any{"type": "array", "description": "Two to six parts.", "items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id":         map[string]any{"type": "string", "description": "A short id for this part, for depends_on."},
+						"title":      map[string]any{"type": "string", "description": "The part, in a few words."},
+						"agent":      map[string]any{"type": "string", "description": "Which agent: " + strings.Join(launchKindNames, ", ") + "."},
+						"folder":     map[string]any{"type": "string", "description": "The folder, as for start_agent."},
+						"task":       map[string]any{"type": "string", "description": "What this agent should do, with what it needs to know."},
+						"worktree":   map[string]any{"type": "string", "description": "A short name to give it a worktree of its own. Leave out to work in the folder itself."},
+						"depends_on": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "The ids of the parts that must finish first."},
+					},
+					"required": []string{"id", "title", "agent", "folder", "task"},
+				}},
+			},
+			required: []string{"goal", "tasks"},
+			run:      runPlanTeam,
+		},
+		{
+			name: "queue_task",
+			description: "Line up work for tonight, when the user asks for something to happen overnight or while they're away. " +
+				"It starts in the night, a few at a time and one to a folder, and the user gets a report in the morning.",
+			properties: map[string]any{
+				"agent":  map[string]any{"type": "string", "enum": launchKindNames},
+				"folder": map[string]any{"type": "string", "description": "The folder, as for start_agent."},
+				"task":   map[string]any{"type": "string", "description": "What the agent should do, with everything it needs to know."},
+			},
+			required: []string{"agent", "folder", "task"},
+			run:      runQueueTask,
+		},
+		{
 			name: "create_worktree",
 			description: "Make a git worktree of a repository, when the user asks: a folder of its own under ~/Agentman/Worktrees, " +
 				"on a new branch named after it from what the repository's folder has checked out, with its .env files copied in. " +
@@ -744,10 +780,12 @@ func runAnswerQuestion(ctx context.Context, m *Manager, input map[string]any) to
 
 	// Approving is for the rules to decide, not the model: only what the
 	// user let Agentman approve, or a no, goes straight to the agent.
-	d := classify(session, q, policyOf(m.currentSettings()))
+	settings := m.currentSettings()
+	d := classify(session, q, policyOf(settings))
+	mayApprove := d.auto && trustLevel(settings, session.Cwd) == protocol.TrustHandle
 	// A turn acting on the user's own reply to this question's card has
 	// their OK for it.
-	safe := repliedTo(ctx, session.ID, q.ID) || key != "" && ((d.auto && key == d.optionKey) || isDenial(q.Options, key))
+	safe := repliedTo(ctx, session.ID, q.ID) || key != "" && ((mayApprove && key == d.optionKey) || isDenial(q.Options, key))
 	m.cardMu.Lock()
 	defer m.cardMu.Unlock()
 	if !safe {

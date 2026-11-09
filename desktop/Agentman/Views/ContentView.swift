@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The main window: agents on the left, and on the right either Agentman or
+/// The main window: agents on the left, and on the right either the Board or
 /// the agent you picked.
 struct ContentView: View {
     @Environment(AgentsStore.self) private var store
@@ -14,8 +14,11 @@ struct ContentView: View {
 
     var body: some View {
         GeometryReader { geometry in
+            // The Board takes the whole window; the sidebar is back the
+            // moment the user leaves it.
+            let sidebarGone = sidebarHidden || (store.showingBoard && !store.boardShowsSidebar)
             HStack(spacing: 0) {
-                if !sidebarHidden {
+                if !sidebarGone {
                     Sidebar()
                         .frame(width: Sidebar.clamp(sidebarWidth, window: geometry.size.width))
                         .overlay(alignment: .trailing) {
@@ -26,7 +29,7 @@ struct ContentView: View {
                 Detail()
                     // With the sidebar hidden, the headers make room for the
                     // window's buttons and the one that brings it back.
-                    .environment(\.detailHeaderLeading, sidebarHidden ? headerLeading + 34 : 0)
+                    .environment(\.detailHeaderLeading, sidebarGone ? headerLeading + 34 : 0)
                     // Under the page's top bar while am serve can't be reached.
                     .overlay(alignment: .top) {
                         ConnectionBanner()
@@ -34,14 +37,17 @@ struct ContentView: View {
                     }
                     .animation(.easeOut(duration: 0.2), value: store.status)
                     .overlay(alignment: .topLeading) {
-                        if sidebarHidden {
-                            ChromeButton(symbol: "sidebar.left", help: "Show the sidebar (⌃⌘S)") { sidebarHidden = false }
+                        if sidebarGone {
+                            ChromeButton(symbol: "sidebar.left", help: "Show the sidebar (⌃⌘S)") {
+                                sidebarHidden = false
+                                if store.showingBoard { store.boardShowsSidebar = true }
+                            }
                                 .padding(.leading, headerLeading)
                                 .padding(.top, 2)
                         }
                     }
             }
-            .animation(.easeOut(duration: 0.18), value: sidebarHidden)
+            .animation(.easeOut(duration: 0.18), value: sidebarGone)
         }
         // Agentman's news, small, over whatever is open.
         .overlayPreferenceValue(MessageBoxFrame.self) { box in
@@ -135,7 +141,7 @@ struct ContentView: View {
     }
 }
 
-/// Agentman, or the agent picked, beside the sidebar. A view of its own,
+/// The Board, or the agent picked, beside the sidebar. A view of its own,
 /// as it reads the agents' sessions: news of any agent redraws it alone,
 /// not the window around it, and the thread only when its own agent
 /// changed.
@@ -158,7 +164,7 @@ private struct Detail: View {
             case .usage:
                 UsageView()
             case .manager, nil:
-                ManagerChatView()
+                BoardView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

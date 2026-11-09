@@ -347,6 +347,7 @@ struct KeySection: View {
 
 /// What Agentman may approve without asking.
 private struct PermissionsPage: View {
+    @Environment(AgentsStore.self) private var store
     @Binding var draft: ManagerSettings?
     @State private var adding = false
 
@@ -368,6 +369,60 @@ private struct PermissionsPage: View {
             }
             .disabled(!binding.wrappedValue.autoApprove)
             .opacity(binding.wrappedValue.autoApprove ? 1 : 0.5)
+
+            SettingsSection(title: "When an agent asks",
+                            footer: "Only when that is all it's asking, in folders on Handle, at most twice for one request, and never while you're looking at it. Agentman sends a fixed yes and lists it under Handled. Pushing, deploying and merging always come to you.") {
+                autopilotRow("Say yes to committing finished work", detail: "The agent is told not to push.", \.answersCommit)
+                autopilotRow("Say yes to installing on my phone or Mac", detail: "A finished build, on your own device.", \.answersInstall, divider: false)
+            }
+
+            SettingsSection(title: "When an agent finishes",
+                            footer: "Has your Agentman model compare the change with what was asked, up to \(Self.dailyReviews) reviews a day on your API key. In folders on Handle it runs their tests first, and only there can failures go back.") {
+                autopilotRow("Offer rules for what I keep approving", detail: "After three approvals of the same safe thing. Never for pushes, deletes, deploys or keys.", \.learnRules)
+                autopilotRow("Check its work", detail: "The card on the Board says whether it holds up.", \.verify)
+                autopilotRow("Send failing tests back to the agent", detail: "In folders on Handle, at most twice for one request, and never while you're looking at it.", \.sendBack, divider: false)
+                    .disabled(!(binding.wrappedValue.autopilot?.verify ?? false))
+                    .opacity(binding.wrappedValue.autopilot?.verify == true ? 1 : 0.5)
+            }
+
+            SettingsSection(title: "While agents work",
+                            footer: "Noticing is read from their transcripts, without using your API key. What happens next follows the folder's trust below.") {
+                autopilotRow("Notice stuck agents", detail: "The same thing failing, long silences, a full context or a usage limit.", \.unstick)
+                autopilotRow("Notice agents on the same files", detail: "Two changing one file, or one changing what another has read.", \.overlap)
+                autopilotRow("Suggest notes for what I keep telling agents", detail: "Once a day, on your API key. You approve each note.", \.learnNotes, divider: false)
+            }
+
+            SettingsSection(title: "Overnight",
+                            footer: "Only what you line up on the Board starts, a few at a time and one to a folder, and you get a report when the night ends.") {
+                autopilotRow("Run my queue overnight", detail: nil, \.overnight)
+                hourRow("Starts", key: \.nightStart, fallback: "23:00", divider: true)
+                hourRow("Ends", key: \.nightEnd, fallback: "07:00", divider: false)
+            }
+
+            SettingsSection(title: "Trust by folder",
+                            footer: "Watch reports and asks. Suggest marks the answer it would give and waits. Handle answers what the rules here allow. A folder without a level follows the switch at the top.") {
+                let trust = binding.wrappedValue.trust ?? []
+                ForEach(Array(trust.enumerated()), id: \.element.folder) { index, entry in
+                    trustRow(entry, index: index, count: trust.count)
+                }
+                HStack {
+                    Menu {
+                        ForEach(store.folders.filter { folder in !trust.contains { $0.folder == folder.path } }.prefix(20)) { folder in
+                            Button((folder.path as NSString).lastPathComponent) {
+                                draft?.trust = trust + [FolderTrust(folder: folder.path, level: "suggest")]
+                            }
+                        }
+                    } label: {
+                        Label("Add Folder", systemImage: "plus")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            }
+            .task { await store.loadFolders() }
 
             SettingsSection(title: "Your rules",
                             footer: "An “Always ask” rule wins over everything. No rule lets an agent touch keys and credentials or run anything as root. Use * for anything and ? for one character.") {
@@ -413,6 +468,66 @@ private struct PermissionsPage: View {
             ForEach(Array(Self.asked.enumerated()), id: \.offset) { index, item in
                 RuleRow(icon: "hand.raised", tint: Palette.needsYou, text: item, divider: index < Self.asked.count - 1)
             }
+        }
+    }
+
+    private static let dailyReviews = 30
+
+    private func trustRow(_ entry: FolderTrust, index: Int, count: Int) -> some View {
+        SettingsRow(title: (entry.folder as NSString).lastPathComponent, detail: entry.folder, divider: true) {
+            HStack(spacing: 8) {
+                Picker("", selection: Binding(
+                    get: { entry.level },
+                    set: { draft?.trust?[index].level = $0 }
+                )) {
+                    ForEach(FolderTrust.levels, id: \.id) { Text($0.title).tag($0.id) }
+                }
+                .labelsHidden()
+                .fixedSize()
+                Button {
+                    draft?.trust?.remove(at: index)
+                } label: {
+                    Image(systemName: "minus.circle")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.muted)
+                .help("Follow the switch at the top instead")
+            }
+        }
+    }
+
+    private func hourRow(_ title: String, key: WritableKeyPath<Autopilot, String?>, fallback: String, divider: Bool) -> some View {
+        SettingsRow(title: title, divider: divider) {
+            Picker("", selection: Binding(
+                get: { (draft?.autopilot ?? Autopilot())[keyPath: key] ?? fallback },
+                set: { value in
+                    var autopilot = draft?.autopilot ?? Autopilot()
+                    autopilot[keyPath: key] = value
+                    draft?.autopilot = autopilot
+                }
+            )) {
+                ForEach(0..<24, id: \.self) { hour in
+                    let value = String(format: "%02d:00", hour)
+                    Text(value).tag(value)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+        }
+    }
+
+    private func autopilotRow(_ title: String, detail: String?, _ key: WritableKeyPath<Autopilot, Bool>, divider: Bool = true) -> some View {
+        SettingsRow(title: title, detail: detail, divider: divider) {
+            Toggle("", isOn: Binding(
+                get: { (draft?.autopilot ?? Autopilot())[keyPath: key] },
+                set: { on in
+                    var autopilot = draft?.autopilot ?? Autopilot()
+                    autopilot[keyPath: key] = on
+                    draft?.autopilot = autopilot
+                }
+            ))
+            .toggleStyle(.switch)
+            .labelsHidden()
         }
     }
 

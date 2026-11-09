@@ -114,7 +114,7 @@ private struct PanelHeader: View {
                 }
                 HeaderButton(symbol: "arrow.up.forward.app", help: "Open Agentman in its window") {
                     openWindow(id: "main")
-                    agents.selection = .manager
+                    agents.openAgentmanChat()
                 }
             case .agent(let id):
                 HeaderButton(symbol: "arrow.up.forward.app", help: "Open this agent in Agentman's window") {

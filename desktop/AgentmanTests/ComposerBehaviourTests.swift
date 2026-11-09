@@ -322,7 +322,11 @@ final class ComposerBehaviourTests: XCTestCase {
         let before = scroll.contentView.bounds.origin.y
         let wheel = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -80, wheel2: 0, wheel3: 0))
         text.scrollWheel(with: try XCTUnwrap(NSEvent(cgEvent: wheel)))
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        // Smooth scrolling takes as long as the system likes.
+        let deadline = Date().addingTimeInterval(3)
+        while scroll.contentView.bounds.origin.y <= before + 20, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
         XCTAssertGreaterThan(scroll.contentView.bounds.origin.y, before + 20, "The wheel over the message scrolls the conversation")
     }
 

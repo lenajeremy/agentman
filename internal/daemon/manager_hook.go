@@ -47,6 +47,25 @@ func (d *Daemon) managerHook() ManagerHook {
 	return d.manager
 }
 
+// answerListener is a manager that wants to hear what the user answered, to
+// learn from it.
+type answerListener interface {
+	Answered(session protocol.Session, req protocol.Request)
+}
+
+func (d *Daemon) managerAnswered(req protocol.Request) {
+	listener, ok := d.managerHook().(answerListener)
+	if !ok {
+		return
+	}
+	d.mu.Lock()
+	session, known := d.sessions[req.SessionID]
+	d.mu.Unlock()
+	if known {
+		go listener.Answered(session, req)
+	}
+}
+
 func (d *Daemon) managerTurnComplete(sessionID string) {
 	manager := d.managerHook()
 	if manager == nil {

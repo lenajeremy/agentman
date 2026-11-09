@@ -63,7 +63,7 @@ export function cardQuestion(card: ManagerCard): Question | null {
   if (card.kind === "question" && card.questionId) {
     return { id: card.questionId, prompt: "", options: card.options ?? [], multiple: card.multiple, custom: card.custom };
   }
-  if (card.kind === "key") return { id: card.id, prompt: "", options: card.options ?? [] };
+  if (card.kind === "key" || card.kind === "offer") return { id: card.id, prompt: "", options: card.options ?? [] };
   return null;
 }
 

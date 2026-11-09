@@ -127,8 +127,20 @@ func globMatch(pattern, text string) bool {
 
 // runsAsRoot reports a command part no rule may approve.
 func runsAsRoot(part string) bool {
-	words := strings.Fields(part)
-	return len(words) > 0 && (words[0] == "sudo" || words[0] == "su" || words[0] == "doas")
+	for _, word := range strings.Fields(part) {
+		name := filepath.Base(word)
+		switch {
+		case name == "sudo" || name == "su" || name == "doas":
+			return true
+		// What only sets up the command: look at what it runs.
+		case strings.Contains(word, "=") && !strings.HasPrefix(word, "-"),
+			strings.HasPrefix(word, "-"),
+			name == "env", name == "time", name == "nice", name == "nohup", name == "command", name == "exec":
+			continue
+		}
+		return false
+	}
+	return false
 }
 
 func validateRules(rules []protocol.PermissionRule) error {
@@ -159,8 +171,11 @@ func validateRules(rules []protocol.PermissionRule) error {
 // Settings' "Try it", by putting it to the policy as an agent would ask it.
 func checkPermission(settings protocol.ManagerSettings, kind, target, folder string) protocol.PermissionCheck {
 	d := decide(protocol.Session{Cwd: strings.TrimSpace(expandHome(folder))}, kind, strings.TrimSpace(target), "yes", policyOf(settings))
-	check := protocol.PermissionCheck{Auto: d.auto && settings.AutoApprove, Summary: d.summary, Reason: d.reason}
-	if d.auto && !settings.AutoApprove {
+	level := trustLevel(settings, strings.TrimSpace(expandHome(folder)))
+	check := protocol.PermissionCheck{Auto: d.auto && level == protocol.TrustHandle, Summary: d.summary, Reason: d.reason}
+	if d.auto && level == protocol.TrustSuggest {
+		check.Reason = "you check what Agentman would answer in this folder"
+	} else if d.auto && !check.Auto {
 		check.Reason = "approving for you is switched off"
 	}
 	return check

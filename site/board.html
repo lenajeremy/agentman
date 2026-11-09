@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agentman Board — Know what every agent is doing</title>
+    <meta
+      name="description"
+      content="Every agent you run, sorted by what it needs from you. See what is waiting, what is running and what is done in one look, however many you have."
+    />
+    <meta name="theme-color" content="#ff5f1f" />
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:title"
+      content="Agentman Board — Know what every agent is doing"
+    />
+    <meta
+      property="og:description"
+      content="Every agent you run, sorted by what it needs from you. See what is waiting, what is running and what is done in one look, however many you have."
+    />
+    <meta property="og:image" content="/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.png" sizes="48x48" type="image/png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preload" href="/fonts/rubik-latin-variable.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/inter-latin-variable.woff2" as="font" type="font/woff2" crossorigin />
+    <script>
+      document.documentElement.classList.add("js");
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) document.documentElement.classList.add("motion");
+    </script>
+    <link rel="stylesheet" href="/third-party/lenis-1.3.26.css" />
+    <link rel="stylesheet" href="/site.css?v=20261109" />
+    <script src="/third-party/lenis-1.3.26.min.js" defer></script>
+    <script src="/site.js?v=20261105" defer></script>
+    <script src="/mascot.js" defer></script>
+  </head>
+  <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="i-github" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.2-3.1-.1-.4-.5-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.6.2 2.8.1 3.2.8.8 1.2 1.9 1.2 3.1 0 4.7-2.8 5.7-5.5 6 .4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5z"
+        />
+      </symbol>
+      <!-- Apple's mark from Simple Icons (CC0), only to say which platform a download is for. -->
+      <symbol id="l-apple" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"
+        />
+      </symbol>
+      <symbol id="i-arrow" viewBox="0 0 16 16">
+        <path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+      </symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24">
+        <rect x="8" y="8" width="12" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="2" />
+        <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" fill="none" stroke="currentColor" stroke-width="2" />
+      </symbol>
+    </svg>
+
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="top flood edge-bottom">
+      <nav class="nav wrap" aria-label="Main">
+        <a class="wordmark" href="/" aria-label="Agentman home"
+          ><img src="/apple-touch-icon.png" alt="" width="28" height="28" /><span>Agentman</span></a
+        >
+        <div class="nav-links"><a href="/board" aria-current="page">Board</a><a href="/mac">Mac</a><a href="/ios">iPhone</a><a href="/start">Setup</a><a href="https://github.com/lenajeremy/agentman">GitHub</a></div>
+        <a class="pill pill-white pill-small" href="https://github.com/lenajeremy/agentman/releases/download/v0.42.0/Agentman.dmg"><svg aria-hidden="true"><use href="#l-apple" /></svg>Download for Mac</a>
+      </nav>
+      <div class="hero wrap" id="main">
+        <p class="eyebrow" data-reveal>The Board · Agentman for Mac</p>
+        <h1 data-split>Five agents.<br />Thirty.<br /><span class="squiggle">Still on top of it.</span></h1>
+        <p class="hero-sub" data-reveal style="--d: 250ms">
+          Every agent you run, sorted by what it needs from you. One look tells you what’s waiting, what’s
+          running, and what’s done.
+        </p>
+        <div class="hero-actions" data-reveal style="--d: 350ms">
+          <a class="pill pill-white" href="https://github.com/lenajeremy/agentman/releases/download/v0.42.0/Agentman.dmg"><svg aria-hidden="true"><use href="#l-apple" /></svg>Download for Mac</a
+          ><a class="pill pill-ink" href="#columns">See how it works</a>
+        </div>
+        <p class="fine" data-reveal style="--d: 450ms">macOS 15 or later · Free and open source</p>
+        <div class="badge" data-reveal="pop" style="--d: 600ms" aria-hidden="true">
+          <svg class="badge-ring" viewBox="0 0 200 200">
+            <defs><path id="ring" d="M100 100m-78 0a78 78 0 1 1 156 0a78 78 0 1 1-156 0" /></defs>
+            <text><textPath href="#ring" textLength="486">EVERY AGENT · ONE LOOK · NO TAB HOPPING · </textPath></text>
+          </svg>
+          <canvas class="badge-mascot" data-mascot data-enter="0.4" width="240" height="240"></canvas>
+        </div>
+      </div>
+      <figure class="hero-shot wrap" data-tilt>
+        <img
+          src="/media/board-hero.webp"
+          width="2560"
+          height="1642"
+          alt="The Board: four agents waiting on you, ten working and six idle, each as a card in its column, with a search box and a box to ask Agentman"
+          fetchpriority="high"
+        />
+      </figure>
+    </header>
+
+    <main>
+      <section class="works cream edge-bottom" aria-labelledby="fleet-heading">
+        <div class="wrap center">
+          <h2 id="fleet-heading" data-split>Thirty agents.<br />Three <span class="outline">need you.</span></h2>
+          <p class="lede" data-reveal style="--d: 120ms">
+            You were never going to read them all. The Board puts the ones waiting on you first, and lets the
+            rest get on with it.
+          </p>
+          <div class="fleet" data-reveal="rise" role="img" aria-label="Thirty dots: three agents need you, 18 are working and 9 are idle"><i class="i"></i><i class="w"></i><i class="w"></i><i class="w"></i><i class="i"></i><i class="w"></i><i class="w"></i><i class="i"></i><i class="w"></i><i class="i"></i><i class="w"></i><i class="i"></i><i class="n"></i><i class="i"></i><i class="i"></i><i class="w"></i><i class="i"></i><i class="w"></i><i class="w"></i><i class="w"></i><i class="n"></i><i class="i"></i><i class="w"></i><i class="w"></i><i class="w"></i><i class="w"></i><i class="w"></i><i class="w"></i><i class="n"></i><i class="w"></i></div>
+          <ul class="fleet-key" data-reveal>
+            <li><i class="n"></i><b>3</b> need you</li>
+            <li><i class="w"></i><b>18</b> working</li>
+            <li><i class="i"></i><b>9</b> idle</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="block" id="columns" aria-labelledby="columns-heading">
+        <div class="wrap center">
+          <h2 id="columns-heading" data-split>Three columns.<br />The whole picture.</h2>
+          <p class="lede" data-reveal style="--d: 120ms">
+            Every agent sits in one, and moves on its own as its work changes. No tabs to check. No terminals
+            to read.
+          </p>
+        </div>
+        <ul class="cards wrap">
+          <li class="card column-card" data-reveal style="--d: 0ms">
+            <h3><em>Needs you</em></h3>
+            <div class="column-crop"><img src="/media/board-column-needs.webp" width="800" height="830" loading="lazy" alt="Cards in the Needs you column: an agent asking to push to main, and one asking which badge style to use, each with its answers on the card" /></div>
+            <p class="column-note">Questions and approvals, answered right on the card.</p>
+          </li>
+          <li class="card column-card" data-reveal style="--d: 120ms">
+            <h3><em>Working</em></h3>
+            <div class="column-crop"><img src="/media/board-column-working.webp" width="800" height="830" loading="lazy" alt="Cards in the Working column, each showing the step its agent is on and the file or command it is using" /></div>
+            <p class="column-note">What each agent is doing, right now, in a line.</p>
+          </li>
+          <li class="card column-card" data-reveal style="--d: 240ms">
+            <h3><em>Idle</em></h3>
+            <div class="column-crop"><img src="/media/board-column-idle.webp" width="800" height="830" loading="lazy" alt="Cards in the Idle column, each saying in a sentence what its agent finished" /></div>
+            <p class="column-note">What it finished, in a sentence you can skim.</p>
+          </li>
+        </ul>
+      </section>
+
+      <div class="outline-strip" aria-hidden="true">
+        <div data-drift>Needs you ✦ Working ✦ Idle ✦ Needs you ✦ Working ✦ Idle ✦ Needs you ✦ Working ✦ Idle ✦</div>
+      </div>
+
+      <section class="block zone" id="news" data-zone="blue" aria-labelledby="news-heading">
+        <div class="wrap split">
+          <div class="split-copy">
+            <h2 id="news-heading" data-split>Know the<br />moment it<br />happens.</h2>
+            <p class="lede" data-reveal style="--d: 120ms">
+              Deep in one agent? A small note tells you when another finishes or needs you. Answer it right
+              there and keep going.
+            </p>
+            <p class="lede" data-reveal style="--d: 200ms">Away from the app, it’s a notification. Away from your desk, it’s on your phone.</p>
+            <div class="zone-actions" data-reveal style="--d: 280ms">
+              <a class="pill pill-zone" href="/ios">Get the iPhone app</a>
+            </div>
+          </div>
+          <div class="phone-wrap">
+            <canvas class="tile-sticker" data-sticker="bell" data-enter="0.3" width="300" height="300" aria-hidden="true"></canvas>
+            <div class="phone-tile toast-tile" data-reveal="rise">
+              <img
+                src="/media/board-toasts.webp"
+                width="1400"
+                height="873"
+                loading="lazy"
+                alt="Two notes in the corner of the window: one agent asking to run git push with Yes and No buttons, and another saying its work is done and 48 tests pass"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="block block-tight" aria-labelledby="search-heading">
+        <div class="wrap center">
+          <h2 id="search-heading" data-split>Find any agent.<br />Find anything it <span class="outline">said.</span></h2>
+          <p class="lede" data-reveal style="--d: 120ms">
+            Search by name, folder, branch, or the words in any conversation, even the ones that ended weeks ago.
+          </p>
+        </div>
+        <figure class="shot wrap" data-reveal="rise">
+          <img src="/media/board-search.webp" width="2400" height="1539" loading="lazy" alt="The Board searching for checkout: three matching agents in their columns, the matching line shown on a card, and a past conversation listed under Idle" />
+        </figure>
+      </section>
+
+      <section class="block block-tight" aria-labelledby="color-heading">
+        <div class="wrap center">
+          <h2 id="color-heading" data-split>Color them<br />how you think.</h2>
+          <p class="lede" data-reveal style="--d: 120ms">
+            By state, by project, or by folder. Spot which agent is on what before you’ve read a word.
+          </p>
+        </div>
+        <figure class="shot wrap" data-reveal="rise">
+          <img src="/media/board-color.webp" width="2400" height="1539" loading="lazy" alt="The Board with the sidebar open and every agent tinted by its project" />
+        </figure>
+      </section>
+
+      <section class="block block-tight block-last" aria-labelledby="ask-heading">
+        <div class="wrap center">
+          <h2 id="ask-heading" data-split>Or just <span class="outline">ask.</span></h2>
+          <p class="lede" data-reveal style="--d: 120ms">
+            What’s left before this can ship? Agentman reads every agent, answers in a few lines, and outlines
+            the cards it means.
+          </p>
+        </div>
+        <figure class="shot wrap" data-reveal="rise">
+          <img src="/media/board-ask.webp" width="2400" height="1539" loading="lazy" alt="The Board beside a conversation with Agentman, which names two agents standing between the storefront and shipping, with their cards outlined in the columns" />
+        </figure>
+      </section>
+
+      <section class="closing flood edge-top" aria-labelledby="closing-heading">
+        <div class="closing-word" aria-hidden="true"><span data-drift data-drift-dir="-1">Agentman</span></div>
+        <div class="wrap center">
+          <canvas class="closing-mascot" data-reveal="pop" data-mascot data-enter="0.2" width="320" height="320" aria-hidden="true"></canvas>
+          <h2 id="closing-heading" data-split>Run more agents.<br />Watch fewer.</h2>
+          <p class="lede" data-reveal style="--d: 120ms">Download Agentman and open it. Your agents show up on the Board by themselves.</p>
+          <div class="hero-actions" data-reveal style="--d: 200ms">
+            <a class="pill pill-white" href="https://github.com/lenajeremy/agentman/releases/download/v0.42.0/Agentman.dmg"><svg aria-hidden="true"><use href="#l-apple" /></svg>Download for Mac</a
+            ><a class="pill pill-ink" href="/ios">Get the iPhone app</a>
+          </div>
+          <a class="fine fine-link" href="/start">Setup guide <svg aria-hidden="true"><use href="#i-arrow" /></svg></a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap footer-row">
+        <a class="wordmark" href="/"
+          ><img src="/apple-touch-icon.png" alt="" width="24" height="24" /><span>Agentman</span
+          ><small>MIT licensed</small></a
+        >
+        <nav aria-label="Footer">
+          <a href="https://github.com/lenajeremy/agentman">GitHub</a><a href="/board">Board</a><a href="/mac">Mac</a><a href="/ios">iPhone</a
+          ><a href="/start">Setup</a><a href="https://github.com/lenajeremy/agentman#readme">Docs</a
+          ><a href="/privacy">Privacy</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -153,18 +153,7 @@ struct Sidebar: View {
         // What the conversations said, a moment after typing stops: the
         // daemon answers in milliseconds, so this only spares it a query
         // per key.
-        .task(id: store.search) {
-            let query = store.search.trimmingCharacters(in: .whitespaces)
-            guard AgentsStore.searchable(query) else {
-                store.messageHits = nil
-                return
-            }
-            try? await Task.sleep(for: .milliseconds(150))
-            guard !Task.isCancelled else { return }
-            let results = await store.searchMessages(query)
-            guard !Task.isCancelled else { return }
-            store.messageHits = results
-        }
+        .task(id: store.search) { await store.refreshMessageHits() }
         // The branch under each agent's title, kept current as agents switch.
         .task {
             while !Task.isCancelled {
@@ -298,11 +287,17 @@ private struct AgentButton: View {
     var inList = true
     /// What a search found in its conversation, which a click opens at.
     var match: SearchHit?
+    @AppStorage(AgentColors.settingKey) private var colorBy: AgentColorBy = .none
     @State private var hovering = false
 
     var body: some View {
         AgentRow(session: session, match: match, query: store.messageHits?.query ?? "")
             .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .leading) {
+                if let tint = AgentColors.color(for: session, by: colorBy) {
+                    Capsule().fill(tint).frame(width: 3).padding(.vertical, 9).offset(x: -4).accessibilityHidden(true)
+                }
+            }
             .padding(.horizontal, inList ? 0 : SidebarMetrics.margin + SidebarMetrics.list)
             .contentShape(Rectangle())
             .onTapGesture { open() }
@@ -756,6 +751,9 @@ private struct FilterMenu: View {
                 option("Needs you", count: counts.needsYou, on: store.stateFilter == .waitingInput) { store.stateFilter = .waitingInput }
                 option("Working", count: counts.working, on: store.stateFilter == .busy) { store.stateFilter = .busy }
                 option("Idle", count: counts.idle, on: store.stateFilter == .idle) { store.stateFilter = .idle }
+            }
+            Section("Color by") {
+                AgentColorMenuItems()
             }
             Section("Folder") {
                 option("All folders", on: store.folderFilter == nil) { store.folderFilter = nil }

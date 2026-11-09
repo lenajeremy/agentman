@@ -30,11 +30,12 @@ func isAutonomous(ctx context.Context) bool {
 var pausingTools = map[string]bool{"send_to_agent": true, "answer_question": true, "dismiss_card": true}
 
 // pausingCards are the open cards an agent is waiting behind: a question,
-// a request for the user, or a key. A suggested note holds nothing up.
+// a request for the user, or a key. A suggested note or an offer holds
+// nothing up.
 func (m *Manager) pausingCards() []protocol.ManagerEntry {
 	var cards []protocol.ManagerEntry
 	for _, entry := range m.conversation.openCards() {
-		if entry.Card.Kind != protocol.CardNote {
+		if entry.Card.Kind != protocol.CardNote && entry.Card.Kind != protocol.CardOffer {
 			cards = append(cards, entry)
 		}
 	}
