@@ -370,6 +370,12 @@ private struct PermissionsPage: View {
             .disabled(!binding.wrappedValue.autoApprove)
             .opacity(binding.wrappedValue.autoApprove ? 1 : 0.5)
 
+            SettingsSection(title: "When an agent asks",
+                            footer: "Only when that is all it's asking, in folders on Handle, at most twice for one request, and never while you're looking at it. Agentman sends a fixed yes and lists it under Handled. Pushing, deploying and merging always come to you.") {
+                autopilotRow("Say yes to committing finished work", detail: "The agent is told not to push.", \.answersCommit)
+                autopilotRow("Say yes to installing on my phone or Mac", detail: "A finished build, on your own device.", \.answersInstall, divider: false)
+            }
+
             SettingsSection(title: "When an agent finishes",
                             footer: "Has your Agentman model compare the change with what was asked, up to \(Self.dailyReviews) reviews a day on your API key. In folders on Handle it runs their tests first, and only there can failures go back.") {
                 autopilotRow("Offer rules for what I keep approving", detail: "After three approvals of the same safe thing. Never for pushes, deletes, deploys or keys.", \.learnRules)

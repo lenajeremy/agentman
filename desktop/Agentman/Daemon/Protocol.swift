@@ -874,6 +874,22 @@ struct Autopilot: Codable, Sendable, Hashable {
     var nightAgents: Int?
     /// Reviews by the model a day; nil is the daemon's default.
     var verifyDaily: Int?
+    /// Yes to an agent asking only whether to commit finished work. Optional
+    /// so an older daemon, which doesn't send it, still decodes.
+    var replyCommit: Bool?
+    /// Yes to an agent asking only whether to install a finished build on the
+    /// user's own phone or Mac.
+    var replyInstall: Bool?
+
+    var answersCommit: Bool {
+        get { replyCommit ?? false }
+        set { replyCommit = newValue }
+    }
+
+    var answersInstall: Bool {
+        get { replyInstall ?? false }
+        set { replyInstall = newValue }
+    }
 }
 
 /// Several finished agents being shipped together.

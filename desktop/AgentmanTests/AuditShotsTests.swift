@@ -564,6 +564,25 @@ extension SiteShotsTests {
         set(nil, "settingsTab")
     }
 
+    /// The standing answers, tall enough to show them with what's around them.
+    func testAuditStandingAnswers() throws {
+        _ = try auditFolder
+        set("permissions", "settingsTab")
+        defer { set(nil, "settingsTab") }
+        for dark in [false, true] {
+            let world = try world(customize: { fixtures in
+                Self.settingsData(&fixtures)
+                var autopilot = fixtures.managerSettings.autopilot ?? Autopilot()
+                autopilot.replyCommit = true
+                fixtures.managerSettings.autopilot = autopilot
+            }, more: extras)
+            Self.reportDaemon(world.store)
+            try audit(SettingsView(), area: "settings", screen: "permissions", state: "standing",
+                      size: CGSize(width: 880, height: 1500), dark: dark, store: world.store, wait: 2.0,
+                      titled: false, buttons: false)
+        }
+    }
+
     /// The daemon's own word on itself, as a session list brings it.
     static func reportDaemon(_ store: AgentsStore) {
         var event = DaemonEvent(type: "sessions")

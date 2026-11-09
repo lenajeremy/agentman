@@ -448,6 +448,26 @@ final class BoardTests: XCTestCase {
     }
 }
 
+final class StandingAnswersTests: XCTestCase {
+    // An older daemon doesn't send them, and that mustn't lose the settings.
+    func testAnOlderDaemonDecodesWithThemOff() throws {
+        let older = #"{"verify":true,"sendBack":false,"learnRules":false,"unstick":false,"overlap":false,"learnNotes":false,"overnight":false}"#
+        let autopilot = try JSONDecoder().decode(Autopilot.self, from: Data(older.utf8))
+        XCTAssertTrue(autopilot.verify)
+        XCTAssertFalse(autopilot.answersCommit)
+        XCTAssertFalse(autopilot.answersInstall)
+    }
+
+    func testTheSwitchesReachTheDaemon() throws {
+        var autopilot = Autopilot()
+        autopilot.answersCommit = true
+        let sent = try JSONSerialization.jsonObject(with: JSONEncoder().encode(autopilot)) as? [String: Any]
+        XCTAssertEqual(sent?["replyCommit"] as? Bool, true)
+        XCTAssertNil(sent?["replyInstall"], "left alone, it isn't sent, and the daemon takes that as off")
+        XCTAssertNil(sent?["answersCommit"], "only the stored fields travel")
+    }
+}
+
 @MainActor
 final class AgentColorsTests: XCTestCase {
     private func defaults() -> UserDefaults {
