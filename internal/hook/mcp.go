@@ -57,6 +57,9 @@ func (in Installer) MCPPlans(remove bool) ([]Plan, error) {
 	if installed(".kiro") {
 		plans = append(plans, planJSONMCP(protocol.KindKiro, filepath.Join(home, ".kiro", "settings", "mcp.json"), "mcpServers", stdio, remove))
 	}
+	if installed(filepath.Join(".config", "muse")) {
+		plans = append(plans, planJSONMCP(protocol.KindMuse, filepath.Join(home, ".config", "muse", "settings.json"), "mcpServers", stdio, remove))
+	}
 	// Every Antigravity app reads ~/.gemini/config, the CLI and the IDE alike
 	// (the IDE's ~/.gemini/antigravity/mcp_config.json links to it).
 	if installed(filepath.Join(".gemini", "config")) || antigravityInstalled(home) {
