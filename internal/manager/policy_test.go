@@ -301,3 +301,13 @@ func TestRootIsSeenBehindWhatSetsUpACommand(t *testing.T) {
 		}
 	}
 }
+
+func TestACommandThatBringsUpAMacOSDialogWaitsForTheUser(t *testing.T) {
+	session := protocol.Session{Cwd: "/w"}
+	q := &protocol.Question{Title: "Bash command", Detail: "List the jobs\n\nls", Prompt: "Do you want to proceed?",
+		Options: []protocol.QuestionOption{{Key: "1", Label: "Yes"}}, Notice: "If you agree, macOS will ask."}
+	d := classify(session, q, policy{})
+	if d.auto || d.optionKey != "" || d.reason != q.Notice {
+		t.Fatalf("got %+v", d)
+	}
+}

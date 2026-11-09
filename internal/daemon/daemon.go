@@ -1674,6 +1674,7 @@ func normalizeDiscoveredSessions(found []protocol.Session) []protocol.Session {
 		normalizeSessionStatus(&session)
 		if question := session.Question; question != nil {
 			copyQuestion := *question
+			copyQuestion.Notice = macOSNotice(question)
 			unsupportedReason := ""
 			// Question IDs are round-trip concurrency tokens and cannot be
 			// truncated without making every answer fail the adapter's stale

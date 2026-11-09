@@ -47,7 +47,12 @@ func classify(session protocol.Session, q *protocol.Question, p policy) decision
 		return decision{reason: "nothing is being asked"}
 	}
 	kind, target := requestOf(q)
-	return decide(session, kind, target, plainYes(q.Options), p)
+	d := decide(session, kind, target, plainYes(q.Options), p)
+	// Nobody but the user can answer the dialog this leads to.
+	if q.Notice != "" {
+		d.auto, d.optionKey, d.reason = false, "", q.Notice
+	}
+	return d
 }
 
 // decide is the policy itself, for one request of kind on target; yes is

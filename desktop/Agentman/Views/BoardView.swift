@@ -794,6 +794,7 @@ private struct BoardCard: View {
             if let detail = question.detail, !detail.isEmpty {
                 CodeBox(text: detail, compact: true)
             }
+            QuestionNotice(question: question)
             if !question.prompt.isEmpty, !question.promptRepeatsDetail {
                 line(question.prompt, lines: 4)
             }
