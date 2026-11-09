@@ -178,7 +178,7 @@ struct RightPanel: View {
     }
 }
 
-private struct PanelTab: View {
+struct PanelTab: View {
     let tab: RightPanelTab
     let selected: Bool
     let select: () -> Void

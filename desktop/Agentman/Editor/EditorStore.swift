@@ -95,26 +95,45 @@ final class EditorStore {
             if !panes.indices.contains(focusedPane) { focusedPane = max(panes.count - 1, 0) }
             if panes.isEmpty { panes = [nil] }
             panes[focusedPane] = newValue
-            showingChanges = false
+            workspaceTab = nil
         }
     }
-    /// The agent whose changes have a tab of their own, and whether that
-    /// tab is in front, in place of the code.
+    /// The agent whose Diff and History tabs are open, those tabs in order,
+    /// and the one in front, in place of the code; nil with the code in front.
     var changesSession: String?
-    var showingChanges = false
+    var workspaceTabs: [RightPanelTab] = []
+    var workspaceTab: RightPanelTab?
+    var showingChanges: Bool { workspaceTab != nil }
 
     /// Fills the editor with everything an agent changed, file after file.
-    func showChanges(of session: String) {
+    func showChanges(of session: String) { showWorkspace(.diff, of: session) }
+
+    /// One of an agent's tabs, in front of the code. The first to open brings
+    /// the other beside it, as the main window has them.
+    func showWorkspace(_ tab: RightPanelTab, of session: String) {
         changesSession = session
-        showingChanges = true
+        if workspaceTabs.isEmpty { workspaceTabs = [.history, .diff] }
+        if !workspaceTabs.contains(tab) { workspaceTabs.append(tab) }
+        workspaceTab = tab
         // The code is still there behind it: keys mustn't type into it.
         window?.makeFirstResponder(nil)
     }
 
-    /// Back to the code the tab was in front of.
+    /// Closes one of those tabs, and with the last goes back to the code.
+    func closeWorkspace(_ tab: RightPanelTab) {
+        workspaceTabs.removeAll { $0 == tab }
+        if workspaceTabs.isEmpty {
+            closeChanges()
+        } else if workspaceTab == tab {
+            workspaceTab = workspaceTabs.last
+        }
+    }
+
+    /// Back to the code the tabs were in front of.
     func closeChanges() {
         changesSession = nil
-        showingChanges = false
+        workspaceTabs = []
+        workspaceTab = nil
     }
     /// The tree's selected row.
     var selection: String?

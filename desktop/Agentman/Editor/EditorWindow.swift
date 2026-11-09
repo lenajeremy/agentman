@@ -112,8 +112,8 @@ struct EditorWindow: View {
                             if store.active == nil, store.panes.count == 1 {
                                 EditorEmpty(store: store)
                             }
-                            if store.showingChanges, let id = store.changesSession {
-                                EditorChanges(session: agents.session(id))
+                            if let tab = store.workspaceTab, let id = store.changesSession {
+                                EditorChanges(session: agents.session(id), tab: tab)
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -295,8 +295,8 @@ struct EditorWindow: View {
             guard event.window === store.window,
                   event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
                   event.charactersIgnoringModifiers == "w" else { return event }
-            if store.showingChanges {
-                store.closeChanges()
+            if let tab = store.workspaceTab {
+                store.closeWorkspace(tab)
                 return nil
             }
             guard let document = store.active else { return event }
@@ -595,15 +595,48 @@ private struct InFrontPane: ViewModifier {
 // MARK: - Tabs
 
 private struct TabStrip: View {
+    @Environment(AgentsStore.self) private var agents
     let store: EditorStore
+
+    /// The agent the tabs are for: the one they're open on, or the one in
+    /// the panel, or the one working on this folder.
+    private var agent: String? {
+        if let open = store.changesSession { return open }
+        if case .agent(let id)? = store.panelRoute { return id }
+        return AgentPanel.agent(for: store.root.path, in: agents.sessions)?.id
+    }
 
     var body: some View {
         // Two tabs with one name show their folders too.
         let names = Dictionary(grouping: store.documents, by: \.name)
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
-                if store.changesSession != nil {
-                    ChangesTab(store: store)
+                if let agent {
+                    HStack(spacing: 4) {
+                        ForEach(store.workspaceTabs) { item in
+                            PanelTab(tab: item, selected: item == store.workspaceTab,
+                                     select: { store.showWorkspace(item, of: agent) },
+                                     close: { store.closeWorkspace(item) })
+                        }
+                        Menu {
+                            ForEach([RightPanelTab.diff, .history]) { item in
+                                Button { store.showWorkspace(item, of: agent) } label: { Label(item.title, systemImage: item.symbol) }
+                            }
+                        } label: {
+                            Image(systemName: "plus").font(.system(size: 11, weight: .medium))
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .foregroundStyle(Palette.muted)
+                        .padding(.leading, 4)
+                        .help("Open the agent's changes or history")
+                    }
+                    .padding(.leading, 10)
+                    .padding(.trailing, 8)
+                    if !store.documents.isEmpty {
+                        Rectangle().fill(Palette.line).frame(width: 1, height: 18)
+                    }
                 }
                 ForEach(store.documents) { document in
                     EditorTab(store: store, document: document,
@@ -626,18 +659,26 @@ private struct TabStrip: View {
     }
 }
 
-/// Everything an agent changed, file after file, in place of the code. The
-/// code stays open behind it, with its scroll and undo, for when this closes.
+/// An agent's Diff or History, in place of the code. The code stays open
+/// behind it, with its scroll and undo, for when this closes.
 private struct EditorChanges: View {
     @Environment(AgentsStore.self) private var agents
     let session: Session?
+    let tab: RightPanelTab
 
     var body: some View {
         Group {
             if let session {
-                DiffPanel(sessionID: session.id, cwd: session.cwd, state: session.state, activity: agents.activity(session.id).at)
-                    .equatable()
-                    .id(session.id)
+                switch tab {
+                case .history:
+                    HistoryPanel(sessionID: session.id, cwd: session.cwd, state: session.state, activity: agents.activity(session.id).at)
+                        .equatable()
+                        .id(session.id)
+                default:
+                    DiffPanel(sessionID: session.id, cwd: session.cwd, state: session.state, activity: agents.activity(session.id).at)
+                        .equatable()
+                        .id(session.id)
+                }
             } else {
                 Text("This agent's changes are no longer here.")
                     .font(TextStyle.caption)
@@ -646,56 +687,6 @@ private struct EditorChanges: View {
             }
         }
         .background(Palette.surface)
-    }
-}
-
-/// The tab of an agent's changes, first in the strip.
-private struct ChangesTab: View {
-    let store: EditorStore
-    @State private var hovering = false
-
-    private var active: Bool { store.showingChanges }
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "plus.forwardslash.minus")
-                .font(.system(size: 11))
-                .foregroundStyle(active ? Palette.text : Palette.muted)
-            Text("Changes")
-                .font(Fonts.sans(12.5, active ? .medium : .regular))
-                .foregroundStyle(active ? Palette.text : Palette.muted)
-            Button {
-                store.closeChanges()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8.5, weight: .bold))
-                    .foregroundStyle(Palette.muted)
-                    .frame(width: 16, height: 16)
-                    .background(hovering ? Palette.fill : .clear, in: RoundedRectangle(cornerRadius: 4))
-            }
-            .buttonStyle(.plain)
-            .opacity(hovering || active ? 1 : 0)
-            .help("Close (⌘W)")
-            .accessibilityLabel("Close Changes")
-        }
-        .padding(.leading, 12)
-        .padding(.trailing, 8)
-        .frame(height: 38)
-        .background(Look.site ? (hovering && !active ? Palette.fill.opacity(0.45) : .clear) : (active ? Palette.fill.opacity(0.55) : .clear), in: RoundedRectangle(cornerRadius: 6))
-        .padding(.horizontal, 3)
-        .overlay(alignment: .bottom) {
-            if active {
-                if Look.site {
-                    Capsule().fill(Palette.flood).frame(height: 2.5).padding(.horizontal, 8)
-                } else {
-                    Rectangle().fill(Palette.surface).frame(height: 1)
-                }
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { store.showingChanges = true }
-        .onHover { hovering = $0 }
-        .help("Everything the agent changed")
     }
 }
 

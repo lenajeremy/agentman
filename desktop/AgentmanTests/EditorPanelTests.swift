@@ -32,9 +32,14 @@ final class EditorPanelTests: XCTestCase {
         XCTAssertFalse(store.showingChanges, "a file comes to the front")
         XCTAssertEqual(store.changesSession, "claude:a", "the tab stays, to go back to")
 
-        store.showingChanges = true
-        store.closeChanges()
-        XCTAssertNil(store.changesSession)
+        store.showWorkspace(.history, of: "claude:a")
+        XCTAssertEqual(store.workspaceTabs, [.history, .diff])
+        XCTAssertEqual(store.workspaceTab, .history)
+
+        store.closeWorkspace(.history)
+        XCTAssertEqual(store.workspaceTab, .diff, "the other comes to the front")
+        store.closeWorkspace(.diff)
+        XCTAssertNil(store.changesSession, "the last one closed goes back to the code")
         XCTAssertFalse(store.showingChanges)
         XCTAssertNotNil(store.active, "the code is still there")
     }
