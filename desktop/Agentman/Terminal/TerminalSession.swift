@@ -10,6 +10,9 @@ final class TerminalSession: Identifiable, @preconcurrency LocalProcessTerminalV
     nonisolated let id = UUID()
     let folder: URL
     @ObservationIgnored let view: AgentmanTerminalView
+    /// Everywhere showing this shell, the latest last: the main window and
+    /// the editor can both have it open. See TerminalContainer.
+    @ObservationIgnored var hosts: [TerminalHostReference] = []
     /// The shell's name, or the title a program in it sets.
     private(set) var title: String
     /// The shell's exit code once it has ended.

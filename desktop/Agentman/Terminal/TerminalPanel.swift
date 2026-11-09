@@ -231,19 +231,14 @@ private struct TerminalHost: NSViewRepresentable {
     let session: TerminalSession
     let visible: Bool
 
-    func makeNSView(context: Context) -> NSView {
-        let host = TerminalContainer()
-        session.view.removeFromSuperview()
-        host.addSubview(session.view)
+    func makeNSView(context: Context) -> TerminalContainer {
+        let host = TerminalContainer(session: session)
+        host.arrive()
         return host
     }
 
-    func updateNSView(_ host: NSView, context: Context) {
-        let view = session.view
-        if view.superview !== host {
-            view.removeFromSuperview()
-            host.addSubview(view)
-        }
+    func updateNSView(_ host: TerminalContainer, context: Context) {
+        host.adoptIfNobodyHas()
         let wasHidden = host.isHidden
         host.isHidden = !visible
         if visible && (wasHidden || context.coordinator.first) {
@@ -252,10 +247,13 @@ private struct TerminalHost: NSViewRepresentable {
             // started by the same click that shows the terminal isn't in one
             // yet a moment later, and the keyboard used to stay where it was
             // until the terminal was hidden and shown again.
-            let container = host as? TerminalContainer
-            container?.wantsKeyboard = true
-            DispatchQueue.main.async { container?.takeKeyboardIfWanted() }
+            host.wantsKeyboard = true
+            DispatchQueue.main.async { host.takeKeyboardIfWanted() }
         }
+    }
+
+    static func dismantleNSView(_ host: TerminalContainer, coordinator: Coordinator) {
+        host.release()
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -265,32 +263,164 @@ private struct TerminalHost: NSViewRepresentable {
     }
 }
 
+/// A place showing a shell, without keeping that place alive.
+struct TerminalHostReference {
+    weak var container: TerminalContainer?
+}
+
 /// Sizes the shell's view to itself, and only once it has a size of its
 /// own.
-private final class TerminalContainer: NSView {
+///
+/// A shell's view can only be in one place, and the main window and the
+/// editor can both have the same shell open. It goes with you: the window you
+/// switch to takes every shell it has open, and the keyboard too if that's
+/// where you left it. Each used to take a shell back whenever it redrew, so a
+/// terminal opened in the editor could be empty until it was hidden and shown
+/// again. A window you aren't in says where the shell went; when the place
+/// holding it goes, the one before it gets it.
+final class TerminalContainer: NSView {
+    let session: TerminalSession
     /// The shell takes the keyboard as soon as it is in a window and shown.
     var wantsKeyboard = false
 
+    private lazy var elsewhere: NSTextField = {
+        let label = NSTextField(labelWithString: "Open in another window. Click to show it here.")
+        label.font = .systemFont(ofSize: 12)
+        label.textColor = .secondaryLabelColor
+        label.alignment = .center
+        label.isHidden = true
+        addSubview(label)
+        return label
+    }()
+
+    init(session: TerminalSession) {
+        self.session = session
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    /// Whether the shell is here.
+    var owns: Bool { session.view.superview === self }
+
+    /// New here. Takes the shell, unless it is in the window being used:
+    /// a shell started there also appears in the other window, and stays.
+    func arrive() {
+        guard session.view.window?.isKeyWindow == true else { return claim() }
+        session.hosts.removeAll { $0.container == nil || $0.container === self }
+        session.hosts.insert(TerminalHostReference(container: self), at: max(session.hosts.count - 1, 0))
+        showWhereTheShellIs()
+    }
+
+    /// Takes the shell.
+    func claim() {
+        session.hosts.removeAll { $0.container == nil || $0.container === self }
+        session.hosts.append(TerminalHostReference(container: self))
+        adopt()
+    }
+
+    /// This place is going: the one before it gets the shell.
+    func release() {
+        let held = owns
+        session.hosts.removeAll { $0.container == nil || $0.container === self }
+        stopWatchingWindow()
+        if held { session.view.removeFromSuperview() }
+        let open = session.hosts.compactMap(\.container)
+        if held { (open.last { $0.window != nil } ?? open.last)?.adopt() }
+    }
+
+    func adoptIfNobodyHas() {
+        if session.view.superview == nil { adopt() }
+    }
+
+    private func adopt() {
+        if !owns { addSubview(session.view) }
+        if bounds.width > 0 && bounds.height > 0 { session.view.frame = bounds }
+        for host in session.hosts.compactMap(\.container) { host.showWhereTheShellIs() }
+        showWhereTheShellIs()
+    }
+
+    private func showWhereTheShellIs() {
+        elsewhere.isHidden = owns
+        placeNote()
+    }
+
+    private func placeNote() {
+        elsewhere.frame = NSRect(x: 12, y: (bounds.height - 18) / 2, width: max(bounds.width - 24, 0), height: 18)
+    }
+
+    /// Showing the note, a click brings the shell here.
+    func bringHere() {
+        claim()
+        wantsKeyboard = true
+        takeKeyboardIfWanted()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if owns { super.mouseDown(with: event) } else { bringHere() }
+    }
+
     func takeKeyboardIfWanted() {
-        guard wantsKeyboard, !isHidden, let window, let view = subviews.first else { return }
+        guard wantsKeyboard, !isHidden, owns, let window else { return }
         wantsKeyboard = false
-        window.makeFirstResponder(view)
+        window.makeFirstResponder(session.view)
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        watchWindow()
+        guard let window else { return }
+        if window.isKeyWindow && !owns { claim() }
         takeKeyboardIfWanted()
+        // Opened here, but the shell is in the window being used.
+        if !owns { wantsKeyboard = false }
+    }
+
+    private var windowWatchers: [NSObjectProtocol] = []
+    /// The shell had the keyboard when this window was left.
+    private var hadKeyboard = false
+
+    private func stopWatchingWindow() {
+        windowWatchers.forEach(NotificationCenter.default.removeObserver)
+        windowWatchers = []
+    }
+
+    private func watchWindow() {
+        stopWatchingWindow()
+        guard let window else { return }
+        let center = NotificationCenter.default
+        windowWatchers = [
+            center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.windowBecameKey() }
+            },
+            center.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.windowLostKey() }
+            },
+        ]
+    }
+
+    private func windowBecameKey() {
+        if !owns { claim() }
+        if hadKeyboard {
+            hadKeyboard = false
+            wantsKeyboard = true
+            takeKeyboardIfWanted()
+        }
+    }
+
+    private func windowLostKey() {
+        hadKeyboard = owns && window?.firstResponder === session.view
     }
 
     override func resizeSubviews(withOldSize oldSize: NSSize) {
-        for view in subviews where bounds.width > 0 && bounds.height > 0 {
-            view.frame = bounds
-        }
+        guard bounds.width > 0 && bounds.height > 0 else { return }
+        if owns { session.view.frame = bounds }
+        placeNote()
     }
 
     override func didAddSubview(_ subview: NSView) {
         super.didAddSubview(subview)
-        if bounds.width > 0 && bounds.height > 0 { subview.frame = bounds }
+        if subview === session.view, bounds.width > 0 && bounds.height > 0 { subview.frame = bounds }
     }
 }
 
