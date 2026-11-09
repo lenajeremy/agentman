@@ -14,6 +14,27 @@
     <description>Updates to Agentman for Mac.</description>
     <language>en</language>
     <item>
+      <title>Agentman 0.43.0</title>
+      <link>https://github.com/lenajeremy/agentman/releases/tag/v0.43.0</link>
+      <pubDate>Mon, 09 Nov 2026 10:08:45 GMT</pubDate>
+      <sparkle:version>50</sparkle:version>
+      <sparkle:shortVersionString>0.43.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <sparkle:fullReleaseNotesLink>https://github.com/lenajeremy/agentman/releases/tag/v0.43.0</sparkle:fullReleaseNotesLink>
+      <description sparkle:format="markdown"><![CDATA[## The Board
+
+Agentman's page is now a Board: every agent in **Needs you**, **Working** or **Idle**, with what it's doing on its card. Answer questions, commit and push right from the card, search every agent and everything they've said, and color agents by state, project or folder.
+
+## Also new
+
+- Agentman can check finished work, notice stuck agents, and answer the simple yes-or-no questions you choose. All of it is off until you turn it on in Settings under Permissions.
+- "Worked for 4m" after each request.
+- Quote part of a reply in your next message.
+- Fewer "needs you" cards, and more permission prompts recognised across agents.
+- Safer auto-approval.]]></description>
+      <enclosure url="https://github.com/lenajeremy/agentman/releases/download/v0.43.0/Agentman.dmg" length="45479236" type="application/octet-stream" sparkle:edSignature="HjEjIy63lf6LRmX1bHlFhgY2FA074nuybfokCRbQ7tGGUkWwnJ4+q48tR8GFoZN+SQqAlHxVj+l4PZCObpN6Aw=="/>
+    </item>
+    <item>
       <title>Agentman 0.42.0</title>
       <link>https://github.com/lenajeremy/agentman/releases/tag/v0.42.0</link>
       <pubDate>Sun, 08 Nov 2026 07:47:13 GMT</pubDate>
