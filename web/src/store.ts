@@ -164,6 +164,23 @@ async function fetchPages(sessionId: string) {
 }
 
 /** The page before the oldest message shown, 40 at most. */
+/** Reads a conversation back until a message is in it, as scrolling up
+ *  would, and says whether it got there (SearchStore.loadThrough). */
+export async function loadThrough(sessionId: string, messageId: string): Promise<boolean> {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  // The newest page has to have come first.
+  for (let i = 0; i < 80 && state.hasMore[sessionId] === undefined; i++) await wait(100);
+  // A thousand pages back is far past where anyone searches, and keeps a
+  // vanished message from reading forever.
+  for (let i = 0; i < 1000; i++) {
+    if ((state.messages[sessionId] ?? []).some((m) => m.id === messageId)) return true;
+    if (!state.hasMore[sessionId]) return false;
+    if (loadingOlder.has(sessionId)) await wait(50);
+    else await loadOlder(sessionId);
+  }
+  return false;
+}
+
 export async function loadOlder(sessionId: string): Promise<void> {
   const cursor = cursors[sessionId];
   if (!state.hasMore[sessionId] || !cursor || loadingOlder.has(sessionId)) return;

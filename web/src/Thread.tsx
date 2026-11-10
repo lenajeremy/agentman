@@ -7,7 +7,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@shared/protocol";
 import { agentName } from "./labels";
-import { follow, loadOlder, useStore } from "./store";
+import { follow, loadOlder, loadThrough, useStore } from "./store";
+import { FindBar } from "./thread/FindBar";
+import { markFound, searchThread, takeJump, useJump, type Finding } from "./thread/find";
 import { ChangedBar, DropTarget, EmptyThread, JumpToLatest, ReviewBar } from "./thread/Bars";
 import { addDropped, dropAccepts } from "./thread/attachments";
 import { threadItems, threadPictures } from "./thread/items";
@@ -24,9 +26,12 @@ import "./styles/thread.css";
 const SLACK = 80;
 const TOP_SLACK = 160;
 
-export function Thread({ session, stickToEnd, card = true, panel = false, onShowChanges, onReview }: {
+export function Thread({ session, stickToEnd, card = true, panel = false, findable = true, onShowChanges, onReview }: {
   session: Session;
   stickToEnd: number;
+  /** ⌘F finds in the conversation; not in an editor's panel, where the
+   *  editor's own find has it. */
+  findable?: boolean;
   /** Whether the workspace card and the right panel show, for "N files changed". */
   card?: boolean;
   panel?: boolean;
@@ -49,6 +54,85 @@ export function Thread({ session, stickToEnd, card = true, panel = false, onShow
   const anchor = useRef<{ id: string; top: number } | null>(null);
   const more = !!hasMore[session.id];
   const canReceive = session.inject !== "none";
+  const [finding, setFinding] = useState<Finding | null>(null);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const jump = useJump();
+
+  /** The row a message is in: its own, or the run of tool calls it is part of. */
+  const itemOf = useCallback((messageId: string) => itemsRef.current.find((i) =>
+    i.id === messageId || ("calls" in i && i.calls.some((c) => c.id === messageId)) || ("message" in i && i.message.id === messageId))?.id, []);
+
+  /** Reads back to a message if it is not loaded yet, then scrolls to it and
+   *  stops following the end, so news does not pull the thread away. */
+  const reveal = useCallback(async (messageId: string) => {
+    atEnd.current = false;
+    setFollowing(false);
+    if (!(await loadThrough(session.id, messageId))) return;
+    // A frame for the rows read back to be laid out before scrolling.
+    await new Promise((r) => setTimeout(r, 60));
+    const item = itemOf(messageId);
+    const el = item ? scroller.current?.querySelector(`[data-item="${CSS.escape(item)}"]`) : null;
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [session.id, itemOf]);
+
+  const step = (delta: number) => {
+    if (!finding || !finding.matches.length) return;
+    const count = finding.matches.length;
+    const at = finding.index !== undefined ? (finding.index + delta + count) % count : delta > 0 ? 0 : count - 1;
+    setFinding({ ...finding, index: at });
+    void reveal(finding.matches[at].messageId);
+  };
+
+  // Typed into the find bar: the whole conversation searched a moment after
+  // typing stops, the newest match shown.
+  useEffect(() => {
+    if (!finding || finding.query === finding.searched) return;
+    const query = finding.query;
+    let current = true;
+    const timer = window.setTimeout(async () => {
+      const matches = await searchThread(session.id, query);
+      if (!current) return;
+      setFinding((f) => (f && f.query === query ? { ...f, searched: query, matches, index: matches.length ? matches.length - 1 : undefined } : f));
+      if (matches.length) void reveal(matches[matches.length - 1].messageId);
+    }, 200);
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
+  }, [finding?.query, session.id]);
+
+  // Opened from a search: at the message, its words found.
+  useEffect(() => {
+    const taken = takeJump(session.id);
+    if (!taken) return;
+    setFinding({ query: taken.query, searched: taken.query, matches: [] });
+    void (async () => {
+      const matches = await searchThread(session.id, taken.query);
+      const index = matches.findIndex((m) => m.messageId === taken.messageId);
+      setFinding({ query: taken.query, searched: taken.query, matches, index: index >= 0 ? index : undefined });
+      await reveal(taken.messageId);
+    })();
+  }, [jump?.serial, session.id]);
+
+  // The words marked wherever the rows are drawn.
+  useEffect(() => markFound(column.current, finding, itemOf), [finding, items, itemOf]);
+  useEffect(() => () => markFound(null, null, itemOf), [itemOf]);
+
+  // ⌘F finds in the conversation.
+  const [findFocus, setFindFocus] = useState(0);
+  useEffect(() => {
+    if (!findable) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setFinding((f) => f ?? { query: "", matches: [] });
+        setFindFocus((n) => n + 1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [findable]);
 
   useEffect(() => follow(session.id), [session.id]);
   useEffect(() => dropDelivered(session.id, list), [session.id, list]);
@@ -218,6 +302,16 @@ export function Thread({ session, stickToEnd, card = true, panel = false, onShow
           </div>
         </div>
         <div className="top-fade" />
+        {finding && (
+          <FindBar
+            key={findFocus}
+            finding={finding}
+            setQuery={(query) => setFinding({ ...finding, query })}
+            previous={() => step(-1)}
+            next={() => step(1)}
+            close={() => setFinding(null)}
+          />
+        )}
         {empty && <EmptyThread session={session} />}
         <JumpToLatest
           shown={!following && !empty}

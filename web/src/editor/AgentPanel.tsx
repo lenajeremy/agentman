@@ -60,7 +60,7 @@ function PanelThread({ session }: { session: Session }) {
   const [sent, setSent] = useState(0);
   return (
     <div className="agent-panel-thread">
-      <Thread session={session} stickToEnd={sent} />
+      <Thread session={session} stickToEnd={sent} findable={false} />
       <Composer session={session} onSent={() => setSent((n) => n + 1)} />
     </div>
   );

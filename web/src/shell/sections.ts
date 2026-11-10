@@ -22,6 +22,9 @@ export interface Choices {
 
 export interface Sections {
   pinned: Session[];
+  /** What waits on the user, before what is busy: it never sinks below a
+   *  long Working list. */
+  needsYou: Session[];
   working: Session[];
   active: Session[];
   archived: Session[];
@@ -55,23 +58,20 @@ export function isArchived(s: Session, choices: Choices, now = Date.now()): bool
 }
 
 export function makeSections(sessions: Session[], choices: Choices, now = Date.now()): Sections {
-  const sections: Sections = { pinned: [], working: [], active: [], archived: [] };
+  const sections: Sections = { pinned: [], needsYou: [], working: [], active: [], archived: [] };
   const pinned = new Map<string, Session>();
   for (const s of sessions) {
     if (isArchived(s, choices, now)) sections.archived.push(s);
     else if (choices.pinned.includes(s.id)) pinned.set(s.id, s);
+    else if (filterState(s) === "waiting_input") sections.needsYou.push(s);
     else if (filterState(s) === "busy") sections.working.push(s);
     else sections.active.push(s);
   }
   sections.pinned = choices.pinned.map((id) => pinned.get(id)).filter((s): s is Session => !!s);
+  // Whatever came back to you last first.
   const recent = (a: Session, b: Session) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0);
-  // What asks for you leads; then whatever came back to you last.
-  sections.active.sort((a, b) => {
-    const wa = filterState(a) === "waiting_input";
-    const wb = filterState(b) === "waiting_input";
-    if (wa !== wb) return wa ? -1 : 1;
-    return recent(a, b);
-  });
+  sections.needsYou.sort(recent);
+  sections.active.sort(recent);
   sections.working.sort(recent);
   sections.archived.sort(recent);
   return sections;
@@ -80,7 +80,7 @@ export function makeSections(sessions: Session[], choices: Choices, now = Date.n
 /** Every agent shown, in the order the sidebar lists them, folded sections
  *  left out: what the arrow keys step through. */
 export function shownInOrder(s: Sections, workingOpen: boolean, archivedOpen: boolean): Session[] {
-  return [...s.pinned, ...(workingOpen ? s.working : []), ...s.active, ...(archivedOpen ? s.archived : [])];
+  return [...s.pinned, ...s.needsYou, ...(workingOpen ? s.working : []), ...s.active, ...(archivedOpen ? s.archived : [])];
 }
 
 // The choices, kept as the Mac keeps them: ids, and dates in seconds.

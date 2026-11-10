@@ -44,9 +44,9 @@ import { detail, headline, makeBoard, mentioned, shown, type BoardSections } fro
 import { ShipSheet, TonightButton } from "./BoardActions";
 import { BoardCommitSheet, BoardGitChip } from "./BoardGit";
 import { openCommitSheet, useCommitSheet, useGitChanged, useGitRun } from "./git";
-import { BoardLink } from "./parts";
+import { BoardLink, Snippet } from "./parts";
 import { agentColor, COLOR_BY, useColorBy } from "./colors";
-import { boardSearch, markedParts, openHit, searchDetail, searchHeadline, useMessageHits, type BoardSearch } from "./search";
+import { boardSearch, openHit, searchDetail, searchHeadline, useMessageHits, type BoardSearch } from "./search";
 import { saveSettings } from "../settings/state";
 import "../styles/board.css";
 
@@ -327,7 +327,7 @@ function BoardCard({ session, kind, outlined, match, query }: { session: Session
   const brief = manager.briefs[session.id];
   const mission = missionOf(session.id, manager);
   // What a search found in its conversation, which a click opens at.
-  const open = () => (match ? openHit(match) : openAgent(session.id));
+  const open = () => (match ? openHit(match, query) : openAgent(session.id));
   const when = kind === "working" ? digest.turnStarted : session.lastActivityAt;
 
   const items = (): MenuEntry[] => {
@@ -621,16 +621,6 @@ function BoardReply({ placeholder, send }: { placeholder: string; send: (text: s
   );
 }
 
-/** A hit's snippet, who said it first, the words marked (SearchWords.snippet). */
-export function Snippet({ hit, query }: { hit: SearchHit; query: string }) {
-  return (
-    <>
-      <span className={hit.role === "user" ? "snippet-you" : "snippet-agent"}>{hit.role === "user" ? "You: " : "Agent: "}</span>
-      {markedParts(hit.snippet, query).map((p, i) => (p.marked ? <b key={i}>{p.text}</b> : <span key={i}>{p.text}</span>))}
-    </>
-  );
-}
-
 /** Conversations that have ended and said what was searched for, at the
  *  foot of the last column: not on the Board, but what was asked. */
 function PastHits({ hits, query }: { hits: SearchHit[]; query: string }) {
@@ -638,7 +628,7 @@ function PastHits({ hits, query }: { hits: SearchHit[]; query: string }) {
     <div className="board-past">
       <div className="board-past-title">In past conversations</div>
       {hits.slice(0, 8).map((hit) => (
-        <button key={`${hit.session?.id}-${hit.messageId}`} className="board-past-hit" title={hit.snippet} onClick={() => openHit(hit)}>
+        <button key={`${hit.session?.id}-${hit.messageId}`} className="board-past-hit" title={hit.snippet} onClick={() => openHit(hit, query)}>
           <span className="board-past-name">{hit.session?.name ?? "Conversation"}</span>
           <span className="board-past-snippet"><Snippet hit={hit} query={query} /></span>
         </button>

@@ -3,11 +3,14 @@
 // "Earlier here" in a folder), the archived shelf, Agentman's card and the
 // connection at the foot.
 
+import { sidebarHits, useMessageHits } from "./board/search";
+import { Snippet } from "./board/parts";
+import { openHit } from "./board/search";
 import { agentColor, useColorBy } from "./board/colors";
 import { confirmEnd, endable } from "./AgentHeader";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { ChevronRight, Contrast, Folder as FolderIcon, Globe, ListFilter, PanelLeft, Search, Sparkles, SquarePen, X, ChartSpline } from "lucide-react";
-import type { Session } from "@shared/protocol";
+import type { SearchHit, Session } from "@shared/protocol";
 import { folderLabel, initials, since } from "./labels";
 import { useManagerSummary } from "./manager/summary";
 import { openAgent, openAgentman, openNewAgent, useRoute, openUsage } from "./nav";
@@ -101,11 +104,18 @@ export function Sidebar({ width, headerLeading }: { width: number; headerLeading
     else openAgent(ids[at - 1]);
   }
 
+  // Searching, what was said too: a row shows the line that matched, and
+  // the conversations that matched by what they said alone are listed under
+  // the rest (SearchStore.sidebarHits).
+  const hits = useMessageHits(shell.search);
+  const found = useMemo(() => sidebarHits(shell.search, hits, sections, sessions, shell.folderFilter, shell.stateFilter), [shell.search, hits, sections, sessions, shell.folderFilter, shell.stateFilter]);
   const row = (s: Session, inList = true) => (
-    <AgentButton key={s.id} session={s} branch={branches[s.cwd]} selected={s.id === selected} inList={inList} choices={choices} live={sessions} />
+    <AgentButton key={s.id} session={s} branch={branches[s.cwd]} selected={s.id === selected} inList={inList} choices={choices} live={sessions}
+      match={found.bySession[s.id]} query={found.query} />
   );
 
-  const { pinned, working, active, archived } = sections;
+  const { pinned, needsYou, working, active, archived } = sections;
+  const nothingFound = !!found.query && !found.searching && !pinned.length && !needsYou.length && !working.length && !active.length && !archived.length && !found.others.length;
   const listRef = useRef<HTMLDivElement>(null);
 
   return (
@@ -149,14 +159,40 @@ export function Sidebar({ width, headerLeading }: { width: number; headerLeading
             {pinned.map((s) => row(s))}
           </>
         )}
-        {working.length > 0 ? (
+        {needsYou.length > 0 && (
+          <>
+            <SectionHeading title="Needs you" count={needsYou.length} tint />
+            {needsYou.map((s) => row(s))}
+          </>
+        )}
+        {working.length > 0 && (
           <>
             <SectionHeading title="Working" count={working.length} open={workingOpen} onToggle={() => setWorkingOpen(!workingOpen)} />
             {workingOpen && working.map((s) => row(s))}
-            {active.length > 0 && <div className="section-rule" />}
           </>
-        ) : pinned.length > 0 && active.length > 0 ? <div className="section-rule" /> : null}
+        )}
+        {active.length > 0 && (pinned.length > 0 || needsYou.length > 0 || working.length > 0) && <div className="section-rule" />}
         {active.map((s) => row(s))}
+        {found.others.length > 0 && (
+          <>
+            <div className="earlier-head">In messages</div>
+            {found.others.map((hit) => hit.session && (
+              <AgentButton key={`hit-${hit.session.id}`} session={hit.session} branch={branches[hit.session.cwd]} selected={hit.session.id === selected}
+                inList choices={choices} live={sessions} match={hit} query={found.query} />
+            ))}
+          </>
+        )}
+        {nothingFound && (
+          <div className="nothing-found">
+            <Icon icon={Search} sf="magnifyingglass" size={22} />
+            <div className="nothing-found-title">Nothing found</div>
+            <div className="nothing-found-text">
+              {shell.folderFilter || shell.stateFilter
+                ? `No agent matches \u201C${found.query}\u201D with these filters.`
+                : `No agent or message matches \u201C${found.query}\u201D.`}
+            </div>
+          </div>
+        )}
         {/* In a folder, the sessions that ran there and ended: read them, or resume one. */}
         {shell.folderFilter && earlierHere.length > 0 && (
           <>
@@ -194,8 +230,10 @@ export function Sidebar({ width, headerLeading }: { width: number; headerLeading
 
 /** An agent in the list, opening its thread when clicked; its right-click
  *  menu renames, pins, archives and mutes. */
-function AgentButton({ session, branch, selected, inList, earlier, choices, live }: {
+function AgentButton({ session, branch, selected, inList, earlier, choices, live, match, query = "" }: {
   session: Session; branch?: string; selected: boolean; inList: boolean; earlier?: boolean; choices: Choices; live: Session[];
+  /** What a search found in its conversation, which a click opens at. */
+  match?: SearchHit; query?: string;
 }) {
   const agentmanOn = useAgentmanOn();
   const [colorBy] = useColorBy();
@@ -239,11 +277,12 @@ function AgentButton({ session, branch, selected, inList, earlier, choices, live
       className={`agent-row ${inList ? "in-list" : "on-shelf"} ${earlier ? "earlier" : ""} ${selected ? "selected" : ""}`}
       role="button"
       aria-selected={selected}
-      onClick={() => openAgent(session.id)}
+      onClick={() => (match ? openHit(match, query) : openAgent(session.id))}
       onContextMenu={earlier ? undefined : menu}
     >
       {tint && <span className="agent-tint" style={{ background: tint }} aria-hidden />}
       <AgentRow session={session} branch={branch} renaming={renaming === session.id} archived={isArchived(session, choices)} />
+      {match && <div className="agent-match" title={match.snippet}><Snippet hit={match} query={query} /></div>}
     </div>
   );
 }
@@ -411,10 +450,10 @@ function ActiveFilters() {
 
 /** A heading in the list: a section's name, and for one that folds, how
  *  many are in it and a chevron that opens and closes it. */
-function SectionHeading({ title, count, open, onToggle, shelf }: { title: string; count?: number; open?: boolean; onToggle?: () => void; shelf?: boolean }) {
+function SectionHeading({ title, count, open, onToggle, shelf, tint }: { title: string; count?: number; open?: boolean; onToggle?: () => void; shelf?: boolean; tint?: boolean }) {
   return (
     <div
-      className={`section-head ${onToggle ? "folds" : ""} ${shelf ? "shelf-head" : ""}`}
+      className={`section-head ${onToggle ? "folds" : ""} ${shelf ? "shelf-head" : ""} ${tint ? "needs-you" : ""}`}
       role={onToggle ? "button" : "heading"}
       aria-expanded={onToggle ? open : undefined}
       onClick={onToggle}

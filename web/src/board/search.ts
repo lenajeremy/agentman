@@ -7,6 +7,7 @@ import type { SearchHit, SearchResults, Session } from "@shared/protocol";
 import { daemon } from "../daemon";
 import { openAgent } from "../nav";
 import { getShell, setShell } from "../shell/state";
+import { setJump } from "../thread/find";
 
 /** Worth asking the daemon: a word of three letters at least. */
 export function searchable(query: string): boolean {
@@ -87,10 +88,12 @@ export function searchDetail(found: BoardSearch): string {
   return found.past.length === 1 ? "Also said in 1 past conversation." : `Also said in ${found.past.length} past conversations.`;
 }
 
-/** Opens what a search found: its conversation, even one on no list. */
-export function openHit(hit: SearchHit) {
+/** Opens what a search found: its conversation, even one on no list, at
+ *  the message, its words found. */
+export function openHit(hit: SearchHit, query: string) {
   const session = hit.session;
   if (!session) return;
+  setJump(session.id, hit.messageId, query);
   if (!getShell().pastSessions.some((s) => s.id === session.id)) {
     setShell({ foundSessions: { ...getShell().foundSessions, [session.id]: session } });
   }
@@ -127,3 +130,37 @@ export function markedParts(text: string, query: string): { text: string; marked
   if (last < text.length) parts.push({ text: text.slice(last), marked: false });
   return parts;
 }
+
+export interface SidebarHits {
+  query: string;
+  /** The best message of each agent listed. */
+  bySession: Record<string, SearchHit>;
+  /** Conversations that matched by what they said alone, running or long over. */
+  others: SearchHit[];
+  searching: boolean;
+}
+
+/** The sidebar's search, of what was said as well (SearchStore.sidebarHits):
+ *  a listed agent shows its match; the rest are listed under it. */
+export function sidebarHits(query: string, hits: SearchResults | null, listed: { pinned: Session[]; needsYou: Session[]; working: Session[]; active: Session[]; archived: Session[] },
+  sessions: Session[], folder: string | null, stateFilter: string | null): SidebarHits {
+  const q = query.trim();
+  const found: SidebarHits = { query: q, bySession: {}, others: [], searching: !!q && searchable(q) && hits?.query !== q };
+  if (!q || !hits || hits.query !== q) return found;
+  const named = new Set([...listed.pinned, ...listed.needsYou, ...listed.working, ...listed.active, ...listed.archived].map((s) => s.id));
+  const inFolder = (cwd: string) => !folder || cwd === folder || cwd.startsWith(folder.endsWith("/") ? folder : folder + "/");
+  const stateOf = (s: Session) => (s.question || s.state === "waiting_input" ? "waiting_input" : s.state === "busy" ? "busy" : "idle");
+  for (const hit of hits.hits) {
+    const session = hit.session;
+    if (!session || !inFolder(session.cwd)) continue;
+    if (named.has(session.id)) {
+      found.bySession[session.id] ??= hit;
+      continue;
+    }
+    const current = sessions.find((s) => s.id === session.id) ?? session;
+    if (stateFilter && (current.state === "ended" || stateOf(current) !== stateFilter)) continue;
+    found.others.push({ ...hit, session: current });
+  }
+  return found;
+}
+
