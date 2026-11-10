@@ -61,6 +61,48 @@ func TestResumeRefusesASessionStillRunningElsewhere(t *testing.T) {
 	}
 }
 
+// Ended while it runs in someone's own terminal, a session only comes off the
+// list: the agent runs on there. Opening it again from the phone, or Earlier
+// here on the Mac, must not start a second agent beside it.
+func TestResumeRefusesAnEndedSessionStillRunningElsewhere(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	for _, session := range []protocol.Session{
+		{ID: "claude:abc", Kind: protocol.KindClaude, State: protocol.StateIdle, Inject: protocol.InjectHook, AgentPID: 4242},
+		{ID: "codex:abc", Kind: protocol.KindCodex, State: protocol.StateIdle, Inject: protocol.InjectNone},
+	} {
+		session.NativeID, session.Cwd = "abc", t.TempDir()
+		registry := source.NewRegistry()
+		registry.Add(&liveSource{session: session})
+		agent := New(registry, &recordingSink{})
+		agent.refresh(context.Background(), true)
+
+		ended := agent.HandleFrom(context.Background(), "mac", protocol.Request{Type: protocol.ReqEndSession, SessionID: session.ID})
+		if ended.Type != protocol.EvtSessionEnded || ended.Closed {
+			t.Fatalf("%s: end = %+v", session.ID, ended)
+		}
+		agent.refresh(context.Background(), false)
+		for _, listed := range agent.snapshot() {
+			if listed.ID == session.ID {
+				t.Fatalf("%s: still listed after it was ended", session.ID)
+			}
+		}
+		// Its folder's history lists it, ended, as the phone and Earlier here
+		// read it.
+		gone := session
+		gone.State, gone.Inject = protocol.StateEnded, protocol.InjectNone
+		agent.folders.remember([]protocol.Session{gone})
+
+		reply := agent.HandleFrom(context.Background(), "phone", protocol.Request{Type: protocol.ReqResumeSession, SessionID: session.ID})
+		if reply.Type != protocol.EvtError || strings.Contains(reply.Error, "not installed") {
+			t.Errorf("%s: a second agent was started beside the one still running: %+v", session.ID, reply)
+			continue
+		}
+		if !strings.Contains(reply.Error, "running") {
+			t.Errorf("%s: the refusal does not say why: %s", session.ID, reply.Error)
+		}
+	}
+}
+
 // fakeAgent puts a stand-in for an agent CLI first on PATH that only sleeps,
 // so a resume can be launched for real on the test's private tmux server.
 func fakeAgent(t *testing.T, name string) {

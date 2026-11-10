@@ -55,6 +55,27 @@ func (r *Registry) EndSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// RunningUnreachable reports whether a session's agent is running where
+// Agentman can't type into it (a terminal the user opened), listed or not.
+// Ended there, it only came off the list, and the agent runs on: what the
+// last sweep found, before ended sessions were left out, still has it.
+func (r *Registry) RunningUnreachable(sessionID string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, sessions := range r.last {
+		for _, session := range sessions {
+			if session.ID != sessionID && endedKey(session) != sessionID {
+				continue
+			}
+			if session.State == protocol.StateEnded || session.Inject == protocol.InjectTmux || session.Inject == protocol.InjectAPI {
+				continue
+			}
+			return true
+		}
+	}
+	return false
+}
+
 // ForgetEnded lists a session again: it is being picked back up.
 func (r *Registry) ForgetEnded(sessionID string) {
 	r.ended.forget(sessionID)
