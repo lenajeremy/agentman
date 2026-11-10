@@ -42,7 +42,7 @@ done. One at a time, in this order.
     corrections; with them the rest of the Mac's Permissions page the web
     lacked: when an agent finishes, while agents work, overnight, trust by
     folder.
-11. **Agentman's key prompt** (0.41): says what Agentman is and why it
+11. ✓ (411747e) **Agentman's key prompt** (0.41): says what Agentman is and why it
     needs a key, and the box's note reads "Don't have one? Get an
     Anthropic key".
 12. **⌘K finds what was said** (CommandPalette.swift `said`): messages that
