@@ -132,3 +132,47 @@
 .board-check.failed .board-check-words { color: var(--error-text); }
 .board-check-issue { padding-left: 19px; font-size: 12.5px; color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .board-check-issue.muted { font-size: 12px; color: var(--muted); }
+
+/* Ship and Tonight (ShipSheet, TonightButton, TonightPanel). */
+.board-top-button { min-width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; border-radius: 6px; color: var(--muted); }
+.board-top-button.counted { padding: 0 6px; }
+.board-top-button:hover { background: var(--fill); }
+.board-top-count { font-size: 12px; font-variant-numeric: tabular-nums; }
+.board-tonight { position: relative; display: inline-flex; }
+.board-ship { width: 460px; display: flex; flex-direction: column; gap: 14px; padding: 20px; box-sizing: border-box; }
+.board-ship-head { display: flex; flex-direction: column; gap: 3px; }
+.board-ship-title { font-size: 15px; font-weight: 600; color: var(--text); }
+.board-ship-subtitle { font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+.board-ship-list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.board-ship-reading { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 12.5px; color: var(--muted); }
+.board-ship-row { display: flex; align-items: baseline; gap: 8px; padding: 5px 0; }
+.board-ship-row input { align-self: center; }
+.board-ship-icon { width: 13px; flex: none; display: inline-grid; place-items: center; align-self: center; }
+.board-ship-icon .ok { color: var(--ok); }
+.board-ship-icon .error { color: var(--error); }
+.board-ship-icon .faint { color: var(--faint); }
+.board-ship-words { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.board-ship-name { font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board-ship-row.off .board-ship-name { color: var(--muted); }
+.board-ship-why { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board-ship-doubt { color: var(--needs-you); align-self: center; }
+.board-ship-link { font-size: 12px; color: var(--accent, #0a7aff); }
+.board-ship-buttons { display: flex; align-items: center; gap: 8px; }
+.board-ship-buttons .push-button { display: inline-flex; align-items: center; gap: 5px; }
+.board-popover { position: fixed; z-index: 50; width: 380px; box-sizing: border-box; padding: 14px; display: flex; flex-direction: column; gap: 12px;
+  border-radius: 12px; background: var(--surface); box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.2), 0 10px 32px rgba(0, 0, 0, 0.18); }
+.board-popover-head { display: flex; flex-direction: column; gap: 2px; }
+.board-popover-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.board-popover-subtitle { font-size: 12px; color: var(--muted); }
+.board-queue-item { display: flex; align-items: baseline; gap: 8px; }
+.board-queue-words { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.board-queue-task { font-size: 12.5px; color: var(--text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.board-queue-meta { font-size: 11.5px; color: var(--muted); }
+.board-queue-remove { color: var(--muted); }
+.board-rule { height: 1px; background: var(--line); }
+.board-tonight-task { resize: none; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: 13px var(--sans); outline: none; }
+.board-tonight-task:focus { border-color: color-mix(in srgb, var(--text) 35%, transparent); }
+.board-tonight-row { display: flex; align-items: center; gap: 8px; }
+.board-tonight-row select { height: 24px; font: 12px var(--sans); color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; }
+.board-tonight-row select:first-child { flex: 1; min-width: 0; }
+.board-tonight-off { display: flex; align-items: center; font-size: 12px; color: var(--muted); }

@@ -4,6 +4,7 @@
 // sheet: there is a message to write.
 
 import { useSyncExternalStore } from "react";
+import type { Session, Verification } from "@shared/protocol";
 import { git, type GitState } from "../workspace/api";
 import type { GitAction } from "../workspace/gitAction";
 
@@ -112,3 +113,29 @@ export function openCommitSheet(sessionId: string | null) {
 export function useCommitSheet(): string | null {
   return useSyncExternalStore(subscribe, () => committing);
 }
+
+/** Whether an agent's work can be shipped, and if not why, the same way the
+ *  daemon decides it (BoardActions.swift's ShipCheck.reason). */
+export function shipReason(session: Session, state: GitState | undefined, check: Verification | undefined): string | undefined {
+  if (session.state !== "idle" || session.question) return "Still working";
+  if (check?.state === "failed") return "Its tests fail";
+  if (check?.state === "checking") return "Still being checked";
+  if (!state) return "Not in a git repository";
+  if (!state.branch) return "No branch checked out";
+  if (isProtected(state.branch, state)) return `On ${state.branch}, which is yours to push`;
+  const tracked = state.upstream?.split("/").slice(1).join("/");
+  if (state.upstream && tracked && isProtected(tracked, state)) return `Tracks ${state.upstream}, which is yours to push`;
+  if (state.behind > 0) return "Behind its upstream";
+  if (!state.upstream && !state.remote) return "No remote to push to";
+  if (state.changes === 0 && state.ahead === 0 && state.aheadOfDefault === 0) return "Nothing to ship";
+  return undefined;
+}
+
+/** What will go out, in a few words. */
+export function shipSummary(state: GitState): string {
+  const parts = [state.branch ?? ""];
+  if (state.changes > 0) parts.push(state.changes === 1 ? "1 changed file" : `${state.changes} changed files`);
+  if (state.ahead > 0) parts.push(state.ahead === 1 ? "1 commit to push" : `${state.ahead} commits to push`);
+  return parts.join(" · ");
+}
+

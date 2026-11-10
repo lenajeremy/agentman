@@ -145,6 +145,39 @@ export function entryById(id: string, s: ManagerState = state): ManagerEntry | u
   return undefined;
 }
 
+/** Ships finished agents together: each committed, pushed and opened as a
+ *  pull request. Answers the run's id, or what went wrong. */
+export async function ship(sessionIds: string[]): Promise<{ id?: string; problem?: string }> {
+  try {
+    const reply = await daemon.request({ type: "manager_ship", sessionIds }, 30_000);
+    if (reply.type === "error") return { problem: reply.error ?? "That didn't work." };
+    if (reply.ship) set({ shipRun: reply.ship });
+    return reply.ship ? { id: reply.ship.id } : { problem: "Update am serve to ship from here." };
+  } catch {
+    return { problem: "Couldn't reach am serve." };
+  }
+}
+
+/** Lines work up for tonight, or takes it back out; answers the problem. */
+export async function addToQueue(agent: string, folder: string, task: string): Promise<string | undefined> {
+  return queueRequest({ type: "manager_queue_add", queue: { agent, folder, task } });
+}
+
+export async function removeFromQueue(queueId: string): Promise<string | undefined> {
+  return queueRequest({ type: "manager_queue_remove", queueId });
+}
+
+async function queueRequest(req: AppRequest): Promise<string | undefined> {
+  try {
+    const reply = await daemon.request(req);
+    if (reply.type === "error") return reply.error ?? "That didn't work.";
+    if (reply.type === "manager_queue") set({ queue: reply.queue ?? [] });
+    return undefined;
+  } catch {
+    return "Couldn't reach am serve.";
+  }
+}
+
 /** The teams at work, for the Board. */
 export const runningMissions = (s: ManagerState = state) => s.missions.filter((m) => m.state === "running");
 

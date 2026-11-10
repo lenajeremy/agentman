@@ -6,7 +6,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
-  BadgeCheck, ChevronDown, Check, CircleAlert, Circle, CircleX, Clock, Code, Diff, EyeOff, Ellipsis, FileText, Globe, MessagesSquare, MessageSquarePlus,
+  BadgeCheck, ChevronDown, CircleArrowUp, Check, CircleAlert, Circle, CircleX, Clock, Code, Diff, EyeOff, Ellipsis, FileText, Globe, MessagesSquare, MessageSquarePlus,
   Plus, SquarePen, TriangleAlert, X,
 } from "lucide-react";
 import type { ManagerCard, Mission, Question, Session, Verification } from "@shared/protocol";
@@ -27,7 +27,7 @@ import { openAgent, openNewAgent } from "../nav";
 import { getPref, setPref, usePref } from "../prefs";
 import { Loader } from "../shell/Loader";
 import { archive, filterState, isArchived, useChoices } from "../shell/sections";
-import { setShell, useShell } from "../shell/state";
+import { loadFolders, setShell, useShell } from "../shell/state";
 import { follow, sessionsLoaded, useStatus, useStore } from "../store";
 import { tidy } from "../thread/items";
 import { showPanel } from "../panel/state";
@@ -40,6 +40,7 @@ import { perform, send as sendToAgent, useActionError } from "../thread/state";
 import { AgentMark, ChromeButton, Icon } from "../ui";
 import { makeDigest, type BoardDigest, type BoardProgress, type BoardStep } from "./digest";
 import { detail, headline, makeBoard, mentioned, shown, type BoardSections } from "./sections";
+import { ShipSheet, TonightButton } from "./BoardActions";
 import { BoardCommitSheet, BoardGitChip } from "./BoardGit";
 import { openCommitSheet, useCommitSheet, useGitChanged, useGitRun } from "./git";
 import { BoardLink } from "./parts";
@@ -135,6 +136,7 @@ export function BoardView({ headerLeading }: { headerLeading: number }) {
           {headerLeading > 0 && <span className="board-top-title">Agentman</span>}
           <span className="board-spacer" />
           <span className="no-drag board-top-buttons">
+            <TonightButton />
             <FolderMenu />
             {manager.schedules.length > 0 && <SchedulesButton />}
             <ChromeButton icon={SquarePen} sf="square.and.pencil" title="New agent" onClick={() => openNewAgent()} />
@@ -215,6 +217,7 @@ function Ask() {
 /** Show one folder's agents, as the sidebar's filter, which steps aside here. */
 function FolderMenu() {
   const { folderFilter, folders } = useShell();
+  useEffect(() => void loadFolders(), []);
   const open = (e: ReactMouseEvent<HTMLButtonElement>) => {
     menuUnder(e.currentTarget, [
       { label: "All Folders", checked: !folderFilter, action: () => setShell({ folderFilter: null }) },
@@ -249,6 +252,7 @@ function BoardColumn({ kind, sessions, outlined, offers = [], missions = [], hid
   // words for an empty column only when it holds nothing at all.
   const quiet = sessions.length === 0 && offers.length === 0;
   const empty = quiet && missions.length === 0;
+  const [shipping, setShipping] = useState(false);
   const hiddenMenu = (e: ReactMouseEvent<HTMLButtonElement>) =>
     menuUnder(e.currentTarget, [
       ...hidden.map((s) => ({ label: s.name, action: () => showOnBoard(s.id) })),
@@ -272,6 +276,13 @@ function BoardColumn({ kind, sessions, outlined, offers = [], missions = [], hid
             <span>{hidden.length} hidden</span>
           </button>
         )}
+        {kind === "idle" && sessions.length > 0 && (
+          <button className="board-column-action" title="Commit, push and open pull requests for finished agents" onClick={() => setShipping(true)}>
+            <CircleArrowUp size={11} />
+            <span>Ship</span>
+          </button>
+        )}
+        {shipping && <ShipSheet sessions={sessions} close={() => setShipping(false)} />}
       </div>
       <div className="board-column-cards" style={{ paddingBottom: clearance }}>
         {missions.map((m) => <BoardMission key={m.id} mission={m} />)}
