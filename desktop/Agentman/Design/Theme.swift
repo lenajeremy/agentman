@@ -27,7 +27,10 @@ extension NSColor {
 
 enum Palette {
     static let paper = Color(light: 0xFAFAFA, dark: 0x000000)
-    static let sidebar = Color(light: 0xF5F5F5, dark: 0x050505)
+    /// The sidebars' ground: the site's cream, lighter, in the New theme.
+    static var sidebar: Color { Look.site ? siteSidebar : classicSidebar }
+    private static let classicSidebar = Color(light: 0xF5F5F5, dark: 0x050505)
+    private static let siteSidebar = Color(light: 0xFFF7EC, dark: 0x14100D)
     static let surface = Color(light: 0xFFFFFF, dark: 0x0D0D0D)
     static let fill = Color(light: 0xEFEFEF, dark: 0x202020)
     static let fillStrong = Color(light: 0xE4E4E4, dark: 0x303030)
