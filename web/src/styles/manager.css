@@ -320,3 +320,5 @@
 
 /* ProgressView, small. */
 .am-spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--muted) 35%, transparent); border-top-color: var(--muted); animation: spin 0.9s linear infinite; display: inline-block; }
+/* What an offer would do, in words (CompactCard.swift's offer detail). */
+.am-offer-detail { font-size: 12.5px; line-height: calc(12.5px * 1.27 + 2px); color: var(--text-2); white-space: pre-wrap; }

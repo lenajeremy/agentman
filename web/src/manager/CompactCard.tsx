@@ -9,7 +9,7 @@ import type { ManagerCard, Question, QuestionOption } from "@shared/protocol";
 import { cardQuestion } from "@shared/manager-feed";
 import { openAgent } from "../nav";
 import { useStore } from "../store";
-import { AgentMark, Icon } from "../ui";
+import { AgentMark, AppIcon, Icon } from "../ui";
 import { replyToCard, type QuestionReply } from "./store";
 import { InlineMarkdown, MiddleTruncated } from "./text";
 
@@ -125,6 +125,7 @@ export function CompactCard({ card, closeHelp = "Put away", close }: { card: Man
   const [problem, setProblem] = useState<string>();
   const [busy, setBusy] = useState(false);
   const question = cardQuestion(card);
+  const offer = card.kind === "offer";
   const detail = shownDetail(card);
   const typed = reply.trim().length > 0;
 
@@ -148,12 +149,22 @@ export function CompactCard({ card, closeHelp = "Put away", close }: { card: Man
   return (
     <fieldset className="am-compact" disabled={busy}>
       <div className="am-compact-head">
-        <AgentMark kind={session?.kind ?? ""} size={14} />
-        <span className="am-compact-name">{name}</span>
-        <span className="am-needs-dot" />
-        <span className="am-needs-text">needs you</span>
+        {/* An offer is Agentman's, not the agent asking (CompactCard.swift). */}
+        {offer ? (
+          <>
+            <AppIcon size={14} />
+            <span className="am-compact-name">Agentman offers</span>
+          </>
+        ) : (
+          <>
+            <AgentMark kind={session?.kind ?? ""} size={14} />
+            <span className="am-compact-name">{name}</span>
+            <span className="am-needs-dot" />
+            <span className="am-needs-text">needs you</span>
+          </>
+        )}
         <span className="am-spacer" />
-        {session && (
+        {session && !offer && (
           <button className="am-icon-button" title={`Open ${name}`} onClick={() => openAgent(card.sessionId)}>
             <Icon icon={ArrowUpRight} sf="arrow.up.right" size={9} weight="semibold" />
           </button>
@@ -163,7 +174,11 @@ export function CompactCard({ card, closeHelp = "Put away", close }: { card: Man
         </button>
       </div>
       <div className="am-compact-title" title={card.title}><InlineMarkdown text={card.title} /></div>
-      {detail && <MiddleTruncated className="am-compact-detail" text={detail} title={card.detail ?? detail} />}
+      {offer && card.detail?.trim() ? (
+        <div className="am-offer-detail">{card.detail.trim()}</div>
+      ) : (
+        detail && <MiddleTruncated className="am-compact-detail" text={detail} title={card.detail ?? detail} />
+      )}
       {question ? (
         <CompactChoices
           question={question}
