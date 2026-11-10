@@ -12,7 +12,7 @@
 #   AMX=$TMPDIR/amx-thread scripts/teststack/thread-agents.sh
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-REPO=$(cd "$HERE/../../.." && pwd)
+REPO=$(cd "$HERE/../.." && pwd)
 T=${AMX:-${TMPDIR:-/tmp}}
 T=${T%/}/amx
 H=$T/home

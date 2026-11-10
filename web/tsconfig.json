@@ -16,8 +16,8 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["vite/client"],
     "paths": {
-      "@shared/*": ["../../mobile/lib/*"],
-      "@marks": ["../../mobile/components/agentMarks.ts"],
+      "@shared/*": ["../mobile/lib/*"],
+      "@marks": ["../mobile/components/agentMarks.ts"],
       "marked": ["./node_modules/marked"]
     }
   },

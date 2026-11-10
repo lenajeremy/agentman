@@ -9,7 +9,7 @@
 # the Mac first (npm run build in frontend/); this builds the Go side there.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-REPO=$(cd "$HERE/../../.." && pwd)
+REPO=$(cd "$HERE/../.." && pwd)
 OUT=${1:?out.png}
 QUERY=${2:-}
 # One run at a time: the machine has one screen.

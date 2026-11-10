@@ -15,7 +15,7 @@
 #   claude:0b9d4e21-7c3a-4f6e-8d12-5a6b7c8d9e10  "bugs"  a code block before a quote
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-REPO=$(cd "$HERE/../../.." && pwd)
+REPO=$(cd "$HERE/../.." && pwd)
 T=${AMX:-${TMPDIR:-/tmp}}
 T=${T%/}/amx
 H=$T/home
@@ -47,8 +47,8 @@ rm -f "$H/.claude/sessions/"*.json
 PROJ=$H/projects/demo
 mkdir -p "$PROJ/src"
 cp "$REPO/internal/term/term.go" "$PROJ/term.go"
-cp "$REPO/crossplatform/frontend/src/daemon.ts" "$PROJ/daemon.ts"
-cp "$REPO/crossplatform/frontend/src/App.tsx" "$PROJ/src/App.tsx"
+cp "$REPO/web/src/daemon.ts" "$PROJ/daemon.ts"
+cp "$REPO/web/src/App.tsx" "$PROJ/src/App.tsx"
 cp "$REPO/README.md" "$PROJ/README.md"
 [ -d "$PROJ/.git" ] || git -C "$PROJ" init -q
 "$TMUX_BIN" -L agentman has-session -t "=agentman-demo" 2>/dev/null ||

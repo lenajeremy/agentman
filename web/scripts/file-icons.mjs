@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const swift = await readFile(join(here, '../../../desktop/Agentman/Design/FileIconMap.swift'), 'utf8')
+const swift = await readFile(join(here, '../../desktop/Agentman/Design/FileIconMap.swift'), 'utf8')
 
 const maps = {}
 let current = null

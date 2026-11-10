@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const desktop = join(here, '../../../desktop')
+const desktop = join(here, '../../desktop')
 const built = join(desktop, 'Agentman/Resources/EditorWeb')
 const fonts = join(desktop, 'Agentman/Resources/Fonts')
 const out = join(here, '../public/editor')

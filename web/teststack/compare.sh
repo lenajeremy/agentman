@@ -24,7 +24,7 @@
 #   sips -c <h> <w> --cropOffset <y> <x> in.png --out out.png   (offsets >= 1)
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-REPO=$(cd "$HERE/../../.." && pwd)
+REPO=$(cd "$HERE/../.." && pwd)
 OUT=${1:?out dir}
 AGENT=${2:-claude:6f1c2a9e-3b7d-4c55-9a10-2d8e4f6b7c01}
 MAC_LINK=${3:-agentman://agent/$AGENT}

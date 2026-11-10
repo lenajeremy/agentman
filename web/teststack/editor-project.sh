@@ -8,7 +8,7 @@
 #   AMX=<dir> scripts/teststack/editor-project.sh
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-REPO=$(cd "$HERE/../../.." && pwd)
+REPO=$(cd "$HERE/../.." && pwd)
 T=${AMX:-${TMPDIR:-/tmp}}
 T=${T%/}/amx
 P=$T/home/projects/demo
@@ -17,16 +17,16 @@ git() { command git -C "$P" -c user.name=Test -c user.email=test@example.com -c 
 rm -rf "$P/.git" "$P/docs" "$P/src" "$P/assets" "$P/node_modules" "$P/scripts"
 mkdir -p "$P/src/components" "$P/src/lib" "$P/docs/images" "$P/assets" "$P/node_modules/left-pad" "$P/scripts"
 cp "$REPO/internal/term/term.go" "$P/term.go"
-cp "$REPO/crossplatform/frontend/src/daemon.ts" "$P/daemon.ts"
-cp "$REPO/crossplatform/frontend/src/App.tsx" "$P/src/App.tsx"
-cp "$REPO/crossplatform/frontend/src/labels.ts" "$P/src/lib/labels.ts"
-cp "$REPO/crossplatform/frontend/src/nav.ts" "$P/src/lib/nav.ts"
-cp "$REPO/crossplatform/frontend/src/ui.tsx" "$P/src/components/ui.tsx"
-cp "$REPO/crossplatform/frontend/src/Sidebar.tsx" "$P/src/components/Sidebar.tsx"
+cp "$REPO/web/src/daemon.ts" "$P/daemon.ts"
+cp "$REPO/web/src/App.tsx" "$P/src/App.tsx"
+cp "$REPO/web/src/labels.ts" "$P/src/lib/labels.ts"
+cp "$REPO/web/src/nav.ts" "$P/src/lib/nav.ts"
+cp "$REPO/web/src/ui.tsx" "$P/src/components/ui.tsx"
+cp "$REPO/web/src/Sidebar.tsx" "$P/src/components/Sidebar.tsx"
 cp "$REPO/README.md" "$P/README.md"
 cp "$REPO/crossplatform/build/appicon.png" "$P/assets/logo.png"
 cp "$REPO/crossplatform/build/appicon.png" "$P/docs/images/diagram.png"
-cp "$REPO/crossplatform/scripts/teststack/start.sh" "$P/scripts/start.sh"
+cp "$REPO/web/teststack/start.sh" "$P/scripts/start.sh"
 printf 'node_modules\n.env\n' > "$P/.gitignore"
 printf 'API_URL=http://localhost:3000\n' > "$P/.env"
 printf '{\n  "name": "left-pad",\n  "version": "1.3.0"\n}\n' > "$P/node_modules/left-pad/package.json"

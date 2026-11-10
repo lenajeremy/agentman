@@ -8,8 +8,8 @@ import { join, resolve } from "node:path";
 // The phone app's TypeScript that has no React Native in it (the protocol,
 // markdown, parsers) is shared, not copied. Its bare imports (marked)
 // resolve from here, as mobile/node_modules may not be installed.
-const shared = resolve(__dirname, "../../mobile/lib");
-const components = resolve(__dirname, "../../mobile/components");
+const shared = resolve(__dirname, "../mobile/lib");
+const components = resolve(__dirname, "../mobile/components");
 
 // The phone's agent marks name their one picture (Antigravity's) with
 // React Native's require(); here it becomes an asset URL.
@@ -52,7 +52,7 @@ export default defineConfig({
     host: "127.0.0.1",
     port: Number(process.env.WAILS_VITE_PORT) || 9245,
     strictPort: true,
-    fs: { allow: [resolve(__dirname, ".."), shared, components, resolve(__dirname, "../../mobile/assets")] },
+    fs: { allow: [resolve(__dirname, ".."), shared, components, resolve(__dirname, "../mobile/assets")] },
   },
   resolve: {
     alias: {
