@@ -36,7 +36,7 @@ struct KnowledgeSettings: View {
 
             HStack(alignment: .top, spacing: 12) {
                 ScrollView {
-                    VStack(spacing: 2) {
+                    VStack(spacing: Look.site ? 5 : 2) {
                         ForEach(manager.notes) { note in
                             NoteRow(note: note, selected: selection == note.id) { selection = note.id }
                         }
@@ -221,14 +221,22 @@ private struct NoteRow: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.primary.opacity(selected ? 0.08 : 0))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(selected ? 0.08 : 0))
-            )
+            .background {
+                // In New, the open note is cream, edged and a little raised,
+                // as the open page and the open agent are.
+                if Look.site, selected {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .hardShadowFill(Palette.bubble, shadow: Palette.edge, depth: 2)
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
+                } else {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.primary.opacity(selected ? 0.08 : 0))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(selected ? 0.08 : 0))
+                        )
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

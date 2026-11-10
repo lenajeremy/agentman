@@ -12,7 +12,7 @@ struct SettingsView: View {
         HStack(spacing: 0) {
             // The pages, with the same quiet highlight as the main window's
             // sidebar rather than the accent-coloured one a List draws.
-            VStack(spacing: 2) {
+            VStack(spacing: Look.site ? 5 : 2) {
                 ForEach(SettingsPage.allCases) { item in
                     SettingsTab(page: item, selected: page == item.rawValue) { page = item.rawValue }
                 }
@@ -21,9 +21,20 @@ struct SettingsView: View {
             .padding(.horizontal, 10)
             .padding(.top, 8)
             .frame(width: 200)
-            .background(SidebarMaterial().ignoresSafeArea())
+            // In New, the main window's sidebar: cream, with the ink edge.
+            .background {
+                if Look.site {
+                    Palette.sidebar.ignoresSafeArea()
+                } else {
+                    SidebarMaterial().ignoresSafeArea()
+                }
+            }
 
-            Divider()
+            if Look.site {
+                Rectangle().fill(Palette.edge).frame(width: Palette.edgeWidth).ignoresSafeArea()
+            } else {
+                Divider()
+            }
 
             VStack(spacing: 0) {
                 switch SettingsPage(rawValue: page) ?? .general {
@@ -84,14 +95,22 @@ private struct SettingsTab: View {
             }
             .padding(.horizontal, 10)
             .frame(height: 32)
-            .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Color.primary.opacity(selected ? 0.10 : hovering ? 0.05 : 0))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(selected ? 0.10 : 0))
-            )
+            .background {
+                // In New, the open page is a card raised on the cream, as
+                // the open agent is in the main window.
+                if Look.site, selected {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .hardShadowFill(Palette.surface, shadow: Palette.edge, depth: 3)
+                        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
+                } else {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.primary.opacity(selected ? 0.10 : hovering ? 0.05 : 0))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(selected ? 0.10 : 0))
+                        )
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -261,7 +280,7 @@ private struct GeneralPage: View {
                 SettingsRow(title: "Brief me on each agent",
                             detail: "A short summary after an agent's turns, so you don't have to read them all.", divider: false) {
                     Toggle("", isOn: binding.briefs)
-                        .toggleStyle(.switch)
+                        .toggleStyle(.appSwitch)
                         .labelsHidden()
                 }
             }
@@ -357,7 +376,7 @@ private struct PermissionsPage: View {
                 SettingsRow(title: "Approve low-risk requests for me",
                             detail: "Agentman answers these the moment an agent asks, and tells you in a line.", divider: false) {
                     Toggle("", isOn: binding.autoApprove)
-                        .toggleStyle(.switch)
+                        .toggleStyle(.appSwitch)
                         .labelsHidden()
                 }
             }
@@ -526,7 +545,7 @@ private struct PermissionsPage: View {
                     draft?.autopilot = autopilot
                 }
             ))
-            .toggleStyle(.switch)
+            .toggleStyle(.appSwitch)
             .labelsHidden()
         }
     }
@@ -541,7 +560,7 @@ private struct PermissionsPage: View {
                     draft?.approve = kinds
                 }
             ))
-            .toggleStyle(.switch)
+            .toggleStyle(.appSwitch)
             .labelsHidden()
         }
     }
@@ -906,27 +925,43 @@ private struct AppearanceSection: View {
         @Bindable var choice = ThemeChoice.shared
         SettingsSection(title: "Appearance", footer: "New is the website's look, still being designed.") {
             SettingsRow(title: "Look") {
-                Picker("", selection: $appearance) {
-                    Text("Match the Mac").tag("system")
-                    Text("Light").tag("light")
-                    Text("Dark").tag("dark")
+                if Look.site {
+                    Segments(options: ["system", "light", "dark"], selection: $appearance) { Self.lookTitle($0) }
+                } else {
+                    Picker("", selection: $appearance) {
+                        Text("Match the Mac").tag("system")
+                        Text("Light").tag("light")
+                        Text("Dark").tag("dark")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
             }
             SettingsRow(title: "Theme", divider: false) {
-                Picker("", selection: $choice.theme) {
-                    ForEach(AppTheme.allCases) { theme in
-                        Text(theme.title).tag(theme)
+                if Look.site {
+                    Segments(options: AppTheme.allCases, selection: $choice.theme) { $0.title }
+                } else {
+                    Picker("", selection: $choice.theme) {
+                        ForEach(AppTheme.allCases) { theme in
+                            Text(theme.title).tag(theme)
+                        }
                     }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
             }
         }
         .onChange(of: appearance) { _, now in Appearance.apply(now) }
+    }
+
+    private static func lookTitle(_ choice: String) -> String {
+        switch choice {
+        case "light": "Light"
+        case "dark": "Dark"
+        default: "Match the Mac"
+        }
     }
 }
 
@@ -1050,7 +1085,7 @@ private struct EditorSection: View {
             SettingsRow(title: "Vim mode",
                         detail: "Vim's keys in the code editor and its file tree. Press ? in the tree to see its keys.",
                         divider: false) {
-                Toggle("", isOn: $vim).toggleStyle(.switch).labelsHidden()
+                Toggle("", isOn: $vim).toggleStyle(.appSwitch).labelsHidden()
             }
         }
     }
@@ -1086,13 +1121,13 @@ struct AboutSection: View {
                             detail: "Once a day, in the background.") {
                     Toggle("", isOn: Binding(get: { updater.checksAutomatically },
                                              set: { updater.checksAutomatically = $0 }))
-                        .toggleStyle(.switch)
+                        .toggleStyle(.appSwitch)
                         .labelsHidden()
                 }
                 SettingsRow(title: "Update Agentman when am serve is newer",
                             detail: "Without asking: it downloads in the background and installs when you quit.") {
                     Toggle("", isOn: $updateWithDaemon)
-                        .toggleStyle(.switch)
+                        .toggleStyle(.appSwitch)
                         .labelsHidden()
                 }
             }
@@ -1223,7 +1258,7 @@ private struct NotificationsPage: View {
 
     private func toggle(_ title: String, _ detail: String?, _ value: Binding<Bool>, divider: Bool = true) -> some View {
         SettingsRow(title: title, detail: detail, divider: divider) {
-            Toggle("", isOn: value).toggleStyle(.switch).labelsHidden()
+            Toggle("", isOn: value).toggleStyle(.appSwitch).labelsHidden()
         }
     }
 
