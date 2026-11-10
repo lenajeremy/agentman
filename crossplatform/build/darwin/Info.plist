@@ -25,5 +25,7 @@
             <string>true</string>
         <key>NSHumanReadableCopyright</key>
             <string>Agentman is open source under the MIT license.</string>
+        <key>NSMicrophoneUsageDescription</key>
+            <string>Agentman listens while you record with the mic button, so you can speak a message to an agent or to Agentman instead of typing it. Celery writes it out.</string>
     </dict>
 </plist>

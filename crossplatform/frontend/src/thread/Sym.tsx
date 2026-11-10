@@ -49,6 +49,7 @@ const SIZES: Record<string, [number, number, number?]> = {
   "mic:13:semibold": [15, 17],
   "mic.fill:13:semibold": [15, 17],
   "stop.fill:13:semibold": [14, 13],
+  "return:9.5:semibold": [13, 11],
 };
 
 /**

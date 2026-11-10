@@ -66,14 +66,14 @@ export class DaemonClient {
   }
 
   /** Sends a request and waits for the event that answers it. */
-  request(req: AppRequest): Promise<AppEvent> {
+  request(req: AppRequest, timeout = TIMEOUT): Promise<AppEvent> {
     const id = this.send(req);
     if (!id) return Promise.reject(new Error("not connected to am serve"));
     return new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`${req.type} timed out`));
-      }, TIMEOUT);
+      }, timeout);
       this.pending.set(id, { resolve, reject, timer });
     });
   }
