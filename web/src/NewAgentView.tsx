@@ -17,6 +17,7 @@ import { ask, getShell, loadFolders, plainProblem, setShell, useShell } from "./
 import { getStore, useStatus } from "./store";
 import { menuUnder, type MenuEntry } from "./thread/menu";
 import { AgentMark, Icon } from "./ui";
+import { tilde } from "./settings/controls";
 import "./styles/newagent.css";
 
 export const AGENT_KINDS = ["claude", "codex", "cursor-cli", "opencode", "kiro", "antigravity", "muse"];
@@ -150,7 +151,8 @@ export function NewAgentView({ worktree: namingAtStart }: { worktree?: boolean }
 
   const canStart = !starting && !!folder;
   const repo = worktrees[0]?.repo ?? (folder.replace(/\/+$/, "").split("/").pop() || folder);
-  const short = (path: string) => (home ? path.split(home).join("~") : path);
+  // Home as ~ at the start only: /Users/mackenzie isn't ~kenzie.
+  const short = (path: string) => tilde(path, home);
   const fromBranch = worktrees.find((w) => w.path === folder)?.branch;
 
   const whereItStarts = (() => {
