@@ -14,6 +14,21 @@
     <description>Updates to Agentman for Mac.</description>
     <language>en</language>
     <item>
+      <title>Agentman 0.44.1</title>
+      <link>https://github.com/lenajeremy/agentman/releases/tag/v0.44.1</link>
+      <pubDate>Tue, 10 Nov 2026 16:24:16 GMT</pubDate>
+      <sparkle:version>52</sparkle:version>
+      <sparkle:shortVersionString>0.44.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <sparkle:fullReleaseNotesLink>https://github.com/lenajeremy/agentman/releases/tag/v0.44.1</sparkle:fullReleaseNotesLink>
+      <description sparkle:format="markdown"><![CDATA[## Fixes
+
+- Resuming an agent you ended while it kept running in your own terminal no longer starts a second copy of it. Agentman says it's still running there.
+- Settings › Devices keeps each phone as one device, through reconnects, and through pairing it again from the next iPhone update.
+- A phone that just left no longer shows as connected, and one still connected while Agentman reconnects to the relay no longer shows as away.]]></description>
+      <enclosure url="https://github.com/lenajeremy/agentman/releases/download/v0.44.1/Agentman.dmg" length="45699826" type="application/octet-stream" sparkle:edSignature="j+hHtCqbCN8y7tenPA2JW90zRsmGWShXWfnek6nCSOQlSKlOXv+Z0Cc5Ydb1q/b00x07YhmT7CW1Fp4w0gaQBg=="/>
+    </item>
+    <item>
       <title>Agentman 0.44.0</title>
       <link>https://github.com/lenajeremy/agentman/releases/tag/v0.44.0</link>
       <pubDate>Tue, 10 Nov 2026 15:21:52 GMT</pubDate>
