@@ -131,6 +131,24 @@ final class MarkdownTextTests: XCTestCase {
         XCTAssertLessThan(size.width, 600)
     }
 
+    /// A paragraph drawn on its own (in a list or quote that also holds code)
+    /// is redrawn when its link, its styles or a heading's level change, not
+    /// only its letters.
+    func testAParagraphOnItsOwnRedrawsWhenOnlyItsLinkOrStyleChanges() throws {
+        func key(_ markdown: String) throws -> String {
+            guard case .list(_, _, let items) = try XCTUnwrap(MarkdownView(markdown).blocks.first).kind,
+                  let first = items.first?.first else { throw XCTSkip("not a list") }
+            return MarkdownView.proseKey(first)
+        }
+        let code = "\n\n  ```sh\n  ls\n  ```"
+        let plain = try key("- see [the guide](old.md)" + code)
+        XCTAssertNotEqual(plain, try key("- see [the guide](new.md)" + code), "the link's address")
+        XCTAssertNotEqual(plain, try key("- see **the guide**" + code), "a style")
+        XCTAssertEqual(plain, try key("- see [the guide](old.md)" + code), "the same text, the same key")
+        let h2 = MarkdownView("## Title").blocks[0], h3 = MarkdownView("### Title").blocks[0]
+        XCTAssertNotEqual(MarkdownView.proseKey(h2), MarkdownView.proseKey(h3), "a heading's level")
+    }
+
     // MARK: Code
 
     /// A reply's code is coloured as the editor colours it, without a

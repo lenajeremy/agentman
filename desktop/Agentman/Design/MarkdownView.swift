@@ -44,6 +44,17 @@ struct MarkdownView: View {
     }
 
     /// The blocks, with each run of prose together.
+    /// What a paragraph or heading drawn on its own is redrawn by: its words
+    /// with their links and styles, and a heading's level. Its letters alone
+    /// missed an edited link, which went on opening the old address.
+    static func proseKey(_ block: MarkdownBlock) -> String {
+        switch block.kind {
+        case .paragraph(let text): "\(block.id)-p-\(text.hashValue)"
+        case .heading(let level, let text): "\(block.id)-h\(level)-\(text.hashValue)"
+        default: "\(block.id)"
+        }
+    }
+
     static func segments(_ blocks: [MarkdownBlock]) -> [Segment] {
         var out: [Segment] = []
         var run: [MarkdownBlock] = []
@@ -409,10 +420,10 @@ private struct BlockView: View {
 
     @ViewBuilder private var content: some View {
         switch block.kind {
-        case .paragraph(let text), .heading(_, let text):
+        case .paragraph, .heading:
             // On its own only inside a list or quote that also holds code:
             // a run of prose is drawn whole, by MarkdownView.
-            MarkdownProse(blocks: [block], key: "\(block.id)-\(String(text.characters).hashValue)")
+            MarkdownProse(blocks: [block], key: MarkdownView.proseKey(block))
         case .rule:
             MarkdownProse(blocks: [block], key: "\(block.id)-rule")
         case .code(let language, let code):

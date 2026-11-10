@@ -8,6 +8,10 @@ import Foundation
 /// The choice goes in the launch arguments' domain, not the registered
 /// defaults: System Settings may have written "Automatic" for everyone, and
 /// that would win over a registered default.
+///
+/// It is made once, at launch: "Always" chosen while the app runs applies
+/// from its next launch. Taking it back mid-run would rely on when AppKit
+/// reads the setting again, which the app cannot see.
 enum ScrollBars {
     static let key = "AppleShowScrollBars"
 
