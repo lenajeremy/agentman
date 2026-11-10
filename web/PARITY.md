@@ -26,7 +26,7 @@ done. One at a time, in this order.
    each plan.
 5. ✓ (d759003) **Take Over and Open in Terminal** (`handoff_session`): an ended or
    watched thread says so and offers Take Over.
-6. **Find in a conversation** (FindBar.swift, ⌘F), and opening a search
+6. ✓ (4228fa3, with the sidebar's Needs you section) **Find in a conversation** (FindBar.swift, ⌘F), and opening a search
    hit at its message (ThreadJump); the sidebar's search of what was said
    too (the Board's is done).
 7. **Settings › Devices** (DevicesSettings.swift; `devices`, `pair_code`):
