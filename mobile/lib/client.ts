@@ -13,6 +13,7 @@ import {
 } from "./protocol";
 import { deviceInfo } from "./device";
 import { newFrameId } from "./id";
+import { installId } from "./install";
 import { normalizeCredentials, normalizeRelayUrl } from "./pairing";
 
 const STORAGE_KEY = "agentman.credentials";
@@ -109,7 +110,8 @@ export async function pair(
     const response = await fetch(`${base}/pair`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: code.replace(/\s/g, ""), deviceId: "phone" }),
+      // This install's own id: pairing it again is the same device on the Mac.
+      body: JSON.stringify({ code: code.replace(/\s/g, ""), deviceId: await installId(AsyncStorage, newFrameId) }),
       signal: controller.signal,
     });
 
