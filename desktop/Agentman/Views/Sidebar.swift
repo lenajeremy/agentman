@@ -353,7 +353,7 @@ private struct RowHighlight: View {
                 if let tint {
                     UnevenRoundedRectangle(bottomTrailingRadius: 1, topTrailingRadius: 1, style: .continuous)
                         .fill(tint)
-                        .frame(width: 2)
+                        .frame(width: 4)
                         .padding(.vertical, 9)
                         .accessibilityHidden(true)
                 }
