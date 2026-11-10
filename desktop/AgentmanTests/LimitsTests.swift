@@ -61,6 +61,47 @@ final class LimitsTests: XCTestCase {
         XCTAssertTrue(LimitsFormat.footnote.contains("Antigravity"))
     }
 
+    /// The editor's Usage popover, from a daemon's answers kept in a folder
+    /// (usage.json, limits.json), at the height a popover settles on: offered
+    /// a sliver, it takes what its cards need. Runs with
+    /// TEST_RUNNER_AGENTMAN_SHOTS=<folder> and TEST_RUNNER_AGENTMAN_POPOVER_DATA=<folder>.
+    @MainActor func testRenderTheUsagePopover() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let out = environment["AGENTMAN_SHOTS"], let data = environment["AGENTMAN_POPOVER_DATA"] else {
+            throw XCTSkip("for screenshots")
+        }
+        func answer(_ name: String) throws -> DaemonEvent {
+            try JSONDecoder().decode(DaemonEvent.self, from: Data(contentsOf: URL(fileURLWithPath: data).appendingPathComponent(name + ".json")))
+        }
+        let usage = try answer("usage"), limits = try answer("limits")
+        let client = DaemonClient(socketPath: "/nonexistent/agentman-popover.sock")
+        client.answer = { request in
+            switch request.type {
+            case .usage: usage
+            case .limits: limits
+            default: nil
+            }
+        }
+        let store = AgentsStore(client: client)
+        for (look, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            let host = NSHostingController(rootView: UsagePopover(close: {}).environment(store).background(Palette.surface))
+            let window = NSWindow(contentViewController: host)
+            window.styleMask = [.borderless]
+            window.appearance = NSAppearance(named: appearance)
+            window.alphaValue = 0
+            defer { window.orderOut(nil) }
+            window.orderFrontRegardless()
+            for _ in 0..<20 { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+            window.setContentSize(host.sizeThatFits(in: CGSize(width: 560, height: 80)))
+            for _ in 0..<10 { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+            let view = host.view
+            let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                .write(to: URL(fileURLWithPath: out).appendingPathComponent("usage-popover-\(look).png"))
+        }
+    }
+
     /// A popover offers its content a small height first and keeps what the
     /// content takes of it. A scroll view takes whatever it is offered, so the
     /// popover stayed a sliver with half a card in it. Offered little, the
