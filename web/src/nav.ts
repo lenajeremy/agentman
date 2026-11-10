@@ -3,6 +3,7 @@
 // area shows Agentman (the default), New Agent, or an agent's thread. Links
 // to the editor or settings open their own windows.
 
+import { setBoardChatOpen } from "./manager/store";
 import { useSyncExternalStore } from "react";
 import { onOpenLink, openEditor, openSettings } from "./host";
 
@@ -45,6 +46,14 @@ export function useRoute(): Route {
 
 export const openAgent = (id: string) => go({ kind: "agent", id });
 export const openAgentman = () => go({ kind: "agentman" });
+
+/** The Board, with the conversation with Agentman open beside it
+ *  (AgentsStore.openAgentmanChat): for a toast, agentman://home, and asking
+ *  Agentman from elsewhere. */
+export function openAgentmanChat() {
+  go({ kind: "agentman" });
+  setBoardChatOpen(true);
+}
 export const openNewAgent = (worktree = false) => go({ kind: "new", worktree });
 
 /** Follows an agentman:// link; any other scheme is ignored. */
@@ -66,7 +75,7 @@ export function openLink(link: string) {
       openNewAgent();
       break;
     case "home":
-      openAgentman();
+      openAgentmanChat();
       break;
     case "terminal": {
       const folder = url.searchParams.get("folder");

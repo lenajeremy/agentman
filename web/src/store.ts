@@ -16,6 +16,15 @@ interface State {
 }
 
 let state: State = { sessions: [], messages: {}, hasMore: {}, branches: {}, changes: {} };
+
+// Whether the daemon has listed its sessions yet: until then an agent that
+// isn't there says nothing about whether it ended, and an empty Board says
+// nothing about whether there are agents.
+let listed = false;
+daemon.on((e) => {
+  if (e.type === "sessions") listed = true;
+});
+export const sessionsLoaded = () => listed;
 const asked = new Set<string>();
 const subscribers = new Set<() => void>();
 const subscribed = new Set<string>();
@@ -95,13 +104,30 @@ export function useStatus(): { status: Status; detail: string } {
 
 /** Follows one agent's conversation while it is on screen. */
 export function follow(sessionId: string): () => void {
-  subscribed.add(sessionId);
-  void fetchPages(sessionId);
+  // Counted: the Board's cards and a thread can follow one agent at once,
+  // and the first to stop mustn't stop it for the other.
+  const count = (followers.get(sessionId) ?? 0) + 1;
+  followers.set(sessionId, count);
+  if (count === 1) {
+    subscribed.add(sessionId);
+    void fetchPages(sessionId);
+  }
+  let done = false;
   return () => {
+    if (done) return;
+    done = true;
+    const left = (followers.get(sessionId) ?? 1) - 1;
+    if (left > 0) {
+      followers.set(sessionId, left);
+      return;
+    }
+    followers.delete(sessionId);
     subscribed.delete(sessionId);
     daemon.send({ type: "unsubscribe", sessionId });
   };
 }
+
+const followers = new Map<string, number>();
 
 /** Where each conversation's next older page starts, from the last page read. */
 const cursors: Record<string, string | undefined> = {};

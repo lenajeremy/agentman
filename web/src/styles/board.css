@@ -1,0 +1,94 @@
+/* The Board (Views/BoardView.swift): columns of agent cards on a quiet well,
+   colour only where a state is. */
+:root { --board-well: #f4f4f4; --board-muted: #666666; --needs-you-edge: #ffdccb; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --board-well: #0b0b0b; --board-muted: #a0a0a0; --needs-you-edge: #4a2818; } }
+:root[data-theme="dark"] { --board-well: #0b0b0b; --board-muted: #a0a0a0; --needs-you-edge: #4a2818; }
+
+.board-page { flex: 1; min-height: 0; display: flex; background: var(--paper); }
+.board-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.board-top { height: calc(var(--safe-top, 0px) + 32px); padding-top: var(--safe-top, 0px); padding-right: 12px; display: flex; align-items: center; gap: 4px; flex: none; }
+.board-top-title { font-size: 13px; font-weight: 500; color: var(--text-2); }
+.board-top-buttons { display: flex; align-items: center; gap: 4px; }
+.board-spacer { flex: 1; }
+.board-chat-button { position: relative; display: inline-flex; }
+.board-unread { position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--needs-you); pointer-events: none; }
+.board-folder-menu { height: 24px; display: flex; align-items: center; gap: 5px; padding: 0 8px; margin-right: 4px; border-radius: 6px; font-size: 12px; color: var(--text-2); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); white-space: nowrap; }
+.board-folder-menu svg { color: var(--muted); }
+
+.board-room { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.board-brief { align-self: center; padding: 10px 6px 16px; box-sizing: border-box; }
+.board-headline { font-size: 20px; font-weight: 600; letter-spacing: -0.2px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board-detail { display: flex; align-items: center; gap: 8px; margin-top: 2px; font-size: 13px; color: var(--muted); }
+.board-detail > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.board-scroll { flex: 1; min-height: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.board-scroll::-webkit-scrollbar { display: none; }
+.board-columns { height: 100%; display: grid; gap: 10px; padding: 0 20px; box-sizing: border-box; justify-content: center; }
+.board-column { min-height: 0; display: flex; flex-direction: column; background: var(--board-well); border-radius: 10px 10px 0 0; }
+.board-column-head { height: 38px; flex: none; display: flex; align-items: center; gap: 7px; padding: 0 12px; }
+.board-column-glyph { width: 14px; height: 14px; display: grid; place-items: center; }
+.board-column-glyph .needs { color: var(--needs-you); }
+.board-column-glyph .faint { color: var(--faint); }
+.board-column-title { font-size: 13px; font-weight: 500; color: var(--text); }
+.board-column-count { font-size: 13px; color: var(--board-muted); font-variant-numeric: tabular-nums; }
+.board-column-action { height: 22px; display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--board-muted); }
+.board-column-cards { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 2px 6px; scrollbar-width: none; }
+.board-column-cards::-webkit-scrollbar { display: none; }
+.board-column-empty { padding: 20px 0; text-align: center; font-size: 12px; color: var(--board-muted); }
+.board-offer { border-radius: 9px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+
+.board-card { display: flex; flex-direction: column; gap: 9px; padding: 11px; border-radius: 9px; background: var(--surface); cursor: default;
+  box-shadow: inset 0 0 0 1px var(--line), 0 1px 1.5px rgba(0, 0, 0, 0.025); transition: box-shadow 0.12s ease-out; }
+.board-card:hover { box-shadow: inset 0 0 0 1px var(--fill-strong), 0 1px 1.5px rgba(0, 0, 0, 0.025); }
+.board-card.outlined { box-shadow: inset 0 0 0 1.5px var(--working), 0 1px 1.5px rgba(0, 0, 0, 0.025); }
+.board-card-top { display: flex; flex-direction: column; gap: 5px; }
+.board-card-meta { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); min-width: 0; }
+.board-card-meta .badge { flex: none; }
+.board-card-folder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board-card-when { font-variant-numeric: tabular-nums; flex: none; }
+.board-card-mark { position: relative; width: 16px; height: 16px; display: grid; place-items: center; flex: none; }
+.board-card-mark .mark-at-rest { display: grid; place-items: center; }
+.board-card-more { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; color: var(--muted); }
+.board-card:hover .board-card-more { opacity: 1; }
+.board-card:hover .mark-at-rest { opacity: 0; }
+.board-card-name { align-self: flex-start; text-align: left; font-size: 13.5px; font-weight: 500; color: var(--text);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.board-card:hover .board-card-name { text-decoration: underline; }
+.board-card-problem { font-size: 12px; color: var(--error-text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.board-text-wrap { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+.board-text { font-size: 12.5px; line-height: 1.45; color: var(--text-2); display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.board-more { font-size: 12px; font-weight: 500; color: var(--muted); }
+.board-code { font-size: 11.5px; max-height: 120px; overflow: auto; }
+.board-choices { margin: 0 -5px; }
+
+.board-steps { display: flex; flex-direction: column; gap: 4px; }
+.board-step { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); min-width: 0; }
+.board-step.running { color: var(--text); }
+.board-step.failed { color: var(--error-text); }
+.board-step-icon { width: 12px; height: 12px; display: grid; place-items: center; flex: none; }
+.board-step.done .board-step-icon { color: var(--faint); }
+.board-step-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board-progress { display: flex; flex-direction: column; gap: 6px; }
+.board-progress-bar { height: 4px; border-radius: 2px; background: var(--fill); overflow: hidden; }
+.board-progress-bar span { display: block; height: 100%; border-radius: 2px; background: var(--working); }
+.board-progress-line { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board-command { font: 11.5px var(--mono); color: var(--text-2); padding: 6px 8px; border-radius: 6px; background: color-mix(in srgb, var(--fill) 60%, transparent);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+
+.board-links { display: flex; flex-wrap: wrap; gap: 5px; }
+.board-link { height: 22px; display: flex; align-items: center; gap: 4px; padding: 0 7px; border-radius: 6px; font-size: 12px; color: var(--text-2); box-shadow: inset 0 0 0 1px var(--line); }
+.board-link svg, .board-link .sf { color: var(--muted); }
+.board-link:hover { background: var(--fill); color: var(--text); }
+
+.board-reply { height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 4px 0 9px; border-radius: 7px; background: color-mix(in srgb, var(--fill) 60%, transparent); }
+.board-reply input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font: 12.5px var(--sans); color: var(--text); }
+.board-reply button { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 5px; color: var(--paper); background: color-mix(in srgb, var(--text) 20%, transparent); }
+.board-reply button.can { background: var(--text); }
+
+.board-ask { position: absolute; left: 0; right: 0; bottom: 16px; padding: 0 20px; display: flex; justify-content: center; pointer-events: none; }
+.board-ask-box { width: 100%; max-width: 620px; pointer-events: auto; border-radius: 16px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.07); }
+
+.board-chat { flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--paper); box-shadow: inset 1px 0 0 var(--line); }
+.board-chat .board-top { padding-left: 16px; }
+.board-chat .am-page { flex: 1; min-height: 0; }

@@ -10,6 +10,7 @@
     "build:dev": "npm run editor && tsc && vite build --minify false --mode development",
     "build": "npm run editor && tsc && vite build --mode production",
     "typecheck": "tsc --noEmit",
+    "test": "node --test src/**/*.test.mts",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -8,9 +8,8 @@ import { useEffect, useState, type CSSProperties, type PointerEvent as ReactPoin
 import { Moon, PanelLeft } from "lucide-react";
 import type { Session } from "@shared/protocol";
 import { AgentView } from "./AgentView";
-import { daemon } from "./daemon";
 import { setBadge } from "./host";
-import { AgentmanView } from "./manager/AgentmanView";
+import { BoardView } from "./board/BoardView";
 import { useManagerSummary } from "./manager/summary";
 import { NewAgentView } from "./NewAgentView";
 import { Overlays } from "./Overlays";
@@ -20,17 +19,12 @@ import { usePref } from "./prefs";
 import { startShellCommands } from "./shell/commands";
 import { useFullscreen } from "./shell/native";
 import { useShell } from "./shell/state";
-import { useStore } from "./store";
+import { sessionsLoaded, useStore } from "./store";
 import { ChromeButton, Icon } from "./ui";
 import "./notify/agents";
 import "./styles/shell.css";
 
-// Whether the daemon has listed its sessions yet: until then an agent that
-// isn't there says nothing about whether it ended.
-let sessionsLoaded = false;
-daemon.on((e) => {
-  if (e.type === "sessions") sessionsLoaded = true;
-});
+
 
 function useWindowWidth(): number {
   const [width, setWidth] = useState(window.innerWidth);
@@ -48,6 +42,15 @@ export function MainWindow({ platform }: { platform: string }) {
   const { pastSessions } = useShell();
   const [sidebarWidth, setSidebarWidth] = usePref("sidebarWidth", SIDEBAR_DEFAULT);
   const [sidebarHidden, setSidebarHidden] = usePref("sidebarHidden", false);
+  // The sidebar steps aside on the Board, whose header has its search and
+  // folders; brought out over it for now, it goes again with the next visit
+  // (AgentsStore.boardShowsSidebar).
+  const onBoard = route.kind === "agentman";
+  const [boardShowsSidebar, setBoardShowsSidebar] = useState(false);
+  useEffect(() => {
+    if (!onBoard) setBoardShowsSidebar(false);
+  }, [onBoard]);
+  const sidebarGone = sidebarHidden || (onBoard && !boardShowsSidebar);
   const fullscreen = useFullscreen();
   const windowWidth = useWindowWidth();
   useEffect(() => startShellCommands(), []);
@@ -66,27 +69,30 @@ export function MainWindow({ platform }: { platform: string }) {
     ? sessions.find((s) => s.id === route.id) ?? pastSessions.find((s) => s.id === route.id)
     : undefined;
 
-  const style = { "--safe-top": `${mac && !fullscreen ? 32 : 0}px`, "--header-leading": `${headerLeading}px`, "--detail-header-leading": sidebarHidden ? `${headerLeading + 34}px` : "0px" } as CSSProperties;
+  const style = { "--safe-top": `${mac && !fullscreen ? 32 : 0}px`, "--header-leading": `${headerLeading}px`, "--detail-header-leading": sidebarGone ? `${headerLeading + 34}px` : "0px" } as CSSProperties;
 
   return (
     <div className="app" style={style}>
-      {!sidebarHidden && (
+      {!sidebarGone && (
         <div className="sidebar-pane">
           <Sidebar width={width} headerLeading={headerLeading} />
           <ResizeHandle width={width} onWidth={(w) => setSidebarWidth(clampSidebar(w, window.innerWidth))} />
         </div>
       )}
       <main className="detail">
-        {route.kind === "agentman" && <AgentmanView />}
+        {route.kind === "agentman" && <BoardView headerLeading={sidebarGone ? headerLeading + 34 : 0} />}
         {route.kind === "new" && <NewAgentView worktree={route.worktree} />}
-        {route.kind === "agent" && (selected ? <AgentView key={selected.id} session={selected} platform={platform} /> : sessionsLoaded ? <GoneView /> : null)}
+        {route.kind === "agent" && (selected ? <AgentView key={selected.id} session={selected} platform={platform} /> : sessionsLoaded() ? <GoneView /> : null)}
         {/* Under the page's top bar while am serve can't be reached. */}
         <ConnectionBanner />
         {/* With the sidebar hidden, the headers make room for the window's
             buttons and the one that brings it back. */}
-        {sidebarHidden && (
+        {sidebarGone && (
           <div className="show-sidebar no-drag" style={{ left: headerLeading }}>
-            <ChromeButton icon={PanelLeft} sf="sidebar.left" title="Show the sidebar (⌃⌘S)" onClick={() => setSidebarHidden(false)} />
+            <ChromeButton icon={PanelLeft} sf="sidebar.left" title="Show the sidebar (⌃⌘S)" onClick={() => {
+              setSidebarHidden(false);
+              if (onBoard) setBoardShowsSidebar(true);
+            }} />
           </div>
         )}
       </main>

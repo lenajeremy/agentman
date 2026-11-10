@@ -6,7 +6,7 @@
 import { useSyncExternalStore } from "react";
 import type { ManagerSettings, ManagerStatus } from "@shared/protocol";
 import { daemon } from "../daemon";
-import { openAgentman } from "../nav";
+import { openAgentmanChat } from "../nav";
 
 let keySet = false;
 let fromSettings = false;
@@ -54,6 +54,6 @@ export function agentmanOn(): boolean {
 
 /** Opens Agentman and asks it something. */
 export function askAgentman(text: string) {
-  openAgentman();
+  openAgentmanChat();
   void daemon.request({ type: "manager_send", text, clientId: crypto.randomUUID() }).catch(() => {});
 }

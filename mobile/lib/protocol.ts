@@ -870,6 +870,10 @@ export interface Brief {
   sessionId: string;
   name: string;
   summary: string;
+  /** What the agent set out to do, and what it is doing now: the Board's
+   *  cards say them (absent from daemons that predate them). */
+  goal?: string;
+  now?: string;
   needsYou?: string;
   updatedAt: number;
 }
@@ -1557,6 +1561,8 @@ function isBrief(value: unknown): value is Brief {
   if (!isRecord(value) || !boundedString(value.sessionId, 512, true) || !boundedString(value.name, 4096) ||
       !boundedString(value.summary, 64 * 1024)) return false;
   if (!optionalBoundedString(value.needsYou, 64 * 1024)) delete value.needsYou;
+  if (!optionalBoundedString(value.goal, 64 * 1024)) delete value.goal;
+  if (!optionalBoundedString(value.now, 64 * 1024)) delete value.now;
   if (!finiteNumber(value.updatedAt)) value.updatedAt = 0;
   return true;
 }

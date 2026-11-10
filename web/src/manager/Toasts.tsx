@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import type { ManagerEntry } from "@shared/protocol";
 import { cardIsOpen } from "@shared/manager-feed";
-import { openAgent, openAgentman, useRoute } from "../nav";
+import { openAgent, openAgentmanChat, useRoute } from "../nav";
 import { useStore } from "../store";
 import { AgentMark, AppIcon, Icon } from "../ui";
 import { CompactCard } from "./CompactCard";
@@ -29,7 +29,7 @@ function NewsToast({ entry, close }: { entry: ManagerEntry; close: () => void })
   const session = entry.sessionId ? sessions.find((s) => s.id === entry.sessionId) : undefined;
   const open = () => {
     if (entry.sessionId && session) openAgent(entry.sessionId);
-    else openAgentman();
+    else openAgentmanChat();
     close();
   };
   return (

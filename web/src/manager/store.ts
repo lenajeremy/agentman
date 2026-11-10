@@ -43,6 +43,8 @@ export interface ManagerState {
   route: Route;
   /** Images read so far, as data: URLs, by "kept\0name" or "session\0path". */
   images: Record<string, string | null>;
+  /** Agentman's conversation open beside the Board. */
+  boardChatOpen: boolean;
 }
 
 const LAST_READ = "managerLastRead";
@@ -68,6 +70,7 @@ let state: ManagerState = {
   appActive: document.hasFocus(),
   route: { kind: "agentman" },
   images: {},
+  boardChatOpen: false,
 };
 const listeners = new Set<() => void>();
 /** The agents, from the main window, to name them in notifications. */
@@ -131,8 +134,17 @@ export function entryById(id: string, s: ManagerState = state): ManagerEntry | u
   return undefined;
 }
 
-/** Whether the user is looking at the conversation with Agentman. */
-export const viewingManager = (s: ManagerState = state) => s.route.kind === "agentman" && s.appActive;
+/** Whether the user is looking at the conversation with Agentman: open
+ *  beside the Board, as the Mac's viewingManager. */
+export const viewingManager = (s: ManagerState = state) => s.route.kind === "agentman" && s.boardChatOpen && s.appActive;
+
+/** Opens or closes Agentman's conversation beside the Board. */
+export function setBoardChatOpen(open: boolean) {
+  if (open === state.boardChatOpen) return;
+  set({ boardChatOpen: open });
+  seeManagerIfShown();
+  tellOnScreen();
+}
 
 function looking(sessionId: string): boolean {
   return state.appActive && state.route.kind === "agent" && state.route.id === sessionId;

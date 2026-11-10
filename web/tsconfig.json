@@ -21,5 +21,6 @@
       "marked": ["./node_modules/marked"]
     }
   },
-  "include": ["src", "bindings"]
+  "include": ["src", "bindings"],
+  "exclude": ["src/**/*.test.mts"]
 }
