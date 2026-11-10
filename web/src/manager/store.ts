@@ -6,7 +6,7 @@
 // count; and telling am serve which agents are on screen.
 
 import { useSyncExternalStore } from "react";
-import type { Brief, ManagerCard, ManagerEntry, ManagerSchedule, ManagerSettings, ManagerStatus, Note, Session } from "@shared/protocol";
+import type { Brief, ManagerCard, ManagerEntry, ManagerSchedule, ManagerSettings, ManagerStatus, Mission, Note, QueueItem, Session, ShipRun, Verification } from "@shared/protocol";
 import { applyDelta, cardIsOpen, isNews, prependOlder, upsertEntry } from "@shared/manager-feed";
 import { daemon, type AppEvent, type AppRequest } from "../daemon";
 import { clearAllNotifications, clearNotification, notifyWith, setBadge } from "../host";
@@ -45,6 +45,14 @@ export interface ManagerState {
   images: Record<string, string | null>;
   /** Agentman's conversation open beside the Board. */
   boardChatOpen: boolean;
+  /** What Agentman found checking each agent's latest work, by session. */
+  verifications: Record<string, Verification>;
+  /** The teams Agentman has planned or is running. */
+  missions: Mission[];
+  /** The latest shipping run, if there has been one. */
+  shipRun?: ShipRun;
+  /** The work lined up for tonight. */
+  queue: QueueItem[];
 }
 
 const LAST_READ = "managerLastRead";
@@ -71,6 +79,9 @@ let state: ManagerState = {
   route: { kind: "agentman" },
   images: {},
   boardChatOpen: false,
+  verifications: {},
+  missions: [],
+  queue: [],
 };
 const listeners = new Set<() => void>();
 /** The agents, from the main window, to name them in notifications. */
@@ -134,6 +145,21 @@ export function entryById(id: string, s: ManagerState = state): ManagerEntry | u
   return undefined;
 }
 
+/** The teams at work, for the Board. */
+export const runningMissions = (s: ManagerState = state) => s.missions.filter((m) => m.state === "running");
+
+/** The team at work an agent is doing a part of. */
+export function missionOf(sessionId: string, s: ManagerState = state): Mission | undefined {
+  return runningMissions(s).find((m) => m.tasks.some((t) => t.sessionId === sessionId));
+}
+
+/** How far a team has got: "2 of 4 done, 1 waiting". */
+export function missionProgress(m: Mission): string {
+  const finished = m.tasks.filter((t) => t.state === "done").length;
+  const waiting = m.tasks.filter((t) => t.state === "planned").length;
+  return waiting > 0 ? `${finished} of ${m.tasks.length} done, ${waiting} waiting` : `${finished} of ${m.tasks.length} done`;
+}
+
 /** Whether the user is looking at the conversation with Agentman: open
  *  beside the Board, as the Mac's viewingManager. */
 export const viewingManager = (s: ManagerState = state) => s.route.kind === "agentman" && s.boardChatOpen && s.appActive;
@@ -159,11 +185,14 @@ export function sessionById(id?: string): Session | undefined {
 /** Loads everything afresh: on connecting, and after a reconnect. */
 export async function reload() {
   const ask = (req: AppRequest) => daemon.request(req).catch(() => undefined);
-  const [settings, briefs, schedules, history] = await Promise.all([
+  const [settings, briefs, schedules, history, checks, missions, queue] = await Promise.all([
     ask({ type: "manager_settings" }),
     ask({ type: "manager_briefs" }),
     ask({ type: "manager_schedules" }),
     ask({ type: "manager_history", limit: PAGE }),
+    ask({ type: "manager_verifications" }),
+    ask({ type: "manager_missions" }),
+    ask({ type: "manager_queue" }),
   ]);
   const next: Partial<ManagerState> = { loaded: true };
   if (settings?.managerSettings) next.settings = settings.managerSettings;
@@ -174,6 +203,9 @@ export async function reload() {
     next.hasOlder = history.more ?? false;
   }
   if (schedules?.type === "manager_schedules") next.schedules = schedules.schedules ?? [];
+  if (checks?.type === "manager_verification") next.verifications = Object.fromEntries((checks.verifications ?? []).map((v) => [v.sessionId, v]));
+  if (missions?.type === "manager_missions") next.missions = missions.missions ?? [];
+  if (queue?.type === "manager_queue") next.queue = queue.queue ?? [];
   set(next);
 }
 
@@ -368,6 +400,24 @@ function apply(event: AppEvent) {
     case "manager_schedules":
       set({ schedules: event.schedules ?? [] });
       break;
+    case "manager_missions":
+      set({ missions: event.missions ?? [] });
+      break;
+    case "manager_ship":
+      set({ shipRun: event.ship });
+      break;
+    case "manager_queue":
+      set({ queue: event.queue ?? [] });
+      break;
+    case "manager_verification": {
+      const verifications = { ...state.verifications };
+      for (const check of [...(event.verifications ?? []), ...(event.verification ? [event.verification] : [])]) {
+        if (check.state === "none") delete verifications[check.sessionId];
+        else verifications[check.sessionId] = check;
+      }
+      set({ verifications });
+      break;
+    }
     case "manager_brief": {
       const briefs = { ...state.briefs };
       if (event.brief) briefs[event.brief.sessionId] = event.brief;

@@ -6,9 +6,10 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
-  ChevronDown, Check, CircleAlert, Circle, Code, Diff, EyeOff, Ellipsis, FileText, Globe, MessagesSquare, MessageSquarePlus, Plus, SquarePen, X,
+  BadgeCheck, ChevronDown, Check, CircleAlert, Circle, CircleX, Clock, Code, Diff, EyeOff, Ellipsis, FileText, Globe, MessagesSquare, MessageSquarePlus,
+  Plus, SquarePen, TriangleAlert, X,
 } from "lucide-react";
-import type { ManagerCard, Question, Session } from "@shared/protocol";
+import type { ManagerCard, Mission, Question, Session, Verification } from "@shared/protocol";
 import { cardQuestion } from "@shared/manager-feed";
 import { confirmEnd, endable } from "../AgentHeader";
 import { openEditor, openURL } from "../host";
@@ -19,8 +20,8 @@ import { CompactCard } from "../manager/CompactCard";
 import { ManagerBox } from "../manager/Composer";
 import { SchedulesButton } from "../manager/Schedules";
 import {
-  dismissCard, openCardsOf, replyToCard, reset, send as askAgentman, setBoardChatOpen, setProblem, unreadOf, useManager,
-  type QuestionReply,
+  dismissCard, missionOf, missionProgress, openCardsOf, replyToCard, reset, runningMissions, send as askAgentman, setBoardChatOpen, setProblem,
+  unreadOf, useManager, type QuestionReply,
 } from "../manager/store";
 import { openAgent, openNewAgent } from "../nav";
 import { getPref, setPref, usePref } from "../prefs";
@@ -156,7 +157,7 @@ export function BoardView({ headerLeading }: { headerLeading: number }) {
           <div className="board-scroll">
             <div className="board-columns" style={{ gridTemplateColumns: `repeat(3, ${column}px)`, minWidth: width }}>
               <BoardColumn kind="needsYou" sessions={sections.needsYou} outlined={outlined} offers={offers} clearance={clearance} />
-              <BoardColumn kind="working" sessions={sections.working} outlined={outlined} clearance={clearance} />
+              <BoardColumn kind="working" sessions={sections.working} outlined={outlined} missions={runningMissions(manager)} clearance={clearance} />
               <BoardColumn kind="idle" sessions={sections.idle} outlined={outlined} hidden={sections.hidden} clearance={clearance} />
             </div>
           </div>
@@ -233,15 +234,21 @@ function FolderMenu() {
   );
 }
 
-function BoardColumn({ kind, sessions, outlined, offers = [], hidden = [], clearance }: {
+function BoardColumn({ kind, sessions, outlined, offers = [], missions = [], hidden = [], clearance }: {
   kind: Kind;
   sessions: Session[];
   outlined: Set<string>;
+  /** What Agentman offers the user, above the agents waiting on them. */
   offers?: ManagerCard[];
+  /** The teams at work, above the agents doing their parts. */
+  missions?: Mission[];
   hidden?: Session[];
   clearance: number;
 }) {
-  const empty = sessions.length === 0 && offers.length === 0;
+  // Colour and motion only while the column holds agents or offers; the
+  // words for an empty column only when it holds nothing at all.
+  const quiet = sessions.length === 0 && offers.length === 0;
+  const empty = quiet && missions.length === 0;
   const hiddenMenu = (e: ReactMouseEvent<HTMLButtonElement>) =>
     menuUnder(e.currentTarget, [
       ...hidden.map((s) => ({ label: s.name, action: () => showOnBoard(s.id) })),
@@ -252,8 +259,8 @@ function BoardColumn({ kind, sessions, outlined, offers = [], hidden = [], clear
     <section className="board-column">
       <div className="board-column-head">
         <span className="board-column-glyph">
-          {kind === "needsYou" && !empty ? <Icon icon={CircleAlert} sf="exclamationmark.circle.fill" size={13} className="needs" />
-            : kind === "working" && !empty ? <Loader size={11} />
+          {kind === "needsYou" && !quiet ? <Icon icon={CircleAlert} sf="exclamationmark.circle.fill" size={13} className="needs" />
+            : kind === "working" && !quiet ? <Loader size={11} />
             : <Icon icon={Circle} sf="circle" size={13} className="faint" />}
         </span>
         <span className="board-column-title">{TITLES[kind]}</span>
@@ -267,6 +274,7 @@ function BoardColumn({ kind, sessions, outlined, offers = [], hidden = [], clear
         )}
       </div>
       <div className="board-column-cards" style={{ paddingBottom: clearance }}>
+        {missions.map((m) => <BoardMission key={m.id} mission={m} />)}
         {offers.map((offer) => (
           <div key={offer.id} className="board-offer">
             <CompactCard card={offer} close={() => dismissCard(offer)} />
@@ -289,6 +297,7 @@ function BoardCard({ session, kind, outlined }: { session: Session; kind: Kind; 
   const list = messages[session.id];
   const digest = useMemo(() => makeDigest(list ?? [], tidy), [list]);
   const brief = manager.briefs[session.id];
+  const mission = missionOf(session.id, manager);
   const open = () => openAgent(session.id);
   const when = kind === "working" ? digest.turnStarted : session.lastActivityAt;
 
@@ -324,6 +333,7 @@ function BoardCard({ session, kind, outlined }: { session: Session; kind: Kind; 
             </button>
           </span>
         </div>
+        {mission && <div className="board-card-mission">{mission.goal}</div>}
         <button className="board-card-name" title={`Open ${session.name}`} onClick={open}>{session.name}</button>
       </div>
       {kind === "needsYou" && <NeedsYou session={session} digest={digest} />}
@@ -412,6 +422,7 @@ function Working({ digest, summary, now }: { digest: BoardDigest; summary?: stri
 }
 
 function Idle({ session, said }: { session: Session; said?: string }) {
+  const check = useManager().verifications[session.id];
   const run = useGitRun(session.id);
   const changedHere = useGitChanged(session.id);
   const [state, setState] = useState<GitState | null>(null);
@@ -450,6 +461,7 @@ function Idle({ session, said }: { session: Session; said?: string }) {
   return (
     <>
       {said && <BoardText text={said} lines={4} />}
+      {check && <BoardCheck check={check} />}
       {(showsGit || opening.length > 0 || elsewhere.length > 0) && (
         <div className="board-links">
           {opening.map((l) => <BoardLink key={l.title} {...l} />)}
@@ -459,6 +471,42 @@ function Idle({ session, said }: { session: Session; said?: string }) {
       )}
       {run?.phase.kind === "failed" && <div className="board-git-failed" title={run.phase.detail}>{run.phase.detail}</div>}
     </>
+  );
+}
+
+/** A team at work: its goal, how far along it is, and who is waiting. */
+function BoardMission({ mission }: { mission: Mission }) {
+  return (
+    <div className="board-mission">
+      <div className="board-mission-goal">{mission.goal}</div>
+      <div className="board-mission-progress">{missionProgress(mission)}</div>
+      {mission.tasks.filter((t) => t.state === "planned").map((t) => (
+        <div key={t.id} className="board-mission-task"><Clock size={9} /><span>{t.title}</span></div>
+      ))}
+    </div>
+  );
+}
+
+const CHECK_WORDS: Record<string, string> = {
+  verified: "Verified", passed: "Tests pass", concerns: "Something looks off", failed: "Tests fail",
+};
+
+/** What Agentman found checking the agent's finished work. */
+function BoardCheck({ check }: { check: Verification }) {
+  const words = check.summary || CHECK_WORDS[check.state] || "Checking its work";
+  const good = check.state === "verified" || check.state === "passed";
+  return (
+    <div className={`board-check ${check.state}`} title={check.output || words}>
+      <div className="board-check-line">
+        <span className="board-check-icon">
+          {good ? <BadgeCheck size={11} /> : check.state === "concerns" ? <TriangleAlert size={10} />
+            : check.state === "failed" ? <CircleX size={11} /> : <Loader size={10} />}
+        </span>
+        <span className="board-check-words">{inline(words)}</span>
+      </div>
+      {(check.issues ?? []).map((issue) => <div key={issue} className="board-check-issue">{inline(issue)}</div>)}
+      {check.sentBack && <div className="board-check-issue muted">Sent back for it to fix</div>}
+    </div>
   );
 }
 
