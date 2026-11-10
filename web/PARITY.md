@@ -45,9 +45,13 @@ done. One at a time, in this order.
 11. ✓ (411747e) **Agentman's key prompt** (0.41): says what Agentman is and why it
     needs a key, and the box's note reads "Don't have one? Get an
     Anthropic key".
-12. **⌘K finds what was said** (CommandPalette.swift `said`): messages that
-    match what is typed, under the commands, opening at the message. Found
-    while doing 9.
+12. ✓ (e2240a2) **⌘K finds what was said** (CommandPalette.swift `said`):
+    messages that match what is typed, under the commands, opening at the
+    message. Found while doing 9. Doing it found 7ce23d5 (the editor's
+    palette styles put ⌘K's magnifying glass above the field). Seen, not
+    fixed: the daemon's folder list has a folder twice when it's known by
+    two paths (~/projects/pics and /private/var/…/projects/pics in the test
+    stack), so ⌘K offers "Open pics in the Editor" twice.
 
 Gone back over 1–9 on 2026-11-10, past the main path of each (the keyboard
 after each overlay, no data, no main window, every way in, dark mode):
@@ -78,9 +82,10 @@ the address follows the page, d85b182 a narrow editor window, 07a0232 ~ only
 for the home folder. The Mac's AgentsStore.end reads the closed flag as the
 web did before f13b318, so an ended Muse session there says it's still
 running in a terminal too.
-End to end: `npm run e2e` (web/teststack/e2e) runs 60 checks over every
-screen, in Chromium and WebKit, on the test stack and its stand-ins; 120
-passing on 2026-11-10. Writing it found 4b6502e (the picture viewer was a
+End to end: `npm run e2e` (web/teststack/e2e) runs 65 checks over every
+screen, in Chromium and WebKit, on the test stack and its stand-ins; 128
+passing on 2026-11-10 with the first 64, the 65th (an ended conversation
+found from an editor) passing in both after. Writing it found 4b6502e (the picture viewer was a
 placeholder; now the Mac's), 6759993 (keys typed as a palette opened over
 the code went into the file), 3382cef (Escape while the commit sheet
 reads), c74e136 (the keyboard back at once, not a frame later).
