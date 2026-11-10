@@ -63,3 +63,28 @@ for (const set of await readdir(assets)) {
   }
 }
 console.log('pictures copied to public/assets')
+
+// The file icon theme's rules (desktop/Agentman/Design/FileIconMap.swift,
+// generated from material-icon-theme), as JSON for src/editor/fileIcons.ts:
+// by exact name, by extension, and by folder name, closed and open.
+const iconMap = await readFile(join(desktop, 'Agentman/Design/FileIconMap.swift'), 'utf8')
+const tables = {}
+let table = null
+for (const line of iconMap.split('\n')) {
+  const start = line.match(/static let (\w+): \[String: String\] = \[/)
+  if (start) {
+    table = tables[start[1]] = {}
+    continue
+  }
+  if (table && /^\s*\]/.test(line)) {
+    table = null
+    continue
+  }
+  const pair = table && line.match(/^\s*"((?:[^"\\]|\\.)*)": "((?:[^"\\]|\\.)*)",?$/)
+  if (pair) table[JSON.parse(`"${pair[1]}"`)] = JSON.parse(`"${pair[2]}"`)
+}
+for (const name of ['fileNames', 'extensions', 'folderNames', 'openFolderNames']) {
+  if (!tables[name] || Object.keys(tables[name]).length === 0) throw new Error(`FileIconMap.swift: no ${name}`)
+}
+await writeFile(join(here, '../src/editor/fileIconMap.json'), JSON.stringify(tables))
+console.log('file icon map written to src/editor/fileIconMap.json')

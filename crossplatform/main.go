@@ -31,9 +31,10 @@ func main() {
 			application.NewService(shell),
 			application.NewService(&Appearance{}),
 			application.NewService(&Settings{}),
+			application.NewService(&EditorFiles{}),
 		}, newHost().services()...),
 		Assets: application.AssetOptions{
-			Handler: withFileIcons(withSymbols(application.AssetFileServerFS(assets))),
+			Handler: withFileIcons(withSymbols(withEditorFiles(application.AssetFileServerFS(assets)))),
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
@@ -55,6 +56,7 @@ func main() {
 		test.prepare(&options, &first)
 	}
 	app := application.New(options)
+	setEditorMenus(app)
 	win := app.Window.NewWithOptions(first)
 	shell.start(app, win, test != nil)
 	if settingsStart(startURL()) {

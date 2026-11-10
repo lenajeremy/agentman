@@ -108,9 +108,29 @@ enum TestSnapshot {
                 NSGraphicsContext.restoreGraphicsState()
             }
         }
+        // AGENTMAN_TEST_TOP=<points>: the window's top drawn again without
+        // its split views. On screen the editor's header is composited over
+        // its HSplitView, which reaches under it; cacheDisplay draws views
+        // in order, the split view last, over the header.
+        if let top = Double(env["AGENTMAN_TEST_TOP"] ?? ""), top > 0 {
+            let splits = views(NSSplitView.self, in: view).filter { !$0.isHidden }
+            splits.forEach { $0.isHidden = true }
+            var band = NSRect(x: 0, y: view.isFlipped ? 0 : view.bounds.height - top, width: view.bounds.width, height: top)
+            if let strip = view.bitmapImageRepForCachingDisplay(in: band) {
+                view.cacheDisplay(in: band, to: strip)
+                if view.isFlipped { band.origin.y = view.bounds.height - band.maxY }
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+                strip.draw(in: band)
+                NSGraphicsContext.restoreGraphicsState()
+            }
+            splits.forEach { $0.isHidden = false }
+        }
         // A web view doesn't draw itself into the cache: its own snapshot
         // goes over its place.
-        draw(webViews(in: view), into: rep, from: view) {
+        // AGENTMAN_TEST_NOWEB=1 leaves them out, for views SwiftUI draws over
+        // a web view (the editor's empty state, preview and pictures).
+        draw(env["AGENTMAN_TEST_NOWEB"] == "1" ? [] : webViews(in: view), into: rep, from: view) {
             guard let png = rep.representation(using: .png, properties: [:]),
                   (try? png.write(to: URL(fileURLWithPath: path))) != nil else {
                 fputs("agentman: could not write \(path)\n", stderr)
@@ -137,6 +157,11 @@ enum TestSnapshot {
                 draw(Array(list.dropFirst()), into: rep, from: root, then: done)
             }
         }
+    }
+
+    private static func views<T: NSView>(_ type: T.Type, in view: NSView) -> [T] {
+        if let match = view as? T { return [match] }
+        return view.subviews.flatMap { views(type, in: $0) }
     }
 
     private static func webViews(in view: NSView?) -> [WKWebView] {
