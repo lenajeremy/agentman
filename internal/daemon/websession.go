@@ -2,9 +2,13 @@ package daemon
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -20,24 +24,93 @@ import (
 // that address. A cookie for 127.0.0.1 is also sent by pages on other ports
 // of 127.0.0.1 (cookies ignore ports, and those count as the same site), so
 // the Origin is what keeps a page from another local server out.
+//
+// Sessions outlast a restart of am serve (an upgrade, a login), as the Mac
+// app reconnects by itself: they are kept in web-sessions.json in the
+// config folder, readable by the user only, as hashes, so the file alone
+// signs nothing in. Each lasts 30 days; am web signs in again after.
 
 // WebCookie names the web app's session cookie.
 const WebCookie = "agentman_session"
 
+// WebSessionsFile keeps the sessions across restarts, in the config folder.
+const WebSessionsFile = "web-sessions.json"
+
 const (
+	webSessionLife  = 30 * 24 * time.Hour
 	webCodeLife     = time.Minute
 	maxWebCodes     = 16
 	maxWebSessions  = 64
 	webSecretLength = 32
 )
 
-// WebSessions keeps the web app's codes and sessions, in memory: a restart
-// of am serve signs every browser out, and `am web` signs one back in.
+// WebSessions keeps the web app's codes, in memory, and its sessions, by
+// their hashes, in memory and (once KeepIn names it) in a file.
 type WebSessions struct {
-	mu       sync.Mutex
-	codes    map[string]time.Time
+	mu    sync.Mutex
+	codes map[string]time.Time
+	// sessions holds each session's hash and when it was made.
 	sessions map[string]time.Time
+	file     string
 	now      func() time.Time
+}
+
+type webSessionsOnDisk struct {
+	Sessions map[string]int64 `json:"sessions"` // hash → made, unix ms
+}
+
+// KeepIn keeps the sessions in file: those there already, still fresh,
+// are taken back; new ones are written to it.
+func (w *WebSessions) KeepIn(file string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.file = file
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return
+	}
+	var kept webSessionsOnDisk
+	if json.Unmarshal(data, &kept) != nil {
+		return
+	}
+	now := w.now()
+	for hash, made := range kept.Sessions {
+		at := time.UnixMilli(made)
+		if now.Sub(at) < webSessionLife && len(w.sessions) < maxWebSessions {
+			w.sessions[hash] = at
+		}
+	}
+}
+
+// saveLocked writes the sessions to the file, if there is one, readable by
+// the user only; w.mu is held.
+func (w *WebSessions) saveLocked() {
+	if w.file == "" {
+		return
+	}
+	kept := webSessionsOnDisk{Sessions: make(map[string]int64, len(w.sessions))}
+	for hash, made := range w.sessions {
+		kept.Sessions[hash] = made.UnixMilli()
+	}
+	data, err := json.Marshal(kept)
+	if err != nil {
+		return
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(w.file), ".web-sessions-*")
+	if err != nil {
+		return
+	}
+	_ = tmp.Chmod(0o600)
+	_, werr := tmp.Write(data)
+	cerr := tmp.Close()
+	if werr != nil || cerr != nil || os.Rename(tmp.Name(), w.file) != nil {
+		_ = os.Remove(tmp.Name())
+	}
+}
+
+func sessionHash(session string) string {
+	sum := sha256.Sum256([]byte(session))
+	return hex.EncodeToString(sum[:])
 }
 
 func NewWebSessions() *WebSessions {
@@ -87,10 +160,17 @@ func (w *WebSessions) Login(code string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
+	now := w.now()
+	for hash, made := range w.sessions {
+		if now.Sub(made) >= webSessionLife {
+			delete(w.sessions, hash)
+		}
+	}
 	if len(w.sessions) >= maxWebSessions {
 		oldest(w.sessions)
 	}
-	w.sessions[session] = w.now()
+	w.sessions[sessionHash(session)] = now
+	w.saveLocked()
 	return session, true
 }
 
@@ -101,14 +181,11 @@ func (w *WebSessions) Signed(r *http.Request) bool {
 	if err != nil || cookie.Value == "" {
 		return false
 	}
+	hash := sessionHash(cookie.Value)
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	for s := range w.sessions {
-		if subtle.ConstantTimeCompare([]byte(s), []byte(cookie.Value)) == 1 {
-			return true
-		}
-	}
-	return false
+	made, ok := w.sessions[hash]
+	return ok && w.now().Sub(made) < webSessionLife
 }
 
 // Allow says whether a request may use the app endpoints on a session: it

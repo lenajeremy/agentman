@@ -3,6 +3,9 @@ package daemon
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -76,5 +79,46 @@ func TestTheSessionCookieIsHttpOnlyAndStrict(t *testing.T) {
 	cookie := rec.Result().Cookies()[0]
 	if cookie.Name != WebCookie || !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/" {
 		t.Fatalf("cookie = %+v", cookie)
+	}
+}
+
+func TestASessionOutlastsARestartButNotAMonth(t *testing.T) {
+	file := filepath.Join(t.TempDir(), WebSessionsFile)
+	first := NewWebSessions()
+	first.KeepIn(file)
+	code, _ := first.NewCode()
+	session, _ := first.Login(code)
+
+	info, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("the file is %v; want it readable by the user only", info.Mode().Perm())
+	}
+	data, _ := os.ReadFile(file)
+	if strings.Contains(string(data), session) {
+		t.Fatal("the file holds the session itself")
+	}
+
+	signed := func(w *WebSessions) bool {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.AddCookie(&http.Cookie{Name: WebCookie, Value: session})
+		return w.Signed(r)
+	}
+	again := NewWebSessions()
+	again.KeepIn(file)
+	if !signed(again) {
+		t.Fatal("a restarted am serve forgot the session")
+	}
+	again.now = func() time.Time { return time.Now().Add(31 * 24 * time.Hour) }
+	if signed(again) {
+		t.Fatal("a session a month old still signs in")
+	}
+	later := NewWebSessions()
+	later.now = again.now
+	later.KeepIn(file)
+	if len(later.sessions) != 0 {
+		t.Fatal("a month-old session was taken back from the file")
 	}
 }

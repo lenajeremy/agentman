@@ -273,6 +273,9 @@ func runServe(ctx context.Context, args []string) error {
 		return fmt.Errorf("make the app token: %w", err)
 	}
 	apps := newAppGateway(appToken)
+	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
+		apps.web.KeepIn(filepath.Join(dir, daemon.WebSessionsFile))
+	}
 	hookServer.Mount("/app", http.HandlerFunc(apps.protocol))
 	hookServer.Mount("/app/terminal", http.HandlerFunc(apps.terminal))
 	// The web app, for `am web`: the browser signs in with a one-time code
