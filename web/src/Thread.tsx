@@ -130,10 +130,9 @@ export function Thread({ session, stickToEnd, card = true, panel = false, findab
     setFinding(null);
     const from = findFrom.current;
     findFrom.current = null;
-    requestAnimationFrame(() => {
-      const now = document.activeElement;
-      if ((!now || now === document.body) && from) giveKeyboardBack(from);
-    });
+    // At once, while the find bar still holds it: a frame later, keys typed
+    // meanwhile were lost.
+    if (from) giveKeyboardBack(from);
   };
   useEffect(() => {
     if (!findable) return;

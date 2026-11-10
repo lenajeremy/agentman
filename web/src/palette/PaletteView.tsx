@@ -47,14 +47,15 @@ export function useKeyboardBack(giveBack?: (before: Element | null) => void) {
   const [before] = useState(keyboardNow);
   const back = useRef(giveBack);
   back.current = giveBack;
+  // At once as it closes: a frame later, keys typed meanwhile were lost (in
+  // Safari's engine, enough of them to notice). What the choice gives the
+  // keyboard to afterwards, a terminal say, still takes it.
   useEffect(
     () => () => {
-      requestAnimationFrame(() => {
-        const now = document.activeElement;
-        if (now && now !== document.body) return;
-        if (back.current) back.current(before.element);
-        else giveKeyboardBack(before);
-      });
+      const now = document.activeElement;
+      if (now && now !== document.body) return;
+      if (back.current) back.current(before.element);
+      else giveKeyboardBack(before);
     },
     [before],
   );
