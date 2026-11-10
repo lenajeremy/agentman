@@ -653,7 +653,7 @@ final class WorkedForTests: XCTestCase {
     }
 
     private func worked(_ messages: [Message]) -> [Int] {
-        ThreadItem.items(from: messages).compactMap { if case .worked(_, let seconds) = $0 { seconds } else { nil } }
+        ThreadItem.items(from: messages).compactMap { if case .worked(_, let seconds, _) = $0 { seconds } else { nil } }
     }
 
     func testDurationsReadShort() {
@@ -686,5 +686,19 @@ final class WorkedForTests: XCTestCase {
 
     func testAConversationThatStartsPartWayThroughATurnSaysNothingForIt() {
         XCTAssertEqual(worked([agent("1", 0), tool("2", 50_000), user("3", 60_000)]), [])
+    }
+
+    /// The line says how long and how many steps, in few words.
+    func testTheLineCountsTheTurnsSteps() {
+        let messages = [user("1", 0), tool("2", 5_000), tool("3", 9_000), agent("4", 20_000), tool("5", 30_000), agent("6", 246_000),
+                        user("7", 300_000), tool("8", 301_000), agent("9", 310_000)]
+        let steps = ThreadItem.items(from: messages).compactMap { if case .worked(_, _, let steps) = $0 { steps } else { nil } }
+        XCTAssertEqual(steps, [3])
+        XCTAssertEqual(ThreadItem.latestTurn(in: messages).steps, 1)
+
+        XCTAssertEqual(WorkedLine(seconds: 246, steps: 3).text, "4m 6s · 3 steps")
+        XCTAssertEqual(WorkedLine(seconds: 78, steps: 1).text, "1m 18s · 1 step")
+        XCTAssertEqual(WorkedLine(seconds: 12).text, "12s", "a turn with no steps says only how long")
+        XCTAssertEqual(WorkedLine(seconds: 12, live: true).text, "Working for 12s")
     }
 }

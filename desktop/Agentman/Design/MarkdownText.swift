@@ -192,9 +192,11 @@ final class MarkdownTextView: NSTextView, @preconcurrency NSLayoutManagerDelegat
 /// SwiftUI blocks had: 14 between blocks, 10 between a list's items and a
 /// quote's blocks, 8 within an item, and a heading's room above it.
 enum MarkdownProseText {
-    static var body: NSFont { .systemFont(ofSize: 14 * Fonts.scale) }
+    /// A size above the interface's own text, so what the agent says reads
+    /// first, before its steps.
+    static var body: NSFont { .systemFont(ofSize: 15 * Fonts.scale) }
     static var mono: NSFont {
-        NSFont(name: "Google Sans Code", size: 12.5 * Fonts.scale) ?? .monospacedSystemFont(ofSize: 12.5 * Fonts.scale, weight: .regular)
+        NSFont(name: "Google Sans Code", size: 13 * Fonts.scale) ?? .monospacedSystemFont(ofSize: 13 * Fonts.scale, weight: .regular)
     }
     static let blockGap: CGFloat = 14
 
@@ -267,7 +269,7 @@ enum MarkdownProseText {
             place(paragraph, block: block, context: context)
             out.append(paragraph)
         case .heading(let level, let text):
-            let size: CGFloat = level <= 1 ? 19 : level == 2 ? 16.5 : 14.5
+            let size: CGFloat = level <= 1 ? 20 : level == 2 ? 17.5 : 15.5
             let paragraph = Paragraph(inline(text, font: .systemFont(ofSize: size * Fonts.scale, weight: .medium), color: color))
             paragraph.style.lineSpacing = 3
             paragraph.style.paragraphSpacingBefore = level <= 2 ? 10 : 4

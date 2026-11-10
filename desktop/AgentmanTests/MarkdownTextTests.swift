@@ -59,7 +59,7 @@ final class MarkdownTextTests: XCTestCase {
 
         let heading = (plain as NSString).range(of: "What changed")
         let headingFont = try XCTUnwrap(text.attribute(.font, at: heading.location, effectiveRange: nil) as? NSFont)
-        XCTAssertEqual(headingFont.pointSize, 16.5)
+        XCTAssertEqual(headingFont.pointSize, 17.5)
 
         let item = (plain as NSString).range(of: "\t•\tThe bar is gone")
         XCTAssertNotEqual(item.location, NSNotFound, "a list item opens with its marker")
