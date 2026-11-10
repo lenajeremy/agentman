@@ -5,6 +5,7 @@
 import { useSyncExternalStore } from "react";
 import type { DaemonInfo, Folder, Key, ManagerSettings, Note, PermissionCheck, VoiceAccount } from "@shared/protocol";
 import { daemon, type AppEvent, type AppRequest } from "../daemon";
+import { pairProblem, type Device, type PairCode } from "./devices";
 
 interface State {
   settings?: ManagerSettings;
@@ -13,6 +14,8 @@ interface State {
   /** Folders agents ran in, most recent first. */
   folders: Folder[];
   daemonInfo?: DaemonInfo;
+  /** The phones and tablets that reach this computer; absent until asked. */
+  devices?: Device[];
 }
 
 let state: State = { notes: [], keys: [], folders: [] };
@@ -38,7 +41,8 @@ export function settingsState(): State {
 }
 
 function apply(event: AppEvent) {
-  switch (event.type) {
+  // "devices" is this app's alone, so not among the phone's event types.
+  switch (event.type as string) {
     case "sessions":
       if (event.daemon) set({ daemonInfo: event.daemon });
       break;
@@ -48,12 +52,19 @@ function apply(event: AppEvent) {
     case "keys":
       if (event.keys) set({ keys: event.keys });
       break;
+    // Sent as each device connects, leaves or names itself.
+    case "devices":
+      set({ devices: (event.devices as Device[] | undefined) ?? [] });
+      break;
   }
 }
 
 daemon.on((event) => apply(event));
 daemon.onStatus((status) => {
-  if (status === "connected") void reload();
+  if (status !== "connected") return;
+  void reload();
+  // A device may have come or gone while away.
+  if (state.devices) void loadDevices();
 });
 if (daemon.status === "connected") void reload();
 
@@ -76,9 +87,9 @@ function connected(): Promise<void> {
 }
 
 /** A request, sent once connected. */
-async function ask(req: AppRequest): Promise<AppEvent> {
+async function ask(req: AppRequest, timeout?: number): Promise<AppEvent> {
   await connected();
-  return daemon.request(req);
+  return daemon.request(req, timeout);
 }
 
 async function reload() {
@@ -235,6 +246,30 @@ export function saveKey(key: Key, value: string) {
 
 export function deleteKey(key: Key) {
   return perform({ type: "key_delete", path: key.name });
+}
+
+// Devices: only an app on this computer may ask (cmd/am/devices.go).
+
+export async function loadDevices() {
+  try {
+    const reply = await ask({ type: "devices" });
+    if ((reply.type as string) === "devices") apply(reply);
+  } catch {
+    // Kept as they were.
+  }
+}
+
+/** A code for pairing a new device, from the relay through am serve. */
+export async function pairCode(): Promise<{ code?: PairCode; problem?: string }> {
+  let reply: AppEvent;
+  try {
+    reply = await ask({ type: "pair_code" }, 30_000);
+  } catch {
+    return { problem: unreachable };
+  }
+  if (reply.type === "error") return { problem: pairProblem(reply.error ?? "") };
+  const code = reply.pairCode as PairCode | undefined;
+  return code ? { code } : { problem: "am serve didn't give a code." };
 }
 
 // Voice prompts: the Celery sign-in, kept by am serve.

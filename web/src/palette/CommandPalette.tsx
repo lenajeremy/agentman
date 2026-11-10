@@ -5,7 +5,7 @@
 import { useEffect } from "react";
 import {
   Bell, Book, Braces, Circle, Code, Contrast, History, Key, ListFilter, MessageSquareText, MessagesSquare, Pencil, Settings, ShieldCheck, Sparkles,
-  SquarePen, SquareTerminal, ChartSpline, type LucideIcon,
+  SquarePen, SquareTerminal, ChartSpline, QrCode, Smartphone, type LucideIcon,
 } from "lucide-react";
 import type { Session } from "@shared/protocol";
 import { showLastAway } from "../away/away";
@@ -30,6 +30,7 @@ interface Command {
 export const SETTINGS_PAGES: { id: string; title: string; icon: string; lucide: LucideIcon }[] = [
   { id: "general", title: "General", icon: "gearshape", lucide: Settings },
   { id: "notifications", title: "Notifications", icon: "bell.badge", lucide: Bell },
+  { id: "devices", title: "Devices", icon: "iphone", lucide: Smartphone },
   { id: "permissions", title: "Permissions", icon: "checkmark.shield", lucide: ShieldCheck },
   { id: "personality", title: "Personality", icon: "text.bubble", lucide: MessageSquareText },
   { id: "knowledge", title: "Knowledge", icon: "book", lucide: Book },
@@ -119,6 +120,7 @@ function Palette() {
       list.push({ item: { id: "terminal:" + folder.path, title: `Open a Terminal in ${name}`, detail: tilde(folder.path), icon: "terminal", lucide: SquareTerminal }, keywords: `${folder.path} shell`, run: () => void openEditor({ folder: folder.path, terminal: true }) });
     }
     list.push({ item: { id: "settings", title: "Settings", icon: "gearshape", lucide: Settings, shortcut: "⌘," }, run: () => void openSettings() });
+    list.push({ item: { id: "pair", title: "Connect a Device…", detail: "a phone or tablet", icon: "qrcode", lucide: QrCode }, keywords: "pair phone iphone ipad qr code", run: () => void openSettings("pair") });
     for (const page of SETTINGS_PAGES) {
       list.push({ item: { id: "settings:" + page.id, title: `Settings: ${page.title}`, icon: page.icon, lucide: page.lucide }, keywords: "preferences", run: () => void openSettings(page.id) });
     }

@@ -12,8 +12,9 @@ import {
 } from "@shared/protocol";
 import { endpoint } from "./host";
 
-/** Requests only an app on this computer makes, beyond the phone's. */
-export type AppRequest = Omit<Request, "type"> & { type: Request["type"] | "lsp_endpoint" | "session_terminal" };
+/** Requests only an app on this computer makes, beyond the phone's: the
+ *  devices and a code to pair one are refused to the phone. */
+export type AppRequest = Omit<Request, "type"> & { type: Request["type"] | "lsp_endpoint" | "session_terminal" | "devices" | "pair_code" };
 
 /** An event, with what the decoder doesn't know kept as sent. */
 export type AppEvent = DaemonEvent & Record<string, unknown>;
@@ -145,7 +146,8 @@ export class DaemonClient {
     if (!envelope) return;
     const raw = envelope.payload as Record<string, unknown>;
     // The phone's decoder checks every event it knows; one only this app
-    // asks for (lsp_endpoint, session_terminal) passes as sent.
+    // asks for (lsp_endpoint, session_terminal, devices, pair_code) passes
+    // as sent.
     const event = (decodeDaemonEvent(structuredClone(raw)) ?? raw) as AppEvent;
     const waiting = envelope.replyTo ? this.pending.get(envelope.replyTo) : undefined;
     if (waiting && envelope.replyTo) {

@@ -356,3 +356,34 @@ html[data-platform="darwin"] .settings.active .settings-sidebar { background: tr
 .mac-popup.borderless { background: transparent; padding: 0; gap: 11.5px; }
 .mac-popup.borderless .ghost { display: none; }
 .mac-popup.borderless .chevrons { box-sizing: border-box; width: 20px; height: 20px; padding: 5px 6.25px; border-radius: 50%; background: var(--ctl-fill); }
+
+/* Devices (Views/DevicesSettings.swift): pairing on the page, then the
+   devices, each with a dot for whether it is connected. */
+.pairing-panel { padding: 16px; }
+.pairing-line { display: flex; align-items: center; gap: 10px; }
+.pairing-line.making { min-height: 60px; }
+.pairing-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pairing-title { font-size: 14px; font-weight: 500; color: var(--text); }
+.pairing-caption { font-size: 12px; color: var(--muted); }
+.pairing-caption.problem { color: var(--text-2); }
+.pairing-ok { display: grid; place-items: center; color: var(--ok); }
+.pairing-problem { display: grid; place-items: center; color: var(--needs-you-text); }
+.pairing-code { display: flex; align-items: flex-start; gap: 18px; }
+.qr-card { flex: none; width: 152px; height: 152px; padding: 10px; background: #fff; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--line); }
+.qr-code { display: block; width: 100%; height: 100%; }
+.pairing-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.pairing-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.copy-buttons { display: flex; gap: 8px; }
+.code-pill { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; font-size: 14px; font-weight: 500; color: var(--text); white-space: nowrap; user-select: text; cursor: text; background: color-mix(in srgb, var(--fill) 45%, transparent); border: 1px solid var(--line); border-radius: 7px; }
+.pairing-left { font-size: 12px; color: var(--faint); }
+.devices-note { display: flex; align-items: center; gap: 10px; padding: 14px 16px; font-size: 12px; color: var(--muted); }
+.device-main { display: flex; align-items: center; gap: 12px; padding: 11px 16px; }
+.device-icon { flex: none; width: 22px; display: grid; place-items: center; color: var(--muted); }
+.device-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.device-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.device-name { font-size: 14px; font-weight: 500; color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.device-model { flex: none; padding: 1px 5px; font-size: 10.5px; color: var(--muted); background: color-mix(in srgb, var(--fill) 60%, transparent); border: 1px solid var(--line); border-radius: 5px; }
+.device-detail { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.device-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--faint) 60%, transparent); }
+.device-dot.on { background: var(--ok); }
+.device-divider { height: 1px; margin-left: 50px; background: var(--separator); }
