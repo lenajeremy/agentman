@@ -597,12 +597,50 @@ final class AgentColorsTests: XCTestCase {
         XCTAssertNotEqual(AgentColors.color(for: one, by: .folder, defaults: store), AgentColors.color(for: two, by: .folder, defaults: store))
     }
 
-    func testNoColorByDefaultAndStateFollowsTheAgent() {
-        var session = Session(id: "a", kind: "claude", name: "A", cwd: "/w", state: .busy)
+    func testNoColorByDefault() {
+        let session = Session(id: "a", kind: "claude", name: "A", cwd: "/w", state: .busy)
         XCTAssertNil(AgentColors.color(for: session, by: .none))
-        XCTAssertEqual(AgentColors.color(for: session, by: .state), Palette.working)
-        session.question = Question(prompt: "Go?", options: [])
-        XCTAssertEqual(AgentColors.color(for: session, by: .state), Palette.needsYou)
+        // The dot shows the state, so it is no colour to choose; one chosen
+        // before reads as none.
+        XCTAssertEqual(AgentColorBy.allCases, [.none, .project, .folder])
+        XCTAssertNil(AgentColorBy(rawValue: "state"))
+    }
+
+    /// No folder's colour is near a state's: blue working, orange needs you,
+    /// grey idle.
+    func testNoColorIsNearAState() {
+        func hue(_ color: Color) -> (hue: CGFloat, saturation: CGFloat) {
+            var out: (CGFloat, CGFloat) = (0, 0)
+            NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
+                let c = NSColor(color).usingColorSpace(.sRGB)!
+                out = (c.hueComponent * 360, c.saturationComponent)
+            }
+            return out
+        }
+        let states = [hue(Palette.working).hue, hue(Palette.needsYou).hue]
+        for color in AgentColors.hues {
+            let (h, s) = hue(color)
+            XCTAssertGreaterThan(s, 0.5, "not grey")
+            for state in states {
+                let apart = min(abs(h - state), 360 - abs(h - state))
+                XCTAssertGreaterThan(apart, 25, "hue \(h) beside a state's \(state)")
+            }
+        }
+    }
+
+    /// A folder coloured before keeps its colour where the new palette still
+    /// has it; one whose colour went gets a new one.
+    func testColorsGivenBeforeKeepTheirColorWherePossible() {
+        let store = defaults()
+        store.set(["folder|/green": 1, "folder|/blue": 0, "folder|/pink": 6, "folder|/indigo": 9], forKey: "agentColorsAssigned")
+        XCTAssertEqual(AgentColors.index(for: "folder|/green", defaults: store), 0)
+        XCTAssertEqual(AgentColors.index(for: "folder|/pink", defaults: store), 3)
+        let blue = AgentColors.index(for: "folder|/blue", defaults: store)
+        XCTAssertTrue(AgentColors.hues.indices.contains(blue))
+        XCTAssertFalse([0, 3].contains(blue), "given one unused")
+        // Moved once: a colour given since is not moved again.
+        store.set(["folder|/teal": 1], forKey: "agentColorsAssigned")
+        XCTAssertEqual(AgentColors.index(for: "folder|/teal", defaults: store), 1)
     }
 }
 
@@ -615,7 +653,7 @@ final class WorkedForTests: XCTestCase {
     }
 
     private func worked(_ messages: [Message]) -> [Int] {
-        ThreadItem.items(from: messages).compactMap { if case .worked(_, let seconds) = $0 { seconds } else { nil } }
+        ThreadItem.items(from: messages).compactMap { if case .worked(_, let seconds, _) = $0 { seconds } else { nil } }
     }
 
     func testDurationsReadShort() {
@@ -648,5 +686,19 @@ final class WorkedForTests: XCTestCase {
 
     func testAConversationThatStartsPartWayThroughATurnSaysNothingForIt() {
         XCTAssertEqual(worked([agent("1", 0), tool("2", 50_000), user("3", 60_000)]), [])
+    }
+
+    /// The line says how long and how many steps, in few words.
+    func testTheLineCountsTheTurnsSteps() {
+        let messages = [user("1", 0), tool("2", 5_000), tool("3", 9_000), agent("4", 20_000), tool("5", 30_000), agent("6", 246_000),
+                        user("7", 300_000), tool("8", 301_000), agent("9", 310_000)]
+        let steps = ThreadItem.items(from: messages).compactMap { if case .worked(_, _, let steps) = $0 { steps } else { nil } }
+        XCTAssertEqual(steps, [3])
+        XCTAssertEqual(ThreadItem.latestTurn(in: messages).steps, 1)
+
+        XCTAssertEqual(WorkedLine(seconds: 246, steps: 3).text, "4m 6s · 3 steps")
+        XCTAssertEqual(WorkedLine(seconds: 78, steps: 1).text, "1m 18s · 1 step")
+        XCTAssertEqual(WorkedLine(seconds: 12).text, "12s", "a turn with no steps says only how long")
+        XCTAssertEqual(WorkedLine(seconds: 12, live: true).text, "Working for 12s")
     }
 }
