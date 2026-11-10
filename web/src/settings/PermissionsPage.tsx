@@ -3,13 +3,14 @@
 // against them, and what always waits for the user.
 
 import { useEffect, useState } from "react";
-import type { ManagerSettings, PermissionCheck } from "@shared/protocol";
-import { Asterisk, CircleCheck, FileSearch, Globe, Hand, Pencil, Plus, SquareTerminal, X, type LucideIcon } from "lucide-react";
+import type { Autopilot, ManagerSettings, PermissionCheck } from "@shared/protocol";
+import { Asterisk, CircleCheck, CircleMinus, FileSearch, Globe, Hand, Pencil, Plus, SquareTerminal, X, type LucideIcon } from "lucide-react";
 import { Icon } from "../ui";
 import { LinkButton, MenuButton, PopUp, PushButton, Segmented, TextField, Toggle, lastPart, tilde } from "./controls";
 import { Divider, Row, Section, SettingsPage, keepLast } from "./layout";
 import { pick, useHome } from "./native";
 import { Sheet } from "./Sheet";
+import { menuUnder } from "../thread/menu";
 import { checkPermission, loadFolders, useSettingsState } from "./state";
 
 type Rule = NonNullable<ManagerSettings["rules"]>[number];
@@ -49,9 +50,40 @@ interface Props {
 
 const query = new URLSearchParams(location.search);
 
+/** Every switch off, as Autopilot() starts (Protocol.swift). */
+const AUTOPILOT_OFF: Autopilot = { verify: false, sendBack: false, learnRules: false, unstick: false, overlap: false, learnNotes: false, overnight: false };
+/** Reviews of finished work a day on the user's key (dailyReviews). */
+const DAILY_REVIEWS = 30;
+/** How much Agentman does in a folder (FolderTrust.levels). */
+const TRUST_LEVELS = [
+  { value: "watch", label: "Watch" },
+  { value: "suggest", label: "Suggest" },
+  { value: "handle", label: "Handle" },
+];
+const HOURS = Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}:00`).map((h) => ({ value: h, label: h }));
+type Switch = "verify" | "sendBack" | "learnRules" | "unstick" | "overlap" | "learnNotes" | "overnight" | "replyCommit" | "replyInstall";
+
 export function PermissionsPage({ draft, setDraft }: Props) {
   // For comparisons: sheet=rule opens the sheet.
   const [adding, setAdding] = useState(query.get("sheet") === "rule");
+  const { folders } = useSettingsState();
+  useEffect(() => void loadFolders(), []);
+
+  // What Agentman does by itself (SettingsView.swift's autopilotRow).
+  const autopilot = draft?.autopilot ?? AUTOPILOT_OFF;
+  const setAutopilot = (next: Partial<Autopilot>) => draft && setDraft({ ...draft, autopilot: { ...autopilot, ...next } });
+  const autopilotRow = (title: string, detail: string | undefined, key: Switch, divider = true, disabled = false) => (
+    <Row title={title} detail={detail} divider={divider} className={disabled ? "dimmed" : ""}>
+      <Toggle on={!!autopilot[key]} disabled={disabled} onChange={(on) => setAutopilot({ [key]: on })} />
+    </Row>
+  );
+  const hourRow = (title: string, key: "nightStart" | "nightEnd", fallback: string, divider: boolean) => (
+    <Row title={title} divider={divider}>
+      <PopUp value={autopilot[key] ?? fallback} options={HOURS} onChange={(value) => setAutopilot({ [key]: value })} />
+    </Row>
+  );
+  const trust = draft?.trust ?? [];
+  const setTrust = (next: { folder: string; level: string }[]) => draft && setDraft({ ...draft, trust: next });
 
   const kindRow = (title: string, key: keyof Kinds, divider = true) => (
     <Row title={title} divider={divider}>
@@ -81,6 +113,65 @@ export function PermissionsPage({ draft, setDraft }: Props) {
             {kindRow("Changing files", "edits")}
             {kindRow("Tests, builds and read-only commands", "commands")}
             {kindRow("“Continue?” prompts", "continue", false)}
+          </Section>
+          <Section
+            title="When an agent asks"
+            footer="Only when that is all it's asking, in folders on Handle, at most twice for one request, and never while you're looking at it. Agentman sends a fixed yes and lists it under Handled. Pushing, deploying and merging always come to you."
+          >
+            {autopilotRow("Say yes to committing finished work", "The agent is told not to push.", "replyCommit")}
+            {autopilotRow("Say yes to installing on my phone or Mac", "A finished build, on your own device.", "replyInstall", false)}
+          </Section>
+          <Section
+            title="When an agent finishes"
+            footer={`Has your Agentman model compare the change with what was asked, up to ${DAILY_REVIEWS} reviews a day on your API key. In folders on Handle it runs their tests first, and only there can failures go back.`}
+          >
+            {autopilotRow("Offer rules for what I keep approving", "After three approvals of the same safe thing. Never for pushes, deletes, deploys or keys.", "learnRules")}
+            {autopilotRow("Check its work", "The card on the Board says whether it holds up.", "verify")}
+            {autopilotRow("Send failing tests back to the agent", "In folders on Handle, at most twice for one request, and never while you're looking at it.", "sendBack", false, !autopilot.verify)}
+          </Section>
+          <Section
+            title="While agents work"
+            footer="Noticing is read from their transcripts, without using your API key. What happens next follows the folder's trust below."
+          >
+            {autopilotRow("Notice stuck agents", "The same thing failing, long silences, a full context or a usage limit.", "unstick")}
+            {autopilotRow("Notice agents on the same files", "Two changing one file, or one changing what another has read.", "overlap")}
+            {autopilotRow("Suggest notes for what I keep telling agents", "Once a day, on your API key. You approve each note.", "learnNotes", false)}
+          </Section>
+          <Section
+            title="Overnight"
+            footer="Only what you line up on the Board starts, a few at a time and one to a folder, and you get a report when the night ends."
+          >
+            {autopilotRow("Run my queue overnight", undefined, "overnight")}
+            {hourRow("Starts", "nightStart", "23:00", true)}
+            {hourRow("Ends", "nightEnd", "07:00", false)}
+          </Section>
+          <Section
+            title="Trust by folder"
+            footer="Watch reports and asks. Suggest marks the answer it would give and waits. Handle answers what the rules here allow. A folder without a level follows the switch at the top."
+          >
+            {trust.map((entry, index) => (
+              <Row key={entry.folder} title={lastPart(entry.folder)} detail={entry.folder}>
+                <PopUp value={entry.level} options={TRUST_LEVELS} onChange={(level) => setTrust(trust.map((t, i) => (i === index ? { ...t, level } : t)))} />
+                <button className="trust-remove" title="Follow the switch at the top instead" aria-label={`Stop trusting ${lastPart(entry.folder)} by its own level`} onClick={() => setTrust(trust.filter((_, i) => i !== index))}>
+                  <Icon icon={CircleMinus} sf="minus.circle" size={13} />
+                </button>
+              </Row>
+            ))}
+            <div className="card-line add-line">
+              {/* A folder agents ran in, starting on Suggest (Menu "Add Folder"). */}
+              <button
+                className="mac-link"
+                onClick={(e) => {
+                  const open = folders.filter((f) => !trust.some((t) => t.folder === f.path)).slice(0, 20);
+                  menuUnder(e.currentTarget, open.length
+                    ? open.map((f) => ({ label: lastPart(f.path), action: () => setTrust([...trust, { folder: f.path, level: "suggest" }]) }))
+                    : [{ label: "No other folders", disabled: true }]);
+                }}
+              >
+                <Icon icon={Plus} sf="plus" size={13} />
+                <span>Add Folder</span>
+              </button>
+            </div>
           </Section>
           <Section
             title="Your rules"

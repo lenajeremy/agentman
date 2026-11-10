@@ -387,3 +387,6 @@ html[data-platform="darwin"] .settings.active .settings-sidebar { background: tr
 .device-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--faint) 60%, transparent); }
 .device-dot.on { background: var(--ok); }
 .device-divider { height: 1px; margin-left: 50px; background: var(--separator); }
+/* A folder's trust: its level, then the way back to the switch at the top. */
+.trust-remove { width: 20px; height: 20px; display: grid; place-items: center; color: var(--muted); margin-left: 8px; }
+.trust-remove:hover { color: var(--text); }
