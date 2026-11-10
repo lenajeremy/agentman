@@ -258,8 +258,8 @@ struct GitActionsRow: View {
             switch ProcessInfo.processInfo.environment["AGENTMAN_TEST_GIT"] {
             case "sheet": committing = .commitAndPush
             case "running": running = "Writing the message…"
-            case "outcome": outcome = Outcome(text: "Committed 3f9c2a1, pushed to origin/main.")
-            case "failed": outcome = Outcome(text: "Committed 3f9c2a1, but the push was rejected: fetch first.", failed: true)
+            case "outcome": outcome = GitOutcome(text: "Committed 3f9c2a1, pushed to origin/main.")
+            case "failed": outcome = GitOutcome(text: "Committed 3f9c2a1, but the push was rejected: fetch first.", failed: true)
             default: break
             }
         }
