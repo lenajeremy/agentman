@@ -53,7 +53,10 @@ two always match).
 
 Seen while testing, not yet looked into: attaching an agent's own
 terminal can type the terminal's answer to tmux's query ("1;2c0;276;0c")
-into its shell. For the looks pass: "Show in Files" where a Mac says Finder
+into its shell. An editor window under about 1000 wide pushes the agent
+panel past its right edge, its header buttons out of reach (the Mac keeps
+the window from being that small; a browser window can be). For the
+looks pass: "Show in Files" where a Mac says Finder
 (the platform label), and the iPad and phone icons alike in Lucide.
 
 Known browser limits: ⌘N, ⌘T, ⌘W and ⌘Q stay the browser's; files copied in
