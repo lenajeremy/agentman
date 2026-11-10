@@ -2,6 +2,7 @@ package source
 
 import (
 	"path/filepath"
+	"strings"
 
 	"github.com/lenajeremy/agentman/internal/procinfo"
 	"github.com/lenajeremy/agentman/internal/protocol"
@@ -28,7 +29,7 @@ func (s *CodexSource) ConversationOpen(session protocol.Session) (bool, bool) {
 	if !ok || path == "" {
 		return false, false
 	}
-	return heldOpen(path, "codex", procinfo.List, procinfo.Files)
+	return heldOpen(path, "codex", listProcesses, openFiles)
 }
 
 // heldOpen reports whether a process of that name holds path open, and
@@ -41,7 +42,9 @@ func heldOpen(path, name string, list func() ([]procinfo.Process, error),
 	}
 	want := resolved(path)
 	for _, process := range processes {
-		if process.Zombie || process.Comm != name {
+		// Homebrew's codex is "codex"; the native binary npm runs on Linux is
+		// "codex-x86_64-un…", cut to the kernel's 15 bytes.
+		if process.Zombie || !strings.HasPrefix(process.Comm, name) {
 			continue
 		}
 		open, err := files(process.PID)
