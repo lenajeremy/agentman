@@ -179,10 +179,15 @@ func TestARequestHandledAfterItsPhoneLeftOpensNothing(t *testing.T) {
 	if len(list) != 1 || list[0].Connected || list[0].Name != "iPhone" {
 		t.Fatalf("named, and gone: %+v", list)
 	}
-	// Its next connection is a new name, and opens as usual.
+	// Its next connection is a new name, and opens as usual; when that one
+	// closes, the old one isn't left holding it open.
 	devices.Seen("acct-pAAAA-2")
 	if list := devices.List(); !list[0].Connected {
 		t.Fatalf("back: %+v", list)
+	}
+	devices.Left("acct-pAAAA-2")
+	if list := devices.List(); list[0].Connected {
+		t.Fatalf("gone again, but shown connected: %+v", list)
 	}
 }
 
