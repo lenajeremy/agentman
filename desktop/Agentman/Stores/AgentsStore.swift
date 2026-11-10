@@ -587,6 +587,29 @@ final class AgentsStore {
         return cwd == folder || cwd.hasPrefix(folder.hasSuffix("/") ? folder : folder + "/")
     }
 
+    /// Where the folders the user chose are kept, and how a folder is found
+    /// on disk: a test's own.
+    @ObservationIgnored var folderDefaults: UserDefaults = .standard
+    @ObservationIgnored var folderExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+
+    /// The folders the filter offers, the one filtered to among them.
+    var folderChoices: [String] {
+        FolderChoices.make(folders: folders, chosen: FolderChoices.chosen(folderDefaults), selected: folderFilter, exists: folderExists)
+    }
+
+    /// Shows a folder the user picked, any folder at all, and keeps it among
+    /// the filter's choices.
+    func chooseFolder(_ path: String) {
+        FolderChoices.remember(path, folderDefaults)
+        folderFilter = path
+    }
+
+    /// The New Agent page, set to start in a folder when given one.
+    func newAgent(in folder: String?) {
+        if let folder { newAgentPreset = NewAgentPreset(folder: folder) }
+        selection = .newAgent
+    }
+
     func loadFolders() async {
         if let reply = try? await client.request(DaemonRequest(.listFolders)), let folders = reply.folders {
             self.folders = folders.sorted { ($0.lastActivityAt ?? 0) > ($1.lastActivityAt ?? 0) }

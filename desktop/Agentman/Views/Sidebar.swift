@@ -127,10 +127,10 @@ struct Sidebar: View {
                     FilterMenu()
                         .labelStyle(.iconOnly)
                         .fixedSize()
-                    Button { store.selection = .newAgent } label: {
+                    Button { store.newAgent(in: store.folderFilter) } label: {
                         Image(systemName: "square.and.pencil")
                     }
-                    .help("New agent (⌘N)")
+                    .help(store.folderFilter.map { "New agent in \(Worktrees.label($0))" } ?? "New agent (⌘N)")
                     .accessibilityLabel("New agent")
                 }
                 .font(TextStyle.caption)
@@ -184,6 +184,18 @@ struct Sidebar: View {
                     Text(store.folderFilter != nil || store.stateFilter != nil
                          ? "No agent matches \u{201C}\(store.search.trimmingCharacters(in: .whitespaces))\u{201D} with these filters."
                          : "No agent or message matches \u{201C}\(store.search.trimmingCharacters(in: .whitespaces))\u{201D}.")
+                }
+                .padding(.top, 60)
+            } else if let folder = store.folderFilter, store.stateFilter == nil,
+                      store.search.trimmingCharacters(in: .whitespaces).isEmpty,
+                      store.sidebar.isEmpty, store.earlierHere.isEmpty {
+                // A folder chosen before any agent has worked in it.
+                ContentUnavailableView {
+                    Label("No agents here yet", systemImage: "folder")
+                } description: {
+                    Text("Start one to work in \(Worktrees.label(folder)).")
+                } actions: {
+                    SmallButton(title: "New Agent Here", symbol: "square.and.pencil", primary: true) { store.newAgent(in: folder) }
                 }
                 .padding(.top, 60)
             }
@@ -742,46 +754,24 @@ private struct RenameField: View {
 }
 
 /// One button for what the list shows: agents in one state, and in one
-/// folder, with how many are in each.
+/// folder. It opens the filter panel.
 private struct FilterMenu: View {
     @Environment(AgentsStore.self) private var store
+    @State private var open = false
 
     var body: some View {
-        let counts = store.stateCounts
-        Menu {
-            Section("Show") {
-                option("All agents", on: store.stateFilter == nil) { store.stateFilter = nil }
-                option("Needs you", count: counts.needsYou, on: store.stateFilter == .waitingInput) { store.stateFilter = .waitingInput }
-                option("Working", count: counts.working, on: store.stateFilter == .busy) { store.stateFilter = .busy }
-                option("Idle", count: counts.idle, on: store.stateFilter == .idle) { store.stateFilter = .idle }
-            }
-            Section("Color by") {
-                AgentColorMenuItems()
-            }
-            Section("Folder") {
-                option("All folders", on: store.folderFilter == nil) { store.folderFilter = nil }
-                ForEach(store.folders.prefix(15)) { folder in
-                    option((folder.path as NSString).lastPathComponent, count: folder.agents,
-                           on: store.folderFilter == folder.path) { store.folderFilter = folder.path }
-                }
-            }
-        } label: {
+        Button { open.toggle() } label: {
             Label("Filter", systemImage: "line.3.horizontal.decrease")
                 .foregroundStyle(filtering ? Palette.working : Palette.textSecondary)
         }
-        .menuIndicator(.hidden)
-        .help("Show agents in one state, or one folder with the sessions that ended there")
+        .help("Show agents in one state, or in one folder with the sessions that ended there")
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            FilterPanel { open = false }
+                .environment(store)
+        }
     }
 
     private var filtering: Bool { store.stateFilter != nil || store.folderFilter != nil }
-
-    @ViewBuilder
-    private func option(_ title: String, count: Int? = nil, on: Bool, action: @escaping () -> Void) -> some View {
-        let text = count.map { "\(title)  \($0)" } ?? title
-        Button(action: action) {
-            if on { Label(text, systemImage: "checkmark") } else { Text(text) }
-        }
-    }
 }
 
 /// What the list is narrowed to, above it, each undone with its ×.

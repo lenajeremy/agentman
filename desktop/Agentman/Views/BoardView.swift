@@ -174,9 +174,11 @@ struct BoardView: View {
         Menu {
             Button("All Folders") { store.folderFilter = nil }
             Divider()
-            ForEach(store.folders) { folder in
-                Button((folder.path as NSString).lastPathComponent) { store.folderFilter = folder.path }
+            ForEach(store.folderChoices, id: \.self) { path in
+                Button(Worktrees.label(path)) { store.folderFilter = path }
             }
+            Divider()
+            Button("Choose a Folder…") { FolderPicker.choose(for: store) }
         } label: {
             HStack(spacing: 5) {
                 Text(store.folderFilter.map { ($0 as NSString).lastPathComponent } ?? "All folders")
