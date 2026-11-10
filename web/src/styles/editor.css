@@ -231,25 +231,26 @@
 .md-pictures img { max-width: 100%; border-radius: 4px; display: block; }
 .md-picture-words { font-size: 14px; color: var(--muted); }
 
-/* Palettes: 580 wide, 70 from the top of the editor. */
+/* Palettes: 580 wide, 70 from the top of the editor. Under .palette-layer
+   only: the main window's palette (palette.css) uses some of the names. */
 .palette-layer { position: absolute; inset: 0; z-index: 5; display: flex; justify-content: center; align-items: flex-start; padding-top: 70px; }
-.palette { width: 580px; background: var(--surface); border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line), 0 12px 30px rgb(0 0 0 / 0.18); overflow: hidden; }
-.palette-field { height: 46px; padding: 0 14px; display: flex; align-items: center; gap: 10px; }
-.palette-search { color: var(--muted); display: grid; }
-.palette-field input { flex: 1; min-width: 0; border: 0; outline: none; background: none; font-size: 15px; padding: 0; color: var(--text); }
-.palette-divider { height: 1px; background: var(--separator); }
-.palette-list { overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px; box-sizing: border-box; }
-.palette-row { height: 32px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: 8px; }
-.palette-row.selected { background: var(--fill); }
-.palette-icon { width: 18px; flex: none; display: grid; place-items: center; }
-.palette-title { font-size: 13.5px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
-.palette-line { font: 12px var(--mono); color: var(--text-2); white-space: pre; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
-.palette-line mark { color: var(--text); background: var(--working-wash); font-weight: 700; }
-.palette-detail { font-size: 12px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; flex: 0 100 auto; min-width: 0; }
-.palette-detail.fixed { flex: none; direction: ltr; }
-.palette-spacer { flex: 1; min-width: 8px; }
-.palette-status { padding: 7px 16px; font-size: 12px; color: var(--faint); }
-.palette-empty { padding: 16px 0; text-align: center; font-size: 12px; color: var(--muted); }
+.palette-layer .palette { width: 580px; background: var(--surface); border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line), 0 12px 30px rgb(0 0 0 / 0.18); overflow: hidden; }
+.palette-layer .palette-field { height: 46px; padding: 0 14px; display: flex; align-items: center; gap: 10px; }
+.palette-layer .palette-search { color: var(--muted); display: grid; }
+.palette-layer .palette-field input { flex: 1; min-width: 0; border: 0; outline: none; background: none; font-size: 15px; padding: 0; color: var(--text); }
+.palette-layer .palette-divider { height: 1px; background: var(--separator); }
+.palette-layer .palette-list { overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px; box-sizing: border-box; }
+.palette-layer .palette-row { height: 32px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: 8px; }
+.palette-layer .palette-row.selected { background: var(--fill); }
+.palette-layer .palette-icon { width: 18px; flex: none; display: grid; place-items: center; }
+.palette-layer .palette-title { font-size: 13.5px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
+.palette-layer .palette-line { font: 12px var(--mono); color: var(--text-2); white-space: pre; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
+.palette-layer .palette-line mark { color: var(--text); background: var(--working-wash); font-weight: 700; }
+.palette-layer .palette-detail { font-size: 12px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; flex: 0 100 auto; min-width: 0; }
+.palette-layer .palette-detail.fixed { flex: none; direction: ltr; }
+.palette-layer .palette-spacer { flex: 1; min-width: 8px; }
+.palette-layer .palette-status { padding: 7px 16px; font-size: 12px; color: var(--faint); }
+.palette-layer .palette-empty { padding: 16px 0; text-align: center; font-size: 12px; color: var(--muted); }
 .search-toggles { display: flex; gap: 2px; }
 .search-toggle { width: 24px; height: 20px; border-radius: 5px; font: 11px var(--mono); color: var(--muted); display: grid; place-items: center; }
 .search-toggle.on { background: var(--inverse); color: var(--on-inverse); }
