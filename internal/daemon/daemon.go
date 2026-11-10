@@ -172,6 +172,11 @@ type Daemon struct {
 	// prompt sitting unanswered across many sweeps rings the phone once.
 	pushedQuestions map[string]string
 
+	// sweepLogged is when a slow or failed sweep was last written to the log,
+	// and sweepFailure the failure written. Only the sweep loop uses them.
+	sweepLogged  time.Time
+	sweepFailure string
+
 	// serverWatcher finds the web servers each agent has started, and sharer
 	// turns one into a preview link on request. Both nil until SetServers.
 	serverWatcher ServerWatcher
@@ -459,12 +464,41 @@ func (d *Daemon) Run(ctx context.Context, hooks <-chan hook.Event) error {
 	}
 }
 
+// slowSweep is how long a sweep runs before the log says so.
+const slowSweep = 5 * time.Second
+
+// noteSweep writes a slow sweep, or one failing in a new way, to the log, at
+// most once a minute: while one runs late or fails, agents' states stand
+// still.
+func (d *Daemon) noteSweep(took time.Duration, err error) {
+	failure := ""
+	if err != nil {
+		failure = err.Error()
+	}
+	slow := took >= slowSweep
+	newFailure := failure != "" && failure != d.sweepFailure
+	if failure == "" {
+		d.sweepFailure = ""
+	}
+	if Logf == nil || (!slow && !newFailure) || time.Since(d.sweepLogged) < time.Minute {
+		return
+	}
+	d.sweepLogged, d.sweepFailure = time.Now(), failure
+	if err != nil {
+		Logf("sweep      failed after %s: %v", took.Round(100*time.Millisecond), err)
+		return
+	}
+	Logf("slow       sweep took %s", took.Round(100*time.Millisecond))
+}
+
 // refresh re-discovers sessions and reports what changed.
 //
 // Only differences are sent. A phone on cell data should not receive the full
 // session list every second just to learn that nothing happened.
 func (d *Daemon) refresh(ctx context.Context, initial bool) {
+	started := time.Now()
 	found, err := d.registry.Discover(ctx)
+	d.noteSweep(time.Since(started), err)
 	if err != nil {
 		// Partial results are still worth reporting: one broken adapter must
 		// not blank the user's whole list.

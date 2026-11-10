@@ -809,14 +809,35 @@ final class AgentsStore {
         return error.replacingOccurrences(of: "^(daemon|source|tmux): ", with: "", options: .regularExpression)
     }
 
+    /// Ended from their page, but still running in a terminal the user
+    /// opened: ending only took them off the list, so they can't be resumed.
+    var stillRunning: Set<String> = []
+
+    /// A session as it reads once ended: under the conversation's own id,
+    /// as the daemon lists an ended one, with nothing to answer or send.
+    nonisolated static func ended(_ session: Session) -> Session {
+        var ended = session
+        if let native = session.nativeId, !native.isEmpty { ended.id = "\(session.kind):\(native)" }
+        ended.state = .ended
+        ended.inject = "none"
+        ended.question = nil
+        ended.queued = nil
+        return ended
+    }
+
     func end(_ sessionId: String) async -> String? {
         do {
             let reply = try await client.request(DaemonRequest(.endSession, sessionId: sessionId))
             if reply.type == "error" {
                 return (reply.error ?? "It couldn't be ended.").replacingOccurrences(of: "^daemon: ", with: "", options: .regularExpression)
             }
-            // Nothing is left to show of it here.
-            if selection == .agent(sessionId) { selection = .manager }
+            // Its page stays, read-only, to be resumed from there.
+            if selection == .agent(sessionId), let session = session(sessionId) {
+                let ended = Self.ended(session)
+                foundSessions[ended.id] = ended
+                if reply.closed == true { stillRunning.remove(ended.id) } else { stillRunning.insert(ended.id) }
+                selection = .agent(ended.id)
+            }
             return nil
         } catch {
             return error.localizedDescription

@@ -498,6 +498,11 @@ func detectMenu(lines []string) *Question {
 	bounded := false
 	for i := first - 1; i >= 0 && len(context) < 14; i-- {
 		trimmed := strings.TrimSpace(lines[i])
+		// Claude 2.1.322 sets a long question in a form behind a bar, one a
+		// line. A box has one on both sides; this has it on the left only.
+		if rest, barred := strings.CutPrefix(trimmed, "│"); barred && !strings.HasSuffix(rest, "│") {
+			trimmed = strings.TrimSpace(rest)
+		}
 		if progressLine.MatchString(lines[i]) {
 			break
 		}
@@ -963,6 +968,11 @@ func parseOptionLabel(label string) (clean, description string, checkbox, checke
 		return clean, description, true, strings.TrimSpace(match[1]) != ""
 	}
 	clean, description = splitOptionText(label)
+	// Back on a question of a form already answered, Claude ticks the answer
+	// given. The tick says it was chosen; it is not part of the label.
+	if rest, ticked := strings.CutSuffix(clean, " ✔"); ticked {
+		return strings.TrimSpace(rest), description, false, true
+	}
 	return clean, description, false, false
 }
 

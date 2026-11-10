@@ -1,0 +1,17 @@
+────────────────────────────────────────────────────────────────────────────
+←  ☒ Access  ☐ Old work  ☐ Look  ✔ Submit  →
+
+│ What should happen to the paused desktop work (six areas built in separate
+│ worktrees, based on a 399-commits-old main)?
+
+❯ 1. Keep the worktrees (Recommended)
+     Leave the six worktrees and their branches in place so the work can be
+     resumed later.
+  2. Rebase onto current main
+     Update each worktree's branch onto the current main before continuing
+     the paused work.
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel

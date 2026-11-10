@@ -439,7 +439,7 @@ struct AgentThreadView: View {
 
             VStack(spacing: 0) {
                 if Self.resumable(session) {
-                    ResumeBar(session: session, resuming: resuming) {
+                    ResumeBar(session: session, resuming: resuming, stillRunning: store.stillRunning.contains(session.id)) {
                         resuming = true
                         Task {
                             store.actionError[session.id] = await store.resume(session.id)
@@ -890,29 +890,37 @@ private struct TakeOverBar: View {
 }
 
 /// In place of the message box for a session that has ended.
-private struct ResumeBar: View {
+struct ResumeBar: View {
     let session: Session
     let resuming: Bool
+    /// Ended here but running on in a terminal the user opened: there is
+    /// nothing to resume, and resuming would start a second copy.
+    var stillRunning = false
     let resume: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "moon.zzz")
+            Image(systemName: stillRunning ? "terminal" : "moon.zzz")
                 .foregroundStyle(Palette.muted)
+                .frame(width: 18)
             VStack(alignment: .leading, spacing: 2) {
-                Text("This session has ended")
+                Text(stillRunning ? "Off your list" : "This session has ended")
                     .font(TextStyle.captionMedium)
                     .foregroundStyle(Palette.text)
-                Text("Its conversation is here to read. Resume it to carry on.")
+                Text(stillRunning ? "It's still running in the terminal you opened it in. Reply to it there."
+                     : "Its conversation is here to read. Resume it to carry on.")
                     .font(TextStyle.caption)
                     .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
-            Button(action: resume) {
-                if resuming { ProgressView().controlSize(.small) } else { Text("Resume") }
+            if !stillRunning {
+                Button(action: resume) {
+                    if resuming { ProgressView().controlSize(.small) } else { Text("Resume") }
+                }
+                .buttonStyle(.brand)
+                .disabled(resuming)
             }
-            .buttonStyle(.brand)
-            .disabled(resuming)
         }
         .padding(14)
         .edged(18, depth: 3)

@@ -1,0 +1,16 @@
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Access  ☒ Old work  ☒ Look  ✔ Submit  →
+
+What look should the new output have?
+
+❯ 1. Clean and minimal (Recommended)
+     Simple layout with restrained colors and generous spacing.
+  2. Bold and expressive ✔
+     Strong color, large type and more visual personality.
+  3. Match existing style
+     Follow whatever visual style the project already uses.
+  4. Type something.
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel
