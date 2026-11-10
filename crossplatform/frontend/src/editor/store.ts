@@ -509,7 +509,10 @@ export class EditorStore {
     const document = this.active;
     if (!document?.isMarkdown) return;
     document.previewing = !document.previewing;
-    if (!document.previewing) this.focusEditor();
+    // The text hidden under the preview gives up the keyboard, so nothing
+    // typed edits what can't be seen.
+    if (document.previewing) (window.document.activeElement as HTMLElement | null)?.blur?.();
+    else this.focusEditor();
     this.changed();
   }
 

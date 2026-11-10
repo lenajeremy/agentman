@@ -9,7 +9,7 @@ import { daemon } from "../daemon";
 import { editorTheme } from "../editorTheme";
 import { popupMenu, type MenuEntry } from "../thread/menu";
 import type { EditorDocument, LineEdit } from "./document";
-import { copyText, files, onFilesChanged } from "./fs";
+import { copyText, files, onFilesChanged, readText } from "./fs";
 import type { EditorStore, MonacoLike } from "./store";
 
 /** A text file open in a tab, as the page needs it. */
@@ -408,16 +408,19 @@ export class MonacoBridge implements MonacoLike {
     popupMenu(entries, (box?.left ?? 0) + x, (box?.top ?? 0) + y);
   }
 
-  /** Cut, Copy and Paste from the menu, as the Edit menu's would do them. */
+  /** Cut, Copy and Paste from the menu, as the Edit menu's would do them:
+   *  the selection through the system's clipboard. */
   private async clipboardAction(id: "cut" | "copy" | "paste") {
     this.frame?.focus();
-    const win = this.frame?.contentWindow;
-    if (!win) return;
     if (id === "paste") {
-      void this.call("run", "editor.action.clipboardPasteAction");
+      const text = await readText();
+      if (text) void this.call("replaceSelection", text);
       return;
     }
-    win.postMessage({ channel: "editorClipboard", action: id }, "*");
+    const selected = await this.call<string>("selection");
+    if (!selected) return;
+    await copyText(selected).catch(() => undefined);
+    if (id === "cut") void this.call("replaceSelection", "");
   }
 }
 

@@ -118,6 +118,12 @@ export async function copyText(text: string): Promise<void> {
   else await navigator.clipboard.writeText(text);
 }
 
+/** The text on the clipboard. */
+export async function readText(): Promise<string> {
+  if (inShell) return (await Clipboard.Text().catch(() => "")) ?? "";
+  return navigator.clipboard.readText().catch(() => "");
+}
+
 /** A picture on the disk, as the page can show it. */
 export function fileURL(path: string): string {
   return `/__editor/file?path=${encodeURIComponent(path)}`;

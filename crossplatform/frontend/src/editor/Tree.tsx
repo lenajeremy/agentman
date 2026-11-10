@@ -122,24 +122,32 @@ function flatten(store: EditorStore) {
   return rows;
 }
 
-/** The arrow keys move through the rows, as an outline view's do; Vim's
- *  keys are the window's (keys.ts). */
+/** The arrow keys move through the rows, as an outline view's do: a file
+ *  moved onto opens, as a click on it would. Vim's keys are the window's. */
 function treeArrowKeys(store: EditorStore, e: ReactKeyboardEvent) {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const entry = store.currentTreeEntry;
+  const step = (by: number) => {
+    const rows = store.visibleTreeRows();
+    if (!rows.length) return;
+    const index = rows.findIndex((r) => r.path === store.selection);
+    const next = index >= 0 ? Math.min(Math.max(index + by, 0), rows.length - 1) : by > 0 ? 0 : rows.length - 1;
+    store.select(rows[next].path);
+    requestAnimationFrame(() => document.querySelector(".tree-row.selected")?.scrollIntoView({ block: "nearest" }));
+  };
   switch (e.key) {
     case "ArrowDown":
-      store.moveTree(1);
+      step(1);
       break;
     case "ArrowUp":
-      store.moveTree(-1);
+      step(-1);
       break;
     case "ArrowRight":
       if (entry?.directory) store.setExpanded(entry.path, true);
       break;
     case "ArrowLeft":
       if (entry?.directory && store.isExpanded(entry.path)) store.setExpanded(entry.path, false);
-      else if (entry && paths.dir(entry.path)) store.selectInTree(paths.dir(entry.path));
+      else if (entry && paths.dir(entry.path)) store.select(paths.dir(entry.path));
       break;
     default:
       return;
@@ -176,11 +184,11 @@ function FileRow({ store, entry, depth, onMenu }: { store: EditorStore; entry: E
         if (e.button !== 0) return;
         store.select(entry.path);
       }}
-      onClick={(e) => {
-        // A folder opens or closes with a click; with the disclosure
-        // chevron as well.
+      onClick={(e) => e.currentTarget.closest<HTMLElement>(".tree-list")?.focus()}
+      onDoubleClick={() => {
+        // The row's primary action: a folder opens or closes, a file opens.
         if (entry.directory) store.setExpanded(entry.path, !store.isExpanded(entry.path));
-        e.currentTarget.closest<HTMLElement>(".tree-list")?.focus();
+        else store.open(entry.path);
       }}
       onContextMenu={(e) => {
         store.select(entry.path);
@@ -188,7 +196,18 @@ function FileRow({ store, entry, depth, onMenu }: { store: EditorStore; entry: E
       }}
     >
       <div className="tree-row-body" style={{ paddingLeft: 16 + depth * 12 }}>
-        <span className="tree-disclosure">{entry.directory && <Chevron open={expanded} />}</span>
+        <span
+          className="tree-disclosure"
+          onMouseDown={(e) => {
+            // The disclosure triangle opens or closes the folder alone.
+            if (!entry.directory || e.button !== 0) return;
+            e.stopPropagation();
+            store.setExpanded(entry.path, !store.isExpanded(entry.path));
+          }}
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          {entry.directory && <Chevron open={expanded} />}
+        </span>
         <span className="tree-icon">
           <FileTypeIcon name={entry.name} directory={entry.directory} open={expanded} size={15} />
         </span>

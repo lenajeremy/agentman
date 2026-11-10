@@ -591,6 +591,26 @@ const agentman = {
     editor.focus()
     void editor.getAction(action)?.run()
   },
+
+  /** The text selected in the file in front. The cross-platform app's
+   * right-click Copy and Cut read it; WKWebView's own cut: and copy: do
+   * that for the Mac app. */
+  selection(): string {
+    const model = editor.getModel()
+    if (!model) return ''
+    return (editor.getSelections() ?? []).map((s) => model.getValueInRange(s)).join(model.getEOL())
+  },
+
+  /** Puts text where the selection is: the cross-platform app's Paste, and
+   * Cut once the text is on the clipboard. */
+  replaceSelection(text: string) {
+    const selections = editor.getSelections()
+    if (!selections || editor.getOption(monaco.editor.EditorOption.readOnly)) return
+    editor.focus()
+    editor.pushUndoStop()
+    editor.executeEdits('agentman', selections.map((range) => ({ range, text, forceMoveMarkers: true })))
+    editor.pushUndoStop()
+  },
 }
 
 ;(window as unknown as { agentman: typeof agentman }).agentman = agentman
