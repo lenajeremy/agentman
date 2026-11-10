@@ -88,10 +88,12 @@ export function startShellCommands(): () => void {
   };
 }
 
-/** For screenshots and tests: open=<agentman:// link>, folder=<path> (the
- *  folder filter), renaming=<session id>, away=<minutes> (the summary since
- *  then, after 4 s), palette=<query> (the palette open, typed into),
- *  lightbox=<image path> (the image open full window). */
+/** open=<agentman:// link>, followed once the page is up (how an editor tab
+ *  opens the main window at a link when none is open). For screenshots and
+ *  tests: folder=<path> (the folder filter), renaming=<session id>,
+ *  away=<minutes> (the summary since then, after 4 s), palette=<query> (the
+ *  palette open, typed into), lightbox=<image path> (the image open full
+ *  window). */
 function launchOptions() {
   const q = new URLSearchParams(location.search);
   const link = q.get("open");

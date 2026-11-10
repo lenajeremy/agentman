@@ -223,13 +223,56 @@ export function onOpenLink(handler: (link: string) => void): () => void {
   const main = !new URLSearchParams(location.search).has("view");
   const channel = !main || typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel(LINKS);
   if (channel) channel.onmessage = (e) => typeof e.data === "string" && handler(e.data);
+  const stopSaying = main ? sayMainIsHere() : () => {};
   return () => {
     linkHandlers.delete(handler);
     channel?.close();
+    stopSaying();
   };
 }
 
 const LINKS = "agentman-links";
+
+// The other tabs know whether a main window is open: each says it is, on
+// opening, when asked, every 20 s, and that it's gone when it goes. A link
+// for the main window where none is open opens one; that has to happen in
+// the click itself, as a browser won't open a window a moment later.
+const PRESENCE = "agentman-main";
+const HEARD_FOR = 90_000; // a hidden tab's timers can slow to once a minute
+const mainsHeard = new Map<string, number>();
+
+function sayMainIsHere(): () => void {
+  if (typeof BroadcastChannel === "undefined") return () => {};
+  const id = crypto.randomUUID();
+  const channel = new BroadcastChannel(PRESENCE);
+  const say = () => channel.postMessage({ main: id });
+  channel.onmessage = (e) => e.data?.ask && say();
+  say();
+  const timer = window.setInterval(say, 20_000);
+  const gone = () => channel.postMessage({ gone: id });
+  window.addEventListener("pagehide", gone);
+  return () => {
+    window.clearInterval(timer);
+    window.removeEventListener("pagehide", gone);
+    gone();
+    channel.close();
+  };
+}
+
+if (!inShell && new URLSearchParams(location.search).has("view") && typeof BroadcastChannel !== "undefined") {
+  const channel = new BroadcastChannel(PRESENCE);
+  channel.onmessage = (e) => {
+    if (typeof e.data?.main === "string") mainsHeard.set(e.data.main, Date.now());
+    if (typeof e.data?.gone === "string") mainsHeard.delete(e.data.gone);
+  };
+  channel.postMessage({ ask: true });
+}
+
+/** Whether a main window was heard from lately. */
+function mainIsOpen(): boolean {
+  const now = Date.now();
+  return [...mainsHeard.values()].some((at) => now - at < HEARD_FOR);
+}
 
 /** An agentman:// link for the main window, from an editor window: in the
  *  browser, another tab, reached over a BroadcastChannel and brought
@@ -239,11 +282,13 @@ export function openInMain(link: string) {
     void Events.Emit("agentman:open", link);
     return;
   }
-  if (typeof BroadcastChannel !== "undefined") {
-    const channel = new BroadcastChannel(LINKS);
-    channel.postMessage(link);
-    channel.close();
+  if (typeof BroadcastChannel === "undefined" || !mainIsOpen()) {
+    window.open(`/?open=${encodeURIComponent(link)}`, "_blank");
+    return;
   }
+  const channel = new BroadcastChannel(LINKS);
+  channel.postMessage(link);
+  channel.close();
   try {
     window.opener?.focus();
   } catch {
