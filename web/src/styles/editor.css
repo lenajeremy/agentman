@@ -39,7 +39,7 @@
 .editor-split { flex: 1; min-height: 0; display: flex; }
 .editor-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--paper); box-shadow: inset 1px 0 var(--line); padding-left: 1px; }
 .editor-row { flex: 1; min-height: 0; display: flex; }
-.editor-column { flex: 1; min-width: 320px; display: flex; flex-direction: column; position: relative; }
+.editor-column { flex: 1; min-width: 200px; display: flex; flex-direction: column; position: relative; }
 .editor-stack { flex: 1; min-height: 0; position: relative; }
 .monaco { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--paper); display: block; }
 .in-front { position: absolute; inset: 0; display: flex; flex-direction: column; }

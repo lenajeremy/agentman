@@ -195,8 +195,13 @@ function FolderEditor({ folder }: { folder: string }) {
 
   const active = store.active;
   const leading = os === "darwin" ? 82 : 16;
-  const panelMax = size.w * 0.6;
-  const shownPanelWidth = Math.min(panelWidth, Math.max(panelMax, PANEL_MIN));
+  // The panel takes what the tree (240) and the code (320) leave, down to
+  // 260; in a window narrower still the code gives way, so nothing runs off
+  // its edge. The Mac keeps its window from being that small; a browser
+  // window can be.
+  const room = size.w - 240 - 320 - 2;
+  const panelMax = Math.max(Math.min(size.w * 0.6, room), 260);
+  const shownPanelWidth = Math.min(panelWidth, Math.max(panelMax, Math.min(PANEL_MIN, panelMax)));
 
   return (
     <div className="editor-window">
