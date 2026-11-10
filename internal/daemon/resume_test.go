@@ -61,6 +61,74 @@ func TestResumeRefusesASessionStillRunningElsewhere(t *testing.T) {
 	}
 }
 
+// Ended while it runs in someone's own terminal, a session only comes off the
+// list: the agent runs on there. Opening it again from the phone, or Earlier
+// here on the Mac, must not start a second agent beside it.
+func TestResumeRefusesAnEndedSessionStillRunningElsewhere(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	// A process that is surely alive: this test's own.
+	alive := os.Getpid()
+	for _, session := range []protocol.Session{
+		{ID: "claude:abc", Kind: protocol.KindClaude, State: protocol.StateIdle, Inject: protocol.InjectHook, AgentPID: alive},
+		{ID: "codex:abc", Kind: protocol.KindCodex, State: protocol.StateIdle, Inject: protocol.InjectNone, AgentPID: alive},
+	} {
+		session.NativeID, session.Cwd = "abc", t.TempDir()
+		registry := source.NewRegistry()
+		registry.Add(&liveSource{session: session})
+		agent := New(registry, &recordingSink{})
+		agent.refresh(context.Background(), true)
+
+		ended := agent.HandleFrom(context.Background(), "mac", protocol.Request{Type: protocol.ReqEndSession, SessionID: session.ID})
+		if ended.Type != protocol.EvtSessionEnded || ended.Closed {
+			t.Fatalf("%s: end = %+v", session.ID, ended)
+		}
+		agent.refresh(context.Background(), false)
+		for _, listed := range agent.snapshot() {
+			if listed.ID == session.ID {
+				t.Fatalf("%s: still listed after it was ended", session.ID)
+			}
+		}
+		// Its folder's history lists it, ended, as the phone and Earlier here
+		// read it.
+		gone := session
+		gone.State, gone.Inject = protocol.StateEnded, protocol.InjectNone
+		agent.folders.remember([]protocol.Session{gone})
+
+		reply := agent.HandleFrom(context.Background(), "phone", protocol.Request{Type: protocol.ReqResumeSession, SessionID: session.ID})
+		if reply.Type != protocol.EvtError || strings.Contains(reply.Error, "not installed") {
+			t.Errorf("%s: a second agent was started beside the one still running: %+v", session.ID, reply)
+			continue
+		}
+		if !strings.Contains(reply.Error, "running") {
+			t.Errorf("%s: the refusal does not say why: %s", session.ID, reply.Error)
+		}
+	}
+}
+
+// Codex lists a recent transcript as idle after its agent has exited. Ended
+// and opened again from history, it is reopened: nothing is running to be
+// started twice, and refusing would leave it closed for days.
+func TestAnEndedSessionWithNothingRunningIsReopened(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	session := protocol.Session{ID: "codex:abc", Kind: protocol.KindCodex, NativeID: "abc", Cwd: t.TempDir(),
+		State: protocol.StateIdle, Inject: protocol.InjectNone}
+	registry := source.NewRegistry()
+	registry.Add(&liveSource{session: session})
+	agent := New(registry, &recordingSink{})
+	agent.refresh(context.Background(), true)
+	agent.HandleFrom(context.Background(), "mac", protocol.Request{Type: protocol.ReqEndSession, SessionID: session.ID})
+	agent.refresh(context.Background(), false)
+	gone := session
+	gone.State = protocol.StateEnded
+	agent.folders.remember([]protocol.Session{gone})
+
+	reply := agent.HandleFrom(context.Background(), "phone", protocol.Request{Type: protocol.ReqResumeSession, SessionID: session.ID})
+	// Nothing can be launched here, so trying shows as "not installed".
+	if reply.Type != protocol.EvtError || !strings.Contains(reply.Error, "not installed") {
+		t.Fatalf("a stopped session wasn't reopened: %+v", reply.Error)
+	}
+}
+
 // fakeAgent puts a stand-in for an agent CLI first on PATH that only sleeps,
 // so a resume can be launched for real on the test's private tmux server.
 func fakeAgent(t *testing.T, name string) {

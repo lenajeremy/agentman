@@ -20,6 +20,11 @@ import (
 // and launching a process with them.
 const maxRememberedFolderSessions = 1000
 
+// errRunningElsewhere turns away reopening a session whose agent is running in
+// a terminal Agentman can't type into.
+var errRunningElsewhere = errors.New("daemon: this session is still running in a terminal on your Mac. " +
+	"Reopening it here would start a second copy; reply to it there, or close it there first")
+
 // folderMemory keeps the sessions a folder listing returned.
 //
 // Resuming needs a session's kind, native id and working directory, and an
@@ -89,9 +94,15 @@ func (d *Daemon) resumeSession(ctx context.Context, sessionID string) (string, e
 		// Reopening it by id would start a second agent on the same
 		// conversation beside the first, both writing one transcript.
 		if live.State != protocol.StateEnded {
-			return "", errors.New("daemon: this session is still running in a terminal on your Mac. " +
-				"Reopening it here would start a second copy; reply to it there, or close it there first")
+			return "", errRunningElsewhere
 		}
+	}
+	// Ended while it ran in such a terminal, it only came off the list: the
+	// agent runs on there, and a second one would write one transcript beside
+	// it. The phone reopens an ended session as it opens; Earlier here does
+	// on Resume.
+	if d.registry.RunningUnreachable(sessionID) {
+		return "", errRunningElsewhere
 	}
 
 	// Reopened a moment ago and still coming up. The pane answers within a

@@ -72,12 +72,32 @@ export function resumeOnce(
 }
 
 /**
- * Whether the pane behind this session is ours to close.
+ * Whether it can be ended now, as the Mac decides it (AgentThreadView.endable).
  *
- * Only a pane Agentman started. A session someone is running in their own
- * terminal reaches the phone through the hook queue, and killing that window
- * out from under them is not what "end session" means here.
+ * One in a terminal Agentman can close, at any time: ending closes Agentman's
+ * pane, or, in a terminal the user opened, only takes it off the list. Any
+ * other once it has stopped working: ending takes it off the list, and an
+ * agent still open in a terminal runs on there. Nothing is ever killed out
+ * from under someone.
  */
-export function canEnd(session: { kind: string; inject: string }): boolean {
-  return session.inject === "tmux" && canResume(session.kind);
+export function canEnd(session: {
+  kind: string;
+  inject: string;
+  state?: string;
+  question?: unknown;
+}): boolean {
+  if (session.state === "ended") return false;
+  if (session.inject === "tmux" && canResume(session.kind)) return true;
+  return session.state === "idle" && !session.question;
+}
+
+/** What ending it does, for the question that asks (AgentThreadView.endNote). */
+export function endNote(session: { kind: string; inject: string }): string {
+  if (session.inject === "tmux" && canResume(session.kind)) {
+    return "If Agentman opened its terminal, this closes it and stops the agent. If you opened it yourself, the agent keeps running there and comes off your list. The conversation stays in the folder's history.";
+  }
+  if (session.inject && session.inject !== "none") {
+    return "This takes it off your list. The conversation stays in the folder's history, and you can pick it up from there.";
+  }
+  return "This takes it off your list. If it's still open in a terminal, it keeps running there.";
 }

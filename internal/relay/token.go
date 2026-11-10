@@ -98,34 +98,75 @@ func MintDeviceToken(secret string, account AccountID, nonce string) (string, er
 // VerifyDeviceToken checks a token's signature and expiry, returning the
 // account it authorizes. Nothing is looked up; the token carries its own proof.
 func VerifyDeviceToken(secret, token string) (AccountID, error) {
+	account, _, err := VerifyDevice(secret, token)
+	return account, err
+}
+
+// VerifyDevice is VerifyDeviceToken that also names the pairing the token
+// came from: "p" and 16 hex digits, the same however often that phone
+// connects, and different for every other pairing, even of the account's
+// other phones. It is a hash, so nothing of the token travels with it.
+// Empty for a token minted without a nonce.
+func VerifyDevice(secret, token string) (AccountID, string, error) {
+	claims, err := verifyDeviceClaims(secret, token)
+	if err != nil {
+		return "", "", err
+	}
+	pairing := ""
+	if claims.Nonce != "" {
+		sum := sha256.Sum256([]byte(string(claims.Account) + "\x00" + pairingSeed(claims.Nonce)))
+		pairing = "p" + hex.EncodeToString(sum[:8])
+	}
+	return claims.Account, pairing, nil
+}
+
+// installPrefix marks a device id an app install named itself with, kept
+// across its pairings (mobile/lib/install.ts).
+const installPrefix = "install-"
+
+// pairingSeed is what a pairing's name is made from. The nonce is the device
+// id the app paired with and a random part ("<device>:<random>"). An install's
+// own id is kept across its pairings, so the same phone paired again is the
+// same device; any other id ("phone", from apps before it) is the same for
+// every phone, so the random part is what tells pairings apart.
+func pairingSeed(nonce string) string {
+	if at := strings.LastIndex(nonce, ":"); at > 0 {
+		if device := nonce[:at]; strings.HasPrefix(device, installPrefix) && len(device) > len(installPrefix)+8 {
+			return "install\x00" + device
+		}
+	}
+	return nonce
+}
+
+func verifyDeviceClaims(secret, token string) (deviceClaims, error) {
 	if secret == "" {
-		return "", ErrTokenSignature
+		return deviceClaims{}, ErrTokenSignature
 	}
 	encoded, signature, ok := strings.Cut(token, ".")
 	if !ok || encoded == "" || signature == "" {
-		return "", ErrTokenMalformed
+		return deviceClaims{}, ErrTokenMalformed
 	}
 	// Constant time: a leaky comparison here would let an attacker discover a
 	// valid signature byte by byte.
 	if !hmac.Equal([]byte(signature), []byte(sign(secret, encoded))) {
-		return "", ErrTokenSignature
+		return deviceClaims{}, ErrTokenSignature
 	}
 
 	body, err := base64.RawURLEncoding.DecodeString(encoded)
 	if err != nil {
-		return "", ErrTokenMalformed
+		return deviceClaims{}, ErrTokenMalformed
 	}
 	var claims deviceClaims
 	if err := json.Unmarshal(body, &claims); err != nil {
-		return "", ErrTokenMalformed
+		return deviceClaims{}, ErrTokenMalformed
 	}
 	if claims.Account == "" {
-		return "", ErrTokenMalformed
+		return deviceClaims{}, ErrTokenMalformed
 	}
 	if time.Now().Unix() > claims.Expires {
-		return "", ErrTokenExpired
+		return deviceClaims{}, ErrTokenExpired
 	}
-	return claims.Account, nil
+	return claims, nil
 }
 
 func sign(secret, encoded string) string {

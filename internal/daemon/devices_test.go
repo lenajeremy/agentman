@@ -3,7 +3,10 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -52,6 +55,165 @@ func TestDevicesAreKeptFromWhatTheySend(t *testing.T) {
 	}
 	if kept[0].ID != "tablet" || kept[1].Name != "Jeremiah's iPhone" {
 		t.Fatalf("kept = %+v", kept)
+	}
+}
+
+// The relay names each connection afresh: the same phone back again arrives
+// under a new id. Once it says who it is, it takes the place of its old
+// entries, keeping when it was first added; two at once stay two. A list
+// kept from before the fix collapses when read.
+func TestTheSamePhoneBackAgainIsOneDevice(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "devices.json")
+	clock := time.UnixMilli(1_000_000)
+	devices := NewDevices(path)
+	devices.now = func() time.Time { return clock }
+	phone := protocol.DeviceInfo{Name: "iPhone", Model: "iPhone", Platform: "ios", OS: "26.6"}
+
+	for i, id := range []string{"acct-1", "acct-2", "acct-3"} {
+		devices.Seen(id)
+		info := phone
+		if i == 2 {
+			info.OS = "26.7" // updated since: still the same phone
+		}
+		devices.Named(id, info)
+		clock = clock.Add(time.Hour)
+		devices.Left(id)
+	}
+	list := devices.List()
+	if len(list) != 1 || list[0].ID != "acct-3" || list[0].FirstSeen != 1_000_000 || list[0].OS != "26.7" {
+		t.Fatalf("one phone, first added at the start: %+v", list)
+	}
+
+	// A second phone just like it, connected at the same time, is its own.
+	devices.Seen("acct-4")
+	devices.Named("acct-4", phone)
+	devices.Seen("acct-5")
+	devices.Named("acct-5", phone)
+	if got := len(devices.List()); got != 2 {
+		t.Fatalf("two connected at once: %d devices, want 2", got)
+	}
+	// A browser is not a phone.
+	devices.Seen("acct-6")
+	devices.Named("acct-6", protocol.DeviceInfo{Name: "Chrome", Platform: "web", OS: "0.0.0"})
+	if got := len(devices.List()); got != 3 {
+		t.Fatalf("with a browser: %d devices, want 3", got)
+	}
+
+	// Written before the fix: 40 entries for one phone.
+	var old []protocol.Device
+	for i := range 40 {
+		old = append(old, protocol.Device{ID: fmt.Sprintf("acct-%d", 100+i), DeviceInfo: phone,
+			FirstSeen: int64(2_000_000 + i), LastSeen: int64(3_000_000 + i)})
+	}
+	old = append(old, protocol.Device{ID: "acct-web", DeviceInfo: protocol.DeviceInfo{Name: "Chrome", Platform: "web"}, FirstSeen: 5, LastSeen: 6})
+	data, _ := json.Marshal(old)
+	stale := filepath.Join(t.TempDir(), "devices.json")
+	if err := os.WriteFile(stale, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	read := NewDevices(stale).List()
+	if len(read) != 2 || read[0].ID != "acct-139" || read[0].FirstSeen != 2_000_000 || read[0].LastSeen != 3_000_039 {
+		t.Fatalf("collapsed: %+v", read)
+	}
+	if again := NewDevices(stale).List(); len(again) != 2 {
+		t.Fatalf("the collapsed list is what was saved: %d entries", len(again))
+	}
+}
+
+// The relay names a connection by its pairing: one phone is one device
+// however often it connects, connected while any connection is open; two
+// phones are two, however alike; and the first to say who it is takes over
+// the entries older relays left for it, with when it was first added.
+func TestAPairingIsOneDeviceAndTwoPairingsAreTwo(t *testing.T) {
+	clock := time.UnixMilli(5_000_000)
+	devices := NewDevices(filepath.Join(t.TempDir(), "devices.json"))
+	devices.now = func() time.Time { return clock }
+	phone := protocol.DeviceInfo{Name: "iPhone", Model: "iPhone", Platform: "ios", OS: "26.6"}
+
+	// Left by an older relay: one entry per connection.
+	for i := range 3 {
+		conn := fmt.Sprintf("acct-17942%d", i)
+		devices.Named(conn, phone)
+		devices.Left(conn)
+		clock = clock.Add(time.Minute)
+	}
+	if got := len(devices.List()); got != 1 {
+		t.Fatalf("older relay: %d entries, want 1", got)
+	}
+
+	devices.Named("acct-pAAAA-1", phone)
+	clock = clock.Add(time.Hour)
+	devices.Left("acct-pAAAA-1")
+	devices.Named("acct-pAAAA-2", phone)
+	// Reconnecting: the new connection opens before the old one closes.
+	devices.Seen("acct-pAAAA-3")
+	devices.Left("acct-pAAAA-2")
+	list := devices.List()
+	if len(list) != 1 || list[0].ID != "acct-pAAAA" || !list[0].Connected || list[0].FirstSeen != 5_000_000 {
+		t.Fatalf("one phone, connected, first added with the older entries: %+v", list)
+	}
+
+	// A second phone just like it, both gone: still two.
+	devices.Named("acct-pBBBB-1", phone)
+	devices.Left("acct-pBBBB-1")
+	devices.Left("acct-pAAAA-3")
+	list = devices.List()
+	if len(list) != 2 || list[0].Connected || list[1].Connected {
+		t.Fatalf("two phones, neither connected: %+v", list)
+	}
+	ids := []string{list[0].ID, list[1].ID}
+	if !slices.Contains(ids, "acct-pAAAA") || !slices.Contains(ids, "acct-pBBBB") {
+		t.Fatalf("ids = %v", ids)
+	}
+}
+
+// When the daemon's own link to the relay ends, it loses sight of its phones,
+// but their connections may be open still: back, the same connection speaks
+// again and the phone is connected. Nothing seen closed stays held against a
+// name past a minute.
+func TestAPhoneTheDaemonLostSightOfComesBackUnderTheSameName(t *testing.T) {
+	clock := time.UnixMilli(1_000_000)
+	devices := NewDevices(filepath.Join(t.TempDir(), "devices.json"))
+	devices.now = func() time.Time { return clock }
+	devices.Seen("acct-pAAAA-1")
+	devices.Lost("acct-pAAAA-1")
+	if list := devices.List(); list[0].Connected {
+		t.Fatalf("while the daemon is away: %+v", list)
+	}
+	devices.Seen("acct-pAAAA-1")
+	if list := devices.List(); !list[0].Connected {
+		t.Fatalf("the daemon back, the phone still there: %+v", list)
+	}
+
+	devices.Left("acct-pAAAA-1")
+	clock = clock.Add(2 * closedKept)
+	devices.Seen("acct-pAAAA-1")
+	if list := devices.List(); !list[0].Connected {
+		t.Fatalf("a close long past held against the name: %+v", list)
+	}
+}
+
+// A request sent just before a phone left can be handled after it left. What
+// it says is kept, but it does not bring the phone back as connected.
+func TestARequestHandledAfterItsPhoneLeftOpensNothing(t *testing.T) {
+	devices := NewDevices(filepath.Join(t.TempDir(), "devices.json"))
+	devices.Seen("acct-pAAAA-1")
+	devices.Left("acct-pAAAA-1")
+	devices.Named("acct-pAAAA-1", protocol.DeviceInfo{Name: "iPhone", Platform: "ios"})
+	devices.Seen("acct-pAAAA-1")
+	list := devices.List()
+	if len(list) != 1 || list[0].Connected || list[0].Name != "iPhone" {
+		t.Fatalf("named, and gone: %+v", list)
+	}
+	// Its next connection is a new name, and opens as usual; when that one
+	// closes, the old one isn't left holding it open.
+	devices.Seen("acct-pAAAA-2")
+	if list := devices.List(); !list[0].Connected {
+		t.Fatalf("back: %+v", list)
+	}
+	devices.Left("acct-pAAAA-2")
+	if list := devices.List(); list[0].Connected {
+		t.Fatalf("gone again, but shown connected: %+v", list)
 	}
 }
 
