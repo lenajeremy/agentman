@@ -86,18 +86,26 @@ struct UsagePopover: View {
 struct PopoverLimits: View {
     let limits: Limits
     var now: Date?
+    /// How tall the cards are. A scroll view asks a popover for next to no
+    /// height of its own, and the popover gives it just that: a sliver with
+    /// half a card in it. Measured, the cards get their own height, up to
+    /// the most the screen allows, and scroll past that.
+    @State private var height: CGFloat?
 
     /// The most it may take of a screen this tall, leaving room for the
     /// popover's heading and link, and the status bar it hangs from.
     static func tallest(screen: CGFloat) -> CGFloat { max(screen - 200, 260) }
 
     var body: some View {
+        let tallest = Self.tallest(screen: NSScreen.main?.visibleFrame.height ?? 800)
         ScrollView {
             LimitsPage(limits: limits, now: now)
                 // The cards' shadows, which fall to the right and below.
                 .padding(.trailing, 4)
                 .padding(.bottom, 4)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
         }
-        .frame(maxHeight: Self.tallest(screen: NSScreen.main?.visibleFrame.height ?? 800))
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(height: height.map { min($0, tallest) })
     }
 }

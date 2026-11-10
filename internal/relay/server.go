@@ -608,7 +608,7 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 // handleApp serves a phone connection.
 func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 	token := bearer(r)
-	account, err := VerifyDeviceToken(s.secret, token)
+	account, pairing, err := VerifyDevice(s.secret, token)
 	if err != nil {
 		http.Error(w, "invalid device token", http.StatusUnauthorized)
 		return
@@ -629,7 +629,13 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 	conn := newWSConn(ws)
 	defer conn.Close()
 
+	// One connection's name: unique, as the hub keys sockets by it. The
+	// pairing in the middle is the same each time this phone connects, which
+	// is how the daemon tells one phone back again from another phone.
 	deviceID := fmt.Sprintf("%s-%d", account, time.Now().UnixNano())
+	if pairing != "" {
+		deviceID = fmt.Sprintf("%s-%s-%d", account, pairing, time.Now().UnixNano())
+	}
 	// The hello is queued in the same step that registers the app, so a
 	// daemon connecting or leaving at that moment cannot have its status
 	// overtaken by a stale hello. See AddAppGreeting.
