@@ -131,6 +131,55 @@ final class MarkdownTextTests: XCTestCase {
         XCTAssertLessThan(size.width, 600)
     }
 
+    // MARK: Code
+
+    /// A reply's code is coloured as the editor colours it, without a
+    /// document's folder.
+    func testCodeInAReplyIsColouredByItsLanguage() throws {
+        let code = "let name = \"Agentman\" // the app\nreturn 42"
+        let text = MarkdownCodeText.coloured(code, language: "swift")
+        let plain = text.string as NSString
+        func colour(of word: String) throws -> [CGFloat] {
+            try Self.rgb(XCTUnwrap(text.attribute(.foregroundColor, at: plain.range(of: word).location, effectiveRange: nil) as? NSColor))
+        }
+        XCTAssertEqual(try colour(of: "let"), Self.rgb(CodeHighlighter.color(.keyword)))
+        XCTAssertEqual(try colour(of: "\"Agentman\""), Self.rgb(CodeHighlighter.color(.string)))
+        XCTAssertEqual(try colour(of: "// the app"), Self.rgb(CodeHighlighter.color(.comment)))
+        XCTAssertEqual(try colour(of: "42"), Self.rgb(CodeHighlighter.color(.number)))
+        XCTAssertEqual(try colour(of: "name"), Self.rgb(NSColor(Palette.text)), "the rest in the text's colour")
+        let font = try XCTUnwrap(text.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
+        XCTAssertTrue(font.fontName.contains("GoogleSansCode") || font.isFixedPitch)
+        XCTAssertTrue(MarkdownCodeText.coloured(code, language: "swift") === text, "coloured once")
+    }
+
+    func testCodeInALanguageNotKnownIsPlain() throws {
+        for language in [nil, "", "brainfuck"] {
+            let text = MarkdownCodeText.coloured("let x = 1", language: language)
+            var colours = Set<[CGFloat]>()
+            text.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: text.length)) { value, _, _ in
+                if let color = value as? NSColor { colours.insert(Self.rgb(color)) }
+            }
+            XCTAssertEqual(colours, [Self.rgb(NSColor(Palette.text))], "\(language ?? "nil")")
+        }
+    }
+
+    func testTheLanguageLabelIsTheFencesFirstWord() {
+        XCTAssertEqual(MarkdownCodeText.label("swift"), "swift")
+        XCTAssertEqual(MarkdownCodeText.label("TypeScript title=app.ts"), "typescript")
+        XCTAssertNil(MarkdownCodeText.label(nil))
+        XCTAssertNil(MarkdownCodeText.label("  "))
+    }
+
+    /// A colour as light mode draws it.
+    private static func rgb(_ color: NSColor) -> [CGFloat] {
+        var out: [CGFloat] = []
+        NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
+            let c = color.usingColorSpace(.sRGB) ?? color
+            out = [c.redComponent, c.greenComponent, c.blueComponent].map { ($0 * 255).rounded() }
+        }
+        return out
+    }
+
     // MARK: Pictures
 
     /// The reply drawn, then with all of it selected in each text, light and

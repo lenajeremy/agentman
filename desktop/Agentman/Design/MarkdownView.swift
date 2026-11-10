@@ -104,8 +104,8 @@ struct MarkdownImage: Hashable {
 
 extension EnvironmentValues {
     /// The folder of a Markdown file shown as a document, as the editor's
-    /// preview shows one: its pictures are read from there and its code is
-    /// coloured. Replies can also show screenshots with absolute local paths.
+    /// preview shows one: its pictures are read from there. Replies can also
+    /// show screenshots with absolute local paths.
     @Entry var markdownFolder: URL?
 }
 
@@ -401,7 +401,6 @@ private enum Inline {
 
 private struct BlockView: View {
     let block: MarkdownBlock
-    @Environment(\.markdownFolder) private var folder
     var body: some View {
         content
             .multilineTextAlignment(block.centered ? .center : .leading)
@@ -417,17 +416,30 @@ private struct BlockView: View {
         case .rule:
             MarkdownProse(blocks: [block], key: "\(block.id)-rule")
         case .code(let language, let code):
-            // A scroll bar shows that a long line goes on past the edge.
-            ScrollView(.horizontal, showsIndicators: true) {
-                MarkdownCode(text: MarkdownProseText.code(folder == nil ? NSAttributedString(string: code) : Self.coloured(code, language: language)),
-                             key: "\(code.hashValue)-\(language ?? "")-\(folder != nil)")
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
+            let label = MarkdownCodeText.label(language)
+            VStack(alignment: .leading, spacing: 0) {
+                // Which language, above the code, where the Copy button
+                // shows too rather than over the first line.
+                if let label {
+                    SwiftUI.Text(label)
+                        .font(TextStyle.label)
+                        .foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 14)
+                        .padding(.top, 10)
+                        .accessibilityLabel("\(label) code")
+                }
+                // A scroll bar shows that a long line goes on past the edge.
+                ScrollView(.horizontal, showsIndicators: true) {
+                    MarkdownCode(text: MarkdownCodeText.coloured(code, language: language), key: "\(code.hashValue)-\(language ?? "")")
+                        .padding(.horizontal, 14)
+                        .padding(.top, label == nil ? 12 : 8)
+                        .padding(.bottom, 12)
+                }
+                // A scroll view and a quote's bar both stretch to any height, so
+                // without this a code block above a quote shared its height with
+                // the quote: the code was cut off and the bar ran on below it.
+                .fixedSize(horizontal: false, vertical: true)
             }
-            // A scroll view and a quote's bar both stretch to any height, so
-            // without this a code block above a quote shared its height with
-            // the quote: the code was cut off and the bar ran on below it.
-            .fixedSize(horizontal: false, vertical: true)
             .background(Palette.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .modifier(CopyOnHover(text: code))
         case .quote(let blocks):
@@ -465,20 +477,38 @@ private struct BlockView: View {
             }
         }
     }
+}
 
-    /// Code in a document, coloured as the editor colours its language.
-    private static func coloured(_ code: String, language: String?) -> NSAttributedString {
+/// A code block's text: coloured as the editor colours its language, in
+/// replies and documents alike.
+@MainActor
+enum MarkdownCodeText {
+    /// The language a block names, as its fence wrote it.
+    static func label(_ language: String?) -> String? {
+        let name = (language ?? "").split(whereSeparator: \.isWhitespace).first.map { $0.lowercased() } ?? ""
+        return name.isEmpty ? nil : name
+    }
+
+    /// Coloured blocks, by language and code: a conversation re-renders
+    /// often and its code never changes.
+    private static let colouredCache = NSCache<NSString, NSAttributedString>()
+
+    /// The code drawn: plain when the block names no language it knows.
+    static func coloured(_ code: String, language: String?) -> NSAttributedString {
+        let fence = label(language) ?? ""
+        let key = "\(fence)\n\(code)" as NSString
+        if let cached = colouredCache.object(forKey: key) { return cached }
         let named = ["typescript": "ts", "javascript": "js", "python": "py", "shell": "sh", "bash": "sh", "zsh": "sh",
                      "console": "sh", "rust": "rs", "ruby": "rb", "kotlin": "kt", "yml": "yaml", "golang": "go"]
-        let fence = (language ?? "").lowercased()
-        guard !fence.isEmpty, let grammar = CodeHighlighter.language(for: "code." + (named[fence] ?? fence)) else {
-            return NSAttributedString(string: code)
-        }
         let text = NSMutableAttributedString(string: code)
-        for (range, token) in CodeHighlighter.tokens(in: code, language: grammar) {
-            text.addAttribute(.foregroundColor, value: CodeHighlighter.color(token), range: range)
+        if !fence.isEmpty, let grammar = CodeHighlighter.language(for: "code." + (named[fence] ?? fence)) {
+            for (range, token) in CodeHighlighter.tokens(in: code, language: grammar) {
+                text.addAttribute(.foregroundColor, value: CodeHighlighter.color(token), range: range)
+            }
         }
-        return text
+        let styled = MarkdownProseText.code(text)
+        colouredCache.setObject(styled, forKey: key)
+        return styled
     }
 }
 
