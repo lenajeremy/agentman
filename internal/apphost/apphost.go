@@ -70,6 +70,8 @@ func Methods() map[string]Method {
 			return MakeFolder(parent, name)
 		},
 		"Host.Locale":      func([]json.RawMessage) (any, error) { return Locale(), nil },
+		"Host.Reveal":      one(func(path string) (any, error) { return nil, Reveal(path) }),
+		"Host.OpenPath":    one(func(path string) (any, error) { return nil, OpenPath(path) }),
 		"Shell.Home":       home,
 		"Settings.Home":    home,
 		"EditorFiles.Home": home,

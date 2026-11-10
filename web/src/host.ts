@@ -110,11 +110,14 @@ export async function pickFiles(title: string, start = "", opts: { images?: bool
 /** Shows a file or folder in Finder, or the Linux file manager. */
 export async function reveal(path: string): Promise<void> {
   if (inShell) await Host.Reveal(path);
+  else await hostCall("Host.Reveal", path);
 }
 
-/** Opens a file in the app the system has for it. */
+/** Opens a file in the app the system has for it. In the browser am serve
+ *  does both, on the same computer. */
 export async function openPath(path: string): Promise<void> {
   if (inShell) await Host.OpenPath(path);
+  else await hostCall("Host.OpenPath", path);
 }
 
 /** Opens a web link in the browser. */
