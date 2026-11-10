@@ -294,3 +294,6 @@
 /* Text drawn as AppKit draws it, with its font smoothing: WebKit's
    antialiased is a shade lighter than SwiftUI's words. */
 .detail { -webkit-font-smoothing: auto; }
+
+/* Ended or only watched, beside the title (AgentThreadView.stateLabel). */
+.crumb-state { flex: none; height: 18px; padding: 0 7px; margin-left: 6px; display: inline-grid; place-items: center; border-radius: 9px; font-size: 11px; color: var(--muted); background: var(--fill); }

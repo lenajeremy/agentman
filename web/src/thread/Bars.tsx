@@ -3,7 +3,7 @@
 // JumpToLatest; ImagePreview.swift's DropTarget).
 
 import type { ReactNode } from "react";
-import { ArrowDown, ChevronRight, CircleAlert, ClipboardList, Folder, Images, Moon, X } from "lucide-react";
+import { ArrowDown, ChevronRight, CircleAlert, ClipboardList, Eye, Folder, Images, Moon, X } from "lucide-react";
 import type { Session } from "@shared/protocol";
 import { AgentMark } from "../ui";
 import { Sym } from "./Sym";
@@ -43,6 +43,23 @@ export function ResumeBar({ resuming, onResume }: { resuming: boolean; onResume:
       <button className="prominent" disabled={resuming} onClick={onResume}>
         {resuming ? <Spinner size={16} light /> : "Resume"}
       </button>
+    </div>
+  );
+}
+
+/** In place of the message box for a session only watched here that
+ *  Agentman can take over from its terminal (AgentThreadView's TakeOverBar). */
+export function TakeOverBar({ working, onTakeOver }: { working: boolean; onTakeOver: () => void }) {
+  return (
+    <div className="resume-bar">
+      <span className="resume-icon"><Sym icon={Eye} sf="eye" size={13} /></span>
+      <div className="resume-words">
+        <div className="resume-title">You're watching this session</div>
+        <div className="resume-note">
+          {working ? "It runs in a terminal. You can take it over when this turn ends." : "It runs in a terminal. Take it over to message it here; its terminal closes."}
+        </div>
+      </div>
+      <button className="prominent" disabled={working} onClick={onTakeOver}>Take Over…</button>
     </div>
   );
 }

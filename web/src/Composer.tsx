@@ -15,7 +15,8 @@ import { resumable } from "./AgentHeader";
 import { openAgent } from "./nav";
 import { AgentMark } from "./ui";
 import { addAttachments, attachmentsOf, encoded, fromFiles, fromPath, setAttachments, useAttachments, MAX_ATTACHMENTS, type Attachment } from "./thread/attachments";
-import { ComposerFeedback, ResumeBar } from "./thread/Bars";
+import { ComposerFeedback, ResumeBar, TakeOverBar } from "./thread/Bars";
+import { confirmTakeOver, offersTakeOver, useMoving } from "./thread/handoff";
 import { commandSend, takesCommands, useMentions, useSlash } from "./thread/completions";
 import { AttachmentStrip, MentionList, PanelSheet, SlashList, VoiceButton } from "./thread/ComposerParts";
 import { confirmSheet, menuUnder } from "./thread/menu";
@@ -81,6 +82,7 @@ export function Composer({ session, onSent }: { session: Session; onSent: () => 
   const slash = useSlash(session);
   const canReceive = session.inject !== "none";
   const { status } = useStatus();
+  const moving = useMoving(session.id);
   const connected = status === "connected";
   // While a question takes a typed answer, the box takes it.
   const typedAnswer = session.question && takesTypedAnswer(session.question) ? session.question : null;
@@ -297,6 +299,9 @@ export function Composer({ session, onSent }: { session: Session; onSent: () => 
               setResuming(false);
             }}
           />
+        ) : offersTakeOver(session) ? (
+          // Started in a terminal: taken over, it is messaged here.
+          <TakeOverBar working={session.state === "busy" || !!session.question || moving} onTakeOver={() => void confirmTakeOver(session)} />
         ) : (
           <div className={`composer-box ${focused ? "focused" : ""}`} onMouseDown={cardClick}>
             {slash.isOpen ? (

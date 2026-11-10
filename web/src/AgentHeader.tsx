@@ -2,6 +2,8 @@
 // the name renamed in place; then the servers menu, terminal, changes
 // panel, workspace card and the more menu.
 
+import { handoffItem, runHandoff, stateLabel, useMoving } from "./thread/handoff";
+import { openAgentTerminal } from "./panel/actions";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Ellipsis, Globe, PanelRight, SquareTerminal } from "lucide-react";
 import type { Server, Session } from "@shared/protocol";
@@ -62,6 +64,7 @@ function worktreeParts(cwd: string): { home: string; repo: string; name: string 
 /** The session's name, renamed in place: Return keeps it, Escape or clicking
  *  away leaves it as it was. */
 function ThreadTitle({ session }: { session: Session }) {
+  const label = stateLabel(session);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const field = useRef<HTMLInputElement>(null);
@@ -118,6 +121,7 @@ function ThreadTitle({ session }: { session: Session }) {
           {session.name}
         </button>
       )}
+      {label && <span className="crumb-state" title={label.help}>{label.text}</span>}
     </div>
   );
 }
@@ -187,6 +191,7 @@ export function AgentHeader({ session, terminal, panel, card, onTerminal, onPane
   onCard: () => void;
 }) {
   const folder = useFolder(session.cwd);
+  const moving = useMoving(session.id);
   const servers = session.servers ?? [];
   const worktree = worktreeParts(session.cwd);
 
@@ -236,7 +241,7 @@ export function AgentHeader({ session, terminal, panel, card, onTerminal, onPane
     const entries: MenuEntry[] = [];
     if (folder.exists) {
       entries.push({ label: "Open in Editor", action: () => void openEditor({ folder: session.cwd }) });
-      if (session.inject === "tmux") entries.push({ label: "Show the Agent's Own Terminal", action: () => !terminal && onTerminal() });
+      if (session.inject === "tmux") entries.push({ label: "Show the Agent's Own Terminal", action: () => openAgentTerminal(session) });
       if (folder.repository) {
         entries.push({ separator: true });
         const repo = worktree?.repo ?? (session.cwd.replace(/\/+$/, "").split("/").pop() || session.cwd);
@@ -253,6 +258,11 @@ export function AgentHeader({ session, terminal, panel, card, onTerminal, onPane
           });
         }
       }
+    }
+    const move = handoffItem(session, moving);
+    if (move) {
+      entries.push({ separator: true });
+      entries.push({ label: move.title, disabled: !move.enabled, action: () => runHandoff(session, move) });
     }
     if (endable(session)) {
       entries.push({ label: "End Session…", action: () => void confirmEnd(session) });
