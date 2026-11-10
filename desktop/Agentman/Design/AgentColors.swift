@@ -1,14 +1,14 @@
 import SwiftUI
 
-/// What an agent's colour says, which the user picks.
+/// What an agent's colour says, which the user picks. Its state needs no
+/// colour of this kind: the dot beside it shows that.
 enum AgentColorBy: String, CaseIterable, Identifiable {
-    case none, state, project, folder
+    case none, project, folder
 
     var id: String { rawValue }
     var title: String {
         switch self {
         case .none: "No Color"
-        case .state: "State"
         case .project: "Project"
         case .folder: "Folder"
         }
@@ -21,30 +21,27 @@ enum AgentColorBy: String, CaseIterable, Identifiable {
 enum AgentColors {
     static let settingKey = "agentColorBy"
     private static let assignedKey = "agentColorsAssigned"
+    private static let paletteKey = "agentColorsPalette"
 
+    /// None near a state's colour, so a folder never reads as one: blue is
+    /// working, orange needs you, grey is idle.
     static let hues: [Color] = [
-        Color(light: 0x3268F5, dark: 0x6A95FF),
         Color(light: 0x12A66A, dark: 0x2BC784),
-        Color(light: 0xE5484D, dark: 0xFF6B70),
         Color(light: 0x8A3FB0, dark: 0xC78BEA),
-        Color(light: 0xD99A2B, dark: 0xE7B04C),
         Color(light: 0x0E9F9A, dark: 0x3CC9C2),
         Color(light: 0xD6409F, dark: 0xF07BC4),
-        Color(light: 0x5B6170, dark: 0xA8AEBB),
-        Color(light: 0xB25A12, dark: 0xF2A867),
-        Color(light: 0x4F46B8, dark: 0x9A93F2),
+        Color(light: 0x6B9B1E, dark: 0x9BCB4A),
+        Color(light: 0x9F1F4A, dark: 0xD4547A),
     ]
+
+    /// Where the colours kept from the first palette of ten went; its blue,
+    /// indigo, slate, red, gold and orange were too near a state's.
+    private static let moved = [1: 0, 3: 1, 5: 2, 6: 3]
 
     static func color(for session: Session, by choice: AgentColorBy, defaults: UserDefaults = .standard) -> Color? {
         switch choice {
         case .none:
             return nil
-        case .state:
-            switch AgentsStore.filterState(session) {
-            case .waitingInput: return Palette.needsYou
-            case .busy: return Palette.working
-            default: return Palette.ok
-            }
         case .project:
             return hues[index(for: "project|" + projectName(session.cwd), defaults: defaults)]
         case .folder:
@@ -59,7 +56,7 @@ enum AgentColors {
 
     /// The colour a key has, giving it one the first time.
     static func index(for key: String, defaults: UserDefaults = .standard) -> Int {
-        var assigned = defaults.dictionary(forKey: assignedKey) as? [String: Int] ?? [:]
+        var assigned = assignments(defaults)
         if let known = assigned[key], hues.indices.contains(known) { return known }
         var uses = [Int](repeating: 0, count: hues.count)
         for value in assigned.values where uses.indices.contains(value) { uses[value] += 1 }
@@ -67,6 +64,17 @@ enum AgentColors {
         assigned[key] = next
         defaults.set(assigned, forKey: assignedKey)
         return next
+    }
+
+    /// The colours given so far. Ones given from the first palette keep
+    /// their colour where it is still here; the rest are given again.
+    private static func assignments(_ defaults: UserDefaults) -> [String: Int] {
+        let assigned = defaults.dictionary(forKey: assignedKey) as? [String: Int] ?? [:]
+        guard defaults.integer(forKey: paletteKey) < 2 else { return assigned }
+        let kept = assigned.compactMapValues { moved[$0] }
+        defaults.set(kept, forKey: assignedKey)
+        defaults.set(2, forKey: paletteKey)
+        return kept
     }
 }
 
