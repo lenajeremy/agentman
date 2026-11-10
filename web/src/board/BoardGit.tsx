@@ -95,6 +95,24 @@ type Stage = { kind: "loading" } | { kind: "form" } | { kind: "committed"; commi
 
 /** Commit from the Board: the agent page's sheet, then a way to push what
  *  was just committed, without leaving the Board. */
+/** The sheet while it reads the changes; Escape closes it then too. */
+function LoadingSheet({ close }: { close: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      close();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [close]);
+  return (
+    <div className="sheet-backdrop">
+      <div className="sheet board-sheet-loading"><Loader size={11} /><span>Reading the changes</span></div>
+    </div>
+  );
+}
+
 export function BoardCommitSheet({ sessionId, close }: { sessionId: string; close: () => void }) {
   // Closed, the keyboard goes back to the button that opened it.
   useKeyboardBack();
@@ -152,9 +170,7 @@ export function BoardCommitSheet({ sessionId, close }: { sessionId: string; clos
 
   if (stage.kind === "loading") {
     return (
-      <div className="sheet-backdrop">
-        <div className="sheet board-sheet-loading"><Loader size={11} /><span>Reading the changes</span></div>
-      </div>
+      <LoadingSheet close={close} />
     );
   }
   if (stage.kind === "form") {
