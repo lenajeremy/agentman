@@ -7,11 +7,16 @@ import type { WorkspaceChange } from "@shared/protocol";
 import type { GitState } from "./api";
 import { onDefaultBranch } from "./gitAction";
 
-export function CommitSheet({ state, changes, hidden, then, confirm, cancel }: {
+export function CommitSheet({ state, changes, hidden, then, busy = null, problem = null, confirm, cancel }: {
   state: GitState | null;
   changes: WorkspaceChange[];
   hidden: number;
   then: "commit" | "commitAndPush";
+  /** While it commits with the sheet still up (the Board's): what it is
+   *  doing, the buttons off until it is done. */
+  busy?: string | null;
+  /** What went wrong, under the message. */
+  problem?: string | null;
   confirm: (paths: string[], message: string, push: boolean) => void;
   cancel: () => void;
 }) {
@@ -22,7 +27,7 @@ export function CommitSheet({ state, changes, hidden, then, confirm, cancel }: {
   const added = included.reduce((n, c) => n + (c.added ?? 0), 0);
   const removed = included.reduce((n, c) => n + (c.removed ?? 0), 0);
   const primary = () => {
-    if (included.length) confirm(included.map((c) => c.path), message, then === "commitAndPush");
+    if (included.length && !busy) confirm(included.map((c) => c.path), message, then === "commitAndPush");
   };
   const sheet = useRef<HTMLDivElement>(null);
 
@@ -110,13 +115,15 @@ export function CommitSheet({ state, changes, hidden, then, confirm, cancel }: {
             {!message && <span className="commit-placeholder">Leave empty to auto-generate</span>}
           </div>
         </div>
+        {problem && <div className="commit-problem error-text">{problem}</div>}
         <div className="commit-buttons">
+          {busy && <span className="commit-busy"><span className="git-spinner" />{busy}</span>}
           <span className="card-spacer" />
-          <button className="push-button large" onClick={cancel}>Cancel</button>
+          <button className="push-button large" disabled={!!busy} onClick={cancel}>Cancel</button>
           {then === "commitAndPush" && (
-            <button className="push-button large" disabled={!included.length} onClick={() => confirm(included.map((c) => c.path), message, false)}>Commit</button>
+            <button className="push-button large" disabled={!included.length || !!busy} onClick={() => confirm(included.map((c) => c.path), message, false)}>Commit</button>
           )}
-          <button className="push-button large default" disabled={!included.length} onClick={primary}>
+          <button className="push-button large default" disabled={!included.length || !!busy} onClick={primary}>
             {then === "commitAndPush" ? "Commit & push" : "Commit"}
           </button>
         </div>

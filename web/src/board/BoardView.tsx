@@ -6,7 +6,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
-  ChevronDown, Check, CircleAlert, Circle, Code, EyeOff, Ellipsis, Globe, MessagesSquare, MessageSquarePlus, Plus, SquarePen, X,
+  ChevronDown, Check, CircleAlert, Circle, Code, Diff, EyeOff, Ellipsis, FileText, Globe, MessagesSquare, MessageSquarePlus, Plus, SquarePen, X,
 } from "lucide-react";
 import type { ManagerCard, Question, Session } from "@shared/protocol";
 import { cardQuestion } from "@shared/manager-feed";
@@ -29,12 +29,19 @@ import { archive, filterState, isArchived, useChoices } from "../shell/sections"
 import { setShell, useShell } from "../shell/state";
 import { follow, sessionsLoaded, useStatus, useStore } from "../store";
 import { tidy } from "../thread/items";
+import { showPanel } from "../panel/state";
+import { git, type GitState } from "../workspace/api";
+import { openCardTab } from "../workspace/cardTab";
+import { quickAction } from "../workspace/gitAction";
 import { confirmSheet, menuUnder, contextMenu, type MenuEntry } from "../thread/menu";
 import { QuestionChoices } from "../thread/QuestionCard";
 import { perform, send as sendToAgent, useActionError } from "../thread/state";
 import { AgentMark, ChromeButton, Icon } from "../ui";
 import { makeDigest, type BoardDigest, type BoardProgress, type BoardStep } from "./digest";
 import { detail, headline, makeBoard, mentioned, shown, type BoardSections } from "./sections";
+import { BoardCommitSheet, BoardGitChip } from "./BoardGit";
+import { openCommitSheet, useCommitSheet, useGitChanged, useGitRun } from "./git";
+import { BoardLink } from "./parts";
 import "../styles/board.css";
 
 /** Agentman's conversation, beside the columns. */
@@ -111,6 +118,7 @@ export function BoardView({ headerLeading }: { headerLeading: number }) {
   const clearance = chatOpen ? 12 : ASK_CLEARANCE;
 
   const connected = status === "connected" && sessionsLoaded();
+  const committing = useCommitSheet();
   const startsEmpty = shown(sections) === 0 && sections.hidden.length === 0 && connected;
 
   const newChat = async () => {
@@ -170,6 +178,7 @@ export function BoardView({ headerLeading }: { headerLeading: number }) {
           <AgentmanView inPanel />
         </aside>
       )}
+      {committing && <BoardCommitSheet key={committing} sessionId={committing} close={() => openCommitSheet(null)} />}
     </div>
   );
 }
@@ -403,17 +412,52 @@ function Working({ digest, summary, now }: { digest: BoardDigest; summary?: stri
 }
 
 function Idle({ session, said }: { session: Session; said?: string }) {
-  const links: { title: string; icon: typeof Code; sf: string; onClick: () => void }[] = [];
-  if (session.cwd) links.push({ title: "View", icon: Code, sf: "chevron.left.forwardslash.chevron.right", onClick: () => void openEditor({ folder: session.cwd }) });
+  const run = useGitRun(session.id);
+  const changedHere = useGitChanged(session.id);
+  const [state, setState] = useState<GitState | null>(null);
+  // What is left to commit, read again whenever it did something and
+  // whenever a button here has finished.
+  const settled = run && run.phase.kind !== "running" ? run.id : 0;
+  useEffect(() => {
+    let current = true;
+    git("git_status", session.id).then((s) => current && setState(s)).catch(() => current && setState(null));
+    return () => {
+      current = false;
+    };
+  }, [session.id, session.lastActivityAt, settled, changedHere]);
+
+  const action = quickAction(state);
+  const showsGit = !!run || (!!state && action.kind !== "idle");
+  const id = session.id;
+  const opening = state && state.changes > 0
+    ? [{ title: state.changes === 1 ? "Review 1 file" : `Review ${state.changes} files`, icon: Diff, sf: "plus.forwardslash.minus", onClick: () => {
+        showPanel("diff");
+        openAgent(id);
+      } }]
+    : [];
+  const elsewhere: { title: string; icon: typeof Code; sf: string; onClick: () => void }[] = [];
+  if (session.cwd) elsewhere.push({ title: "View", icon: Code, sf: "chevron.left.forwardslash.chevron.right", onClick: () => void openEditor({ folder: session.cwd }) });
+  const documents = session.artifactsToReview ?? 0;
+  if (documents > 0) {
+    elsewhere.push({ title: documents === 1 ? "Review document" : `Review ${documents} documents`, icon: FileText, sf: "doc.text", onClick: () => {
+      openCardTab("plans");
+      openAgent(id);
+    } });
+  }
   for (const server of (session.servers ?? []).slice(0, 2)) {
-    links.push({ title: `localhost:${server.port}`, icon: Globe, sf: "globe", onClick: () => void openURL(`http://localhost:${server.port}`) });
+    elsewhere.push({ title: `localhost:${server.port}`, icon: Globe, sf: "globe", onClick: () => void openURL(`http://localhost:${server.port}`) });
   }
   return (
     <>
       {said && <BoardText text={said} lines={4} />}
-      {links.length > 0 && (
-        <div className="board-links">{links.map((l) => <BoardLink key={l.title} {...l} />)}</div>
+      {(showsGit || opening.length > 0 || elsewhere.length > 0) && (
+        <div className="board-links">
+          {opening.map((l) => <BoardLink key={l.title} {...l} />)}
+          {showsGit && <BoardGitChip sessionId={id} action={action} state={state} onCommit={() => openCommitSheet(id)} />}
+          {elsewhere.map((l) => <BoardLink key={l.title} {...l} />)}
+        </div>
       )}
+      {run?.phase.kind === "failed" && <div className="board-git-failed" title={run.phase.detail}>{run.phase.detail}</div>}
     </>
   );
 }
@@ -454,16 +498,6 @@ function Progress({ progress }: { progress: BoardProgress }) {
       <div className="board-progress-bar"><span style={{ width: `${(100 * progress.done) / Math.max(1, progress.total)}%` }} /></div>
       <div className="board-progress-line">{line}</div>
     </div>
-  );
-}
-
-/** Something to do with an agent, a click away, as a small chip. */
-function BoardLink({ title, icon, sf, onClick }: { title: string; icon: typeof Code; sf: string; onClick: () => void }) {
-  return (
-    <button className="board-link" onClick={onClick}>
-      <Icon icon={icon} sf={sf} size={10} />
-      <span>{title}</span>
-    </button>
   );
 }
 

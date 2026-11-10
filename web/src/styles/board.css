@@ -92,3 +92,23 @@
 .board-chat { flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--paper); box-shadow: inset 1px 0 0 var(--line); }
 .board-chat .board-top { padding-left: 16px; }
 .board-chat .am-page { flex: 1; min-height: 0; }
+
+/* Git on a card (BoardGitChip). */
+.board-link.warns { color: var(--needs-you-text); background: var(--needs-you-wash); box-shadow: inset 0 0 0 1px var(--needs-you-edge); }
+.board-link.warns svg, .board-link.warns .sf { color: var(--needs-you-text); }
+.board-status { height: 22px; display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border-radius: 6px; font-size: 12px; color: var(--text-2); box-shadow: inset 0 0 0 1px var(--line); white-space: nowrap; }
+.board-status.ok { color: var(--ok); }
+.board-status.error { color: var(--error-text); }
+.board-status .ok { color: var(--ok); }
+.board-status .error { color: var(--error); }
+.board-dismiss { width: 16px; height: 22px; display: grid; place-items: center; color: var(--faint); }
+.board-git-failed { font-size: 12px; color: var(--error-text); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.board-sheet-loading { width: 520px; height: 120px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.board-committed { width: 520px; display: flex; flex-direction: column; gap: 16px; padding: 22px; box-sizing: border-box; }
+.board-committed-head { display: flex; flex-direction: column; gap: 4px; }
+.board-committed-commit { display: flex; align-items: baseline; gap: 8px; padding: 12px; border-radius: 12px; background: color-mix(in srgb, var(--fill) 40%, transparent); box-shadow: inset 0 0 0 1px var(--line); }
+.board-committed-commit .ok { color: var(--ok); flex: none; }
+.board-committed-hash { font: 11.5px var(--mono); color: var(--muted); flex: none; }
+.board-committed-message { font-size: 12px; color: var(--text); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; user-select: text; }
+.commit-problem { font-size: 12px; user-select: text; }
+.commit-busy { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
