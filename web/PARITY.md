@@ -31,7 +31,7 @@ done. One at a time, in this order.
    too (the Board's is done).
 7. ✓ (c5c2487) **Settings › Devices** (DevicesSettings.swift; `devices`, `pair_code`):
    pairing a phone on the page.
-8. **Thread details:** how long the agent worked ("Worked for"), code
+8. ✓ (6af544e, 636796f, 927de80) **Thread details:** how long the agent worked ("Worked for"), code
    blocks that copy, a folder's logo in place of its initials.
 9. **Editor additions:** History and Diff tabs as in the main window, an
    agent's changes in a tab of their own, terminals that follow between the
