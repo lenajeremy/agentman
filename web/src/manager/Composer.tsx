@@ -208,7 +208,7 @@ function KeyBox() {
       <div className="am-key-intro">
         <div className="am-key-heading">Agentman needs an API key</div>
         <div className="am-key-why">
-          {`It reads what your agents are doing, answers their routine requests, and tells you what needs you. It runs on your own ${gemini ? "Gemini" : "Anthropic"} key, ${keptWhere(system)} and only sent to ${gemini ? "Google" : "Anthropic"}.`}
+          {`It reads what your agents are doing, answers their routine requests, and tells you what needs you. It runs on your own ${gemini ? "Gemini" : "Anthropic"} key, ${keptWhere(system ?? "")} and only sent to ${gemini ? "Google" : "Anthropic"}.`}
         </div>
       </div>
       <div className="am-keybox">

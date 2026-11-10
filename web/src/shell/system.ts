@@ -2,11 +2,13 @@
 // kept, what the file manager is called), as a hook.
 
 import { useEffect, useState } from "react";
-import { serverSystem } from "../host";
+import { knownSystem, serverSystem } from "../host";
 
-/** "darwin", "linux" or "windows" once am serve has said; "" until then. */
-export function useServerSystem(): string {
-  const [system, setSystem] = useState("");
+/** "darwin", "linux" or "windows" once am serve has said; null until then,
+ *  "" if it couldn't. Asked as the page starts (main.tsx), so it's mostly
+ *  known by the time anything shows words that depend on it. */
+export function useServerSystem(): string | null {
+  const [system, setSystem] = useState<string | null>(knownSystem);
   useEffect(() => {
     void serverSystem().then(setSystem);
   }, []);

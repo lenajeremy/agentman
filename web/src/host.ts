@@ -62,14 +62,20 @@ export async function platform(): Promise<Platform> {
 }
 
 let systemCache: Promise<string> | null = null;
+let systemKnown: string | null = null;
 
 /** The system am serve runs on: "darwin", "linux" or "windows"; "" until
  *  known. In the shell, the computer's own; in a browser, which can't tell
  *  from itself, am serve says (Host.System). */
 export function serverSystem(): Promise<string> {
-  systemCache ??= inShell ? platform().then(String) : hostCall<string>("Host.System").then(String).catch(() => "");
+  systemCache ??= (inShell ? platform().then(String) : hostCall<string>("Host.System").then(String))
+    .catch(() => "")
+    .then((system) => (systemKnown = system));
   return systemCache;
 }
+
+/** The system, once asked: null until am serve answers, "" if it couldn't. */
+export const knownSystem = () => systemKnown;
 
 /** Where am serve keeps an API key (internal/secrets): the Mac's Keychain,
  *  or elsewhere a file only the user can read. */

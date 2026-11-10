@@ -40,6 +40,9 @@ export function GeneralPage({ draft, setDraft }: Props) {
   const { settings } = useSettingsState();
   const anthropic = settings?.anthropicKeySet ?? settings?.keySet === true;
   const gemini = settings?.geminiKeySet === true;
+  // A fresh page asks am serve first; until it answers, a key is neither
+  // saved nor missing.
+  const loaded = !!settings;
 
   // A model on an engine without its key cannot run; say so under the
   // pickers rather than when the first reply fails.
@@ -52,8 +55,8 @@ export function GeneralPage({ draft, setDraft }: Props) {
 
   return (
     <SettingsPage title="General">
-      <KeySection provider="anthropic" saved={anthropic} />
-      <KeySection provider="gemini" saved={gemini} />
+      <KeySection provider="anthropic" saved={loaded ? anthropic : undefined} />
+      <KeySection provider="gemini" saved={loaded ? gemini : undefined} />
       <AppearanceSection />
       <EditorSection />
       {draft && (
@@ -101,7 +104,8 @@ function ModelPicker({ value, onChange }: { value: string; onChange: (value: str
 /** One engine's API key: whether it is saved, and a field to save one. */
 const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
-function KeySection({ provider, saved }: { provider: "anthropic" | "gemini"; saved: boolean }) {
+/** `saved`: undefined until am serve has said. */
+function KeySection({ provider, saved }: { provider: "anthropic" | "gemini"; saved: boolean | undefined }) {
   const [key, setKeyText] = useState("");
   const [message, setMessage] = useState<string>();
   const gemini = provider === "gemini";
@@ -118,11 +122,13 @@ function KeySection({ provider, saved }: { provider: "anthropic" | "gemini"; sav
   return (
     <Section
       title={gemini ? "Gemini API key" : "Anthropic API key"}
-      footer={message ?? `${capitalized(keptWhere(system))} and only ever sent to ${gemini ? "Google" : "Anthropic"}.`}
+      footer={message ?? (system === null ? "\u00a0" : `${capitalized(keptWhere(system))} and only ever sent to ${gemini ? "Google" : "Anthropic"}.`)}
     >
+      {/* Blank, its height kept, until am serve has said: not words that
+          change a moment later. */}
       <Row
-        title={saved ? (system === "darwin" ? "Saved in your Keychain" : "Saved") : "Not set yet"}
-        detail={saved ? "Paste a new key below to replace it." : gemini ? "For running Agentman on Gemini models." : "For running Agentman on Claude models."}
+        title={saved === undefined || (saved && system === null) ? "\u00a0" : saved ? (system === "darwin" ? "Saved in your Keychain" : "Saved") : "Not set yet"}
+        detail={saved === undefined ? "\u00a0" : saved ? "Paste a new key below to replace it." : gemini ? "For running Agentman on Gemini models." : "For running Agentman on Claude models."}
       >
         {saved && (
           <PushButton destructive onClick={() => void save("")}>
