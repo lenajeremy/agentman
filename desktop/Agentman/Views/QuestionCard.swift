@@ -136,6 +136,7 @@ struct QuestionChoices: View {
     @State private var checked: Set<String> = []
     @State private var busy = false
     @Environment(\.compactChoices) private var compact
+    @Environment(\.roomyChoices) private var roomy
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 6 : 12) {
@@ -163,11 +164,13 @@ struct QuestionChoices: View {
     }
 
     private var singleChoice: some View {
-        VStack(spacing: compact ? 2 : 4) {
+        // On the Board in New the choices are buttons on hard shadows: room
+        // for the shadows between them.
+        VStack(spacing: Look.site && roomy ? 7 : compact ? 2 : 4) {
             ForEach(Array(question.options.enumerated()), id: \.element.id) { index, option in
                 OptionRow(
                     number: index + 1, option: option,
-                    pick: option.key == suggested, leading: option.id == primaryKey
+                    pick: option.key == suggested, leading: option.id == primaryKey, strong: option.key == strongKey
                 ) {
                     if option.withText == true {
                         noting = option
@@ -223,13 +226,18 @@ struct QuestionChoices: View {
     /// Agentman's pick when it made one; otherwise the first affirmative
     /// option, the one most people reach for.
     private var primaryKey: String? {
+        strongKey ?? question.options.first?.key
+    }
+
+    /// The answer worth the orange on the Board: Agentman's pick, or a yes.
+    /// Never merely the first of several, which would push one at random.
+    private var strongKey: String? {
         if let suggested, question.options.contains(where: { $0.key == suggested }) { return suggested }
-        let affirmative = question.options.first {
+        return question.options.first {
             let label = $0.label.lowercased()
             return label.hasPrefix("yes") || label.hasPrefix("allow") || label.hasPrefix("approve") ||
                 label.hasPrefix("continue") || label.hasPrefix("proceed")
-        }
-        return (affirmative ?? question.options.first)?.key
+        }?.key
     }
 
     private func send(_ reply: QuestionReply) {
@@ -277,10 +285,15 @@ private struct OptionRow: View {
     let option: QuestionOption
     var pick = false
     var leading = false
+    /// On the Board in New, in the orange: Agentman's pick, or a yes.
+    var strong = false
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.compactChoices) private var compact
     @Environment(\.roomyChoices) private var roomy
+
+    /// On the Board in New: a button of the site's, not a row.
+    private var siteButton: Bool { Look.site && roomy }
 
     var body: some View {
         Button(action: action) {
@@ -288,14 +301,14 @@ private struct OptionRow: View {
                 Text("\(number)")
                     .font(TextStyle.label)
                     .monospacedDigit()
-                    .foregroundStyle(roomy ? Palette.faint : Palette.muted)
+                    .foregroundStyle(siteButton && strong ? Palette.onFlood.opacity(0.8) : roomy ? Palette.faint : Palette.muted)
                     .frame(width: roomy ? 12 : compact ? 17 : 20, height: compact ? 17 : 20)
                     .background(roomy ? Color.clear : Palette.fill, in: RoundedRectangle(cornerRadius: compact ? 5 : 6, style: .continuous))
                     .alignmentGuide(.firstTextBaseline) { $0[.firstTextBaseline] }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(option.label)
-                        .font(roomy ? Fonts.sans(13) : compact ? TextStyle.caption : TextStyle.body)
-                        .foregroundStyle(Palette.text)
+                        .font(roomy ? Fonts.sans(13, siteButton && strong ? .semibold : .regular) : compact ? TextStyle.caption : TextStyle.body)
+                        .foregroundStyle(siteButton && strong ? Palette.onFlood : Palette.text)
                         .lineSpacing(compact ? 2 : 4)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -326,13 +339,21 @@ private struct OptionRow: View {
                         .foregroundStyle(Palette.faint)
                 }
             }
-            .padding(.horizontal, roomy ? 6 : compact ? 8 : 12)
-            .padding(.vertical, roomy ? 4 : compact ? 5 : 10)
+            .padding(.horizontal, siteButton ? 10 : roomy ? 6 : compact ? 8 : 12)
+            .padding(.vertical, siteButton ? 6 : roomy ? 4 : compact ? 5 : 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: roomy ? 6 : compact ? 8 : 10, style: .continuous)
-                    .fill(hovering ? Palette.fillStrong : (leading || pick ? Palette.fill : Color.clear))
-            )
+            .background {
+                if siteButton {
+                    // The site's buttons: edged, on a hard shadow; the likely
+                    // answer in the orange.
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .hardShadowFill(strong ? Palette.flood : (hovering ? Palette.fill : Palette.surface), shadow: Palette.edge, depth: 2)
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
+                } else {
+                    RoundedRectangle(cornerRadius: roomy ? 6 : compact ? 8 : 10, style: .continuous)
+                        .fill(hovering ? Palette.fillStrong : (leading || pick ? Palette.fill : Color.clear))
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
