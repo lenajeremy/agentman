@@ -94,7 +94,10 @@ export function markFound(root: HTMLElement | null, f: Finding | null, itemOf: (
     seen.add(item);
     const el = root.querySelector(`[data-item="${CSS.escape(item)}"]`);
     if (!el) continue;
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    // Words of the page's own (a code block's Copy) aren't what was said.
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => (node.parentElement?.closest("[data-nofind]") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    });
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const text = (node.textContent ?? "").toLowerCase();
       for (const word of words) {

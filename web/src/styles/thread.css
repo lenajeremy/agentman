@@ -315,3 +315,10 @@
 .worked-line { display: flex; align-items: center; gap: 10px; }
 .worked-text { flex: none; font-size: 12px; color: var(--muted); }
 .worked-rule { flex: 1; height: 1px; background: var(--line); }
+
+/* A code block's Copy, at its corner while the pointer is over it, and for
+   a moment after (CopyOnHover). */
+.md-code-wrap { position: relative; }
+.code-copy { position: absolute; top: 6px; right: 6px; display: flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; font-size: 11px; font-weight: 500; color: var(--text-2); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; opacity: 0; pointer-events: none; transition: opacity 0.12s ease-out; }
+.md-code-wrap:hover .code-copy, .md-code-wrap.copied .code-copy, .code-copy:focus-visible { opacity: 1; pointer-events: auto; }
+.code-copy:hover { background: var(--fill); }

@@ -2,10 +2,13 @@
 // both apps read an agent's words the same way, laid out as the Mac app's
 // MarkdownView.swift lays it out: blocks 14 apart, its quotes curled.
 
-import { memo, useMemo, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Check, Copy } from "lucide-react";
 import { parseMarkdown, safeHref, type Block, type Inline } from "@shared/markdown";
 import { openURL } from "./host";
+import { copyText } from "./thread/clipboard";
 import { smartBlocks } from "./thread/smart";
+import { Icon } from "./ui";
 
 function inline(nodes: Inline[], key = ""): ReactNode[] {
   return nodes.map((node, i) => {
@@ -62,6 +65,31 @@ function cellWidth(columns: number): number {
   return Math.min(360, Math.max(140, 700 / Math.max(columns, 1)));
 }
 
+/** A code block, with a Copy button at its corner while the pointer is
+ *  over it (CopyOnHover), saying Copied for a moment after. */
+function CodeBlock({ text, language }: { text: string; language?: string }) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef(0);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const copy = () => {
+    void copyText(text);
+    setCopied(true);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setCopied(false), 1400);
+  };
+  return (
+    <div className={`md-code-wrap ${copied ? "copied" : ""}`}>
+      <div className="md-code">
+        <pre data-language={language}><code>{text}</code></pre>
+      </div>
+      <button className="code-copy" data-nofind onClick={copy}>
+        <Icon icon={copied ? Check : Copy} sf={copied ? "checkmark" : "doc.on.doc"} size={10} />
+        <span>{copied ? "Copied" : "Copy"}</span>
+      </button>
+    </div>
+  );
+}
+
 function blocks(list: Block[], key = ""): ReactNode[] {
   return list.map((block, i) => {
     const k = `${key}${i}`;
@@ -75,11 +103,7 @@ function blocks(list: Block[], key = ""): ReactNode[] {
         return <Tag key={k} className={`md-h md-h${Math.min(level, 3)}${centered}`}>{inline(block.content, k)}</Tag>;
       }
       case "code":
-        return (
-          <div key={k} className="md-code">
-            <pre data-language={block.language}><code>{block.text}</code></pre>
-          </div>
-        );
+        return <CodeBlock key={k} text={block.text} language={block.language} />;
       case "quote":
         return (
           <div key={k} className="md-quote">
