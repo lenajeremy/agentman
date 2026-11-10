@@ -53,7 +53,10 @@ two always match).
 
 Seen while testing, not yet looked into: attaching an agent's own
 terminal can type the terminal's answer to tmux's query ("1;2c0;276;0c")
-into its shell. An editor window under about 1000 wide pushes the agent
+into its shell. The address bar doesn't follow the page (an agent opened, Usage), so
+reloading or going Back returns to where the page was first opened; the
+Mac has no address bar, so this is the browser's alone. An editor window
+under about 1000 wide pushes the agent
 panel past its right edge, its header buttons out of reach (the Mac keeps
 the window from being that small; a browser window can be). For the
 looks pass: "Show in Files" where a Mac says Finder
