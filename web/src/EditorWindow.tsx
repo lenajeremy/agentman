@@ -13,7 +13,7 @@ import { EditorAlerts } from "./editor/Alerts";
 import { commandFor, onMenuCommand, runCommand } from "./editor/commands";
 import { files, inShell } from "./editor/fs";
 import { MonacoBridge } from "./editor/monaco";
-import { GoToFile, GoToText } from "./editor/Palette";
+import { editorKeyboardBack, GoToFile, GoToText } from "./editor/Palette";
 import { EditorCommandPalette } from "./palette/CommandPalette";
 import { UsagePopover } from "./usage/UsagePopover";
 import { StatusBar } from "./editor/StatusBar";
@@ -280,6 +280,7 @@ function FolderEditor({ folder }: { folder: string }) {
       <EditorCommandPalette store={store} />
       {store.showUsage && (
         <UsagePopover
+          giveBack={editorKeyboardBack(store)}
           close={() => {
             store.showUsage = false;
             store.changed();

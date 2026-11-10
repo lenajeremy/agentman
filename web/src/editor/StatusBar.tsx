@@ -26,6 +26,9 @@ export function StatusBar({ store }: { store: EditorStore }) {
       <button
         className={`status-usage ${store.showUsage ? "open" : ""}`}
         title="What your agents spent, and what's left of each plan"
+        // Clicked, it leaves the keyboard where it is, for the popover to
+        // give back when it closes.
+        onMouseDown={(e) => e.preventDefault()}
         onClick={() => {
           store.showUsage = !store.showUsage;
           store.changed();

@@ -120,3 +120,4 @@
 .usage-popover-reading { min-height: 80px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .usage-popover-rule { height: 1px; background: var(--line); }
 .usage-popover-open { align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--link); cursor: pointer; }
+.usage-popover:focus { outline: none; }

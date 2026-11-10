@@ -10,12 +10,16 @@ import type { Limits, Usage } from "@shared/protocol";
 import { money } from "@shared/usage";
 import { openInMain } from "../host";
 import { Loader } from "../shell/Loader";
+import { useKeyboardBack } from "../palette/PaletteView";
 import { Icon } from "../ui";
 import { LIMITS_FOOTNOTE, LimitsPage, readLimits, readUsage } from "./UsageView";
 
 const WIDTH = 560;
 
-export function UsagePopover({ close }: { close: () => void }) {
+/** `giveBack` returns the keyboard where it was when this closes, as a
+ *  palette does: it has it while open, so Escape is heard. */
+export function UsagePopover({ close, giveBack }: { close: () => void; giveBack?: (before: Element | null) => void }) {
+  useKeyboardBack(giveBack);
   const [usage, setUsage] = useState<Usage>();
   const [limits, setLimits] = useState<Limits>();
   const [problem, setProblem] = useState<string>();
@@ -50,6 +54,12 @@ export function UsagePopover({ close }: { close: () => void }) {
     return () => window.removeEventListener("resize", place);
   }, []);
 
+  // It takes the keyboard once placed (hidden until then, it can't).
+  const placed = place !== undefined;
+  useEffect(() => {
+    if (placed) box.current?.focus({ preventScroll: true });
+  }, [placed]);
+
   // A click elsewhere or Escape closes it; the Usage button toggles it itself.
   useEffect(() => {
     const away = (e: PointerEvent) => {
@@ -68,7 +78,7 @@ export function UsagePopover({ close }: { close: () => void }) {
   }, [close]);
 
   return (
-    <div ref={box} className="usage-popover" role="dialog" aria-label="Usage" style={place ? { left: place.left, bottom: place.bottom, width: WIDTH } : { visibility: "hidden" }}>
+    <div ref={box} tabIndex={-1} className="usage-popover" role="dialog" aria-label="Usage" style={place ? { left: place.left, bottom: place.bottom, width: WIDTH } : { visibility: "hidden" }}>
       <div className="usage-popover-head">
         <span className="usage-popover-title">Usage</span>
         <span className="usage-spacer" />
