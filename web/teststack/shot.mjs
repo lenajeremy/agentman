@@ -11,7 +11,9 @@
 // Each --step is JavaScript run in the page, --after seconds apart, once
 // the first --wait is over; a step's value, if any, is printed. A step can
 // instead be real input: "click:<x>,<y>" (CSS pixels), "type:<text>", or
-// "key:<Meta+Shift+s>" (Meta, Ctrl, Alt, Shift and a key); or
+// "key:<Meta+Shift+s>" (Meta, Ctrl, Alt, Shift and a key);
+// "clickon:<selector>", the pointer moved onto the first element it matches
+// and clicked there, wherever it has scrolled to; or
 // "open:<command>", which runs the command then and opens the link it
 // prints in a second tab of the same browser, as am web would. --init runs
 // before the page's own scripts; --grant gives the page a permission (as
@@ -97,7 +99,24 @@ try {
   await send("Page.navigate", { url });
   await sleep(wait);
   const input = async (step) => {
-    if (step.startsWith("click:")) {
+    if (step.startsWith("clickon:")) {
+      const selector = JSON.stringify(step.slice(8));
+      const found = await send("Runtime.evaluate", {
+        expression: `(() => { const r = document.querySelector(${selector})?.getBoundingClientRect(); return r && [r.x + r.width / 2, r.y + r.height / 2]; })()`,
+        returnByValue: true,
+      });
+      const [x, y] = found.result?.value ?? [];
+      if (x === undefined) {
+        console.error(`step failed: nothing matches ${step.slice(8)}`);
+        return;
+      }
+      // Moved first, so what shows on hover is there to be clicked.
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+      await sleep(200);
+      for (const type of ["mousePressed", "mouseReleased"]) {
+        await send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+      }
+    } else if (step.startsWith("click:")) {
       const [x, y] = step.slice(6).split(",").map(Number);
       for (const type of ["mousePressed", "mouseReleased"]) {
         await send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
@@ -124,7 +143,7 @@ try {
       await sleep(after);
       continue;
     }
-    if (/^(click|type|key):/.test(step)) {
+    if (/^(click|clickon|type|key):/.test(step)) {
       await input(step);
       await sleep(after);
       continue;
