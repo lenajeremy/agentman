@@ -2,7 +2,8 @@
 
 **Parked.** Agentman is a web app first (`web/`, served by `am serve` and
 opened with `am web`). This Wails shell will wrap that same app later; to
-build it now, copy `web/dist` into `frontend/dist` first.
+build it now, copy `internal/webapp/dist` (what `npm run build` in `web/`
+makes) into `frontend/dist` first.
 
 Every agent `am serve` watches, in one window, on macOS, Linux and Windows.
 A [Wails v3](https://v3.wails.io) shell around React screens (`frontend/`).
