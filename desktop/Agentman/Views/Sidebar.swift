@@ -584,8 +584,8 @@ struct AgentRow: View {
 }
 
 /// An agent's state, before its title, in the same colours everywhere:
-/// orange when it needs you, blue turning while it works, a grey ring
-/// while it waits for something to do.
+/// orange when it needs you, the loader turning while it works, a grey
+/// ring while it waits for something to do.
 struct StateDot: View {
     enum Kind { case needsYou, working, idle }
     let state: Kind
@@ -598,8 +598,7 @@ struct StateDot: View {
                 .frame(width: 8, height: 8)
                 .accessibilityLabel("Needs you")
         case .working:
-            // Only the working blue: orange is for needing you.
-            Loader(size: 9, colors: [Palette.working])
+            Loader(size: 9)
         case .idle:
             Circle()
                 .strokeBorder(Palette.faint, lineWidth: 1.5)
