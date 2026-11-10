@@ -199,6 +199,9 @@ struct DaemonEvent: Codable, Sendable {
 
     var type: String
     var sessionId: String?
+    /// On session_ended: whether ending it closed the terminal it ran in.
+    /// Not when the user opened that terminal: the agent runs on there.
+    var closed: Bool?
     var sessions: [Session]?
     /// Folders agents have run in, on "folders".
     var folders: [Folder]?
@@ -1088,6 +1091,9 @@ enum SessionState: String, Codable, Sendable {
 struct Session: Codable, Sendable, Identifiable, Hashable {
     var id: String
     var kind: String
+    /// The agent's own id for the conversation. One running in a pane can be
+    /// listed under the pane; ended, it is listed under this.
+    var nativeId: String?
     /// What it is called: the user's name for it when they gave one.
     var name: String
     /// The agent's own name, when the user renamed it.
