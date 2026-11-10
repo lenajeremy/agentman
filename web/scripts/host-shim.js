@@ -79,6 +79,14 @@
         },
         '*',
       )
+      // A key that opens a palette over the code (⌘K, ⌘P, ⇧⌘F): the code
+      // lets the keyboard go at once. The palette is drawn by the window a
+      // moment later, and what was typed in that moment went into the file.
+      var key = (e.key || '').toLowerCase()
+      if ((!e.shiftKey && (key === 'k' || key === 'p')) || (e.shiftKey && key === 'f')) {
+        var active = document.activeElement
+        if (active && active.blur) active.blur()
+      }
     },
     true,
   )
