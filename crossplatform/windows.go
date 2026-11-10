@@ -45,8 +45,9 @@ func (w *Windows) OpenEditor(opts EditorOptions) {
 
 // OpenSettings opens the Settings window on a page: general, notifications,
 // devices, permissions, personality, knowledge, keys or languages; "pair"
-// for Devices pairing a new one; "" for the last one shown. There is one, as the Mac's Settings scene: opened again, it
-// comes forward on the page asked for.
+// for Devices pairing a new one; "" for the last one shown. There is one,
+// as the Mac's Settings scene: opened again, it comes forward on the page
+// asked for.
 func (w *Windows) OpenSettings(page string) {
 	settings.Lock()
 	open := settings.window
