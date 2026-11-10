@@ -3,8 +3,11 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -217,6 +220,85 @@ func TestANeedsYouCardGoesWhenTheUserWritesToTheAgent(t *testing.T) {
 	h.m.reconcile(context.Background(), h.agents.Sessions())
 	if open := h.m.conversation.openCards(); len(open) != 0 {
 		t.Fatalf("still open: %+v", open)
+	}
+}
+
+// An agent can be busy before the user's words are in its conversation, as
+// Claude's prompt hook runs before the prompt is written: the card still
+// goes when they show, on a later check with nothing else changed, however
+// much the agent has done since. A minute on, Agentman stops looking.
+func TestANeedsYouCardGoesWhenTheReplyShowsAfterTheAgentPicksUp(t *testing.T) {
+	h := newHarness(t, &scriptedModel{}, true)
+	site := h.agents.Sessions()[0]
+	site.State = protocol.StateIdle
+	h.agents.setSessions([]protocol.Session{site})
+	h.m.reconcile(context.Background(), h.agents.Sessions())
+	h.m.cardMu.Lock()
+	h.m.postNeedsYouLocked(site, protocol.Brief{SessionID: site.ID, NeedsYou: "Say what to make in Paper."})
+	h.m.cardMu.Unlock()
+	posted := h.m.conversation.openCards()[0].Ts
+
+	// Newest last, a page of replyPage at a time, as the daemon pages.
+	var mu sync.Mutex
+	var messages []protocol.Message
+	h.agents.answer = func(req protocol.Request) protocol.Event {
+		mu.Lock()
+		defer mu.Unlock()
+		end := len(messages)
+		if req.Before != "" {
+			end, _ = strconv.Atoi(req.Before)
+		}
+		start := max(0, end-req.Limit)
+		page := &protocol.Page{SessionID: req.SessionID, Messages: append([]protocol.Message(nil), messages[start:end]...), HasMore: start > 0}
+		if start > 0 {
+			page.NextCursor = strconv.Itoa(start)
+		}
+		return protocol.Event{Type: protocol.EvtPage, Page: page}
+	}
+
+	site.State = protocol.StateBusy
+	h.agents.setSessions([]protocol.Session{site})
+	h.m.reconcile(context.Background(), h.agents.Sessions())
+	if len(h.m.conversation.openCards()) != 1 {
+		t.Fatal("the card went before the user wrote")
+	}
+
+	// The prompt lands, and the agent gets through a lot before the next look.
+	mu.Lock()
+	messages = append(messages, protocol.Message{ID: "u", Role: protocol.RoleUser, Ts: posted + 1, Text: "a new page from the landing page"})
+	for i := range 120 {
+		messages = append(messages, protocol.Message{ID: fmt.Sprintf("t%d", i), Role: protocol.RoleTool, Ts: posted + 2 + int64(i)})
+	}
+	mu.Unlock()
+	h.m.reconcile(context.Background(), h.agents.Sessions())
+	open := h.m.conversation.openCards()
+	if len(open) != 0 {
+		t.Fatalf("still open: %+v", open)
+	}
+	cards := h.cards()
+	if last := cards[len(cards)-1].Card; last.State != protocol.CardSettled || last.Outcome != "You replied in the agent" {
+		t.Fatalf("the card ended as %+v", last)
+	}
+	if h.m.awaitingReplies() {
+		t.Fatal("still checking a settled card")
+	}
+
+	// A card whose agent picked up over a minute ago, with no reply, is left
+	// alone: the agent got going for some other reason.
+	h.m.cardMu.Lock()
+	h.m.postNeedsYouLocked(site, protocol.Brief{SessionID: site.ID, NeedsYou: "Pick a colour."})
+	h.m.cardMu.Unlock()
+	card := h.m.conversation.openCards()[0].Card
+	h.m.cardMu.Lock()
+	h.m.pickedUp = map[string]time.Time{card.ID: time.Now().Add(-2 * replyWindow)}
+	h.m.cardMu.Unlock()
+	asked := len(h.agents.sent(protocol.ReqFetchMessages))
+	h.m.reconcile(context.Background(), h.agents.Sessions())
+	if len(h.m.conversation.openCards()) != 1 || h.m.awaitingReplies() {
+		t.Fatal("an old pick-up was still checked")
+	}
+	if len(h.agents.sent(protocol.ReqFetchMessages)) != asked {
+		t.Fatal("read the agent's conversation for a card no longer checked")
 	}
 }
 

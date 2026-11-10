@@ -21,6 +21,22 @@ import (
 // against the agents as they are now: long enough for the first sweep.
 const startupCheck = 5 * time.Second
 
+// An agent can be busy before what the user typed to it is in its
+// conversation: Claude's prompt hook runs before the prompt is written. So
+// once an agent with a needs-you card gets going, Agentman looks for the
+// user's words every replyRecheck until they show, for up to replyWindow.
+const (
+	replyRecheck = 3 * time.Second
+	replyWindow  = time.Minute
+)
+
+// replyLookback is how far back, in messages, Agentman reads for the user's
+// reply: by the time it shows, the agent may have done a lot since.
+const (
+	replyPage  = 50
+	replyPages = 4
+)
+
 // active reports whether Agentman is set up. Without a key it does nothing
 // at all, so upgrading am changes nothing until the user turns it on.
 func (m *Manager) active() bool {
@@ -367,6 +383,8 @@ func (m *Manager) SessionsChanged(sessions []protocol.Session) {
 func (m *Manager) watchSessions(ctx context.Context) {
 	start := time.NewTimer(startupCheck)
 	defer start.Stop()
+	recheck := time.NewTicker(replyRecheck)
+	defer recheck.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -378,8 +396,20 @@ func (m *Manager) watchSessions(ctx context.Context) {
 			sessions := m.latestSessions
 			m.sessionsMu.Unlock()
 			m.reconcile(ctx, sessions)
+		case <-recheck.C:
+			if m.awaitingReplies() {
+				m.reconcile(ctx, m.agents.Sessions())
+			}
 		}
 	}
+}
+
+// awaitingReplies reports whether a needs-you card is still being checked
+// for the user's reply.
+func (m *Manager) awaitingReplies() bool {
+	m.cardMu.Lock()
+	defer m.cardMu.Unlock()
+	return len(m.pickedUp) > 0
 }
 
 // reconcile takes away the cards that no longer need the user: a question
@@ -391,8 +421,11 @@ func (m *Manager) reconcile(ctx context.Context, sessions []protocol.Session) {
 		byID[s.ID] = s
 	}
 	m.cardMu.Lock()
+	now := time.Now()
 	var pickedUp []protocol.ManagerEntry
+	stillOpen := make(map[string]bool)
 	for _, entry := range m.conversation.openCards() {
+		stillOpen[entry.Card.ID] = true
 		card := entry.Card
 		// A suggested note waits for the user, whatever the agents do.
 		if card.Kind == protocol.CardNote || (card.Kind == protocol.CardOffer && (card.Offer["type"] == offerRule || card.Offer["type"] == offerMission)) {
@@ -414,8 +447,23 @@ func (m *Manager) reconcile(ctx context.Context, sessions []protocol.Session) {
 			}
 		case card.Kind == protocol.CardNeedsYou:
 			if s.State == protocol.StateBusy && m.lastState[s.ID] != protocol.StateBusy {
-				pickedUp = append(pickedUp, entry)
+				if m.pickedUp == nil {
+					m.pickedUp = make(map[string]time.Time)
+				}
+				m.pickedUp[card.ID] = now
 			}
+			if at, ok := m.pickedUp[card.ID]; ok {
+				if now.Sub(at) > replyWindow {
+					delete(m.pickedUp, card.ID)
+				} else {
+					pickedUp = append(pickedUp, entry)
+				}
+			}
+		}
+	}
+	for id := range m.pickedUp {
+		if !stillOpen[id] {
+			delete(m.pickedUp, id)
 		}
 	}
 	m.lastState = make(map[string]protocol.State, len(sessions))
@@ -435,21 +483,29 @@ func (m *Manager) reconcile(ctx context.Context, sessions []protocol.Session) {
 		if current, ok := m.cardByIDLocked(entry.Card.ID); ok {
 			m.settleCardLocked(current, "You replied in the agent")
 		}
+		delete(m.pickedUp, entry.Card.ID)
 		m.cardMu.Unlock()
 	}
 }
 
 // userWroteSince reports whether the agent's conversation has a message from
-// its user after ts.
+// its user after ts, reading back a page at a time until it reaches ts.
 func (m *Manager) userWroteSince(ctx context.Context, sessionID string, ts int64) bool {
-	page := m.agents.Request(ctx, protocol.Request{Type: protocol.ReqFetchMessages, SessionID: sessionID, Limit: 10}).Page
-	if page == nil {
-		return false
-	}
-	for _, message := range page.Messages {
-		if message.Role == protocol.RoleUser && !message.IsSidechain && message.Ts > ts && strings.TrimSpace(message.Text) != "" {
-			return true
+	before := ""
+	for range replyPages {
+		page := m.agents.Request(ctx, protocol.Request{Type: protocol.ReqFetchMessages, SessionID: sessionID, Limit: replyPage, Before: before}).Page
+		if page == nil {
+			return false
 		}
+		for _, message := range page.Messages {
+			if message.Role == protocol.RoleUser && !message.IsSidechain && message.Ts > ts && strings.TrimSpace(message.Text) != "" {
+				return true
+			}
+		}
+		if !page.HasMore || page.NextCursor == "" || len(page.Messages) == 0 || page.Messages[0].Ts <= ts {
+			return false
+		}
+		before = page.NextCursor
 	}
 	return false
 }

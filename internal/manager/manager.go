@@ -141,6 +141,10 @@ type Manager struct {
 	cardMu sync.Mutex
 	// lastState is each agent's state at the last check, to see one pick up.
 	lastState map[string]protocol.State
+	// pickedUp is when the agent behind each open needs-you card last got
+	// going, by card: the card is checked for the user's reply until that
+	// shows in the agent's conversation, or replyWindow passes.
+	pickedUp map[string]time.Time
 
 	sessionsMu      sync.Mutex
 	latestSessions  []protocol.Session
