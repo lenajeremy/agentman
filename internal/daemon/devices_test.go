@@ -167,6 +167,25 @@ func TestAPairingIsOneDeviceAndTwoPairingsAreTwo(t *testing.T) {
 	}
 }
 
+// A request sent just before a phone left can be handled after it left. What
+// it says is kept, but it does not bring the phone back as connected.
+func TestARequestHandledAfterItsPhoneLeftOpensNothing(t *testing.T) {
+	devices := NewDevices(filepath.Join(t.TempDir(), "devices.json"))
+	devices.Seen("acct-pAAAA-1")
+	devices.Left("acct-pAAAA-1")
+	devices.Named("acct-pAAAA-1", protocol.DeviceInfo{Name: "iPhone", Platform: "ios"})
+	devices.Seen("acct-pAAAA-1")
+	list := devices.List()
+	if len(list) != 1 || list[0].Connected || list[0].Name != "iPhone" {
+		t.Fatalf("named, and gone: %+v", list)
+	}
+	// Its next connection is a new name, and opens as usual.
+	devices.Seen("acct-pAAAA-2")
+	if list := devices.List(); !list[0].Connected {
+		t.Fatalf("back: %+v", list)
+	}
+}
+
 // A pairing request waits for the relay's answer to it, whether a code or a
 // reason; a code nobody asked for goes where it always did.
 func TestPairCodeWaitsForTheRelaysAnswer(t *testing.T) {

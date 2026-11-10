@@ -31,10 +31,18 @@ type Devices struct {
 	// one an older relay named.
 	list map[string]*protocol.Device
 	// open is each open connection's device.
-	open     map[string]string
+	open map[string]string
+	// closed is the connections seen to close, and when. A request sent just
+	// before a phone left can be handled after it left: it must not open the
+	// connection again, or the phone shows as connected for good. A
+	// connection's name is never used twice, so a minute's memory does.
+	closed   map[string]time.Time
 	saved    time.Time
 	onChange func([]protocol.Device)
 }
+
+// closedKept is how long a closed connection is remembered.
+const closedKept = time.Minute
 
 // deviceSaveEvery spaces out saves for a device that is only still there: an
 // open phone sends a request every few seconds.
@@ -64,7 +72,7 @@ func paired(id string) bool {
 // NewDevices reads the devices kept at path. None is connected until it
 // sends something.
 func NewDevices(path string) *Devices {
-	d := &Devices{path: path, now: time.Now, list: map[string]*protocol.Device{}, open: map[string]string{}}
+	d := &Devices{path: path, now: time.Now, list: map[string]*protocol.Device{}, open: map[string]string{}, closed: map[string]time.Time{}}
 	if data, err := os.ReadFile(path); err == nil {
 		var kept []protocol.Device
 		if json.Unmarshal(data, &kept) == nil {
@@ -124,6 +132,13 @@ func (d *Devices) Left(conn string) {
 		id = deviceOf(conn)
 	}
 	delete(d.open, conn)
+	now := d.now()
+	for gone, at := range d.closed {
+		if now.Sub(at) > closedKept {
+			delete(d.closed, gone)
+		}
+	}
+	d.closed[conn] = now
 	_, listed := d.list[id]
 	d.mu.Unlock()
 	if !listed {
@@ -223,9 +238,12 @@ func (d *Devices) update(key string, connected bool, change func(*protocol.Devic
 	now := d.now()
 	d.mu.Lock()
 	id := key
+	_, gone := d.closed[key]
 	if connected {
 		id = deviceOf(key)
-		d.open[key] = id
+		if !gone {
+			d.open[key] = id
+		}
 	}
 	device := d.list[id]
 	changed := false
@@ -234,8 +252,15 @@ func (d *Devices) update(key string, connected bool, change func(*protocol.Devic
 		d.list[id] = device
 		changed = true
 	}
+	before := device.Connected
 	if change(device, now.UnixMilli()) {
 		changed = true
+	}
+	// A request handled after its connection closed: what it says is kept,
+	// but it opens nothing.
+	if connected && gone {
+		device.Connected = d.openLocked(id)
+		changed = changed || device.Connected != before
 	}
 	var kept []protocol.Device
 	if changed || now.Sub(d.saved) >= deviceSaveEvery {
