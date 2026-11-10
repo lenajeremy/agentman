@@ -34,7 +34,20 @@ function inlineMarkdown(text: string): ReactNode {
   return walk(content);
 }
 
-export function QuestionCard({ session, question }: { session: Session; question: Question }) {
+/** Whether it takes a typed answer as well as its options. */
+export function takesTypedAnswer(question: Question): boolean {
+  return question.custom === true && question.multiple !== true;
+}
+
+/** Whether it asks for permission to do something: its options say yes or
+ *  allow, rather than offering answers. */
+export function isApproval(question: Question): boolean {
+  return question.options.some((o) => /^(yes|allow|approve)/.test(o.label.toLowerCase()));
+}
+
+/** typedInComposer: a typed answer goes in the thread's own message box, so
+ *  the card shows no second box for it. */
+export function QuestionCard({ session, question, typedInComposer = false }: { session: Session; question: Question; typedInComposer?: boolean }) {
   const answer = (reply: QuestionReply) => {
     if (reply.optionKeys?.length) return perform(session.id, { type: "answer_question", questionId: question.id, optionKeys: reply.optionKeys });
     return perform(session.id, {
@@ -50,7 +63,7 @@ export function QuestionCard({ session, question }: { session: Session; question
       </div>
       {question.detail ? <div className="code-box">{question.detail}</div> : null}
       {question.prompt ? <div className="question-prompt">{inlineMarkdown(question.prompt)}</div> : null}
-      <QuestionChoices question={question} answer={answer} />
+      <QuestionChoices question={question} answer={answer} typed={!typedInComposer} />
     </div>
   );
 }
@@ -58,11 +71,14 @@ export function QuestionCard({ session, question }: { session: Session; question
 /** A question's options as buttons, with a note for an option that takes
  *  one, ticks for several, and a box for a typed answer. Compact for a card
  *  in a toast or in Agentman's chat. */
-export function QuestionChoices({ question, suggested, typedPrompt = "Or type an answer", compact = false, answer }: {
+export function QuestionChoices({ question, suggested, typedPrompt = "Or type an answer", compact = false, typed = true, answer }: {
   question: Question;
   suggested?: string;
   typedPrompt?: string;
   compact?: boolean;
+  /** Whether to show the typed answer's box: not where the message box
+   *  below takes it. */
+  typed?: boolean;
   answer: (reply: QuestionReply) => Promise<boolean>;
 }) {
   const [note, setNote] = useState("");
@@ -159,7 +175,7 @@ export function QuestionChoices({ question, suggested, typedPrompt = "Or type an
   return (
     <div className={`choices ${compact ? "compact" : ""}`}>
       {choices}
-      {question.custom && !question.multiple && !noting && (
+      {typed && question.custom && !question.multiple && !noting && (
         <div className="mac-field-row">
           <input
             className={`mac-field ${compact ? "small" : ""}`}

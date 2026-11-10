@@ -19,7 +19,7 @@ import { menuUnder, type MenuEntry } from "./thread/menu";
 import { AgentMark, Icon } from "./ui";
 import "./styles/newagent.css";
 
-export const AGENT_KINDS = ["claude", "codex", "cursor-cli", "opencode", "kiro", "antigravity"];
+export const AGENT_KINDS = ["claude", "codex", "cursor-cli", "opencode", "kiro", "antigravity", "muse"];
 
 /** The product names the menu shows (AgentName.of). */
 const KIND_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", "cursor-cli": "Cursor CLI", opencode: "OpenCode", kiro: "Kiro", antigravity: "Antigravity" };

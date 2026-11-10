@@ -3,6 +3,7 @@
 // "Earlier here" in a folder), the archived shelf, Agentman's card and the
 // connection at the foot.
 
+import { confirmEnd, endable } from "./AgentHeader";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { ChevronRight, Contrast, Folder as FolderIcon, Globe, ListFilter, PanelLeft, Search, Sparkles, SquarePen, X } from "lucide-react";
 import type { Session } from "@shared/protocol";
@@ -213,6 +214,7 @@ function AgentButton({ session, branch, selected, inList, earlier, choices, live
     entries.push(isArchived(session, choices)
       ? { label: "Unarchive", action: () => unarchive(session.id, ids) }
       : { label: "Archive", action: () => archive(session.id, ids) });
+    if (endable(session)) entries.push({ label: "End Session…", action: () => void confirmEnd(session) });
     entries.push({ separator: true });
     // Agentman speaks for the agents while it is on; this one can speak for itself as well.
     if (agentmanOn) {

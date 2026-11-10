@@ -5,6 +5,7 @@
 // the agent works. The thread's error shows on it, and an ended session
 // offers Resume in its place.
 
+import { useStatus } from "./store";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { ArrowUp, ChevronDown, Paperclip } from "lucide-react";
 import type { CommandPanel, Session } from "@shared/protocol";
@@ -20,14 +21,26 @@ import { AttachmentStrip, MentionList, PanelSheet, SlashList, VoiceButton } from
 import { confirmSheet, menuUnder } from "./thread/menu";
 import { MessageField, type FieldApi } from "./thread/MessageField";
 import { agentProduct, modeLabel, modelLabel } from "./thread/sessionLabels";
-import { draftFor, readLocalFile, saveDraft, send, setActionError, useActionError } from "./thread/state";
+import { draftFor, perform, readLocalFile, saveDraft, send, setActionError, useActionError } from "./thread/state";
+import { isApproval, takesTypedAnswer } from "./thread/QuestionCard";
 import { Sym } from "./thread/Sym";
 import { addSpoken } from "./thread/voice";
 import "./styles/composer.css";
 
-function placeholder(s: Session): string {
-  if (s.inject === "none") return `Start this agent with am ${s.kind} to message it from here`;
-  if (s.question) return "Answer the question above first";
+// As the Mac's (AgentThreadView.placeholder): what the box says about why
+// it's off, or what typing in it does.
+function placeholder(s: Session, connected: boolean): string {
+  if (!connected) return "Can't send while Agentman isn't connected";
+  if (s.inject === "none") {
+    if (s.state === "ended") return "This session has ended";
+    // Muse lets one client drive a session: a terminal has this one.
+    if (s.kind === "muse") return "Open in a terminal: close it there to message it from here";
+    return `Started outside Agentman: start it with am ${s.kind} to message it here`;
+  }
+  if (s.question) {
+    if (takesTypedAnswer(s.question)) return "Type an answer, or pick one above";
+    return isApproval(s.question) ? "Approve or deny above to continue" : "Pick an answer above to continue";
+  }
   if (s.inject === "hook") return `Message ${s.name}: it reads it when its turn ends (start it with am ${s.kind} to type in directly)`;
   return `Message ${s.name}`;
 }
@@ -67,7 +80,11 @@ export function Composer({ session, onSent }: { session: Session; onSent: () => 
   const mentions = useMentions(session);
   const slash = useSlash(session);
   const canReceive = session.inject !== "none";
-  const enabled = canReceive && !sending && !readingPanel && !session.question;
+  const { status } = useStatus();
+  const connected = status === "connected";
+  // While a question takes a typed answer, the box takes it.
+  const typedAnswer = session.question && takesTypedAnswer(session.question) ? session.question : null;
+  const enabled = canReceive && !sending && !readingPanel && connected && (!session.question || !!typedAnswer);
   const canSend = enabled && (draft.trim() !== "" || attachments.length > 0);
   const modes = session.modes ?? [];
   const models = session.modelScope ? session.models ?? [] : [];
@@ -103,6 +120,17 @@ export function Composer({ session, onSent }: { session: Session; onSent: () => 
   const sendNow = async () => {
     let text = draft.trim();
     if (!canSend) return;
+    // While a question takes a typed answer, what is typed is the answer.
+    if (typedAnswer) {
+      if (!text) return;
+      setSending(true);
+      try {
+        if (await perform(session.id, { type: "answer_question", questionId: typedAnswer.id, answerText: text })) setDraft("");
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
     // A panel command sent bare is read off the agent's terminal, since it
     // never reaches the transcript; a bare /model would leave a picker open.
     if (takesCommands(session) && attachments.length === 0) {
@@ -283,7 +311,7 @@ export function Composer({ session, onSent }: { session: Session; onSent: () => 
               <MessageField
                 ref={field}
                 value={draft}
-                placeholder={placeholder(session)}
+                placeholder={placeholder(session, connected)}
                 enabled={enabled}
                 onChange={change}
                 onSubmit={() => void sendNow()}

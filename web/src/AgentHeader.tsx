@@ -15,11 +15,35 @@ import { confirmSheet, contextMenu, menuUnder, type MenuEntry } from "./thread/m
 import { useFolder } from "./thread/folder";
 import { ask, setActionError } from "./thread/state";
 
-const RESUMABLE = new Set(["claude", "codex", "cursor-cli", "kiro", "antigravity"]);
+const RESUMABLE = new Set(["claude", "codex", "cursor-cli", "kiro", "antigravity", "muse"]);
 
-/** A session running in a terminal agentman can close and reopen. */
+/** Whether it can be ended now: one in a terminal Agentman can close at any
+ *  time, and any other once it has stopped working (AgentThreadView.endable). */
 export function endable(session: Session): boolean {
-  return session.inject === "tmux" && RESUMABLE.has(session.kind);
+  if (session.state === "ended") return false;
+  if (session.inject === "tmux" && RESUMABLE.has(session.kind)) return true;
+  return session.state === "idle" && !session.question;
+}
+
+/** What ending it does, for the question that asks (endNote). */
+export function endNote(session: Session): string {
+  if (session.inject === "tmux" && RESUMABLE.has(session.kind)) {
+    return "If Agentman opened its terminal, this closes it and stops the agent. If you opened it yourself, the agent keeps running there and comes off your list. The conversation stays in the folder's history.";
+  }
+  if (session.inject && session.inject !== "none") {
+    return "This takes it off your list. The conversation stays in the folder's history, and you can pick it up from there.";
+  }
+  return "This takes it off your list. If it's still open in a terminal, it keeps running there.";
+}
+
+/** Asks, then ends it: the same from the "…" menu, the sidebar and the Board. */
+export async function confirmEnd(session: Session) {
+  if ((await confirmSheet("End this session?", endNote(session), ["End Session", "Cancel"])) !== "End Session") return;
+  try {
+    await ask({ type: "end_session", sessionId: session.id }, "It couldn't be ended.");
+  } catch (err) {
+    setActionError(session.id, err instanceof Error ? err.message : String(err));
+  }
 }
 
 /** An ended session its agent can reopen, as the phone decides it. */
@@ -231,17 +255,7 @@ export function AgentHeader({ session, terminal, panel, card, onTerminal, onPane
       }
     }
     if (endable(session)) {
-      entries.push({
-        label: "End Session…",
-        action: async () => {
-          if ((await confirmSheet("End this session?", "", ["End session", "Cancel"])) !== "End session") return;
-          try {
-            await ask({ type: "end_session", sessionId: session.id }, "It couldn't be ended.");
-          } catch (err) {
-            setActionError(session.id, err instanceof Error ? err.message : String(err));
-          }
-        },
-      });
+      entries.push({ label: "End Session…", action: () => void confirmEnd(session) });
     }
     menuUnder(button, entries);
   };
