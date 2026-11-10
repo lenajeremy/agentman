@@ -275,6 +275,11 @@ func runServe(ctx context.Context, args []string) error {
 	apps := newAppGateway(appToken)
 	hookServer.Mount("/app", http.HandlerFunc(apps.protocol))
 	hookServer.Mount("/app/terminal", http.HandlerFunc(apps.terminal))
+	// The web app, for `am web`: the browser signs in with a one-time code
+	// and is then served the app (webapp.go).
+	hookServer.Mount("/app/login-code", http.HandlerFunc(apps.loginCode))
+	hookServer.Mount("/login", http.HandlerFunc(apps.login))
+	hookServer.Mount("/", http.HandlerFunc(apps.page))
 	hookErrs := make(chan error, 1)
 	go func() { hookErrs <- hookServer.Serve(ctx, listener) }()
 	fmt.Printf("%s\n", dim("hooks      listening on "+addr))

@@ -28,7 +28,9 @@ func testGateway(t *testing.T) (*appGateway, string, context.Context) {
 	shells := g.ready.Load().shells
 	shells.ShellPath = "/bin/sh"
 	home := t.TempDir()
-	shells.Environ = func() []string { return []string{"PATH=/usr/bin:/bin", "HOME=" + home, "ENV=/dev/null", "HISTFILE=/dev/null"} }
+	shells.Environ = func() []string {
+		return []string{"PATH=/usr/bin:/bin", "HOME=" + home, "ENV=/dev/null", "HISTFILE=/dev/null"}
+	}
 	t.Cleanup(shells.StopAll)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/app", g.protocol)

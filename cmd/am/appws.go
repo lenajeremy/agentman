@@ -23,7 +23,10 @@ import (
 // shells are kept in a registry: they run on while no panel shows them,
 // until a little after the app's last connection closes.
 type appGateway struct {
-	gate  daemon.AppGate
+	gate daemon.AppGate
+	// web signs the browser in: the web app uses a session cookie where the
+	// desktop shell and tools use the app token (webapp.go).
+	web   *daemon.WebSessions
 	ready atomic.Pointer[appTargets]
 }
 
@@ -35,7 +38,7 @@ type appTargets struct {
 }
 
 func newAppGateway(token string) *appGateway {
-	return &appGateway{gate: daemon.AppGate{Token: token}}
+	return &appGateway{gate: daemon.AppGate{Token: token}, web: daemon.NewWebSessions()}
 }
 
 // serve starts answering, once the local server and the agents exist.
@@ -56,7 +59,7 @@ func (g *appGateway) serve(ctx context.Context, local *daemon.LocalServer, paneF
 }
 
 func (g *appGateway) targets(w http.ResponseWriter, r *http.Request) *appTargets {
-	if err := g.gate.Allow(r); err != nil {
+	if g.gate.Allow(r) != nil && !g.web.Allow(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return nil
 	}

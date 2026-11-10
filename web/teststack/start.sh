@@ -25,7 +25,10 @@ TMUX_BIN=$(command -v tmux)
 GO=$(command -v go || echo /usr/local/go/bin/go)
 
 mkdir -p "$H/.claude/sessions" "$TMUX_TMPDIR"
-(cd "$REPO" && "$GO" build -o "$T/am" ./cmd/am)
+# With the web app built (internal/webapp/dist), am carries it.
+TAGS=
+[ -f "$REPO/internal/webapp/dist/index.html" ] && TAGS="-tags webapp"
+(cd "$REPO" && "$GO" build $TAGS -o "$T/am" ./cmd/am)
 
 # session <id> <folder name> <pid>: a Claude registry entry and its transcript.
 session() {

@@ -1,4 +1,5 @@
 node_modules
+# The build goes to ../internal/webapp/dist (embedded in am with -tags webapp).
 dist
 # Copied or generated from desktop/ by scripts/editor.mjs
 public/editor

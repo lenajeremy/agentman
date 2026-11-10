@@ -61,5 +61,8 @@ export default defineConfig({
       marked: resolve(__dirname, "node_modules/marked"),
     },
   },
+  // Built into the Go package that carries it inside am (internal/webapp,
+  // embedded with -tags webapp).
+  build: { outDir: resolve(__dirname, "../internal/webapp/dist"), emptyOutDir: true },
   plugins: [react(), wails("./bindings"), devEndpoint(), nativeRequire()],
 });

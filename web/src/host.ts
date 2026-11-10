@@ -21,9 +21,16 @@ const inShell = location.protocol === "wails:" || location.hostname === "wails.l
 /** Where am serve is, and the token it gave out at its last start. */
 export async function endpoint(): Promise<Endpoint> {
   if (inShell) return (await Daemon.Endpoint()) as Endpoint;
-  const res = await fetch("/__agentman/endpoint");
-  if (!res.ok) throw new Error("am serve isn't running");
-  return res.json();
+  // On Vite's development server, which hands over a test daemon's endpoint.
+  if (import.meta.env.DEV) {
+    const res = await fetch("/__agentman/endpoint");
+    if (!res.ok) throw new Error("am serve isn't running");
+    return res.json();
+  }
+  // Served by am serve (am web): the same address, signed in by the
+  // session cookie the browser already holds, so no token.
+  const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+  return { url: `${scheme}//${location.host}/app`, terminal: `${scheme}//${location.host}/app/terminal`, token: "" };
 }
 
 let platformCache: Platform | undefined;
