@@ -78,13 +78,16 @@ export async function openEditor(opts: EditorOptions): Promise<void> {
   if (full.file) q.set("file", full.file);
   if (full.terminal) q.set("terminal", "1");
   if (full.agentHere) q.set("agent", "here");
-  window.open(`/?${q}`, "_blank", "width=1200,height=800");
+  // One window per folder, as the Mac's: opening it again brings it back.
+  window.open(`/?${q}`, `agentman-editor:${full.folder}`, "width=1200,height=800");
 }
 
 /** The Settings window, on a page ("" for the last one shown). */
 export async function openSettings(page = ""): Promise<void> {
   if (inShell) return Windows.OpenSettings(page);
-  window.open(`/?view=settings${page ? `&page=${page}` : ""}`, "_blank", "width=800,height=580");
+  // One Settings window, as the Mac's: opening it again shows the page asked
+  // for in the same window.
+  window.open(`/?view=settings${page ? `&page=${page}` : ""}`, "agentman-settings", "width=800,height=580");
 }
 
 // What the system does for the screens (host.go). In a browser, while the

@@ -8,6 +8,7 @@
 # in the page, 1.5 s apart, after WAIT seconds (default 6), e.g.
 #   'document.querySelector("button[aria-label=More]").click()'
 # SIZE (default 1560x980, drawn at 2x); DARK=1 for the dark appearance;
+# BLUR=1 for the look of a window that isn't in front (it is by default);
 # INIT=<js> runs before the page's scripts; GRANT=notifications allows them.
 # Build the app first (cd web && npx vite build) and start the stack.
 set -euo pipefail
@@ -24,6 +25,7 @@ if [ -n "$QUERY" ]; then
 fi
 ARGS=(--size "${SIZE:-1560x980}" --wait "${WAIT:-6}")
 [ -n "${DARK:-}" ] && ARGS+=(--dark)
+[ -n "${BLUR:-}" ] && ARGS+=(--blur)
 [ -n "${INIT:-}" ] && ARGS+=(--init "$INIT")
 [ -n "${GRANT:-}" ] && ARGS+=(--grant "$GRANT")
 for step in "$@"; do ARGS+=(--step "$step"); done

@@ -4,7 +4,7 @@
 // Chrome's --virtual-time-budget does not), can run steps on the page, and
 // takes the picture. Headless Chrome draws off screen: nothing shows.
 //
-//   node shot.mjs <url> <out.png> [--size 1560x980] [--wait 6] [--dark]
+//   node shot.mjs <url> <out.png> [--size 1560x980] [--wait 6] [--dark] [--blur]
 //                 [--step "<js>"]... [--after 1.5] [--init "<js>"]
 //                 [--grant notifications]...
 //
@@ -34,6 +34,9 @@ const [width, height] = opt("--size", "1560x980").split("x").map(Number);
 const wait = Number(opt("--wait", "6")) * 1000;
 const after = Number(opt("--after", "1.5")) * 1000;
 const dark = args.includes("--dark");
+// The page has focus, as the window in front does (the screens draw an
+// inactive window's look otherwise, as the Mac's do); --blur for that look.
+const blur = args.includes("--blur");
 if (!url || !out) {
   console.error("usage: shot.mjs <url> <out.png> [--size WxH] [--wait s] [--dark] [--step js]...");
   process.exit(2);
@@ -84,6 +87,7 @@ try {
     });
 
   await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 2, mobile: false });
+  if (!blur) await send("Emulation.setFocusEmulationEnabled", { enabled: true });
   if (dark) await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] });
   await send("Page.enable");
   for (const source of inits) await send("Page.addScriptToEvaluateOnNewDocument", { source });

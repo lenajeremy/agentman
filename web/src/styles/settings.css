@@ -80,7 +80,9 @@
   --form-group: rgb(255 255 255 / 0.05);
   --form-line: rgb(255 255 255 / 0.06);
 }
-html[data-platform="linux"] { --titlebar: 0px; }
+/* No window buttons to make room for: the system draws the title bar on
+   Linux, and a browser tab has none. */
+html[data-platform="linux"], html[data-platform="browser"] { --titlebar: 0px; }
 
 /* The window: the sidebar under the title bar, a divider, the page. */
 .settings { display: flex; height: 100%; background: transparent; }

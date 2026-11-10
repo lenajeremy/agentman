@@ -10,7 +10,7 @@ import { hostCall } from "../host";
 
 const inShell = location.protocol === "wails:" || location.hostname === "wails.localhost";
 
-export type Command = "new-agent" | "toggle-sidebar" | "cycle-appearance" | "palette" | "agentman" | "away";
+export type Command = "new-agent" | "toggle-sidebar" | "cycle-appearance" | "palette" | "agentman" | "away" | "settings" | "open-folder";
 
 function on<T>(name: string, handler: (data: T) => void): () => void {
   if (!inShell) return () => {};

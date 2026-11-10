@@ -9,7 +9,7 @@ import { hostCall } from "../host";
 const inShell = location.protocol === "wails:" || location.hostname === "wails.localhost";
 
 let homeCache = "";
-const homeReady = inShell ? hostCall("Settings.Home").then((h) => (homeCache = String(h ?? ""))).catch(() => "") : Promise.resolve("");
+const homeReady = hostCall("Settings.Home").then((h) => (homeCache = String(h ?? ""))).catch(() => "");
 
 /** The user's home folder, for ~ in paths ("" until known). */
 export function useHome(): string {

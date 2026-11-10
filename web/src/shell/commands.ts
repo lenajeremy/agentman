@@ -8,9 +8,9 @@ import { openLightbox } from "../lightbox";
 import { getPref, setPref } from "../prefs";
 import { openAgentman, openLink, openNewAgent } from "../nav";
 import { showAwaySince, showLastAway } from "../away/away";
-import { onCommand, type Command } from "./native";
+import { cachedHome, onCommand, type Command } from "./native";
 import { setShell } from "./state";
-import { hostCall } from "../host";
+import { hostCall, openEditor, openSettings, pickFolder } from "../host";
 
 const inShell = location.protocol === "wails:" || location.hostname === "wails.localhost";
 
@@ -38,6 +38,16 @@ export function run(command: Command) {
     case "away":
       showLastAway();
       break;
+    // The menu bar's own in the shell (Settings…, Open Folder…); the
+    // page's in the browser.
+    case "settings":
+      void openSettings();
+      break;
+    case "open-folder":
+      void pickFolder("Choose a folder to open in the editor", cachedHome()).then((folder) => {
+        if (folder) void openEditor({ folder });
+      });
+      break;
   }
 }
 
@@ -47,6 +57,8 @@ function shortcut(e: KeyboardEvent): Command | null {
   const key = e.key.toLowerCase();
   if (mod && !e.altKey && !e.shiftKey && key === "n") return "new-agent";
   if (mod && !e.altKey && !e.shiftKey && key === "k") return "palette";
+  if (mod && !e.altKey && !e.shiftKey && key === ",") return "settings";
+  if (mod && !e.altKey && !e.shiftKey && key === "o") return "open-folder";
   if (e.ctrlKey && (e.metaKey || e.altKey) && key === "s") return "toggle-sidebar";
   if (mod && e.altKey && e.shiftKey && (key === "a" || e.code === "KeyA")) return "cycle-appearance";
   if (mod && e.altKey && !e.shiftKey && (key === "0" || e.code === "Digit0")) return "agentman";
