@@ -841,6 +841,9 @@ export interface ManagerSettings {
   autoApprove: boolean;
   approve?: { reads: boolean; edits: boolean; commands: boolean; continue: boolean };
   rules?: { action: string; kind: string; pattern: string; folder?: string }[];
+  /** How much Agentman does by itself in a folder: "watch", "suggest" or
+   *  "handle", the closest folder's level applying. */
+  trust?: { folder: string; level: string }[];
   style: string;
   instructions: string;
   /** Whether the chat model's engine has its key on the Mac. Read only. */
@@ -913,6 +916,9 @@ export interface ManagerEntry {
   card?: ManagerCard;
   /** The user closed it, here or on the Mac: it is left out. */
   closed?: boolean;
+  /** What Agentman approved by itself, on a "approve" activity entry, so
+   *  the user can have it ask next time. */
+  approved?: { kind: string; target: string; folder?: string };
 }
 
 export interface ManagerStatus {
