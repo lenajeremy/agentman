@@ -10,8 +10,8 @@ import { Composer } from "../Composer";
 import { Thread } from "../Thread";
 import { AgentmanView } from "../manager/AgentmanView";
 import { useStore } from "../store";
-import { AgentMark, AppIcon, Icon } from "../ui";
-import { folderLabel, initials, needsYou, since } from "../labels";
+import { AgentMark, AppIcon, FolderMark, Icon } from "../ui";
+import { folderLabel, needsYou, since } from "../labels";
 import { paths } from "./fs";
 import { folderAgent, type EditorStore, type PanelRoute } from "./store";
 
@@ -191,7 +191,7 @@ function PanelAgentRow({ session }: { session: Session }) {
   return (
     <span className="panel-agent-row">
       <span className="panel-agent-line1">
-        <span className="badge">{initials(session.cwd)}</span>
+        <FolderMark session={session} />
         <span className="folder">{folderLabel(session.cwd)}</span>
         <span style={{ flex: 1, minWidth: 4 }} />
         {waiting ? (

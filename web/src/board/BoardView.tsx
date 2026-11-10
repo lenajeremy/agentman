@@ -13,7 +13,7 @@ import type { ManagerCard, ManagerEntry, Mission, Question, SearchHit, Session, 
 import { cardQuestion } from "@shared/manager-feed";
 import { confirmEnd, endable } from "../AgentHeader";
 import { openEditor, openURL } from "../host";
-import { folderLabel, initials, since } from "../labels";
+import { folderLabel, since } from "../labels";
 import { AgentmanView } from "../manager/AgentmanView";
 import { encoded, type Attachment } from "../manager/attach";
 import { CompactCard } from "../manager/CompactCard";
@@ -38,7 +38,7 @@ import { quickAction } from "../workspace/gitAction";
 import { confirmSheet, menuUnder, contextMenu, type MenuEntry } from "../thread/menu";
 import { QuestionChoices } from "../thread/QuestionCard";
 import { perform, send as sendToAgent, useActionError } from "../thread/state";
-import { AgentMark, ChromeButton, Icon } from "../ui";
+import { AgentMark, ChromeButton, FolderMark, Icon } from "../ui";
 import { makeDigest, type BoardDigest, type BoardProgress, type BoardStep } from "./digest";
 import { detail, headline, makeBoard, mentioned, shown, type BoardSections } from "./sections";
 import { ShipSheet, TonightButton } from "./BoardActions";
@@ -361,7 +361,7 @@ function BoardCard({ session, kind, outlined, match, query }: { session: Session
     >
       <div className="board-card-top">
         <div className="board-card-meta">
-          <span className="badge">{initials(session.cwd)}</span>
+          <FolderMark session={session} size={14} />
           <span className="board-card-folder">{folderLabel(session.cwd)}</span>
           <span className="board-spacer" />
           {when ? <span className="board-card-when">{since(when)}</span> : null}

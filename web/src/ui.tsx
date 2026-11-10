@@ -1,9 +1,12 @@
 // Small pieces the Mac app draws everywhere (desktop/Agentman/Design/Theme.swift):
-// ChromeButton, AgentMark, the app icon, and the icons standing in for SF
-// Symbols (Lucide, drawn at SF's weights).
+// ChromeButton, AgentMark, FolderMark, the app icon, and the icons standing
+// in for SF Symbols (Lucide, drawn at SF's weights).
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
+import type { Session } from "@shared/protocol";
+import { fileURL } from "./editor/fs";
+import { initials } from "./labels";
 
 type Weight = "regular" | "medium" | "semibold" | "bold";
 
@@ -54,6 +57,39 @@ export function AgentMark({ kind, size }: { kind: string; size: number }) {
     return <span className="mark mark-template" style={{ width: size, height: size, WebkitMaskImage: `url(${src})`, maskImage: `url(${src})` }} />;
   }
   return <img className="mark" src={src} width={size} height={size} alt="" />;
+}
+
+/** Logos that couldn't be read, remembered as none (FolderLogos). */
+const unreadable = new Set<string>();
+
+/** Which folder an agent works in (Sidebar.swift FolderMark): the folder's
+ *  own logo when am serve found one, otherwise its first two letters on the
+ *  brand wash. */
+export function FolderMark({ session, size = 16 }: { session: Pick<Session, "cwd" | "folderIcon">; size?: number }) {
+  const [, redraw] = useState(0);
+  const icon = session.folderIcon;
+  const path = icon && !icon.includes("..") ? session.cwd.replace(/\/+$/, "") + "/" + icon : "";
+  const shape = { width: size, height: size, borderRadius: size / 4 };
+  if (path && !unreadable.has(path)) {
+    return (
+      <img
+        className="folder-logo"
+        src={fileURL(path)}
+        style={shape}
+        alt=""
+        draggable={false}
+        onError={() => {
+          unreadable.add(path);
+          redraw((n) => n + 1);
+        }}
+      />
+    );
+  }
+  return (
+    <span className="badge" style={size === 16 ? undefined : shape}>
+      {initials(session.cwd)}
+    </span>
+  );
 }
 
 /** The macOS app icon, which draws its art inset in its frame (about 17 of 20). */

@@ -11,7 +11,7 @@ import { confirmEnd, endable } from "./AgentHeader";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { ChevronRight, Contrast, Folder as FolderIcon, Globe, ListFilter, PanelLeft, Search, Sparkles, SquarePen, X, ChartSpline } from "lucide-react";
 import type { SearchHit, Session } from "@shared/protocol";
-import { folderLabel, initials, since } from "./labels";
+import { folderLabel, since } from "./labels";
 import { useManagerSummary } from "./manager/summary";
 import { openAgent, openAgentman, openNewAgent, useRoute, openUsage } from "./nav";
 import { isMuted, setMuted } from "./notify/policy";
@@ -24,7 +24,7 @@ import { archive, filterState, inFolder, isArchived, makeSections, pin, shownInO
 import { ask, loadFolders, setShell, useShell, type FilterState } from "./shell/state";
 import { refreshBranches, useStatus, useStore } from "./store";
 import { contextMenu, menuUnder, type MenuEntry } from "./thread/menu";
-import { AgentMark, AppIcon, ChromeButton, Icon, Spacer } from "./ui";
+import { AgentMark, AppIcon, ChromeButton, FolderMark, Icon, Spacer } from "./ui";
 import "./styles/sidebar.css";
 
 export const SIDEBAR_DEFAULT = 256;
@@ -304,7 +304,7 @@ function AgentRow({ session, branch, renaming, archived }: { session: Session; b
   return (
     <>
       <div className="agent-line1">
-        <span className="badge">{initials(session.cwd)}</span>
+        <FolderMark session={session} />
         <span className="folder">{folderLabel(session.cwd)}</span>
         <Spacer min={4} />
         {waiting ? (
