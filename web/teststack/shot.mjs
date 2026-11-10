@@ -12,8 +12,8 @@
 // the first --wait is over; a step's value, if any, is printed. A step can
 // instead be real input: "click:<x>,<y>" (CSS pixels), "type:<text>", or
 // "key:<Meta+Shift+s>" (Meta, Ctrl, Alt, Shift and a key);
-// "clickon:<selector>", the pointer moved onto the first element it matches
-// and clicked there, wherever it has scrolled to; or
+// "clickon:<selector>", the first element it matches scrolled into view and
+// the pointer moved onto it and clicked there; or
 // "open:<command>", which runs the command then and opens the link it
 // prints in a second tab of the same browser, as am web would. --init runs
 // before the page's own scripts; --grant gives the page a permission (as
@@ -102,7 +102,8 @@ try {
     if (step.startsWith("clickon:")) {
       const selector = JSON.stringify(step.slice(8));
       const found = await send("Runtime.evaluate", {
-        expression: `(() => { const r = document.querySelector(${selector})?.getBoundingClientRect(); return r && [r.x + r.width / 2, r.y + r.height / 2]; })()`,
+        // Scrolled into view first, where a page would let the pointer reach it.
+        expression: `(() => { const el = document.querySelector(${selector}); el?.scrollIntoView({ block: "nearest" }); const r = el?.getBoundingClientRect(); return r && [r.x + r.width / 2, r.y + r.height / 2]; })()`,
         returnByValue: true,
       });
       const [x, y] = found.result?.value ?? [];
