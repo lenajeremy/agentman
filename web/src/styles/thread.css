@@ -309,3 +309,9 @@
 .find-bar button:disabled { opacity: 0.4; }
 ::highlight(find) { background-color: light-dark(#FFEB99, #5A4A0C); }
 ::highlight(find-current) { background-color: light-dark(#FFB866, #9A5A12); }
+
+/* How long the agent took (WorkedLine): the time, then a rule to the edge;
+   while it works, the loader before it. */
+.worked-line { display: flex; align-items: center; gap: 10px; }
+.worked-text { flex: none; font-size: 12px; color: var(--muted); }
+.worked-rule { flex: 1; height: 1px; background: var(--line); }

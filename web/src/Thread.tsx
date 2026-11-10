@@ -13,6 +13,8 @@ import { markFound, searchThread, takeJump, useJump, type Finding } from "./thre
 import { ChangedBar, DropTarget, EmptyThread, JumpToLatest, ReviewBar } from "./thread/Bars";
 import { addDropped, dropAccepts } from "./thread/attachments";
 import { threadItems, threadPictures } from "./thread/items";
+import { LatestTurnLine, WorkedLine } from "./thread/Worked";
+import { workDuration } from "@shared/toolgroups";
 import { Spinner } from "./thread/Loader";
 import { MessageRow, QueuedBubble } from "./thread/Messages";
 import { QuestionCard } from "./thread/QuestionCard";
@@ -274,11 +276,14 @@ export function Thread({ session, stickToEnd, card = true, panel = false, findab
                   <ToolRun calls={item.calls} said={item.said} />
                 ) : item.kind === "image" ? (
                   <ImageThumbnail sessionId={session.id} path={item.path} gallery={gallery} />
+                ) : item.kind === "worked" ? (
+                  <WorkedLine text={"Worked for " + workDuration(item.seconds)} />
                 ) : (
                   <PicturesRun sessionId={session.id} calls={item.calls} paths={item.paths} said={item.said} gallery={gallery} />
                 )}
               </div>
             ))}
+            <LatestTurnLine session={session} messages={list} />
             {queued.map((text, i) => (
               <div key={`q${i}`} className="thread-item">
                 <QueuedBubble

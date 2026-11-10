@@ -1,8 +1,10 @@
 // What a thread shows, as AgentThreadView.swift makes it from the messages:
 // runs of tool calls folded into one line each, pictures the agent read
-// shown as pictures, and the user's messages split into what went with them.
+// shown as pictures, how long each turn took once another follows, and the
+// user's messages split into what went with them.
 
 import type { Message } from "@shared/protocol";
+import { addToTurn, startsTurn, turnSeconds, type Turn } from "@shared/toolgroups";
 
 export type ThreadItem =
   | { kind: "message"; id: string; message: Message }
@@ -11,7 +13,9 @@ export type ThreadItem =
   /** An image the agent read, shown as a thumbnail rather than its path. */
   | { kind: "image"; id: string; message: Message; path: string }
   /** Images read one after another: one run, the pictures side by side. */
-  | { kind: "images"; id: string; calls: Message[]; paths: string[]; said: string };
+  | { kind: "images"; id: string; calls: Message[]; paths: string[]; said: string }
+  /** A turn that has been followed by another: how long the agent took. */
+  | { kind: "worked"; id: string; seconds: number };
 
 /** The image file a path names, if it is one (ImageThumbnail.imagePath). */
 export function imagePath(text: string): string | null {
@@ -23,6 +27,7 @@ export function threadItems(messages: readonly Message[]): ThreadItem[] {
   let run: Message[] = [];
   let pictures: { message: Message; path: string }[] = [];
   let said = "";
+  let turn: Turn = { start: null, last: null };
   const flush = () => {
     if (run.length) items.push({ kind: "tools", id: run.at(-1)!.id, calls: run, said });
     run = [];
@@ -40,6 +45,15 @@ export function threadItems(messages: readonly Message[]): ThreadItem[] {
     pictures = [];
   };
   for (const message of messages) {
+    // The end of a turn, once there's a next one to mark it.
+    if (startsTurn(message)) {
+      flush();
+      flushPictures();
+      const seconds = turnSeconds(turn);
+      if (seconds !== null && turn.start) items.push({ kind: "worked", id: "worked-" + turn.start.id, seconds });
+      turn = { start: null, last: null };
+    }
+    addToTurn(turn, message);
     const path = message.role === "tool" && toolKind(message.tool?.name).kind === "read"
       ? imagePath(message.tool?.summary ?? message.text ?? "") : null;
     if (path) {
