@@ -16,15 +16,67 @@ export type Route =
   | { kind: "usage" };
 
 const query = new URLSearchParams(location.search);
-let route: Route = query.get("agent") ? { kind: "agent", id: query.get("agent")! } : { kind: "agentman" };
+let route: Route = routeOf(query);
 const listeners = new Set<() => void>();
 
+/** The page an address names: ?agent=<id>, ?page=new|new-worktree|usage,
+ *  or the Board. */
+export function routeOf(params: URLSearchParams): Route {
+  const agent = params.get("agent");
+  if (agent) return { kind: "agent", id: agent };
+  switch (params.get("page")) {
+    case "new": return { kind: "new" };
+    case "new-worktree": return { kind: "new", worktree: true };
+    case "usage": return { kind: "usage" };
+    default: return { kind: "agentman" };
+  }
+}
+
+/** The address of a page, as routeOf reads it. */
+export function addressOf(r: Route): string {
+  switch (r.kind) {
+    case "agent": return `?agent=${encodeURIComponent(r.id)}`;
+    case "new": return r.worktree ? "?page=new-worktree" : "?page=new";
+    case "usage": return "?page=usage";
+    default: return "";
+  }
+}
+
+// Launch options a page is opened with once (shell/commands.ts), not a
+// page to go Back to.
+const LAUNCH = ["open", "palette", "folder", "away", "lightbox", "renaming", "next"];
+
+/** In a browser the address follows the main window's page, so reloading
+ *  or going Back finds it again; the Mac has no address to keep. */
+function follow(r: Route) {
+  if (new URLSearchParams(location.search).has("view")) return;
+  const address = addressOf(r);
+  if (location.search === address) return;
+  const once = LAUNCH.some((name) => new URLSearchParams(location.search).has(name));
+  const url = address || location.pathname;
+  if (once) history.replaceState(null, "", url);
+  else history.pushState(null, "", url);
+}
+
+function same(a: Route, b: Route): boolean {
+  return a.kind === b.kind && (a.kind !== "agent" || (b.kind === "agent" && a.id === b.id))
+    && (a.kind !== "new" || (b.kind === "new" && !!a.worktree === !!b.worktree));
+}
+
 export function go(next: Route) {
-  if (next.kind === route.kind && (next.kind !== "agent" || (route.kind === "agent" && next.id === route.id))
-    && (next.kind !== "new" || (route.kind === "new" && !!next.worktree === !!route.worktree))) return;
+  if (same(next, route)) return;
   route = next;
+  follow(next);
   for (const l of listeners) l();
 }
+
+// Back and Forward go to the page the address names.
+window.addEventListener("popstate", () => {
+  const next = routeOf(new URLSearchParams(location.search));
+  if (same(next, route)) return;
+  route = next;
+  for (const l of listeners) l();
+});
 
 /** Where the main window is now, for code outside React. */
 export function getRoute(): Route {
