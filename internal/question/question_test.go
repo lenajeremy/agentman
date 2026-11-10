@@ -3,6 +3,7 @@ package question
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -413,6 +414,51 @@ func TestDetectsCompleteWrappedClaudeQuestion(t *testing.T) {
 	}
 	if q.Title != "" {
 		t.Errorf("Title = %q, want ambiguous multi-question tabs omitted", q.Title)
+	}
+}
+
+// Claude 2.1.322 draws a long question in a multi-question form behind a
+// bar, one per line. The bar is not part of the question.
+func TestAWrappedQuestionInAFormLosesItsBar(t *testing.T) {
+	q := Detect(readFixture(t, "testdata/claude_multiquestion_wrapped_real_pane.txt"))
+	if q == nil {
+		t.Fatal("the form was not detected")
+	}
+	const want = "What should happen to the paused desktop work (six areas built in separate worktrees, based on a 399-commits-old main)?"
+	if q.Prompt != want {
+		t.Errorf("Prompt = %q, want %q", q.Prompt, want)
+	}
+	if len(q.Options) != 2 || q.Options[0].Label != "Keep the worktrees (Recommended)" {
+		t.Errorf("Options = %+v", q.Options)
+	}
+}
+
+// Back on a question already answered, the answer carries a tick. It is the
+// earlier choice, not part of its label.
+func TestAnAnsweredTabsTickMarksTheEarlierChoice(t *testing.T) {
+	q := Detect(readFixture(t, "testdata/claude_multiquestion_answered_tab_real_pane.txt"))
+	if q == nil {
+		t.Fatal("the answered tab was not detected")
+	}
+	if q.Prompt != "What look should the new output have?" {
+		t.Errorf("Prompt = %q", q.Prompt)
+	}
+	var labels []string
+	var checked []string
+	for _, option := range q.Options {
+		labels = append(labels, option.Label)
+		if option.Checked {
+			checked = append(checked, option.Key)
+		}
+	}
+	if want := []string{"Clean and minimal (Recommended)", "Bold and expressive", "Match existing style"}; !slices.Equal(labels, want) {
+		t.Errorf("labels = %q, want %q", labels, want)
+	}
+	if !slices.Equal(checked, []string{"2"}) {
+		t.Errorf("checked = %v, want the earlier answer, 2", checked)
+	}
+	if q.Multiple {
+		t.Error("a single-choice question became a multi-select")
 	}
 }
 
