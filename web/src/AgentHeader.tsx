@@ -9,8 +9,9 @@ import { Ellipsis, Globe, PanelRight, SquareTerminal } from "lucide-react";
 import type { Server, Session } from "@shared/protocol";
 import { daemon } from "./daemon";
 import { openEditor, openURL } from "./host";
-import { folderLabel } from "./labels";
-import { go } from "./nav";
+import { endedSession, folderLabel } from "./labels";
+import { getRoute, go, openAgent } from "./nav";
+import { getShell, setShell } from "./shell/state";
 import { ChromeButton, Icon, PlusSlashMinus } from "./ui";
 import { copyText } from "./thread/clipboard";
 import { confirmSheet, contextMenu, menuUnder, type MenuEntry } from "./thread/menu";
@@ -38,11 +39,22 @@ export function endNote(session: Session): string {
   return "This takes it off your list. If it's still open in a terminal, it keeps running there.";
 }
 
-/** Asks, then ends it: the same from the "…" menu, the sidebar and the Board. */
+/** Asks, then ends it: the same from the "…" menu, the sidebar and the Board.
+ *  Ending the agent whose page is open keeps the page, read-only, to resume
+ *  from there (AgentsStore.end). */
 export async function confirmEnd(session: Session) {
   if ((await confirmSheet("End this session?", endNote(session), ["End Session", "Cancel"])) !== "End Session") return;
   try {
-    await ask({ type: "end_session", sessionId: session.id }, "It couldn't be ended.");
+    const reply = await ask({ type: "end_session", sessionId: session.id }, "It couldn't be ended.");
+    const route = getRoute();
+    if (route.kind === "agent" && route.id === session.id) {
+      const ended = endedSession(session);
+      const shell = getShell();
+      // Not closed: it runs on in a terminal the user opened.
+      const others = shell.stillRunning.filter((id) => id !== ended.id);
+      setShell({ foundSessions: { ...shell.foundSessions, [ended.id]: ended }, stillRunning: reply.closed === true ? others : [...others, ended.id] });
+      openAgent(ended.id);
+    }
   } catch (err) {
     setActionError(session.id, err instanceof Error ? err.message : String(err));
   }

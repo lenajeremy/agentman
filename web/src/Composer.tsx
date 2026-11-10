@@ -6,6 +6,7 @@
 // offers Resume in its place.
 
 import { useStatus } from "./store";
+import { useShell } from "./shell/state";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { ArrowUp, ChevronDown, Paperclip } from "lucide-react";
 import type { CommandPanel, Session } from "@shared/protocol";
@@ -82,6 +83,7 @@ export function Composer({ session, onSent }: { session: Session; onSent: () => 
   const slash = useSlash(session);
   const canReceive = session.inject !== "none";
   const { status } = useStatus();
+  const { stillRunning } = useShell();
   const moving = useMoving(session.id);
   const connected = status === "connected";
   // While a question takes a typed answer, the box takes it.
@@ -283,6 +285,7 @@ export function Composer({ session, onSent }: { session: Session; onSent: () => 
       <ComposerFeedback message={error} onDismiss={() => setActionError(session.id, null)}>
         {resumable(session) ? (
           <ResumeBar
+            stillRunning={stillRunning.includes(session.id)}
             resuming={resuming}
             onResume={async () => {
               setResuming(true);

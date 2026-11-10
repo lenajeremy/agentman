@@ -3,7 +3,7 @@
 // JumpToLatest; ImagePreview.swift's DropTarget).
 
 import type { ReactNode } from "react";
-import { ArrowDown, ChevronRight, CircleAlert, ClipboardList, Eye, Folder, Images, Moon, X } from "lucide-react";
+import { ArrowDown, ChevronRight, CircleAlert, ClipboardList, Eye, Folder, Images, Moon, SquareTerminal, X } from "lucide-react";
 import type { Session } from "@shared/protocol";
 import { AgentMark } from "../ui";
 import { Sym } from "./Sym";
@@ -31,18 +31,26 @@ export function ChangedBar({ count, onOpen }: { count: number; onOpen: () => voi
   );
 }
 
-/** In place of the message box for a session that has ended. */
-export function ResumeBar({ resuming, onResume }: { resuming: boolean; onResume: () => void }) {
+/** In place of the message box for a session that has ended. One ended
+ *  here but running on in a terminal the user opened has nothing to resume:
+ *  resuming would start a second copy. */
+export function ResumeBar({ resuming, onResume, stillRunning = false }: { resuming: boolean; onResume: () => void; stillRunning?: boolean }) {
   return (
     <div className="resume-bar">
-      <span className="resume-icon"><Sym icon={Moon} sf="moon.zzz" size={13} /></span>
+      <span className="resume-icon">
+        {stillRunning ? <Sym icon={SquareTerminal} sf="terminal" size={13} /> : <Sym icon={Moon} sf="moon.zzz" size={13} />}
+      </span>
       <div className="resume-words">
-        <div className="resume-title">This session has ended</div>
-        <div className="resume-note">Its conversation is here to read. Resume it to carry on.</div>
+        <div className="resume-title">{stillRunning ? "Off your list" : "This session has ended"}</div>
+        <div className="resume-note">
+          {stillRunning ? "It's still running in the terminal you opened it in. Reply to it there." : "Its conversation is here to read. Resume it to carry on."}
+        </div>
       </div>
-      <button className="prominent" disabled={resuming} onClick={onResume}>
-        {resuming ? <Spinner size={16} light /> : "Resume"}
-      </button>
+      {!stillRunning && (
+        <button className="prominent" disabled={resuming} onClick={onResume}>
+          {resuming ? <Spinner size={16} light /> : "Resume"}
+        </button>
+      )}
     </div>
   );
 }

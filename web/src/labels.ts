@@ -48,6 +48,14 @@ export function agentName(kind: string): string {
   return AGENT_NAMES[kind] ?? kind.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/** A session as it reads once ended (AgentsStore.ended): under the
+ *  conversation's own id, as am serve lists an ended one, with nothing to
+ *  answer or send. */
+export function endedSession(session: Session): Session {
+  const id = session.nativeId ? `${session.kind}:${session.nativeId}` : session.id;
+  return { ...session, id, state: "ended", inject: "none", question: undefined, queued: undefined };
+}
+
 // The Mac's words for a run of tool calls, as AgentThreadView counts them
 // until Agentman's own line arrives. The phone's runCounts says a few of
 // them differently ("Looked up a page"), so the Mac's are kept here.

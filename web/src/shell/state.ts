@@ -31,6 +31,9 @@ export interface ShellState {
   /** Conversations opened from a search that aren't on any list, so their
    *  page has them (AgentsStore.foundSessions). */
   foundSessions: Record<string, Session>;
+  /** Ended from their page but still running in a terminal the user
+   *  opened: ending only took them off the list (AgentsStore.stillRunning). */
+  stillRunning: string[];
 }
 
 let state: ShellState = {
@@ -43,6 +46,7 @@ let state: ShellState = {
   showPalette: false,
   newAgentPreset: null,
   foundSessions: {},
+  stillRunning: [],
 };
 const listeners = new Set<() => void>();
 
