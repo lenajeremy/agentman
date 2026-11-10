@@ -25,14 +25,22 @@
         window.__sent.push(env.payload);
         setTimeout(() => {
           this.reply({ type: "send_result", sessionId: env.payload.sessionId }, env.id);
-          if (t === "answer_question") { window.__asking = false; this.reply({ type: "session_update", session: { ...window.__last, question: undefined, state: "idle" } }); }
+          // pick as last seen, answered; never a session it hasn't seen.
+          if (t === "answer_question") { window.__asking = false; if (window.__last) this.reply({ type: "session_update", session: { ...window.__last, question: undefined, state: "idle" } }); }
         }, 300);
         return;
       }
       return super.send(d);
     }
   };
+  // Whole lines only: a frame can split one across two messages.
   const remember = (text) => { for (const line of text.split("\n")) { try { const p = JSON.parse(line).payload; for (const s of p?.sessions ?? (p?.session ? [p.session] : [])) if (s.id === PICK) window.__last = s; } catch {} } };
-  window.WebSocket = function (u, p) { if (String(u).includes("/app/terminal")) return new W(u, p); const ws = new Fake(u, p); ws.addEventListener("message", (e) => remember(String(e.data))); return ws; };
+  window.WebSocket = function (u, p) {
+    if (String(u).includes("/app/terminal")) return new W(u, p);
+    const ws = new Fake(u, p);
+    let buffer = "";
+    ws.addEventListener("message", (e) => { buffer += String(e.data); const end = buffer.lastIndexOf("\n"); if (end < 0) return; remember(buffer.slice(0, end)); buffer = buffer.slice(end + 1); });
+    return ws;
+  };
   window.WebSocket.OPEN = W.OPEN; window.WebSocket.prototype = W.prototype;
 }

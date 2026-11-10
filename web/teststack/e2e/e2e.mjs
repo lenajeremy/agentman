@@ -96,7 +96,12 @@ async function check(name, run, { expected = [] } = {}) {
     for (const page of context.pages()) await page.close().catch(() => {});
     // A browser's notice, not an error: a ResizeObserver's work ran into the
     // next frame.
-    const always = [/ResizeObserver loop/];
+    const always = [
+      /ResizeObserver loop/,
+      // The worktrees the worktree check made and removed: am serve still
+      // lists their folders, and the logo it found in one while it was there.
+      /^http 404 GET \/__editor\/file\?path=[^ ]*Worktrees%2Fdemo%2Fe2e-wt-/,
+    ];
     const unexpected = [...new Set(pageErrors)].filter((e) => ![...always, ...expected].some((re) => re.test(e)));
     if (unexpected.length) {
       errorsSeen.push(`${engineName} ${name}: ${unexpected.join(" | ")}`);
@@ -522,8 +527,11 @@ async function newAgent() {
       const words = "Hello from the end-to-end run";
       // The index is rebuilt for each run (prepare.sh), and the session just
       // ended can still be listed for a moment: asked until one is found.
+      // With none of Muse's found at all, its history waits for am serve's
+      // next sweep (every 2 minutes; the first can miss Muse while a Muse
+      // session runs, and doesn't say so), so up to one sweep more.
       let hit, found = 0, indexing = true;
-      for (let tries = 0; !hit && (tries < 20 || (indexing && tries < 120)); tries++) {
+      for (let tries = 0; !hit && (tries < 20 || ((indexing || found === 0) && tries < 140)); tries++) {
         if (tries) await new Promise((r) => setTimeout(r, 1000));
         const live = new Set(((await daemon({ type: "list_sessions" })).sessions ?? []).map((s) => s.id));
         const said = await daemon({ type: "search", text: words, limit: 50 });
