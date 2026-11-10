@@ -29,7 +29,7 @@ done. One at a time, in this order.
 6. ✓ (4228fa3, with the sidebar's Needs you section) **Find in a conversation** (FindBar.swift, ⌘F), and opening a search
    hit at its message (ThreadJump); the sidebar's search of what was said
    too (the Board's is done).
-7. **Settings › Devices** (DevicesSettings.swift; `devices`, `pair_code`):
+7. ✓ (c5c2487) **Settings › Devices** (DevicesSettings.swift; `devices`, `pair_code`):
    pairing a phone on the page.
 8. **Thread details:** how long the agent worked ("Worked for"), code
    blocks that copy, a folder's logo in place of its initials.
