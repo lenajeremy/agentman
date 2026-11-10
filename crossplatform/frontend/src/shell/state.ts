@@ -99,6 +99,12 @@ async function loadPastSessions() {
   }
 }
 
+// A folder filtered to before am serve could be asked (a launch option),
+// or across a reconnect: its sessions read again.
+daemon.onStatus((status) => {
+  if (status === "connected" && state.folderFilter) void loadPastSessions();
+});
+
 /** The daemon's words without the package that raised them. */
 export function plainProblem(error: unknown, fallback: string): string {
   const text = typeof error === "string" ? error : error instanceof Error ? error.message : "";

@@ -166,7 +166,7 @@ export function Sidebar({ width, headerLeading }: { width: number; headerLeading
         )}
         {sessions.length === 0 && status === "connected" && (
           <div className="no-agents">
-            <Icon icon={Sparkles} sf="sparkles" size={34} />
+            <Icon icon={Sparkles} sf="sparkles" size={37} weight="regular" />
             <div className="no-agents-title">No agents yet</div>
             <div className="no-agents-text">Start one with am claude or am codex in a terminal.</div>
           </div>
