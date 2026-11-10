@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Folder, PanelRight, Search, SquareTerminal } from "lucide-react";
-import { Events, Window } from "@wailsio/runtime";
+import { Window } from "@wailsio/runtime";
 import { EditorPanes } from "./Editor";
 import { AgentPanel, ColumnDivider, PANEL_MIN } from "./editor/AgentPanel";
 import { EditorAlerts } from "./editor/Alerts";
@@ -19,7 +19,7 @@ import { EditorStore, useEditor } from "./editor/store";
 import { DiskBanner, PathBar, TabStrip } from "./editor/Tabs";
 import { FileTree } from "./editor/Tree";
 import { EditorEmpty, MarkdownPreview, NonTextView } from "./editor/Views";
-import { platform, reveal } from "./host";
+import { openInMain, platform, reveal } from "./host";
 import { getPref, usePref } from "./prefs";
 import { registerUnsaved } from "./shell/quitGuard";
 import { useStore } from "./store";
@@ -162,9 +162,7 @@ function FolderEditor({ folder }: { folder: string }) {
       const command = commandFor(e.data);
       if (command) void runCommand(store, command);
     };
-    const openMain = (e: Event) => {
-      if (inShell) void Events.Emit("agentman:open", (e as CustomEvent<string>).detail);
-    };
+    const openMain = (e: Event) => openInMain((e as CustomEvent<string>).detail);
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("message", fromPage);
     window.addEventListener("agentman:open-main", openMain);

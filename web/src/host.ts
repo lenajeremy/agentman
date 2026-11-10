@@ -199,9 +199,40 @@ export async function setBadge(label: string): Promise<void> {
 
 const linkHandlers = new Set<(link: string) => void>();
 
-/** Links to follow: a clicked notification's, and later agentman:// links. */
+/** Links to follow: a clicked notification's, and later agentman:// links;
+ *  in the browser also those an editor tab hands over (openInMain). */
 export function onOpenLink(handler: (link: string) => void): () => void {
   if (inShell) return Events.On("agentman:open", (event) => handler(String(event.data)));
   linkHandlers.add(handler);
-  return () => linkHandlers.delete(handler);
+  // Only the main window takes them: an editor or Settings tab (?view=) is
+  // where they come from.
+  const main = !new URLSearchParams(location.search).has("view");
+  const channel = !main || typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel(LINKS);
+  if (channel) channel.onmessage = (e) => typeof e.data === "string" && handler(e.data);
+  return () => {
+    linkHandlers.delete(handler);
+    channel?.close();
+  };
+}
+
+const LINKS = "agentman-links";
+
+/** An agentman:// link for the main window, from an editor window: in the
+ *  browser, another tab, reached over a BroadcastChannel and brought
+ *  forward where the browser lets it. */
+export function openInMain(link: string) {
+  if (inShell) {
+    void Events.Emit("agentman:open", link);
+    return;
+  }
+  if (typeof BroadcastChannel !== "undefined") {
+    const channel = new BroadcastChannel(LINKS);
+    channel.postMessage(link);
+    channel.close();
+  }
+  try {
+    window.opener?.focus();
+  } catch {
+    // Another page's, or none.
+  }
 }

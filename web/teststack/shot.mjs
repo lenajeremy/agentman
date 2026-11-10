@@ -9,7 +9,9 @@
 //                 [--grant notifications]...
 //
 // Each --step is JavaScript run in the page, --after seconds apart, once
-// the first --wait is over; a step's value, if any, is printed. --init runs
+// the first --wait is over; a step's value, if any, is printed. A step can
+// instead be real input: "click:<x>,<y>" (CSS pixels), "type:<text>", or
+// "key:<Meta+Shift+s>" (Meta, Ctrl, Alt, Shift and a key). --init runs
 // before the page's own scripts; --grant gives the page a permission (as
 // if the user had allowed it). Used by browser.sh.
 import { spawn } from "node:child_process";
@@ -88,7 +90,33 @@ try {
   if (grants.length) await send("Browser.grantPermissions", { permissions: grants, origin: new URL(url).origin });
   await send("Page.navigate", { url });
   await sleep(wait);
+  const input = async (step) => {
+    if (step.startsWith("click:")) {
+      const [x, y] = step.slice(6).split(",").map(Number);
+      for (const type of ["mousePressed", "mouseReleased"]) {
+        await send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+      }
+    } else if (step.startsWith("type:")) {
+      await send("Input.insertText", { text: step.slice(5) });
+    } else {
+      const parts = step.slice(4).split("+");
+      const key = parts.pop();
+      const bits = { Alt: 1, Ctrl: 2, Meta: 4, Shift: 8 };
+      const modifiers = parts.reduce((m, p) => m | (bits[p] ?? 0), 0);
+      const letter = key.length === 1;
+      const code = letter ? (/[a-z]/i.test(key) ? `Key${key.toUpperCase()}` : /\d/.test(key) ? `Digit${key}` : "") : key;
+      const keyCode = letter ? key.toUpperCase().charCodeAt(0) : { Enter: 13, Escape: 27, Tab: 9, Backspace: 8, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39 }[key] ?? 0;
+      const base = { modifiers, key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode };
+      await send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...base });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
+    }
+  };
   for (const step of steps) {
+    if (/^(click|type|key):/.test(step)) {
+      await input(step);
+      await sleep(after);
+      continue;
+    }
     const result = await send("Runtime.evaluate", { expression: step, awaitPromise: true, returnByValue: true });
     if (result.exceptionDetails) console.error(`step failed: ${step}\n  ${result.exceptionDetails.exception?.description ?? result.exceptionDetails.text}`);
     else if (result.result?.value !== undefined) console.log(JSON.stringify(result.result.value));
