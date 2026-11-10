@@ -1,13 +1,121 @@
-/* The workspace card: 220 wide beside the thread, 12 from the top and right. */
-.workspace-card { width: 220px; flex: none; align-self: flex-start; margin: 12px 12px 20px 0; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; font-size: 12px; color: var(--text-2); overflow: hidden; }
+/* The workspace card (WorkspacePanel.swift): 220 wide beside the thread, 540
+   opened up, 12 from the top and right and 20 from the bottom; on the surface
+   with a hairline edge, radius 14. Rows 30 high, the icon 16 wide 8 in, the
+   words 10 after it; sections padded 8 across and 6 down. */
+.workspace-card { width: 220px; flex: none; align-self: flex-start; margin: 12px 12px 20px 0; background: var(--surface); border-radius: 14px; position: relative; font-size: 12px; color: var(--text-2); overflow: hidden; display: flex; flex-direction: column; transition: width 0.18s ease-out; }
+.workspace-card.open { width: 540px; align-self: stretch; }
+/* The edge over the content, as SwiftUI's strokeBorder overlay: it takes no room. */
+.workspace-card::after { content: ""; position: absolute; inset: 0; border: 1px solid var(--line); border-radius: 14px; pointer-events: none; z-index: 5; }
 .card-section { padding: 6px 8px; display: flex; flex-direction: column; }
-.card-section + .card-section { border-top: 1px solid var(--line); }
-.card-row { height: 30px; display: flex; align-items: center; gap: 10px; padding: 0 8px; border-radius: 7px; }
+.card-divider { height: 1px; flex: none; background: var(--line); }
+.card-row { height: 30px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 8px; border-radius: 7px; min-width: 0; }
 .card-row.clickable:hover { background: color-mix(in srgb, var(--fill) 60%, transparent); }
 .card-icon { width: 16px; flex: none; display: grid; place-items: center; color: var(--muted); }
-.card-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.card-trailing-button { width: 20px; height: 20px; display: grid; place-items: center; color: var(--muted); }
-.card-menu { width: 20px; height: 20px; display: grid; place-items: center; color: var(--faint); }
-.card-counts { display: flex; gap: 6px; font-family: var(--mono); font-size: 11px; }
-.card-counts .added { color: var(--ok); }
-.card-counts .removed { color: var(--error-text); }
+.card-title { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+.card-spacer { flex: 1; min-width: 6px; }
+.card-trailing-button { width: 20px; height: 20px; flex: none; display: grid; place-items: center; color: var(--muted); }
+.card-chevron { width: 20px; flex: none; display: grid; place-items: center; color: var(--faint); }
+.card-counts { display: flex; gap: 6px; font-family: var(--mono); font-size: 11px; flex: none; }
+.card-heading { height: 24px; display: flex; align-items: center; padding: 0 8px; font-size: 11px; color: var(--faint); }
+.card-dot-box { width: 20px; flex: none; display: grid; place-items: center; }
+.card-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+/* The git row: its menu laid over the row's end, the outcome under its words. */
+.git-row { display: flex; flex-direction: column; gap: 2px; }
+.git-row-line { position: relative; }
+.git-menu-room { width: 20px; height: 20px; flex: none; }
+.git-spinner { display: grid; place-items: center; transform: scale(0.75); }
+.git-menu { position: absolute; right: 8px; top: 5px; width: 20px; height: 20px; display: grid; place-items: center; color: var(--faint); }
+.git-menu:disabled { opacity: 0.5; }
+.git-outcome { display: flex; align-items: baseline; gap: 6px; padding: 0 8px 6px 34px; font-size: 12px; color: var(--text-2); user-select: text; }
+.git-outcome .failed { color: var(--error-text); }
+.git-dismiss { color: var(--faint); display: grid; place-items: center; align-self: center; }
+
+/* Opened up: a header with the way back, then the list or what was picked. */
+.card-header { display: flex; align-items: center; gap: 8px; padding: 8px 10px; flex: none; }
+.card-back { width: 24px; height: 24px; display: grid; place-items: center; color: var(--text-2); }
+.card-header-title { font-size: 12px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.card-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.card-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* A plain List as macOS draws one: rows 8 in from either side, 3.5 more above
+   and below than their own padding, hairlines between them from where their
+   words start to the edge. */
+.card-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; padding-bottom: 8px; }
+.list-row { --v: 5px; --sep: 8px; position: relative; flex: none; display: flex; align-items: center; gap: 10px; padding: calc(var(--v) + 3.5px) 8px; min-width: 0; }
+.list-row:not(:last-child):not(.no-separator)::after { content: ""; position: absolute; left: var(--sep); right: 0; bottom: -1px; height: 1px; background: var(--line); }
+.list-row[role="button"] { cursor: default; }
+.caption { font-size: 12px; }
+.changes-summary { font-size: 12px; font-weight: 500; gap: 6px; --v: 4px; color: var(--text-2); }
+.change-row { font-family: var(--mono); font-size: 11px; }
+.change-letter { width: 14px; flex: none; text-align: center; font-weight: 500; }
+.path-label { display: flex; min-width: 0; font-family: var(--sans); font-size: 12px; }
+.path-folder { color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; min-width: 0; flex: 0 1 auto; }
+.path-name { color: var(--text); white-space: nowrap; flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.file-row { gap: 9px; --v: 4px; --sep: 33px; }
+.file-row-icon { width: 16px; flex: none; display: grid; place-items: center; }
+.file-row-name { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.file-row .chevron { display: grid; }
+
+/* The bar over a file or a diff. */
+.file-bar { display: flex; align-items: center; gap: 10px; padding: 7px 14px; flex: none; font-size: 12px; }
+.file-bar-folder { color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; min-width: 0; }
+.mono-11 { font-family: var(--mono); font-size: 11px; }
+.bar-icon { width: 22px; height: 22px; flex: none; display: grid; place-items: center; color: var(--muted); }
+.bar-icon.copied { color: var(--ok); }
+.long-file { padding: 8px; font-size: 12px; color: var(--muted); text-align: center; flex: none; }
+.card-image { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.card-image img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+/* The card's own diff: both numbers, a marker, the line. */
+.card-diff { flex: 1; min-height: 0; overflow: auto; }
+.card-diff-lines { padding: 8px 0; min-width: 100%; width: max-content; user-select: text; }
+.card-diff-row { display: flex; font-family: var(--mono); font-size: 11.5px; line-height: 15px; color: var(--faint); padding: 1px 0; white-space: pre; tab-size: 4; }
+/* macOS 26 rounds a coloured row's ends here. */
+.card-diff-row.add, .card-diff-row.remove, .card-diff-row.hunk { border-radius: 7px; }
+.card-diff-row.add { background: var(--diff-add); }
+.card-diff-row.remove { background: var(--diff-remove); }
+.card-diff-row.hunk { background: var(--diff-hunk); }
+.card-diff-number { width: 38px; flex: none; text-align: right; }
+.card-diff-marker { width: 18px; flex: none; text-align: center; }
+.card-diff-text { color: var(--text); padding-right: 16px; }
+.card-diff-row.hunk .card-diff-text, .card-diff-row.meta .card-diff-text { color: var(--muted); }
+.card-diff-more { padding: 14px; font-family: var(--sans); font-size: 12px; color: var(--muted); }
+
+/* Plans. */
+.artifact-row { align-items: flex-start; --sep: 36px; }
+.artifact-icon { width: 18px; flex: none; display: grid; place-items: center; color: var(--working); padding-top: 1px; }
+.artifact-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 12px; }
+.artifact-title-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.artifact-title { font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.review-pill { flex: none; padding: 1px 6px; border-radius: 999px; background: var(--needs-you-wash); color: var(--needs-you-text); }
+.artifact-summary { color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.artifact-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.artifact-doc { padding: 20px; }
+.artifact-image { display: block; max-width: calc(100% - 32px); margin: 16px; }
+.review-box { padding: 14px; display: flex; flex-direction: column; gap: 10px; font-size: 12px; flex: none; }
+.review-ask { font-weight: 500; color: var(--text-2); }
+.review-outcome { display: flex; align-items: center; gap: 6px; color: var(--ok); }
+.review-field { resize: none; font-size: 12px; padding: 3px 6px; border-radius: 5px; border: 1px solid var(--line); background: var(--surface); color: var(--text); outline: none; min-height: 22px; max-height: 70px; field-sizing: content; }
+.review-buttons { display: flex; align-items: center; gap: 8px; }
+
+/* The commit sheet: 520 of content, 22 around it, 16 between its parts. */
+.commit-sheet { width: 564px; padding: 22px; display: flex; flex-direction: column; gap: 16px; }
+.commit-head { display: flex; flex-direction: column; gap: 4px; }
+.commit-title { font-size: 16px; font-weight: 500; color: var(--text); }
+.commit-subtitle { font-size: 12px; color: var(--muted); }
+.commit-box { display: flex; flex-direction: column; gap: 12px; font-size: 12px; padding: 11px; border-radius: 12px; background: color-mix(in srgb, var(--fill) 40%, transparent); border: 1px solid var(--line); }
+.commit-branch { display: flex; align-items: center; gap: 8px; }
+.commit-branch-name { font-weight: 500; color: var(--text); }
+.commit-files { display: flex; flex-direction: column; gap: 6px; }
+.commit-files-head { display: flex; align-items: center; gap: 8px; }
+.commit-list { height: 176px; overflow-y: auto; scrollbar-width: none; padding: 3px; display: flex; flex-direction: column; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.commit-file { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-family: var(--mono); font-size: 11.5px; flex: none; }
+.commit-path { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; min-width: 0; }
+.commit-path.out { color: var(--faint); }
+.commit-totals { display: flex; align-items: center; font-family: var(--mono); font-size: 11.5px; white-space: pre; }
+.commit-message { display: flex; flex-direction: column; gap: 6px; }
+.commit-message-label { font-size: 12px; font-weight: 500; color: var(--text); }
+.commit-editor { position: relative; height: 76px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.commit-editor textarea { position: absolute; inset: 0; width: 100%; height: 100%; resize: none; border: 0; outline: 0; background: none; padding: 6px 11px; font-size: 14px; color: var(--text); }
+.commit-placeholder { position: absolute; left: 11px; top: 6px; font-size: 14px; color: var(--faint); pointer-events: none; }
+.commit-buttons { display: flex; align-items: center; gap: 8px; }

@@ -179,58 +179,63 @@ Swift that does it today.
 - [ ] Failed switch shown as composer error "Couldn't switch the mode to …" — AgentsStore.swift:655
 
 ## 5. Workspace card & git
-- [ ] Card beside the thread, 220pt wide (540 with a list, diff or file open); hidden when the right panel leaves too little room — WorkspacePanel.swift:164, AgentThreadView.swift:70
-- [ ] "This Mac" row with Show the folder in Finder — WorkspacePanel.swift:43
-- [ ] Open in editor and Open terminal rows (when the folder exists) — WorkspacePanel.swift:54
-- [ ] Branch row — WorkspacePanel.swift:64
-- [ ] Git quick-action row — GitActions.swift:33, GitActions.swift:92
-  - [ ] Shows Commit, Commit & push, Push or Create PR, whichever fits — GitActions.swift:37
-  - [ ] Idle states (hint as tooltip): Diverged, Behind, Up to date, no remote, no branch, status unavailable — GitActions.swift:34
-- [ ] Git ▾ menu: Commit…, Push, Create PR, each enabled only when it applies — GitActions.swift:101
-- [ ] Push / Create PR confirm alert: branch, upstream, commit count, warning when pushing to the default branch — GitActions.swift:161, GitActions.swift:181
+- [x] Card beside the thread, 220pt wide (540 with a list, diff or file open); hidden when the right panel leaves too little room — WorkspacePanel.swift:164, AgentThreadView.swift:70
+- [x] "This Mac" row with Show the folder in Finder — WorkspacePanel.swift:43
+  - Differs: off macOS the row says "This computer", and the folder opens in the file manager.
+- [x] Open in editor and Open terminal rows (when the folder exists) — WorkspacePanel.swift:54
+- [x] Branch row — WorkspacePanel.swift:64
+- [x] Git quick-action row — GitActions.swift:33, GitActions.swift:92
+  - [x] Shows Commit, Commit & push, Push or Create PR, whichever fits — GitActions.swift:37
+  - [x] Idle states (hint as tooltip): Diverged, Behind, Up to date, no remote, no branch, status unavailable — GitActions.swift:34
+- [x] Git ▾ menu: Commit…, Push, Create PR, each enabled only when it applies — GitActions.swift:101
+  - Differs: the system menu here shows the items without their symbols (menus.go takes words only), here and in the panel's + menu.
+- [x] Push / Create PR confirm alert: branch, upstream, commit count, warning when pushing to the default branch — GitActions.swift:161, GitActions.swift:181
 - [ ] Commit sheet — GitActions.swift:248
   - [ ] Branch, with "Default branch" warning; file list with Edit/Done checkboxes to leave files out, "(n of m)" — GitActions.swift:275
   - [ ] Note of secret files left out; +/− totals — GitActions.swift:310
   - [ ] Optional message (blank: Agentman writes it); Cancel / Commit / Commit & push — GitActions.swift:326
 - [ ] Progress text (Writing the message… / Committing… / Pushing… / Opening the PR…) with spinner — GitActions.swift:209
 - [ ] Outcome line ("Committed abc, pushed to …") with View PR link and ×; hides after 10 s unless it failed — GitActions.swift:123
-- [ ] History row opens the right panel's History — WorkspacePanel.swift:73
-- [ ] Changes row with +added −removed opens the right panel's Diff — WorkspacePanel.swift:76
-- [ ] Files row opens the right panel's Files — WorkspacePanel.swift:86
+- [x] History row opens the right panel's History — WorkspacePanel.swift:73
+- [x] Changes row with +added −removed opens the right panel's Diff — WorkspacePanel.swift:76
+- [x] Files row opens the right panel's Files — WorkspacePanel.swift:86
 - [ ] Plans row (when the agent has artifacts) opens the Plans list — WorkspacePanel.swift:87
 - [ ] Plans list: icon by kind, title, "Needs your review", summary, relative time; empty text — WorkspacePanel.swift:743
 - [ ] Plan view: markdown or image; review box with comment, Ask for changes, Approve, then "Approved" / "Sent your changes" — WorkspacePanel.swift:813
 - [ ] In-card Changes list: summary, M/A/D/R/U letters tinted, dimmed folder before the name, +/−, note of hidden secret files; opens the diff — WorkspacePanel.swift:290
-- [ ] In-card Files browser: folders first, file sizes, drill down — WorkspacePanel.swift:479
+- [x] In-card Files browser: folders first, file sizes, drill down — WorkspacePanel.swift:479
 - [ ] In-card file viewer — WorkspacePanel.swift:594
-  - [ ] Code: read-only, line numbers, syntax colours, ⌘F find; "Showing the start of a long file" — CodeTextView.swift:8
+  - [x] Code: read-only, line numbers, syntax colours, ⌘F find; "Showing the start of a long file" — CodeTextView.swift:8
+    - Differs: ⌘F opens a find bar the page draws, not AppKit's; the Mac's ruler also draws its edge line up through the card's header (an AppKit glitch), not copied.
   - [ ] Image: click opens the lightbox; Copy Image — WorkspacePanel.swift:601
-- [ ] File/diff bar: folder, line count or +/−, Copy, Edit in the editor, Show in Finder — WorkspacePanel.swift:657
-- [ ] Back chevron (⌘[) through what was opened; changing tab resets it — WorkspacePanel.swift:174
+- [x] File/diff bar: folder, line count or +/−, Copy, Edit in the editor, Show in Finder — WorkspacePanel.swift:657
+- [x] Back chevron (⌘[) through what was opened; changing tab resets it — WorkspacePanel.swift:174
 - [ ] Each list loads with a spinner, or shows the error with Try again — WorkspacePanel.swift:238
-- [ ] "In this project · N": other running agents in the same folder (mark, state dot); click opens — WorkspacePanel.swift:95
-- [ ] Changes read again as the agent works (1 s after activity settles); git status when a turn starts or ends and after a git action — WorkspacePanel.swift:126
+- [x] "In this project · N": other running agents in the same folder (mark, state dot); click opens — WorkspacePanel.swift:95
+- [x] Changes read again as the agent works (1 s after activity settles); git status when a turn starts or ends and after a git action — WorkspacePanel.swift:126
 - [ ] Worktrees live in ~/Agentman/Worktrees/<repo>/<name>, labelled "repo · name"; created, listed and removed through the daemon — Worktrees.swift:11, Worktrees.swift:50
 
 ## 6. Right panel
-- [ ] Opens at the window's right edge with Diff / Files / History / Terminal tabs. Open tabs kept across launches; + menu opens any; × on hover closes a tab; closing the last closes the panel — RightPanel.swift:20, RightPanel.swift:113
-- [ ] Resize from the leading edge (min 360; thread keeps 380); double-click resets to 540. Fill the window / Restore; Close (⇧⌘D) — RightPanel.swift:105, AgentThreadView.swift:107, RightPanel.swift:138
-- [ ] Diff toolbar: "Uncommitted" scope, +/− totals, Collapse/Expand all, Stacked/Split, Wrap, Hide whitespace, File tree toggle (each kept across launches) — RightPanel.swift:496
-- [ ] Diff read again every 2.5 s while working; everything again when a turn changes — RightPanel.swift:484
-- [ ] File headers stick while their diff scrolls — RightPanel.swift:893
-  - [ ] Chevron, status icon, path, Copy path on hover, −/+; click folds the file — RightPanel.swift:904
-  - [ ] Context menu: Copy Path, Open in Editor, Show in Finder — RightPanel.swift:947
-- [ ] Diff lines: syntax colours, changed words marked, coloured edge bars, line numbers; split view puts old and new side by side — RightPanel.swift:735, RightPanel.swift:819
+- [x] Opens at the window's right edge with Diff / Files / History / Terminal tabs. Open tabs kept across launches; + menu opens any; × on hover closes a tab; closing the last closes the panel — RightPanel.swift:20, RightPanel.swift:113
+- [x] Resize from the leading edge (min 360; thread keeps 380); double-click resets to 540. Fill the window / Restore; Close (⇧⌘D) — RightPanel.swift:105, AgentThreadView.swift:107, RightPanel.swift:138
+- [x] Diff toolbar: "Uncommitted" scope, +/− totals, Collapse/Expand all, Stacked/Split, Wrap, Hide whitespace, File tree toggle (each kept across launches) — RightPanel.swift:496
+- [x] Diff read again every 2.5 s while working; everything again when a turn changes — RightPanel.swift:484
+- [x] File headers stick while their diff scrolls — RightPanel.swift:893
+  - [x] Chevron, status icon, path, Copy path on hover, −/+; click folds the file — RightPanel.swift:904
+  - [x] Context menu: Copy Path, Open in Editor, Show in Finder — RightPanel.swift:947
+- [x] Diff lines: syntax colours, changed words marked, coloured edge bars, line numbers; split view puts old and new side by side — RightPanel.swift:735, RightPanel.swift:819
 - [ ] Unchanged lines folded as "N unmodified lines"; click shows them (read from the file, or the commit's file) — RightPanel.swift:863, DiffLayout.swift:16
 - [ ] Diff states: loading, error, "No uncommitted changes", secrets only, binary or mode-only, too large, nothing with whitespace hidden — RightPanel.swift:546, RightPanel.swift:614
-- [ ] Changed-files tree (when ≥480pt wide): folders fold, picking a file scrolls to it, status letters, × hides it — RightPanel.swift:963
+- [x] Changed-files tree (when ≥480pt wide): folders fold, picking a file scrolls to it, status letters, × hides it — RightPanel.swift:963
 - [ ] Commit diff (from History): back, short hash, subject, author and date, body with Show more — RightPanel.swift:466, RightPanel.swift:665
 - [ ] History tab — HistoryPanel.swift:122
-  - [ ] Branch menu (browse any branch without checking it out); refresh — HistoryPanel.swift:125
-  - [ ] Commit rows: subject, hash, author, relative time, +/− — HistoryPanel.swift:195
+  - [x] Branch menu (browse any branch without checking it out); refresh — HistoryPanel.swift:125
+  - [x] Commit rows: subject, hash, author, relative time, +/− — HistoryPanel.swift:195
   - [ ] Load older commits / Try again; new commits appear on top; back from a commit scrolls to it — HistoryPanel.swift:178
-- [ ] Files tab: project tree with git marks (letter, tint, dot on changed folders), git-ignored dimmed, search across files, refresh, collapse all, files open in the editor; context Copy Path / Copy Relative Path / Show in Finder — RightPanel.swift:1116
-- [ ] Terminal tab: the folder's shells (see §7); "No terminal open in this folder." with New Terminal; note when the folder is gone — RightPanel.swift:1078
+- [x] Files tab: project tree with git marks (letter, tint, dot on changed folders), git-ignored dimmed, search across files, refresh, collapse all, files open in the editor; context Copy Path / Copy Relative Path / Show in Finder — RightPanel.swift:1116
+  - Differs: git-ignored files aren't dimmed and files holding secrets (.env) aren't listed: the tree comes from am serve's list_files, which leaves secrets out and says nothing of what git ignores. The search is am serve's find_files, best first, not the Mac's own scoring.
+- [x] Terminal tab: the folder's shells (see §7); "No terminal open in this folder." with New Terminal; note when the folder is gone — RightPanel.swift:1078
+  - Differs: off macOS the note says "this computer".
 - [ ] Lightbox — ImagePreview.swift:269
   - [ ] Dark overlay; title, "n of m", spinner while the next loads; "This image can't be read." — ImagePreview.swift:358
   - [ ] ← → keys and side arrows; close with ×, Esc, or a click beside the picture — ImagePreview.swift:316
@@ -240,19 +245,19 @@ Swift that does it today.
 - [ ] Plans rendered as markdown — WorkspacePanel.swift:831
 
 ## 7. Terminal
-- [ ] Terminal under the conversation (drag the divider, ≥120pt, height kept) or moved into the side panel (where it lives is kept) — AgentThreadView.swift:88, RightPanel.swift:81
-- [ ] Shown only while the folder has a shell; the last shell closing hides it — AgentThreadView.swift:58
-- [ ] Bar: TERMINAL label, shell tabs (title set by the program, "ended" when done), Restart for an ended shell — TerminalPanel.swift:16
-- [ ] Bar buttons: + new (⌃⇧`), Split/Unsplit, Clear, Stop & close, Move under/to side, Hide (⌃`) — TerminalPanel.swift:36
+- [x] Terminal under the conversation (drag the divider, ≥120pt, height kept) or moved into the side panel (where it lives is kept) — AgentThreadView.swift:88, RightPanel.swift:81
+- [x] Shown only while the folder has a shell; the last shell closing hides it — AgentThreadView.swift:58
+- [x] Bar: TERMINAL label, shell tabs (title set by the program, "ended" when done), Restart for an ended shell — TerminalPanel.swift:16
+- [x] Bar buttons: + new (⌃⇧`), Split/Unsplit, Clear, Stop & close, Move under/to side, Hide (⌃`) — TerminalPanel.swift:36
 - [ ] Split tab: two shells side by side; closing the tab closes both — TerminalPanel.swift:63, TerminalPanel.swift:140
-- [ ] Shells belong to the folder, shared with its editor; they outlive the panel and window until quit — EditorStore.swift:156, TerminalPanel.swift:166
-- [ ] Login shell from the user record ($SHELL fallback); TERM=xterm-256color, TERM_PROGRAM=Agentman; tmux and agentman variables removed — TerminalSession.swift:34
+- [x] Shells belong to the folder, shared with its editor; they outlive the panel and window until quit — EditorStore.swift:156, TerminalPanel.swift:166
+- [x] Login shell from the user record ($SHELL fallback); TERM=xterm-256color, TERM_PROGRAM=Agentman; tmux and agentman variables removed — TerminalSession.swift:34
 - [ ] Agent's own terminal: tmux attach in a tab of its own, reused if still open; closing it leaves the agent running — EditorStore.swift:516, AgentThreadView.swift:416
-- [ ] ⌘K clears screen and scrollback; Option types characters (not Meta) — TerminalSession.swift:131, TerminalSession.swift:112
+- [x] ⌘K clears screen and scrollback; Option types characters (not Meta) — TerminalSession.swift:131, TerminalSession.swift:112
 - [ ] Wheel/trackpad: programs that take the mouse (tmux) get wheel events, full-screen programs get arrow keys, else scrollback; small trackpad movements add up — TerminalSession.swift:151
-- [ ] Exit message "[The shell ended (with code N). Restart it from the panel.]" — TerminalSession.swift:99
-- [ ] Light/dark theme with custom 16 ANSI colours; Google Sans Code 12.5 — TerminalSession.swift:214
-- [ ] Keyboard goes to the shell when it is shown — TerminalPanel.swift:185
+- [x] Exit message "[The shell ended (with code N). Restart it from the panel.]" — TerminalSession.swift:99
+- [x] Light/dark theme with custom 16 ANSI colours; Google Sans Code 12.5 — TerminalSession.swift:214
+- [x] Keyboard goes to the shell when it is shown — TerminalPanel.swift:185
 
 ## 8. Agentman (ManagerChatView, ManagerStore)
 - [ ] Header: "Agentman", "N scheduled" popover, New chat (asks first; open cards carry over) — ManagerChatView.swift:39

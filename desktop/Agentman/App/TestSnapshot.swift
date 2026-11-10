@@ -17,6 +17,15 @@ enum TestSnapshot {
     static func start() {
         guard let path = env["AGENTMAN_TEST_SNAPSHOT"], !path.isEmpty else { return }
         NSApp.setActivationPolicy(.accessory)
+        // AGENTMAN_TEST_TERMINAL=<folder>: a shell open there, so the
+        // terminal under the conversation (or in the panel) has one to show.
+        if let folder = env["AGENTMAN_TEST_TERMINAL"], !folder.isEmpty {
+            RightPanel.startTerminal(in: folder)
+            // AGENTMAN_TEST_TERMINAL_SPLIT=1: and a second shell beside it.
+            if env["AGENTMAN_TEST_TERMINAL_SPLIT"] == "1" {
+                EditorRegistry.shared.store(for: folder).splitTerminal()
+            }
+        }
         // Every window is hidden the moment it exists, the editor's too.
         let timer = Timer(timeInterval: 0.01, repeats: true) { _ in
             MainActor.assumeIsolated { hideWindows() }

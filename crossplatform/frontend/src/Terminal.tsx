@@ -1,39 +1,61 @@
 // A terminal: xterm.js here, the program on a pty in am serve
-// (internal/term). An agent's terminal attaches to its tmux session; a
-// folder's starts the user's shell there.
+// (internal/term). A folder's is its whole terminal panel, its shells kept by
+// am serve and shared by every window (RightPanel.swift's FolderTerminal); an
+// agent's attaches to its tmux session on its own.
 
 import { useEffect, useRef, useState } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { endpoint, platform } from "./host";
+import { thisComputer } from "./workspace/place";
+import { shellCommand, useShells } from "./terminal/shells";
+import { TerminalPanel, type TerminalMove } from "./terminal/TerminalPanel";
+import { terminalTheme, TERMINAL_FONT, TERMINAL_SIZE } from "./terminal/theme";
 import "./styles/terminal.css";
 
 export type TerminalTarget = { session: string } | { folder: string };
 
-function cssVar(name: string) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+/** A terminal: a folder's panel of shells, or an agent's tmux on its own.
+ *  hide shows a Hide button (under the editor or the conversation); move, one
+ *  that moves it between under the conversation and the side panel. */
+export function Terminal({ target, hide, move }: { target: TerminalTarget; hide?: () => void; move?: TerminalMove }) {
+  if ("folder" in target) return <FolderTerminal folder={target.folder} hide={hide} move={move} />;
+  return <AgentTerminal session={target.session} />;
 }
 
-export function Terminal({ target }: { target: TerminalTarget }) {
+/** The folder's shells, or a way to start one. */
+export function FolderTerminal({ folder, hide, move }: { folder: string; hide?: () => void; move?: TerminalMove }) {
+  const state = useShells(folder);
+  if (state.problem) {
+    return <div className="term-note"><span>This folder isn't on {thisComputer()} any more.</span></div>;
+  }
+  if (!state.ready) return <div className="term-note" />;
+  if (!state.shells.length) {
+    return (
+      <div className="term-note">
+        <span>No terminal open in this folder.</span>
+        <button className="push-button small" onClick={() => shellCommand(folder, { type: "new" })}>New Terminal</button>
+      </div>
+    );
+  }
+  return <TerminalPanel folder={folder} state={state} hide={hide} move={move} />;
+}
+
+/** An agent's tmux session, attached for as long as it is shown. */
+function AgentTerminal({ session }: { session: string }) {
   const host = useRef<HTMLDivElement>(null);
   const [note, setNote] = useState("Connecting…");
-  const key = "session" in target ? `s:${target.session}` : `f:${target.folder}`;
 
   useEffect(() => {
     const el = host.current;
     if (!el) return;
     const term = new XTerm({
-      fontFamily: '"Google Sans Code", ui-monospace, Menlo, Consolas, monospace',
-      fontSize: 13,
-      cursorBlink: true,
+      fontFamily: TERMINAL_FONT,
+      fontSize: TERMINAL_SIZE,
       allowProposedApi: true,
-      theme: {
-        background: cssVar("--paper"),
-        foreground: cssVar("--text"),
-        cursor: cssVar("--text"),
-        selectionBackground: cssVar("--selection"),
-      },
+      macOptionIsMeta: false,
+      theme: terminalTheme(),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -57,9 +79,7 @@ export function Terminal({ target }: { target: TerminalTarget }) {
       }
       const ep = await endpoint();
       if (disposed) return;
-      const q = new URLSearchParams({ token: ep.token, cols: String(term.cols), rows: String(term.rows) });
-      if ("session" in target) q.set("session", target.session);
-      else q.set("folder", target.folder);
+      const q = new URLSearchParams({ token: ep.token, cols: String(term.cols), rows: String(term.rows), session });
       ws = new WebSocket(`${ep.terminal}?${q}`);
       ws.binaryType = "arraybuffer";
       ws.onopen = () => setNote("");
@@ -87,13 +107,12 @@ export function Terminal({ target }: { target: TerminalTarget }) {
       ws?.close();
       term.dispose();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [session]);
 
   return (
-    <div className="terminal">
-      <div className="terminal-host" ref={host} />
-      {note && <div className="terminal-note">{note}</div>}
+    <div className="agent-term">
+      <div className="agent-term-host" ref={host} />
+      {note && <div className="agent-term-note">{note}</div>}
     </div>
   );
 }

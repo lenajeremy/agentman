@@ -251,6 +251,19 @@ struct GitActionsRow: View {
         } message: {
             Text(confirmMessage)
         }
+        #if DEBUG
+        // Test runs (crossplatform/scripts/teststack/compare.sh):
+        // AGENTMAN_TEST_GIT=sheet, running or outcome shows that state.
+        .onAppear {
+            switch ProcessInfo.processInfo.environment["AGENTMAN_TEST_GIT"] {
+            case "sheet": committing = .commitAndPush
+            case "running": running = "Writing the message…"
+            case "outcome": outcome = Outcome(text: "Committed 3f9c2a1, pushed to origin/main.")
+            case "failed": outcome = Outcome(text: "Committed 3f9c2a1, but the push was rejected: fetch first.", failed: true)
+            default: break
+            }
+        }
+        #endif
     }
 
     private var requestReady: Bool {
