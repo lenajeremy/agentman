@@ -327,7 +327,8 @@ export interface QuestionReply {
 /** Answers a card: the agent's question, or a reply to an agent waiting on
  *  the user. Returns the problem, if any. */
 export function replyToCard(card: ManagerCard, reply: QuestionReply): Promise<string | undefined> {
-  if (card.kind === "question" || card.kind === "key") {
+  // An offer is answered with its options too (ManagerStore.reply).
+  if (card.kind === "question" || card.kind === "key" || card.kind === "offer") {
     return perform({ type: "manager_card_reply", cardId: card.id, optionKey: reply.optionKey, optionKeys: reply.optionKeys, answerText: reply.text });
   }
   return perform({ type: "manager_card_reply", cardId: card.id, text: reply.text });
