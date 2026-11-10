@@ -6,6 +6,7 @@
 import { Call, Events } from "@wailsio/runtime";
 import { useSyncExternalStore } from "react";
 import { unsavedFiles } from "./quitGuard";
+import { hostCall } from "../host";
 
 const inShell = location.protocol === "wails:" || location.hostname === "wails.localhost";
 
@@ -83,7 +84,7 @@ let home = "";
 /** The user's home folder. */
 export async function homeFolder(): Promise<string> {
   if (home) return home;
-  if (inShell) home = String(await Call.ByName("main.Shell.Home"));
+  if (inShell) home = String(await hostCall("Shell.Home"));
   else home = (await fetch("/__agentman/home").then((r) => (r.ok ? r.text() : "")).catch(() => "")) || "";
   return home;
 }

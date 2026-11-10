@@ -3,7 +3,7 @@
 // again when the window comes back to the front.
 
 import { useEffect, useState } from "react";
-import { Call } from "@wailsio/runtime";
+import { hostCall } from "../host";
 
 export interface FolderInfo {
   exists: boolean;
@@ -16,7 +16,7 @@ const known = new Map<string, FolderInfo>();
 async function look(path: string): Promise<FolderInfo> {
   if (!inShell) return { exists: true, repository: true };
   try {
-    return (await Call.ByName("main.Files.Folder", path)) as FolderInfo;
+    return (await hostCall("Files.Folder", path)) as FolderInfo;
   } catch {
     return { exists: false, repository: false };
   }

@@ -4,10 +4,11 @@
 // drafts kept across launches.
 
 import { useSyncExternalStore } from "react";
-import { Call } from "@wailsio/runtime";
+
 import type { Message, Tool } from "@shared/protocol";
 import { daemon, type AppEvent, type AppRequest } from "../daemon";
 import { getPref, setPref } from "../prefs";
+import { hostCall } from "../host";
 
 type Listener = () => void;
 
@@ -199,7 +200,7 @@ export interface LocalFile {
 export async function readLocalFile(path: string, max: number): Promise<LocalFile | null> {
   if (!inShell) return null;
   try {
-    return (await Call.ByName("main.Files.Read", path, max)) as LocalFile;
+    return (await hostCall("Files.Read", path, max)) as LocalFile;
   } catch {
     return null;
   }

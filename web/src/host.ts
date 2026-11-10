@@ -3,7 +3,7 @@
 // browser, while the screens are developed, the Vite server stands in.
 
 import { Daemon, Host, Windows } from "../bindings/github.com/lenajeremy/agentman/crossplatform";
-import { Events } from "@wailsio/runtime";
+import { Call, Events } from "@wailsio/runtime";
 import { NotificationService } from "../bindings/github.com/wailsapp/wails/v3/pkg/services/notifications";
 
 export interface Endpoint {
@@ -16,7 +16,25 @@ export type Platform = "darwin" | "linux" | "windows" | "browser";
 
 /** Running inside the Wails shell, rather than in a browser: its pages come
  *  from wails:// on macOS and Linux, and http://wails.localhost on Windows. */
-const inShell = location.protocol === "wails:" || location.hostname === "wails.localhost";
+export const inShell = location.protocol === "wails:" || location.hostname === "wails.localhost";
+
+/**
+ * Asks the computer for what a page can't do itself (internal/apphost):
+ * "Files.Folder", "Files.Read", "Shell.Home"… In the desktop shell its
+ * services answer; in the browser am serve does, at /app/host/<name>,
+ * signed in by the session cookie.
+ */
+export async function hostCall<T>(name: string, ...args: unknown[]): Promise<T> {
+  if (inShell) return Call.ByName(`main.${name}`, ...args) as Promise<T>;
+  const res = await fetch(`/app/host/${name}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(args),
+  });
+  const body = (await res.json().catch(() => ({ error: res.statusText }))) as { result?: T; error?: string };
+  if (!res.ok || body.error) throw new Error(body.error || res.statusText);
+  return body.result as T;
+}
 
 /** Where am serve is, and the token it gave out at its last start. */
 export async function endpoint(): Promise<Endpoint> {

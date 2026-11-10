@@ -3,7 +3,7 @@
 // from the system (locale.go), not the web view's language alone.
 
 import { useSyncExternalStore } from "react";
-import { Call } from "@wailsio/runtime";
+import { hostCall } from "../host";
 
 const inShell = location.protocol === "wails:" || location.hostname === "wails.localhost";
 
@@ -11,7 +11,7 @@ let locale: string | undefined;
 const listeners = new Set<() => void>();
 
 if (inShell) {
-  void (Call.ByName("main.Host.Locale") as Promise<string>)
+  void (hostCall("Host.Locale") as Promise<string>)
     .then((tag) => {
       if (!tag) return;
       // A tag Intl doesn't know is left for its default.

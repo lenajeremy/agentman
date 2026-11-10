@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -66,4 +67,34 @@ func withCookie(c *http.Cookie, origin string) *http.Request {
 	r.AddCookie(c)
 	r.Header.Set("Origin", origin)
 	return r
+}
+
+func TestTheHostCallsNeedASignedInApp(t *testing.T) {
+	g := newAppGateway("secret")
+	post := func(target, body, origin string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
+		r.Host = "127.0.0.1:8788"
+		if origin != "" {
+			r.Header.Set("Origin", origin)
+		}
+		rec := httptest.NewRecorder()
+		g.host(rec, r)
+		return rec
+	}
+	if rec := post("/app/host/Shell.Home", "[]", "https://example.com"); rec.Code != http.StatusForbidden {
+		t.Fatalf("a call with no sign-in: %d", rec.Code)
+	}
+	rec := post("/app/host/Shell.Home?token=secret", "[]", "")
+	var answer struct{ Result string }
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &answer) != nil || answer.Result == "" {
+		t.Fatalf("Shell.Home: %d %s", rec.Code, rec.Body)
+	}
+	if rec := post("/app/host/Nope.Nothing?token=secret", "[]", ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("an unknown method: %d", rec.Code)
+	}
+	rec = post("/app/host/Files.Read?token=secret", `["relative", 10]`, "")
+	var failed struct{ Error string }
+	if json.Unmarshal(rec.Body.Bytes(), &failed) != nil || failed.Error == "" {
+		t.Fatalf("a failing call: %s", rec.Body)
+	}
 }

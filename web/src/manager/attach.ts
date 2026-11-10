@@ -4,8 +4,7 @@
 // through the shell (menus.go's Files.Read), as a page can't read a file
 // by its path.
 
-import { Call } from "@wailsio/runtime";
-import { pickFiles } from "../host";
+import { pickFiles, hostCall } from "../host";
 import type { InlineImage } from "./store";
 
 export interface Attachment {
@@ -100,7 +99,7 @@ export async function fromPaths(paths: string[]): Promise<Attachment[]> {
   for (const path of paths) {
     if (!inShell) break;
     try {
-      const file = (await Call.ByName("main.Files.Read", path, MAX_FILE)) as PickedFile;
+      const file = (await hostCall("Files.Read", path, MAX_FILE)) as PickedFile;
       if (!file.data || !file.mime.startsWith("image/")) continue;
       const bytes = Uint8Array.from(atob(file.data), (c) => c.charCodeAt(0));
       const made = await fromBlob(new Blob([bytes], { type: file.mime }));

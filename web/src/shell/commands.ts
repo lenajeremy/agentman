@@ -4,13 +4,13 @@
 // In a plain browser, which has no menu bar, the page takes the menu's
 // shortcuts itself.
 
-import { Call } from "@wailsio/runtime";
 import { openLightbox } from "../lightbox";
 import { getPref, setPref } from "../prefs";
 import { openAgentman, openLink, openNewAgent } from "../nav";
 import { showAwaySince, showLastAway } from "../away/away";
 import { onCommand, type Command } from "./native";
 import { setShell } from "./state";
+import { hostCall } from "../host";
 
 const inShell = location.protocol === "wails:" || location.hostname === "wails.localhost";
 
@@ -93,7 +93,7 @@ function launchOptions() {
   if (q.has("palette")) setShell({ showPalette: true });
   const image = q.get("lightbox");
   if (image && inShell) {
-    void Call.ByName("main.Files.Read", image, 50 * 1024 * 1024).then((file) => {
+    void hostCall("Files.Read", image, 50 * 1024 * 1024).then((file) => {
       const f = file as { data: string; mime: string; name: string };
       if (f.data) openLightbox([{ src: `data:${f.mime};base64,${f.data}`, title: f.name, path: image }]);
     }).catch(() => {});

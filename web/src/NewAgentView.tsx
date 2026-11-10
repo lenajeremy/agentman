@@ -5,10 +5,10 @@
 // at once.
 
 import { useEffect, useRef, useState } from "react";
-import { Call } from "@wailsio/runtime";
+
 import { ArrowUp, ChevronDown, Folder as FolderIcon, GitBranch } from "lucide-react";
 import { agentName } from "./labels";
-import { pickFolder } from "./host";
+import { pickFolder, hostCall } from "./host";
 import { openAgent, openNewAgent } from "./nav";
 import { usePref } from "./prefs";
 import { homeFolder } from "./shell/native";
@@ -57,7 +57,7 @@ const inShell = location.protocol === "wails:" || location.hostname === "wails.l
 async function folderExists(path: string): Promise<boolean> {
   if (!inShell) return true;
   try {
-    const info = (await Call.ByName("main.Files.Folder", path)) as { exists: boolean };
+    const info = (await hostCall("Files.Folder", path)) as { exists: boolean };
     return info.exists;
   } catch {
     return true;

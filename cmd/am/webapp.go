@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lenajeremy/agentman/internal/apphost"
 	"github.com/lenajeremy/agentman/internal/daemon"
 	"github.com/lenajeremy/agentman/internal/hook"
 	"github.com/lenajeremy/agentman/internal/webapp"
@@ -25,6 +26,7 @@ import (
 //   GET /app/login-code?token=<app token>   a one-time code, for am web
 //   GET /login?code=<code>                  the code for a session cookie
 //   GET /…                                  the app, to a signed-in browser
+//   POST /app/host/<name>                   what a page can't do (internal/apphost)
 
 // loginCode answers am web with a one-time code. Only the app token proves
 // the caller: a browser is never given it.
@@ -51,7 +53,14 @@ func (g *appGateway) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	daemon.SetWebCookie(w, session)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	// next, a path on this same address (/?agent=<id>), is where to land;
+	// anything else goes to the start, so the link can't send the browser
+	// elsewhere.
+	next := r.URL.Query().Get("next")
+	if !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.Contains(next, "\\") {
+		next = "/"
+	}
+	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
 // page serves the app's files. The page itself goes only to a signed-in
@@ -67,6 +76,40 @@ func (g *appGateway) page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	webapp.Handler().ServeHTTP(w, r)
+}
+
+// hostMethods are the calls /app/host/ answers.
+var hostMethods = apphost.Methods()
+
+// host answers the screens' calls to the computer: POST /app/host/<name>
+// with the arguments as a JSON array, answered {"result": …} or
+// {"error": "…"}. The same sign-in as the app endpoints guards it.
+func (g *appGateway) host(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if g.gate.Allow(r) != nil && !g.web.Allow(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	method, ok := hostMethods[strings.TrimPrefix(r.URL.Path, "/app/host/")]
+	if !ok {
+		http.Error(w, apphost.ErrNoMethod.Error(), http.StatusNotFound)
+		return
+	}
+	var args []json.RawMessage
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<20)).Decode(&args); err != nil {
+		http.Error(w, "the arguments aren't a JSON array", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	result, err := method(args)
+	if err != nil {
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"result": result})
 }
 
 // webappHostOK keeps DNS rebinding out: the app answers only to loopback.
