@@ -60,12 +60,15 @@ func (r *Registry) EndSession(ctx context.Context, sessionID string) error {
 // Ended there, it only came off the list, and the agent runs on: what the
 // last sweep found, before ended sessions were left out, still has it.
 //
-// Only a process seen alive counts. Codex lists a recent transcript as idle
-// after its agent has exited, and refusing that would leave a stopped
-// conversation that can't be reopened for the three days it stays listed.
+// Only an agent seen running counts: its source's word where it can tell
+// (Codex: a process holding the conversation's rollout open), else a live
+// pid. Codex lists a recent rollout as idle after its agent has exited, and
+// records a pid only for a pane; going by the listing refused a stopped
+// conversation for days, and going by the pid let one still running in the
+// user's terminal be started twice.
 func (r *Registry) RunningUnreachable(sessionID string) bool {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
+	var candidates []protocol.Session
 	for _, sessions := range r.last {
 		for _, session := range sessions {
 			if session.ID != sessionID && endedKey(session) != sessionID {
@@ -74,9 +77,26 @@ func (r *Registry) RunningUnreachable(sessionID string) bool {
 			if session.State == protocol.StateEnded || session.Inject == protocol.InjectTmux || session.Inject == protocol.InjectAPI {
 				continue
 			}
-			if session.AgentPID > 0 && processAlive(session.AgentPID) {
-				return true
+			candidates = append(candidates, session)
+		}
+	}
+	sources := make(map[protocol.Kind]Source, len(candidates))
+	for _, session := range candidates {
+		sources[session.Kind] = r.sources[session.Kind]
+	}
+	r.mu.RUnlock()
+
+	for _, session := range candidates {
+		if opener, ok := sources[session.Kind].(conversationOpener); ok {
+			if open, known := opener.ConversationOpen(session); known {
+				if open {
+					return true
+				}
+				continue
 			}
+		}
+		if session.AgentPID > 0 && processAlive(session.AgentPID) {
+			return true
 		}
 	}
 	return false
