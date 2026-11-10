@@ -7,6 +7,14 @@
 ;(function () {
   var pending = new Map()
   var next = 0
+  // Monaco drops work it no longer needs (a hover, a highlight, a model
+  // closed) by rejecting with an error named Canceled, which VS Code's own
+  // handler ignores; Safari reports each as an unhandled rejection. Ignored
+  // here the same way, and nothing else.
+  window.addEventListener('unhandledrejection', function (e) {
+    var reason = e.reason
+    if (reason && (reason.name === 'Canceled' || reason.message === 'Canceled')) e.preventDefault()
+  })
   window.addEventListener('message', function (e) {
     if (e.source !== window.parent) return
     var data = e.data || {}
