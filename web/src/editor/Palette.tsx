@@ -9,6 +9,16 @@ import { FileTypeIcon } from "./fileIcons";
 import { paths, type SearchMatch } from "./fs";
 import { fuzzyFilter } from "./fuzzy";
 import type { EditorStore } from "./store";
+import { useKeyboardBack } from "../palette/PaletteView";
+
+/** Gives the keyboard back to the editor's code, which sits in a frame of
+ *  its own, or to whatever else had it. */
+export function editorKeyboardBack(store: EditorStore) {
+  return (before: Element | null) => {
+    if (before instanceof HTMLIFrameElement && before.classList.contains("monaco")) store.monaco?.focus();
+    else if (before instanceof HTMLElement && before.isConnected) before.focus();
+  };
+}
 
 interface Item {
   id: string;
@@ -30,6 +40,7 @@ function PaletteView({
   accessory,
   status,
   initial = "",
+  giveBack,
 }: {
   placeholder: string;
   results: (query: string) => Item[];
@@ -40,7 +51,9 @@ function PaletteView({
   accessory?: ReactNode;
   status?: string | null;
   initial?: string;
+  giveBack?: (before: Element | null) => void;
 }) {
+  useKeyboardBack(giveBack);
   const [query, setQuery] = useState(initial);
   const [selected, setSelected] = useState(0);
   const input = useRef<HTMLInputElement>(null);
@@ -160,6 +173,7 @@ export function GoToFile({ store }: { store: EditorStore }) {
   return (
     <PaletteView
       placeholder="Go to file"
+      giveBack={editorKeyboardBack(store)}
       results={results}
       choose={(item) => {
         close();
@@ -213,6 +227,7 @@ export function GoToText({ store }: { store: EditorStore }) {
   return (
     <PaletteView
       placeholder={`Search in ${store.name}`}
+      giveBack={editorKeyboardBack(store)}
       initial={store.searchQuery}
       results={items}
       status={status}

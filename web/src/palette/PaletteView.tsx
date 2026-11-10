@@ -36,7 +36,31 @@ export function shortcutLabel(shortcut: string): string {
   return mac ? shortcut : shortcut.replace("⌘", "Ctrl+");
 }
 
-export function PaletteView({ placeholder, results, choose, dismiss, initialQuery = "", status }: {
+/**
+ * Where the keyboard was when a palette opened, given back when it closes,
+ * unless what was chosen took it somewhere else. Closing one with Escape
+ * used to leave the keyboard nowhere, so what was typed next was lost.
+ * `giveBack` does it where focusing the element isn't enough (the editor's
+ * code, in a frame of its own).
+ */
+export function useKeyboardBack(giveBack?: (before: Element | null) => void) {
+  const [before] = useState(() => document.activeElement);
+  const back = useRef(giveBack);
+  back.current = giveBack;
+  useEffect(
+    () => () => {
+      requestAnimationFrame(() => {
+        const now = document.activeElement;
+        if (now && now !== document.body) return;
+        if (back.current) back.current(before);
+        else if (before instanceof HTMLElement && before.isConnected) before.focus();
+      });
+    },
+    [before],
+  );
+}
+
+export function PaletteView({ placeholder, results, choose, dismiss, initialQuery = "", status, giveBack }: {
   placeholder: string;
   /** The rows for what has been typed, best first. */
   results: (query: string) => PaletteItem[];
@@ -44,7 +68,9 @@ export function PaletteView({ placeholder, results, choose, dismiss, initialQuer
   dismiss: () => void;
   initialQuery?: string;
   status?: string;
+  giveBack?: (before: Element | null) => void;
 }) {
+  useKeyboardBack(giveBack);
   const [query, setQuery] = useState(initialQuery);
   const [selected, setSelected] = useState(0);
   const input = useRef<HTMLInputElement>(null);

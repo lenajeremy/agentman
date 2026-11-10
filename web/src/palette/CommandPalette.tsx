@@ -13,6 +13,7 @@ import type { Session } from "@shared/protocol";
 import { showLastAway } from "../away/away";
 import { daemon } from "../daemon";
 import type { EditorStore, PanelRoute } from "../editor/store";
+import { editorKeyboardBack } from "../editor/Palette";
 import { agentName } from "../labels";
 import { openEditor, openInMain, openSettings, pickFolder } from "../host";
 import { openAgent, openAgentman, openNewAgent, useRoute, openUsage } from "../nav";
@@ -200,6 +201,7 @@ function Palette({ editor }: { editor?: EditorStore }) {
   return (
     <PaletteView
       placeholder="Go to an agent, run a command, or ask Agentman"
+      giveBack={editor ? editorKeyboardBack(editor) : undefined}
       initialQuery={initial}
       results={results}
       dismiss={close}
