@@ -2,6 +2,7 @@
 // (Views/BoardActions.swift's ShipSheet and TonightPanel).
 
 import { useEffect, useRef, useState } from "react";
+import { useKeyboardBack } from "../palette/PaletteView";
 import { CircleArrowUp, CircleCheck, CircleMinus, CircleX, Clock, Moon, TriangleAlert, X } from "lucide-react";
 import type { Session, ShipItem } from "@shared/protocol";
 import { openURL } from "../host";
@@ -14,6 +15,7 @@ import { shipReason, shipSummary } from "./git";
 
 /** Choosing finished agents to ship together, and watching it happen. */
 export function ShipSheet({ sessions, close }: { sessions: Session[]; close: () => void }) {
+  useKeyboardBack();
   const manager = useManager();
   const [states, setStates] = useState<Record<string, GitState>>({});
   const [loaded, setLoaded] = useState(false);
@@ -142,6 +144,8 @@ export function TonightButton() {
 }
 
 function TonightPanel({ anchor, close }: { anchor: HTMLElement | null; close: () => void }) {
+  // Closed, the keyboard goes back to the button that opened it.
+  useKeyboardBack();
   const { queue, settings } = useManager();
   const { folders } = useShell();
   const [task, setTask] = useState("");

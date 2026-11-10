@@ -5,6 +5,7 @@
 // where a state is.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useKeyboardBack } from "../palette/PaletteView";
 import {
   BadgeCheck, ChevronDown, CircleArrowUp, CircleCheck, CircleX as XCircle, Palette, Search, Check, CircleAlert, Circle, CircleX, Clock, Code, Diff, EyeOff, Ellipsis, FileText, Globe, MessagesSquare, MessageSquarePlus,
   Plus, SquarePen, TriangleAlert, X,
@@ -721,6 +722,7 @@ function HandledButton() {
 }
 
 function HandledPanel({ anchor, entries, close }: { anchor: HTMLElement | null; entries: ManagerEntry[]; close: () => void }) {
+  useKeyboardBack();
   const panel = useRef<HTMLDivElement>(null);
   const [asked, setAsked] = useState<Set<string>>(new Set());
   const manager = useManager();

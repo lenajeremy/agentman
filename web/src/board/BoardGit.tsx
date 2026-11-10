@@ -5,6 +5,7 @@
 // branch asks once, on the chip itself.
 
 import { useEffect, useState } from "react";
+import { useKeyboardBack } from "../palette/PaletteView";
 import { ArrowUpRight, CircleArrowUp, CircleCheck, CircleX, GitPullRequest, RotateCw, TriangleAlert, X } from "lucide-react";
 import type { WorkspaceChange } from "@shared/protocol";
 import { openURL } from "../host";
@@ -95,6 +96,8 @@ type Stage = { kind: "loading" } | { kind: "form" } | { kind: "committed"; commi
 /** Commit from the Board: the agent page's sheet, then a way to push what
  *  was just committed, without leaving the Board. */
 export function BoardCommitSheet({ sessionId, close }: { sessionId: string; close: () => void }) {
+  // Closed, the keyboard goes back to the button that opened it.
+  useKeyboardBack();
   const [stage, setStage] = useState<Stage>({ kind: "loading" });
   const [state, setState] = useState<GitState | null>(null);
   const [changes, setChanges] = useState<WorkspaceChange[]>([]);
