@@ -24,7 +24,7 @@ done. One at a time, in this order.
    `limits`): what the agents spent over six months, a year or all of it,
    input, cache and output apart, fast mode and advising; what is left of
    each plan.
-5. **Take Over and Open in Terminal** (`handoff_session`): an ended or
+5. ✓ (d759003) **Take Over and Open in Terminal** (`handoff_session`): an ended or
    watched thread says so and offers Take Over.
 6. **Find in a conversation** (FindBar.swift, ⌘F), and opening a search
    hit at its message (ThreadJump); the sidebar's search of what was said
@@ -45,6 +45,10 @@ done. One at a time, in this order.
 Not for the web app: the setup screen, installing the am command, Sparkle
 updates and the catch-up prompt (am serve serves the web app itself, so the
 two always match).
+
+Seen while testing, not yet looked into: attaching an agent's own
+terminal can type the terminal's answer to tmux's query ("1;2c0;276;0c")
+into its shell.
 
 Known browser limits: ⌘N, ⌘T, ⌘W and ⌘Q stay the browser's; files copied in
 the editor's tree go on the clipboard as paths.
