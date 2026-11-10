@@ -50,9 +50,13 @@ export async function confirmEnd(session: Session) {
     if (route.kind === "agent" && route.id === session.id) {
       const ended = endedSession(session);
       const shell = getShell();
-      // Not closed: it runs on in a terminal the user opened.
+      // Not closed, one that ran in a terminal runs on there, in one the
+      // user opened. One Agentman drives itself (inject "api": Muse, Kiro
+      // over ACP) ran in none, and has stopped.
       const others = shell.stillRunning.filter((id) => id !== ended.id);
-      setShell({ foundSessions: { ...shell.foundSessions, [ended.id]: ended }, stillRunning: reply.closed === true ? others : [...others, ended.id] });
+      const ranInTerminal = session.inject === "tmux" || session.inject === "hook";
+      const runsOn = ranInTerminal && reply.closed !== true;
+      setShell({ foundSessions: { ...shell.foundSessions, [ended.id]: ended }, stillRunning: runsOn ? [...others, ended.id] : others });
       openAgent(ended.id);
     }
   } catch (err) {
