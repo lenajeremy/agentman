@@ -59,6 +59,10 @@ func (r *Registry) EndSession(ctx context.Context, sessionID string) error {
 // Agentman can't type into it (a terminal the user opened), listed or not.
 // Ended there, it only came off the list, and the agent runs on: what the
 // last sweep found, before ended sessions were left out, still has it.
+//
+// Only a process seen alive counts. Codex lists a recent transcript as idle
+// after its agent has exited, and refusing that would leave a stopped
+// conversation that can't be reopened for the three days it stays listed.
 func (r *Registry) RunningUnreachable(sessionID string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -70,7 +74,9 @@ func (r *Registry) RunningUnreachable(sessionID string) bool {
 			if session.State == protocol.StateEnded || session.Inject == protocol.InjectTmux || session.Inject == protocol.InjectAPI {
 				continue
 			}
-			return true
+			if session.AgentPID > 0 && processAlive(session.AgentPID) {
+				return true
+			}
 		}
 	}
 	return false

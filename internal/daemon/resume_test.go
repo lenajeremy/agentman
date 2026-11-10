@@ -66,9 +66,11 @@ func TestResumeRefusesASessionStillRunningElsewhere(t *testing.T) {
 // here on the Mac, must not start a second agent beside it.
 func TestResumeRefusesAnEndedSessionStillRunningElsewhere(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
+	// A process that is surely alive: this test's own.
+	alive := os.Getpid()
 	for _, session := range []protocol.Session{
-		{ID: "claude:abc", Kind: protocol.KindClaude, State: protocol.StateIdle, Inject: protocol.InjectHook, AgentPID: 4242},
-		{ID: "codex:abc", Kind: protocol.KindCodex, State: protocol.StateIdle, Inject: protocol.InjectNone},
+		{ID: "claude:abc", Kind: protocol.KindClaude, State: protocol.StateIdle, Inject: protocol.InjectHook, AgentPID: alive},
+		{ID: "codex:abc", Kind: protocol.KindCodex, State: protocol.StateIdle, Inject: protocol.InjectNone, AgentPID: alive},
 	} {
 		session.NativeID, session.Cwd = "abc", t.TempDir()
 		registry := source.NewRegistry()
@@ -100,6 +102,30 @@ func TestResumeRefusesAnEndedSessionStillRunningElsewhere(t *testing.T) {
 		if !strings.Contains(reply.Error, "running") {
 			t.Errorf("%s: the refusal does not say why: %s", session.ID, reply.Error)
 		}
+	}
+}
+
+// Codex lists a recent transcript as idle after its agent has exited. Ended
+// and opened again from history, it is reopened: nothing is running to be
+// started twice, and refusing would leave it closed for days.
+func TestAnEndedSessionWithNothingRunningIsReopened(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	session := protocol.Session{ID: "codex:abc", Kind: protocol.KindCodex, NativeID: "abc", Cwd: t.TempDir(),
+		State: protocol.StateIdle, Inject: protocol.InjectNone}
+	registry := source.NewRegistry()
+	registry.Add(&liveSource{session: session})
+	agent := New(registry, &recordingSink{})
+	agent.refresh(context.Background(), true)
+	agent.HandleFrom(context.Background(), "mac", protocol.Request{Type: protocol.ReqEndSession, SessionID: session.ID})
+	agent.refresh(context.Background(), false)
+	gone := session
+	gone.State = protocol.StateEnded
+	agent.folders.remember([]protocol.Session{gone})
+
+	reply := agent.HandleFrom(context.Background(), "phone", protocol.Request{Type: protocol.ReqResumeSession, SessionID: session.ID})
+	// Nothing can be launched here, so trying shows as "not installed".
+	if reply.Type != protocol.EvtError || !strings.Contains(reply.Error, "not installed") {
+		t.Fatalf("a stopped session wasn't reopened: %+v", reply.Error)
 	}
 }
 
