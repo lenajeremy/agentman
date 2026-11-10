@@ -19,6 +19,7 @@ struct AgentmanApp: App {
         // offering accents: holding j in the editor's Vim mode moves down.
         // Someone who set press-and-hold themselves keeps it.
         UserDefaults.standard.register(defaults: ["ApplePressAndHoldEnabled": false])
+        ScrollBars.apply()
         Fonts.register()
     }
 
