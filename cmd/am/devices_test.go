@@ -131,6 +131,46 @@ func TestConnectingADeviceEndToEnd(t *testing.T) {
 		list := devices.List()
 		return len(list) == 1 && !list[0].Connected
 	}, "the phone, gone")
+
+	// The same phone back: the relay names the new connection afresh, and it
+	// is the same device. A second phone, though just like it, is another.
+	connect := func(token string) *websocket.Conn {
+		conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws/app", &websocket.DialOptions{
+			HTTPHeader: http.Header{"Authorization": []string{"Bearer " + token}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.Write(ctx, websocket.MessageText, frame); err != nil {
+			t.Fatal(err)
+		}
+		return conn
+	}
+	back := connect(paired.Token)
+	waitForDevices(t, ctx, func() bool {
+		list := devices.List()
+		return len(list) == 1 && list[0].Connected
+	}, "the same phone back, still one device")
+	back.CloseNow()
+
+	second := deviceRequests(next, client, devices, ts.URL)(ctx, "local:1", protocol.Request{Type: protocol.ReqPairCode})
+	body, _ = json.Marshal(map[string]string{"code": second.PairCode.Code, "deviceId": "phone"})
+	resp, err = http.Post(ts.URL+"/pair", "application/json", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var other struct {
+		Token string `json:"token"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&other)
+	resp.Body.Close()
+	secondPhone := connect(other.Token)
+	waitForDevices(t, ctx, func() bool { return len(devices.List()) == 2 }, "the second phone")
+	secondPhone.CloseNow()
+	waitForDevices(t, ctx, func() bool {
+		list := devices.List()
+		return len(list) == 2 && !list[0].Connected && !list[1].Connected && list[0].ID != list[1].ID
+	}, "two phones, both gone")
 }
 
 func waitForDevices(t *testing.T, ctx context.Context, done func() bool, what string) {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -116,6 +117,53 @@ func TestTheSamePhoneBackAgainIsOneDevice(t *testing.T) {
 	}
 	if again := NewDevices(stale).List(); len(again) != 2 {
 		t.Fatalf("the collapsed list is what was saved: %d entries", len(again))
+	}
+}
+
+// The relay names a connection by its pairing: one phone is one device
+// however often it connects, connected while any connection is open; two
+// phones are two, however alike; and the first to say who it is takes over
+// the entries older relays left for it, with when it was first added.
+func TestAPairingIsOneDeviceAndTwoPairingsAreTwo(t *testing.T) {
+	clock := time.UnixMilli(5_000_000)
+	devices := NewDevices(filepath.Join(t.TempDir(), "devices.json"))
+	devices.now = func() time.Time { return clock }
+	phone := protocol.DeviceInfo{Name: "iPhone", Model: "iPhone", Platform: "ios", OS: "26.6"}
+
+	// Left by an older relay: one entry per connection.
+	for i := range 3 {
+		conn := fmt.Sprintf("acct-17942%d", i)
+		devices.Named(conn, phone)
+		devices.Left(conn)
+		clock = clock.Add(time.Minute)
+	}
+	if got := len(devices.List()); got != 1 {
+		t.Fatalf("older relay: %d entries, want 1", got)
+	}
+
+	devices.Named("acct-pAAAA-1", phone)
+	clock = clock.Add(time.Hour)
+	devices.Left("acct-pAAAA-1")
+	devices.Named("acct-pAAAA-2", phone)
+	// Reconnecting: the new connection opens before the old one closes.
+	devices.Seen("acct-pAAAA-3")
+	devices.Left("acct-pAAAA-2")
+	list := devices.List()
+	if len(list) != 1 || list[0].ID != "acct-pAAAA" || !list[0].Connected || list[0].FirstSeen != 5_000_000 {
+		t.Fatalf("one phone, connected, first added with the older entries: %+v", list)
+	}
+
+	// A second phone just like it, both gone: still two.
+	devices.Named("acct-pBBBB-1", phone)
+	devices.Left("acct-pBBBB-1")
+	devices.Left("acct-pAAAA-3")
+	list = devices.List()
+	if len(list) != 2 || list[0].Connected || list[1].Connected {
+		t.Fatalf("two phones, neither connected: %+v", list)
+	}
+	ids := []string{list[0].ID, list[1].ID}
+	if !slices.Contains(ids, "acct-pAAAA") || !slices.Contains(ids, "acct-pBBBB") {
+		t.Fatalf("ids = %v", ids)
 	}
 }
 
