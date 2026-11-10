@@ -11,7 +11,17 @@
 .palette-rule { height: 1px; background: var(--line); flex: none; }
 .palette-results { overflow-y: auto; flex: none; }
 .palette-rows { padding: 6px; display: flex; flex-direction: column; gap: 2px; }
-.palette-row { height: 32px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: 8px; min-width: 0; }
+/* As specific as the editor's own palette rows (editor.css), which share
+   the name. */
+.palette-rows > .palette-row { height: 32px; flex: none; display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: 0; padding: 0 10px; border-radius: 8px; min-width: 0; }
+.palette-rows > .palette-row.with-snippet { height: 50px; gap: 3px; }
+.palette-item-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* What a message said, under its title, from where the icon ends. */
+.palette-snippet { padding-left: 28px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.palette-snippet mark, .palette-snippet b { background: none; color: var(--text); font-weight: 600; }
+/* A group's heading: the agent open now, the agents, the rest, what was said. */
+.palette-heading { padding: 8px 10px 2px; font-size: 11px; font-weight: 500; color: var(--faint); }
+.palette-heading.first { padding-top: 2px; }
 .palette-row.selected { background: var(--fill); }
 .palette-icon { width: 18px; flex: none; display: grid; place-items: center; color: var(--muted); }
 .palette-icon.filled svg { fill: currentColor; }

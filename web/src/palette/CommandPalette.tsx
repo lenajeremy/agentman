@@ -4,7 +4,7 @@
 // an editor, agents and Agentman open in the editor's own panel, Usage in
 // its popover, and only what needs the main window goes there.
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Bell, Book, Braces, Circle, Code, Contrast, History, Key, ListFilter, MessageSquareText, MessagesSquare, Pencil, Settings, ShieldCheck, Sparkles,
   SquarePen, SquareTerminal, ChartSpline, QrCode, Smartphone, type LucideIcon,
@@ -14,7 +14,9 @@ import { showLastAway } from "../away/away";
 import { daemon } from "../daemon";
 import type { EditorStore, PanelRoute } from "../editor/store";
 import { editorKeyboardBack } from "../editor/Palette";
-import { agentName } from "../labels";
+import { agentName, since } from "../labels";
+import { Snippet } from "../board/parts";
+import { openHit, searchable, useMessageHits } from "../board/search";
 import { openEditor, openInMain, openSettings, pickFolder } from "../host";
 import { openAgent, openAgentman, openNewAgent, useRoute, openUsage } from "../nav";
 import { setPref } from "../prefs";
@@ -78,6 +80,11 @@ function Palette({ editor }: { editor?: EditorStore }) {
   const route = useRoute();
   const keySet = useAgentmanOn();
   const initial = editor ? "" : new URLSearchParams(location.search).get("palette") ?? "";
+  // What the conversations said, for what was typed a moment ago.
+  const [typedQuery, setTypedQuery] = useState(initial);
+  const typed = useCallback((query: string) => setTypedQuery(query.trim()), []);
+  const said = useMessageHits(typedQuery, 20);
+  const pending = searchable(typedQuery) && said?.query !== typedQuery;
   useEffect(() => {
     void loadFolders();
   }, []);
@@ -175,10 +182,36 @@ function Palette({ editor }: { editor?: EditorStore }) {
     return list;
   }
 
+  /** Conversations whose messages have the words, under the commands and
+   *  agents, leaving out an agent already listed by its name. */
+  function saidRows(listed: PaletteItem[], query: string): PaletteItem[] {
+    if (!said || said.query !== query) return [];
+    const shown = new Set(listed.map((i) => i.id));
+    return said.hits.flatMap((hit) => {
+      const session = hit.session;
+      if (!session || shown.has("agent:" + session.id)) return [];
+      return [{
+        id: `said:${session.id}/${hit.messageId}`,
+        title: session.name,
+        detail: base(session.cwd) + (hit.ts ? " · " + since(hit.ts) : ""),
+        icon: "text.bubble",
+        lucide: MessageSquareText,
+        snippet: <Snippet hit={hit} query={said.query} />,
+        section: "In messages",
+      }];
+    });
+  }
+
   function results(query: string): PaletteItem[] {
     const all = commands(query);
     const trimmed = query.trim();
-    if (!trimmed) return all.slice(0, 40).map((c) => c.item);
+    // Grouped while nothing is typed; ranked by match once something is.
+    if (!trimmed) {
+      return all.slice(0, 40).map((c) => ({
+        ...c.item,
+        section: c.item.section ?? (c.item.id.startsWith("here-") ? "This agent" : c.item.id.startsWith("agent:") ? "Agents" : "Commands"),
+      }));
+    }
     const ranked = all
       .filter((c) => !c.item.id.startsWith("ask:"))
       .map((c) => {
@@ -195,8 +228,17 @@ function Palette({ editor }: { editor?: EditorStore }) {
       if (!ranked.length || trimmed.endsWith("?") || trimmed.split(" ").filter(Boolean).length >= 4) ranked.unshift(askItem);
       else ranked.push(askItem);
     }
-    return ranked;
+    return [...ranked, ...saidRows(ranked, trimmed)];
   }
+
+  /** A message found: at its place in the thread, the main window's. */
+  const openSaid = (id: string) => {
+    const hit = said?.hits.find((h) => h.session && `said:${h.session.id}/${h.messageId}` === id);
+    if (!hit?.session || !said) return;
+    if (!editor) return openHit(hit, said.query);
+    const q = new URLSearchParams({ message: hit.messageId, q: said.query });
+    openInMain(`agentman://found/${encodeURIComponent(hit.session.id)}?${q}`);
+  };
 
   return (
     <PaletteView
@@ -205,9 +247,12 @@ function Palette({ editor }: { editor?: EditorStore }) {
       initialQuery={initial}
       results={results}
       dismiss={close}
+      typed={typed}
+      status={pending ? "Searching messages…" : undefined}
       choose={(item) => {
         close();
-        if (item.id.startsWith("ask:")) ask(item.id.slice(4));
+        if (item.id.startsWith("said:")) openSaid(item.id);
+        else if (item.id.startsWith("ask:")) ask(item.id.slice(4));
         else commands("").find((c) => c.item.id === item.id)?.run();
       }}
     />

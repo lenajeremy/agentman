@@ -128,6 +128,15 @@ export function openLink(link: string) {
     case "agent":
       if (parts[1]) openAgent(parts.slice(1).join("/"));
       break;
+    // agentman://found/<session>?message=<id>&q=<words>: a message found
+    // from an editor's ⌘K, opened at its place.
+    case "found": {
+      const id = parts.slice(1).join("/");
+      if (!id) break;
+      // Loaded when needed: the search imports this module.
+      void import("./board/search").then(({ openFound }) => openFound(id, url.searchParams.get("message"), url.searchParams.get("q") ?? ""));
+      break;
+    }
     case "new":
       openNewAgent();
       break;

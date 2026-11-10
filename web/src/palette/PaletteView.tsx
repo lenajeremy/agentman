@@ -3,7 +3,7 @@
 // type, move with the arrow keys, Return to choose, Escape or a click
 // outside to close.
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Search } from "lucide-react";
 import { Truncated } from "../shell/Truncated";
@@ -24,6 +24,19 @@ export interface PaletteItem {
   shortcut?: string;
   /** Drawn instead of the icon, as a file's own. */
   glyph?: ReactNode;
+  /** A line under the title: what a message said, its words marked. */
+  snippet?: ReactNode;
+  /** The group it's listed in, its heading over the group's first row. */
+  section?: string;
+}
+
+/** How to use it, at its foot while it has nothing else to say. */
+const HINTS = "↑↓ to move · ↵ to open · esc to close";
+
+/** A group's heading, over the first of its rows. */
+function heading(items: PaletteItem[], index: number): string | undefined {
+  const section = items[index].section;
+  return section && (index === 0 || items[index - 1].section !== section) ? section : undefined;
 }
 
 /** A shortcut as the Mac writes it ("⌘N"); "Ctrl+N" where there is no ⌘.
@@ -94,7 +107,7 @@ export function giveKeyboardBack(place: KeyboardPlace) {
   }
 }
 
-export function PaletteView({ placeholder, results, choose, dismiss, initialQuery = "", status, giveBack }: {
+export function PaletteView({ placeholder, results, choose, dismiss, initialQuery = "", status, giveBack, typed }: {
   placeholder: string;
   /** The rows for what has been typed, best first. */
   results: (query: string) => PaletteItem[];
@@ -103,9 +116,12 @@ export function PaletteView({ placeholder, results, choose, dismiss, initialQuer
   initialQuery?: string;
   status?: string;
   giveBack?: (before: Element | null) => void;
+  /** Told what is typed, as it changes (for a search of what was said). */
+  typed?: (query: string) => void;
 }) {
   useKeyboardBack(giveBack);
   const [query, setQuery] = useState(initialQuery);
+  useEffect(() => typed?.(query), [query, typed]);
   const [selected, setSelected] = useState(0);
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -116,9 +132,11 @@ export function PaletteView({ placeholder, results, choose, dismiss, initialQuer
   }, []);
   useEffect(() => setSelected(0), [query]);
   useLayoutEffect(() => {
-    const row = list.current?.children[selected] as HTMLElement | undefined;
+    const row = list.current?.querySelector(`[data-index="${selected}"]`) as HTMLElement | null;
     row?.scrollIntoView({ block: "nearest" });
   }, [selected]);
+  // Rows of 34, 52 with a snippet, and 28 more over a group's first.
+  const height = items.reduce((total, item, index) => total + (item.snippet ? 52 : 34) + (heading(items, index) ? 28 : 0), 0);
 
   return (
     <div className="palette-overlay" onMouseDown={dismiss}>
@@ -152,32 +170,38 @@ export function PaletteView({ placeholder, results, choose, dismiss, initialQuer
         {items.length > 0 ? (
           <>
             <div className="palette-rule" />
-            <div className="palette-results" style={{ height: Math.min(items.length * 34 + 12, 380) }}>
+            <div className="palette-results" style={{ height: Math.min(height + 12, 380) }}>
               <div className="palette-rows" ref={list}>
-                {items.map((item, index) => (
-                  <div
-                    key={item.id}
-                    className={`palette-row ${index === selected ? "selected" : ""}`}
-                    onMouseMove={() => index !== selected && setSelected(index)}
-                    onClick={() => choose(item)}
-                  >
-                    <span className={`palette-icon ${item.icon === "circle.fill" ? "filled" : ""}`} style={{ color: item.tint }}>
-                      {item.glyph ?? <Icon icon={item.lucide} sf={item.icon} size={12} />}
-                    </span>
-                    <span className="palette-title">{item.title}</span>
-                    {item.detail && <Truncated mode="head" className="palette-detail" text={item.detail} />}
-                    <span className="palette-gap" />
-                    {item.shortcut && shortcutLabel(item.shortcut) && <span className="palette-shortcut">{shortcutLabel(item.shortcut)}</span>}
-                  </div>
-                ))}
+                {items.map((item, index) => {
+                  const group = heading(items, index);
+                  return (
+                    <Fragment key={item.id}>
+                      {group && <div className={`palette-heading${index === 0 ? " first" : ""}`}>{group}</div>}
+                      <div
+                        data-index={index}
+                        className={`palette-row ${item.snippet ? "with-snippet " : ""}${index === selected ? "selected" : ""}`}
+                        onMouseMove={() => index !== selected && setSelected(index)}
+                        onClick={() => choose(item)}
+                      >
+                        <div className="palette-item-line">
+                          <span className={`palette-icon ${item.icon === "circle.fill" ? "filled" : ""}`} style={{ color: item.tint }}>
+                            {item.glyph ?? <Icon icon={item.lucide} sf={item.icon} size={12} />}
+                          </span>
+                          <span className="palette-title">{item.title}</span>
+                          {item.detail && <Truncated mode="head" className="palette-detail" text={item.detail} />}
+                          <span className="palette-gap" />
+                          {item.shortcut && shortcutLabel(item.shortcut) && <span className="palette-shortcut">{shortcutLabel(item.shortcut)}</span>}
+                        </div>
+                        {item.snippet && <div className="palette-snippet">{item.snippet}</div>}
+                      </div>
+                    </Fragment>
+                  );
+                })}
               </div>
             </div>
-            {status && (
-              <>
-                <div className="palette-rule" />
-                <div className="palette-status">{status}</div>
-              </>
-            )}
+            {/* What it's doing, or how to use it. */}
+            <div className="palette-rule" />
+            <div className="palette-status">{status ?? HINTS}</div>
           </>
         ) : query ? (
           <>

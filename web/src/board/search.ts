@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import type { SearchHit, SearchResults, Session } from "@shared/protocol";
 import { daemon } from "../daemon";
 import { openAgent } from "../nav";
-import { getShell, setShell } from "../shell/state";
+import { ask, getShell, setShell } from "../shell/state";
 import { setJump } from "../thread/find";
 
 /** Worth asking the daemon: a word of three letters at least. */
@@ -16,7 +16,7 @@ export function searchable(query: string): boolean {
 
 /** The best message of each conversation that has the query's words, once
  *  typing has paused. */
-export function useMessageHits(query: string): SearchResults | null {
+export function useMessageHits(query: string, limit = 50): SearchResults | null {
   const [hits, setHits] = useState<SearchResults | null>(null);
   useEffect(() => {
     const q = query.trim();
@@ -26,7 +26,7 @@ export function useMessageHits(query: string): SearchResults | null {
     }
     let current = true;
     const timer = window.setTimeout(() => {
-      daemon.request({ type: "search", text: q.slice(0, 200), limit: 50 }, 15_000)
+      daemon.request({ type: "search", text: q.slice(0, 200), limit }, 15_000)
         .then((reply) => current && reply.type === "search" && reply.search && setHits(reply.search))
         .catch(() => {});
     }, 150);
@@ -34,7 +34,7 @@ export function useMessageHits(query: string): SearchResults | null {
       current = false;
       window.clearTimeout(timer);
     };
-  }, [query]);
+  }, [query, limit]);
   return hits;
 }
 
@@ -98,6 +98,23 @@ export function openHit(hit: SearchHit, query: string) {
     setShell({ foundSessions: { ...getShell().foundSessions, [session.id]: session } });
   }
   openAgent(session.id);
+}
+
+/** A message found from an editor's ⌘K, in this window: looked up again, as
+ *  its conversation may have ended and be on no list here (openHit keeps it). */
+export async function openFound(sessionId: string, messageId: string | null, query: string) {
+  if (messageId && searchable(query)) {
+    try {
+      const reply = await ask({ type: "search", text: query.slice(0, 200), limit: 50 });
+      const hits = (reply.search as SearchResults | undefined)?.hits ?? [];
+      const hit = hits.find((h) => h.session?.id === sessionId && h.messageId === messageId) ?? hits.find((h) => h.session?.id === sessionId);
+      if (hit) return openHit(hit, query);
+    } catch {
+      // Not found again: the agent, as it is.
+    }
+  }
+  if (messageId) setJump(sessionId, messageId, query);
+  openAgent(sessionId);
 }
 
 /** The query's words worth marking, longest first so "notarize" is marked
