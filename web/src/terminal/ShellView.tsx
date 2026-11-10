@@ -27,6 +27,7 @@ export function ShellView({ id, visible }: { id: string; visible: boolean }) {
   const shown = useRef(visible);
   const fitRef = useRef<() => void>(() => {});
   const focusRef = useRef<() => void>(() => {});
+  const claimRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const el = host.current;
@@ -70,6 +71,19 @@ export function ShellView({ id, visible }: { id: string; visible: boolean }) {
     };
     fitRef.current = refit;
     focusRef.current = () => term.focus();
+    // A shell shown in two windows (the editor and the agent's page) takes
+    // the size of the one that was last sized; the window you come back to
+    // takes it back, so what runs in it draws for this window again
+    // (TerminalPanel.swift's TerminalContainer claim).
+    const claim = () => {
+      if (shown.current) send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+    };
+    claimRef.current = claim;
+    const cameForward = () => {
+      if (document.visibilityState === "visible") claim();
+    };
+    window.addEventListener("focus", claim);
+    document.addEventListener("visibilitychange", cameForward);
     views.set(id, {
       clear,
       focus: () => term.focus(),
@@ -125,6 +139,8 @@ export function ShellView({ id, visible }: { id: string; visible: boolean }) {
     return () => {
       disposed = true;
       views.delete(id);
+      window.removeEventListener("focus", claim);
+      document.removeEventListener("visibilitychange", cameForward);
       observer.disconnect();
       offTheme();
       input.dispose();
@@ -141,6 +157,7 @@ export function ShellView({ id, visible }: { id: string; visible: boolean }) {
     shown.current = visible;
     if (visible) {
       fitRef.current();
+      claimRef.current();
       requestAnimationFrame(() => focusRef.current());
     }
   }, [visible]);
