@@ -801,7 +801,39 @@ export interface PermissionCheck {
 }
 
 /** How Agentman works, as the user set it on the Mac or here. */
+/** What Agentman does by itself beyond approving; all off to begin with.
+ *  Absent from daemons that predate it. */
+export interface Autopilot {
+  /** Check an agent's work when it finishes a turn that changed something. */
+  verify: boolean;
+  /** Give an agent the output of its failing tests to fix. */
+  sendBack: boolean;
+  /** Offer to make a rule of what the user keeps approving. */
+  learnRules: boolean;
+  /** Notice agents that have stopped getting anywhere. */
+  unstick: boolean;
+  /** Notice agents working on the same files. */
+  overlap: boolean;
+  /** Suggest a note for what the user keeps telling agents. */
+  learnNotes: boolean;
+  /** Run the work lined up for tonight. */
+  overnight: boolean;
+  /** "HH:MM"; absent takes the daemon's default. */
+  nightStart?: string;
+  nightEnd?: string;
+  nightAgents?: number;
+  /** Reviews by the model a day. */
+  verifyDaily?: number;
+  /** Yes to an agent asking only whether to commit finished work. */
+  replyCommit?: boolean;
+  /** Yes to an agent asking only whether to install a finished build on the
+   *  user's own phone or Mac. */
+  replyInstall?: boolean;
+}
+
 export interface ManagerSettings {
+  /** What Agentman does by itself; kept as the daemon sent it. */
+  autopilot?: Autopilot;
   chatModel: string;
   briefModel: string;
   effort: string;
