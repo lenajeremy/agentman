@@ -136,6 +136,8 @@ export function Sidebar({ width, headerLeading }: { width: number; headerLeading
             spellCheck={false}
             value={shell.search}
             onChange={(e) => setShell({ search: e.target.value })}
+            // Escape clears it, as the Mac's does.
+            onKeyDown={(e) => e.key === "Escape" && setShell({ search: "" })}
           />
           <FilterMenu sessions={sessions} />
           <button className="new-agent-button" title="New agent (⌘N)" aria-label="New agent" onClick={() => openNewAgent()}>
