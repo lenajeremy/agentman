@@ -12,6 +12,15 @@ const cache = new Map<string, unknown>();
 // Mac test copy's, and keeps nothing it changes.
 const fresh = new URLSearchParams(location.search).has("fresh");
 
+// For comparisons and tests: ?prefs={"appearance":"dark"} holds settings for
+// this run only, without saving them.
+try {
+  const held = new URLSearchParams(location.search).get("prefs");
+  if (held) for (const [key, value] of Object.entries(JSON.parse(held))) cache.set(key, value);
+} catch {
+  // Unreadable: nothing is held.
+}
+
 function read<T>(key: string, fallback: T): T {
   if (cache.has(key)) return cache.get(key) as T;
   let value = fallback;

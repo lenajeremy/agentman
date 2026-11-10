@@ -79,7 +79,19 @@ struct KeysSettings: View {
             .padding(.horizontal, 28)
             .padding(.vertical, 26)
         }
-        .task { await manager.loadKeys() }
+        .task {
+            await manager.loadKeys()
+            #if DEBUG
+            // For comparisons: AGENTMAN_TEST_SHEET=key, or key:<NAME> to edit one.
+            if let sheet = ProcessInfo.processInfo.environment["AGENTMAN_TEST_SHEET"] {
+                if sheet == "key" {
+                    editing = KeyDraft()
+                } else if sheet.hasPrefix("key:"), let key = manager.keys.first(where: { $0.name == sheet.dropFirst(4) }) {
+                    editing = KeyDraft(key)
+                }
+            }
+            #endif
+        }
         .sheet(item: $editing) { draft in
             KeyEditor(draft: draft)
         }

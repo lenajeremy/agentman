@@ -1,0 +1,22 @@
+/* The appearance chosen in Settings (settings/appearance.ts), over the
+   computer's: the same tokens as base.css, for data-theme on <html>. */
+:root[data-theme="light"] {
+  --paper: #fafafa; --sidebar: #f5f5f5; --surface: #ffffff; --fill: #efefef; --fill-strong: #e4e4e4; --line: #e5e5e5;
+  --tool-card: #f5f5f5; --tool-edge: #e8e8e8; --tool-well: #fafafa;
+  --text: #101010; --text-2: #3c3c3c; --muted: #737373; --faint: #999999;
+  --working: #3268f5; --working-text: #1f35c7; --working-wash: #eef1ff;
+  --needs-you: #ff6a2b; --needs-you-text: #c2451a; --needs-you-wash: #fff2eb;
+  --ok: #12a66a; --error: #e5484d; --error-text: #c4343a; --error-wash: #fdedee;
+  --primary: 0 0 0;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --paper: #000000; --sidebar: #050505; --surface: #0d0d0d; --fill: #202020; --fill-strong: #303030; --line: #242424;
+  --tool-card: #0d0d0d; --tool-edge: #202020; --tool-well: #101010;
+  --text: #f2f2f2; --text-2: #d0d0d0; --muted: #a0a0a0; --faint: #737373;
+  --working: #578cff; --working-text: #9daaff; --working-wash: #1a1f3d;
+  --needs-you: #ff7d45; --needs-you-text: #ff9a6c; --needs-you-wash: #2e1b12;
+  --ok: #2bc784; --error: #ff6b70; --error-text: #ff8a8e; --error-wash: #2c1517;
+  --primary: 255 255 255;
+  color-scheme: dark;
+}

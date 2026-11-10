@@ -29,6 +29,8 @@ func main() {
 			application.NewService(&Menus{}),
 			application.NewService(&Files{}),
 			application.NewService(shell),
+			application.NewService(&Appearance{}),
+			application.NewService(&Settings{}),
 		}, newHost().services()...),
 		Assets: application.AssetOptions{
 			Handler: withFileIcons(withSymbols(application.AssetFileServerFS(assets))),
@@ -45,6 +47,9 @@ func main() {
 		_, _ = fmt.Sscanf(size, "%dx%d", &width, &height)
 	}
 	first := window("Agentman", startURL(), width, height)
+	if settingsStart(startURL()) {
+		first = settingsOptions(startURL())
+	}
 	shell.prepare(&options, &first, test != nil)
 	if test != nil {
 		test.prepare(&options, &first)
@@ -52,6 +57,9 @@ func main() {
 	app := application.New(options)
 	win := app.Window.NewWithOptions(first)
 	shell.start(app, win, test != nil)
+	if settingsStart(startURL()) {
+		keepSettings(win)
+	}
 	if test != nil {
 		test.start(app, win)
 	}
