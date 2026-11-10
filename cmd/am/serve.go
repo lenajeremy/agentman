@@ -361,6 +361,12 @@ func runServe(ctx context.Context, args []string) error {
 			agent.DisconnectSubscriber(deviceID)
 			devices.Left(deviceID)
 		}
+		// The daemon's own link to the relay ended: its phones may still be
+		// there, and come back under the same names once it reconnects.
+		client.OnDeviceUnreachable = func(deviceID string) {
+			agent.DisconnectSubscriber(deviceID)
+			devices.Lost(deviceID)
+		}
 	}
 
 	// Which agentman this is travels with every session list, and so does

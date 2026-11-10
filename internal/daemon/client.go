@@ -54,8 +54,14 @@ type Client struct {
 	OnDeviceSeen func(deviceID string)
 	// OnStatus reports connection transitions for the CLI to display.
 	OnStatus func(connected bool, detail string)
-	// OnDeviceDisconnected releases subscriptions owned by one app socket.
+	// OnDeviceDisconnected releases subscriptions owned by one app socket:
+	// the relay says it closed.
 	OnDeviceDisconnected func(deviceID string)
+	// OnDeviceUnreachable is the same for an app socket this daemon lost
+	// sight of because its own connection to the relay ended. The phone's
+	// may well be open still, and come back under the same name once this
+	// daemon reconnects. Without it, OnDeviceDisconnected is called instead.
+	OnDeviceUnreachable func(deviceID string)
 }
 
 // NewClient creates a relay client. The URL may use http(s) or ws(s).
@@ -225,9 +231,13 @@ func (c *Client) connectOnce(
 	defer func() {
 		stopConnection()
 		dispatch.close()
-		if c.OnDeviceDisconnected != nil {
+		lost := c.OnDeviceUnreachable
+		if lost == nil {
+			lost = c.OnDeviceDisconnected
+		}
+		if lost != nil {
 			for deviceID := range devices {
-				c.OnDeviceDisconnected(deviceID)
+				lost(deviceID)
 			}
 		}
 		c.mu.Lock()

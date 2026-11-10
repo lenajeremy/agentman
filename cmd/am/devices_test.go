@@ -173,6 +173,114 @@ func TestConnectingADeviceEndToEnd(t *testing.T) {
 	}, "two phones, both gone")
 }
 
+// The daemon's link to the relay drops while the phone stays connected: the
+// phone shows as away while the daemon is, and connected again once the
+// daemon is back and the phone speaks, under the same connection name.
+func TestAPhoneStaysOneDeviceWhileTheDaemonReconnects(t *testing.T) {
+	server := relay.NewServer("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "test", slog.New(slog.DiscardHandler), true)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	devices := daemon.NewDevices(filepath.Join(t.TempDir(), "devices.json"))
+	next := func(context.Context, string, protocol.Request) protocol.Event { return protocol.Event{} }
+	// One run of the daemon's link to the relay, until stopped.
+	run := func() (*daemon.Client, context.CancelFunc, chan struct{}) {
+		client := daemon.NewClient(ts.URL, "daemon-token")
+		online := make(chan struct{}, 1)
+		client.OnStatus = func(connected bool, _ string) {
+			if connected {
+				select {
+				case online <- struct{}{}:
+				default:
+				}
+			}
+		}
+		client.OnDeviceSeen = devices.Seen
+		client.OnDeviceDisconnected = devices.Left
+		client.OnDeviceUnreachable = devices.Lost
+		runCtx, stop := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_ = client.Run(runCtx, namingDevices(next, devices))
+		}()
+		select {
+		case <-online:
+		case <-ctx.Done():
+			t.Fatal("the daemon never reached the relay")
+		}
+		return client, stop, done
+	}
+	client, stop, done := run()
+
+	code := deviceRequests(next, client, devices, ts.URL)(ctx, "local:1", protocol.Request{Type: protocol.ReqPairCode})
+	if code.PairCode == nil {
+		t.Fatalf("code = %+v", code)
+	}
+	body, _ := json.Marshal(map[string]string{"code": code.PairCode.Code, "deviceId": "phone"})
+	resp, err := http.Post(ts.URL+"/pair", "application/json", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paired struct {
+		Token string `json:"token"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&paired)
+	resp.Body.Close()
+	phone, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws/app", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + paired.Token}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer phone.CloseNow()
+	// The phone reads what the relay sends it, as the app does, so its
+	// socket stays healthy while the daemon comes and goes.
+	go func() {
+		for {
+			if _, _, err := phone.Read(ctx); err != nil {
+				return
+			}
+		}
+	}()
+	speak := func() {
+		envelope, _ := protocol.NewEnvelope("r1", protocol.PeerDaemon, protocol.Request{
+			Type: protocol.ReqRegisterPush, PushToken: "ExponentPushToken[test]",
+			Device: &protocol.DeviceInfo{Name: "Test iPhone", Model: "iPhone 17 Pro", Platform: "ios"},
+		})
+		frame, _ := json.Marshal(envelope)
+		if err := phone.Write(ctx, websocket.MessageText, frame); err != nil {
+			t.Fatal(err)
+		}
+	}
+	speak()
+	waitForDevices(t, ctx, func() bool {
+		list := devices.List()
+		return len(list) == 1 && list[0].Connected
+	}, "the phone, connected")
+
+	// The daemon's link drops; the phone's stays open.
+	stop()
+	<-done
+	waitForDevices(t, ctx, func() bool {
+		list := devices.List()
+		return len(list) == 1 && !list[0].Connected
+	}, "the phone, away while the daemon is")
+
+	_, stop, done = run()
+	defer func() {
+		stop()
+		<-done
+	}()
+	speak()
+	waitForDevices(t, ctx, func() bool {
+		list := devices.List()
+		return len(list) == 1 && list[0].Connected
+	}, "the phone, connected again under the same name")
+}
+
 func waitForDevices(t *testing.T, ctx context.Context, done func() bool, what string) {
 	t.Helper()
 	for !done() {

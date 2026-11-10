@@ -167,6 +167,32 @@ func TestAPairingIsOneDeviceAndTwoPairingsAreTwo(t *testing.T) {
 	}
 }
 
+// When the daemon's own link to the relay ends, it loses sight of its phones,
+// but their connections may be open still: back, the same connection speaks
+// again and the phone is connected. Nothing seen closed stays held against a
+// name past a minute.
+func TestAPhoneTheDaemonLostSightOfComesBackUnderTheSameName(t *testing.T) {
+	clock := time.UnixMilli(1_000_000)
+	devices := NewDevices(filepath.Join(t.TempDir(), "devices.json"))
+	devices.now = func() time.Time { return clock }
+	devices.Seen("acct-pAAAA-1")
+	devices.Lost("acct-pAAAA-1")
+	if list := devices.List(); list[0].Connected {
+		t.Fatalf("while the daemon is away: %+v", list)
+	}
+	devices.Seen("acct-pAAAA-1")
+	if list := devices.List(); !list[0].Connected {
+		t.Fatalf("the daemon back, the phone still there: %+v", list)
+	}
+
+	devices.Left("acct-pAAAA-1")
+	clock = clock.Add(2 * closedKept)
+	devices.Seen("acct-pAAAA-1")
+	if list := devices.List(); !list[0].Connected {
+		t.Fatalf("a close long past held against the name: %+v", list)
+	}
+}
+
 // A request sent just before a phone left can be handled after it left. What
 // it says is kept, but it does not bring the phone back as connected.
 func TestARequestHandledAfterItsPhoneLeftOpensNothing(t *testing.T) {

@@ -122,23 +122,32 @@ func (d *Devices) Named(conn string, info protocol.DeviceInfo) {
 	})
 }
 
-// Left notes that a connection closed. Its device is still connected while
-// another of its connections is open: a phone reconnecting opens the new one
-// before the old one is seen to close.
-func (d *Devices) Left(conn string) {
+// Left notes that the relay saw a connection close. Its device is still
+// connected while another of its connections is open: a phone reconnecting
+// opens the new one before the old one is seen to close.
+func (d *Devices) Left(conn string) { d.drop(conn, true) }
+
+// Lost notes that this daemon lost sight of a connection because its own
+// link to the relay ended. The phone's may be open still: once the daemon is
+// back, it speaks again under the same name, and is connected again.
+func (d *Devices) Lost(conn string) { d.drop(conn, false) }
+
+func (d *Devices) drop(conn string, closed bool) {
 	d.mu.Lock()
 	id, known := d.open[conn]
 	if !known {
 		id = deviceOf(conn)
 	}
 	delete(d.open, conn)
-	now := d.now()
-	for gone, at := range d.closed {
-		if now.Sub(at) > closedKept {
-			delete(d.closed, gone)
+	if closed {
+		now := d.now()
+		for gone, at := range d.closed {
+			if now.Sub(at) > closedKept {
+				delete(d.closed, gone)
+			}
 		}
+		d.closed[conn] = now
 	}
-	d.closed[conn] = now
 	_, listed := d.list[id]
 	d.mu.Unlock()
 	if !listed {
@@ -238,7 +247,8 @@ func (d *Devices) update(key string, connected bool, change func(*protocol.Devic
 	now := d.now()
 	d.mu.Lock()
 	id := key
-	_, gone := d.closed[key]
+	closedAt, gone := d.closed[key]
+	gone = gone && now.Sub(closedAt) <= closedKept
 	if connected {
 		id = deviceOf(key)
 		if !gone {
