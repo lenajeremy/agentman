@@ -6,10 +6,10 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
-  BadgeCheck, ChevronDown, CircleArrowUp, Check, CircleAlert, Circle, CircleX, Clock, Code, Diff, EyeOff, Ellipsis, FileText, Globe, MessagesSquare, MessageSquarePlus,
+  BadgeCheck, ChevronDown, CircleArrowUp, CircleCheck, CircleX as XCircle, Palette, Search, Check, CircleAlert, Circle, CircleX, Clock, Code, Diff, EyeOff, Ellipsis, FileText, Globe, MessagesSquare, MessageSquarePlus,
   Plus, SquarePen, TriangleAlert, X,
 } from "lucide-react";
-import type { ManagerCard, Mission, Question, Session, Verification } from "@shared/protocol";
+import type { ManagerCard, ManagerEntry, Mission, Question, SearchHit, Session, Verification } from "@shared/protocol";
 import { cardQuestion } from "@shared/manager-feed";
 import { confirmEnd, endable } from "../AgentHeader";
 import { openEditor, openURL } from "../host";
@@ -20,7 +20,7 @@ import { CompactCard } from "../manager/CompactCard";
 import { ManagerBox } from "../manager/Composer";
 import { SchedulesButton } from "../manager/Schedules";
 import {
-  dismissCard, missionOf, missionProgress, openCardsOf, replyToCard, reset, runningMissions, send as askAgentman, setBoardChatOpen, setProblem,
+  dismissCard, getManager, missionOf, missionProgress, openCardsOf, replyToCard, reset, runningMissions, send as askAgentman, setBoardChatOpen, setProblem,
   unreadOf, useManager, type QuestionReply,
 } from "../manager/store";
 import { openAgent, openNewAgent } from "../nav";
@@ -28,6 +28,7 @@ import { getPref, setPref, usePref } from "../prefs";
 import { Loader } from "../shell/Loader";
 import { archive, filterState, isArchived, useChoices } from "../shell/sections";
 import { loadFolders, setShell, useShell } from "../shell/state";
+import { cachedHome } from "../shell/native";
 import { follow, sessionsLoaded, useStatus, useStore } from "../store";
 import { tidy } from "../thread/items";
 import { showPanel } from "../panel/state";
@@ -44,6 +45,9 @@ import { ShipSheet, TonightButton } from "./BoardActions";
 import { BoardCommitSheet, BoardGitChip } from "./BoardGit";
 import { openCommitSheet, useCommitSheet, useGitChanged, useGitRun } from "./git";
 import { BoardLink } from "./parts";
+import { agentColor, COLOR_BY, useColorBy } from "./colors";
+import { boardSearch, markedParts, openHit, searchDetail, searchHeadline, useMessageHits, type BoardSearch } from "./search";
+import { saveSettings } from "../settings/state";
 import "../styles/board.css";
 
 /** Agentman's conversation, beside the columns. */
@@ -72,10 +76,12 @@ const showOnBoard = (id: string) => setPref(HIDDEN, getPref<string[]>(HIDDEN, []
 const showAllOnBoard = () => setPref(HIDDEN, []);
 
 export function BoardView({ headerLeading }: { headerLeading: number }) {
-  const { sessions } = useStore();
+  const { sessions, branches } = useStore();
   const manager = useManager();
   const choices = useChoices();
-  const { folderFilter } = useShell();
+  const { folderFilter, search } = useShell();
+  const hits = useMessageHits(search);
+  const found = useMemo(() => boardSearch(search, sessions, branches, folderFilter, hits), [search, sessions, branches, folderFilter, hits]);
   const { status } = useStatus();
   const [hiddenList] = usePref<string[]>(HIDDEN, []);
   const chatOpen = manager.boardChatOpen;
@@ -89,8 +95,9 @@ export function BoardView({ headerLeading }: { headerLeading: number }) {
       hidden: new Set(hiddenList),
       waiting,
       folder: folderFilter,
+      matching: found?.ids,
     });
-  }, [sessions, cards, choices, hiddenList, folderFilter]);
+  }, [sessions, cards, choices, hiddenList, folderFilter, found]);
   const offers = cards.filter((c) => c.kind === "offer");
   const outlined = useMemo(() => (chatOpen ? mentioned(manager.entries, sessions) : new Set<string>()), [chatOpen, manager.entries, sessions]);
 
@@ -121,7 +128,7 @@ export function BoardView({ headerLeading }: { headerLeading: number }) {
 
   const connected = status === "connected" && sessionsLoaded();
   const committing = useCommitSheet();
-  const startsEmpty = shown(sections) === 0 && sections.hidden.length === 0 && connected;
+  const startsEmpty = !found && shown(sections) === 0 && sections.hidden.length === 0 && connected;
 
   const newChat = async () => {
     if ((await confirmSheet("Start a new chat?", NEW_CHAT_MESSAGE, ["New Chat", "Cancel"])) !== "New Chat") return;
@@ -136,7 +143,9 @@ export function BoardView({ headerLeading }: { headerLeading: number }) {
           {headerLeading > 0 && <span className="board-top-title">Agentman</span>}
           <span className="board-spacer" />
           <span className="no-drag board-top-buttons">
+            <HandledButton />
             <TonightButton />
+            <ColorMenu />
             <FolderMenu />
             {manager.schedules.length > 0 && <SchedulesButton />}
             <ChromeButton icon={SquarePen} sf="square.and.pencil" title="New agent" onClick={() => openNewAgent()} />
@@ -149,18 +158,21 @@ export function BoardView({ headerLeading }: { headerLeading: number }) {
           </span>
         </header>
         <div className="board-room" ref={room}>
-          <div className="board-brief" style={{ width: row }}>
-            <div className="board-headline">{headline(sections, connected)}</div>
-            <div className="board-detail">
-              <span>{startsEmpty ? "Start one and it shows up here." : detail(sections) || " "}</span>
-              {startsEmpty && <BoardLink title="New agent" icon={Plus} sf="plus" onClick={() => openNewAgent()} />}
+          <div className="board-head" style={{ width: row }}>
+            <div className="board-brief">
+              <div className="board-headline">{found ? searchHeadline(found, shown(sections)) : headline(sections, connected)}</div>
+              <div className="board-detail">
+                <span>{found ? searchDetail(found) : startsEmpty ? "Start one and it shows up here." : detail(sections) || "\u00a0"}</span>
+                {startsEmpty && <BoardLink title="New agent" icon={Plus} sf="plus" onClick={() => openNewAgent()} />}
+              </div>
             </div>
+            <SearchField width={Math.min(380, row * 0.45)} />
           </div>
           <div className="board-scroll">
             <div className="board-columns" style={{ gridTemplateColumns: `repeat(3, ${column}px)`, minWidth: width }}>
-              <BoardColumn kind="needsYou" sessions={sections.needsYou} outlined={outlined} offers={offers} clearance={clearance} />
-              <BoardColumn kind="working" sessions={sections.working} outlined={outlined} missions={runningMissions(manager)} clearance={clearance} />
-              <BoardColumn kind="idle" sessions={sections.idle} outlined={outlined} hidden={sections.hidden} clearance={clearance} />
+              <BoardColumn kind="needsYou" sessions={sections.needsYou} outlined={outlined} found={found} offers={offers} clearance={clearance} />
+              <BoardColumn kind="working" sessions={sections.working} outlined={outlined} found={found} missions={runningMissions(manager)} clearance={clearance} />
+              <BoardColumn kind="idle" sessions={sections.idle} outlined={outlined} found={found} hidden={sections.hidden} clearance={clearance} />
             </div>
           </div>
         </div>
@@ -237,10 +249,12 @@ function FolderMenu() {
   );
 }
 
-function BoardColumn({ kind, sessions, outlined, offers = [], missions = [], hidden = [], clearance }: {
+function BoardColumn({ kind, sessions, outlined, found, offers = [], missions = [], hidden = [], clearance }: {
   kind: Kind;
   sessions: Session[];
   outlined: Set<string>;
+  /** The search, when one is running. */
+  found: BoardSearch | null;
   /** What Agentman offers the user, above the agents waiting on them. */
   offers?: ManagerCard[];
   /** The teams at work, above the agents doing their parts. */
@@ -251,7 +265,7 @@ function BoardColumn({ kind, sessions, outlined, offers = [], missions = [], hid
   // Colour and motion only while the column holds agents or offers; the
   // words for an empty column only when it holds nothing at all.
   const quiet = sessions.length === 0 && offers.length === 0;
-  const empty = quiet && missions.length === 0;
+  const empty = quiet && missions.length === 0 && (kind !== "idle" || !found?.past.length);
   const [shipping, setShipping] = useState(false);
   const hiddenMenu = (e: ReactMouseEvent<HTMLButtonElement>) =>
     menuUnder(e.currentTarget, [
@@ -291,8 +305,9 @@ function BoardColumn({ kind, sessions, outlined, offers = [], missions = [], hid
             <CompactCard card={offer} close={() => dismissCard(offer)} />
           </div>
         ))}
-        {sessions.map((s) => <BoardCard key={s.id} session={s} kind={kind} outlined={outlined.has(s.id)} />)}
-        {empty && <div className="board-column-empty">{EMPTY[kind]}</div>}
+        {sessions.map((s) => <BoardCard key={s.id} session={s} kind={kind} outlined={outlined.has(s.id)} match={found?.bySession[s.id]} query={found?.query ?? ""} />)}
+        {kind === "idle" && found && found.past.length > 0 && <PastHits hits={found.past} query={found.query} />}
+        {empty && <div className="board-column-empty">{found ? "No matches" : EMPTY[kind]}</div>}
       </div>
     </section>
   );
@@ -300,7 +315,9 @@ function BoardColumn({ kind, sessions, outlined, offers = [], missions = [], hid
 
 /** One agent: where it is, what it is called, and what it wants, answerable
  *  or followable on the spot. Clicking anywhere else opens its conversation. */
-function BoardCard({ session, kind, outlined }: { session: Session; kind: Kind; outlined: boolean }) {
+function BoardCard({ session, kind, outlined, match, query }: { session: Session; kind: Kind; outlined: boolean; match?: SearchHit; query: string }) {
+  const [colorBy] = useColorBy();
+  const tint = agentColor(session, colorBy);
   const { messages } = useStore();
   const manager = useManager();
   const problem = useActionError(session.id);
@@ -309,13 +326,19 @@ function BoardCard({ session, kind, outlined }: { session: Session; kind: Kind; 
   const digest = useMemo(() => makeDigest(list ?? [], tidy), [list]);
   const brief = manager.briefs[session.id];
   const mission = missionOf(session.id, manager);
-  const open = () => openAgent(session.id);
+  // What a search found in its conversation, which a click opens at.
+  const open = () => (match ? openHit(match) : openAgent(session.id));
   const when = kind === "working" ? digest.turnStarted : session.lastActivityAt;
 
   const items = (): MenuEntry[] => {
     const entries: MenuEntry[] = [{ label: "Open Conversation", action: open }];
     if (kind !== "needsYou") entries.push({ label: "Hide from the Board", action: () => hideFromBoard(session.id) });
     if (endable(session)) entries.push({ label: "End Session…", action: () => void confirmEnd(session) });
+    entries.push({ label: "Trust This Folder", header: true });
+    const level = trustLevel(session.cwd, manager.settings);
+    for (const option of TRUST_LEVELS) {
+      entries.push({ label: option.title, checked: option.id === level, action: () => void setTrust(option.id, session.cwd) });
+    }
     if (kind === "idle") {
       entries.push({ separator: true });
       entries.push({ label: "Archive", action: () => archive(session.id, new Set([session.id])) });
@@ -330,7 +353,12 @@ function BoardCard({ session, kind, outlined }: { session: Session; kind: Kind; 
   };
 
   return (
-    <div className={`board-card${outlined ? " outlined" : ""}`} onClick={cardClick} onContextMenu={(e) => contextMenu(e, items())}>
+    <div
+      className={`board-card${outlined ? " outlined" : ""}${tint ? " tinted" : ""}`}
+      style={tint ? ({ "--tint": tint } as React.CSSProperties) : undefined}
+      onClick={cardClick}
+      onContextMenu={(e) => contextMenu(e, items())}
+    >
       <div className="board-card-top">
         <div className="board-card-meta">
           <span className="badge">{initials(session.cwd)}</span>
@@ -346,6 +374,7 @@ function BoardCard({ session, kind, outlined }: { session: Session; kind: Kind; 
         </div>
         {mission && <div className="board-card-mission">{mission.goal}</div>}
         <button className="board-card-name" title={`Open ${session.name}`} onClick={open}>{session.name}</button>
+        {match && <div className="board-card-match" title={match.snippet}><Snippet hit={match} query={query} /></div>}
       </div>
       {kind === "needsYou" && <NeedsYou session={session} digest={digest} />}
       {kind === "working" && <Working digest={digest} summary={brief?.summary || brief?.goal} now={brief?.now} />}
@@ -590,6 +619,187 @@ function BoardReply({ placeholder, send }: { placeholder: string; send: (text: s
       </button>
     </div>
   );
+}
+
+/** A hit's snippet, who said it first, the words marked (SearchWords.snippet). */
+export function Snippet({ hit, query }: { hit: SearchHit; query: string }) {
+  return (
+    <>
+      <span className={hit.role === "user" ? "snippet-you" : "snippet-agent"}>{hit.role === "user" ? "You: " : "Agent: "}</span>
+      {markedParts(hit.snippet, query).map((p, i) => (p.marked ? <b key={i}>{p.text}</b> : <span key={i}>{p.text}</span>))}
+    </>
+  );
+}
+
+/** Conversations that have ended and said what was searched for, at the
+ *  foot of the last column: not on the Board, but what was asked. */
+function PastHits({ hits, query }: { hits: SearchHit[]; query: string }) {
+  return (
+    <div className="board-past">
+      <div className="board-past-title">In past conversations</div>
+      {hits.slice(0, 8).map((hit) => (
+        <button key={`${hit.session?.id}-${hit.messageId}`} className="board-past-hit" title={hit.snippet} onClick={() => openHit(hit)}>
+          <span className="board-past-name">{hit.session?.name ?? "Conversation"}</span>
+          <span className="board-past-snippet"><Snippet hit={hit} query={query} /></span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The sidebar's search, as the sidebar steps aside here: agents by name,
+ *  folder or branch, and everything said in their conversations. ⌘F. */
+function SearchField({ width }: { width: number }) {
+  const { search } = useShell();
+  const [focused, setFocused] = useState(false);
+  const field = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        field.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  return (
+    <label className={`board-search${focused ? " focused" : ""}`} style={{ width }}>
+      <Search size={13} strokeWidth={2.2} />
+      <input
+        ref={field}
+        value={search}
+        placeholder="Search agents and messages"
+        aria-label="Search agents and messages"
+        spellCheck={false}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onChange={(e) => setShell({ search: e.target.value })}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            setShell({ search: "" });
+            field.current?.blur();
+          }
+        }}
+      />
+      {search ? (
+        <button className="board-search-clear" title="Clear the search" aria-label="Clear the search" onClick={() => setShell({ search: "" })}>
+          <XCircle size={13} />
+        </button>
+      ) : !focused ? <span className="board-search-key">⌘F</span> : null}
+    </label>
+  );
+}
+
+/** Colour agents by state, project or folder. */
+function ColorMenu() {
+  const [colorBy, setColorBy] = useColorBy();
+  return (
+    <button
+      className={`board-top-button${colorBy === "none" ? "" : " on"}`}
+      title="Color agents by state, project or folder"
+      aria-label="Color agents by"
+      onClick={(e) => menuUnder(e.currentTarget, COLOR_BY.map((c) => ({ label: c.title, checked: c.id === colorBy, action: () => setColorBy(c.id) })))}
+    >
+      <Palette size={12} fill={colorBy === "none" ? "none" : "currentColor"} />
+    </button>
+  );
+}
+
+/** What Agentman approved by itself today, newest first (handledToday). */
+function handledToday(entries: ManagerEntry[]): ManagerEntry[] {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  return entries.filter((e) => e.tool === "approve" && e.ts >= start.getTime()).reverse();
+}
+
+function HandledButton() {
+  const manager = useManager();
+  const handled = handledToday(manager.entries);
+  const [open, setOpen] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  if (!handled.length) return null;
+  return (
+    <span className="board-tonight">
+      <button ref={button} className="board-handled" title="What Agentman approved for you today" onClick={() => setOpen(!open)}>
+        <CircleCheck size={11} />
+        <span>{handled.length} handled</span>
+      </button>
+      {open && <HandledPanel anchor={button.current} entries={handled} close={() => setOpen(false)} />}
+    </span>
+  );
+}
+
+function HandledPanel({ anchor, entries, close }: { anchor: HTMLElement | null; entries: ManagerEntry[]; close: () => void }) {
+  const panel = useRef<HTMLDivElement>(null);
+  const [asked, setAsked] = useState<Set<string>>(new Set());
+  const manager = useManager();
+  useEffect(() => {
+    const down = (e: MouseEvent) => {
+      if (!panel.current?.contains(e.target as Node) && !anchor?.contains(e.target as Node)) close();
+    };
+    const key = (e: KeyboardEvent) => e.key === "Escape" && close();
+    document.addEventListener("mousedown", down);
+    window.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("mousedown", down);
+      window.removeEventListener("keydown", key);
+    };
+  }, [anchor, close]);
+  const box = anchor?.getBoundingClientRect();
+  const left = box ? Math.max(8, Math.min(window.innerWidth - 408, box.left + box.width / 2 - 200)) : 8;
+  // Ask next time: a rule that asks, for what it approved (alwaysAsk).
+  const alwaysAsk = async (entry: ManagerEntry) => {
+    const settings = manager.settings;
+    const approved = entry.approved;
+    if (!settings || !approved) return;
+    const rule = { action: "ask", kind: approved.kind, pattern: approved.target, ...(approved.folder ? { folder: approved.folder } : {}) };
+    const rules = settings.rules ?? [];
+    const known = rules.some((r) => r.action === rule.action && r.kind === rule.kind && r.pattern === rule.pattern && (r.folder ?? "") === (rule.folder ?? ""));
+    if (!(await saveSettings({ ...settings, rules: known ? rules : [...rules, rule] }))) setAsked(new Set([...asked, entry.id]));
+  };
+  return (
+    <div className="board-popover board-handled-panel" ref={panel} style={{ left, top: box ? box.bottom + 8 : 40 }} role="dialog" aria-label="Approved for you today">
+      <div className="board-popover-title">Approved for you today</div>
+      {entries.map((entry) => (
+        <div key={entry.id} className="board-handled-row">
+          <span className="board-handled-text">{inline(entry.text)}</span>
+          {entry.approved && (
+            <button className="board-handled-ask" disabled={asked.has(entry.id)} onClick={() => void alwaysAsk(entry)}>
+              {asked.has(entry.id) ? "Will ask" : "Ask next time"}
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** How much Agentman does by itself in a folder (FolderTrust). */
+const TRUST_LEVELS = [
+  { id: "watch", title: "Watch" },
+  { id: "suggest", title: "Suggest" },
+  { id: "handle", title: "Handle" },
+];
+
+/** The level that applies to a folder: the closest entry, or what the
+ *  approving switch means where there is none. */
+function trustLevel(folder: string, settings?: { trust?: { folder: string; level: string }[]; autoApprove: boolean }): string {
+  if (!settings) return "watch";
+  const home = cachedHome();
+  const expanded = (p: string) => (p.startsWith("~") && home ? home + p.slice(1) : p);
+  const closest = (settings.trust ?? [])
+    .filter((t) => folder === expanded(t.folder) || folder.startsWith(expanded(t.folder) + "/"))
+    .sort((a, b) => expanded(b.folder).length - expanded(a.folder).length)[0];
+  return closest?.level ?? (settings.autoApprove ? "handle" : "watch");
+}
+
+async function setTrust(level: string, folder: string) {
+  const settings = getManager().settings;
+  if (!settings) return;
+  const trust = (settings.trust ?? []).filter((t) => t.folder !== folder);
+  trust.push({ folder, level });
+  await saveSettings({ ...settings, trust });
 }
 
 export type { BoardSections };

@@ -101,3 +101,8 @@
 
 /* The line on the sidebar's edge: drag to resize, double-click for 256. */
 .pane-resize { position: absolute; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 5; --wails-draggable: no-drag; }
+
+/* An agent's colour, when the Board colours agents (AgentColors): a short
+   bar at the row's leading edge. */
+.agent-row { position: relative; }
+.agent-tint { position: absolute; left: -4px; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; pointer-events: none; }

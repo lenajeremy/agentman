@@ -28,6 +28,9 @@ export interface ShellState {
   showPalette: boolean;
   /** Where the New Agent page opens, when something sends the user there. */
   newAgentPreset: NewAgentPreset | null;
+  /** Conversations opened from a search that aren't on any list, so their
+   *  page has them (AgentsStore.foundSessions). */
+  foundSessions: Record<string, Session>;
 }
 
 let state: ShellState = {
@@ -39,6 +42,7 @@ let state: ShellState = {
   renaming: null,
   showPalette: false,
   newAgentPreset: null,
+  foundSessions: {},
 };
 const listeners = new Set<() => void>();
 

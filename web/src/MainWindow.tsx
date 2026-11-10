@@ -39,7 +39,7 @@ function useWindowWidth(): number {
 export function MainWindow({ platform }: { platform: string }) {
   const route = useRoute();
   const { sessions } = useStore();
-  const { pastSessions } = useShell();
+  const { pastSessions, foundSessions } = useShell();
   const [sidebarWidth, setSidebarWidth] = usePref("sidebarWidth", SIDEBAR_DEFAULT);
   const [sidebarHidden, setSidebarHidden] = usePref("sidebarHidden", false);
   // The sidebar steps aside on the Board, whose header has its search and
@@ -66,7 +66,7 @@ export function MainWindow({ platform }: { platform: string }) {
   const headerLeading = mac && !fullscreen ? 82 : 16;
   const width = clampSidebar(sidebarWidth, windowWidth);
   const selected: Session | undefined = route.kind === "agent"
-    ? sessions.find((s) => s.id === route.id) ?? pastSessions.find((s) => s.id === route.id)
+    ? sessions.find((s) => s.id === route.id) ?? pastSessions.find((s) => s.id === route.id) ?? foundSessions[route.id]
     : undefined;
 
   const style = { "--safe-top": `${mac && !fullscreen ? 32 : 0}px`, "--header-leading": `${headerLeading}px`, "--detail-header-leading": sidebarGone ? `${headerLeading + 34}px` : "0px" } as CSSProperties;

@@ -3,6 +3,7 @@
 // "Earlier here" in a folder), the archived shelf, Agentman's card and the
 // connection at the foot.
 
+import { agentColor, useColorBy } from "./board/colors";
 import { confirmEnd, endable } from "./AgentHeader";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { ChevronRight, Contrast, Folder as FolderIcon, Globe, ListFilter, PanelLeft, Search, Sparkles, SquarePen, X } from "lucide-react";
@@ -197,6 +198,7 @@ function AgentButton({ session, branch, selected, inList, earlier, choices, live
   session: Session; branch?: string; selected: boolean; inList: boolean; earlier?: boolean; choices: Choices; live: Session[];
 }) {
   const agentmanOn = useAgentmanOn();
+  const [colorBy] = useColorBy();
   const { renaming } = useShell();
   function menu(e: MouseEvent) {
     const ids = liveIds(live);
@@ -231,6 +233,7 @@ function AgentButton({ session, branch, selected, inList, earlier, choices, live
     });
     contextMenu(e, entries);
   }
+  const tint = agentColor(session, colorBy);
   return (
     <div
       className={`agent-row ${inList ? "in-list" : "on-shelf"} ${earlier ? "earlier" : ""} ${selected ? "selected" : ""}`}
@@ -239,6 +242,7 @@ function AgentButton({ session, branch, selected, inList, earlier, choices, live
       onClick={() => openAgent(session.id)}
       onContextMenu={earlier ? undefined : menu}
     >
+      {tint && <span className="agent-tint" style={{ background: tint }} aria-hidden />}
       <AgentRow session={session} branch={branch} renaming={renaming === session.id} archived={isArchived(session, choices)} />
     </div>
   );
