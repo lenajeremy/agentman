@@ -8,21 +8,59 @@ import UniformTypeIdentifiers
 // GitHub's tables), so a reply reads the way it does on the phone rather than
 // as raw pipes and hashes.
 
-/// A whole reply, block by block.
+/// A whole reply: each run of prose one selectable text, so a selection goes
+/// on from one paragraph to the next, and the blocks between them (code,
+/// tables, pictures) on their own.
 struct MarkdownView: View {
     let blocks: [MarkdownBlock]
+    private let source: String
 
     init(_ source: String) {
+        self.source = source
         blocks = MarkdownCache.blocks(for: source)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            ForEach(blocks) { block in
-                BlockView(block: block)
+            ForEach(Self.segments(blocks)) { segment in
+                switch segment.content {
+                case .prose(let run):
+                    MarkdownProse(blocks: run, key: "\(source.hashValue)-\(segment.id)")
+                case .block(let block):
+                    BlockView(block: block)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    struct Segment: Identifiable {
+        enum Content {
+            case prose([MarkdownBlock])
+            case block(MarkdownBlock)
+        }
+        let id: Int
+        let content: Content
+    }
+
+    /// The blocks, with each run of prose together.
+    static func segments(_ blocks: [MarkdownBlock]) -> [Segment] {
+        var out: [Segment] = []
+        var run: [MarkdownBlock] = []
+        func close() {
+            if let first = run.first { out.append(Segment(id: first.id, content: .prose(run))) }
+            run = []
+        }
+        for block in blocks {
+            if MarkdownProseText.isProse(block) {
+                run.append(block)
+            } else {
+                close()
+                out.append(Segment(id: block.id, content: .block(block)))
+            }
+        }
+        close()
+        return out
     }
 }
 
@@ -304,6 +342,15 @@ private enum Inline {
         return out
     }
 
+    /// An intent added to each run's own, so code inside bold stays code.
+    private static func adding(_ intent: InlinePresentationIntent, to text: AttributedString) -> AttributedString {
+        var out = text
+        for run in text.runs {
+            out[run.range].inlinePresentationIntent = (run.inlinePresentationIntent ?? []).union(intent)
+        }
+        return out
+    }
+
     private static func render(inline node: Markup) -> AttributedString {
         switch node {
         case let text as Markdown.Text:
@@ -313,20 +360,19 @@ private enum Inline {
         case is LineBreak:
             return AttributedString("\n")
         case let code as InlineCode:
+            // The intent is what the text view reads; the font and grey are
+            // SwiftUI's, for a table's cells.
             var piece = AttributedString(code.code)
             piece.font = Fonts.mono(12.5)
             piece.backgroundColor = Palette.fill
+            piece.inlinePresentationIntent = .code
             return piece
         case let strong as Strong:
-            var piece = render(strong)
-            piece.inlinePresentationIntent = .stronglyEmphasized
-            return piece
+            return adding(.stronglyEmphasized, to: render(strong))
         case let emphasis as Emphasis:
-            var piece = render(emphasis)
-            piece.inlinePresentationIntent = .emphasized
-            return piece
+            return adding(.emphasized, to: render(emphasis))
         case let strike as Strikethrough:
-            var piece = render(strike)
+            var piece = adding(.strikethrough, to: render(strike))
             piece.strikethroughStyle = .single
             return piece
         case let link as Markdown.Link:
@@ -356,12 +402,6 @@ private enum Inline {
 private struct BlockView: View {
     let block: MarkdownBlock
     @Environment(\.markdownFolder) private var folder
-    @Environment(\.findHighlight) private var highlight
-
-    private func marked(_ text: AttributedString) -> AttributedString {
-        highlight?.mark(text) ?? text
-    }
-
     var body: some View {
         content
             .multilineTextAlignment(block.centered ? .center : .leading)
@@ -370,28 +410,17 @@ private struct BlockView: View {
 
     @ViewBuilder private var content: some View {
         switch block.kind {
-        case .paragraph(let text):
-            SwiftUI.Text(marked(text))
-                .font(TextStyle.body)
-                .foregroundStyle(Palette.text)
-                .lineSpacing(6)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-        case .heading(let level, let text):
-            SwiftUI.Text(marked(text))
-                .font(Fonts.sans(level <= 1 ? 19 : level == 2 ? 16.5 : 14.5, .medium))
-                .foregroundStyle(Palette.text)
-                .lineSpacing(3)
-                .padding(.top, level <= 2 ? 10 : 4)
-                .textSelection(.enabled)
+        case .paragraph(let text), .heading(_, let text):
+            // On its own only inside a list or quote that also holds code:
+            // a run of prose is drawn whole, by MarkdownView.
+            MarkdownProse(blocks: [block], key: "\(block.id)-\(String(text.characters).hashValue)")
+        case .rule:
+            MarkdownProse(blocks: [block], key: "\(block.id)-rule")
         case .code(let language, let code):
             // A scroll bar shows that a long line goes on past the edge.
             ScrollView(.horizontal, showsIndicators: true) {
-                SwiftUI.Text(folder == nil ? AttributedString(code) : Self.coloured(code, language: language))
-                    .font(TextStyle.code)
-                    .foregroundStyle(Palette.text)
-                    .lineSpacing(4)
-                    .textSelection(.enabled)
+                MarkdownCode(text: MarkdownProseText.code(folder == nil ? NSAttributedString(string: code) : Self.coloured(code, language: language)),
+                             key: "\(code.hashValue)-\(language ?? "")-\(folder != nil)")
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
             }
@@ -428,11 +457,6 @@ private struct BlockView: View {
             }
         case .table(let header, let rows):
             TableBlock(header: header, rows: rows)
-        case .rule:
-            Rectangle()
-                .fill(Palette.line)
-                .frame(height: 1)
-                .padding(.vertical, 8)
         case .images(let images):
             FlowLayout(spacing: 6) {
                 ForEach(Array(images.enumerated()), id: \.offset) { _, image in
@@ -443,18 +467,18 @@ private struct BlockView: View {
     }
 
     /// Code in a document, coloured as the editor colours its language.
-    private static func coloured(_ code: String, language: String?) -> AttributedString {
+    private static func coloured(_ code: String, language: String?) -> NSAttributedString {
         let named = ["typescript": "ts", "javascript": "js", "python": "py", "shell": "sh", "bash": "sh", "zsh": "sh",
                      "console": "sh", "rust": "rs", "ruby": "rb", "kotlin": "kt", "yml": "yaml", "golang": "go"]
         let fence = (language ?? "").lowercased()
         guard !fence.isEmpty, let grammar = CodeHighlighter.language(for: "code." + (named[fence] ?? fence)) else {
-            return AttributedString(code)
+            return NSAttributedString(string: code)
         }
         let text = NSMutableAttributedString(string: code)
         for (range, token) in CodeHighlighter.tokens(in: code, language: grammar) {
             text.addAttribute(.foregroundColor, value: CodeHighlighter.color(token), range: range)
         }
-        return (try? AttributedString(text, including: \.appKit)) ?? AttributedString(code)
+        return text
     }
 }
 

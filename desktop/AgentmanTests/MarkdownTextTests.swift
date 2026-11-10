@@ -1,0 +1,175 @@
+import AppKit
+import SwiftUI
+import XCTest
+@testable import Agentman
+
+@MainActor
+final class MarkdownTextTests: XCTestCase {
+    private static let reply = """
+    The fix is in two parts, and both are **small**.
+
+    First, the parser drops the bar Claude draws in front of a long question, \
+    and `cleanTitle` keeps the tab strip out of the prompt.
+
+    ## What changed
+
+    - The bar is gone from a wrapped question.
+    - A tick marks the earlier answer, not part of its label.
+
+    > Tested against real panes from Claude 2.1.322.
+
+    ```swift
+    if let rest, barred := strings.CutPrefix(trimmed, "│"); barred && !strings.HasSuffix(rest, "│") {
+        trimmed = strings.TrimSpace(rest)
+    }
+    ```
+
+    Then the daemon was rebuilt, and [the PR](https://github.com/lenajeremy/agentman/pull/185) merged.
+    """
+
+    /// Prose runs together; a code block, a table or a picture stands alone
+    /// and splits the run.
+    func testARunOfProseIsOneTextAndCodeSplitsIt() {
+        let segments = MarkdownView.segments(MarkdownView(Self.reply).blocks)
+        let kinds = segments.map { segment -> String in
+            switch segment.content {
+            case .prose(let run): "prose \(run.count)"
+            case .block: "block"
+            }
+        }
+        XCTAssertEqual(kinds, ["prose 5", "block", "prose 1"])
+    }
+
+    func testTheProseReadsAsTheBlocksDid() throws {
+        let blocks = MarkdownView(Self.reply).blocks
+        guard case .prose(let run) = MarkdownView.segments(blocks)[0].content else { return XCTFail("no prose first") }
+        let text = MarkdownProseText.attributed(run, highlight: FindHighlight(words: ["parser"], current: true))
+        let plain = text.string
+        XCTAssertTrue(plain.hasPrefix("The fix is in two parts"))
+        XCTAssertEqual(plain.components(separatedBy: "\n").count, 6, "one line a paragraph, the list's items each one")
+
+        let code = (plain as NSString).range(of: "cleanTitle")
+        let codeFont = try XCTUnwrap(text.attribute(.font, at: code.location, effectiveRange: nil) as? NSFont)
+        XCTAssertTrue(codeFont.fontName.contains("GoogleSansCode") || codeFont.isFixedPitch, "inline code in the code font: \(codeFont.fontName)")
+        XCTAssertNotNil(text.attribute(.backgroundColor, at: code.location, effectiveRange: nil), "inline code on its grey")
+
+        let bold = (plain as NSString).range(of: "small")
+        let boldFont = try XCTUnwrap(text.attribute(.font, at: bold.location, effectiveRange: nil) as? NSFont)
+        XCTAssertTrue(NSFontManager.shared.traits(of: boldFont).contains(.boldFontMask))
+
+        let heading = (plain as NSString).range(of: "What changed")
+        let headingFont = try XCTUnwrap(text.attribute(.font, at: heading.location, effectiveRange: nil) as? NSFont)
+        XCTAssertEqual(headingFont.pointSize, 16.5)
+
+        let item = (plain as NSString).range(of: "\t•\tThe bar is gone")
+        XCTAssertNotEqual(item.location, NSNotFound, "a list item opens with its marker")
+        let itemStyle = try XCTUnwrap(text.attribute(.paragraphStyle, at: item.location, effectiveRange: nil) as? NSParagraphStyle)
+        XCTAssertGreaterThan(itemStyle.headIndent, 0, "wrapped lines hang under the item's text")
+
+        let quote = (plain as NSString).range(of: "Tested against")
+        let quoteStyle = try XCTUnwrap(text.attribute(.paragraphStyle, at: quote.location, effectiveRange: nil) as? NSParagraphStyle)
+        XCTAssertEqual(quoteStyle.textBlocks.first?.width(for: .border, edge: .minX), 3, "the quote's bar")
+
+        let found = (plain as NSString).range(of: "parser")
+        XCTAssertNotNil(text.attribute(.backgroundColor, at: found.location, effectiveRange: nil), "Find marks a match")
+        let last = try XCTUnwrap(text.attribute(.paragraphStyle, at: text.length - 1, effectiveRange: nil) as? NSParagraphStyle)
+        XCTAssertEqual(last.paragraphSpacing, 0, "no room below the last line")
+    }
+
+    /// A hard line break stays within its paragraph, keeping the paragraph's
+    /// spacing; copied, it is a plain newline.
+    func testALineBreakStaysInItsParagraphAndCopiesAsANewline() throws {
+        let view = MarkdownTextView(wraps: true)
+        view.textStorage?.setAttributedString(MarkdownProseText.attributed(MarkdownView("one<br>two\n\nthree").blocks, highlight: nil))
+        XCTAssertEqual(view.string, "one\u{2028}two\nthree")
+        view.setSelectedRange(NSRange(location: 0, length: (view.string as NSString).length))
+        let board = NSPasteboard(name: NSPasteboard.Name("markdown-text-test"))
+        board.clearContents()
+        XCTAssertTrue(view.writeSelection(to: board, type: .string))
+        XCTAssertEqual(board.string(forType: .string), "one\ntwo\nthree")
+        XCTAssertEqual(view.accessibilitySelectedText(), "one\ntwo\nthree")
+    }
+
+    /// Line spacing goes between a paragraph's lines, not after its last:
+    /// two one-line paragraphs 10 apart are a line and 10 apart, as the
+    /// SwiftUI text had them.
+    func testLineSpacingIsBetweenAParagraphsLinesOnly() throws {
+        let view = MarkdownTextView(wraps: true)
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = 6
+        style.paragraphSpacing = 10
+        let text = NSMutableAttributedString(string: "first item\nsecond item", attributes: [.font: NSFont.systemFont(ofSize: 14), .paragraphStyle: style])
+        view.textStorage?.setAttributedString(text)
+        _ = view.size(fittingWidth: 500)
+        let layout = try XCTUnwrap(view.layoutManager)
+        var tops: [CGFloat] = []
+        layout.enumerateLineFragments(forGlyphRange: NSRange(location: 0, length: layout.numberOfGlyphs)) { rect, _, _, _, _ in tops.append(rect.minY) }
+        XCTAssertEqual(tops.count, 2)
+        XCTAssertEqual(tops.last ?? 0, 27, accuracy: 0.5, "line tops \(tops)")
+    }
+
+    func testALinkKeepsWhereItGoes() throws {
+        let blocks = MarkdownView("See [the PR](https://example.com/185).").blocks
+        let text = MarkdownProseText.attributed(blocks, highlight: nil)
+        let at = (text.string as NSString).range(of: "the PR").location
+        XCTAssertEqual(text.attribute(.link, at: at, effectiveRange: nil) as? URL, URL(string: "https://example.com/185"))
+    }
+
+    /// As tall as its text at the width it is given, taller when narrower;
+    /// a code block's as wide as its longest line.
+    func testATextIsAsTallAsItsLines() {
+        let view = MarkdownTextView(wraps: true)
+        view.textStorage?.setAttributedString(MarkdownProseText.attributed(MarkdownView(Self.reply).blocks, highlight: nil))
+        let wide = view.size(fittingWidth: 700), narrow = view.size(fittingWidth: 300)
+        XCTAssertEqual(wide.width, 700)
+        XCTAssertGreaterThan(narrow.height, wide.height)
+
+        let code = MarkdownTextView(wraps: false)
+        code.textStorage?.setAttributedString(MarkdownProseText.code(NSAttributedString(string: "short\na much longer line of code than the first")))
+        let size = code.size(fittingWidth: nil)
+        XCTAssertGreaterThan(size.width, 200)
+        XCTAssertLessThan(size.width, 600)
+    }
+
+    // MARK: Pictures
+
+    /// The reply drawn, then with all of it selected in each text, light and
+    /// dark. Runs with TEST_RUNNER_AGENTMAN_SHOTS=<folder>.
+    func testRenderASelectedReply() throws {
+        guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
+        for (look, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            let size = CGSize(width: 640, height: 900)
+            let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.alphaValue = 0
+            window.appearance = NSAppearance(named: appearance)
+            let short = "A short block, as wide as its box:\n\n```sh\nam service restart\n```\n\n> A longer quote that runs on past the width of one line, so the bar is seen to follow it down.\n\n---\n\nAfter the rule."
+            let host = NSHostingView(rootView: VStack(alignment: .leading, spacing: 24) {
+                MarkdownView(Self.reply)
+                MarkdownView(short)
+            }
+            .padding(24).frame(width: size.width, height: size.height, alignment: .top)
+            .background(Palette.paper))
+            window.contentView = host
+            window.orderFrontRegardless()
+            defer { window.orderOut(nil) }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+            for (name, select) in [("", false), ("-selected", true)] {
+                if select {
+                    for text in Self.textViews(in: host) {
+                        text.setSelectedRange(NSRange(location: 0, length: text.textStorage?.length ?? 0))
+                    }
+                }
+                host.display()
+                let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+                host.cacheDisplay(in: host.bounds, to: bitmap)
+                try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                    .write(to: URL(fileURLWithPath: out).appendingPathComponent("reply\(name)-\(look).png"))
+            }
+        }
+    }
+
+    private static func textViews(in view: NSView) -> [MarkdownTextView] {
+        (view as? MarkdownTextView).map { [$0] } ?? view.subviews.flatMap(textViews)
+    }
+}
