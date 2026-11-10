@@ -78,6 +78,12 @@ the address follows the page, d85b182 a narrow editor window, 07a0232 ~ only
 for the home folder. The Mac's AgentsStore.end reads the closed flag as the
 web did before f13b318, so an ended Muse session there says it's still
 running in a terminal too.
+End to end: `npm run e2e` (web/teststack/e2e) runs 60 checks over every
+screen, in Chromium and WebKit, on the test stack and its stand-ins; 120
+passing on 2026-11-10. Writing it found 4b6502e (the picture viewer was a
+placeholder; now the Mac's), 6759993 (keys typed as a palette opened over
+the code went into the file), 3382cef (Escape while the commit sheet
+reads), c74e136 (the keyboard back at once, not a frame later).
 Not tested: Firefox (its headless build can't start inside the sandbox
 these tests run in); the desktop shell running (it builds, vets and passes
 its tests, but running it shows windows).
