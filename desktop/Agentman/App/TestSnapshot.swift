@@ -26,6 +26,7 @@ enum TestSnapshot {
                 EditorRegistry.shared.store(for: folder).splitTerminal()
             }
         }
+        TestTyping.start()
         // Every window is hidden the moment it exists, the editor's too.
         let timer = Timer(timeInterval: 0.01, repeats: true) { _ in
             MainActor.assumeIsolated { hideWindows() }

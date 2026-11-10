@@ -1,7 +1,7 @@
 // The agents and their conversations, kept from am serve's events.
 
 import { useEffect, useState, useSyncExternalStore } from "react";
-import type { Message, Session } from "@shared/protocol";
+import type { Message, Page, Session } from "@shared/protocol";
 import { daemon, type AppEvent, type Status } from "./daemon";
 
 interface State {
@@ -27,7 +27,14 @@ function set(next: Partial<State>) {
 
 function mergeMessages(sessionId: string, incoming: Message[]) {
   const byId = new Map((state.messages[sessionId] ?? []).map((m) => [m.id, m]));
-  for (const m of incoming) byId.set(m.id, m);
+  for (const m of incoming) {
+    // A later copy replaces the earlier one (a running call arriving
+    // finished), never the other way: a page read before the result was
+    // written must not set a finished call running again.
+    const known = byId.get(m.id);
+    if (known?.tool && known.tool.status !== "running" && m.tool?.status === "running") continue;
+    byId.set(m.id, m);
+  }
   const merged = [...byId.values()].sort((a, b) => a.ts - b.ts);
   set({ messages: { ...state.messages, [sessionId]: merged } });
 }
@@ -52,10 +59,7 @@ function apply(event: AppEvent) {
       if (event.sessionId && event.messages) mergeMessages(event.sessionId, event.messages);
       break;
     case "page":
-      if (event.page) {
-        mergeMessages(event.page.sessionId, event.page.messages);
-        set({ hasMore: { ...state.hasMore, [event.page.sessionId]: event.page.hasMore } });
-      }
+      // Read where they are asked for: fetchPages, loadOlder.
       break;
   }
 }
@@ -64,10 +68,8 @@ daemon.on((event) => apply(event));
 daemon.onStatus((status) => {
   if (status !== "connected") return;
   daemon.send({ type: "list_sessions" });
-  for (const id of subscribed) {
-    daemon.send({ type: "subscribe", sessionId: id });
-    daemon.send({ type: "fetch_messages", sessionId: id, limit: 200 });
-  }
+  // A reconnect starts the daemon's side afresh: follow again.
+  for (const id of subscribed) void fetchPages(id);
 });
 
 export function useStore(): State {
@@ -94,18 +96,63 @@ export function useStatus(): { status: Status; detail: string } {
 /** Follows one agent's conversation while it is on screen. */
 export function follow(sessionId: string): () => void {
   subscribed.add(sessionId);
-  daemon.send({ type: "subscribe", sessionId });
-  daemon.send({ type: "fetch_messages", sessionId, limit: 200 });
+  void fetchPages(sessionId);
   return () => {
     subscribed.delete(sessionId);
     daemon.send({ type: "unsubscribe", sessionId });
   };
 }
 
-export function loadOlder(sessionId: string) {
-  const oldest = state.messages[sessionId]?.[0];
-  if (!oldest) return;
-  daemon.send({ type: "fetch_messages", sessionId, before: oldest.id, limit: 200 });
+/** Where each conversation's next older page starts, from the last page read. */
+const cursors: Record<string, string | undefined> = {};
+const loadingOlder = new Set<string>();
+/** A page, and the most a catch-up reads, as the Mac's and the phone's (catchup.ts). */
+const PAGE = 40;
+const CATCH_UP_PAGES = 4;
+
+/** Subscribes and reads the newest page. Followed again after a reconnect,
+ *  the thread already shows what came before: the pages reach back to that,
+ *  four at most, so nothing in between is missing. */
+async function fetchPages(sessionId: string) {
+  daemon.send({ type: "subscribe", sessionId });
+  const shown = state.messages[sessionId] ?? [];
+  const since = shown.length ? Math.max(...shown.map((m) => m.ts)) : undefined;
+  try {
+    let page = (await daemon.request({ type: "fetch_messages", sessionId, limit: PAGE })).page;
+    if (!page) return;
+    mergeMessages(sessionId, page.messages);
+    let pages = 1;
+    while (since !== undefined && page.hasMore && pages < CATCH_UP_PAGES && page.nextCursor &&
+      page.messages.length > 0 && Math.min(...page.messages.map((m) => m.ts)) > since) {
+      const next: Page | undefined = (await daemon.request({ type: "fetch_messages", sessionId, before: page.nextCursor, limit: PAGE })).page;
+      if (!next) break;
+      mergeMessages(sessionId, next.messages);
+      page = next;
+      pages += 1;
+    }
+    cursors[sessionId] = page.nextCursor;
+    set({ hasMore: { ...state.hasMore, [sessionId]: page.hasMore } });
+  } catch {
+    // Not connected: the reconnect reads it again.
+  }
+}
+
+/** The page before the oldest message shown, 40 at most. */
+export async function loadOlder(sessionId: string): Promise<void> {
+  const cursor = cursors[sessionId];
+  if (!state.hasMore[sessionId] || !cursor || loadingOlder.has(sessionId)) return;
+  loadingOlder.add(sessionId);
+  try {
+    const page = (await daemon.request({ type: "fetch_messages", sessionId, before: cursor, limit: PAGE })).page;
+    if (!page) return;
+    mergeMessages(sessionId, page.messages);
+    cursors[sessionId] = page.nextCursor;
+    set({ hasMore: { ...state.hasMore, [sessionId]: page.hasMore } });
+  } catch {
+    // Asked again when the reader comes back to the top.
+  } finally {
+    loadingOlder.delete(sessionId);
+  }
 }
 
 export function sendMessage(sessionId: string, text: string) {

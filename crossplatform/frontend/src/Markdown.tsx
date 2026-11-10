@@ -1,8 +1,11 @@
 // Draws markdown parsed by the phone's parser (mobile/lib/markdown.ts), so
-// both apps read an agent's words the same way.
+// both apps read an agent's words the same way, laid out as the Mac app's
+// MarkdownView.swift lays it out: blocks 14 apart, its quotes curled.
 
-import { memo, type ReactNode } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import { parseMarkdown, safeHref, type Block, type Inline } from "@shared/markdown";
+import { openURL } from "./host";
+import { smartBlocks } from "./thread/smart";
 
 function inline(nodes: Inline[], key = ""): ReactNode[] {
   return nodes.map((node, i) => {
@@ -23,7 +26,16 @@ function inline(nodes: Inline[], key = ""): ReactNode[] {
       case "link": {
         const href = safeHref(node.href);
         return href ? (
-          <a key={k} href={href} target="_blank" rel="noreferrer">{inline(node.children, k)}</a>
+          <a
+            key={k}
+            href={href}
+            onClick={(e) => {
+              e.preventDefault();
+              void openURL(href);
+            }}
+          >
+            {inline(node.children, k)}
+          </a>
         ) : (
           <span key={k}>{inline(node.children, k)}</span>
         );
@@ -36,54 +48,77 @@ function inline(nodes: Inline[], key = ""): ReactNode[] {
   });
 }
 
+/** A task item's box, as the Mac app puts it ahead of the item's words. */
+function withBox(blocks: Block[], checked: boolean | undefined): Block[] {
+  if (checked === undefined) return blocks;
+  const mark: Inline = { kind: "text", text: checked ? "☑︎ " : "☐ " };
+  const [first, ...rest] = blocks;
+  if (first?.kind === "paragraph") return [{ ...first, content: [mark, ...first.content] }, ...rest];
+  return [{ kind: "paragraph", content: [mark] }, ...blocks];
+}
+
+/** As wide as its words, up to the width a table of its columns allows. */
+function cellWidth(columns: number): number {
+  return Math.min(360, Math.max(140, 700 / Math.max(columns, 1)));
+}
+
 function blocks(list: Block[], key = ""): ReactNode[] {
   return list.map((block, i) => {
     const k = `${key}${i}`;
     const centered = block.centered ? " centered" : "";
     switch (block.kind) {
       case "paragraph":
-        return <p key={k} className={centered}>{inline(block.content, k)}</p>;
+        return <p key={k} className={`md-p${centered}`}>{inline(block.content, k)}</p>;
       case "heading": {
-        const Tag = `h${Math.min(Math.max(block.level, 1), 6)}` as "h1";
-        return <Tag key={k} className={centered}>{inline(block.content, k)}</Tag>;
+        const level = Math.min(Math.max(block.level, 1), 6);
+        const Tag = `h${level}` as "h1";
+        return <Tag key={k} className={`md-h md-h${Math.min(level, 3)}${centered}`}>{inline(block.content, k)}</Tag>;
       }
       case "code":
         return (
-          <pre key={k} className="code" data-language={block.language}>
-            <code>{block.text}</code>
-          </pre>
+          <div key={k} className="md-code">
+            <pre data-language={block.language}><code>{block.text}</code></pre>
+          </div>
         );
       case "quote":
-        return <blockquote key={k}><div className="quote-body">{blocks(block.blocks, k)}</div></blockquote>;
-      case "list":
         return (
-          <ul key={k} className="md-list">
-            {block.items.map((item, j) => (
-              <li key={j}>
-                <span className="marker">{item.checked === undefined ? item.marker : item.checked ? "☑" : "☐"}</span>
-                <div className="item">{blocks(item.blocks, `${k}.${j}.`)}</div>
-              </li>
-            ))}
-          </ul>
+          <div key={k} className="md-quote">
+            <span className="md-quote-bar" />
+            <div className="md-quote-body">{blocks(block.blocks, k)}</div>
+          </div>
         );
-      case "rule":
-        return <hr key={k} />;
-      case "table":
+      case "list": {
+        const ordered = /^\d+\.$/.test(block.items[0]?.marker ?? "");
         return (
-          <div key={k} className="table-wrap">
-            <table>
+          <div key={k} className="md-list">
+            {block.items.map((item, j) => (
+              <div key={j} className="md-item">
+                <span className={`md-marker ${ordered ? "ordered" : ""}`}>{ordered ? item.marker : "•"}</span>
+                <div className="md-item-body">{blocks(withBox(item.blocks, item.checked), `${k}.${j}.`)}</div>
+              </div>
+            ))}
+          </div>
+        );
+      }
+      case "rule":
+        return <div key={k} className="md-rule" />;
+      case "table": {
+        const width = cellWidth(block.table.header.length);
+        return (
+          <div key={k} className="md-table-scroll">
+            <table className="md-table">
               <thead>
-                <tr>{block.table.header.map((cell, j) => <th key={j} style={{ textAlign: block.table.align[j] }}>{inline(cell, `${k}h${j}`)}</th>)}</tr>
+                <tr>{block.table.header.map((cell, j) => <th key={j}><div style={{ maxWidth: width }}>{inline(cell, `${k}h${j}`)}</div></th>)}</tr>
               </thead>
               <tbody>
                 {block.table.rows.map((row, r) => (
-                  <tr key={r}>{row.map((cell, j) => <td key={j} style={{ textAlign: block.table.align[j] }}>{inline(cell, `${k}r${r}c${j}`)}</td>)}</tr>
+                  <tr key={r}>{row.map((cell, j) => <td key={j}><div style={{ maxWidth: width }}>{inline(cell, `${k}r${r}c${j}`)}</div></td>)}</tr>
                 ))}
               </tbody>
             </table>
-            {block.table.hiddenRows > 0 && <div className="faint">{block.table.hiddenRows} more rows</div>}
           </div>
         );
+      }
       case "pictures":
         return null;
     }
@@ -91,5 +126,6 @@ function blocks(list: Block[], key = ""): ReactNode[] {
 }
 
 export const Markdown = memo(function Markdown({ text }: { text: string }) {
-  return <div className="md">{blocks(parseMarkdown(text))}</div>;
+  const parsed = useMemo(() => smartBlocks(parseMarkdown(text)), [text]);
+  return <div className="md">{blocks(parsed)}</div>;
 });

@@ -31,7 +31,7 @@ func main() {
 			application.NewService(shell),
 		}, newHost().services()...),
 		Assets: application.AssetOptions{
-			Handler: withSymbols(application.AssetFileServerFS(assets)),
+			Handler: withFileIcons(withSymbols(application.AssetFileServerFS(assets))),
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,

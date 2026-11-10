@@ -1,13 +1,81 @@
-/* Composer: 36 gutters, 4 above, 20 below; box surface, radius 18, 1pt line. */
+/* The message box (AgentThreadView.swift's Composer, MessageField.swift,
+   FileMentions.swift, SlashCommands.swift, VoiceRecorder.swift). 1 pt = 1 px.
+   Edges are drawn inside, as SwiftUI's strokeBorder: a shadow, not a border. */
 .composer-wrap { flex: none; padding: 4px 36px 20px; max-width: 740px; width: 100%; margin: 0 auto; }
-.composer-box { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 10px 8px 8px; display: flex; flex-direction: column; gap: 10px; }
-.composer-box:focus-within { border-color: var(--fill-strong); }
-.composer-field { border: 0; outline: none; resize: none; background: none; padding: 0 5px; min-height: 36px; max-height: calc(10 * (1.2em + 3px)); font-size: 14px; line-height: calc(1.2em + 3px); color: var(--text); field-sizing: content; user-select: text; }
-.composer-field::placeholder { color: var(--muted); }
+.composer-box { position: relative; background: var(--surface); border-radius: 18px; box-shadow: inset 0 0 0 1px var(--line); padding: 10px 8px 8px; display: flex; flex-direction: column; gap: 10px; }
+.composer-box.focused { box-shadow: inset 0 0 0 1px var(--fill-strong); }
+.composer-field { padding: 0 5px; min-height: 36px; }
+.composer-field.disabled { opacity: 0.6; }
+/* 14 with 3 between lines, as the Mac's text view: one to ten lines. */
+.message-field { position: relative; top: -1.5px; font-size: 14px; line-height: 20px; min-height: 20px; overflow-y: auto; outline: none; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); caret-color: var(--text); user-select: text; cursor: text; }
+.message-field::-webkit-scrollbar { display: none; }
+.message-field[data-empty="true"]::before { content: attr(data-placeholder); position: absolute; left: 0; right: 0; top: 0; color: var(--muted); pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip { color: var(--mention); white-space: nowrap; user-select: all; padding-right: 1.5px; }
+.chip-icon { width: 14px; height: 14px; margin-right: 4px; vertical-align: -2px; }
+
 .composer-controls { display: flex; align-items: center; gap: 6px; height: 28px; }
-.clip { width: 26px; height: 28px; display: grid; place-items: center; color: var(--muted); }
-.mic { width: 28px; height: 28px; border-radius: 50%; background: var(--fill); color: var(--muted); display: grid; place-items: center; }
-.model-chip { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; }
-.send { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--fill-strong); color: var(--muted); }
-.send:disabled { opacity: 0.55; }
+.composer-spacer { flex: 1; min-width: 8px; }
+.clip { width: 26px; height: 28px; display: grid; place-items: center; color: var(--muted); flex: none; }
+.clip:disabled { opacity: 0.5; }
+.switch-menu { height: 28px; padding: 0 5px; display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-2); white-space: nowrap; flex: none; }
+.switch-menu:disabled { opacity: 0.5; }
+.model-chip { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; min-width: 0; }
+.model-chip-name { overflow: hidden; text-overflow: ellipsis; }
+.send { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--fill-strong); color: var(--muted); flex: none; }
 .send.can { background: var(--working); color: #fff; }
+/* SwiftUI dims a disabled button; one that can't be used at all, more. */
+.send:disabled { opacity: 0.58; }
+.send.off { opacity: 0.4; }
+.send.off:disabled { opacity: 0.23; }
+.stop { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--error) 90%, transparent); flex: none; }
+.stop-square { width: 9px; height: 9px; border-radius: 2px; background: #fff; }
+.voice { height: 28px; min-width: 28px; border-radius: 14px; display: flex; align-items: center; justify-content: center; position: relative; flex: none; }
+.voice.idle, .voice.writing { width: 28px; background: var(--fill); color: var(--muted); }
+.voice.recording { padding: 0 10px; gap: 6px; background: var(--error); color: #fff; }
+.voice-halo { position: absolute; inset: 0; border-radius: 14px; background: color-mix(in srgb, var(--error) 25%, transparent); z-index: -1; transition: transform 0.12s ease-out; }
+.voice-stop { width: 8px; height: 8px; border-radius: 2px; background: #fff; }
+.voice-time { font: 600 calc(11px * var(--mono-scale)) var(--mono); font-variant-numeric: tabular-nums; }
+.voice:disabled { opacity: 0.6; }
+
+/* The lists over the box: files for @, commands for / */
+.completion-anchor { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 10; }
+.completion-list { padding: 5px; background: var(--surface); border-radius: 12px; box-shadow: inset 0 0 0 1px var(--line), 0 4px 28px rgba(0, 0, 0, 0.12); display: flex; flex-direction: column; gap: 1px; }
+.completion-heading { font-size: 11px; font-weight: 500; color: var(--faint); padding: 4px 8px 3px; }
+.completion-spacer { flex: 1; min-width: 0; }
+.completion-return { color: var(--faint); display: flex; flex: none; }
+.mention-row { display: flex; align-items: center; gap: 8px; padding: 0 8px; height: 28px; border-radius: 7px; }
+.mention-row.selected { background: var(--fill); }
+.mention-icon { width: 16px; display: grid; place-items: center; flex: none; }
+.mention-name { font-size: 13px; color: var(--text); white-space: nowrap; flex: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
+.mention-row.selected .mention-name { font-weight: 500; }
+.mention-folder { font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; min-width: 0; }
+.slash-scroll { max-height: 351px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.slash-scroll::-webkit-scrollbar { display: none; }
+/* A list that scrolls keeps room for macOS's scroller at its side, as
+   SwiftUI's ScrollView does with legacy scrollers (a mouse attached). */
+.slash-scroll.scrolls { padding-right: 15px; }
+.slash-row { padding: 4px 8px; min-height: 38px; border-radius: 7px; display: flex; flex-direction: column; justify-content: center; gap: 1px; flex: none; }
+.slash-row.selected { background: var(--fill); }
+.slash-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.slash-name { font: var(--code) var(--mono); color: var(--text); white-space: nowrap; }
+.slash-row.selected .slash-name { font-weight: 500; }
+.slash-hint { font: calc(11.5px * var(--mono-scale)) var(--mono); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.slash-description { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.slash-problem { font-size: 12.5px; color: var(--muted); padding: 8px; }
+
+/* Pictures and files waiting to go */
+.attachment-strip { display: flex; gap: 8px; padding: 6px 6px 0 0; margin: -4px 0 0 5px; }
+.attachment { position: relative; flex: none; }
+.attachment-image { width: 56px; height: 56px; border-radius: 10px; object-fit: cover; display: block; box-shadow: inset 0 0 0 1px var(--line); outline: 1px solid var(--line); outline-offset: -1px; }
+.attachment-file { display: flex; align-items: center; gap: 8px; padding: 0 10px; height: 56px; background: var(--fill); border-radius: 10px; }
+.attachment-name { font-size: 12.5px; font-weight: 500; color: var(--text); max-width: 170px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.attachment-remove { position: absolute; top: -5px; right: -5px; width: 18px; height: 18px; border-radius: 50%; background: rgba(0, 0, 0, 0.65); color: #fff; display: grid; place-items: center; }
+
+/* A panel command's sheet */
+.panel-sheet { width: min(680px, calc(100vw - 80px)); height: min(560px, calc(100vh - 80px)); min-width: 560px; min-height: 360px; }
+.panel-sheet-bar { display: flex; align-items: center; padding: 12px 18px; }
+.panel-sheet-command { font: 500 calc(13px * var(--mono-scale)) var(--mono); color: var(--text); }
+.panel-sheet-rule { height: 1px; background: var(--line); flex: none; }
+.panel-sheet-scroll { flex: 1; overflow: auto; }
+.panel-sheet-text { margin: 0; padding: 18px; font: var(--code)/var(--code-lh) var(--mono); color: var(--text); white-space: pre; user-select: text; }
+.mac-button.default { background: #007aff; color: #fff; box-shadow: none; }
