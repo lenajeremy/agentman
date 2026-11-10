@@ -11,7 +11,8 @@
     "build": "npm run editor && tsc && vite build --mode production",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"src/**/*.test.mts\"",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "e2e": "teststack/e2e/run.sh"
   },
   "dependencies": {
     "@wailsio/runtime": "3.0.0",
@@ -28,6 +29,7 @@
     "@types/react": "~19.2.18",
     "@types/react-dom": "~19.2.3",
     "@vitejs/plugin-react": "6.1.2",
+    "playwright-core": "1.63.0",
     "typescript": "~6.0.3",
     "vite": "8.3.5"
   }

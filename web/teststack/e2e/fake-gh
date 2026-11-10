@@ -1,0 +1,9 @@
+#!/bin/bash
+# A stand-in GitHub CLI for the test stack: records what it was asked and
+# answers pr create with a made-up link. Nothing reaches GitHub.
+echo "$(date +%H:%M:%S) $PWD :: $*" >> "$(dirname "$0")/gh.log"
+case "$1 $2" in
+  "pr create") echo "https://github.com/example/demo/pull/7" ;;
+  "auth status") echo "github.com: Logged in as test" ;;
+esac
+exit 0
