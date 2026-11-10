@@ -26,9 +26,14 @@ export interface PaletteItem {
   glyph?: ReactNode;
 }
 
-/** A shortcut as the Mac writes it ("⌘N"); "Ctrl+N" where there is no ⌘. */
+/** A shortcut as the Mac writes it ("⌘N"); "Ctrl+N" where there is no ⌘.
+ *  In a browser, the keys it keeps for itself (⌘N opens a browser window,
+ *  and a page never sees it) aren't shown: there the shortcut doesn't work. */
 export function shortcutLabel(shortcut: string): string {
-  return document.documentElement.dataset.platform === "darwin" ? shortcut : shortcut.replace("⌘", "Ctrl+");
+  const os = document.documentElement.dataset.platform;
+  if (os === "browser" && /^⌘[NTWQ]$/.test(shortcut)) return "";
+  const mac = os === "darwin" || (os === "browser" && navigator.platform.startsWith("Mac"));
+  return mac ? shortcut : shortcut.replace("⌘", "Ctrl+");
 }
 
 export function PaletteView({ placeholder, results, choose, dismiss, initialQuery = "", status }: {
@@ -102,7 +107,7 @@ export function PaletteView({ placeholder, results, choose, dismiss, initialQuer
                     <span className="palette-title">{item.title}</span>
                     {item.detail && <Truncated mode="head" className="palette-detail" text={item.detail} />}
                     <span className="palette-gap" />
-                    {item.shortcut && <span className="palette-shortcut">{shortcutLabel(item.shortcut)}</span>}
+                    {item.shortcut && shortcutLabel(item.shortcut) && <span className="palette-shortcut">{shortcutLabel(item.shortcut)}</span>}
                   </div>
                 ))}
               </div>

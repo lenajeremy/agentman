@@ -5,10 +5,13 @@
 // takes the picture. Headless Chrome draws off screen: nothing shows.
 //
 //   node shot.mjs <url> <out.png> [--size 1560x980] [--wait 6] [--dark]
-//                 [--step "<js>"]... [--after 1.5]
+//                 [--step "<js>"]... [--after 1.5] [--init "<js>"]
+//                 [--grant notifications]...
 //
 // Each --step is JavaScript run in the page, --after seconds apart, once
-// the first --wait is over. Used by browser.sh.
+// the first --wait is over; a step's value, if any, is printed. --init runs
+// before the page's own scripts; --grant gives the page a permission (as
+// if the user had allowed it). Used by browser.sh.
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,7 +24,10 @@ const opt = (name, fallback) => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : fallback;
 };
-const steps = args.flatMap((a, i) => (a === "--step" ? [args[i + 1]] : []));
+const all = (name) => args.flatMap((a, i) => (a === name ? [args[i + 1]] : []));
+const steps = all("--step");
+const inits = all("--init");
+const grants = all("--grant");
 const [width, height] = opt("--size", "1560x980").split("x").map(Number);
 const wait = Number(opt("--wait", "6")) * 1000;
 const after = Number(opt("--after", "1.5")) * 1000;
@@ -78,6 +84,8 @@ try {
   await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 2, mobile: false });
   if (dark) await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] });
   await send("Page.enable");
+  for (const source of inits) await send("Page.addScriptToEvaluateOnNewDocument", { source });
+  if (grants.length) await send("Browser.grantPermissions", { permissions: grants, origin: new URL(url).origin });
   await send("Page.navigate", { url });
   await sleep(wait);
   for (const step of steps) {

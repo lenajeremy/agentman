@@ -17,7 +17,8 @@ function on<T>(name: string, handler: (data: T) => void): () => void {
   return Events.On(name, (event) => handler(event.data as T));
 }
 
-/** A menu item meant for the page. */
+/** A menu item meant for the page. (In the browser, with no menu bar,
+ *  commands.ts takes the menu's shortcuts from the keyboard.) */
 export function onCommand(handler: (command: Command) => void): () => void {
   return on<Command>("agentman:command", handler);
 }
@@ -84,8 +85,7 @@ let home = "";
 /** The user's home folder. */
 export async function homeFolder(): Promise<string> {
   if (home) return home;
-  if (inShell) home = String(await hostCall("Shell.Home"));
-  else home = (await fetch("/__agentman/home").then((r) => (r.ok ? r.text() : "")).catch(() => "")) || "";
+  home = String(await hostCall("Shell.Home").catch(() => ""));
   return home;
 }
 
@@ -111,3 +111,13 @@ on<string>("agentman:quit-save", async (token) => {
   }
   void Call.ByName("main.Shell.SaveAnswer", token, saved);
 });
+
+// In the browser, closing the tab with unsaved editor files asks first: the
+// browser's own question, as a page can't word it.
+if (!inShell) {
+  window.addEventListener("beforeunload", (e) => {
+    if (unsavedFiles().length === 0) return;
+    e.preventDefault();
+    e.returnValue = "";
+  });
+}

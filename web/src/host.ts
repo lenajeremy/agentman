@@ -115,19 +115,37 @@ export async function openURL(url: string): Promise<void> {
   else window.open(url, "_blank", "noopener");
 }
 
-/** A system notification; clicking it opens `link` (an agentman:// route). */
+/** A system notification; clicking it opens `link` (an agentman:// route).
+ *  In the browser, the browser's own: permission is asked the first time
+ *  there is something to say, and a click brings the tab forward. */
 export async function notify(id: string, title: string, body: string, link = ""): Promise<void> {
-  if (inShell) await Host.Notify(id, title, body, link);
+  if (inShell) return Host.Notify(id, title, body, link);
+  if (typeof Notification === "undefined") return;
+  if (Notification.permission === "default") await Notification.requestPermission();
+  if (Notification.permission !== "granted") return;
+  shown.get(id)?.close();
+  const note = new Notification(title, { body, tag: id, icon: "/assets/agentman.png" });
+  shown.set(id, note);
+  note.onclick = () => {
+    window.focus();
+    note.close();
+    if (link) for (const handler of linkHandlers) handler(link);
+  };
+  note.onclose = () => shown.delete(id);
 }
 
+const shown = new Map<string, Notification>();
+
 export async function clearNotification(id: string): Promise<void> {
-  if (inShell) await Host.ClearNotification(id);
+  if (inShell) return Host.ClearNotification(id);
+  shown.get(id)?.close();
 }
 
 /** A notification with the Mac's other parts: a subtitle, its thread
  *  (grouped in Notification Center), and no sound when silent. Asks for
  *  permission the first time, not at launch. Nothing where the shell can't
- *  post them (a development build on macOS). */
+ *  post them (a development build on macOS). In the browser, the browser's
+ *  own notification, the subtitle above the body. */
 export interface Notice {
   id: string;
   title: string;
@@ -141,7 +159,10 @@ export interface Notice {
 let noticeAsked = false;
 
 export async function notifyWith(n: Notice): Promise<void> {
-  if (!inShell) return;
+  if (!inShell) {
+    const body = n.subtitle ? `${n.subtitle}\n${n.body}` : n.body;
+    return notify(n.id, n.title, body, n.link ?? "");
+  }
   try {
     if (!(await NotificationService.CheckNotificationAuthorization())) {
       if (noticeAsked) return;
@@ -159,16 +180,23 @@ export async function notifyWith(n: Notice): Promise<void> {
 
 /** Takes back every notification delivered, as opening Agentman does. */
 export async function clearAllNotifications(): Promise<void> {
-  if (inShell) await NotificationService.RemoveAllDeliveredNotifications().catch(() => {});
+  if (inShell) return NotificationService.RemoveAllDeliveredNotifications().catch(() => {});
+  for (const note of shown.values()) note.close();
 }
 
-/** The dock icon's badge ("" clears it). macOS only. */
+/** The dock icon's badge ("" clears it), macOS only; in the browser the
+ *  tab's title carries the count, "(3) Agentman". */
 export async function setBadge(label: string): Promise<void> {
-  if (inShell) await Host.SetBadge(label);
+  if (inShell) return Host.SetBadge(label);
+  const title = document.title.replace(/^\(\S+\) /, "");
+  document.title = label ? `(${label}) ${title}` : title;
 }
+
+const linkHandlers = new Set<(link: string) => void>();
 
 /** Links to follow: a clicked notification's, and later agentman:// links. */
 export function onOpenLink(handler: (link: string) => void): () => void {
-  if (!inShell) return () => {};
-  return Events.On("agentman:open", (event) => handler(String(event.data)));
+  if (inShell) return Events.On("agentman:open", (event) => handler(String(event.data)));
+  linkHandlers.add(handler);
+  return () => linkHandlers.delete(handler);
 }

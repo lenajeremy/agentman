@@ -7,7 +7,8 @@
 # query lands on a screen ("agent=claude:6f1c…"); each step is JavaScript run
 # in the page, 1.5 s apart, after WAIT seconds (default 6), e.g.
 #   'document.querySelector("button[aria-label=More]").click()'
-# SIZE (default 1560x980, drawn at 2x); DARK=1 for the dark appearance.
+# SIZE (default 1560x980, drawn at 2x); DARK=1 for the dark appearance;
+# INIT=<js> runs before the page's scripts; GRANT=notifications allows them.
 # Build the app first (cd web && npx vite build) and start the stack.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -23,5 +24,7 @@ if [ -n "$QUERY" ]; then
 fi
 ARGS=(--size "${SIZE:-1560x980}" --wait "${WAIT:-6}")
 [ -n "${DARK:-}" ] && ARGS+=(--dark)
+[ -n "${INIT:-}" ] && ARGS+=(--init "$INIT")
+[ -n "${GRANT:-}" ] && ARGS+=(--grant "$GRANT")
 for step in "$@"; do ARGS+=(--step "$step"); done
 node "$HERE/shot.mjs" "$LINK" "$OUT" "${ARGS[@]}"
