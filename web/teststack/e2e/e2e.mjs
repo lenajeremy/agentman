@@ -437,6 +437,24 @@ async function newAgent() {
       await sessionMenu(page, "End Session…");
       await sheetButton(page, "End Session");
     });
+
+    await check("palette: what an ended conversation said, handed from an editor, opens in a new main window", async () => {
+      const words = "Hello from the end-to-end run";
+      // The index is rebuilt for each run (prepare.sh), and the session just
+      // ended can still be listed for a moment: asked until one is found.
+      let hit, found = 0;
+      for (let tries = 0; !hit && tries < 20; tries++) {
+        if (tries) await new Promise((r) => setTimeout(r, 1000));
+        const live = new Set(((await daemon({ type: "list_sessions" })).sessions ?? []).map((s) => s.id));
+        const said = await daemon({ type: "search", text: words, limit: 50 });
+        found = said.search?.hits?.length ?? 0;
+        hit = said.search?.hits?.find((h) => h.session && !live.has(h.session.id));
+      }
+      expect(hit, `an ended conversation that said it (${found} found)`);
+      const link = `agentman://found/${encodeURIComponent(hit.session.id)}?${new URLSearchParams({ message: hit.messageId, q: words })}`;
+      const main = await open(`open=${encodeURIComponent(link)}`);
+      await until(main, () => /\d+\/\d+/.test(document.querySelector(".find-bar")?.innerText ?? "") && !!document.querySelector(".resume-bar"), null, "the ended conversation at the message, with Resume", 20000);
+    });
   }
 }
 
@@ -513,6 +531,9 @@ async function editor() {
     await paletteReady(page);
     expect(await page.evaluate(() => !document.querySelector(".tab.active")?.classList.contains("dirty")), "a key typed as the palette opened went into the file");
     await page.keyboard.type("bugs");
+    // As a person would: once the agents are listed (they come after the
+    // folders, which match "bugs" too).
+    await until(page, () => document.querySelector(".palette-row.selected")?.innerText.split("\n")[0] === "bugs", null, "the bugs agent first");
     await page.keyboard.press("Enter");
     await until(page, () => (document.querySelector(".agent-panel-column")?.innerText ?? "").startsWith("bugs"), null, "bugs in the panel");
     await page.keyboard.press("Meta+k");
@@ -627,6 +648,71 @@ async function settings() {
   });
 }
 
+
+
+async function paletteSaid() {
+  await check("palette: groups its rows, and finds what was said under In messages", async () => {
+    const page = await open(`agent=${ID.bugs}`, { wait: ".message-field" });
+    await page.keyboard.press("Meta+k");
+    await paletteReady(page);
+    const headings = await until(page, () => { const h = [...document.querySelectorAll(".palette-heading")].map((e) => e.innerText); return h.includes("Agents") && h.includes("Commands") && h; }, null, "Agents and Commands headings");
+    expect(headings[0] === "This agent", `the first heading is ${headings[0]}`);
+    await page.keyboard.type("uploader");
+    await until(page, () => [...document.querySelectorAll(".palette-heading")].some((e) => e.innerText === "In messages") && !!document.querySelector(".palette-snippet b"), null, "an In messages row, its words marked", 15000);
+    const foot = await page.evaluate(() => document.querySelector(".palette-status")?.innerText);
+    expect(foot === "↑↓ to move · ↵ to open · esc to close", `the foot reads ${foot}`);
+    await page.locator(".palette-row.with-snippet").first().click();
+    await until(page, () => /\d+\/\d+/.test(document.querySelector(".find-bar")?.innerText ?? ""), null, "opened at the message, the find bar counting");
+  });
+
+  await check("palette: a message found from an editor opens in a main window", async () => {
+    const page = await open(`view=editor&folder=${encodeURIComponent(DEMO_DIR)}&file=TODO.txt`, { wait: "iframe.monaco" });
+    await intoCode(page);
+    await page.keyboard.press("Meta+k");
+    await paletteReady(page);
+    await page.keyboard.type("uploader");
+    await page.locator(".palette-row.with-snippet").first().click({ timeout: 15000 });
+    const handed = await until(page, () => [...window.__links, ...window.__opened.map((u) => new URL(u, location.href).searchParams.get("open") ?? "")].find((l) => l.startsWith("agentman://found/")), null, "handed to a main window");
+    // A main window opened with it (none was open): at the message.
+    const main = await open(`open=${encodeURIComponent(handed)}`, { wait: ".message-field" });
+    await until(main, () => /\d+\/\d+/.test(document.querySelector(".find-bar")?.innerText ?? ""), null, "the new main window at the message, the find bar counting");
+  });
+
+  await check("palette: rows that come in under a still pointer don't take the selection", async () => {
+    const page = await open("", { wait: ".board-card" });
+    await page.keyboard.press("Meta+k");
+    await paletteReady(page);
+    // Where the message found will be: under Ask Agentman and its heading.
+    const box = await page.locator(".palette-rows").boundingBox();
+    await page.mouse.move(box.x + 200, box.y + 6 + 34 + 28 + 26);
+    await page.keyboard.type("uploader");
+    await until(page, () => !!document.querySelector(".palette-row.with-snippet") && document.querySelector(".palette-status")?.innerText.startsWith("↑↓"), null, "the message found", 15000);
+    await page.waitForTimeout(300);
+    const selected = await page.evaluate(() => document.querySelector(".palette-row.selected")?.innerText.split("\n")[0]);
+    expect(selected?.startsWith("Ask Agentman"), `the selection moved to ${selected}`);
+    // A real move still selects.
+    await page.mouse.move(box.x + 210, box.y + 6 + 34 + 28 + 30);
+    await until(page, () => document.querySelector(".palette-row.selected")?.classList.contains("with-snippet"), null, "the row moved onto selected");
+  });
+
+  await check("palette: short words aren't searched; an agent listed by name isn't listed again for what it said", async () => {
+    const said = await daemon({ type: "search", text: "pics", limit: 50 });
+    const pics = await sessionId("pics");
+    expect(said.search?.hits?.some((h) => h.session?.id === pics), "the pics agent's own messages say pics (else this proves nothing)");
+    const page = await open("", { wait: ".board-card" });
+    await page.keyboard.press("Meta+k");
+    await paletteReady(page);
+    await page.keyboard.type("pi");
+    await page.waitForTimeout(600);
+    const short = await page.evaluate(() => ({ foot: document.querySelector(".palette-status")?.innerText, said: document.querySelectorAll(".palette-row.with-snippet").length }));
+    expect(short.foot === "↑↓ to move · ↵ to open · esc to close" && short.said === 0, `with two letters: ${JSON.stringify(short)}`);
+    await page.keyboard.type("cs");
+    await until(page, () => document.querySelector(".palette-status")?.innerText === "↑↓ to move · ↵ to open · esc to close", null, "the search over");
+    const rows = await page.evaluate(() => [...document.querySelectorAll(".palette-rows > *")].map((e) => (e.classList.contains("palette-heading") ? "## " : "") + e.innerText.split("\n")[0]));
+    expect(rows.includes("pics"), `pics is listed: ${rows.join(", ")}`);
+    expect(!rows.includes("## In messages") || !rows.slice(rows.indexOf("## In messages")).includes("pics"), `pics isn't listed again: ${rows.join(", ")}`);
+  });
+}
 
 // MARK: - The second batch: the rest of each screen
 
@@ -849,7 +935,7 @@ for (const [index, [name, engine]] of engines.entries()) {
   await signIn.close();
   // Order matters only at the end: ending "empty" and dropping the
   // connection come last, after the rest has used them.
-  if (want("shell")) await shell();
+  if (want("shell")) { await shell(); await paletteSaid(); }
   if (want("sidebar")) await sidebar();
   if (want("board")) { await board(); await boardMore(); }
   if (want("usage")) await usage();
