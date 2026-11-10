@@ -23,6 +23,17 @@
             <string>12.0.0</string>
         <key>NSHighResolutionCapable</key>
             <string>true</string>
+        <key>CFBundleURLTypes</key>
+            <array>
+                <dict>
+                    <key>CFBundleURLName</key>
+                        <string>dev.agentman.app</string>
+                    <key>CFBundleURLSchemes</key>
+                        <array>
+                            <string>agentman</string>
+                        </array>
+                </dict>
+            </array>
         <key>NSHumanReadableCopyright</key>
             <string>Agentman is open source under the MIT license.</string>
     </dict>

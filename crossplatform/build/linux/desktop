@@ -9,5 +9,6 @@ Type=Application
 Icon=agentman
 Categories=Utility;
 StartupWMClass=agentman
+MimeType=x-scheme-handler/agentman;
 
  

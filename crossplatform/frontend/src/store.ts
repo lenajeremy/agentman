@@ -132,3 +132,28 @@ async function workspace(session: Session) {
 daemon.onStatus((status) => {
   if (status !== "connected") asked.clear();
 });
+
+/** The branch in every live agent's folder, read again (Sidebar.swift reads
+ *  them every 10 s while it shows); folders without one drop out. */
+export async function refreshBranches() {
+  const folders = new Map<string, string>();
+  for (const s of state.sessions) if (s.state !== "ended" && !folders.has(s.cwd)) folders.set(s.cwd, s.id);
+  const read: Record<string, string> = {};
+  await Promise.all([...folders].map(async ([cwd, id]) => {
+    try {
+      const commits = await daemon.request({ type: "list_commits", sessionId: id, limit: 1 });
+      const branch = commits.workspace?.branch;
+      if (branch) read[cwd] = branch;
+    } catch {
+      // Not read this time: kept until the next round.
+      if (state.branches[cwd]) read[cwd] = state.branches[cwd];
+    }
+  }));
+  const same = Object.keys(read).length === Object.keys(state.branches).length && Object.entries(read).every(([k, v]) => state.branches[k] === v);
+  if (!same) set({ branches: read });
+}
+
+/** The agents as they are now, for code outside React. */
+export function getStore(): State {
+  return state;
+}

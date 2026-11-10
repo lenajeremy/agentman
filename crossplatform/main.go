@@ -19,6 +19,7 @@ var assets embed.FS
 
 func main() {
 	test := testMode()
+	shell := newShell()
 	options := application.Options{
 		Name:        "Agentman",
 		Description: "Every coding agent on this computer, in one window",
@@ -27,6 +28,7 @@ func main() {
 			application.NewService(&Windows{}),
 			application.NewService(&Menus{}),
 			application.NewService(&Files{}),
+			application.NewService(shell),
 		}, newHost().services()...),
 		Assets: application.AssetOptions{
 			Handler: withSymbols(application.AssetFileServerFS(assets)),
@@ -43,11 +45,13 @@ func main() {
 		_, _ = fmt.Sscanf(size, "%dx%d", &width, &height)
 	}
 	first := window("Agentman", startURL(), width, height)
+	shell.prepare(&options, &first, test != nil)
 	if test != nil {
 		test.prepare(&options, &first)
 	}
 	app := application.New(options)
 	win := app.Window.NewWithOptions(first)
+	shell.start(app, win, test != nil)
 	if test != nil {
 		test.start(app, win)
 	}
