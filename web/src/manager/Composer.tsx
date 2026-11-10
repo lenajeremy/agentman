@@ -5,7 +5,8 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
 import { ArrowRight, ArrowUp, CircleAlert, Key, Plus, Square, X } from "lucide-react";
-import { openURL } from "../host";
+import { keptWhere, openURL } from "../host";
+import { useServerSystem } from "../shell/system";
 import { useStatus } from "../store";
 import { Icon } from "../ui";
 import { fromFiles, MAX_COUNT, pick, type Attachment } from "./attach";
@@ -183,20 +184,16 @@ export function ManagerComposer({ text, setText, attachments, setAttachments, th
   );
 }
 
-/** Where am serve keeps the key: the Keychain on a Mac, a file only the
- *  user can read elsewhere (internal/secrets). */
-function keptWhere(): string {
-  const os = document.documentElement.dataset.platform;
-  return os === "linux" || os === "windows" ? "kept in a file only you can read" : "kept in your Keychain";
-}
-
-/** Where the API key goes, in place of the message box until there is one. */
+/** Where the API key goes, in place of the message box until there is one:
+ *  what Agentman is and why it needs a key, then the key (ManagerChatView's
+ *  KeyBox, 0.41). */
 function KeyBox() {
   const s = useManager();
   const [key, setKeyText] = useState("");
   const [saving, setSaving] = useState(false);
   const [problem, setLocalProblem] = useState<string>();
   const gemini = provider(s) === "gemini";
+  const system = useServerSystem();
   const save = async () => {
     const value = key.trim();
     if (!value || saving) return;
@@ -208,13 +205,19 @@ function KeyBox() {
   };
   return (
     <div className="am-keybox-wrap">
+      <div className="am-key-intro">
+        <div className="am-key-heading">Agentman needs an API key</div>
+        <div className="am-key-why">
+          {`It reads what your agents are doing, answers their routine requests, and tells you what needs you. It runs on your own ${gemini ? "Gemini" : "Anthropic"} key, ${keptWhere(system)} and only sent to ${gemini ? "Google" : "Anthropic"}.`}
+        </div>
+      </div>
       <div className="am-keybox">
         <Icon icon={Key} sf="key" size={13} className="am-key-icon" />
         <input
           className="am-key-field"
           type="password"
           value={key}
-          placeholder={gemini ? "Paste your Gemini API key to start" : "Paste your Anthropic API key to start"}
+          placeholder={gemini ? "Paste your Gemini API key" : "Paste your Anthropic API key"}
           onChange={(e) => setKeyText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") void save();
@@ -250,7 +253,7 @@ export function ManagerBox({ text, setText, attachments, setAttachments, sending
     <div className="am-box">
       <ComposerFeedback message={s.problem} radius={large ? 26 : 22}>
         {!connected ? (
-          <ManagerComposer text="" setText={() => {}} attachments={[]} setAttachments={() => {}} thinking={false} sending large={large} placeholder="Waiting for am serve…" disabled onSend={() => {}} onStop={() => {}} />
+          <ManagerComposer text="" setText={() => {}} attachments={[]} setAttachments={() => {}} thinking={false} sending large={large} placeholder="Waiting for Agentman to connect…" disabled onSend={() => {}} onStop={() => {}} />
         ) : keyNeeded ? (
           <KeyBox />
         ) : (
@@ -261,13 +264,15 @@ export function ManagerBox({ text, setText, attachments, setAttachments, sending
           Group in SwiftUI. */}
       {(status !== "connected" || keyNeeded) && (
         <div className="am-box-note">
+          {/* The banner over the page says how to bring am serve back; the card
+              above says what the key is for. */}
           {status === "offline" ? (
-            <span>am serve isn't running. Start it in a terminal with <b>am serve</b>.</span>
+            <span>Not connected.</span>
           ) : status === "connecting" ? (
             <span>Connecting…</span>
           ) : (
             <span className="am-key-note">
-              {`Agentman runs on your ${gemini ? "Gemini" : "Anthropic"} API key, ${keptWhere()}.`}
+              Don't have one?
               <a
                 href={gemini ? "https://aistudio.google.com/apikey" : "https://console.anthropic.com/settings/keys"}
                 onClick={(e) => {
@@ -275,7 +280,7 @@ export function ManagerBox({ text, setText, attachments, setAttachments, sending
                   void openURL(e.currentTarget.href);
                 }}
               >
-                Get a key
+                {gemini ? "Get a Gemini key" : "Get an Anthropic key"}
               </a>
             </span>
           )}

@@ -104,8 +104,12 @@
 /* The link takes the note's colour (foregroundStyle(muted) over it). */
 .am-key-note a { color: inherit; text-decoration: none; }
 
-/* The key box: radius 26, 20 before the key icon, a 32 arrow button. */
-.am-keybox-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+/* The key box: what Agentman is and why it needs a key, 12 above the field
+   (radius 26, 20 before the key icon, a 32 arrow button), all to the left. */
+.am-keybox-wrap { display: flex; flex-direction: column; align-items: stretch; gap: 12px; text-align: left; }
+.am-key-intro { display: flex; flex-direction: column; gap: 5px; padding: 0 6px; }
+.am-key-heading { font-size: 14px; font-weight: 500; color: var(--text); }
+.am-key-why { font-size: 12px; line-height: 1.4; color: var(--muted); }
 .am-keybox { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 8px 9px 20px; background: var(--surface); border-radius: 26px; box-shadow: 0 6px 36px rgba(0, 0, 0, 0.06), inset 0 0 0 1px var(--line); }
 .am-key-icon { color: var(--muted); }
 .am-key-field { flex: 1; min-width: 0; border: 0; outline: none; background: none; font-size: 15px; padding: 9px 0; line-height: 18px; color: var(--text); user-select: text; }

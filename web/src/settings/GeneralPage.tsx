@@ -3,6 +3,8 @@
 // am serve this is.
 
 import { useState } from "react";
+import { keptWhere } from "../host";
+import { useServerSystem } from "../shell/system";
 import pkg from "../../package.json";
 import type { ManagerSettings } from "@shared/protocol";
 import { usePref } from "../prefs";
@@ -97,10 +99,13 @@ function ModelPicker({ value, onChange }: { value: string; onChange: (value: str
 }
 
 /** One engine's API key: whether it is saved, and a field to save one. */
+const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
 function KeySection({ provider, saved }: { provider: "anthropic" | "gemini"; saved: boolean }) {
   const [key, setKeyText] = useState("");
   const [message, setMessage] = useState<string>();
   const gemini = provider === "gemini";
+  const system = useServerSystem();
   const save = async (value: string) => {
     const problem = await setKey(value.trim(), provider);
     if (problem) {
@@ -113,10 +118,10 @@ function KeySection({ provider, saved }: { provider: "anthropic" | "gemini"; sav
   return (
     <Section
       title={gemini ? "Gemini API key" : "Anthropic API key"}
-      footer={message ?? `Kept in your Mac's Keychain and only ever sent to ${gemini ? "Google" : "Anthropic"}.`}
+      footer={message ?? `${capitalized(keptWhere(system))} and only ever sent to ${gemini ? "Google" : "Anthropic"}.`}
     >
       <Row
-        title={saved ? "Saved in your Keychain" : "Not set yet"}
+        title={saved ? (system === "darwin" ? "Saved in your Keychain" : "Saved") : "Not set yet"}
         detail={saved ? "Paste a new key below to replace it." : gemini ? "For running Agentman on Gemini models." : "For running Agentman on Claude models."}
       >
         {saved && (

@@ -61,6 +61,24 @@ export async function platform(): Promise<Platform> {
   return platformCache;
 }
 
+let systemCache: Promise<string> | null = null;
+
+/** The system am serve runs on: "darwin", "linux" or "windows"; "" until
+ *  known. In the shell, the computer's own; in a browser, which can't tell
+ *  from itself, am serve says (Host.System). */
+export function serverSystem(): Promise<string> {
+  systemCache ??= inShell ? platform().then(String) : hostCall<string>("Host.System").then(String).catch(() => "");
+  return systemCache;
+}
+
+/** Where am serve keeps an API key (internal/secrets): the Mac's Keychain,
+ *  or elsewhere a file only the user can read. */
+export function keptWhere(system: string): string {
+  if (system === "darwin") return "kept in your Mac's Keychain";
+  if (system) return "kept in a file only you can read";
+  return "kept on this computer";
+}
+
 export interface EditorOptions {
   folder: string;
   sessionId?: string;
