@@ -44,9 +44,10 @@ enum Look {
 /// The website's look, as the phone has it: Rubik for titles, the site's
 /// mono labels, a warm dark edge on cards and controls with a hard shadow
 /// under the ones that stand out, cream for Agentman's own things, and the
-/// site's orange for the one thing to tap. What a person reads (messages,
-/// tools, code, diffs) never takes any of it. Each colour that replaced one
-/// of today's goes back to it in the Classic theme.
+/// site's orange for the one thing to tap. What a person reads (the agent's
+/// words, diffs) stays plain; the frames round it (steps, your messages,
+/// code) take the edge, as the site's cards do. Each colour that replaced
+/// one of today's goes back to it in the Classic theme.
 extension Palette {
     /// The website's orange, and the white set on it.
     static let flood = Color(light: 0xFF5F1F, dark: 0xFF5F1F)
@@ -68,6 +69,9 @@ extension Palette {
     static let inverseShadow = Color(light: 0x000000, dark: 0xFFFFFF).opacity(0.25)
     /// The $ before a command, and the icons on Agentman's cream.
     static let prompt = Color(light: 0xE5480A, dark: 0xFF8A55)
+    /// The site's ink, as a strip over a code block, and the cream set on it.
+    static let ink = Color(light: 0x160D08, dark: 0x2A211B)
+    static let onInk = Color(light: 0xFFF3E3, dark: 0xFFF3E3)
 }
 
 extension Fonts {
