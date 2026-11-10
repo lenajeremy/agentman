@@ -10,6 +10,13 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 T=${TMPDIR%/}/amx; H=$T/home
 [ -x "$T/am" ] || "$HERE/../start.sh"
 [ -f "$HERE/../../../internal/webapp/dist/index.html" ] || (cd "$HERE/../.." && npx vite build >/dev/null)
+# EMBEDDED=1: the web app as built into am, built afresh, not from the folder.
+if [ -n "${EMBEDDED:-}" ]; then
+  (cd "$HERE/../.." && npm run build >/dev/null 2>&1)
+  (cd "$HERE/../../.." && go build -tags webapp -o "$T/am" ./cmd/am)
+  echo "the web app built into am"
+fi
+export EMBEDDED="${EMBEDDED:-}"
 
 # The stand-ins.
 pgrep -f "fake-anthropic.py 18998" >/dev/null || (FAKE_ANTHROPIC_LOG="$T/fake-anthropic.log" nohup python3 "$HERE/fake-anthropic.py" 18998 >/dev/null 2>&1 &)

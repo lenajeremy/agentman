@@ -8,9 +8,13 @@ REPO=$(cd "$(dirname "$0")/../../.." && pwd)
 T=${TMPDIR%/}/amx; H=$T/home
 pkill -f "$T/am serve" 2>/dev/null || true
 sleep 1
+# The web app from the build folder, or with EMBEDDED=1 the copy built into
+# am (-tags webapp), as people get it.
+WEB=(AGENTMAN_WEB_DIR="$REPO/internal/webapp/dist")
+[ -n "${EMBEDDED:-}" ] && WEB=()
 PATHS="$T/fakebin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 nohup env -i HOME="$H" USER="$USER" LOGNAME="$USER" SHELL=/bin/bash TERM=xterm-256color LANG=en_US.UTF-8 \
-  TMPDIR="${TMPDIR:-/tmp}" TMUX_TMPDIR="$T/tmux" PATH="$PATHS" AGENTMAN_WEB_DIR="$REPO/internal/webapp/dist" \
+  TMPDIR="${TMPDIR:-/tmp}" TMUX_TMPDIR="$T/tmux" PATH="$PATHS" ${WEB[@]+"${WEB[@]}"} \
   XDG_DATA_HOME=/private/tmp/amxm MUSE_NO_AUTO_UPDATE=1 \
   ANTHROPIC_API_KEY=sk-ant-fake-test-key ANTHROPIC_BASE_URL=http://127.0.0.1:18998 \
   "$T/am" serve -relay none -config-home "$H" -addr 127.0.0.1:18797 > "$T/serve.log" 2>&1 &

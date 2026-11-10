@@ -26,7 +26,7 @@ const ID = {
 const fake = (name) => readFileSync(`${HERE}fakes/${name}.js`, "utf8");
 // Copying goes to a stub, never the Mac's clipboard; new windows are noted.
 const STUBS = `
-  Object.defineProperty(navigator, "clipboard", { value: { writeText: async (t) => { window.__copied = t; }, readText: async () => "" } });
+  Object.defineProperty(navigator, "clipboard", { value: { writeText: async (t) => { window.__copied = t; }, write: async (items) => { window.__copiedItems = items; }, readText: async () => "", read: async () => [] } });
   window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; };
   window.__links = []; { const P = BroadcastChannel.prototype.postMessage; BroadcastChannel.prototype.postMessage = function (m) { if (this.name === "agentman-links") window.__links.push(String(m)); return P.call(this, m); }; }
 `;
@@ -38,6 +38,9 @@ const want = (area) => !areas.length || areas.includes(area);
 
 let passed = 0;
 const failures = [];
+// What any page threw or logged as an error during the check running.
+let pageErrors = [];
+const errorsSeen = [];
 let context;
 let engineName = "";
 
@@ -48,6 +51,11 @@ function signInLink() {
 /** A page of the app, signed in, with fakes set up before its scripts. */
 async function open(query = "", { init = [], size = [1400, 900], dark = false, wait = "" } = {}) {
   const page = await context.newPage();
+  page.on("pageerror", (e) => pageErrors.push(`thrown: ${String(e.message).split("\n")[0].slice(0, 200)}`));
+  // A failed load is told by its address below, not by the console's line.
+  page.on("console", (m) => m.type() === "error" && !m.text().startsWith("Failed to load resource") && pageErrors.push(`console: ${m.text().split("\n")[0].slice(0, 200)}`));
+  page.on("response", (r) => r.status() >= 400 && pageErrors.push(`http ${r.status()} ${r.request().method()} ${r.url().replace(BASE, "").slice(0, 160)}`));
+  page.on("requestfailed", (r) => !/ERR_ABORTED|cancelled/i.test(r.failure()?.errorText ?? "") && pageErrors.push(`failed: ${r.url().replace(BASE, "").slice(0, 120)} (${r.failure()?.errorText})`));
   await page.setViewportSize({ width: size[0], height: size[1] });
   await page.emulateMedia({ colorScheme: dark ? "dark" : "light" });
   await page.addInitScript(STUBS);
@@ -58,8 +66,11 @@ async function open(query = "", { init = [], size = [1400, 900], dark = false, w
   return page;
 }
 
-async function check(name, run) {
+/** One check. `expected`: errors it causes on purpose (am serve stopped, a
+ *  picture the test project lacks), as patterns; any other is reported. */
+async function check(name, run, { expected = [] } = {}) {
   const started = Date.now();
+  pageErrors = [];
   try {
     await run();
     passed++;
@@ -83,6 +94,14 @@ async function check(name, run) {
     }
   } finally {
     for (const page of context.pages()) await page.close().catch(() => {});
+    // A browser's notice, not an error: a ResizeObserver's work ran into the
+    // next frame.
+    const always = [/ResizeObserver loop/];
+    const unexpected = [...new Set(pageErrors)].filter((e) => ![...always, ...expected].some((re) => re.test(e)));
+    if (unexpected.length) {
+      errorsSeen.push(`${engineName} ${name}: ${unexpected.join(" | ")}`);
+      console.log(`ERRORS ${engineName} ${name}: ${unexpected.join(" | ")}`);
+    }
   }
 }
 
@@ -129,7 +148,8 @@ async function sessionMenu(page, item, timeout = 30000) {
   const until = Date.now() + timeout;
   for (;;) {
     await click(page, "button.ellipsis");
-    const has = await page.locator(".page-menu-item").filter({ hasText: item }).count();
+    // Offered, and not greyed out while the turn finishes.
+    const has = await page.locator(".page-menu-item:not(.disabled)").filter({ hasText: item }).count();
     if (has) return menu(page, item);
     await page.keyboard.press("Escape");
     if (Date.now() > until) throw new Error(`the menu never offered ${item}`);
@@ -388,6 +408,31 @@ async function thread() {
     await until(page, () => (document.querySelector(".composer-wrap")?.innerText ?? "").includes("in the middle of a turn"), null, "the reason under the box");
   });
 
+  await check("thread: Open in Terminal moves it, and then offers Take Over (faked move)", async () => {
+    const page = await open(`agent=${ID.demo}`, { init: [fake("handoff")], wait: "button.ellipsis" });
+    await click(page, "button.ellipsis");
+    await menu(page, "Open in Terminal");
+    await until(page, () => window.__handoffs.includes("claude:6f1c2a9e-3b7d-4c55-9a10-2d8e4f6b7c01") && window.__arrived?.had, null, "moved, and arrived in its terminal");
+    await page.waitForTimeout(300);
+    await click(page, "button.ellipsis");
+    await until(page, () => [...document.querySelectorAll(".page-menu-item")].some((m) => m.innerText.trim() === "Take Over from Terminal…"), null, "Take Over offered now");
+    await page.keyboard.press("Escape");
+  });
+
+  await check("thread: a watched session's Take Over asks first; Cancel keeps it, Take Over moves it (faked move)", async () => {
+    const page = await open(`agent=${ID.bugs}`, { init: [fake("handoff")], wait: ".resume-bar" });
+    const bar = await page.evaluate(() => document.querySelector(".resume-bar")?.innerText.replace(/\s+/g, " ").trim());
+    expect(bar === "You're watching this session It runs in a terminal. Take it over to message it here; its terminal closes. Take Over…", `the bar: ${bar}`);
+    await click(page, ".resume-bar button", "Take Over…");
+    await until(page, () => (document.querySelector(".page-sheet")?.innerText ?? "").includes("Take this session over from its terminal?"), null, "the question");
+    await sheetButton(page, "Cancel");
+    await page.waitForTimeout(400);
+    expect(await page.evaluate(() => window.__handoffs.length === 0), "Cancel moved it");
+    await click(page, ".resume-bar button", "Take Over…");
+    await sheetButton(page, "Take Over");
+    await until(page, () => window.__handoffs.includes("claude:0b9d4e21-7c3a-4f6e-8d12-5a6b7c8d9e10"), null, "asked am serve to move it");
+  });
+
   await check("thread: the right panel's tabs", async () => {
     const page = await open(`agent=${ID.demo}`, { wait: ".thread-item" });
     await page.keyboard.press("Meta+Shift+d");
@@ -438,16 +483,52 @@ async function newAgent() {
       await sheetButton(page, "End Session");
     });
 
+    await check("new agent: a new worktree, named in place, with a Muse agent working in it (echo provider)", async () => {
+      const name = `e2e-wt-${Date.now()}`;
+      const place = `${H}/Agentman/Worktrees/demo/${name}`;
+      try {
+        const page = await open("page=new", { wait: ".new-agent-line" });
+        await page.locator("button.pill").first().click();
+        await menu(page, "Muse");
+        await page.locator("button.pill").nth(1).click();
+        await menu(page, "~/projects/demo");
+        // Its worktrees, once listed, and New Worktree… with them.
+        for (let i = 0; i < 20; i++) {
+          await page.locator("button.pill").nth(1).click();
+          if (await page.locator(".page-menu-item").filter({ hasText: /^\s*New Worktree…\s*$/ }).count()) break;
+          await page.keyboard.press("Escape");
+          await sleep(500);
+        }
+        await menu(page, "New Worktree…");
+        await page.waitForSelector(".namer-field");
+        await page.locator(".namer-field").fill(name);
+        await page.keyboard.press("Enter");
+        await until(page, (n) => (document.querySelector(".new-agent-line")?.innerText ?? "").startsWith(`Starts in a new worktree, ~/Agentman/Worktrees/demo/${n}, on a new branch ${n} from`), name, "where it starts, said");
+        await page.locator('[placeholder^="Describe the task"]').first().click();
+        await page.keyboard.type("Hello from a worktree");
+        await click(page, ".start-button");
+        await until(page, () => [...document.querySelectorAll(".thread-item")].some((e) => e.innerText.includes("echo: Hello from a worktree")), null, "Muse's echo", 30000);
+        const muse = ((await daemon({ type: "list_sessions" })).sessions ?? []).find((x) => x.kind === "muse" && x.cwd.replace(/^\/private/, "") === place.replace(/^\/private/, ""));
+        expect(muse, `a Muse agent working in ${place}`);
+        expect(existsSync(place) && execSync(`git -C "${DEMO_DIR}" branch --list ${name}`, { encoding: "utf8" }).includes(name), "the worktree's folder and branch");
+        await sessionMenu(page, "End Session…");
+        await sheetButton(page, "End Session");
+      } finally {
+        execSync(`git -C "${DEMO_DIR}" worktree remove --force "${place}" 2>/dev/null; git -C "${DEMO_DIR}" branch -D ${name} 2>/dev/null; true`);
+      }
+    });
+
     await check("palette: what an ended conversation said, handed from an editor, opens in a new main window", async () => {
       const words = "Hello from the end-to-end run";
       // The index is rebuilt for each run (prepare.sh), and the session just
       // ended can still be listed for a moment: asked until one is found.
-      let hit, found = 0;
-      for (let tries = 0; !hit && tries < 20; tries++) {
+      let hit, found = 0, indexing = true;
+      for (let tries = 0; !hit && (tries < 20 || (indexing && tries < 120)); tries++) {
         if (tries) await new Promise((r) => setTimeout(r, 1000));
         const live = new Set(((await daemon({ type: "list_sessions" })).sessions ?? []).map((s) => s.id));
         const said = await daemon({ type: "search", text: words, limit: 50 });
         found = said.search?.hits?.length ?? 0;
+        indexing = said.search?.indexing === true;
         hit = said.search?.hits?.find((h) => h.session && !live.has(h.session.id));
       }
       expect(hit, `an ended conversation that said it (${found} found)`);
@@ -490,7 +571,7 @@ async function connection() {
     const said = `Reconnect check ${Date.now()}`;
     appendFileSync(file, JSON.stringify({ ...last, uuid: crypto.randomUUID(), parentUuid: last.uuid, timestamp: new Date().toISOString(), message: { role: "assistant", model: "claude-opus-5-5", content: [{ type: "text", text: said }] } }) + "\n");
     await until(page, (s) => [...document.querySelectorAll(".thread-item")].some((e) => e.innerText.includes(s)), said, "the new message in the thread", 20000);
-  });
+  }, { expected: [/^console: WebSocket connection to .* failed/, /^failed: .*(REFUSED|Could not connect|network connection was lost)/, /^http 401 GET \/app\/(session|whoami)/] });
 }
 
 async function editor() {
@@ -530,6 +611,8 @@ async function editor() {
     await page.keyboard.type("x");
     await paletteReady(page);
     expect(await page.evaluate(() => !document.querySelector(".tab.active")?.classList.contains("dirty")), "a key typed as the palette opened went into the file");
+    // The x may have reached the palette's field instead, which is fine.
+    await page.keyboard.press("Meta+a");
     await page.keyboard.type("bugs");
     // As a person would: once the agents are listed (they come after the
     // folders, which match "bugs" too).
@@ -714,6 +797,124 @@ async function paletteSaid() {
   });
 }
 
+
+// MARK: - Agentman's key prompt (never saved: on a Mac that's the Keychain)
+
+async function keyPrompt() {
+  const words = () => ({
+    heading: document.querySelector(".am-key-heading")?.innerText,
+    why: document.querySelector(".am-key-why")?.innerText,
+    placeholder: document.querySelector(".am-key-field")?.placeholder,
+    note: document.querySelector(".am-box-note")?.innerText.replace(/\s+/g, " ").trim(),
+  });
+  await check("key prompt: what Agentman is, why it needs a key, where it's kept, and where to get one", async () => {
+    const page = await open("", { init: [fake("nokey")], wait: ".am-keybox" });
+    const w = await page.evaluate(words);
+    expect(w.heading === "Agentman needs an API key", `heading: ${w.heading}`);
+    expect(w.why === "It reads what your agents are doing, answers their routine requests, and tells you what needs you. It runs on your own Anthropic key, kept in your Mac's Keychain and only sent to Anthropic.", `why: ${w.why}`);
+    expect(w.placeholder === "Paste your Anthropic API key", `placeholder: ${w.placeholder}`);
+    expect(w.note === "Don't have one? Get an Anthropic key", `note: ${w.note}`);
+    await click(page, ".am-box-note a");
+    await until(page, () => window.__opened.includes("https://console.anthropic.com/settings/keys"), null, "Anthropic's keys page opened");
+    expect(!(await page.evaluate(() => window.__keySetTried)), "a key was sent");
+  });
+
+  await check("key prompt: Gemini's words, and a file only you can read where am serve isn't on a Mac", async () => {
+    const page = await open("", { init: ["window.__gemini = true; window.__system = 'linux';", fake("system"), fake("nokey")], wait: ".am-keybox" });
+    const w = await until(page, () => { const t = document.querySelector(".am-key-why")?.innerText ?? ""; return t.includes("a file only you can read") && t; }, null, "the words for a system that isn't a Mac");
+    expect(w.endsWith("It runs on your own Gemini key, kept in a file only you can read and only sent to Google."), `why: ${w}`);
+    const rest = await page.evaluate(words);
+    expect(rest.placeholder === "Paste your Gemini API key" && rest.note === "Don't have one? Get a Gemini key", JSON.stringify(rest));
+    await click(page, ".am-box-note a");
+    await until(page, () => window.__opened.includes("https://aistudio.google.com/apikey"), null, "Google's keys page opened");
+  });
+
+  await check("key prompt: cut off from am serve, the box waits and its note says Not connected, then Connecting…", async () => {
+    const page = await open("", { init: [fake("nokey"), fake("net")], wait: ".am-keybox" });
+    await page.evaluate(() => { window.__net = "down"; window.__cut(); });
+    await until(page, () => document.querySelector(".am-box-note")?.innerText === "Not connected." && !document.querySelector(".am-keybox")
+      && !![...document.querySelectorAll(".am-box [placeholder], .am-box [data-placeholder]")].find((e) => (e.getAttribute("placeholder") ?? e.dataset.placeholder) === "Waiting for Agentman to connect…"), null, "Not connected, the box waiting");
+    await page.evaluate(() => { window.__net = "hang"; });
+    await until(page, () => document.querySelector(".am-box-note")?.innerText === "Connecting…", null, "Connecting…", 12000);
+  }, { expected: [/^console: WebSocket connection to 'ws:\/\/127\.0\.0\.1:9\/' failed/] });
+}
+
+async function generalPage() {
+  const keySections = () => [...document.querySelectorAll(".settings-section")].map((e) => e.innerText.replace(/\s+/g, " ")).filter((t) => / API key /.test(t + " "));
+  // Anything the page says on its way to the right words, from its first frame.
+  const watchWords = `window.__said = new Set(); new MutationObserver(() => {
+    const anthropic = [...document.querySelectorAll(".settings-section")].find((e) => e.innerText.includes("Anthropic API key"))?.innerText ?? "";
+    if (anthropic.includes("on this computer")) window.__said.add("Kept on this computer");
+    if (anthropic.includes("Not set yet")) window.__said.add("Not set yet, for the saved key");
+  }).observe(document, { subtree: true, childList: true, characterData: true });`;
+  await check("settings: General's keys say where they're kept, on a Mac and off one, with no other words first", async () => {
+    let page = await open("view=settings&page=general", { size: [800, 700], init: [watchWords] });
+    let [anthropic, gemini] = await until(page, () => { const k = [...document.querySelectorAll(".settings-section")].map((e) => e.innerText.replace(/\s+/g, " ")).filter((t) => / API key /.test(t + " ")); return k.length === 2 && k[0].includes("Keychain") && k; }, null, "the key sections, saying Keychain");
+    expect(anthropic.includes("Saved in your Keychain") && anthropic.includes("Kept in your Mac's Keychain and only ever sent to Anthropic."), `Anthropic: ${anthropic}`);
+    expect(gemini.includes("Not set yet") && gemini.includes("Kept in your Mac's Keychain and only ever sent to Google."), `Gemini: ${gemini}`);
+    const before = await page.evaluate(() => [...window.__said]);
+    expect(!before.length, `said first: ${before.join(", ")}`);
+    await page.close();
+    page = await open("view=settings&page=general", { size: [800, 700], init: ["window.__system = 'linux';", fake("system")] });
+    [anthropic] = await until(page, () => { const k = [...document.querySelectorAll(".settings-section")].map((e) => e.innerText.replace(/\s+/g, " ")).filter((t) => t.includes("a file only you can read")); return k.length === 2 && k; }, null, "both keys' words off a Mac");
+    expect(/Anthropic API key Saved (?!in your Keychain)/.test(anthropic) && anthropic.includes("Kept in a file only you can read and only ever sent to Anthropic."), `Anthropic off a Mac: ${anthropic}`);
+  });
+
+  await check("settings: Appearance switches the look, keeps it across a reload, and goes back", async () => {
+    const page = await open("view=settings&page=general", { size: [800, 700] });
+    const segment = (label) => page.locator(".mac-segmented .segment", { hasText: label }).first();
+    await segment("Dark").click();
+    await until(page, () => document.documentElement.dataset.theme === "dark" && getComputedStyle(document.body).backgroundColor !== "rgb(255, 255, 255)", null, "dark");
+    await page.reload();
+    await until(page, () => document.documentElement.dataset.theme === "dark" && document.querySelector('.mac-segmented [aria-checked="true"]')?.innerText === "Dark", null, "dark after a reload");
+    await segment("Light").click();
+    await until(page, () => document.documentElement.dataset.theme === "light", null, "light");
+    await segment("Match the Mac").click();
+    await until(page, () => !("theme" in document.documentElement.dataset), null, "following the system again");
+  });
+}
+
+
+// MARK: - The sidebar's filters, and the summary for coming back
+
+async function filtersAndAway() {
+  const item = (page, title) => page.locator(".page-menu-item").filter({ hasText: new RegExp(`^\\s*(✓\\s*)?${title}\\s+\\d+\\s*$`) }).first().click({ timeout: 8000 });
+  await check("sidebar: the filter shows one state, then one folder, each undone with its ×", async () => {
+    // On an agent's page: the Board keeps the sidebar folded away.
+    const page = await open(`agent=${ID.bugs}`, { init: [fake("question")], wait: ".sidebar .agent-row" });
+    await until(page, () => { const n = [...document.querySelectorAll(".sidebar .agent-row:not(.earlier) .agent-line2 .name")].map((e) => e.innerText.trim()); return n.length >= 6 && n.includes("pick"); }, null, "every agent");
+    const count = await page.evaluate(() => document.querySelectorAll(".sidebar .agent-row:not(.earlier)").length);
+    await click(page, ".filter-button");
+    await item(page, "Needs you");
+    await until(page, () => { const n = [...document.querySelectorAll(".sidebar .agent-row:not(.earlier) .agent-line2 .name")].map((e) => e.innerText.trim()); return n.length === 1 && n[0] === "pick"; }, null, "only pick, who needs you");
+    expect((await page.evaluate(() => document.querySelector(".active-filters")?.innerText.trim())) === "Needs you", "the Needs you token");
+    await click(page, ".filter-token");
+    await until(page, (c) => document.querySelectorAll(".sidebar .agent-row:not(.earlier)").length === c && !document.querySelector(".active-filters"), count, "every agent again");
+    await click(page, ".filter-button");
+    await item(page, "shots");
+    await until(page, () => { const n = [...document.querySelectorAll(".sidebar .agent-row:not(.earlier) .agent-line2 .name")].map((e) => e.innerText.trim()); return n.length === 1 && n[0] === "shots"; }, null, "only the shots folder's agent");
+    expect((await page.evaluate(() => document.querySelector(".active-filters")?.innerText.trim())) === "shots", "the shots token");
+    await click(page, ".filter-token");
+    await until(page, (c) => document.querySelectorAll(".sidebar .agent-row:not(.earlier)").length === c, count, "every agent again");
+  });
+
+  await check("away: the summary since an hour ago lists who was busy, closes on Escape, comes back from ⌘K, and opens an agent", async () => {
+    const page = await open("away=60", { wait: ".away-panel" });
+    const who = await page.evaluate(() => [...document.querySelectorAll(".away-name")].map((e) => e.innerText.trim()));
+    expect(who.includes("shots") && (await page.evaluate(() => document.querySelector(".away-title")?.innerText)) === "While you were away", `the summary lists: ${who.join(", ")}`);
+    await page.keyboard.press("Escape");
+    await until(page, () => !document.querySelector(".away-panel"), null, "closed");
+    await page.keyboard.press("Meta+k");
+    await paletteReady(page);
+    await page.keyboard.type("What Happened");
+    await until(page, () => document.querySelector(".palette-row.selected")?.innerText.split("\n")[0] === "What Happened While I Was Away", null, "the command first");
+    await page.keyboard.press("Enter");
+    await page.waitForSelector(".away-panel", { timeout: 10000 });
+    await page.locator(".away-row").filter({ hasText: "shots" }).first().click();
+    await until(page, () => !document.querySelector(".away-panel") && new URLSearchParams(location.search).get("agent")?.startsWith("claude:"), null, "the agent open, the summary closed");
+  });
+}
+
 // MARK: - The second batch: the rest of each screen
 
 // A test agent's id by its name: a Claude one, as a Muse session started in
@@ -856,7 +1057,7 @@ async function editorMore() {
     await until(page, () => { try { return document.querySelector("iframe.monaco").contentDocument.querySelectorAll(".monaco-editor").length >= 2; } catch { return false; } }, null, "two editors side by side");
     await page.keyboard.press("Meta+Shift+v");
     await until(page, () => (document.querySelector(".md-preview")?.innerText ?? "").length > 20, null, "the preview");
-  });
+  }, { expected: [/^http 404 .*hero\.png/] });
 }
 
 async function settingsMore() {
@@ -936,10 +1137,10 @@ for (const [index, [name, engine]] of engines.entries()) {
   // Order matters only at the end: ending "empty" and dropping the
   // connection come last, after the rest has used them.
   if (want("shell")) { await shell(); await paletteSaid(); }
-  if (want("sidebar")) await sidebar();
-  if (want("board")) { await board(); await boardMore(); }
+  if (want("sidebar")) { await sidebar(); await filtersAndAway(); }
+  if (want("board")) { await board(); await boardMore(); await keyPrompt(); }
   if (want("usage")) await usage();
-  if (want("settings")) { await settings(); await settingsMore(); }
+  if (want("settings")) { await settings(); await settingsMore(); await generalPage(); }
   if (want("editor")) { await editor(); await editorMore(); }
   if (want("notify")) await notify();
   if (want("newagent")) await newAgent();
@@ -947,6 +1148,7 @@ for (const [index, [name, engine]] of engines.entries()) {
   if (want("connection")) await connection();
   await browser.close();
 }
-console.log(`\n${passed} passed, ${failures.length} failed`);
+console.log(`\n${passed} passed, ${failures.length} failed, ${errorsSeen.length} with page errors`);
+for (const e of errorsSeen) console.log("  errors: " + e);
 for (const f of failures) console.log("  " + f);
 process.exit(failures.length ? 1 : 0);
