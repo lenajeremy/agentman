@@ -10,7 +10,8 @@ import { onOpenLink, openEditor, openSettings } from "./host";
 export type Route =
   | { kind: "agentman" }
   | { kind: "new"; worktree?: boolean }
-  | { kind: "agent"; id: string };
+  | { kind: "agent"; id: string }
+  | { kind: "usage" };
 
 const query = new URLSearchParams(location.search);
 let route: Route = query.get("agent") ? { kind: "agent", id: query.get("agent")! } : { kind: "agentman" };
@@ -55,6 +56,8 @@ export function openAgentmanChat() {
   setBoardChatOpen(true);
 }
 export const openNewAgent = (worktree = false) => go({ kind: "new", worktree });
+/** The usage page: what the agents spent, and what is left of each plan. */
+export const openUsage = () => go({ kind: "usage" });
 
 /** Follows an agentman:// link; any other scheme is ignored. */
 export function openLink(link: string) {
@@ -76,6 +79,9 @@ export function openLink(link: string) {
       break;
     case "home":
       openAgentmanChat();
+      break;
+    case "usage":
+      openUsage();
       break;
     case "terminal": {
       const folder = url.searchParams.get("folder");

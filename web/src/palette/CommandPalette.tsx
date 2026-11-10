@@ -5,13 +5,13 @@
 import { useEffect } from "react";
 import {
   Bell, Book, Braces, Circle, Code, Contrast, History, Key, ListFilter, MessageSquareText, MessagesSquare, Pencil, Settings, ShieldCheck, Sparkles,
-  SquarePen, SquareTerminal, type LucideIcon,
+  SquarePen, SquareTerminal, ChartSpline, type LucideIcon,
 } from "lucide-react";
 import type { Session } from "@shared/protocol";
 import { showLastAway } from "../away/away";
 import { agentName } from "../labels";
 import { openEditor, openSettings, pickFolder } from "../host";
-import { openAgent, openAgentman, openNewAgent, useRoute } from "../nav";
+import { openAgent, openAgentman, openNewAgent, useRoute, openUsage } from "../nav";
 import { setPref } from "../prefs";
 import { askAgentman, useAgentmanOn } from "../shell/agentman";
 import { cachedHome } from "../shell/native";
@@ -101,6 +101,7 @@ function Palette() {
     }
     list.push({ item: { id: "new", title: "New Agent", icon: "square.and.pencil", lucide: SquarePen, shortcut: "⌘N" }, run: () => openNewAgent() });
     list.push({ item: { id: "agentman", title: "Agentman", detail: "the conversation", icon: "bubble.left.and.text.bubble.right", lucide: MessagesSquare }, run: openAgentman });
+    list.push({ item: { id: "usage", title: "Usage", detail: "what the agents spent", icon: "chart.xyaxis.line", lucide: ChartSpline }, keywords: "cost tokens spend money limits", run: openUsage });
     list.push({ item: { id: "away", title: "What Happened While I Was Away", icon: "clock.arrow.circlepath", lucide: History }, keywords: "summary catch up", run: showLastAway });
     for (const [state, title] of [["waiting_input", "Show Agents That Need You"], ["busy", "Show Working Agents"], ["idle", "Show Idle Agents"]] as [FilterState, string][]) {
       list.push({ item: { id: `filter:${state}`, title, icon: "line.3.horizontal.decrease", lucide: ListFilter }, keywords: "filter", run: () => setShell({ stateFilter: state }) });

@@ -106,3 +106,7 @@
    bar at the row's leading edge. */
 .agent-row { position: relative; }
 .agent-tint { position: absolute; left: -4px; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; pointer-events: none; }
+
+/* Usage, beside the appearance switch (UsageButton). */
+.usage-button { width: 22px; height: 20px; display: grid; place-items: center; color: var(--muted); flex: none; }
+.usage-button.open { color: var(--text); }

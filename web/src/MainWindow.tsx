@@ -10,6 +10,7 @@ import type { Session } from "@shared/protocol";
 import { AgentView } from "./AgentView";
 import { setBadge } from "./host";
 import { BoardView } from "./board/BoardView";
+import { UsageView } from "./usage/UsageView";
 import { useManagerSummary } from "./manager/summary";
 import { NewAgentView } from "./NewAgentView";
 import { Overlays } from "./Overlays";
@@ -82,6 +83,7 @@ export function MainWindow({ platform }: { platform: string }) {
       <main className="detail">
         {route.kind === "agentman" && <BoardView headerLeading={sidebarGone ? headerLeading + 34 : 0} />}
         {route.kind === "new" && <NewAgentView worktree={route.worktree} />}
+        {route.kind === "usage" && <UsageView headerLeading={sidebarGone ? headerLeading + 34 : 0} />}
         {route.kind === "agent" && (selected ? <AgentView key={selected.id} session={selected} platform={platform} /> : sessionsLoaded() ? <GoneView /> : null)}
         {/* Under the page's top bar while am serve can't be reached. */}
         <ConnectionBanner />

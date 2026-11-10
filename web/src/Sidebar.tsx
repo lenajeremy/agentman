@@ -6,11 +6,11 @@
 import { agentColor, useColorBy } from "./board/colors";
 import { confirmEnd, endable } from "./AgentHeader";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { ChevronRight, Contrast, Folder as FolderIcon, Globe, ListFilter, PanelLeft, Search, Sparkles, SquarePen, X } from "lucide-react";
+import { ChevronRight, Contrast, Folder as FolderIcon, Globe, ListFilter, PanelLeft, Search, Sparkles, SquarePen, X, ChartSpline } from "lucide-react";
 import type { Session } from "@shared/protocol";
 import { folderLabel, initials, since } from "./labels";
 import { useManagerSummary } from "./manager/summary";
-import { openAgent, openAgentman, openNewAgent, useRoute } from "./nav";
+import { openAgent, openAgentman, openNewAgent, useRoute, openUsage } from "./nav";
 import { isMuted, setMuted } from "./notify/policy";
 import { usePref, setPref } from "./prefs";
 import { useAgentmanOn } from "./shell/agentman";
@@ -473,8 +473,20 @@ function ConnectionFooter({ version }: { version?: string }) {
       <span className={`conn ${status}`} />
       <span className="conn-text">{text}</span>
       <Spacer />
+      <UsageButton />
       <AppearanceMenu />
     </footer>
+  );
+}
+
+/** Opens the usage page, beside the appearance switch (Sidebar.swift's
+ *  UsageButton). */
+function UsageButton() {
+  const route = useRoute();
+  return (
+    <button className={`usage-button${route.kind === "usage" ? " open" : ""}`} title="Usage: what the agents spent" aria-label="Usage" onClick={openUsage}>
+      <Icon icon={ChartSpline} sf="chart.xyaxis.line" size={13} />
+    </button>
   );
 }
 
