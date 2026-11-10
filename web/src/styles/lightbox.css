@@ -1,0 +1,18 @@
+/* A picture full window (ImagePreview.swift's LightboxView): black at 0.85,
+   the picture 60 from the top and 80 from the sides in a run (40 alone), its
+   caption under it, round white-glass buttons. */
+.lightbox { position: fixed; inset: 0; z-index: 200; background: rgb(0 0 0 / 0.85); color: #fff; }
+.lightbox-stage { position: absolute; inset: 60px 40px 50px; display: flex; }
+.lightbox-stage.run { left: 80px; right: 80px; }
+.lightbox-stage > * { flex: 1; min-width: 0; min-height: 0; }
+.lightbox-unreadable { display: grid; place-items: center; font-size: 14px; color: rgb(255 255 255 / 0.7); }
+.lightbox-caption { position: absolute; left: 80px; right: 80px; bottom: 22px; height: 16px; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 12px; color: rgb(255 255 255 / 0.75); }
+.lightbox-title { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.lightbox-count { color: rgb(255 255 255 / 0.5); flex: none; }
+.lightbox-arrow, .lightbox-close { position: absolute; display: grid; place-items: center; border-radius: 50%; background: rgb(255 255 255 / 0.15); color: #fff; }
+.lightbox-arrow { top: 50%; width: 40px; height: 40px; margin-top: -20px; }
+.lightbox-arrow.left { left: 20px; }
+.lightbox-arrow.right { right: 20px; }
+.lightbox-arrow:disabled { opacity: 0.25; }
+.lightbox-close { top: 18px; right: 18px; width: 32px; height: 32px; }
+.lightbox-arrow:hover:not(:disabled), .lightbox-close:hover { background: rgb(255 255 255 / 0.25); }
