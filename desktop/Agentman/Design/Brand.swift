@@ -69,6 +69,8 @@ extension Palette {
     static let inverseShadow = Color(light: 0x000000, dark: 0xFFFFFF).opacity(0.25)
     /// The $ before a command, and the icons on Agentman's cream.
     static let prompt = Color(light: 0xE5480A, dark: 0xFF8A55)
+    /// The Board's ground in New: the page with a tint of the site's orange.
+    static let boardTint = Color(light: 0xFFF3E8, dark: 0x140E0A)
     /// The site's ink, as a strip over a code block, and the cream set on it.
     static let ink = Color(light: 0x160D08, dark: 0x2A211B)
     static let onInk = Color(light: 0xFFF3E3, dark: 0xFFF3E3)

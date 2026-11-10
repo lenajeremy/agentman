@@ -43,6 +43,8 @@ struct BoardView: View {
                 }
             }
             .frame(minWidth: 0, maxWidth: .infinity)
+            // In New, the Board's page has a tint of the site's orange.
+            .background(Look.site ? Palette.boardTint : Color.clear)
             .overlay(alignment: .bottom) {
                 if !store.boardChatOpen {
                     ask.transition(.opacity)

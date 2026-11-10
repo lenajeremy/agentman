@@ -37,7 +37,11 @@ enum Palette {
     static let line = Color(light: 0xE5E5E5, dark: 0x242424)
     /// A column of the Board, and words on it, which `muted` is too light
     /// for on this grey.
-    static let boardWell = Color(light: 0xF4F4F4, dark: 0x0B0B0B)
+    /// A Board column's ground: in New, a deeper shade of the Board's
+    /// orange tint, so the columns still read on it.
+    static var boardWell: Color { Look.site ? siteBoardWell : classicBoardWell }
+    private static let classicBoardWell = Color(light: 0xF4F4F4, dark: 0x0B0B0B)
+    private static let siteBoardWell = Color(light: 0xFCE7D4, dark: 0x1F1610)
     static let boardMuted = Color(light: 0x666666, dark: 0xA0A0A0)
     // Tool calls in a thread: a soft card a step greyer than the page, set
     // apart from the conversation and from the user's own bubbles, with a
