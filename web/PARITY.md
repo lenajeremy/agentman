@@ -18,8 +18,8 @@ done. One at a time, in this order.
    the page, columns, cards, ask box, chat beside, sidebar aside (71d8e82);
    git buttons and the commit sheet (773538e; 1c49c75 fixed committing a
    renamed file in am serve); checks and teams (c79ca19); Ship and Tonight
-   (68513da); search, colours, Handled, folder trust (f24e95c). Left: an
-   offer card's time limit and its title as a button (CompactCard, 0.43).
+   (68513da); search, colours, Handled, folder trust (f24e95c). The card's title opens the agent;
+   4e7237c's offer time limit is am serve's, which the web shares.
 4. ✓ (bb53f60) **Usage and Limits** (UsageView.swift, LimitsView.swift; `usage`,
    `limits`): what the agents spent over six months, a year or all of it,
    input, cache and output apart, fast mode and advising; what is left of
