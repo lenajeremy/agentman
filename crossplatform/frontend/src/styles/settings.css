@@ -1,0 +1,356 @@
+/* The Settings window (Views/SettingsView.swift, KeysSettings.swift,
+   KnowledgeSettings.swift, LanguagesSettings.swift), 1 pt = 1 px. The
+   palette is base.css's; the system's control colours are measured from the
+   Mac app's own Settings window on macOS 26, in light and dark, active and
+   not. */
+
+:root {
+  --titlebar: 32px;
+  --sidebar-inactive: #f0f0f0;
+  --window-bg: #ececec;
+  --separator: rgb(0 0 0 / 0.098);
+  --accent: #0088ff;
+  --link: #0068da;
+  --ctl-text: rgb(0 0 0 / 0.86);
+  --ctl-text-off: rgb(0 0 0 / 0.25);
+  --ctl-fill: rgb(0 0 0 / 0.07);
+  --ctl-fill-off: rgb(0 0 0 / 0.035);
+  --ctl-fill-strong: rgb(0 0 0 / 0.17);
+  --ctl-sep: rgb(0 0 0 / 0.26);
+  --field-bg: #ffffff;
+  --field-edge: rgb(0 0 0 / 0.125);
+  --placeholder: rgb(0 0 0 / 0.42);
+  --switch-off: rgb(0 0 0 / 0.085);
+  --switch-on-inactive: rgb(0 0 0 / 0.12);
+  --knob: #ffffff;
+  --knob-edge: rgb(0 0 0 / 0.07);
+  --destructive: #e0352b;
+  --sheet-bg: #f0f0f0;
+  --form-group: #f8f8f8;
+  --form-line: rgb(0 0 0 / 0.04);
+}
+@supports (color: -apple-system-control-accent) {
+  :root { --accent: -apple-system-control-accent; }
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --sidebar-inactive: #2a2a2a;
+    --window-bg: #323232;
+    --separator: rgb(255 255 255 / 0.1);
+    --ctl-text: rgb(255 255 255 / 0.86);
+    --ctl-text-off: rgb(255 255 255 / 0.25);
+    --ctl-fill: rgb(255 255 255 / 0.1);
+    --ctl-fill-off: rgb(255 255 255 / 0.05);
+    --ctl-fill-strong: rgb(255 255 255 / 0.22);
+    --ctl-sep: rgb(255 255 255 / 0.26);
+    --field-bg: rgb(255 255 255 / 0.05);
+    --field-edge: rgb(255 255 255 / 0.15);
+    --placeholder: rgb(255 255 255 / 0.35);
+    --switch-off: rgb(255 255 255 / 0.1);
+    --switch-on-inactive: rgb(255 255 255 / 0.2);
+    --knob: #e6e6e6;
+    --knob-edge: rgb(0 0 0 / 0.2);
+    --link: #3c9cff;
+    --destructive: #ff5f57;
+    --sheet-bg: #2b2b2b;
+    --form-group: rgb(255 255 255 / 0.05);
+    --form-line: rgb(255 255 255 / 0.06);
+  }
+}
+:root[data-theme="dark"] {
+  --sidebar-inactive: #2a2a2a;
+  --window-bg: #323232;
+  --separator: rgb(255 255 255 / 0.1);
+  --ctl-text: rgb(255 255 255 / 0.86);
+  --ctl-text-off: rgb(255 255 255 / 0.25);
+  --ctl-fill: rgb(255 255 255 / 0.1);
+  --ctl-fill-off: rgb(255 255 255 / 0.05);
+  --ctl-fill-strong: rgb(255 255 255 / 0.22);
+  --ctl-sep: rgb(255 255 255 / 0.26);
+  --field-bg: rgb(255 255 255 / 0.05);
+  --field-edge: rgb(255 255 255 / 0.15);
+  --placeholder: rgb(255 255 255 / 0.35);
+  --switch-off: rgb(255 255 255 / 0.1);
+  --switch-on-inactive: rgb(255 255 255 / 0.2);
+  --knob: #e6e6e6;
+  --knob-edge: rgb(0 0 0 / 0.2);
+  --link: #3c9cff;
+  --destructive: #ff5f57;
+  --sheet-bg: #2b2b2b;
+  --form-group: rgb(255 255 255 / 0.05);
+  --form-line: rgb(255 255 255 / 0.06);
+}
+html[data-platform="linux"] { --titlebar: 0px; }
+
+/* The window: the sidebar under the title bar, a divider, the page. */
+.settings { display: flex; height: 100%; background: transparent; }
+/* Lines as tall as AppKit sets them: SF's ascent and descent, each rounded
+   to the point (12 → 15, 13 → 16, 14 → 17, 28 → 33). */
+.settings, .settings * { line-height: calc(round(nearest, 0.9668em, 1px) + round(nearest, 0.2109em, 1px)); }
+.settings-sidebar {
+  flex: none; width: 200px; display: flex; flex-direction: column; gap: 2px;
+  padding: calc(var(--titlebar) + 8px) 10px 0; background: var(--sidebar-inactive);
+  --wails-draggable: drag;
+}
+/* Active, the sidebar material shows through (settings_darwin.go). */
+html[data-platform="darwin"] .settings.active .settings-sidebar { background: transparent; }
+/* The divider, over the window's own background, which shows above it in
+   the title bar. */
+.settings-divider-v {
+  flex: none; width: 1px;
+  background: linear-gradient(var(--separator), var(--separator)) 0 var(--titlebar) / 1px 100% no-repeat, var(--window-bg);
+}
+.settings-content { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--paper); }
+
+/* A page in the sidebar: 32 tall, radius 9, primary@0.10 fill and edge when
+   chosen, @0.05 on hover; the symbol 13 medium in an 18 frame, 10 apart. */
+.settings-tab {
+  --wails-draggable: no-drag;
+  display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border-radius: 9px; text-align: left;
+}
+.settings.active .settings-tab:hover { background: rgb(var(--primary) / 0.05); }
+.settings-tab.selected { background: rgb(var(--primary) / 0.1); box-shadow: inset 0 0 0 1px rgb(var(--primary) / 0.1); }
+.tab-icon { width: 18px; display: grid; place-items: center; color: var(--muted); }
+.settings-tab.selected .tab-icon { color: var(--text); }
+.tab-title { font-size: 14px; color: var(--text); }
+
+/* A page: its title, then its sections, 28 apart, inside 32×28 of margin.
+   Scroll bars as the Mac's always-shown ones take room only when the page
+   scrolls. */
+.settings-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-top: var(--titlebar); }
+.settings-scroll::-webkit-scrollbar { width: 17px; background: transparent; }
+.settings-scroll::-webkit-scrollbar-thumb { background: transparent; border: 5px solid transparent; border-radius: 9px; background-clip: content-box; }
+.settings-scroll:hover::-webkit-scrollbar-thumb { background-color: rgb(var(--primary) / 0.25); }
+.settings-page { display: flex; flex-direction: column; gap: 28px; padding: 28px 32px; }
+.settings-page.tight { gap: 18px; padding: 26px 28px; }
+.settings-display { margin: 0; font-size: 28px; font-weight: 500; color: var(--text); line-height: normal; }
+
+/* A section: a heading, its card, a note below, 10 apart. */
+.settings-section { display: flex; flex-direction: column; gap: 10px; }
+.section-title { padding-left: 4px; font-size: 12px; font-weight: 500; color: var(--muted); }
+/* The edge is drawn inside the card, over its margins, as strokeBorder is. */
+.section-card, .card { position: relative; background: var(--surface); border-radius: 12px; }
+.section-card::after, .card::after { content: ""; position: absolute; inset: 0; border: 1px solid var(--line); border-radius: inherit; pointer-events: none; }
+.section-card { display: flex; flex-direction: column; overflow: hidden; }
+.section-footer { padding: 0 4px; font-size: 12px; color: var(--muted); }
+.settings-section.dimmed .section-card { opacity: 0.5; }
+
+/* A row: title and detail, then the control; 18×14 of margin. */
+.settings-row .row-main { display: flex; align-items: center; gap: 16px; padding: 14px 18px; }
+.row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.row-title { font-size: 14px; color: var(--text); }
+.row-detail { font-size: 12px; color: var(--muted); }
+.row-spacer { flex: 1; min-width: 12px; }
+.row-divider { height: 1px; margin-left: 18px; background: var(--separator); }
+.settings-row.dimmed .row-main { opacity: 0.5; }
+.row-value { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.settings-divider { height: 1px; background: var(--separator); flex: none; }
+
+/* Lines of a card that aren't settings rows: 16 of margin. */
+.card-line { display: flex; align-items: center; gap: 10px; padding: 10px 16px; font-size: 14px; color: var(--text); }
+.muted-none { padding: 11px 16px; font-size: 12px; color: var(--muted); }
+.muted-folder { color: var(--text); }
+.muted-folder .sf, .muted-folder svg { color: var(--muted); }
+.folder-path { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; text-align: left; }
+/* The Spacer beside it, and the space before that, keep 16 more clear. */
+.rules-empty { padding: 12px 32px 12px 16px; font-size: 12px; color: var(--muted); }
+.add-rule, .add-line { padding: 10px 16px; }
+.asked .asked-icon { width: 16px; display: grid; place-items: center; color: var(--needs-you); }
+
+/* A rule: Allow or Always ask, the kind, the pattern, where; × on hover. */
+.rule-line { padding: 9px 16px; }
+.rule-badge { flex: none; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+.rule-badge.allow { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.rule-badge.ask { color: var(--needs-you-text); background: var(--needs-you-wash); }
+.rule-kind { color: var(--muted); display: grid; place-items: center; }
+.rule-pattern { font: 12px var(--mono); color: var(--text); min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; user-select: text; }
+.rule-where { flex: none; font-size: 12px; color: var(--faint); }
+.rule-remove { width: 20px; height: 20px; display: grid; place-items: center; color: var(--muted); opacity: 0; }
+.rule-line:hover .rule-remove { opacity: 1; }
+
+/* Try it. */
+.try-it { display: flex; flex-direction: column; gap: 10px; padding: 16px; }
+.try-field { flex: 1; min-width: 0; }
+.try-verdict { font-size: 12px; color: var(--text); }
+.try-verdict .ok { color: var(--ok); display: grid; }
+.try-verdict .needs-you { color: var(--needs-you); display: grid; }
+.caption { font-size: 12px; }
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+.needs-you-text { color: var(--needs-you-text); }
+.error-text { color: var(--error-text); }
+
+/* Personality. */
+.style-group { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.style-group > .settings-section { align-self: stretch; }
+.personality-editor { padding: 10px 10px 10px 15px; }
+
+/* The save bar: under the page, the window's bar material. */
+.save-bar {
+  flex: none; display: flex; align-items: center; gap: 10px; padding: 12px 20px;
+  background: var(--paper); border-top: 1px solid var(--separator);
+}
+.save-note { font-size: 12px; color: var(--muted); }
+.save-note.problem { color: var(--error-text); }
+
+/* Pages with a heading of their own: Knowledge, Keys, Languages. */
+.page-head { display: flex; align-items: flex-start; }
+.page-head-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.page-head-gap { flex: 1; min-width: 16px; }
+.page-intro { font-size: 12px; color: var(--muted); }
+.keys-empty { min-height: 120px; display: grid; place-items: center; font-size: 12px; color: var(--muted); }
+.voice-problem { padding: 0 18px 12px; font-size: 12px; color: var(--error-text); }
+.key-field { width: 242px; }
+.email-field { width: 210px; }
+.code-field { width: 100px; }
+.ellipsis-menu { display: grid; place-items: center; width: 20px; height: 20px; color: var(--ctl-text); }
+.languages-loading { min-height: 120px; display: grid; place-items: center; }
+.languages-problem { margin-top: 0; }
+
+/* Knowledge: the list and the note, side by side, filling the page. */
+.knowledge { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 18px; padding: calc(var(--titlebar) + 26px) 28px 26px; }
+.knowledge-body { flex: 1; min-height: 0; display: flex; gap: 12px; align-items: stretch; }
+.note-list { position: relative; flex: none; width: 190px; overflow: hidden; }
+.note-list-scroll { height: 100%; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.note-row { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; text-align: left; }
+.note-row.selected { background: rgb(var(--primary) / 0.08); box-shadow: inset 0 0 0 1px rgb(var(--primary) / 0.08); }
+.note-title { font-size: 13px; font-weight: 500; color: var(--text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.note-meta { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.note-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 18px; text-align: center; }
+.note-empty-title { font-size: 12px; font-weight: 500; color: var(--text-2); }
+.note-empty-text { font-size: 12px; color: var(--muted); }
+.note-editor { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 18px; }
+.note-title-field { border: 0; outline: 0; background: transparent; resize: none; padding: 0; margin: 0 0 10px; font-size: 18px; font-weight: 500; color: var(--text); line-height: normal; height: 22px; overflow: hidden; }
+.note-title-field::placeholder { color: var(--placeholder); }
+.note-who { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.tier-menu { display: flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 12px; background: var(--fill); font-size: 12px; color: var(--text-2); }
+.note-body { flex: 1; min-height: 0; padding: 10px 0 0; }
+.note-actions { display: flex; align-items: center; gap: 10px; padding-top: 10px; }
+.note-problem { font-size: 12px; color: var(--error-text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* ---- Controls (settings/controls.tsx) ---- */
+
+/* Push button: 24 tall, 12 of margin, radius 6, 13pt. */
+.mac-button {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 24px; padding: 0 12px;
+  border-radius: 6px; background: var(--ctl-fill); color: var(--ctl-text); font-size: 13px; white-space: nowrap;
+}
+.mac-button:active:not(:disabled) { background: var(--ctl-fill-strong); }
+.mac-button:disabled { background: var(--ctl-fill-off); color: var(--ctl-text-off); }
+.mac-button.destructive:not(:disabled) { color: var(--destructive); }
+.settings.inactive .mac-button.destructive:not(:disabled) { color: var(--ctl-text); }
+.settings.active .mac-button.prominent:not(:disabled) { background: var(--accent); color: #fff; }
+.mac-button .sf, .mac-button svg { color: inherit; }
+
+/* Link button. */
+.mac-link { display: inline-flex; align-items: center; gap: 4px; color: var(--link); font-size: 13px; }
+.mac-link.caption { font-size: 12px; }
+.mac-link:disabled { opacity: 0.4; }
+
+/* Switch: 54×24, a knob 36×24 that slides 18. */
+.mac-switch { flex: none; position: relative; width: 54px; height: 24px; border-radius: 12px; background: var(--switch-off); transition: background 0.15s; }
+.mac-switch.on { background: var(--switch-on-inactive); }
+.settings.active .mac-switch.on { background: var(--accent); }
+.mac-switch .knob {
+  position: absolute; top: 0; left: 0; width: 36px; height: 24px; border-radius: 12px; background: var(--knob);
+  box-shadow: inset 0 0 0 1px var(--knob-edge), 0 0.5px 1.5px rgb(0 0 0 / 0.12); transition: transform 0.15s;
+}
+.mac-switch.on .knob { transform: translateX(18px); }
+.mac-switch:disabled { opacity: 0.5; }
+
+/* Segmented control: 24 tall, radius 6; the chosen segment darker. */
+.mac-segmented { flex: none; display: inline-grid; grid-auto-flow: column; height: 24px; border-radius: 6px; background: var(--ctl-fill); }
+.mac-segmented.equal { grid-auto-columns: 1fr; }
+.mac-segmented .segment { position: relative; padding: 0 12px; font-size: 13px; color: var(--ctl-text); border-radius: 6px; white-space: nowrap; }
+.mac-segmented .segment + .segment::before {
+  content: ""; position: absolute; left: -0.5px; top: 5px; bottom: 5px; width: 1px; background: var(--ctl-sep);
+}
+.mac-segmented .segment.no-sep + .segment::before, .mac-segmented .segment.selected::before { display: none; }
+.mac-segmented .segment.selected { background: var(--ctl-fill-strong); }
+
+/* Pop-up button: the item, then the chevrons. */
+.mac-popup {
+  flex: none; display: inline-flex; align-items: center; gap: 18px; height: 24px; padding: 0 10px 0 12px; border-radius: 6px;
+  background: var(--ctl-fill); color: var(--ctl-text); font-size: 13px; white-space: nowrap; text-align: left;
+}
+.mac-popup .stack { display: grid; }
+.mac-popup .stack > span { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: 5px; }
+.mac-popup .stack > .ghost { visibility: hidden; }
+.mac-popup .chevrons { flex: none; color: var(--ctl-text); }
+.mac-popup:disabled { color: var(--ctl-text-off); background: var(--ctl-fill-off); }
+.mac-popup.plain { background: transparent; padding: 0; height: auto; color: var(--text-2); }
+.mac-popup.caption { font-size: 12px; }
+.mac-popup.borderless { background: transparent; padding-right: 0; }
+
+/* Text field: white, a 1pt edge, radius 6. */
+.mac-field {
+  height: 24px; padding: 0 6px; border: 1px solid var(--field-edge); border-radius: 6px; background: var(--field-bg);
+  color: var(--text); font-size: 13px; outline: none; min-width: 0;
+}
+.mac-field.mono { font: 12.5px var(--mono); height: 27px; margin: -1px -1px; }
+.mac-field::placeholder { color: var(--placeholder); }
+.mac-field:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent); border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.mac-field:disabled { color: var(--ctl-text-off); }
+
+/* Text editor: clear on its card, 14pt. */
+.mac-editor { display: block; width: 100%; border: 0; outline: 0; resize: none; background: transparent; color: var(--text); font-size: 14px; line-height: normal; }
+.mac-editor::placeholder { color: var(--faint); }
+
+/* Checkbox: a 14pt box, its label 12pt. */
+.mac-checkbox { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
+.mac-checkbox .box { width: 16px; height: 16px; border-radius: 4px; background: var(--ctl-fill-strong); display: grid; place-items: center; color: #fff; }
+.settings.active .mac-checkbox.on .box { background: var(--accent); }
+
+/* Time field with its stepper. */
+.mac-time { display: inline-flex; align-items: center; gap: 2px; }
+.mac-time .field {
+  display: inline-flex; align-items: center; height: 24px; padding: 0 6px; border: 1px solid var(--field-edge); border-radius: 6px;
+  background: var(--field-bg); font-size: 13px; color: var(--text); outline: none; font-variant-numeric: tabular-nums;
+}
+.mac-time .part { padding: 0 1px; border-radius: 3px; }
+.mac-time .part.chosen { background: var(--accent); color: #fff; }
+.mac-time .ampm { margin-left: 4px; }
+.mac-time .stepper { display: flex; flex-direction: column; width: 13px; height: 22px; border-radius: 5px; background: var(--ctl-fill); overflow: hidden; }
+.mac-time .stepper button { flex: 1; display: grid; place-items: center; color: var(--ctl-text); }
+.mac-time[aria-disabled="true"] { opacity: 1; }
+
+.mac-spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgb(var(--primary) / 0.15); border-top-color: rgb(var(--primary) / 0.55); animation: spin 0.9s linear infinite; }
+
+/* ---- Sheets ---- */
+/* Centred in the window, as macOS 26 places a sheet. */
+.sheet-backdrop { position: fixed; inset: 0; z-index: 50; display: flex; justify-content: center; align-items: center; }
+.sheet {
+  background: var(--sheet-bg); border-radius: 16px; box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.2), 0 12px 40px rgb(0 0 0 / 0.25);
+  max-height: 100%; overflow: auto;
+}
+.rule-sheet { display: flex; flex-direction: column; align-items: flex-start; gap: 18px; padding: 24px; }
+.rule-sheet > .sheet-field, .rule-sheet > .sheet-buttons { align-self: stretch; }
+.sheet-title { font-size: 16px; font-weight: 500; color: var(--text); }
+.sheet-field { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.sheet-field > .mac-field, .sheet-field > .hstack { align-self: stretch; }
+.sheet-label { font-size: 11px; font-weight: 500; color: var(--faint); }
+.sheet-hint { font-size: 12px; color: var(--muted); }
+.sheet-hint.problem { color: var(--error-text); }
+.sheet-where { min-width: 0; font-size: 12px; color: var(--text-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.sheet-buttons { display: flex; align-items: center; gap: 8px; }
+
+/* The key editor: a grouped form on its white pane, then the buttons. */
+.key-editor { display: flex; flex-direction: column; }
+.form-pane { padding: 20px; background: var(--surface); }
+.form-group { display: flex; flex-direction: column; padding: 0 10px; background: var(--form-group); border-radius: 10px; }
+.form-row { display: flex; align-items: center; gap: 12px; min-height: 37.5px; font-size: 13px; color: var(--text); }
+/* A text field's row is 10 taller below, its line where a short row's is. */
+.form-row.tall { min-height: 47.5px; padding-bottom: 10px; }
+.form-row + .form-row { box-shadow: inset 0 1px 0 var(--form-line); }
+.form-label { flex: none; }
+.form-row > .form-field { flex: 1; border: 0; background: transparent; box-shadow: none !important; height: 22px; padding: 0; margin: 0; }
+.form-row > .form-field::placeholder { color: var(--ctl-text); }
+/* The field being typed in draws its prompt grey; the others draw theirs dark. */
+.form-row > .form-field.focused::placeholder { color: var(--placeholder); }
+.form-folder { flex: 1; min-width: 0; font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.form-remove { color: var(--ctl-text); display: grid; place-items: center; }
+.form-row > .mac-popup { margin-left: auto; }
+.key-editor > .sheet-buttons { padding: 21.5px 20px 20px; }
+.mac-popup.borderless { background: transparent; padding: 0; gap: 11.5px; }
+.mac-popup.borderless .ghost { display: none; }
+.mac-popup.borderless .chevrons { box-sizing: border-box; width: 20px; height: 20px; padding: 5px 6.25px; border-radius: 50%; background: var(--ctl-fill); }

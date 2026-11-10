@@ -56,6 +56,15 @@ struct SettingsView: View {
         .onChange(of: store.manager.settings) { _, settings in
             if draft == nil { draft = settings }
         }
+        #if DEBUG
+        // For comparisons: AGENTMAN_TEST_UNSAVED=1 makes a change, so the
+        // save bar shows.
+        .onChange(of: draft == nil, initial: true) { _, none in
+            if !none, ProcessInfo.processInfo.environment["AGENTMAN_TEST_UNSAVED"] == "1", draft == store.manager.settings {
+                draft?.briefs.toggle()
+            }
+        }
+        #endif
     }
 }
 
@@ -403,6 +412,10 @@ private struct PermissionsPage: View {
                     draft?.rules = (draft?.rules ?? []) + [rule]
                 }
             }
+            #if DEBUG
+            // For comparisons: AGENTMAN_TEST_SHEET=rule opens the sheet.
+            .onAppear { if ProcessInfo.processInfo.environment["AGENTMAN_TEST_SHEET"] == "rule" { adding = true } }
+            #endif
         }
 
         TryPermission()
@@ -871,6 +884,18 @@ struct VoiceSection: View {
         }
         .task {
             if case .success(let found) = await store.voiceAccount() { account = found }
+            #if DEBUG
+            // For comparisons: AGENTMAN_TEST_VOICE=code or signedin.
+            switch ProcessInfo.processInfo.environment["AGENTMAN_TEST_VOICE"] {
+            case "code":
+                email = "you@example.com"
+                requestId = "test"
+            case "signedin":
+                account = VoiceAccount(signedIn: true, email: "you@example.com", plan: "pro")
+            default:
+                break
+            }
+            #endif
         }
     }
 

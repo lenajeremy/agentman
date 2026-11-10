@@ -8,7 +8,9 @@ import WebKit
 /// never becomes the active app; its windows are transparent, let clicks
 /// through and sit behind everything; after AGENTMAN_TEST_DELAY seconds
 /// (default 10) it draws a window into the file — AGENTMAN_TEST_WINDOW names
-/// it by title, else the largest — and quits.
+/// it by title, else the largest — and quits. AGENTMAN_TEST_SCROLL=<points>
+/// scrolls the window's largest scroll view down first; a sheet open on the
+/// window is drawn over it where it sits.
 @MainActor
 enum TestSnapshot {
     private static let env = ProcessInfo.processInfo.environment
@@ -23,6 +25,11 @@ enum TestSnapshot {
         }
         RunLoop.main.add(timer, forMode: .common)
         let delay = Double(env["AGENTMAN_TEST_DELAY"] ?? "") ?? 10
+        if let offset = Double(env["AGENTMAN_TEST_SCROLL"] ?? "") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(delay - 1.5, 0.5)) {
+                MainActor.assumeIsolated { scroll(to: offset) }
+            }
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             MainActor.assumeIsolated { snapshot(to: path) }
         }
@@ -53,16 +60,44 @@ enum TestSnapshot {
         }
     }
 
-    private static func snapshot(to path: String) {
-        let windows = NSApp.windows.filter { $0.isVisible && $0.contentView != nil && $0.frame.width > 300 && $0.frame.height > 200 }
+    private static func pictured() -> NSWindow? {
+        let windows = NSApp.windows.filter { $0.isVisible && $0.contentView != nil && $0.frame.width > 300 && $0.frame.height > 200 && !$0.isSheet }
         let wanted = env["AGENTMAN_TEST_WINDOW"]
-        let window = windows.first { wanted != nil && $0.title == wanted }
+        return windows.first { wanted != nil && $0.title == wanted }
             ?? windows.max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
+    }
+
+    private static func scroll(to offset: Double) {
+        func scrollViews(in view: NSView?) -> [NSScrollView] {
+            guard let view else { return [] }
+            return (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap { scrollViews(in: $0) }
+        }
+        guard let largest = scrollViews(in: pictured()?.contentView)
+            .max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) else { return }
+        // No further than the end, as scrolling by hand goes.
+        let end = (largest.documentView?.frame.height ?? 0) - largest.contentView.bounds.height + largest.contentInsets.bottom
+        largest.contentView.scroll(to: NSPoint(x: 0, y: max(-largest.contentInsets.top, min(offset, end))))
+        largest.reflectScrolledClipView(largest.contentView)
+    }
+
+    private static func snapshot(to path: String) {
+        let window = pictured()
         guard let view = window?.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
             fputs("agentman: no window to take a picture of\n", stderr)
             exit(3)
         }
         view.cacheDisplay(in: view.bounds, to: rep)
+        if let window, let sheet = window.attachedSheet, let sheetView = sheet.contentView {
+            let rect = NSRect(x: sheet.frame.minX - window.frame.minX, y: sheet.frame.minY - window.frame.minY,
+                              width: sheet.frame.width, height: sheet.frame.height)
+            if let sheetRep = sheetView.bitmapImageRepForCachingDisplay(in: sheetView.bounds) {
+                sheetView.cacheDisplay(in: sheetView.bounds, to: sheetRep)
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+                sheetRep.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+                NSGraphicsContext.restoreGraphicsState()
+            }
+        }
         // A web view doesn't draw itself into the cache: its own snapshot
         // goes over its place.
         draw(webViews(in: view), into: rep, from: view) {

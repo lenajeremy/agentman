@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { daemon } from "./daemon";
 import "./styles/base.css";
+import "./settings/appearance";
 
 daemon.start();
 
