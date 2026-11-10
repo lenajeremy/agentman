@@ -38,8 +38,10 @@ done. One at a time, in this order.
    agent's changes in a tab of their own, terminals that follow between the
    editor and the agent's page (here: the window you're in gives a shared
    shell its size), Usage and ⌘K in the editor.
-10. **Settings switches:** Agentman's standing answers, learning from
-    corrections.
+10. ✓ (f384ae0) **Settings switches:** Agentman's standing answers, learning from
+    corrections; with them the rest of the Mac's Permissions page the web
+    lacked: when an agent finishes, while agents work, overnight, trust by
+    folder.
 11. **Agentman's key prompt** (0.41): says what Agentman is and why it
     needs a key, and the box's note reads "Don't have one? Get an
     Anthropic key".
