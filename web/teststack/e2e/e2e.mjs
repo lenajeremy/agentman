@@ -672,6 +672,36 @@ async function editor() {
     }
   });
 
+  await check("editor and Agentman follow the Appearance chosen, not the computer's, both ways", async () => {
+    // The code's background, the editor's label colour and Agentman's: with
+    // `dark` given, whether all three are dark (or light); without, what they are.
+    const look = (dark) => {
+      // rgb(…) or #rrggbb(aa), as the minifier may write either.
+      const lum = (c) => {
+        c = c.trim();
+        const [r, g, b] = c.startsWith("#") ? [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)) : (c.match(/\d+(\.\d+)?/g) ?? []).map(Number);
+        return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+      };
+      let code = null;
+      try { const m = document.querySelector("iframe.monaco").contentDocument.querySelector(".monaco-editor"); if (m) code = lum(getComputedStyle(m).backgroundColor); } catch {}
+      const labelIsLight = lum(getComputedStyle(document.querySelector(".editor-window")).getPropertyValue("--label")) > 0.5;
+      const am = getComputedStyle(document.documentElement).getPropertyValue("--am-inverse").trim();
+      const seen = { code, labelIsLight, am };
+      if (dark === undefined) return seen;
+      return code !== null && (code < 0.5) === dark && labelIsLight === dark && am === (dark ? "#f2f2f2" : "#101010");
+    };
+    for (const [computer, chosen] of [["light", "dark"], ["dark", "light"]]) {
+      const page = await open(`view=editor&folder=${folder}&file=TODO.txt&prefs=${encodeURIComponent(JSON.stringify({ appearance: chosen }))}`, { dark: computer === "dark", wait: "iframe.monaco" });
+      await intoCode(page);
+      try {
+        await until(page, look, chosen === "dark", `${chosen} chosen on a ${computer} computer`);
+      } catch (e) {
+        throw new Error(`${e.message}: ${JSON.stringify(await page.evaluate(look))}`);
+      }
+      await page.close();
+    }
+  });
+
   await check("editor: the terminal runs a shell", async () => {
     const page = await open(`view=editor&folder=${folder}&file=TODO.txt&terminal=1&renderer=dom`, { wait: ".editor-terminal" });
     const newButton = page.locator(".term-note button");
