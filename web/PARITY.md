@@ -60,8 +60,25 @@ after each overlay, no data, no main window, every way in, dark mode):
 9. 9638da5, 45c4ddc palettes and the Usage popover give the keyboard back;
    cccc576 an editor opens a main tab when none is open.
 4, 5, 7 and 8: nothing found. Also c33b677: npm test runs every test file.
-Not tested anywhere: the desktop shell, Safari and Firefox, starting a real
-Muse, offers on the Board, a real Ship.
+
+Then what hadn't been tested, with stand-ins that cost nothing and publish
+nothing: offers on the Board (faked in the page): a1295e2 an offer's answer
+names the option, 662b4e8 it reads as Agentman's; Ship end to end through a
+stand-in gh (commit, push to a local remote, the PR link); Agentman asked
+from the Board and the editor, on a fake Anthropic API (ANTHROPIC_BASE_URL,
+a fake key in the environment, never the Keychain); Muse started, messaged,
+ended and resumed on Muse's echo provider: 347fae5 am serve no longer breaks
+a fresh Muse with a settings file it can't read, f13b318 an ended Muse
+session offers Resume; WebKit (Safari's engine, headless): thread, find,
+palette, Board, Usage, Devices and its QR, the editor, the message box, no
+errors once a56e75a answers the shell runtime's script. Also fixed: 6baf37c
+the address follows the page, d85b182 a narrow editor window, 07a0232 ~ only
+for the home folder. The Mac's AgentsStore.end reads the closed flag as the
+web did before f13b318, so an ended Muse session there says it's still
+running in a terminal too.
+Not tested: Firefox (its headless build can't start inside the sandbox
+these tests run in); the desktop shell running (it builds, vets and passes
+its tests, but running it shows windows).
 
 Not for the web app: the setup screen, installing the am command, Sparkle
 updates and the catch-up prompt (am serve serves the web app itself, so the
@@ -69,12 +86,7 @@ two always match).
 
 Seen while testing, not yet looked into: attaching an agent's own
 terminal can type the terminal's answer to tmux's query ("1;2c0;276;0c")
-into its shell. The address bar doesn't follow the page (an agent opened, Usage), so
-reloading or going Back returns to where the page was first opened; the
-Mac has no address bar, so this is the browser's alone. An editor window
-under about 1000 wide pushes the agent
-panel past its right edge, its header buttons out of reach (the Mac keeps
-the window from being that small; a browser window can be). For the
+into its shell. For the
 looks pass: "Show in Files" where a Mac says Finder
 (the platform label), and the iPad and phone icons alike in Lucide.
 
