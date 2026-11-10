@@ -47,6 +47,22 @@ done. One at a time, in this order.
     match what is typed, under the commands, opening at the message. Found
     while doing 9.
 
+Gone back over 1–9 on 2026-11-10, past the main path of each (the keyboard
+after each overlay, no data, no main window, every way in, dark mode):
+1. 9ce2375 Muse and Cursor CLI named as on the Mac, Muse's logo; 7064563
+   ending the agent you're on keeps its page; 2ac667f the message box keeps
+   the keyboard after sending.
+2. 9814c33 the footer and banner say what the Mac's do, am service restart.
+3. b1c73fc the Board's sheets give the keyboard back; 7c982d9 its folder
+   menu lists the folders (asked before the socket was up).
+6. d20cf28 closing find gives the keyboard back; 42cc961 the cursor kept;
+   80ed804 Escape clears the sidebar's search.
+9. 9638da5, 45c4ddc palettes and the Usage popover give the keyboard back;
+   cccc576 an editor opens a main tab when none is open.
+4, 5, 7 and 8: nothing found. Also c33b677: npm test runs every test file.
+Not tested anywhere: the desktop shell, Safari and Firefox, starting a real
+Muse, offers on the Board, a real Ship.
+
 Not for the web app: the setup screen, installing the am command, Sparkle
 updates and the catch-up prompt (am serve serves the web app itself, so the
 two always match).
