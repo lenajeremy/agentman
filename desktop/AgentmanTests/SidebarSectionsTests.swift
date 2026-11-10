@@ -158,7 +158,7 @@ final class SidebarSectionsTests: XCTestCase {
          {"id":"shot-g","kind":"claude","name":"Review the API docs","cwd":"\(api)","state":"idle","inject":"tmux","lastActivityAt":\(now - 25 * minute)}
         ]}
         """
-        let keys = ["sidebarChoices", "sidebarWorkingOpen", "sidebarArchivedOpen"]
+        let keys = ["sidebarChoices", "sidebarWorkingOpen", "sidebarArchivedOpen", AgentColors.settingKey]
         let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
         defer {
             for (key, value) in zip(keys, saved) {
@@ -174,8 +174,11 @@ final class SidebarSectionsTests: XCTestCase {
         window.alphaValue = 0
         window.ignoresMouseEvents = true
         defer { window.orderOut(nil) }
-        for (name, archivedOpen, pin) in [("sidebar", false, false), ("sidebar-open", true, true)] {
+        // Then coloured by project: each row's bar on the sidebar's edge.
+        for (name, archivedOpen, pin, colorBy) in [("sidebar", false, false, AgentColorBy.none), ("sidebar-open", true, true, .none),
+                                                   ("sidebar-color", true, false, .project)] {
             for (look, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+                UserDefaults.standard.set(colorBy.rawValue, forKey: AgentColors.settingKey)
                 UserDefaults.standard.removeObject(forKey: "sidebarChoices")
                 UserDefaults.standard.set(true, forKey: "sidebarWorkingOpen")
                 UserDefaults.standard.set(archivedOpen, forKey: "sidebarArchivedOpen")
