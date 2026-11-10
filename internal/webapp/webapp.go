@@ -20,6 +20,10 @@ func Available() bool { return files != nil }
 // that folder instead (internal/webapp/dist, as Vite builds it), so a test
 // daemon shows each new build without am being rebuilt.
 func Handler() http.Handler {
+	return withoutShellScript(app())
+}
+
+func app() http.Handler {
 	if dir := os.Getenv("AGENTMAN_WEB_DIR"); dir != "" {
 		return http.FileServer(http.Dir(dir))
 	}
@@ -32,4 +36,19 @@ func Handler() http.Handler {
 		})
 	}
 	return http.FileServer(http.FS(files))
+}
+
+// shellScript is what the desktop shell's runtime (@wailsio/runtime) looks
+// for on every page, a script the shell may add. In a browser there is none:
+// it's answered with nothing, rather than a 404 in every page's console.
+const shellScript = "/wails/custom.js"
+
+func withoutShellScript(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == shellScript {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
