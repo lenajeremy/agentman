@@ -34,6 +34,11 @@ export class DaemonClient {
   private backoff = 500;
   private stopped = false;
   status: Status = "connecting";
+  /** In the browser: am serve is there but no longer knows this page's
+   *  sign-in (it restarted before it kept them, or the sign-in expired).
+   *  The page keeps trying, so it comes back once am web signs in again in
+   *  any tab, which share the cookie. */
+  signedOut = false;
   detail = "";
 
   start() {
@@ -92,7 +97,7 @@ export class DaemonClient {
       const ep = await endpoint();
       url = `${ep.url}?token=${encodeURIComponent(ep.token)}`;
     } catch (err) {
-      this.retry(err instanceof Error ? err.message : String(err));
+      void this.retry(err instanceof Error ? err.message : String(err));
       return;
     }
     const ws = new WebSocket(url);
@@ -100,6 +105,7 @@ export class DaemonClient {
     this.buffer = "";
     ws.onopen = () => {
       this.backoff = 500;
+      this.signedOut = false;
       this.setStatus("connected");
     };
     ws.onmessage = (e) => this.receive(typeof e.data === "string" ? e.data : "");
@@ -110,12 +116,14 @@ export class DaemonClient {
         p.reject(new Error("am serve went away"));
         this.pending.delete(id);
       }
-      this.retry("am serve went away");
+      void this.retry("am serve went away");
     };
   }
 
-  private retry(detail: string) {
+  private async retry(detail: string) {
     if (this.stopped) return;
+    this.signedOut = await signedOut();
+    if (this.signedOut) detail = "am serve doesn't know this page's sign-in";
     this.setStatus("offline", detail);
     const wait = this.backoff;
     this.backoff = Math.min(this.backoff * 2, 5000);
@@ -150,3 +158,16 @@ export class DaemonClient {
 }
 
 export const daemon = new DaemonClient();
+
+/** Whether am serve answers but turns this page away: a page it serves
+ *  (no shell, no development server) asks for something small and is told
+ *  it isn't signed in. */
+async function signedOut(): Promise<boolean> {
+  if (location.protocol === "wails:" || location.hostname === "wails.localhost" || import.meta.env.DEV) return false;
+  try {
+    const res = await fetch("/app/host/Host.Locale", { method: "POST", headers: { "Content-Type": "application/json" }, body: "[]" });
+    return res.status === 403;
+  } catch {
+    return false; // not answering at all
+  }
+}

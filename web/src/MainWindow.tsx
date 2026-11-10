@@ -3,6 +3,7 @@
 // Agent, an agent, or "This agent has ended" — and the overlays over
 // everything (toasts, palette, away summary, lightbox).
 
+import { ConnectionBanner } from "./shell/ConnectionBanner";
 import { useEffect, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { Moon, PanelLeft } from "lucide-react";
 import type { Session } from "@shared/protocol";
@@ -79,6 +80,8 @@ export function MainWindow({ platform }: { platform: string }) {
         {route.kind === "agentman" && <AgentmanView />}
         {route.kind === "new" && <NewAgentView worktree={route.worktree} />}
         {route.kind === "agent" && (selected ? <AgentView key={selected.id} session={selected} platform={platform} /> : sessionsLoaded ? <GoneView /> : null)}
+        {/* Under the page's top bar while am serve can't be reached. */}
+        <ConnectionBanner />
         {/* With the sidebar hidden, the headers make room for the window's
             buttons and the one that brings it back. */}
         {sidebarHidden && (

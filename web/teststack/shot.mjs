@@ -11,10 +11,12 @@
 // Each --step is JavaScript run in the page, --after seconds apart, once
 // the first --wait is over; a step's value, if any, is printed. A step can
 // instead be real input: "click:<x>,<y>" (CSS pixels), "type:<text>", or
-// "key:<Meta+Shift+s>" (Meta, Ctrl, Alt, Shift and a key). --init runs
+// "key:<Meta+Shift+s>" (Meta, Ctrl, Alt, Shift and a key); or
+// "open:<command>", which runs the command then and opens the link it
+// prints in a second tab of the same browser, as am web would. --init runs
 // before the page's own scripts; --grant gives the page a permission (as
 // if the user had allowed it). Used by browser.sh.
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -116,6 +118,12 @@ try {
     }
   };
   for (const step of steps) {
+    if (step.startsWith("open:")) {
+      const link = execSync(step.slice(5), { encoding: "utf8" }).trim().split("\n").pop();
+      await send("Target.createTarget", { url: link });
+      await sleep(after);
+      continue;
+    }
     if (/^(click|type|key):/.test(step)) {
       await input(step);
       await sleep(after);
