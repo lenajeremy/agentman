@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -66,5 +67,12 @@ func TestAPickedFileIsReadUpToTheLimit(t *testing.T) {
 func TestAMissingArgumentIsAnError(t *testing.T) {
 	if _, err := call(t, "Files.Read"); err == nil {
 		t.Fatal("Files.Read with no arguments answered")
+	}
+}
+
+func TestThePageIsToldTheSystemAmServeRunsOn(t *testing.T) {
+	got, err := call(t, "Host.System")
+	if err != nil || got != runtime.GOOS {
+		t.Fatalf("Host.System = %v, %v", got, err)
 	}
 }

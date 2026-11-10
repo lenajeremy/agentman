@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 )
 
 // A Method takes the call's arguments, as JSON, and answers.
@@ -69,7 +70,10 @@ func Methods() map[string]Method {
 			}
 			return MakeFolder(parent, name)
 		},
-		"Host.Locale":      func([]json.RawMessage) (any, error) { return Locale(), nil },
+		"Host.Locale": func([]json.RawMessage) (any, error) { return Locale(), nil },
+		// The system am serve runs on, which a page in a browser can't tell
+		// from its own: where a key is kept, what the file manager is called.
+		"Host.System":      func([]json.RawMessage) (any, error) { return runtime.GOOS, nil },
 		"Host.Reveal":      one(func(path string) (any, error) { return nil, Reveal(path) }),
 		"Host.OpenPath":    one(func(path string) (any, error) { return nil, OpenPath(path) }),
 		"Shell.Home":       home,
