@@ -7,6 +7,7 @@ package webapp
 import (
 	"io/fs"
 	"net/http"
+	"os"
 )
 
 // files is the built app, set by embed.go in builds with the webapp tag.
@@ -15,8 +16,13 @@ var files fs.FS
 // Available says whether this am carries the web app.
 func Available() bool { return files != nil }
 
-// Handler serves the app's files.
+// Handler serves the app's files. AGENTMAN_WEB_DIR=<folder> serves them from
+// that folder instead (internal/webapp/dist, as Vite builds it), so a test
+// daemon shows each new build without am being rebuilt.
 func Handler() http.Handler {
+	if dir := os.Getenv("AGENTMAN_WEB_DIR"); dir != "" {
+		return http.FileServer(http.Dir(dir))
+	}
 	if files == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")

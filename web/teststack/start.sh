@@ -70,7 +70,7 @@ pkill -f "$T/am serve" 2>/dev/null || true
 sleep 0.5
 PATHS="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 nohup env -i HOME="$H" USER="$USER" LOGNAME="$USER" SHELL=/bin/bash TERM=xterm-256color LANG=en_US.UTF-8 \
-  TMPDIR="${TMPDIR:-/tmp}" TMUX_TMPDIR="$TMUX_TMPDIR" PATH="$PATHS" \
+  TMPDIR="${TMPDIR:-/tmp}" TMUX_TMPDIR="$TMUX_TMPDIR" PATH="$PATHS" AGENTMAN_WEB_DIR="$REPO/internal/webapp/dist" \
   "$T/am" serve -relay none -config-home "$H" -addr 127.0.0.1:${PORT:-18797} > "$T/serve.log" 2>&1 &
 for _ in $(seq 1 50); do
   [ -f "$H/.agentman/app.json" ] && break
