@@ -163,6 +163,14 @@ function FolderEditor({ folder }: { folder: string }) {
       if (command) void runCommand(store, command);
     };
     const openMain = (e: Event) => openInMain((e as CustomEvent<string>).detail);
+    // Asked to open this folder's editor from inside it (host.ts openEditor).
+    const openHere = (e: Event) => {
+      const asked = (e as CustomEvent<{ file: string; terminal: boolean }>).detail;
+      if (asked.file) store.open(asked.file);
+      if (asked.terminal && !store.showTerminal) store.toggleTerminal();
+      store.changed();
+    };
+    window.addEventListener("agentman:editor-open", openHere);
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("message", fromPage);
     window.addEventListener("agentman:open-main", openMain);
@@ -173,6 +181,7 @@ function FolderEditor({ folder }: { folder: string }) {
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("message", fromPage);
       window.removeEventListener("agentman:open-main", openMain);
+      window.removeEventListener("agentman:editor-open", openHere);
       offMenu();
     };
   }, [store]);

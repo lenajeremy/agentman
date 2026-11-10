@@ -72,6 +72,14 @@ export interface EditorOptions {
 /** A folder in an editor window of its own, as the Mac app's editor scenes. */
 export async function openEditor(opts: EditorOptions): Promise<void> {
   const full = { sessionId: "", file: "", terminal: false, agentHere: false, ...opts };
+  // This page is that folder's editor: it opens the file itself, rather than
+  // another window or a reload of this one (EditorWindow.tsx).
+  const here = new URLSearchParams(location.search);
+  const trim = (path: string) => path.replace(/\/+$/, "");
+  if (here.get("view") === "editor" && trim(here.get("folder") ?? "") === trim(full.folder)) {
+    window.dispatchEvent(new CustomEvent("agentman:editor-open", { detail: full }));
+    return;
+  }
   if (inShell) return Windows.OpenEditor(full);
   const q = new URLSearchParams({ view: "editor", folder: full.folder });
   if (full.sessionId) q.set("session", full.sessionId);
