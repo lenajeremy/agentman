@@ -34,6 +34,16 @@ final class BoardTests: XCTestCase {
         XCTAssertTrue(sections.idle.isEmpty)
     }
 
+    /// The user answered in the agent and it got going, but its card is
+    /// still up: it shows as working, as it does in the sidebar.
+    func testAWorkingAgentIsWorkingThoughACardIsUpAboutIt() {
+        let sections = sort([session("a", .busy), session("b", .idle)], waiting: ["a", "b"])
+        XCTAssertEqual(sections.working.map(\.id), ["a"])
+        XCTAssertEqual(sections.needsYou.map(\.id), ["b"])
+        XCTAssertEqual(sections.headline(connected: true), "1 agent is waiting on you. The rest are fine.")
+        XCTAssertEqual(sections.detail, "Agent a is working.")
+    }
+
     func testEndedAndArchivedAgentsAreNotOnTheBoard() {
         let old = Date.now.addingTimeInterval(-5 * 24 * 3600)
         let sections = sort([session("a", .ended), session("b", .idle, active: old)])
