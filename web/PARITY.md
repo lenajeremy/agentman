@@ -14,24 +14,21 @@ done. One at a time, in this order.
    connected" banner.** Losing am serve says so across
    the window (ConnectionBanner.swift). In a browser, Restart can't reach a
    stopped am serve: it says how to start it instead.
-3. **The Board** (BoardView.swift, BoardActions.swift): it replaced
-   Agentman's tab on the Mac. In five pieces: (a) ✓ 71d8e82 the page,
-   columns, cards, ask box, chat beside, sidebar aside; (b) git buttons and
-   the commit sheet; (c) checks and missions; (d) Ship and Tonight; (e)
-   search, colours, Handled, folder trust. Cards with each agent's brief and git
-   buttons, offers answered within a time limit, Agentman's check of the
-   work (`manager_verifications`), shipping finished agents together
-   (`manager_ship`), work lined up for tonight (`manager_queue`,
-   `manager_queue_add`, `manager_queue_remove`), missions
-   (`manager_missions`), teams, search beside the headline, agents
-   coloured by state, project or folder, stuck or colliding agents.
+3. ✓ **The Board** (BoardView.swift, BoardActions.swift), in five pieces:
+   the page, columns, cards, ask box, chat beside, sidebar aside (71d8e82);
+   git buttons and the commit sheet (773538e; 1c49c75 fixed committing a
+   renamed file in am serve); checks and teams (c79ca19); Ship and Tonight
+   (68513da); search, colours, Handled, folder trust (f24e95c). Left: an
+   offer card's time limit and its title as a button (CompactCard, 0.43).
 4. **Usage and Limits** (UsageView.swift, LimitsView.swift; `usage`,
    `limits`): what the agents spent over six months, a year or all of it,
    input, cache and output apart, fast mode and advising; what is left of
    each plan.
 5. **Take Over and Open in Terminal** (`handoff_session`): an ended or
    watched thread says so and offers Take Over.
-6. **Find in a conversation** (FindBar.swift, ⌘F).
+6. **Find in a conversation** (FindBar.swift, ⌘F), and opening a search
+   hit at its message (ThreadJump); the sidebar's search of what was said
+   too (the Board's is done).
 7. **Settings › Devices** (DevicesSettings.swift; `devices`, `pair_code`):
    pairing a phone on the page.
 8. **Thread details:** how long the agent worked ("Worked for"), code
