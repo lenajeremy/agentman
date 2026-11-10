@@ -56,7 +56,9 @@ function apply(event: AppEvent) {
       break;
     case "session_update": {
       const updated = event.session;
-      if (!updated) break;
+      // One without its id can't be placed, and drawn it would take the page
+      // down; am serve always sends one.
+      if (!updated?.id) break;
       const others = state.sessions.filter((s) => s.id !== updated.id);
       set({ sessions: [...others, updated] });
       break;
