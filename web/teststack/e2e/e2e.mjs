@@ -76,7 +76,10 @@ async function check(name, run, { expected = [] } = {}) {
     passed++;
     console.log(`PASS ${engineName} ${name} (${((Date.now() - started) / 1000).toFixed(1)}s)`);
   } catch (err) {
-    const why = String(err?.message ?? err).split("\n")[0].slice(0, 240);
+    // Playwright's first line, and which element it was waiting for.
+    const lines = String(err?.message ?? err).split("\n");
+    const waiting = lines.find((l) => /waiting for|intercepts pointer/.test(l))?.trim();
+    const why = (lines[0] + (waiting ? ` [${waiting}]` : "")).slice(0, 320);
     failures.push(`${engineName} ${name}: ${why}`);
     console.log(`FAIL ${engineName} ${name}: ${why}`);
     // What the page showed, for working out why: a picture and a few facts.
@@ -492,11 +495,11 @@ async function newAgent() {
       const name = `e2e-wt-${Date.now()}`;
       const place = `${H}/Agentman/Worktrees/demo/${name}`;
       try {
-        const page = await open("page=new", { wait: ".new-agent-line" });
+        // In demo from the start: each run's worktree, gone but still listed by
+        // am serve, is newer than demo, and Recent shows ten.
+        const page = await open(`page=new&prefs=${encodeURIComponent(JSON.stringify({ newAgentFolder: DEMO_DIR }))}`, { wait: ".new-agent-line" });
         await page.locator("button.pill").first().click();
         await menu(page, "Muse");
-        await page.locator("button.pill").nth(1).click();
-        await menu(page, "~/projects/demo");
         // Its worktrees, once listed, and New Worktree… with them.
         for (let i = 0; i < 20; i++) {
           await page.locator("button.pill").nth(1).click();
