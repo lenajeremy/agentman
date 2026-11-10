@@ -26,7 +26,6 @@ const BUDGET = 12_000_000;
 /** The largest picked file read. */
 const MAX_FILE = 40 << 20;
 
-const inShell = location.protocol === "wails:" || location.hostname === "wails.localhost";
 
 function blobBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -90,14 +89,13 @@ interface PickedFile {
 
 /** Images from the system's picker. */
 export async function pick(): Promise<Attachment[]> {
-  return fromPaths(await pickFiles("Choose images for Agentman"));
+  return fromPaths(await pickFiles("Choose images for Agentman", "", { images: true }));
 }
 
 /** Pictures in files, by their paths, read through the shell. */
 export async function fromPaths(paths: string[]): Promise<Attachment[]> {
   const found: Attachment[] = [];
   for (const path of paths) {
-    if (!inShell) break;
     try {
       const file = (await hostCall("Files.Read", path, MAX_FILE)) as PickedFile;
       if (!file.data || !file.mime.startsWith("image/")) continue;

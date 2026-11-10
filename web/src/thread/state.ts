@@ -198,7 +198,6 @@ export interface LocalFile {
 
 /** A file on this computer, through the shell (menus.go Files.Read). */
 export async function readLocalFile(path: string, max: number): Promise<LocalFile | null> {
-  if (!inShell) return null;
   try {
     return (await hostCall("Files.Read", path, max)) as LocalFile;
   } catch {

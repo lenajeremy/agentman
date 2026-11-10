@@ -1,6 +1,7 @@
 // What the Settings window asks the shell for (settings.go): the home
 // folder and open panels. In a plain browser, the nearest a page can do.
 
+import { openPanel } from "../picker/OpenPanel";
 import { useEffect, useState } from "react";
 import { Call, Clipboard } from "@wailsio/runtime";
 import { hostCall } from "../host";
@@ -33,10 +34,7 @@ export interface PickOptions {
 
 /** An open panel; nothing when cancelled. */
 export async function pick(opts: PickOptions): Promise<string[]> {
-  if (!inShell) {
-    const path = prompt(opts.message || (opts.folders ? "Folder" : "File"), opts.start ?? "");
-    return path ? [path] : [];
-  }
+  if (!inShell) return openPanel(opts);
   try {
     const paths = (await Call.ByName("main.Settings.Pick", { multiple: false, message: "", button: "", start: "", ...opts })) as string[] | null;
     return paths ?? [];

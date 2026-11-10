@@ -202,7 +202,7 @@ export function NewAgentView({ worktree: namingAtStart }: { worktree?: boolean }
   }
 
   async function choose() {
-    const picked = await pickFolder("Choose where the agent works", folder || home);
+    const picked = await pickFolder("Choose where the agent works", folder || home, { button: "Choose", newFolder: true });
     if (picked) setFolder(picked);
   }
 

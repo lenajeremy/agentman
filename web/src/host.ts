@@ -2,6 +2,7 @@
 // shell can change (Wails today) without the screens changing. In a plain
 // browser, while the screens are developed, the Vite server stands in.
 
+import { openPanel } from "./picker/OpenPanel";
 import { Daemon, Host, Windows } from "../bindings/github.com/lenajeremy/agentman/crossplatform";
 import { Call, Events } from "@wailsio/runtime";
 import { NotificationService } from "../bindings/github.com/wailsapp/wails/v3/pkg/services/notifications";
@@ -90,13 +91,17 @@ export async function openSettings(page = ""): Promise<void> {
 // screens are developed, each does the nearest thing a page can, or nothing.
 
 /** A folder from the system's picker; "" when cancelled. */
-export async function pickFolder(title: string, start = ""): Promise<string> {
-  return inShell ? Host.PickFolder(title, start) : (prompt(title) ?? "");
+export async function pickFolder(title: string, start = "", opts: { button?: string; newFolder?: boolean } = {}): Promise<string> {
+  if (inShell) return Host.PickFolder(title, start);
+  const [folder] = await openPanel({ folders: true, message: title, start, button: opts.button ?? "Open", newFolder: opts.newFolder });
+  return folder ?? "";
 }
 
-/** Files from the system's picker; none when cancelled. */
-export async function pickFiles(title: string, start = ""): Promise<string[]> {
-  return inShell ? Host.PickFiles(title, start) : [];
+/** Files from the system's picker; none when cancelled. In the browser,
+ *  the page's own panel (picker/OpenPanel.tsx), which answers with paths. */
+export async function pickFiles(title: string, start = "", opts: { images?: boolean } = {}): Promise<string[]> {
+  if (inShell) return Host.PickFiles(title, start);
+  return openPanel({ multiple: true, message: title, start, images: opts.images });
 }
 
 /** Shows a file or folder in Finder, or the Linux file manager. */

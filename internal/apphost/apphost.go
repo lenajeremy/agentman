@@ -44,6 +44,30 @@ func Methods() map[string]Method {
 			}
 			return Read(path, max)
 		},
+		"Files.List": func(args []json.RawMessage) (any, error) {
+			var path string
+			var hidden bool
+			if err := arg(args, 0, &path); err != nil {
+				return nil, err
+			}
+			if len(args) > 1 {
+				if err := arg(args, 1, &hidden); err != nil {
+					return nil, err
+				}
+			}
+			return List(path, hidden)
+		},
+		"Files.Places": func([]json.RawMessage) (any, error) { return ListPlaces(), nil },
+		"Files.MakeFolder": func(args []json.RawMessage) (any, error) {
+			var parent, name string
+			if err := arg(args, 0, &parent); err != nil {
+				return nil, err
+			}
+			if err := arg(args, 1, &name); err != nil {
+				return nil, err
+			}
+			return MakeFolder(parent, name)
+		},
 		"Host.Locale":      func([]json.RawMessage) (any, error) { return Locale(), nil },
 		"Shell.Home":       home,
 		"Settings.Home":    home,
