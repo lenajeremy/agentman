@@ -11,9 +11,14 @@ import { Icon } from "../ui";
 export function ConnectionBanner() {
   const { status, detail } = useStatus();
   if (status !== "offline") return null;
+  // On a Mac, am serve usually runs as a login service (am setup), which
+  // am service restart starts again; am service is the Mac's alone.
+  const mac = /Mac/.test(navigator.platform);
   const explanation = daemon.signedOut
     ? "am serve is running but has signed this page out. Run am web in a terminal to sign in again, and this page picks up where it was."
-    : "Your agents keep running, but you can't see or message them from here. Start it again with am serve in a terminal.";
+    : mac
+      ? "Your agents keep running, but you can't see or message them from here. Start it again in a terminal with am service restart, or am serve if you run it yourself."
+      : "Your agents keep running, but you can't see or message them from here. Start it again with am serve in a terminal.";
   return (
     <div className="connection-banner" role="status">
       <span className="connection-banner-icon"><Icon icon={TriangleAlert} sf="exclamationmark.triangle.fill" size={13} /></span>

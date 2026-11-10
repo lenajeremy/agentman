@@ -498,11 +498,12 @@ function AgentmanCard({ selected, sessions }: { selected: boolean; sessions: Ses
 
 /** Whether the app can reach am serve, and which version it is. */
 function ConnectionFooter({ version }: { version?: string }) {
-  const { status, detail } = useStatus();
+  const { status } = useStatus();
   const mac = document.documentElement.dataset.platform === "darwin";
   const connected = mac ? "Mac connected" : "Connected";
   const text = status === "connected" ? (version ? `${connected} · am ${version}` : connected)
-    : status === "connecting" ? "Connecting to am serve…" : `${detail}. Run am serve.`;
+    // The whole story, and the way back, is in the banner over the page.
+    : status === "connecting" ? "Connecting…" : "Not connected";
   const [socket, setSocket] = useState("");
   useEffect(() => {
     void import("./host").then(({ endpoint }) => endpoint()).then((e) => setSocket(e.url)).catch(() => {});
