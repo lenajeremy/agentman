@@ -10,8 +10,8 @@ final class ToolRunTests: XCTestCase {
     @MainActor
     func testRenderStepsOpened() throws {
         guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
-        func call(_ id: String, _ name: String, _ summary: String, title: String, text: String? = nil) -> Message {
-            Message(id: id, sessionId: "s", role: .tool, ts: 1, text: text, tool: ToolCall(name: name, summary: summary, status: "ok", title: title))
+        func call(_ id: String, _ name: String, _ summary: String, title: String, text: String? = nil, status: String = "ok") -> Message {
+            Message(id: id, sessionId: "s", role: .tool, ts: 1, text: text, tool: ToolCall(name: name, summary: summary, status: status, title: title))
         }
         let reads = [call("1", "Read", "web/checkout/CheckoutSheet.tsx", title: "Read the checkout sheet"),
                      call("2", "Read", "web/checkout/useCart.ts", title: "Read the cart hook"),
@@ -21,9 +21,10 @@ final class ToolRunTests: XCTestCase {
         let closed = call("5", "Bash", "npm test", title: "Ran the tests · 52 passed")
         let ipad = call("6", "Bash", "npx playwright test checkout --project=\"iPad Safari\"", title: "Ran the checkout flow in Safari on iPad",
                         text: "Running 3 tests using 1 worker\n  ✓ shows the Apple Pay button (1.2s)\n  ✓ opens the payment sheet (2.4s)\n3 passed (5.1s)")
+        let running = call("7", "Bash", "go test ./...", title: "Fixed the two test mistakes and ran the full suite", status: "running")
         let store = AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-steps.sock"))
         for (look, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
-            let size = CGSize(width: 640, height: 640)
+            let size = CGSize(width: 640, height: 700)
             let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             window.alphaValue = 0
@@ -33,6 +34,7 @@ final class ToolRunTests: XCTestCase {
                 ToolRun(calls: [edit], open: true)
                 ToolRun(calls: [closed])
                 ToolRun(calls: [ipad], open: true)
+                ToolRun(calls: [running])
             }
             .padding(24).frame(width: size.width, height: size.height, alignment: .top)
             .background(Palette.paper)

@@ -1677,7 +1677,7 @@ private struct ToolCallRow: View {
         Group {
             switch call.tool?.status {
             case "running":
-                Loader()
+                Loader().stepIconBaseline()
             case "error":
                 Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.error)
             default:
@@ -1695,7 +1695,7 @@ private struct ToolCallRow: View {
             Group {
                 switch call.tool?.status {
                 case "running":
-                    Loader()
+                    Loader().stepIconBaseline()
                 case "error":
                     Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.error)
                 default:
@@ -1737,6 +1737,12 @@ extension View {
             .background(open ? Palette.fill.mix(with: Palette.text, by: 0.06) : Palette.fill,
                         in: RoundedRectangle(cornerRadius: 13, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+    }
+
+    /// The loader has no text of its own, so beside a step's words it hung
+    /// from its top and stretched the pill; its middle sits on the words'.
+    func stepIconBaseline() -> some View {
+        alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
     }
 
     /// What an opened step holds, hung under its pill on a thin line.
