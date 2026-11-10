@@ -45,6 +45,10 @@ func NewDevices(path string) *Devices {
 			}
 		}
 	}
+	// Kept before the same phone was recognised coming back.
+	if d.collapseLocked() {
+		d.save(d.listLocked())
+	}
 	return d
 }
 
@@ -73,8 +77,49 @@ func (d *Devices) Named(id string, info protocol.DeviceInfo) {
 		device.DeviceInfo = info
 		device.Connected = true
 		device.LastSeen = now
-		return changed
+		return d.absorbLocked(device) || changed
 	})
+}
+
+// The relay names each connection afresh (the account and the moment it
+// connected), so the same phone back again arrives under a new id: 108
+// entries for one iPhone in four days. A device that says who it is takes
+// the place of the entries before it that say the same and are gone, keeping
+// when the first was added. Two such at once are two devices. OS is left
+// out: a phone that updated is still the same phone.
+func sameDevice(a, b protocol.DeviceInfo) bool {
+	if a.Name == "" && a.Model == "" {
+		return false
+	}
+	return a.Name == b.Name && a.Model == b.Model && a.Platform == b.Platform
+}
+
+// absorbLocked folds the disconnected entries like device into it, and
+// reports whether it took any. d.mu is held.
+func (d *Devices) absorbLocked(device *protocol.Device) bool {
+	took := false
+	for id, other := range d.list {
+		if id == device.ID || other.Connected || !sameDevice(device.DeviceInfo, other.DeviceInfo) {
+			continue
+		}
+		device.FirstSeen = min(device.FirstSeen, other.FirstSeen)
+		delete(d.list, id)
+		took = true
+	}
+	return took
+}
+
+// collapseLocked folds a kept list's look-alikes into the latest of each,
+// as absorbLocked would have as they arrived. d.mu is held, or d is not yet
+// shared.
+func (d *Devices) collapseLocked() bool {
+	took := false
+	for _, device := range d.listLocked() {
+		if latest := d.list[device.ID]; latest != nil && d.absorbLocked(latest) {
+			took = true
+		}
+	}
+	return took
 }
 
 // Left notes that a device's connection closed.

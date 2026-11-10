@@ -3,6 +3,8 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -52,6 +54,68 @@ func TestDevicesAreKeptFromWhatTheySend(t *testing.T) {
 	}
 	if kept[0].ID != "tablet" || kept[1].Name != "Jeremiah's iPhone" {
 		t.Fatalf("kept = %+v", kept)
+	}
+}
+
+// The relay names each connection afresh: the same phone back again arrives
+// under a new id. Once it says who it is, it takes the place of its old
+// entries, keeping when it was first added; two at once stay two. A list
+// kept from before the fix collapses when read.
+func TestTheSamePhoneBackAgainIsOneDevice(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "devices.json")
+	clock := time.UnixMilli(1_000_000)
+	devices := NewDevices(path)
+	devices.now = func() time.Time { return clock }
+	phone := protocol.DeviceInfo{Name: "iPhone", Model: "iPhone", Platform: "ios", OS: "26.6"}
+
+	for i, id := range []string{"acct-1", "acct-2", "acct-3"} {
+		devices.Seen(id)
+		info := phone
+		if i == 2 {
+			info.OS = "26.7" // updated since: still the same phone
+		}
+		devices.Named(id, info)
+		clock = clock.Add(time.Hour)
+		devices.Left(id)
+	}
+	list := devices.List()
+	if len(list) != 1 || list[0].ID != "acct-3" || list[0].FirstSeen != 1_000_000 || list[0].OS != "26.7" {
+		t.Fatalf("one phone, first added at the start: %+v", list)
+	}
+
+	// A second phone just like it, connected at the same time, is its own.
+	devices.Seen("acct-4")
+	devices.Named("acct-4", phone)
+	devices.Seen("acct-5")
+	devices.Named("acct-5", phone)
+	if got := len(devices.List()); got != 2 {
+		t.Fatalf("two connected at once: %d devices, want 2", got)
+	}
+	// A browser is not a phone.
+	devices.Seen("acct-6")
+	devices.Named("acct-6", protocol.DeviceInfo{Name: "Chrome", Platform: "web", OS: "0.0.0"})
+	if got := len(devices.List()); got != 3 {
+		t.Fatalf("with a browser: %d devices, want 3", got)
+	}
+
+	// Written before the fix: 40 entries for one phone.
+	var old []protocol.Device
+	for i := range 40 {
+		old = append(old, protocol.Device{ID: fmt.Sprintf("acct-%d", 100+i), DeviceInfo: phone,
+			FirstSeen: int64(2_000_000 + i), LastSeen: int64(3_000_000 + i)})
+	}
+	old = append(old, protocol.Device{ID: "acct-web", DeviceInfo: protocol.DeviceInfo{Name: "Chrome", Platform: "web"}, FirstSeen: 5, LastSeen: 6})
+	data, _ := json.Marshal(old)
+	stale := filepath.Join(t.TempDir(), "devices.json")
+	if err := os.WriteFile(stale, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	read := NewDevices(stale).List()
+	if len(read) != 2 || read[0].ID != "acct-139" || read[0].FirstSeen != 2_000_000 || read[0].LastSeen != 3_000_039 {
+		t.Fatalf("collapsed: %+v", read)
+	}
+	if again := NewDevices(stale).List(); len(again) != 2 {
+		t.Fatalf("the collapsed list is what was saved: %d entries", len(again))
 	}
 }
 
