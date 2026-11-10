@@ -137,6 +137,22 @@ export const MessageField = forwardRef<FieldApi, Props>(function MessageField(pr
   const last = useRef<string | null>(null);
   const chipping = useRef(false);
 
+  // Off while a message sends, the box can't hold the keyboard, and a
+  // browser drops it; the Mac's keeps it. Had it when it went off, it takes
+  // it back when it's on again, unless something else has it by then. Read
+  // as it renders, before the box goes off and loses it.
+  const wasOn = useRef(enabled);
+  const hadKeyboard = useRef(false);
+  if (wasOn.current && !enabled && el.current && document.activeElement === el.current) hadKeyboard.current = true;
+  wasOn.current = enabled;
+  useLayoutEffect(() => {
+    if (!enabled || !hadKeyboard.current) return;
+    hadKeyboard.current = false;
+    const now = document.activeElement;
+    if (now && now !== document.body) return;
+    el.current?.focus();
+  }, [enabled]);
+
   /** As tall as the Mac measures its text: n lines of 17
    *  with 3 between them, one line at least, ten at most; the lines
    *  themselves are 20 apart, as its text view sets them. */
