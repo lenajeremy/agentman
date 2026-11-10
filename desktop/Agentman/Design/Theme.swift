@@ -167,6 +167,8 @@ enum TextStyle {
 struct AgentMark: View {
     let kind: String
     var size: CGFloat = 18
+    /// Grey, whatever its own colours: an agent put away.
+    var muted = false
 
     var body: some View {
         if let image = NSImage(named: "Agent-\(kind)") {
@@ -174,10 +176,10 @@ struct AgentMark: View {
             // sidebar as well as a light one.
             Image("Agent-\(kind)")
                 .resizable()
-                .renderingMode(image.isTemplate ? .template : .original)
+                .renderingMode(image.isTemplate || muted ? .template : .original)
                 .interpolation(.high)
                 .scaledToFit()
-                .foregroundStyle(Palette.text)
+                .foregroundStyle(muted ? Palette.faint : Palette.text)
                 .frame(width: size, height: size)
                 .accessibilityLabel(kind)
         } else {

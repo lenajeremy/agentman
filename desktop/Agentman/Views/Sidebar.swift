@@ -307,7 +307,8 @@ private struct AgentButton: View {
     @State private var hovering = false
 
     var body: some View {
-        let tint = AgentColors.color(for: session, by: colorBy)
+        // Archived, its colour goes grey with the rest of it.
+        let tint = AgentColors.color(for: session, by: colorBy).map { store.isArchived(session) ? Palette.faint : $0 }
         AgentRow(session: session, match: match, query: store.messageHits?.query ?? "")
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, inList ? 0 : SidebarMetrics.margin + SidebarMetrics.list)
@@ -522,7 +523,7 @@ struct AgentRow: View {
             // Who and where: the agent's logo, then its folder and branch,
             // or what it asks while it needs you.
             HStack(spacing: 6) {
-                AgentMark(kind: session.kind, size: 12)
+                AgentMark(kind: session.kind, size: 12, muted: store.isArchived(session))
                 place
                     .lineLimit(1)
                     .truncationMode(.tail)
