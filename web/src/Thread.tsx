@@ -14,6 +14,7 @@ import { ChangedBar, DropTarget, EmptyThread, JumpToLatest, ReviewBar } from "./
 import { addDropped, dropAccepts } from "./thread/attachments";
 import { threadItems, threadPictures } from "./thread/items";
 import { LatestTurnLine, WorkedLine } from "./thread/Worked";
+import { giveKeyboardBack, keyboardNow, type KeyboardPlace } from "./palette/PaletteView";
 import { workDuration } from "@shared/toolgroups";
 import { Spinner } from "./thread/Loader";
 import { MessageRow, QueuedBubble } from "./thread/Messages";
@@ -121,13 +122,25 @@ export function Thread({ session, stickToEnd, card = true, panel = false, findab
   useEffect(() => markFound(column.current, finding, itemOf), [finding, items, itemOf]);
   useEffect(() => () => markFound(null, null, itemOf), [itemOf]);
 
-  // ⌘F finds in the conversation.
+  // ⌘F finds in the conversation. Closed, the find bar gives the keyboard
+  // back to where it was when ⌘F was pressed: the message box, usually.
   const [findFocus, setFindFocus] = useState(0);
+  const findFrom = useRef<KeyboardPlace | null>(null);
+  const closeFind = () => {
+    setFinding(null);
+    const from = findFrom.current;
+    findFrom.current = null;
+    requestAnimationFrame(() => {
+      const now = document.activeElement;
+      if ((!now || now === document.body) && from) giveKeyboardBack(from);
+    });
+  };
   useEffect(() => {
     if (!findable) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
+        if (!(document.activeElement as HTMLElement | null)?.closest?.(".find-bar")) findFrom.current = keyboardNow();
         setFinding((f) => f ?? { query: "", matches: [] });
         setFindFocus((n) => n + 1);
       }
@@ -314,7 +327,7 @@ export function Thread({ session, stickToEnd, card = true, panel = false, findab
             setQuery={(query) => setFinding({ ...finding, query })}
             previous={() => step(-1)}
             next={() => step(1)}
-            close={() => setFinding(null)}
+            close={closeFind}
           />
         )}
         {empty && <EmptyThread session={session} />}
