@@ -22,8 +22,7 @@ import "./styles/newagent.css";
 export const AGENT_KINDS = ["claude", "codex", "cursor-cli", "opencode", "kiro", "antigravity", "muse"];
 
 /** The product names the menu shows (AgentName.of). */
-const KIND_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", "cursor-cli": "Cursor CLI", opencode: "OpenCode", kiro: "Kiro", antigravity: "Antigravity" };
-const kindName = (kind: string) => KIND_NAMES[kind] ?? agentName(kind);
+const kindName = agentName;
 
 interface Worktree {
   path: string;

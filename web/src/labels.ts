@@ -37,13 +37,15 @@ export function needsYou(s: Session): boolean {
   return s.state === "waiting_input" || !!s.question;
 }
 
+// As the Mac names them (SessionLabels.swift AgentName.of); another kind
+// capitalized.
 const AGENT_NAMES: Record<string, string> = {
-  claude: "Claude Code", codex: "Codex", cursor: "Cursor", "cursor-cli": "Cursor", opencode: "OpenCode",
-  kiro: "Kiro", antigravity: "Antigravity", gemini: "Gemini", grok: "Grok",
+  claude: "Claude Code", codex: "Codex", opencode: "OpenCode", cursor: "Cursor", "cursor-cli": "Cursor CLI",
+  kiro: "Kiro", antigravity: "Antigravity", muse: "Muse",
 };
 
 export function agentName(kind: string): string {
-  return AGENT_NAMES[kind] ?? kind;
+  return AGENT_NAMES[kind] ?? kind.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 // The Mac's words for a run of tool calls, as AgentThreadView counts them

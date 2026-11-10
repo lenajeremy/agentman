@@ -46,7 +46,7 @@ export function ChromeButton({ icon, sf, glyph, active, title, onClick }: { icon
 // Marks drawn in the text colour, as the Mac's template images are; the
 // others keep their own colours.
 const TEMPLATE = new Set(["codex", "cursor", "cursor-cli", "opencode", "grok"]);
-const KNOWN = new Set(["claude", "kiro", "gemini", "antigravity", ...TEMPLATE]);
+const KNOWN = new Set(["claude", "kiro", "gemini", "antigravity", "muse", ...TEMPLATE]);
 
 export function AgentMark({ kind, size }: { kind: string; size: number }) {
   if (!KNOWN.has(kind)) {
