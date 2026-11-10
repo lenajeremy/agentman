@@ -61,16 +61,33 @@ final class LimitsTests: XCTestCase {
         XCTAssertTrue(LimitsFormat.footnote.contains("Antigravity"))
     }
 
-    @MainActor func testThePopoverScrollsRatherThanRunningOffTheScreen() {
-        func height(windows: Int) -> CGFloat {
-            let list = (0..<windows).map { Limits.Window(id: "w\($0)", kind: "weekly", label: "Weekly \($0)", used: 20) }
-            let limits = Limits(agents: [.init(kind: "claude", checkedAt: 0, windows: list)])
-            let view = NSHostingView(rootView: PopoverLimits(limits: limits, now: Date(timeIntervalSince1970: 0)).frame(width: 528))
-            return view.fittingSize.height
+    /// A popover offers its content a small height first and keeps what the
+    /// content takes of it. A scroll view takes whatever it is offered, so the
+    /// popover stayed a sliver with half a card in it. Offered little, the
+    /// cards still take their own height; a long list stops at the screen.
+    @MainActor func testThePopoverShowsItsCardsWholeAndScrollsPastTheScreen() {
+        func height<V: View>(_ view: V, offered: CGFloat) -> CGFloat {
+            let host = NSHostingController(rootView: view.frame(width: 528))
+            let window = NSWindow(contentViewController: host)
+            window.alphaValue = 0
+            defer { window.orderOut(nil) }
+            // Laid out once, as on screen, so it has measured its cards.
+            host.view.layoutSubtreeIfNeeded()
+            for _ in 0..<5 { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+            return host.sizeThatFits(in: CGSize(width: 528, height: offered)).height
         }
+        func limits(_ windows: Int) -> Limits {
+            let list = (0..<windows).map { Limits.Window(id: "w\($0)", kind: "weekly", label: "Weekly \($0)", used: 20) }
+            return Limits(agents: [.init(kind: "claude", checkedAt: 0, windows: list)])
+        }
+        let at = Date(timeIntervalSince1970: 0)
+        let cards = height(LimitsPage(limits: limits(2), now: at).padding(.trailing, 4).padding(.bottom, 4), offered: 10_000)
+        XCTAssertGreaterThan(cards, 120)
+        XCTAssertEqual(height(PopoverLimits(limits: limits(2), now: at), offered: 80), cards, accuracy: 1,
+                       "offered a sliver, the cards still show whole")
         let tallest = PopoverLimits.tallest(screen: NSScreen.main?.visibleFrame.height ?? 800)
-        XCTAssertLessThanOrEqual(height(windows: 60), tallest, "ran off the screen")
-        XCTAssertLessThan(height(windows: 1), 240, "a short list grew to fill the screen")
+        XCTAssertEqual(height(PopoverLimits(limits: limits(60), now: at), offered: 80), tallest, accuracy: 1,
+                       "a long list stops at the screen, and scrolls")
     }
 
     private func limits(_ text: String = sample()) throws -> Limits {
