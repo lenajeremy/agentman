@@ -95,7 +95,45 @@ final class EditorStore {
             if !panes.indices.contains(focusedPane) { focusedPane = max(panes.count - 1, 0) }
             if panes.isEmpty { panes = [nil] }
             panes[focusedPane] = newValue
+            workspaceTab = nil
         }
+    }
+    /// The agent whose Diff and History tabs are open, those tabs in order,
+    /// and the one in front, in place of the code; nil with the code in front.
+    var changesSession: String?
+    var workspaceTabs: [RightPanelTab] = []
+    var workspaceTab: RightPanelTab?
+    var showingChanges: Bool { workspaceTab != nil }
+
+    /// Fills the editor with everything an agent changed, file after file.
+    func showChanges(of session: String) { showWorkspace(.diff, of: session) }
+
+    /// One of an agent's tabs, in front of the code. The first to open brings
+    /// the other beside it, as the main window has them.
+    func showWorkspace(_ tab: RightPanelTab, of session: String) {
+        changesSession = session
+        if workspaceTabs.isEmpty { workspaceTabs = [.history, .diff] }
+        if !workspaceTabs.contains(tab) { workspaceTabs.append(tab) }
+        workspaceTab = tab
+        // The code is still there behind it: keys mustn't type into it.
+        window?.makeFirstResponder(nil)
+    }
+
+    /// Closes one of those tabs, and with the last goes back to the code.
+    func closeWorkspace(_ tab: RightPanelTab) {
+        workspaceTabs.removeAll { $0 == tab }
+        if workspaceTabs.isEmpty {
+            closeChanges()
+        } else if workspaceTab == tab {
+            workspaceTab = workspaceTabs.last
+        }
+    }
+
+    /// Back to the code the tabs were in front of.
+    func closeChanges() {
+        changesSession = nil
+        workspaceTabs = []
+        workspaceTab = nil
     }
     /// The tree's selected row.
     var selection: String?
@@ -250,7 +288,12 @@ final class EditorStore {
         if let document = documents.first(where: { $0.path == path && !$0.readOnly }) { return document }
         let document = EditorDocument(root: root, path: path)
         documents.append(document)
-        if activeID == nil { activeID = document.id }
+        if activeID == nil {
+            // Opened behind whatever is showing, an agent's diff included.
+            let showing = workspaceTab
+            activeID = document.id
+            workspaceTab = showing
+        }
         Task { await updateGitBases() }
         return document
     }

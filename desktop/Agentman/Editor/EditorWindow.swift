@@ -44,6 +44,7 @@ enum EditorOpener {
 struct EditorWindow: View {
     @State private var headerLeading: CGFloat = 82
     @Environment(AgentsStore.self) private var agents
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var store: EditorStore
     @State private var naming: Naming?
     @State private var keyMonitor: Any?
@@ -92,10 +93,10 @@ struct EditorWindow: View {
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
-                        if !store.documents.isEmpty {
+                        if !store.documents.isEmpty || store.changesSession != nil {
                             TabStrip(store: store)
                         }
-                        if let document = store.active {
+                        if let document = store.active, !store.showingChanges {
                             PathBar(store: store, document: document)
                             DiskBanner(document: document, close: { store.close(document) })
                         }
@@ -112,17 +113,24 @@ struct EditorWindow: View {
                             if store.active == nil, store.panes.count == 1 {
                                 EditorEmpty(store: store)
                             }
+                            if let tab = store.workspaceTab, let id = store.changesSession {
+                                EditorChanges(session: agents.session(id), tab: tab)
+                            }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         if store.showTerminal {
                             PanelDivider(height: $terminalHeight, maximum: size.height * 0.75)
                                 .padding(.vertical, -3)
                                 .zIndex(1)
+                                .transition(.opacity)
                             TerminalPanel(store: store, hide: { store.showTerminal = false })
                                 .frame(height: Self.terminalHeight(dragged: terminalHeight, window: size.height))
+                                .transition(.move(edge: .bottom))
                         }
                     }
                     .frame(minWidth: 320)
+                    .clipped()
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: store.showTerminal)
                     .overlay {
                         if store.quickOpen {
                             GoToFile(store: store)
@@ -291,8 +299,12 @@ struct EditorWindow: View {
             }
             guard event.window === store.window,
                   event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-                  event.charactersIgnoringModifiers == "w",
-                  let document = store.active else { return event }
+                  event.charactersIgnoringModifiers == "w" else { return event }
+            if let tab = store.workspaceTab {
+                store.closeWorkspace(tab)
+                return nil
+            }
+            guard let document = store.active else { return event }
             store.requestClose(document)
             return nil
         }
@@ -588,16 +600,52 @@ private struct InFrontPane: ViewModifier {
 // MARK: - Tabs
 
 private struct TabStrip: View {
+    @Environment(AgentsStore.self) private var agents
     let store: EditorStore
+
+    /// The agent the tabs are for: the one they're open on, or the one in
+    /// the panel, or the one working on this folder.
+    private var agent: String? {
+        if let open = store.changesSession { return open }
+        if case .agent(let id)? = store.panelRoute { return id }
+        return AgentPanel.agent(for: store.root.path, in: agents.sessions)?.id
+    }
 
     var body: some View {
         // Two tabs with one name show their folders too.
         let names = Dictionary(grouping: store.documents, by: \.name)
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
+                if let agent {
+                    HStack(spacing: 4) {
+                        ForEach(store.workspaceTabs) { item in
+                            PanelTab(tab: item, selected: item == store.workspaceTab,
+                                     select: { store.showWorkspace(item, of: agent) },
+                                     close: { store.closeWorkspace(item) })
+                        }
+                        Menu {
+                            ForEach([RightPanelTab.diff, .history]) { item in
+                                Button { store.showWorkspace(item, of: agent) } label: { Label(item.title, systemImage: item.symbol) }
+                            }
+                        } label: {
+                            Image(systemName: "plus").font(.system(size: 11, weight: .medium))
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .foregroundStyle(Palette.muted)
+                        .padding(.leading, 4)
+                        .help("Open the agent's changes or history")
+                    }
+                    .padding(.leading, 10)
+                    .padding(.trailing, 8)
+                    if !store.documents.isEmpty {
+                        Rectangle().fill(Palette.line).frame(width: 1, height: 18)
+                    }
+                }
                 ForEach(store.documents) { document in
                     EditorTab(store: store, document: document,
-                              active: document.id == store.activeID,
+                              active: !store.showingChanges && document.id == store.activeID,
                               folder: (names[document.name]?.count ?? 0) > 1 ? (document.path as NSString).deletingLastPathComponent : nil)
                 }
             }
@@ -613,6 +661,37 @@ private struct TabStrip: View {
                 Button("Close Others") { store.closeOthers(than: active) }
             }
         }
+    }
+}
+
+/// An agent's Diff or History, in place of the code. The code stays open
+/// behind it, with its scroll and undo, for when this closes.
+private struct EditorChanges: View {
+    @Environment(AgentsStore.self) private var agents
+    let session: Session?
+    let tab: RightPanelTab
+
+    var body: some View {
+        Group {
+            if let session {
+                switch tab {
+                case .history:
+                    HistoryPanel(sessionID: session.id, cwd: session.cwd, state: session.state, activity: agents.activity(session.id).at)
+                        .equatable()
+                        .id(session.id)
+                default:
+                    DiffPanel(sessionID: session.id, cwd: session.cwd, state: session.state, activity: agents.activity(session.id).at)
+                        .equatable()
+                        .id(session.id)
+                }
+            } else {
+                Text("This agent's changes are no longer here.")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(Palette.surface)
     }
 }
 

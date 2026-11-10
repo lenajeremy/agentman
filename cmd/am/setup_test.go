@@ -461,3 +461,10 @@ func TestSetupJSONIsALinePerStepThenASummary(t *testing.T) {
 		t.Errorf("summary %s (%v)", lines[len(lines)-1], err)
 	}
 }
+
+func TestTheLoginItemIsListedUnderTheApp(t *testing.T) {
+	plist := renderServicePlist(servicePlist{Binary: "/b/am", Log: "/l", Home: "/h", Path: "/usr/bin"})
+	if !strings.Contains(plist, "<key>AssociatedBundleIdentifiers</key>\n\t<string>dev.agentman.mac</string>") {
+		t.Fatalf("got %s", plist)
+	}
+}

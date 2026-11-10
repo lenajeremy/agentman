@@ -15,8 +15,10 @@ nonisolated struct BoardSections: Equatable, Sendable {
     var shown: Int { needsYou.count + working.count + idle.count }
 
     /// Sorts the agents. `waiting` names those Agentman has put a card up
-    /// about, which need the user whatever their state says. Needing the
-    /// user beats being hidden or archived; an agent that has ended, or
+    /// about, which need the user though they sit idle. One that is working
+    /// is working, card or not: it is not waiting on anyone now, and if it
+    /// still needs the user when it stops, its card brings it back. Needing
+    /// the user beats being hidden or archived; an agent that has ended, or
     /// that the sidebar has archived, is not on the Board at all.
     static func make(_ sessions: [Session], choices: SidebarSections.Choices, hidden: Set<String>, waiting: Set<String> = [],
                      folder: String? = nil, matching: Set<String>? = nil, now: Date = .now) -> BoardSections {
@@ -24,7 +26,7 @@ nonisolated struct BoardSections: Equatable, Sendable {
         for session in sessions where session.state != .ended && AgentsStore.inFolder(session.cwd, folder)
             && (matching?.contains(session.id) ?? true) {
             let state = AgentsStore.filterState(session)
-            if state == .waitingInput || waiting.contains(session.id) {
+            if state == .waitingInput || (waiting.contains(session.id) && state != .busy) {
                 sections.needsYou.append(session)
             } else if matching == nil, SidebarSections.isArchived(session, choices: choices, now: now) {
                 continue

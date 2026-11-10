@@ -43,7 +43,7 @@ import (
 // input channel, and the app renders such sessions with the composer
 // disabled. The separate Cursor Agent CLI adapter can control terminal chats
 // started with `am cursor`, but CLI chats cannot resume IDE conversations.
-const cursorLiveWindow = 30 * time.Minute
+const cursorLiveWindow = idleListing
 
 // cursorActivityScanBytes bounds the once-per-change search for the latest
 // turn boundary. Transcripts stay small (tool results are not recorded), but

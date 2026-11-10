@@ -549,13 +549,18 @@ final class DaemonSetup {
 
     /// Where the link to am goes, and whether making it needs the
     /// administrator prompt: the preferred folder when PATH looks there
-    /// before the fallback and it can be written, else the fallback.
-    nonisolated static func linkFolder(path: [String], preferred: String, fallback: String,
+    /// before the fallback and it can be written, else the fallback. Before
+    /// asking for a password, a folder of the user's own already on PATH.
+    nonisolated static func linkFolder(path: [String], preferred: String, fallback: String, home: String,
                                        writable: (String) -> Bool) -> (folder: String, admin: Bool) {
         if let first = path.firstIndex(of: preferred), first < (path.firstIndex(of: fallback) ?? .max), writable(preferred) {
             return (preferred, false)
         }
-        return (fallback, !writable(fallback))
+        if writable(fallback) { return (fallback, false) }
+        for own in ["\(home)/.local/bin", "\(home)/bin"] where path.contains(own) && writable(own) {
+            return (own, false)
+        }
+        return (fallback, true)
     }
 
     /// What Settings says of the am command, and whether it offers to put
@@ -574,7 +579,7 @@ final class DaemonSetup {
     func commandStatus() -> CommandStatus {
         let managedThere = FileManager.default.isExecutableFile(atPath: paths.managed)
         var status = Self.commandStatus(tools: shellTools, managed: paths.managed, managedThere: managedThere,
-                                        allowed: allowed, folders: paths.commandFolders,
+                                        allowed: allowed, folders: paths.commandFolders, userHome: paths.home,
                                         writable: FileManager.default.isWritableFile(atPath:))
         status.busy = status.busy || linking
         status.problem = linkProblem
@@ -582,7 +587,7 @@ final class DaemonSetup {
     }
 
     nonisolated static func commandStatus(tools: ShellTools?, managed: String, managedThere: Bool, allowed: Bool,
-                                          folders: (preferred: String, fallback: String),
+                                          folders: (preferred: String, fallback: String), userHome: String,
                                           writable: (String) -> Bool) -> CommandStatus {
         guard let tools else { return CommandStatus(detail: "Looking…", busy: true) }
         let home = (managed as NSString).abbreviatingWithTildeInPath
@@ -598,7 +603,7 @@ final class DaemonSetup {
         guard managedThere else {
             return CommandStatus(detail: "Not on your PATH. Set up Agentman first: the command runs the app's copy, \(home).")
         }
-        let (folder, admin) = linkFolder(path: tools.path, preferred: folders.preferred, fallback: folders.fallback, writable: writable)
+        let (folder, admin) = linkFolder(path: tools.path, preferred: folders.preferred, fallback: folders.fallback, home: userHome, writable: writable)
         return CommandStatus(detail: "Not on your PATH. Install links \(folder)/am to the app's copy, \(home)" +
                              (admin ? ", and asks for your password once." : "."),
                              installTo: folder)
@@ -619,7 +624,7 @@ final class DaemonSetup {
         guard allowed, !linking, let tools = shellTools, tools.am == nil,
               FileManager.default.isExecutableFile(atPath: paths.managed) else { return }
         let (folder, admin) = Self.linkFolder(path: tools.path, preferred: paths.commandFolders.preferred,
-                                              fallback: paths.commandFolders.fallback,
+                                              fallback: paths.commandFolders.fallback, home: paths.home,
                                               writable: FileManager.default.isWritableFile(atPath:))
         let link = (folder as NSString).appendingPathComponent("am")
         linkProblem = nil

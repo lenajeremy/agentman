@@ -332,11 +332,11 @@ final class DaemonSetupTests: XCTestCase {
     func testWhereTheLinkGoes() {
         let brew = "/opt/homebrew/bin", local = "/usr/local/bin"
         let everything: (String) -> Bool = { _ in true }
-        XCTAssertTrue(DaemonSetup.linkFolder(path: [brew, local, "/usr/bin"], preferred: brew, fallback: local, writable: everything) == (brew, false))
-        XCTAssertTrue(DaemonSetup.linkFolder(path: [local, brew], preferred: brew, fallback: local, writable: everything) == (local, false),
+        XCTAssertTrue(DaemonSetup.linkFolder(path: [brew, local, "/usr/bin"], preferred: brew, fallback: local, home: "/nowhere", writable: everything) == (brew, false))
+        XCTAssertTrue(DaemonSetup.linkFolder(path: [local, brew], preferred: brew, fallback: local, home: "/nowhere", writable: everything) == (local, false),
                       "PATH looks in /usr/local/bin first")
-        XCTAssertTrue(DaemonSetup.linkFolder(path: ["/usr/bin", local], preferred: brew, fallback: local, writable: everything) == (local, false))
-        XCTAssertTrue(DaemonSetup.linkFolder(path: [brew, local], preferred: brew, fallback: local, writable: { _ in false }) == (local, true),
+        XCTAssertTrue(DaemonSetup.linkFolder(path: ["/usr/bin", local], preferred: brew, fallback: local, home: "/nowhere", writable: everything) == (local, false))
+        XCTAssertTrue(DaemonSetup.linkFolder(path: [brew, local], preferred: brew, fallback: local, home: "/nowhere", writable: { _ in false }) == (local, true),
                       "neither is the user's to write: the administrator prompt")
     }
 
@@ -391,6 +391,20 @@ final class DaemonSetupTests: XCTestCase {
         XCTAssertEqual(cancelling.links.count, 1)
         XCTAssertNil(again.commandStatus().problem)
         XCTAssertFalse(again.commandStatus().installed)
+    }
+
+    func testAFolderOfTheUsersOwnSparesThePassword() async throws {
+        let am = FakeAm(setup: [])
+        try manage("0.39.0", am: am)
+        let own = try folder(".local/bin")
+        let shell = FakeShell(path: [own, "/usr/bin"])
+        let setup = setup(am: am, shell: shell, brew: home.appendingPathComponent("no-brew").path,
+                          local: home.appendingPathComponent("not-writable").path)
+        await setup.lookAtShell()
+        XCTAssertEqual(setup.commandStatus().installTo, own)
+        XCTAssertFalse(setup.commandStatus().detail.contains("password"), setup.commandStatus().detail)
+        await setup.installCommand()
+        XCTAssertEqual(shell.links, [.init(link: own + "/am", target: setup.paths.managed, admin: false)])
     }
 
     func testAnAmAlreadyOnPathIsSaidAndKept() async throws {
@@ -626,7 +640,7 @@ final class DaemonSetupTests: XCTestCase {
         let managed = "/Users/me/.agentman/bin/am"
         let command = DaemonSetup.commandStatus(
             tools: DaemonSetup.ShellTools(path: ["/opt/homebrew/bin", "/usr/local/bin"], am: nil), managed: managed,
-            managedThere: true, allowed: true, folders: ("/opt/homebrew/bin", "/usr/local/bin"), writable: { _ in false })
+            managedThere: true, allowed: true, folders: ("/opt/homebrew/bin", "/usr/local/bin"), userHome: "/nowhere", writable: { _ in false })
         for dark in [false, true] {
             let page = SettingsPageView(title: "General") {
                 CommandLineRows(command: command, tmuxMissing: true)
@@ -649,13 +663,13 @@ final class DaemonSetupTests: XCTestCase {
         let path = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
         func status(_ am: DaemonSetup.Found?, managedThere: Bool = true, writable: Bool = false) -> DaemonSetup.CommandStatus {
             DaemonSetup.commandStatus(tools: DaemonSetup.ShellTools(path: path, am: am), managed: managed, managedThere: managedThere,
-                                      allowed: true, folders: ("/opt/homebrew/bin", "/usr/local/bin"), writable: { _ in writable })
+                                      allowed: true, folders: ("/opt/homebrew/bin", "/usr/local/bin"), userHome: "/nowhere", writable: { _ in writable })
         }
         var failed = status(nil)
         failed.problem = "The administrator prompt couldn't be shown: the app isn't allowed to ask for it."
         let states: [(String, DaemonSetup.CommandStatus)] = [
             ("Looking", DaemonSetup.commandStatus(tools: nil, managed: managed, managedThere: true, allowed: true,
-                                                  folders: ("/opt/homebrew/bin", "/usr/local/bin"), writable: { _ in true })),
+                                                  folders: ("/opt/homebrew/bin", "/usr/local/bin"), userHome: "/nowhere", writable: { _ in true })),
             ("Not on PATH: Install, with the password", status(nil)),
             ("Not on PATH: Install into Homebrew's folder", status(nil, writable: true)),
             ("Not on PATH, nothing set up yet", status(nil, managedThere: false)),

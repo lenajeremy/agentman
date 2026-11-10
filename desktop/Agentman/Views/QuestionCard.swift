@@ -22,6 +22,7 @@ struct QuestionCard: View {
             if let detail = question.detail, !detail.isEmpty {
                 CodeBox(text: detail)
             }
+            QuestionNotice(question: question)
             if !question.prompt.isEmpty, !question.promptRepeatsDetail {
                 Text(inlineMarkdown(question.prompt))
                     .font(TextStyle.body)
@@ -383,6 +384,20 @@ struct FlowLayout: Layout {
             subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
             x += size.width + spacing
             rowHeight = max(rowHeight, size.height)
+        }
+    }
+}
+
+/// That agreeing brings up a permission dialog from macOS itself.
+struct QuestionNotice: View {
+    let question: Question
+
+    var body: some View {
+        if let notice = question.notice, !notice.isEmpty {
+            Label(notice, systemImage: "lock.shield")
+                .font(TextStyle.caption)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

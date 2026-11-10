@@ -39,6 +39,25 @@ builds:
     flags: [-trimpath]
     mod_timestamp: "{{ .CommitTimestamp }}"
 
+# macOS remembers what a program may do by who signed it. Unsigned, each new
+# release of am can look like a new program, and the user is asked again for
+# everything they had allowed. Signed and notarized once the release has the
+# certificate (the MACOS_* secrets in release.yml); until then a release ships
+# unsigned, as before, rather than failing.
+notarize:
+  macos:
+    - enabled: '{{ ne (envOrDefault "MACOS_SIGN_P12" "") "" }}'
+      ids: [am]
+      sign:
+        certificate: "{{ .Env.MACOS_SIGN_P12 }}"
+        password: "{{ .Env.MACOS_SIGN_PASSWORD }}"
+      notarize:
+        issuer_id: "{{ .Env.MACOS_NOTARY_ISSUER_ID }}"
+        key_id: "{{ .Env.MACOS_NOTARY_KEY_ID }}"
+        key: "{{ .Env.MACOS_NOTARY_KEY }}"
+        wait: true
+        timeout: 20m
+
 archives:
   - id: am
     formats: [tar.gz]

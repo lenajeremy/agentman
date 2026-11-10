@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -200,11 +201,15 @@ func runServe(ctx context.Context, args []string) error {
 	// a terminal would have given it; the login shell's puts it back, for
 	// itself and every agent it starts.
 	if inService() {
-		if env, err := shellenv.Load(ctx); err != nil {
+		if env, fresh, err := serviceShellEnv(ctx, *configHome); err != nil {
 			fmt.Printf("%s\n", dim("service    couldn't read your shell's environment ("+err.Error()+"); agents get launchd's"))
 		} else {
 			shellenv.Apply(env)
-			fmt.Printf("%s\n", dim("service    running at login, with your shell's environment"))
+			source := "your shell's environment"
+			if !fresh {
+				source = "your shell's saved environment"
+			}
+			fmt.Printf("%s\n", dim("service    running at login, with "+source))
 		}
 	}
 
@@ -323,6 +328,7 @@ func runServe(ctx context.Context, args []string) error {
 	// while Agentman speaks for the rest, before the first sweep.
 	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
 		agent.SetNamesFile(filepath.Join(dir, "names.json"))
+		registry.KeepEnded(filepath.Join(dir, "ended.json"))
 		agent.SetAlertsFile(filepath.Join(dir, "alerts.json"))
 		// Every conversation's words, for search in the apps.
 		agent.SetSearchFile(filepath.Join(dir, "search.db"))
@@ -378,11 +384,18 @@ func runServe(ctx context.Context, args []string) error {
 	// reads every agent for the user. It runs on the user's own Claude API
 	// key, set from Agentman for Mac and kept in the Keychain.
 	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
+		notes := knowledge.Open(filepath.Join(dir, "knowledge"))
+		// The notes marked for every agent go into each agent's own files. A
+		// daemon with its own config home is a test one, beside the user's
+		// real agents: its empty notes must not take theirs out.
+		if homes, err := knowledge.HomesFromEnv(); err == nil && *configHome == "" {
+			agent.SetSharedNotes(notes, homes, filepath.Join(dir, "shared-notes.json"))
+		}
 		boss, err := manager.New(manager.Config{
 			Dir:       filepath.Join(dir, "manager"),
 			Secrets:   secrets.Default(dir),
 			Agents:    managerAgents{daemon: agent},
-			Knowledge: knowledge.Open(filepath.Join(dir, "knowledge")),
+			Knowledge: notes,
 			Emit: func(event protocol.Event) {
 				_ = sink.Send(event)
 				// Its key set or taken away turns Agentman on or off, which
@@ -688,4 +701,19 @@ func spaced(code string) string {
 		out = append(out, strings.Join(strings.Split(group, ""), " "))
 	}
 	return strings.Join(out, "   ")
+}
+
+// serviceShellEnv is the login shell's environment for the service. On a Mac
+// the shell isn't run at every login: see shellenv.Cache.
+func serviceShellEnv(ctx context.Context, configHome string) (env []string, fresh bool, err error) {
+	dir, dirErr := hook.ConfigDir(configHome)
+	home, homeErr := os.UserHomeDir()
+	if runtime.GOOS != "darwin" || dirErr != nil || homeErr != nil {
+		env, err = shellenv.Load(ctx)
+		return env, true, err
+	}
+	return shellenv.Cache{
+		Path: filepath.Join(dir, "shell-env"), Keys: secrets.Default(dir), Home: home,
+		Now: time.Now, Load: shellenv.Load,
+	}.Environment(ctx)
 }

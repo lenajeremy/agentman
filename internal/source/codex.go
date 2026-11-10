@@ -37,7 +37,7 @@ import (
 // This is the weakest part of Codex support and it is deliberately contained
 // here. Codex's supported notifier reports turn completion but not a complete
 // live-session registry, so polling still owns discovery and busy state.
-const codexLiveWindow = 30 * time.Minute
+const codexLiveWindow = idleListing
 
 // processCheckTimeout bounds the liveness probe so a wedged pgrep cannot stall
 // a discovery sweep.

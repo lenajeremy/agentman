@@ -211,3 +211,43 @@ func TestClaudeCodeGetsTheServerThroughItsCommand(t *testing.T) {
 		t.Fatal("removing found nothing to remove")
 	}
 }
+
+func TestMuseGetsAgentmansServerAndKeepsItsSettings(t *testing.T) {
+	home := mcpHome(t, ".config/muse")
+	path := filepath.Join(home, ".config", "muse", "settings.json")
+	if err := os.WriteFile(path, []byte(`{"schema_version":1,"provider":"meta","model":"muse-spark-1.3"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plans, err := Installer{Binary: "/bin/am", Home: home}.MCPPlans(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var muse *Plan
+	for i := range plans {
+		if plans[i].Kind == protocol.KindMuse {
+			muse = &plans[i]
+		}
+	}
+	if muse == nil {
+		t.Fatal("Muse wasn't given the server")
+	}
+	if err := muse.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		SchemaVersion int    `json:"schema_version"`
+		Model         string `json:"model"`
+		MCPServers    map[string]struct {
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"mcpServers"`
+	}
+	raw, _ := os.ReadFile(path)
+	if err := json.Unmarshal(raw, &config); err != nil {
+		t.Fatal(err)
+	}
+	server := config.MCPServers[MCPServerName]
+	if config.SchemaVersion != 1 || config.Model != "muse-spark-1.3" || server.Command != "/bin/am" || len(server.Args) != 1 || server.Args[0] != "mcp" {
+		t.Fatalf("got %s", raw)
+	}
+}

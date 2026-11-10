@@ -48,6 +48,13 @@ struct ContentView: View {
                     }
             }
             .animation(.easeOut(duration: 0.18), value: sidebarGone)
+            .confirmationDialog("End this session?", isPresented: Binding(get: { store.confirmEnd != nil }, set: { if !$0 { store.confirmEnd = nil } }),
+                                presenting: store.confirmEnd.flatMap { store.session($0) }) { session in
+                Button("End Session") { Task { store.actionError[session.id] = await store.end(session.id) } }
+                Button("Cancel", role: .cancel) {}
+            } message: { session in
+                Text(AgentThreadView.endNote(session))
+            }
         }
         // Agentman's news, small, over whatever is open.
         .overlayPreferenceValue(MessageBoxFrame.self) { box in

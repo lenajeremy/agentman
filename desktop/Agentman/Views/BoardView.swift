@@ -174,9 +174,11 @@ struct BoardView: View {
         Menu {
             Button("All Folders") { store.folderFilter = nil }
             Divider()
-            ForEach(store.folders) { folder in
-                Button((folder.path as NSString).lastPathComponent) { store.folderFilter = folder.path }
+            ForEach(store.folderChoices, id: \.self) { path in
+                Button(Worktrees.label(path)) { store.folderFilter = path }
             }
+            Divider()
+            Button("Choose a Folder…") { FolderPicker.choose(for: store) }
         } label: {
             HStack(spacing: 5) {
                 Text(store.folderFilter.map { ($0 as NSString).lastPathComponent } ?? "All folders")
@@ -761,6 +763,9 @@ private struct BoardCard: View {
         if kind != .needsYou {
             Button("Hide from the Board") { store.hideFromBoard(session.id) }
         }
+        if AgentThreadView.endable(session) {
+            Button("End Session…") { store.confirmEnd = session.id }
+        }
         Menu("Trust This Folder") {
             let level = FolderTrust.level(for: session.cwd, in: store.manager.settings)
             ForEach(FolderTrust.levels, id: \.id) { option in
@@ -791,6 +796,7 @@ private struct BoardCard: View {
             if let detail = question.detail, !detail.isEmpty {
                 CodeBox(text: detail, compact: true)
             }
+            QuestionNotice(question: question)
             if !question.prompt.isEmpty, !question.promptRepeatsDetail {
                 line(question.prompt, lines: 4)
             }

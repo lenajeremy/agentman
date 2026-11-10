@@ -412,6 +412,9 @@ type Event struct {
 	PairCode  *PairCode        `json:"pairCode,omitempty"`
 	Devices   []Device         `json:"devices,omitempty"`
 	Search    *SearchResults   `json:"search,omitempty"`
+	// Closed says, on EvtSessionEnded, that a terminal Agentman opened was
+	// closed; otherwise the session only came off the list.
+	Closed bool `json:"closed,omitempty"`
 	// Directory names only; the app never needs the Mac's absolute home path.
 	Directories []string `json:"directories,omitempty"`
 	Path        string   `json:"path,omitempty"`

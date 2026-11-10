@@ -255,7 +255,7 @@ func cursorCLIModeChange(body string) string {
 // generated workspace preamble (<user_info>) as a user message of its own.
 func cursorCLIUserText(body string) string {
 	if query := extractTag(body, "user_query"); query != "" {
-		return query
+		return StripSharedNotes(query)
 	}
 	trimmed := strings.TrimSpace(body)
 	for _, scaffold := range []string{"<user_info>", "<system_reminder>", "<image_files>", "<timestamp>"} {
@@ -263,7 +263,7 @@ func cursorCLIUserText(body string) string {
 			return ""
 		}
 	}
-	return trimmed
+	return StripSharedNotes(trimmed)
 }
 
 var cursorCLIImagePath = regexp.MustCompile(`(?i)^/\S+\.(png|jpe?g|gif|webp)$`)

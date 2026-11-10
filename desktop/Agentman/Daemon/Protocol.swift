@@ -1180,6 +1180,8 @@ struct Question: Codable, Sendable, Hashable {
     var options: [QuestionOption]
     var multiple: Bool?
     var custom: Bool?
+    /// What macOS itself will ask if this is agreed to.
+    var notice: String?
 }
 
 struct QuestionOption: Codable, Sendable, Hashable, Identifiable {

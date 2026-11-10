@@ -34,7 +34,7 @@ struct AgentPanel: View {
                         // Cleared or switched in its terminal: follow it.
                         Color.clear.onAppear { editor.panelRoute = .agent(next) }
                     } else if let session = agents.session(id) {
-                        AgentThreadView(session: session, inPanel: true)
+                        AgentThreadView(session: session, inPanel: true, openChanges: { editor.showChanges(of: session.id) })
                             .equatable()
                             .id(id)
                             .onAppear { agents.showInPanel(id) }

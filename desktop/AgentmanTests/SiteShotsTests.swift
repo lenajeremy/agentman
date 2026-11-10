@@ -150,6 +150,16 @@ final class SiteShotsTests: XCTestCase {
     }
 
     /// The Usage page over the last 30 days, and its Limits tab.
+    func testRenderEditorChanges() throws {
+        guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
+        let shots = URL(fileURLWithPath: out)
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        for workspace in [RightPanelTab.diff, .history] {
+            try shootEditor(withAgent: true, workspace: workspace, size: CGSize(width: 1440, height: 900), dark: false,
+                            to: shots.appendingPathComponent("editor-\(workspace.rawValue)-light.png"))
+        }
+    }
+
     func testRenderUsage() throws {
         let shots = try out
         let defaults = UserDefaults.standard
@@ -174,7 +184,7 @@ final class SiteShotsTests: XCTestCase {
     /// The editor on the agent's folder: the tree with what changed, the
     /// changed file open and the tests passing in its terminal; with the
     /// agent's conversation beside the code, or without.
-    private func shootEditor(withAgent: Bool, size: CGSize, dark: Bool, to url: URL) throws {
+    private func shootEditor(withAgent: Bool, workspace: RightPanelTab? = nil, size: CGSize, dark: Bool, to url: URL) throws {
         let world = try world(fresh: true)
         let root = world.folders["storefront"]!
         let editor = EditorRegistry.shared.store(for: root.path)
@@ -191,8 +201,10 @@ final class SiteShotsTests: XCTestCase {
         // A terminal with no shell of its own to speak of, written to as the
         // tests would.
         editor.showAgentTerminal(SessionTerminal(name: "shots", argv: ["/bin/sleep", "600"]), title: "zsh")
+        if let workspace { editor.showWorkspace(workspace, of: "a") }
+        defer { editor.closeChanges() }
         try shoot(EditorWindow(folder: root.path, client: world.store.client), size: size, dark: dark, store: world.store,
-                  wait: 5.0, titled: false, prepare: { _ in
+                  wait: 5.0, titled: false, webPages: workspace == nil, prepare: { _ in
                       editor.selection = nil
                       if let terminal = editor.terminals.first {
                           terminal.view.feed(text: Self.testRun)

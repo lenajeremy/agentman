@@ -34,6 +34,16 @@ final class BoardTests: XCTestCase {
         XCTAssertTrue(sections.idle.isEmpty)
     }
 
+    /// The user answered in the agent and it got going, but its card is
+    /// still up: it shows as working, as it does in the sidebar.
+    func testAWorkingAgentIsWorkingThoughACardIsUpAboutIt() {
+        let sections = sort([session("a", .busy), session("b", .idle)], waiting: ["a", "b"])
+        XCTAssertEqual(sections.working.map(\.id), ["a"])
+        XCTAssertEqual(sections.needsYou.map(\.id), ["b"])
+        XCTAssertEqual(sections.headline(connected: true), "1 agent is waiting on you. The rest are fine.")
+        XCTAssertEqual(sections.detail, "Agent a is working.")
+    }
+
     func testEndedAndArchivedAgentsAreNotOnTheBoard() {
         let old = Date.now.addingTimeInterval(-5 * 24 * 3600)
         let sections = sort([session("a", .ended), session("b", .idle, active: old)])
@@ -513,6 +523,17 @@ final class BoardSearchTests: XCTestCase {
         store.folderFilter = "/work/api"
         store.search = "fix"
         XCTAssertEqual(store.board.working.map(\.id), ["a"])
+    }
+
+    func testWhatCanBeEnded() throws {
+        func make(_ kind: String, _ state: String, _ inject: String) throws -> Session {
+            let data = try JSONSerialization.data(withJSONObject: ["type": "sessions", "sessions": [["id": "x", "kind": kind, "name": "x", "cwd": "/w", "state": state, "inject": inject]]])
+            return try XCTUnwrap(JSONDecoder().decode(DaemonEvent.self, from: data).sessions?.first)
+        }
+        XCTAssertTrue(AgentThreadView.endable(try make("claude", "busy", "tmux")), "a terminal Agentman runs closes at any time")
+        XCTAssertTrue(AgentThreadView.endable(try make("muse", "idle", "api")), "with nothing to close, it comes off the list")
+        XCTAssertFalse(AgentThreadView.endable(try make("muse", "busy", "api")), "not while it's working")
+        XCTAssertFalse(AgentThreadView.endable(try make("claude", "ended", "none")), "it already has")
     }
 
     func testTheHeadlineSaysWhatWasFound() {

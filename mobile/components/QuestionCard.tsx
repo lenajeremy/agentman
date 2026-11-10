@@ -183,6 +183,7 @@ export function QuestionCard({
             </Text>
           </View>
         ) : null}
+        {question.notice ? <Text style={styles.compactPrompt}>{question.notice}</Text> : null}
         {question.prompt ? <Text style={styles.compactPrompt}>{question.prompt}</Text> : null}
         <View style={styles.quickRow}>
           {quick
@@ -255,6 +256,7 @@ export function QuestionCard({
         </View>
       ) : null}
 
+      {question.notice ? <Text style={styles.prompt}>{question.notice}</Text> : null}
       {question.prompt ? <Text style={styles.prompt}>{question.prompt}</Text> : null}
 
       <View style={styles.options}>

@@ -49,6 +49,7 @@ export interface Question {
   options: QuestionOption[];
   multiple?: boolean;
   custom?: boolean;
+  notice?: string;
 }
 
 export interface QuestionAnswer {

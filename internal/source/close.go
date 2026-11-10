@@ -2,8 +2,9 @@ package source
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
+	"github.com/lenajeremy/agentman/internal/protocol"
 	"github.com/lenajeremy/agentman/internal/tmux"
 )
 
@@ -20,25 +21,68 @@ type Closer interface {
 	TmuxName(sessionID string) (string, bool)
 }
 
-// EndSession closes the tmux pane hosting a session.
-//
-// The agent process goes with the pane, which is the point: this is how a
-// session stops costing anything. The transcript is untouched, so the session
-// reappears in its folder's history and can be resumed again.
+// EndSession ends a session. One in a pane Agentman opened has the pane closed,
+// and the agent process goes with it, which is how a session stops costing
+// anything. One with nothing to close (Muse between turns, a chat in Cursor, a
+// Codex rollout nothing has open) is taken off the list instead, until it does
+// something again. Either way the transcript is untouched, so the session stays
+// in its folder's history and can be picked up from there.
 func (r *Registry) EndSession(ctx context.Context, sessionID string) error {
 	s, err := r.forSession(sessionID)
 	if err != nil {
 		return err
 	}
-	closer, ok := s.(Closer)
-	if !ok {
-		return fmt.Errorf("source: %s sessions do not run in a pane", s.Kind())
+	session, listed := r.lastSession(s.Kind(), sessionID)
+	if closer, ok := s.(Closer); ok {
+		if name, ok := closer.TmuxName(sessionID); ok && name != "" {
+			if err := tmux.Kill(ctx, name); err != nil {
+				return err
+			}
+			// Its transcript would otherwise list it again as an idle agent.
+			if listed {
+				r.ended.add(session)
+			}
+			return nil
+		}
 	}
-	name, ok := closer.TmuxName(sessionID)
-	if !ok || name == "" {
-		return fmt.Errorf("source: this session is not running in a pane Agentman started")
+	if !listed {
+		return errors.New("source: this session isn't running any more")
 	}
-	return tmux.Kill(ctx, name)
+	if session.State == protocol.StateBusy || session.State == protocol.StateWaitingInput {
+		return errors.New("source: it's still working; stop it first, then end it")
+	}
+	r.ended.add(session)
+	return nil
+}
+
+// ForgetEnded lists a session again: it is being picked back up.
+func (r *Registry) ForgetEnded(sessionID string) {
+	r.ended.forget(sessionID)
+	// Ended under the conversation's name; asked for by another.
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, sessions := range r.last {
+		for _, session := range sessions {
+			if session.ID == sessionID {
+				r.ended.forget(endedKey(session))
+			}
+		}
+	}
+}
+
+// KeepEnded keeps the sessions the user ended in a file, so a restart doesn't
+// bring them back.
+func (r *Registry) KeepEnded(path string) { r.ended = newEndedSessions(path) }
+
+func (r *Registry) lastSession(kind protocol.Kind, sessionID string) (protocol.Session, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, session := range r.last[kind] {
+		if session.ID == sessionID {
+			return session, true
+		}
+	}
+	return protocol.Session{}, false
 }
 
 // PaneFor reports the tmux pane hosting a session, if the daemon can close it.

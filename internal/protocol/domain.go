@@ -310,6 +310,8 @@ type Question struct {
 	// means the user may supply their own text instead of a listed choice.
 	Multiple bool `json:"multiple,omitempty"`
 	Custom   bool `json:"custom,omitempty"`
+	// Notice says what macOS itself will ask the user if this is agreed to.
+	Notice string `json:"notice,omitempty"`
 }
 
 // QuestionOption is one choice. Key is what gets sent to select it.

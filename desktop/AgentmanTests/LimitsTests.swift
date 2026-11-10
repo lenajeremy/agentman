@@ -61,6 +61,18 @@ final class LimitsTests: XCTestCase {
         XCTAssertTrue(LimitsFormat.footnote.contains("Antigravity"))
     }
 
+    @MainActor func testThePopoverScrollsRatherThanRunningOffTheScreen() {
+        func height(windows: Int) -> CGFloat {
+            let list = (0..<windows).map { Limits.Window(id: "w\($0)", kind: "weekly", label: "Weekly \($0)", used: 20) }
+            let limits = Limits(agents: [.init(kind: "claude", checkedAt: 0, windows: list)])
+            let view = NSHostingView(rootView: PopoverLimits(limits: limits, now: Date(timeIntervalSince1970: 0)).frame(width: 528))
+            return view.fittingSize.height
+        }
+        let tallest = PopoverLimits.tallest(screen: NSScreen.main?.visibleFrame.height ?? 800)
+        XCTAssertLessThanOrEqual(height(windows: 60), tallest, "ran off the screen")
+        XCTAssertLessThan(height(windows: 1), 240, "a short list grew to fill the screen")
+    }
+
     private func limits(_ text: String = sample()) throws -> Limits {
         try XCTUnwrap(JSONDecoder().decode(DaemonEvent.self, from: Data(text.utf8)).limits)
     }

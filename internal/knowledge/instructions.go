@@ -32,19 +32,9 @@ func (s *Store) SyncInstructions(dir, kind string) (string, int, error) {
 	if !filepath.IsAbs(dir) {
 		return "", 0, errors.New("knowledge: the project folder must be an absolute path")
 	}
-	listed, err := s.List(Shared)
+	always, err := s.Always()
 	if err != nil {
 		return "", 0, err
-	}
-	var always []Note
-	for _, meta := range listed {
-		if !meta.Always {
-			continue
-		}
-		note, err := s.Read(Shared, meta.Name)
-		if err == nil {
-			always = append(always, note)
-		}
 	}
 	path := InstructionFile(dir, kind)
 	current, err := os.ReadFile(path)
@@ -58,11 +48,7 @@ func (s *Store) SyncInstructions(dir, kind string) (string, int, error) {
 	if next == string(current) {
 		return path, len(always), nil
 	}
-	mode := os.FileMode(0o644)
-	if info, err := os.Stat(path); err == nil {
-		mode = info.Mode().Perm()
-	}
-	return path, len(always), os.WriteFile(path, []byte(next), mode)
+	return path, len(always), writeKept(path, next)
 }
 
 // block is the managed block for notes, or nothing for none.
@@ -74,9 +60,11 @@ func block(notes []Note) string {
 	b.WriteString(beginMarker + "\n")
 	b.WriteString("## From Agentman\n\n")
 	b.WriteString("Kept by Agentman from the user's shared notes. Edits here are replaced; change the notes in Agentman instead.\n")
+	// A note quoting the markers mustn't end the block early.
+	safe := strings.NewReplacer(beginMarker, "<!-- agentman begin -->", endMarker, "<!-- agentman end -->")
 	for _, note := range notes {
-		b.WriteString("\n### " + note.Title + "\n\n")
-		b.WriteString(strings.TrimSpace(note.Body) + "\n")
+		b.WriteString("\n### " + safe.Replace(note.Title) + "\n\n")
+		b.WriteString(safe.Replace(strings.TrimSpace(note.Body)) + "\n")
 	}
 	b.WriteString(endMarker + "\n")
 	return b.String()
@@ -91,7 +79,12 @@ func withBlock(text, block string) string {
 		if end < len(text) && text[end] == '\n' {
 			end++
 		}
-		return text[:start] + block + text[end:]
+		before := text[:start]
+		// Taken out, so is the blank line that set it apart.
+		if block == "" && strings.HasSuffix(before, "\n\n") {
+			before = before[:len(before)-1]
+		}
+		return before + block + text[end:]
 	}
 	if block == "" {
 		return text

@@ -31,6 +31,14 @@ type MuseItem struct {
 	RecordedAt   string            `json:"recordedAt"`
 	Retracted    bool              `json:"retracted"`
 	Attachments  []MuseAttachment  `json:"attachments"`
+	// EarlierHistory is what Muse kept of the conversation before a
+	// compaction, in place of the items it pruned.
+	EarlierHistory *struct {
+		Messages []struct {
+			Role string `json:"role"`
+			Text string `json:"text"`
+		} `json:"messages"`
+	} `json:"earlierHistory"`
 }
 
 // MuseDisplayLabel is how Muse itself names a tool call: while it runs,
@@ -51,11 +59,73 @@ type MuseAttachment struct {
 func MuseMessages(sessionID string, items []MuseItem) []protocol.Message {
 	messages := make([]protocol.Message, 0, len(items))
 	for _, item := range items {
-		if message, ok := MuseMessage(sessionID, item); ok {
-			messages = append(messages, message)
+		messages = append(messages, MuseRows(sessionID, item)...)
+	}
+	PlaceMuseEarlier(messages)
+	return messages
+}
+
+// MuseEarlierPrefix starts the id of a row copied from what Muse kept before
+// a compaction. The apps may already hold the original under its own id, and
+// leave the copy out.
+const MuseEarlierPrefix = "earlier:"
+
+// PlaceMuseEarlier dates what Muse kept from before a compaction just ahead
+// of the first row after it, in order, whatever date the item itself has.
+func PlaceMuseEarlier(rows []protocol.Message) {
+	count, next := 0, int64(0)
+	for _, row := range rows {
+		if strings.HasPrefix(row.ID, MuseEarlierPrefix) {
+			count++
+		} else {
+			next = row.Ts
+			break
 		}
 	}
-	return messages
+	if count == 0 || next == 0 {
+		return
+	}
+	for i := 0; i < count; i++ {
+		rows[i].Ts = next - int64(count-i)
+	}
+}
+
+// MuseRows is the rows one item makes: none or one, or for what Muse kept from
+// before a compaction, a row for each message of it. Without those a compacted
+// conversation looks as if it had only just started.
+func MuseRows(sessionID string, item MuseItem) []protocol.Message {
+	if item.Kind != "earlierHistory" {
+		if message, ok := MuseMessage(sessionID, item); ok {
+			return []protocol.Message{message}
+		}
+		return nil
+	}
+	if item.EarlierHistory == nil {
+		return nil
+	}
+	rows := make([]protocol.Message, 0, len(item.EarlierHistory.Messages))
+	at := museTime(item.RecordedAt)
+	for i, earlier := range item.EarlierHistory.Messages {
+		role := protocol.RoleAssistant
+		switch earlier.Role {
+		case "assistant":
+		case "user":
+			role = protocol.RoleUser
+		default:
+			continue
+		}
+		text := strings.TrimSpace(earlier.Text)
+		if role == protocol.RoleUser {
+			text = StripSharedNotes(text)
+		}
+		if text == "" {
+			continue
+		}
+		rows = append(rows, protocol.Message{
+			ID: fmt.Sprintf("%s%s-%d", MuseEarlierPrefix, item.ItemID, i), SessionID: sessionID, Ts: at + int64(i), Role: role, Text: text,
+		})
+	}
+	return rows
 }
 
 // MuseMessage turns one item into a row, or reports that it is not one a
@@ -68,13 +138,17 @@ func MuseMessage(sessionID string, item MuseItem) (protocol.Message, bool) {
 			return message, false
 		}
 		message.Role = protocol.RoleUser
-		message.Text = strings.TrimSpace(firstNonEmpty(item.DisplayText, item.Text))
+		message.Text = StripSharedNotes(strings.TrimSpace(firstNonEmpty(item.DisplayText, item.Text)))
 		for _, attachment := range item.Attachments {
 			if attachment.Path != "" && (attachment.Kind == "" || attachment.Kind == "image") {
 				message.Images = append(message.Images, attachment.Path)
 			}
 		}
 		return message, message.Text != "" || len(message.Images) > 0
+	case "compaction":
+		message.Role = protocol.RoleSystem
+		message.Text = "Context compacted"
+		return message, item.Status == "" || item.Status == "completed"
 	case "agentMessage":
 		message.Role = protocol.RoleAssistant
 		message.Text = strings.TrimSpace(item.Text)

@@ -24,7 +24,7 @@ import (
 const (
 	// museLiveWindow keeps a session listed for this long after its last
 	// activity, as Codex's are.
-	museLiveWindow = 30 * time.Minute
+	museLiveWindow = idleListing
 	// musePoll is how often a thread hosted by a plain terminal, which the
 	// daemon cannot watch, is read again while someone has it open.
 	musePoll   = 2 * time.Second
@@ -363,13 +363,12 @@ func (s *MuseSource) readWithStatus(ctx context.Context, sessionID string) ([]pr
 	messages := make([]protocol.Message, 0, len(read.History.Items)+1)
 	after := -1
 	for _, item := range read.History.Items {
-		if message, ok := parser.MuseMessage(sessionID, item); ok {
-			messages = append(messages, message)
-		}
+		messages = append(messages, parser.MuseRows(sessionID, item)...)
 		if read.LastTurn != nil && item.TurnID != "" && item.TurnID == read.LastTurn.TurnID {
 			after = len(messages)
 		}
 	}
+	parser.PlaceMuseEarlier(messages)
 	if read.LastTurn != nil && after >= 0 {
 		at := int64(0)
 		if after > 0 {

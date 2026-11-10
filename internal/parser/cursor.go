@@ -197,7 +197,7 @@ func cleanCursorUserText(text string) string {
 	}
 	// A timestamp without a query is scaffolding, not a message.
 	inner = removeTag(inner, "timestamp")
-	return strings.TrimSpace(inner)
+	return StripSharedNotes(strings.TrimSpace(inner))
 }
 
 // cleanCursorText trims assistant text. Assistant records carry no envelope,

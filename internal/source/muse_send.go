@@ -42,6 +42,11 @@ func (s *MuseSource) Inject(ctx context.Context, sessionID, text string) (protoc
 	if err := s.take(ctx, native); err != nil {
 		return "", err
 	}
+	// Muse's own command. Sent as a turn it is only words to the model, which
+	// answers them and compacts nothing.
+	if strings.TrimSpace(text) == "/compact" {
+		return s.compact(ctx, native)
+	}
 	params := map[string]any{
 		"commandId": museCommandID(),
 		"sessionId": native,
@@ -53,6 +58,24 @@ func (s *MuseSource) Inject(ctx context.Context, sessionID, text string) (protoc
 			return "", errMuseInTerminal
 		}
 		return "", err
+	}
+	return protocol.InjectAPI, nil
+}
+
+// compact asks Muse to compact a session Agentman has taken.
+func (s *MuseSource) compact(ctx context.Context, native string) (protocol.InjectMode, error) {
+	var result struct {
+		Status string `json:"status"`
+	}
+	err := s.host.call(ctx, "session/compact", map[string]any{"commandId": museCommandID(), "sessionId": native}, &result)
+	if museInUse(err) {
+		return "", errMuseInTerminal
+	}
+	if err != nil {
+		return "", err
+	}
+	if result.Status == "noop" {
+		return "", errors.New("Muse has nothing to compact yet")
 	}
 	return protocol.InjectAPI, nil
 }

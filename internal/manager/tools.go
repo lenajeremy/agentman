@@ -157,9 +157,9 @@ func init() {
 		},
 		{
 			name: "end_agent",
-			description: "End an agent's session and close its terminal, when the user asks you to. Only for agents running in a terminal " +
-				"Agentman started (from the apps, by you, or with am); one in the user's own terminal they close themselves. " +
-				"Its conversation is kept, and reopen_agent brings it back. To stop what it is doing but keep it open, use interrupt.",
+			description: "End an agent's session, when the user asks you to. One in a terminal Agentman started has that terminal closed, even while it works. " +
+				"Any other comes off the list once it has stopped working, and if it is open in the user's own terminal it keeps running there. " +
+				"Its conversation is kept in its folder's history. To stop what it is doing but keep it open, use interrupt.",
 			properties: map[string]any{"agent": agentProperty},
 			required:   []string{"agent"},
 			run:        runEndAgent,
@@ -326,7 +326,7 @@ func init() {
 				"body":   map[string]any{"type": "string", "description": "The note, in Markdown, short."},
 				"why":    map[string]any{"type": "string", "description": "What you noticed that makes it worth keeping, in a line, said to the user: \"You said you always use pnpm.\""},
 				"tier":   map[string]any{"type": "string", "enum": []string{"shared", "private"}, "description": "Default shared."},
-				"always": map[string]any{"type": "boolean", "description": "Put it in every project's instructions. Default false."},
+				"always": map[string]any{"type": "boolean", "description": "Every agent follows it, without being asked: it goes into each agent's own instructions. Default false."},
 				"name":   map[string]any{"type": "string", "description": "An existing note's name, to suggest a change to it."},
 			},
 			required: []string{"title", "body"},
@@ -355,7 +355,7 @@ func init() {
 		},
 		{
 			name: "update_instructions",
-			description: "Write the user's shared notes marked always into one agent's project instructions " +
+			description: "Copy the user's shared notes marked always into one agent's project instructions (they already reach every agent without this) " +
 				"(CLAUDE.md for Claude Code, AGENTS.md for the others), in a block Agentman keeps; the rest of the file is untouched. " +
 				"Only when the user asks.",
 			properties: map[string]any{"agent": agentProperty},
@@ -895,7 +895,7 @@ func runDeleteNote(_ context.Context, m *Manager, input map[string]any) toolResu
 	}
 	text := fmt.Sprintf("Deleted %s (%s).", note.Name, note.Tier)
 	if note.Always {
-		text += " It was in every project's instructions: project instruction files keep it until update_instructions runs for them."
+		text += " Every agent was following it: it comes out of their own instructions by itself, but a project's instruction file keeps it until update_instructions runs for that project."
 	}
 	return toolResult{text: text, activity: "Deleted your note “" + note.Title + "”"}
 }

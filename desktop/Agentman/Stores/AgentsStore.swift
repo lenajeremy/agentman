@@ -303,6 +303,9 @@ final class AgentsStore {
     /// a card.
     var gitActionRequest: String?
 
+    /// The session being asked about ending.
+    var confirmEnd: String?
+
     /// An agent's documents to open as soon as its page shows, for "Review
     /// document" on a card.
     var documentsRequest: String?
@@ -584,6 +587,29 @@ final class AgentsStore {
         return cwd == folder || cwd.hasPrefix(folder.hasSuffix("/") ? folder : folder + "/")
     }
 
+    /// Where the folders the user chose are kept, and how a folder is found
+    /// on disk: a test's own.
+    @ObservationIgnored var folderDefaults: UserDefaults = .standard
+    @ObservationIgnored var folderExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+
+    /// The folders the filter offers, the one filtered to among them.
+    var folderChoices: [String] {
+        FolderChoices.make(folders: folders, chosen: FolderChoices.chosen(folderDefaults), selected: folderFilter, exists: folderExists)
+    }
+
+    /// Shows a folder the user picked, any folder at all, and keeps it among
+    /// the filter's choices.
+    func chooseFolder(_ path: String) {
+        FolderChoices.remember(path, folderDefaults)
+        folderFilter = path
+    }
+
+    /// The New Agent page, set to start in a folder when given one.
+    func newAgent(in folder: String?) {
+        if let folder { newAgentPreset = NewAgentPreset(folder: folder) }
+        selection = .newAgent
+    }
+
     func loadFolders() async {
         if let reply = try? await client.request(DaemonRequest(.listFolders)), let folders = reply.folders {
             self.folders = folders.sorted { ($0.lastActivityAt ?? 0) > ($1.lastActivityAt ?? 0) }
@@ -789,6 +815,8 @@ final class AgentsStore {
             if reply.type == "error" {
                 return (reply.error ?? "It couldn't be ended.").replacingOccurrences(of: "^daemon: ", with: "", options: .regularExpression)
             }
+            // Nothing is left to show of it here.
+            if selection == .agent(sessionId) { selection = .manager }
             return nil
         } catch {
             return error.localizedDescription
@@ -1156,9 +1184,7 @@ final class AgentsStore {
         // in between would be missing until it was scrolled to.
         let since = messages[sessionId]?.map(\.ts).max()
         Task {
-            var request = DaemonRequest(.fetchMessages, sessionId: sessionId)
-            request.limit = 40
-            guard var page = try? await client.request(request).page else { return }
+            guard var page = await firstPage(of: sessionId) else { return }
             merge(page.messages, into: sessionId)
             var pages = 1
             while let since, Self.needsAnotherPage(page.messages, hasMore: page.hasMore, since: since, pages: pages),
@@ -1175,6 +1201,25 @@ final class AgentsStore {
             hasMore[sessionId] = page.hasMore
         }
     }
+
+    /// The newest page of a conversation being opened. Tried again if it
+    /// fails: given up on, the chat stayed empty until it was left and opened
+    /// again, the only other thing that asked.
+    private func firstPage(of sessionId: String) async -> Page? {
+        var request = DaemonRequest(.fetchMessages, sessionId: sessionId)
+        request.limit = 40
+        let waits: [Duration?] = Self.firstPageRetries + [nil]
+        for wait in waits {
+            // Left again meanwhile: nothing is waiting for it.
+            guard following[sessionId] != nil else { return nil }
+            if let page = try? await client.request(request).page { return page }
+            if let wait { try? await Task.sleep(for: wait) }
+        }
+        return nil
+    }
+
+    /// How long to wait before asking again for a conversation's first page.
+    nonisolated static let firstPageRetries: [Duration] = [.milliseconds(300), .milliseconds(800), .seconds(2)]
 
     /// Pages a catch-up reads at most: a long absence stops there, and the
     /// rest is still there to scroll to. As the phone's (mobile/lib/catchup.ts).
@@ -1282,7 +1327,7 @@ final class AgentsStore {
         var index: [String: Int] = [:]
         for (i, message) in all.enumerated() { index[message.id] = i }
         var added: [Message] = []
-        for message in new {
+        for message in placedKeptCopies(new, among: current) where !isKeptCopy(message, in: current) {
             if let i = index[message.id] {
                 let finished = all[i].tool.map { $0.status != "running" } ?? false
                 if finished, message.tool?.status == "running" { continue }
@@ -1296,6 +1341,35 @@ final class AgentsStore {
         }
         all.sort { $0.ts < $1.ts }
         return (all, added)
+    }
+
+    /// A message Muse kept from before a compaction, under an id of its own,
+    /// whose original is already here: shown again, the chat would read twice.
+    /// Muse cuts what it keeps at 1,000 characters.
+    nonisolated static func isKeptCopy(_ message: Message, in current: [Message]) -> Bool {
+        guard message.id.hasPrefix("earlier:"), let text = message.text, !text.isEmpty else { return false }
+        let cut = text.count >= 1000
+        return current.contains { held in
+            guard !held.id.hasPrefix("earlier:"), held.role == message.role, let whole = held.text else { return false }
+            let original = whole.trimmingCharacters(in: .whitespacesAndNewlines)
+            return cut ? original.hasPrefix(text) : original == text
+        }
+    }
+
+    /// What Muse kept and this Mac never saw is older than anything held:
+    /// it goes first, in its own order.
+    nonisolated static func placedKeptCopies(_ new: [Message], among current: [Message]) -> [Message] {
+        guard let oldest = current.filter({ !$0.id.hasPrefix("earlier:") }).map(\.ts).min() else { return new }
+        let copies = new.filter { $0.id.hasPrefix("earlier:") && !isKeptCopy($0, in: current) }
+        guard !copies.isEmpty else { return new }
+        var at = oldest - Int64(copies.count)
+        return new.map { message in
+            guard message.id.hasPrefix("earlier:"), !isKeptCopy(message, in: current), message.ts >= oldest else { return message }
+            var placed = message
+            placed.ts = at
+            at += 1
+            return placed
+        }
     }
 
     nonisolated static func boardOrder(_ a: Session, _ b: Session) -> Bool {

@@ -102,14 +102,18 @@ func runEndAgent(ctx context.Context, m *Manager, input map[string]any) toolResu
 	}
 	event := m.agents.Request(ctx, protocol.Request{Type: protocol.ReqEndSession, SessionID: session.ID})
 	if event.Type == protocol.EvtError {
-		problem := plainError(event.Error)
-		if strings.Contains(problem, "pane Agentman started") || strings.Contains(problem, "do not run in a pane") {
-			problem = session.Name + " is running in the user's own terminal, not one Agentman started; they close it there"
+		return toolResult{text: "Couldn't end it: " + plainError(event.Error) + ".", isError: true}
+	}
+	if !event.Closed {
+		return toolResult{
+			text: fmt.Sprintf("Took %s off the list. Agentman had no terminal of its to close, so if it is open in the user's own terminal it keeps running there. "+
+				"Its conversation is kept in its folder's history, and it comes back by itself if it does something new.", session.Name),
+			activity:  "Ended " + session.Name,
+			sessionID: session.ID,
 		}
-		return toolResult{text: "Couldn't end it: " + problem + ".", isError: true}
 	}
 	return toolResult{
-		text:      fmt.Sprintf("Ended %s and closed its terminal. Its conversation is kept; reopen_agent brings it back.", session.Name),
+		text:      fmt.Sprintf("Ended %s and closed its terminal. Its conversation is kept in its folder's history.", session.Name),
 		activity:  "Ended " + session.Name,
 		sessionID: session.ID,
 	}

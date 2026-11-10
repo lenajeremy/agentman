@@ -52,6 +52,13 @@ jobs:
           # Scoped to this repo only, so publishing to the tap repository
           # needs a separate token with write access to it.
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # Sign and notarize the macOS builds (.goreleaser.yaml), once these
+          # are set. Without them a release still ships, unsigned.
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
 
       # npm gets the binaries GoReleaser just built and released, one package
       # per platform plus agentman itself. Skipped until an NPM_TOKEN secret

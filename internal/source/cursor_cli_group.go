@@ -117,6 +117,12 @@ func (s *CursorCLIGroup) CurrentQuestion(ctx context.Context, id string) (*proto
 
 // TmuxName implements Closer. ACP chats run in a child process the source
 // owns, never in a pane, so there is nothing for "end" to close.
+// Compactions forwards to the terminal chats, the ones Cursor summarizes in a
+// transcript Agentman can read. See the note on this type.
+func (s *CursorCLIGroup) Compactions(ctx context.Context, sessionID string) (int, bool) {
+	return s.terminal.Compactions(ctx, sessionID)
+}
+
 func (s *CursorCLIGroup) TmuxName(id string) (string, bool) {
 	if s.owned(id) {
 		return "", false
