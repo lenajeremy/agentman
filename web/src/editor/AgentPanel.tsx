@@ -46,7 +46,7 @@ export function AgentPanel({ store }: { store: EditorStore }) {
     body = <AgentmanView />;
   } else {
     const session = sessions.find((s) => s.id === route.id);
-    body = session ? <PanelThread key={session.id} session={session} /> : <PanelGone back={() => go({ kind: "agents" })} />;
+    body = session ? <PanelThread key={session.id} session={session} store={store} /> : <PanelGone back={() => go({ kind: "agents" })} />;
   }
   return (
     <div className="agent-panel">
@@ -56,11 +56,12 @@ export function AgentPanel({ store }: { store: EditorStore }) {
   );
 }
 
-function PanelThread({ session }: { session: Session }) {
+function PanelThread({ session, store }: { session: Session; store: EditorStore }) {
   const [sent, setSent] = useState(0);
   return (
     <div className="agent-panel-thread">
-      <Thread session={session} stickToEnd={sent} findable={false} />
+      {/* "4 files changed" fills the editor with the agent's changes. */}
+      <Thread session={session} stickToEnd={sent} findable={false} card={false} onShowChanges={() => store.showChanges(session.id)} />
       <Composer session={session} onSent={() => setSent((n) => n + 1)} />
     </div>
   );

@@ -115,6 +115,11 @@ export async function runCommand(store: EditorStore, command: Command) {
       setPref("editorFontSize", 14);
       break;
     case "closeTab": {
+      // An agent's Diff or History in front closes first.
+      if (store.workspaceTab) {
+        store.closeWorkspace(store.workspaceTab);
+        break;
+      }
       const document = store.active;
       if (document) store.requestClose(document);
       else if (inShell) void Window.Close();

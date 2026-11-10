@@ -300,3 +300,11 @@
 .alert-buttons { width: 100%; display: flex; gap: 8px; margin-top: 4px; }
 .alert-button { flex: 1; height: 28px; border-radius: 8px; font-size: 13px; color: var(--label); background: rgb(var(--primary) / 0.06); }
 .alert-button.default { background: var(--accent); color: #fff; }
+
+/* An agent's Diff and History, first in the strip (EditorWindow.swift
+   TabStrip), as the main window's panel draws its tabs; a rule before the
+   files' tabs; and the one in front, in place of the code. */
+.workspace-tabs { flex: none; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 10px; }
+.workspace-tabs-rule { flex: none; align-self: center; width: 1px; height: 18px; background: var(--line); }
+.editor-changes { background: var(--surface); z-index: 2; }
+.editor-changes-gone { flex: 1; display: grid; place-items: center; font-size: 12px; color: var(--muted); }

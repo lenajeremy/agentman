@@ -1,19 +1,29 @@
 // The tab strip, the path bar and the disk banner (EditorWindow.swift's
 // TabStrip, EditorTab, PathBar and DiskBanner).
 
-import { ChevronRight, Eye, Pencil, TriangleAlert, X } from "lucide-react";
+import { useRef } from "react";
+import { ChevronRight, Eye, Pencil, Plus, TriangleAlert, X } from "lucide-react";
 import { Icon } from "../ui";
-import { contextMenu } from "../thread/menu";
+import { contextMenu, menuUnder } from "../thread/menu";
 import { reveal } from "../host";
+import { PanelTabButton } from "../RightPanel";
+import { tabTitle } from "../panel/state";
+import { useStore } from "../store";
 import type { EditorDocument } from "./document";
 import { FileTypeIcon } from "./fileIcons";
 import { copyText, paths } from "./fs";
-import { MAX_PANES, type EditorStore } from "./store";
+import { folderAgent, MAX_PANES, type EditorStore, type WorkspaceTab } from "./store";
 
 export function TabStrip({ store }: { store: EditorStore }) {
+  const { sessions } = useStore();
+  const plus = useRef<HTMLButtonElement>(null);
   // Two tabs with one name show their folders too.
   const counts = new Map<string, number>();
   for (const d of store.documents) counts.set(d.name, (counts.get(d.name) ?? 0) + 1);
+  // The agent the Diff and History tabs are for: the one they're open on,
+  // or the one in the panel, or the one working on this folder.
+  const route = store.panelRoute;
+  const agent = store.changesSession ?? (route?.kind === "agent" ? route.id : undefined) ?? folderAgent(store.root, sessions)?.id;
   return (
     <div
       className="tab-strip"
@@ -27,12 +37,36 @@ export function TabStrip({ store }: { store: EditorStore }) {
       }}
     >
       <div className="tab-scroll">
+        {agent && (
+          <div className="workspace-tabs">
+            {store.workspaceTabs.map((tab) => (
+              <PanelTabButton
+                key={tab}
+                tab={tab}
+                selected={tab === store.workspaceTab}
+                select={() => store.showWorkspace(tab, agent)}
+                close={() => store.closeWorkspace(tab)}
+              />
+            ))}
+            <button
+              ref={plus}
+              className="panel-plus"
+              title="Open the agent's changes or history"
+              onClick={() =>
+                menuUnder(plus.current!, (["diff", "history"] as WorkspaceTab[]).map((tab) => ({ label: tabTitle[tab], action: () => store.showWorkspace(tab, agent) })))
+              }
+            >
+              <Icon icon={Plus} sf="plus" size={11} weight="medium" />
+            </button>
+          </div>
+        )}
+        {agent && store.documents.length > 0 && <span className="workspace-tabs-rule" />}
         {store.documents.map((document) => (
           <EditorTab
             key={document.id}
             store={store}
             document={document}
-            active={document.id === store.activeID}
+            active={!store.showingChanges && document.id === store.activeID}
             folder={(counts.get(document.name) ?? 0) > 1 ? paths.dir(document.path) : null}
           />
         ))}

@@ -25,6 +25,9 @@ export const MARK_TINT: Record<GitMark, string> = {
 /** What the agent panel shows. */
 export type PanelRoute = { kind: "agents" } | { kind: "agentman" } | { kind: "agent"; id: string };
 
+/** An agent's tabs in the editor, as the main window's right panel has them. */
+export type WorkspaceTab = "history" | "diff";
+
 /** One thing a change in the tree did to the disk, enough to undo it. */
 export type TreeStep = { kind: "moved"; from: string; to: string } | { kind: "made"; url: string };
 
@@ -134,6 +137,12 @@ export class EditorStore {
   showAgentPanel = getPref("agentPanelOpen", false);
   panelRoute: PanelRoute | null = null;
   showsFolderAgent = false;
+  /** The agent whose Diff and History tabs are open, those tabs in order,
+   *  and the one in front, in place of the code; null with the code in
+   *  front. */
+  changesSession: string | null = null;
+  workspaceTabs: WorkspaceTab[] = [];
+  workspaceTab: WorkspaceTab | null = null;
   marked = new Set<string>();
   treeClipboard: TreeClipboard | null = null;
   creatingIn: string | null = null;
@@ -210,6 +219,47 @@ export class EditorStore {
     if (this.focusedPane >= this.panes.length) this.focusedPane = Math.max(this.panes.length - 1, 0);
     if (this.panes.length === 0) this.panes = [null];
     this.panes = this.panes.map((p, i) => (i === this.focusedPane ? id : p));
+    this.workspaceTab = null;
+    this.changed();
+  }
+
+  get showingChanges(): boolean {
+    return this.workspaceTab !== null;
+  }
+
+  /** Fills the editor with everything an agent changed, file after file. */
+  showChanges(session: string) {
+    this.showWorkspace("diff", session);
+  }
+
+  /** One of an agent's tabs, in front of the code. The first to open brings
+   *  the other beside it, as the main window has them. */
+  showWorkspace(tab: WorkspaceTab, session: string) {
+    this.changesSession = session;
+    if (!this.workspaceTabs.length) this.workspaceTabs = ["history", "diff"];
+    if (!this.workspaceTabs.includes(tab)) this.workspaceTabs = [...this.workspaceTabs, tab];
+    this.workspaceTab = tab;
+    // The code is still there behind it: keys mustn't type into it.
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    this.changed();
+  }
+
+  /** Closes one of those tabs, and with the last goes back to the code. */
+  closeWorkspace(tab: WorkspaceTab) {
+    this.workspaceTabs = this.workspaceTabs.filter((t) => t !== tab);
+    if (!this.workspaceTabs.length) {
+      this.closeChanges();
+      return;
+    }
+    if (this.workspaceTab === tab) this.workspaceTab = this.workspaceTabs.at(-1) ?? null;
+    this.changed();
+  }
+
+  /** Back to the code the tabs were in front of. */
+  closeChanges() {
+    this.changesSession = null;
+    this.workspaceTabs = [];
+    this.workspaceTab = null;
     this.changed();
   }
 
@@ -259,7 +309,12 @@ export class EditorStore {
     if (found) return found;
     const document = new EditorDocument(this.root, path, false, this.changed);
     this.documents = [...this.documents, document];
-    if (this.activeID === null) this.activeID = document.id;
+    if (this.activeID === null) {
+      // Opened behind whatever is showing, an agent's diff included.
+      const showing = this.workspaceTab;
+      this.activeID = document.id;
+      this.workspaceTab = showing;
+    }
     void document.load().then(() => this.updateGitBases());
     this.changed();
     return document;

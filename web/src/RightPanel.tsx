@@ -23,6 +23,27 @@ import "./styles/panel.css";
 
 const TAB_ICON: Record<PanelTab, LucideIcon> = { diff: FileText, files: Folder, history: Clock, terminal: SquareTerminal };
 
+/** One of the panel's tabs, as the editor's agent tabs are drawn too
+ *  (RightPanel.swift PanelTab). */
+export function PanelTabButton({ tab, selected, select, close }: { tab: PanelTab; selected: boolean; select: () => void; close: () => void }) {
+  return (
+    <div className={`panel-tab ${selected ? "selected" : ""}`} onClick={select} role="button" aria-label={tabTitle[tab]}>
+      <Sym icon={TAB_ICON[tab]} sf={tabSymbol[tab]} size={11} />
+      <span className="panel-tab-title">{tabTitle[tab]}</span>
+      <button
+        className="panel-tab-close"
+        title={`Close ${tabTitle[tab]}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          close();
+        }}
+      >
+        <Sym icon={X} sf="xmark" size={8} weight="bold" />
+      </button>
+    </div>
+  );
+}
+
 export function RightPanel({ session, maximised, onMaximise, onClose }: {
   session: Session;
   maximised: boolean;
@@ -48,16 +69,7 @@ export function RightPanel({ session, maximised, onMaximise, onClose }: {
     <aside className="right-panel">
       <div className="panel-tabs" style={{ paddingLeft: maximised ? 12 : 10 }}>
         {tabs.map((item) => (
-          <div key={item} className={`panel-tab ${item === shown ? "selected" : ""}`} onClick={() => setTab(item)} role="button" aria-label={tabTitle[item]}>
-            <Sym icon={TAB_ICON[item]} sf={tabSymbol[item]} size={11} />
-            <span className="panel-tab-title">{tabTitle[item]}</span>
-            <button className="panel-tab-close" title={`Close ${tabTitle[item]}`} onClick={(e) => {
-              e.stopPropagation();
-              closeTab(item);
-            }}>
-              <Sym icon={X} sf="xmark" size={8} weight="bold" />
-            </button>
-          </div>
+          <PanelTabButton key={item} tab={item} selected={item === shown} select={() => setTab(item)} close={() => closeTab(item)} />
         ))}
         <button
           ref={plus}

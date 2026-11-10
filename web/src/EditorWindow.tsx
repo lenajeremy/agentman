@@ -15,7 +15,10 @@ import { files, inShell } from "./editor/fs";
 import { MonacoBridge } from "./editor/monaco";
 import { GoToFile, GoToText } from "./editor/Palette";
 import { StatusBar } from "./editor/StatusBar";
-import { EditorStore, useEditor } from "./editor/store";
+import { EditorStore, useEditor, type WorkspaceTab } from "./editor/store";
+import { DiffPanel } from "./panel/DiffPanel";
+import { HistoryPanel } from "./panel/HistoryPanel";
+import type { Session } from "@shared/protocol";
 import { DiskBanner, PathBar, TabStrip } from "./editor/Tabs";
 import { FileTree } from "./editor/Tree";
 import { EditorEmpty, MarkdownPreview, NonTextView } from "./editor/Views";
@@ -221,8 +224,8 @@ function FolderEditor({ folder }: { folder: string }) {
         <div className="editor-main">
           <div className="editor-row">
             <div className="editor-column">
-              {store.documents.length > 0 && <TabStrip store={store} />}
-              {active && (
+              {(store.documents.length > 0 || store.changesSession) && <TabStrip store={store} />}
+              {active && !store.showingChanges && (
                 <>
                   <PathBar store={store} document={active} />
                   <DiskBanner document={active} close={() => store.close(active)} />
@@ -241,6 +244,11 @@ function FolderEditor({ folder }: { folder: string }) {
                   </InFrontPane>
                 )}
                 {!active && store.panes.length === 1 && <EditorEmpty store={store} />}
+                {store.workspaceTab && store.changesSession && (
+                  <div className="in-front editor-changes">
+                    <EditorChanges session={sessions.find((s) => s.id === store.changesSession)} tab={store.workspaceTab} />
+                  </div>
+                )}
               </div>
               {store.showTerminal && (
                 <>
@@ -267,6 +275,13 @@ function FolderEditor({ folder }: { folder: string }) {
       <EditorAlerts store={store} />
     </div>
   );
+}
+
+/** An agent's Diff or History, in place of the code. The code stays open
+ *  behind it, with its scroll and undo, for when this closes. */
+function EditorChanges({ session, tab }: { session?: Session; tab: WorkspaceTab }) {
+  if (!session) return <div className="editor-changes-gone">This agent's changes are no longer here.</div>;
+  return tab === "history" ? <HistoryPanel key={session.id} session={session} /> : <DiffPanel key={session.id} session={session} />;
 }
 
 /** A view of the file in front over its own split, below the split's
