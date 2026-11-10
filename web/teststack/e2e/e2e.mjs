@@ -577,11 +577,14 @@ async function connection() {
     execFileSync(`${HERE}restart.sh`);
     await until(page, () => !document.querySelector(".connection-banner") && document.querySelector(".sidebar-footer").innerText.includes("Connected"), null, "connected again", 20000);
     const file = execSync(`ls "${H}/.claude/projects/"*demo*/*.jsonl | head -1`, { encoding: "utf8" }).trim();
-    const lines = readFileSync(file, "utf8").trim().split("\n");
+    const before = readFileSync(file, "utf8");
+    const lines = before.trim().split("\n");
     const last = JSON.parse(lines.at(-1));
     const said = `Reconnect check ${Date.now()}`;
     appendFileSync(file, JSON.stringify({ ...last, uuid: crypto.randomUUID(), parentUuid: last.uuid, timestamp: new Date().toISOString(), message: { role: "assistant", model: "claude-opus-5-5", content: [{ type: "text", text: said }] } }) + "\n");
     await until(page, (s) => [...document.querySelectorAll(".thread-item")].some((e) => e.innerText.includes(s)), said, "the new message in the thread", 20000);
+    // demo as it was: runs adding a line each crowd its worked lines out.
+    writeFileSync(file, before);
   }, { expected: [/^console: WebSocket connection to .* failed/, /^failed: .*(REFUSED|Could not connect|network connection was lost)/, /^http 401 GET \/app\/(session|whoami)/] });
 }
 
