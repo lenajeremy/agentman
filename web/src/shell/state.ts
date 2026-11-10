@@ -4,7 +4,7 @@
 
 import { useSyncExternalStore } from "react";
 import type { Folder, Session, SessionState } from "@shared/protocol";
-import { daemon, type AppRequest } from "../daemon";
+import { daemon, whenConnected, type AppRequest } from "../daemon";
 
 /** The states the sidebar filters by, as AgentsStore.filterState counts them. */
 export type FilterState = Extract<SessionState, "waiting_input" | "busy" | "idle">;
@@ -72,7 +72,9 @@ export function useShell(): ShellState {
 }
 
 /** A request this app makes that the phone's protocol types don't list. */
-export function ask(req: Record<string, unknown> & { type: string }) {
+/** A request, sent once connected. */
+export async function ask(req: Record<string, unknown> & { type: string }) {
+  await whenConnected();
   return daemon.request(req as unknown as AppRequest);
 }
 

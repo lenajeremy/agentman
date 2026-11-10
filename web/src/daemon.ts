@@ -161,6 +161,25 @@ export class DaemonClient {
 
 export const daemon = new DaemonClient();
 
+/** Resolves once connected to am serve, as the Mac's requests wait for the
+ *  connection; rejects after `timeout`. A request made as a page opens
+ *  would otherwise fail before the socket is up, and not be made again. */
+export function whenConnected(timeout = 30_000): Promise<void> {
+  if (daemon.status === "connected") return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      off();
+      reject(new Error("not connected to am serve"));
+    }, timeout);
+    const off = daemon.onStatus((status) => {
+      if (status !== "connected") return;
+      window.clearTimeout(timer);
+      off();
+      resolve();
+    });
+  });
+}
+
 /** Whether am serve answers but turns this page away: a page it serves
  *  (no shell, no development server) asks for something small and is told
  *  it isn't signed in. */
