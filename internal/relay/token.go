@@ -114,10 +114,28 @@ func VerifyDevice(secret, token string) (AccountID, string, error) {
 	}
 	pairing := ""
 	if claims.Nonce != "" {
-		sum := sha256.Sum256([]byte(string(claims.Account) + "\x00" + claims.Nonce))
+		sum := sha256.Sum256([]byte(string(claims.Account) + "\x00" + pairingSeed(claims.Nonce)))
 		pairing = "p" + hex.EncodeToString(sum[:8])
 	}
 	return claims.Account, pairing, nil
+}
+
+// installPrefix marks a device id an app install named itself with, kept
+// across its pairings (mobile/lib/install.ts).
+const installPrefix = "install-"
+
+// pairingSeed is what a pairing's name is made from. The nonce is the device
+// id the app paired with and a random part ("<device>:<random>"). An install's
+// own id is kept across its pairings, so the same phone paired again is the
+// same device; any other id ("phone", from apps before it) is the same for
+// every phone, so the random part is what tells pairings apart.
+func pairingSeed(nonce string) string {
+	if at := strings.LastIndex(nonce, ":"); at > 0 {
+		if device := nonce[:at]; strings.HasPrefix(device, installPrefix) && len(device) > len(installPrefix)+8 {
+			return "install\x00" + device
+		}
+	}
+	return nonce
 }
 
 func verifyDeviceClaims(secret, token string) (deviceClaims, error) {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { canEnd, canResume, resumeOnce, shouldResume } from "./resume.ts";
+import { canEnd, canResume, endNote, resumeOnce, shouldResume } from "./resume.ts";
 
 // Mirrors ResumeArgs in internal/source/resume.go. Offering to reopen a
 // session the Mac can never reopen is worse than not offering it, because the
@@ -83,15 +83,21 @@ test("resumeOnce lets a failed resume be tried again", async () => {
   assert.equal(asked.length, 2);
 });
 
-// A session someone is running in their own terminal reaches the phone
-// through the hook queue. Killing that window out from under them is not what
-// "end session" means.
-test("canEnd covers only panes Agentman started", () => {
-  assert.equal(canEnd({ kind: "claude", inject: "tmux" }), true);
-  assert.equal(canEnd({ kind: "codex", inject: "tmux" }), true);
-  assert.equal(canEnd({ kind: "claude", inject: "hook" }), false);
-  assert.equal(canEnd({ kind: "claude", inject: "none" }), false);
-  assert.equal(canEnd({ kind: "opencode", inject: "api" }), false);
+// As on the Mac: one in a terminal Agentman can close ends at any time; any
+// other once it has stopped, which only takes it off the list. Never one
+// already ended, or one waiting on an answer.
+test("canEnd matches the Mac", () => {
+  assert.equal(canEnd({ kind: "claude", inject: "tmux", state: "busy" }), true);
+  assert.equal(canEnd({ kind: "codex", inject: "tmux", state: "idle" }), true);
+  assert.equal(canEnd({ kind: "claude", inject: "hook", state: "idle" }), true);
+  assert.equal(canEnd({ kind: "muse", inject: "api", state: "idle" }), true);
+  assert.equal(canEnd({ kind: "opencode", inject: "api", state: "idle" }), true);
+  assert.equal(canEnd({ kind: "muse", inject: "api", state: "busy" }), false);
+  assert.equal(canEnd({ kind: "claude", inject: "hook", state: "idle", question: { prompt: "?" } }), false);
+  assert.equal(canEnd({ kind: "claude", inject: "none", state: "ended" }), false);
+  assert.match(endNote({ kind: "claude", inject: "tmux" }), /closes it/);
+  assert.match(endNote({ kind: "muse", inject: "api" }), /off your list/);
+  assert.match(endNote({ kind: "claude", inject: "none" }), /keeps running there/);
 });
 
 // Muse reopens in place: an old session opened from search or a folder is

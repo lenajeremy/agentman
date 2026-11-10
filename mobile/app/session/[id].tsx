@@ -57,7 +57,7 @@ import { OutputViewer } from "../../components/OutputViewer";
 import { type Frame } from "../../lib/message-menu";
 import { artifactsButtonLabel } from "../../lib/artifacts";
 import { simulatorOpensSessionMenu } from "../../lib/simulator";
-import { canEnd, shouldResume } from "../../lib/resume";
+import { canEnd, endNote, shouldResume } from "../../lib/resume";
 import { folderName, modeLabel, modelLabel, modeWord, showsInFeed, statusChip } from "../../lib/session-view";
 import {
   defaultScopeWarning,
@@ -734,18 +734,30 @@ export default function SessionScreen() {
         onPress: requestInterrupt,
       });
     }
-    // Closing the pane is what keeps opening sessions freely from leaving a
-    // dozen of them running. The transcript survives, so this is reversible:
-    // the session stays in its folder and opening it starts it again.
+    // Ending is what keeps opening sessions freely from leaving a dozen of
+    // them running. The transcript survives, so this is reversible: the
+    // session stays in its folder and opening it starts it again. As on the
+    // Mac it asks first, saying what ending this one does. Back to the list
+    // after: an ended session's page reopens it as it opens.
     if (canEnd(session)) {
+      const end = () => {
+        void store.endSession(session.id).catch(() => {});
+        router.back();
+      };
       sessionMenuItems.push({
         key: "end",
         label: "End session",
         icon: "x-circle",
         destructive: true,
         onPress: () => {
-          void store.endSession(session.id).catch(() => {});
-          router.back();
+          if (Platform.OS === "web") {
+            if (globalThis.confirm(`End ${session.name}? ${endNote(session)}`)) end();
+            return;
+          }
+          Alert.alert(`End ${session.name}?`, endNote(session), [
+            { text: "Keep it", style: "cancel" },
+            { text: "End session", style: "destructive", onPress: end },
+          ]);
         },
       });
     }

@@ -274,8 +274,14 @@ func TestAPhoneStaysOneDeviceWhileTheDaemonReconnects(t *testing.T) {
 		stop()
 		<-done
 	}()
-	speak()
+	// The phone keeps speaking, as the app does: one request that reached
+	// the relay before it had the daemon back is dropped there.
+	last := time.Time{}
 	waitForDevices(t, ctx, func() bool {
+		if time.Since(last) > 200*time.Millisecond {
+			speak()
+			last = time.Now()
+		}
 		list := devices.List()
 		return len(list) == 1 && list[0].Connected
 	}, "the phone, connected again under the same name")
