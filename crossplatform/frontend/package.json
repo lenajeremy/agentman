@@ -1,0 +1,32 @@
+{
+  "name": "agentman-crossplatform",
+  "private": true,
+  "version": "0.1.0",
+  "description": "The screens of Agentman's cross-platform app: React in the Wails web view, talking to am serve over a loopback WebSocket.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "editor": "node scripts/editor.mjs",
+    "build:dev": "npm run editor && tsc && vite build --minify false --mode development",
+    "build": "npm run editor && tsc && vite build --mode production",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@wailsio/runtime": "3.0.0",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/addon-webgl": "0.19.0",
+    "@xterm/xterm": "6.0.0",
+    "lucide-react": "1.64.0",
+    "marked": "18.1.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.18",
+    "@types/react-dom": "~19.2.3",
+    "@vitejs/plugin-react": "6.1.2",
+    "typescript": "~6.0.3",
+    "vite": "8.3.5"
+  }
+}

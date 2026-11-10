@@ -129,6 +129,13 @@ struct AgentmanApp: App {
 /// Starts the updater, and asks before quitting with unsaved edits in the
 /// editor.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        // A comparison run of a Debug build: nothing shows (TestSnapshot.swift).
+        MainActor.assumeIsolated { TestSnapshot.start() }
+        #endif
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated { AppUpdater.shared.start() }
     }

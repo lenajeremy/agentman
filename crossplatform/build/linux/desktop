@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=Agentman
+Comment=Every coding agent on this computer, in one window
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/agentman %u
+Terminal=false
+Type=Application
+Icon=agentman
+Categories=Utility;
+StartupWMClass=agentman
+
+ 

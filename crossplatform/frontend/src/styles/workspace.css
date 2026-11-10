@@ -1,0 +1,13 @@
+/* The workspace card: 220 wide beside the thread, 12 from the top and right. */
+.workspace-card { width: 220px; flex: none; align-self: flex-start; margin: 12px 12px 20px 0; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; font-size: 12px; color: var(--text-2); overflow: hidden; }
+.card-section { padding: 6px 8px; display: flex; flex-direction: column; }
+.card-section + .card-section { border-top: 1px solid var(--line); }
+.card-row { height: 30px; display: flex; align-items: center; gap: 10px; padding: 0 8px; border-radius: 7px; }
+.card-row.clickable:hover { background: color-mix(in srgb, var(--fill) 60%, transparent); }
+.card-icon { width: 16px; flex: none; display: grid; place-items: center; color: var(--muted); }
+.card-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-trailing-button { width: 20px; height: 20px; display: grid; place-items: center; color: var(--muted); }
+.card-menu { width: 20px; height: 20px; display: grid; place-items: center; color: var(--faint); }
+.card-counts { display: flex; gap: 6px; font-family: var(--mono); font-size: 11px; }
+.card-counts .added { color: var(--ok); }
+.card-counts .removed { color: var(--error-text); }
