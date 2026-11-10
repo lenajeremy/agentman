@@ -5,11 +5,15 @@
 
 import { AwaySummary } from "./away/AwaySummary";
 import { Lightbox } from "./LightboxView";
+import { AgentmanToasts } from "./manager/Toasts";
+import { NoteSuggestionPopup } from "./manager/NoteSuggestion";
 import { CommandPalette } from "./palette/CommandPalette";
 
 export function Overlays() {
   return (
     <>
+      <AgentmanToasts />
+      <NoteSuggestionPopup />
       <CommandPalette />
       <AwaySummary />
       <Lightbox />

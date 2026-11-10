@@ -1,6 +1,7 @@
 // What the sidebar's Agentman card and the dock badge show (Sidebar.swift's
-// AgentmanCard, AgentsStore's unread count). Owned by the Agentman area,
-// which fills it from Agentman's conversation; a stub until then.
+// AgentmanCard, AgentsStore's unread count), from Agentman's conversation.
+
+import { openCardsOf, unreadOf, useManager, viewingManager } from "./store";
 
 export interface ManagerSummary {
   /** Agentman entries not read yet: the card's badge and the dock's. */
@@ -10,5 +11,10 @@ export interface ManagerSummary {
 }
 
 export function useManagerSummary(): ManagerSummary {
-  return { unread: 0, cardsWaiting: 0 };
+  const s = useManager();
+  return {
+    // Nothing is unread while the conversation is in front of the user.
+    unread: viewingManager(s) ? 0 : unreadOf(s).length,
+    cardsWaiting: openCardsOf(s).length,
+  };
 }

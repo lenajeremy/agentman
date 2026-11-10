@@ -271,37 +271,43 @@ Swift that does it today.
 
 ## 8. Agentman (ManagerChatView, ManagerStore)
 - [ ] Header: "Agentman", "N scheduled" popover, New chat (asks first; open cards carry over) — ManagerChatView.swift:39
-- [ ] Entry page while there is no conversation: large icon, wordmark, large box, centred — ManagerChatView.swift:219
-- [ ] Box states — ManagerChatView.swift:249
-  - [ ] "Waiting for am serve…" — ManagerChatView.swift:263
-  - [ ] API key box (Anthropic or Gemini, by provider), secure field, "Get a key" link — ManagerChatView.swift:281
-  - [ ] Composer; notes under it ("am serve isn't running…", "Connecting…") — ManagerChatView.swift:276
+- [x] Entry page while there is no conversation: large icon, wordmark, large box, centred — ManagerChatView.swift:219
+- [x] Box states — ManagerChatView.swift:249
+  - [x] "Waiting for am serve…" — ManagerChatView.swift:263
+  - [x] API key box (Anthropic or Gemini, by provider), secure field, "Get a key" link — ManagerChatView.swift:281
+    - Differs: on Linux the note says the key is "kept in a file only you can read", where am serve keeps it there (internal/secrets).
+  - [x] Composer; notes under it ("am serve isn't running…", "Connecting…") — ManagerChatView.swift:276
 - [ ] Onboarding key saved to the Keychain through the daemon; errors shown — ManagerChatView.swift:790, ManagerStore.swift:189
 - [ ] Composer pill: + to attach images, @ mentions (in the editor panel), voice, Send ↔ Stop while thinking; large variant focuses itself — ManagerChatView.swift:672
 - [ ] Replies stream in; thinking dots row — ManagerStore.swift:358, ManagerChatView.swift:639
-- [ ] User entries with sent images (lightbox, Copy Image) — ManagerChatView.swift:353, ImagePreview.swift:407
+- [x] User entries with sent images (lightbox, Copy Image) — ManagerChatView.swift:353, ImagePreview.swift:407
+  - The lightbox they open is §6's (LightboxView.tsx).
 - [ ] Assistant replies: badge and markdown — ManagerChatView.swift:416
-- [ ] Activity runs folded ("… and N more", icon per tool) — ManagerChatView.swift:436
+- [x] Activity runs folded ("… and N more", icon per tool) — ManagerChatView.swift:436
 - [ ] Image activity thumbnails — ManagerChatView.swift:521
-- [ ] Brief and agent-says cards: mark, name, text, "needs you" line, Open agent, × close, two-finger swipe to dismiss — ManagerChatView.swift:533, SwipeToDismiss.swift:9
-- [ ] Open cards (question / needs_you / key) as CompactCard — CompactCard.swift:6
-  - [ ] Header: agent, "needs you", Open (↗), Put away (×) — CompactCard.swift:21
-  - [ ] Title, one-line detail (left out when the title already says it) — CompactCard.swift:39
-  - [ ] Compact choices with Agentman's pick ✦, or a "Reply to Agentman about X" field; swipe to dismiss — CompactCard.swift:57, ManagerChatView.swift:387
-- [ ] Card receipts "✓ name · outcome" with Open; note receipts; × appears on hover — ManagerChatView.swift:617, NoteSuggestion.swift:187, ManagerChatView.swift:597
-- [ ] Note suggestion card inside the chat — ManagerChatView.swift:380
-- [ ] Scheduled lines (bell or eye, time), error lines, compaction divider — ManagerChatView.swift:845, ManagerChatView.swift:397, ManagerChatView.swift:973
-- [ ] Settled or dismissed cards and closed entries hidden — ManagerChatView.swift:327
+- [x] Brief and agent-says cards: mark, name, text, "needs you" line, Open agent, × close, two-finger swipe to dismiss — ManagerChatView.swift:533, SwipeToDismiss.swift:9
+  - Differs: a page sees a trackpad swipe as wheel events without their phases, so a swipe ends when they stop for 140 ms (manager/swipe.ts).
+- [x] Open cards (question / needs_you / key) as CompactCard — CompactCard.swift:6
+  - [x] Header: agent, "needs you", Open (↗), Put away (×) — CompactCard.swift:21
+  - [x] Title, one-line detail (left out when the title already says it) — CompactCard.swift:39
+  - [x] Compact choices with Agentman's pick ✦, or a "Reply to Agentman about X" field; swipe to dismiss — CompactCard.swift:57, ManagerChatView.swift:387
+- [x] Card receipts "✓ name · outcome" with Open; note receipts; × appears on hover — ManagerChatView.swift:617, NoteSuggestion.swift:187, ManagerChatView.swift:597
+- [x] Note suggestion card inside the chat — ManagerChatView.swift:380
+- [x] Scheduled lines (bell or eye, time), error lines, compaction divider — ManagerChatView.swift:845, ManagerChatView.swift:397, ManagerChatView.swift:973
+  - Times follow the system's region and 24-hour choice, which the shell reads (locale.go): a web view's own would say 3:32 PM where the Mac says 15:32.
+- [x] Settled or dismissed cards and closed entries hidden — ManagerChatView.swift:327
 - [ ] Schedules popover: reminders and watches, repeats, "When X needs you…", "Gives up at", cancel ⓧ — ManagerChatView.swift:888
 - [ ] Loads older (80) at the top; follows the end with jump-to-latest; drop images on the chat — ManagerStore.swift:155, ManagerChatView.swift:112, ManagerChatView.swift:170
-- [ ] Unread tracking: last-read time kept across launches; a first launch starts with nothing unread — ManagerStore.swift:44, ManagerStore.swift:55
-- [ ] Toasts in the bottom-right, 3 at most, above the composer — AgentmanToasts.swift:8
-  - [ ] News fades after 8 s unless hovered; click opens it — AgentmanToasts.swift:54
-  - [ ] Cards stay until answered or hidden — AgentmanToasts.swift:61
-- [ ] Note suggestion popup at top-right (not on the Agentman page), "1 of N" — NoteSuggestion.swift:208
-- [ ] Note suggestion card — NoteSuggestion.swift:5
-  - [ ] Title, body, why, who reads it — NoteSuggestion.swift:92
-  - [ ] Dismiss / Edit / Save note; editing: title, body, Shared or Only Agentman, "in every project's instructions" — NoteSuggestion.swift:61
+- [x] Unread tracking: last-read time kept across launches; a first launch starts with nothing unread — ManagerStore.swift:44, ManagerStore.swift:55
+- [x] Toasts in the bottom-right, 3 at most, above the composer — AgentmanToasts.swift:8
+  - Compared with a Debug-only hook in the Mac app (AGENTMAN_TOASTS=<ids>; here toasts=<ids>), as a test run is never in front and shows none of its own.
+  - [x] News fades after 8 s unless hovered; click opens it — AgentmanToasts.swift:54
+  - [x] Cards stay until answered or hidden — AgentmanToasts.swift:61
+- [x] Note suggestion popup at top-right (not on the Agentman page), "1 of N" — NoteSuggestion.swift:208
+- [x] Note suggestion card — NoteSuggestion.swift:5
+  - Differs: macOS 26's controls (push buttons, the rounded field, the segmented control, the checkbox) are drawn by the page to look like the Mac's, the default button blue only while the window is in front.
+  - [x] Title, body, why, who reads it — NoteSuggestion.swift:92
+  - [x] Dismiss / Edit / Save note; editing: title, body, Shared or Only Agentman, "in every project's instructions" — NoteSuggestion.swift:61
 - [ ] Problem banner on the composer — ManagerChatView.swift:156
 
 ## 9. Settings window
