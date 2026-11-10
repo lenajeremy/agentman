@@ -82,10 +82,28 @@ the address follows the page, d85b182 a narrow editor window, 07a0232 ~ only
 for the home folder. The Mac's AgentsStore.end reads the closed flag as the
 web did before f13b318, so an ended Muse session there says it's still
 running in a terminal too.
-End to end: `npm run e2e` (web/teststack/e2e) runs 65 checks over every
-screen, in Chromium and WebKit, on the test stack and its stand-ins; 128
-passing on 2026-11-10 with the first 64, the 65th (an ended conversation
-found from an editor) passing in both after. Writing it found 4b6502e (the picture viewer was a
+End to end: `npm run e2e` (web/teststack/e2e) runs 76 checks over every
+screen, in Chromium and WebKit, on the test stack and its stand-ins, and
+reports any page's uncaught errors, console errors and failed requests;
+`EMBEDDED=1` runs it on the web app built into am, as people get it.
+
+Verified before the look pass, 2026-11-10, with main merged in (04377d6:
+Mac 0.44.1, the daemon's device and Codex work): Go vet and all 28
+packages' tests, the webapp-tagged ones, the web's unit tests, and the
+end-to-end run on the built-in copy, 151 of 152 with no page errors (the
+one, a test's leftover data, fixed in 467ae2c and rerun).
+New checks for what had none: the key prompt in every state, Settings ›
+General, Open in Terminal and Take Over, the sidebar's filters, the
+summary for coming back, a new worktree, the Appearance chosen against the
+computer's. They found: 205c491 (the editor, Agentman's chat, the panel
+and terminals followed the computer's light or dark, not the setting),
+66d19ea (Settings showed "Not set yet" and "Kept on this computer" for a
+moment), ac5148b (Monaco's cancellations as errors in Safari), d2c81fc (a
+session without its id blanked the page). Seen in am serve, not fixed
+(the Mac shares them): after a start, the first search sweep can miss
+Muse's history while a Muse session runs, and says nothing until the
+next, two minutes on; removed worktrees stay in the folder list (Recent,
+⌘K's Open … in the Editor) with the logo found there while they existed. Writing it found 4b6502e (the picture viewer was a
 placeholder; now the Mac's), 6759993 (keys typed as a palette opened over
 the code went into the file), 3382cef (Escape while the commit sheet
 reads), c74e136 (the keyboard back at once, not a frame later).
