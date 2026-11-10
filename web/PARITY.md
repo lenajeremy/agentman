@@ -33,14 +33,19 @@ done. One at a time, in this order.
    pairing a phone on the page.
 8. ✓ (6af544e, 636796f, 927de80) **Thread details:** how long the agent worked ("Worked for"), code
    blocks that copy, a folder's logo in place of its initials.
-9. **Editor additions:** History and Diff tabs as in the main window, an
+9. ✓ (d34220d, 23ff13f, c39334a; cdba078 and b55b8f5 fixed what testing
+   found) **Editor additions:** History and Diff tabs as in the main window, an
    agent's changes in a tab of their own, terminals that follow between the
-   editor and the agent's page, Usage and ⌘K in the editor.
+   editor and the agent's page (here: the window you're in gives a shared
+   shell its size), Usage and ⌘K in the editor.
 10. **Settings switches:** Agentman's standing answers, learning from
     corrections.
 11. **Agentman's key prompt** (0.41): says what Agentman is and why it
     needs a key, and the box's note reads "Don't have one? Get an
     Anthropic key".
+12. **⌘K finds what was said** (CommandPalette.swift `said`): messages that
+    match what is typed, under the commands, opening at the message. Found
+    while doing 9.
 
 Not for the web app: the setup screen, installing the am command, Sparkle
 updates and the catch-up prompt (am serve serves the web app itself, so the
@@ -48,7 +53,8 @@ two always match).
 
 Seen while testing, not yet looked into: attaching an agent's own
 terminal can type the terminal's answer to tmux's query ("1;2c0;276;0c")
-into its shell.
+into its shell. For the looks pass: "Show in Files" where a Mac says Finder
+(the platform label), and the iPad and phone icons alike in Lucide.
 
 Known browser limits: ⌘N, ⌘T, ⌘W and ⌘Q stay the browser's; files copied in
 the editor's tree go on the clipboard as paths.
