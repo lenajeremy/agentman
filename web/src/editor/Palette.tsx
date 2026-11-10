@@ -9,14 +9,14 @@ import { FileTypeIcon } from "./fileIcons";
 import { paths, type SearchMatch } from "./fs";
 import { fuzzyFilter } from "./fuzzy";
 import type { EditorStore } from "./store";
-import { useKeyboardBack } from "../palette/PaletteView";
+import { giveKeyboardBack, useKeyboardBack } from "../palette/PaletteView";
 
 /** Gives the keyboard back to the editor's code, which sits in a frame of
  *  its own, or to whatever else had it. */
 export function editorKeyboardBack(store: EditorStore) {
   return (before: Element | null) => {
     if (before instanceof HTMLIFrameElement && before.classList.contains("monaco")) store.monaco?.focus();
-    else if (before instanceof HTMLElement && before.isConnected) before.focus();
+    else giveKeyboardBack({ element: before, range: null });
   };
 }
 

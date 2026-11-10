@@ -44,7 +44,7 @@ export function shortcutLabel(shortcut: string): string {
  * code, in a frame of its own).
  */
 export function useKeyboardBack(giveBack?: (before: Element | null) => void) {
-  const [before] = useState(() => document.activeElement);
+  const [before] = useState(keyboardNow);
   const back = useRef(giveBack);
   back.current = giveBack;
   useEffect(
@@ -52,12 +52,45 @@ export function useKeyboardBack(giveBack?: (before: Element | null) => void) {
       requestAnimationFrame(() => {
         const now = document.activeElement;
         if (now && now !== document.body) return;
-        if (back.current) back.current(before);
-        else if (before instanceof HTMLElement && before.isConnected) before.focus();
+        if (back.current) back.current(before.element);
+        else giveKeyboardBack(before);
       });
     },
     [before],
   );
+}
+
+/** Where the keyboard is: the element, and where the cursor is in it. */
+export interface KeyboardPlace {
+  element: Element | null;
+  range: Range | null;
+}
+
+export function keyboardNow(): KeyboardPlace {
+  const element = document.activeElement;
+  const selection = window.getSelection();
+  const range = selection && selection.rangeCount && element?.contains(selection.getRangeAt(0).startContainer) ? selection.getRangeAt(0).cloneRange() : null;
+  return { element, range };
+}
+
+/** The keyboard back where it was, the cursor too: focused again, a message
+ *  box would put it at the start of what's typed there. */
+export function giveKeyboardBack(place: KeyboardPlace) {
+  const { element, range } = place;
+  if (!(element instanceof HTMLElement) || !element.isConnected) return;
+  element.focus();
+  if (!element.isContentEditable) return;
+  const selection = window.getSelection();
+  if (!selection) return;
+  selection.removeAllRanges();
+  if (range && element.contains(range.startContainer)) {
+    selection.addRange(range);
+  } else {
+    const end = document.createRange();
+    end.selectNodeContents(element);
+    end.collapse(false);
+    selection.addRange(end);
+  }
 }
 
 export function PaletteView({ placeholder, results, choose, dismiss, initialQuery = "", status, giveBack }: {
