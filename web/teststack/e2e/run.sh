@@ -1,7 +1,7 @@
 #!/bin/bash
 # The web app end to end, against the test stack:
 #   web/teststack/e2e/run.sh [chromium|webkit|all] [area…]
-# areas: shell board thread newagent usage connection editor settings.
+# areas: shell sidebar board usage settings editor notify newagent thread connection.
 # Nothing shows on screen, nothing costs money and nothing is published:
 # Agentman runs on a fake Anthropic API, pull requests go to a stand-in gh,
 # Muse runs on its echo provider, and every agent is a test one.

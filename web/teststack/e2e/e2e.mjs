@@ -9,7 +9,7 @@
 // faked in the page (fakes/); what costs or publishes is a stand-in.
 import { chromium, webkit } from "playwright-core";
 import { execFileSync, execSync } from "node:child_process";
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const HERE = new URL(".", import.meta.url).pathname;
@@ -627,6 +627,212 @@ async function settings() {
   });
 }
 
+
+// MARK: - The second batch: the rest of each screen
+
+// A test agent's id by its name: a Claude one, as a Muse session started in
+// its folder goes by the folder's name too until it has its own.
+const sessionId = async (name) => (await daemon({ type: "list_sessions" })).sessions?.find((s) => s.name === name && s.kind === "claude")?.id;
+
+async function sidebar() {
+  await check("sidebar: rename, then back", async () => {
+    const page = await open(`agent=${ID.bugs}`);
+    const row = page.locator(".sidebar .agent-line1").filter({ hasText: "shots" }).first();
+    await row.click({ button: "right" });
+    await menu(page, "Rename…");
+    await page.waitForSelector(".rename-field");
+    await page.keyboard.press("Meta+a");
+    await page.keyboard.type("shots renamed");
+    await page.keyboard.press("Enter");
+    await until(page, () => [...document.querySelectorAll(".sidebar .agent-line1 + *, .sidebar .agent-name, .sidebar .name")].some((e) => e.innerText.trim() === "shots renamed") || document.querySelector(".sidebar").innerText.includes("shots renamed"), null, "the new name in the sidebar");
+    await page.locator(".sidebar").getByText("shots renamed", { exact: true }).first().click({ button: "right" });
+    await menu(page, "Rename…");
+    await page.waitForSelector(".rename-field");
+    await page.keyboard.press("Meta+a");
+    await page.keyboard.type("shots");
+    await page.keyboard.press("Enter");
+    await until(page, () => !document.querySelector(".sidebar").innerText.includes("shots renamed"), null, "the old name back");
+  });
+
+  await check("sidebar: pin and archive, then undo both", async () => {
+    const page = await open(`agent=${ID.bugs}`);
+    const rowOf = (name) => page.locator(".sidebar .agent-line1").filter({ hasText: name }).first();
+    await rowOf("modes").click({ button: "right" });
+    await menu(page, "Pin");
+    await until(page, () => /Pinned[\s\S]*modes/.test(document.querySelector(".sidebar").innerText), null, "modes under Pinned");
+    await rowOf("modes").click({ button: "right" });
+    await menu(page, "Unpin");
+    await until(page, () => !document.querySelector(".sidebar").innerText.includes("Pinned"), null, "Pinned gone");
+    await rowOf("modes").click({ button: "right" });
+    await menu(page, "Archive");
+    await until(page, () => /Archived\s*1/.test(document.querySelector(".sidebar").innerText), null, "one archived");
+    await page.locator(".sidebar").getByText("Archived", { exact: true }).first().click();
+    await rowOf("modes").click({ button: "right" });
+    await menu(page, "Unarchive");
+    await until(page, () => !/Archived\s*\d/.test(document.querySelector(".sidebar").innerText), null, "none archived");
+  });
+}
+
+async function threadMore() {
+  await check("thread: Stop asks am serve to interrupt the turn", async () => {
+    const page = await open(`agent=${ID.demo}`, { init: [fake("record"), fake("busy")], wait: '[aria-label="Stop the agent\'s turn"]' });
+    await click(page, '[aria-label="Stop the agent\'s turn"]');
+    await until(page, (id) => window.__requests.some((r) => r.type === "interrupt" && r.sessionId === id), ID.demo, "an interrupt for demo");
+  });
+
+  await check("thread: the picture viewer goes through the run with ← and →, and closes on Escape", async () => {
+    const id = await sessionId("pics");
+    const page = await open(`agent=${encodeURIComponent(id)}`, { wait: ".thumb" });
+    // From the keyboard, so the keyboard has somewhere to come back to in
+    // Safari, whose buttons don't take it when clicked.
+    await page.locator(".thumb").first().focus();
+    await page.keyboard.press("Enter");
+    const first = await until(page, () => { const c = document.querySelector(".lightbox-caption")?.innerText ?? ""; return document.querySelector(".lightbox img") && /1 of \d+/.test(c) && c; }, null, "the picture, captioned 1 of n");
+    await page.keyboard.press("ArrowRight");
+    await until(page, () => /2 of \d+/.test(document.querySelector(".lightbox-caption")?.innerText ?? ""), null, "→ shows the next");
+    await page.keyboard.press("ArrowLeft");
+    await until(page, () => /1 of \d+/.test(document.querySelector(".lightbox-caption")?.innerText ?? ""), null, "← goes back");
+    await page.keyboard.press("Escape");
+    await until(page, () => !document.querySelector(".lightbox") && document.activeElement?.classList.contains("thumb"), null, "closed, the keyboard back on the thumbnail");
+    expect(first.includes("of"), first);
+  });
+
+  await check("thread: / lists the agent's commands", async () => {
+    const id = await sessionId("ask");
+    const page = await open(`agent=${encodeURIComponent(id)}`, { wait: ".message-field" });
+    await click(page, ".message-field");
+    await page.keyboard.type("/");
+    await until(page, () => !!document.querySelector(".completion-list"), null, "a list of commands");
+    await page.keyboard.press("Escape");
+    await clearBox(page);
+  });
+
+  await check("thread: the mode picker offers the agent's modes and asks for the one chosen", async () => {
+    const id = await sessionId("modes");
+    const page = await open(`agent=${encodeURIComponent(id)}`, { init: [fake("record")], wait: ".message-field" });
+    const pill = page.locator('.composer-wrap [title="Switch the agent\'s mode"]').first();
+    await pill.click();
+    const items = await until(page, () => { const m = [...document.querySelectorAll(".page-menu-item")].map((e) => e.innerText.trim()); return m.length > 1 && m; }, null, "modes in the menu");
+    const other = items.find((m) => !m.startsWith("✓"));
+    await menu(page, other);
+    await until(page, () => window.__requests.some((r) => r.type === "set_mode"), null, "a set_mode request");
+  });
+}
+
+async function boardMore() {
+  await check("board: checks and missions (faked)", async () => {
+    const page = await open("", { init: [fake("board")], wait: ".board-card" });
+    await until(page, () => { const t = document.querySelector(".board")?.innerText ?? document.body.innerText; return t.includes("Ship transcript search on every app") && t.includes("All 214 tests pass") && t.includes("Something looks off"); }, null, "the mission and both checks");
+  });
+}
+
+async function editorMore() {
+  const folder = encodeURIComponent(DEMO_DIR);
+  await check("editor: New File and Rename in the tree reach the disk", async () => {
+    const made = `${DEMO_DIR}/docs/e2e-new.md`, moved = `${DEMO_DIR}/docs/e2e-renamed.md`;
+    try {
+      const page = await open(`view=editor&folder=${folder}`, { wait: ".tree-row-body" });
+      await page.locator(".tree-row-body").filter({ hasText: /^\s*docs\s*$/ }).first().click({ button: "right" });
+      await menu(page, "New File…");
+      await until(page, () => document.activeElement?.tagName === "INPUT", null, "a name to type");
+      await page.keyboard.type("e2e-new.md");
+      await page.keyboard.press("Enter");
+      for (let i = 0; i < 40 && !existsSync(made); i++) await sleep(250);
+      expect(existsSync(made), "no file made");
+      await page.locator(".tree-row-body").filter({ hasText: /^\s*e2e-new\.md\s*$/ }).first().click({ button: "right" });
+      await menu(page, "Rename…");
+      await until(page, () => document.activeElement?.tagName === "INPUT", null, "the name to edit");
+      await page.keyboard.press("Meta+a");
+      await page.keyboard.type("e2e-renamed.md");
+      await page.keyboard.press("Enter");
+      for (let i = 0; i < 40 && !existsSync(moved); i++) await sleep(250);
+      expect(existsSync(moved) && !existsSync(made), "not renamed on disk");
+    } finally {
+      for (const f of [made, moved]) if (existsSync(f)) unlinkSync(f);
+    }
+  });
+
+  await check("editor: Search in the folder finds and opens a match", async () => {
+    const page = await open(`view=editor&folder=${folder}&file=TODO.txt`, { wait: "iframe.monaco" });
+    await intoCode(page);
+    await page.keyboard.press("Meta+Shift+f");
+    await paletteReady(page);
+    await page.keyboard.type("License");
+    await until(page, () => (document.querySelector(".palette-layer")?.innerText ?? "").includes("README.md"), null, "a match in README.md", 15000);
+    await page.keyboard.press("Enter");
+    await until(page, () => [...document.querySelectorAll(".tab")].some((t) => t.innerText.includes("README.md") && t.classList.contains("active")), null, "README.md open");
+  });
+
+  await check("editor: split, and the Markdown preview", async () => {
+    const page = await open(`view=editor&folder=${folder}&file=README.md`, { wait: "iframe.monaco" });
+    await intoCode(page);
+    await page.keyboard.press("Meta+\\");
+    await until(page, () => { try { return document.querySelector("iframe.monaco").contentDocument.querySelectorAll(".monaco-editor").length >= 2; } catch { return false; } }, null, "two editors side by side");
+    await page.keyboard.press("Meta+Shift+v");
+    await until(page, () => (document.querySelector(".md-preview")?.innerText ?? "").length > 20, null, "the preview");
+  });
+}
+
+async function settingsMore() {
+  await check("settings: a note is added, then deleted", async () => {
+    // Notes an earlier run left, gone first.
+    for (const note of (await daemon({ type: "knowledge_list" })).notes ?? []) {
+      if (/e2e/i.test(note.title + note.body)) await daemon({ type: "knowledge_delete", note });
+    }
+    const page = await open("view=settings&page=knowledge", { size: [900, 700] });
+    await click(page, ".mac-button", "New note");
+    await page.locator(".note-title-field").fill("E2E note");
+    await page.locator(".note-editor textarea:not(.note-title-field)").first().fill("Written and removed by the e2e run.");
+    await click(page, ".mac-button", "Add note");
+    await until(page, () => [...document.querySelectorAll(".note-title")].some((e) => e.innerText === "E2E note"), null, "the note in the list");
+    await page.locator(".note-row").filter({ hasText: "E2E note" }).first().click();
+    await click(page, ".mac-button", "Delete");
+    await until(page, () => ![...document.querySelectorAll(".note-title")].some((e) => e.innerText === "E2E note"), null, "the note gone");
+  });
+
+  await check("settings: Languages lists the servers", async () => {
+    const page = await open("view=settings&page=languages", { size: [800, 700] });
+    await until(page, () => /TypeScript/.test(document.querySelector(".settings-page, .settings-scroll")?.innerText ?? ""), null, "TypeScript among them", 15000);
+  });
+
+  await check("settings: a Notifications switch is kept", async () => {
+    const page = await open("view=settings&page=notifications", { size: [800, 700] });
+    await page.waitForSelector(".settings-row button, .settings-row input");
+    const first = page.locator(".settings-row").filter({ has: page.locator(".mac-switch, [role=switch], input[type=checkbox]") }).first();
+    const title = await first.locator(".row-title").innerText();
+    const was = await first.locator(".mac-switch, [role=switch], input[type=checkbox]").first().getAttribute("aria-checked");
+    await first.locator(".mac-switch, [role=switch], input[type=checkbox]").first().click();
+    await page.reload();
+    const again = page.locator(".settings-row").filter({ has: page.locator(".row-title", { hasText: title }) }).first();
+    await again.waitFor();
+    const now = await again.locator(".mac-switch, [role=switch], input[type=checkbox]").first().getAttribute("aria-checked");
+    await again.locator(".mac-switch, [role=switch], input[type=checkbox]").first().click();
+    expect(now !== was, `${title} went back to ${now} after a reload`);
+  });
+}
+
+async function notify() {
+  await check("notifications: an agent asked to notify tells the user when its turn ends", async () => {
+    await context.grantPermissions(["notifications"], { origin: BASE });
+    const page = await open(`agent=${ID.demo}`, {
+      init: ["window.__notes = []; window.Notification = class { constructor(t, o) { window.__notes.push(t + ': ' + (o?.body ?? '')); } static permission = 'granted'; static requestPermission = async () => 'granted'; close() {} };"],
+    });
+    // While Agentman is on only it notifies, as on the Mac; an agent the user
+    // asked to hear from notifies for itself.
+    const row = page.locator(".sidebar .agent-line1").filter({ hasText: "bugs" }).first();
+    await row.click({ button: "right" });
+    await menu(page, "Notify Me About This Agent");
+    try {
+      await sleep(1000);
+      execFileSync(`${HERE}stop-hook.sh`, ["0b9d4e21-7c3a-4f6e-8d12-5a6b7c8d9e10", "bugs", "Fixed the flaky resize test."]);
+      await until(page, () => window.__notes.length > 0 && window.__notes, null, "a notification", 25000);
+    } finally {
+      await row.click({ button: "right" });
+      await menu(page, "Notify Me About This Agent");
+    }
+  });
+}
+
 // MARK: - Run
 
 const engines = which === "all" ? [["chromium", chromium], ["webkit", webkit]] : [[which, which === "webkit" ? webkit : chromium]];
@@ -644,12 +850,14 @@ for (const [index, [name, engine]] of engines.entries()) {
   // Order matters only at the end: ending "empty" and dropping the
   // connection come last, after the rest has used them.
   if (want("shell")) await shell();
-  if (want("board")) await board();
+  if (want("sidebar")) await sidebar();
+  if (want("board")) { await board(); await boardMore(); }
   if (want("usage")) await usage();
-  if (want("settings")) await settings();
-  if (want("editor")) await editor();
+  if (want("settings")) { await settings(); await settingsMore(); }
+  if (want("editor")) { await editor(); await editorMore(); }
+  if (want("notify")) await notify();
   if (want("newagent")) await newAgent();
-  if (want("thread")) await thread();
+  if (want("thread")) { await threadMore(); await thread(); }
   if (want("connection")) await connection();
   await browser.close();
 }
