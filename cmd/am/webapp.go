@@ -6,12 +6,14 @@ import (
 	"flag"
 	"fmt"
 	"html"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lenajeremy/agentman/internal/apphost"
@@ -27,6 +29,8 @@ import (
 //   GET /login?code=<code>                  the code for a session cookie
 //   GET /…                                  the app, to a signed-in browser
 //   POST /app/host/<name>                   what a page can't do (internal/apphost)
+//   GET /app/watch?root=<folder>            the editor's folder, its changes streamed
+//   GET /__editor/file?path=<picture>       a picture from the disk, for the editor
 
 // loginCode answers am web with a one-time code. Only the app token proves
 // the caller: a browser is never given it.
@@ -89,7 +93,7 @@ func (g *appGateway) host(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if g.gate.Allow(r) != nil && !g.web.Allow(r) {
+	if !g.signedIn(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -110,6 +114,77 @@ func (g *appGateway) host(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"result": result})
+}
+
+// signedIn says whether a request comes from the app: the desktop shell's
+// token, or the browser's session from the app's own page.
+func (g *appGateway) signedIn(r *http.Request) bool {
+	return g.gate.Allow(r) == nil || g.web.Allow(r)
+}
+
+// editorFile serves the editor a picture from the disk (its image viewer,
+// its Markdown preview), as the desktop shell's /__editor/file did.
+func (g *appGateway) editorFile(w http.ResponseWriter, r *http.Request) {
+	if !g.signedIn(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	apphost.ServeEditorFile(w, r)
+}
+
+// watch streams an editor tab's folder changes, as server-sent events,
+// for as long as the tab keeps the stream open: what the shell's watcher
+// told its windows ("agentman:editor-files").
+func (g *appGateway) watch(w http.ResponseWriter, r *http.Request) {
+	if !g.signedIn(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	root := r.URL.Query().Get("root")
+	if info, err := os.Stat(root); !filepath.IsAbs(root) || err != nil || !info.IsDir() {
+		http.Error(w, "no such folder", http.StatusNotFound)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming isn't possible here", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	var mu sync.Mutex
+	send := func(line string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if _, err := io.WriteString(w, line); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	}
+	if send(": watching\n\n") != nil {
+		return
+	}
+	// A comment now and then keeps the stream from looking idle.
+	go func() {
+		tick := time.NewTicker(25 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-tick.C:
+				_ = send(": still\n\n")
+			}
+		}
+	}()
+	apphost.Watch(r.Context(), root, func(changed apphost.FilesChanged) error {
+		data, err := json.Marshal(changed)
+		if err != nil {
+			return err
+		}
+		return send("data: " + string(data) + "\n\n")
+	})
 }
 
 // webappHostOK keeps DNS rebinding out: the app answers only to loopback.

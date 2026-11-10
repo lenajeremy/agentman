@@ -1,6 +1,7 @@
 // Package apphost is what the app's screens ask the computer for that a web
 // page can't do itself: whether a folder exists, a picked file's contents,
-// the home folder, the user's locale, and later the editor's disk. am serve
+// the home folder, the user's locale, the open panel's folders, and the
+// editor's disk (its files, git, search, the Trash and a folder watched). am serve
 // answers it for the web app at /app/host/<name> (cmd/am/webapp.go), under
 // the names the desktop shell's services had ("Files.Folder"), so the
 // screens call it the same way in either.
@@ -25,7 +26,7 @@ var ErrNoMethod = errors.New("no such host method")
 // Methods are what the screens may call, by name.
 func Methods() map[string]Method {
 	home := func([]json.RawMessage) (any, error) { return Home(), nil }
-	return map[string]Method{
+	methods := map[string]Method{
 		"Files.Folder": func(args []json.RawMessage) (any, error) {
 			var path string
 			if err := arg(args, 0, &path); err != nil {
@@ -73,6 +74,10 @@ func Methods() map[string]Method {
 		"Settings.Home":    home,
 		"EditorFiles.Home": home,
 	}
+	for name, method := range editorMethods() {
+		methods[name] = method
+	}
+	return methods
 }
 
 // Home is the user's home folder: agents start inside it, worktrees live in

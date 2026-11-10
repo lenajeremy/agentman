@@ -280,6 +280,8 @@ func runServe(ctx context.Context, args []string) error {
 	hookServer.Mount("/app/login-code", http.HandlerFunc(apps.loginCode))
 	hookServer.Mount("/login", http.HandlerFunc(apps.login))
 	hookServer.Mount("/app/host/", http.HandlerFunc(apps.host))
+	hookServer.Mount("/app/watch", http.HandlerFunc(apps.watch))
+	hookServer.Mount("/__editor/file", http.HandlerFunc(apps.editorFile))
 	hookServer.Mount("/", http.HandlerFunc(apps.page))
 	hookErrs := make(chan error, 1)
 	go func() { hookErrs <- hookServer.Serve(ctx, listener) }()

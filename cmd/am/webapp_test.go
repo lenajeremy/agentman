@@ -1,11 +1,19 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/lenajeremy/agentman/internal/apphost"
 )
 
 // am web's path into the browser: a code for the app token, the code for a
@@ -97,4 +105,75 @@ func TestTheHostCallsNeedASignedInApp(t *testing.T) {
 	if json.Unmarshal(rec.Body.Bytes(), &failed) != nil || failed.Error == "" {
 		t.Fatalf("a failing call: %s", rec.Body)
 	}
+}
+
+func TestTheEditorsPicturesAndWatchNeedASignedInApp(t *testing.T) {
+	g := newAppGateway("secret")
+	dir := t.TempDir()
+	png := filepath.Join(dir, "shot.png")
+	if err := os.WriteFile(png, []byte("\x89PNG\r\n\x1a\nrest"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(dir, "notes.txt")
+	_ = os.WriteFile(secret, []byte("private"), 0o644)
+	get := func(handler http.HandlerFunc, target string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, target, nil)
+		r.Host = "127.0.0.1:8788"
+		rec := httptest.NewRecorder()
+		handler(rec, r)
+		return rec
+	}
+	if rec := get(g.editorFile, "/__editor/file?path="+png); rec.Code != http.StatusForbidden {
+		t.Fatalf("a picture with no sign-in: %d", rec.Code)
+	}
+	if rec := get(g.editorFile, "/__editor/file?token=secret&path="+png); rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "image/png" {
+		t.Fatalf("a picture: %d %s", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if rec := get(g.editorFile, "/__editor/file?token=secret&path="+secret); rec.Code != http.StatusNotFound {
+		t.Fatalf("a file that isn't a picture: %d", rec.Code)
+	}
+	if rec := get(g.watch, "/app/watch?root="+dir); rec.Code != http.StatusForbidden {
+		t.Fatalf("a watch with no sign-in: %d", rec.Code)
+	}
+	if rec := get(g.watch, "/app/watch?token=secret&root="+filepath.Join(dir, "gone")); rec.Code != http.StatusNotFound {
+		t.Fatalf("a watch of no folder: %d", rec.Code)
+	}
+}
+
+func TestAWatchStreamsTheFolderChanges(t *testing.T) {
+	g := newAppGateway("secret")
+	dir := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(g.watch))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/app/watch?token=secret&root="+url.QueryEscape(dir), nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.Header.Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("Content-Type = %q", resp.Header.Get("Content-Type"))
+	}
+	lines := bufio.NewScanner(resp.Body)
+	lines.Scan() // ": watching", once the watcher has looked
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for lines.Scan() {
+		line := lines.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var changed apphost.FilesChanged
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &changed); err != nil {
+			t.Fatal(err)
+		}
+		if changed.Root != dir || len(changed.Changes) != 1 || changed.Changes[0].Type != 1 {
+			t.Fatalf("changes = %+v", changed)
+		}
+		return
+	}
+	t.Fatal("the stream ended with nothing told")
 }

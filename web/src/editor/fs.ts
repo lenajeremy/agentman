@@ -1,8 +1,11 @@
-// The editor's way to the disk: the shell's EditorFiles service
-// (crossplatform/editorfs.go), as the Mac app's editor uses FileManager and
-// git. Called by name, so the generated bindings stay as they are.
+// The editor's way to the disk: EditorFiles (internal/apphost's
+// editorfs.go), as the Mac app's editor uses FileManager and git; the
+// desktop shell's service, or am serve's /app/host/ in the browser. The
+// folder's changes come from the shell's watcher, or am serve's
+// /app/watch stream.
 
-import { Call, Clipboard, Events } from "@wailsio/runtime";
+import { Clipboard, Events } from "@wailsio/runtime";
+import { hostCall } from "../host";
 
 export interface Entry {
   path: string;
@@ -65,8 +68,7 @@ export interface SearchResults {
 export const inShell = location.protocol === "wails:" || location.hostname === "wails.localhost";
 
 function call<T>(method: string, ...args: unknown[]): Promise<T> {
-  if (!inShell) return Promise.reject(new Error("The editor needs the app's shell to reach the disk."));
-  return Call.ByName(`main.EditorFiles.${method}`, ...args) as Promise<T>;
+  return hostCall<T>(`EditorFiles.${method}`, ...args);
 }
 
 /** An error from Go, as the words an alert shows. */
@@ -103,9 +105,17 @@ export const files = {
   watch: (root: string) => call<void>("Watch", root).catch(() => undefined),
 };
 
-/** Files changed under a folder, from the shell's watcher. */
+/** Files changed under a folder, from the shell's watcher or, in the
+ *  browser, am serve's stream for this tab, which ends as the tab does. */
 export function onFilesChanged(root: string, handler: (changes: { path: string; type: number }[]) => void): () => void {
-  if (!inShell) return () => {};
+  if (!inShell) {
+    const stream = new EventSource(`/app/watch?root=${encodeURIComponent(root)}`);
+    stream.onmessage = (event) => {
+      const data = JSON.parse(event.data) as { root: string; changes: { path: string; type: number }[] };
+      if (data?.root === root) handler(data.changes);
+    };
+    return () => stream.close();
+  }
   return Events.On("agentman:editor-files", (event) => {
     const data = event.data as { root: string; changes: { path: string; type: number }[] };
     if (data?.root === root) handler(data.changes);
