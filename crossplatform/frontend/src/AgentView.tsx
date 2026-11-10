@@ -45,6 +45,13 @@ export function AgentView({ session, platform }: { session: Session; platform: s
   useEffect(() => {
     if (query.get("tab") === "terminal") shellCommand(session.cwd, { type: "ensure" });
   }, [session.cwd]);
+  // ?split=1: and a second shell beside it, as AGENTMAN_TEST_TERMINAL_SPLIT.
+  const splitAsked = useRef(false);
+  useEffect(() => {
+    if (query.get("split") !== "1" || splitAsked.current || shells.shells.length !== 1) return;
+    splitAsked.current = true;
+    shellCommand(session.cwd, { type: "split" });
+  }, [shells.shells.length, session.cwd]);
 
   // The detail area's size, as the Mac's GeometryReader reads it.
   const box = useRef<HTMLDivElement>(null);

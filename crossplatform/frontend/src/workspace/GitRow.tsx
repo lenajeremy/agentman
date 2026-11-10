@@ -23,7 +23,15 @@ interface Outcome {
   failed?: boolean;
 }
 
-const SYMBOL_ICON = { "checkmark.circle": CircleCheck, "arrow.up.circle": ArrowUpCircle, "arrow.triangle.pull": GitPullRequestArrow } as const;
+// For comparisons, as the Mac's AGENTMAN_TEST_GIT: ?git=sheet, running,
+// outcome or failed shows that state.
+const TEST = new URLSearchParams(location.search).get("git");
+const TEST_OUTCOME: Outcome | null =
+  TEST === "outcome" ? { text: "Committed 3f9c2a1, pushed to origin/main." }
+  : TEST === "failed" ? { text: "Committed 3f9c2a1, but the push was rejected: fetch first.", failed: true }
+  : null;
+
+const SYMBOL_ICON ={ "checkmark.circle": CircleCheck, "arrow.up.circle": ArrowUpCircle, "arrow.triangle.pull": GitPullRequestArrow } as const;
 
 export function GitRow({ session, state, changes, hidden, changed }: {
   session: Session;
@@ -33,9 +41,9 @@ export function GitRow({ session, state, changes, hidden, changed }: {
   /** Reads the branch and the changes again. */
   changed: () => void;
 }) {
-  const [committing, setCommitting] = useState<"commit" | "commitAndPush" | null>(null);
-  const [running, setRunning] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const [committing, setCommitting] = useState<"commit" | "commitAndPush" | null>(TEST === "sheet" ? "commitAndPush" : null);
+  const [running, setRunning] = useState<string | null>(TEST === "running" ? "Writing the message…" : null);
+  const [outcome, setOutcome] = useState<Outcome | null>(TEST_OUTCOME);
   const menuButton = useRef<HTMLButtonElement>(null);
   const action = quickAction(state);
   const idle = action.kind === "idle";
