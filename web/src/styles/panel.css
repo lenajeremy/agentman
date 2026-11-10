@@ -7,12 +7,18 @@
   --git-modified: #a8690f; --link: #0068da;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --code-keyword: #d19af5; --code-string: #7fd3a0; --code-number: #f2a867; --code-comment: #6e727b; --code-type: #8db8f5;
     --diff-add: #13281c; --diff-remove: #2c1517; --diff-hunk: #1a1f3d; --diff-add-word: #1f5134; --diff-remove-word: #5c2427;
     --git-modified: #e2b45c; --link: #419cff;
   }
 }
+/* The same, for Dark chosen in Settings. */
+:root[data-theme="dark"] {
+    --code-keyword: #d19af5; --code-string: #7fd3a0; --code-number: #f2a867; --code-comment: #6e727b; --code-type: #8db8f5;
+    --diff-add: #13281c; --diff-remove: #2c1517; --diff-hunk: #1a1f3d; --diff-add-word: #1f5134; --diff-remove-word: #5c2427;
+    --git-modified: #e2b45c; --link: #419cff;
+  }
 .tok-comment { color: var(--code-comment); }
 .tok-string { color: var(--code-string); }
 .tok-number { color: var(--code-number); }
@@ -188,9 +194,12 @@ mark.found.current { background: #ffb020; }
 .push-button:active:not(:disabled) { filter: brightness(0.94); }
 .push-button:disabled { opacity: 0.45; }
 @media (prefers-color-scheme: dark) {
-  .push-button { color: rgb(255 255 255 / 0.85); background: rgb(255 255 255 / 0.1); }
-  .push-button.default { background: #0088ff; color: #fff; }
+  :root:not([data-theme="light"]) .push-button { color: rgb(255 255 255 / 0.85); background: rgb(255 255 255 / 0.1); }
+  :root:not([data-theme="light"]) .push-button.default { background: #0088ff; color: #fff; }
 }
+/* The same, for Dark chosen in Settings. */
+:root[data-theme="dark"] .push-button { color: rgb(255 255 255 / 0.85); background: rgb(255 255 255 / 0.1); }
+:root[data-theme="dark"] .push-button.default { background: #0088ff; color: #fff; }
 .plain-button { color: var(--text-2); font-size: inherit; }
 .link-button { color: var(--link); font-size: inherit; }
 .checkbox { width: 14px; height: 14px; margin: 0; accent-color: #0a7aff; flex: none; }

@@ -35,5 +35,9 @@
 .agent-term-note { position: absolute; right: 16px; bottom: 12px; font-size: 12px; color: var(--muted); background: var(--fill); padding: 3px 10px; border-radius: 999px; }
 /* xterm leaves its viewport black below the last whole row: the page colour there. */
 .shell-host .xterm-viewport, .agent-term .xterm-viewport { background-color: #ffffff !important; }
-@media (prefers-color-scheme: dark) { .shell-host .xterm-viewport, .agent-term .xterm-viewport { background-color: #000000 !important; } }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .shell-host .xterm-viewport, :root:not([data-theme="light"]) .agent-term .xterm-viewport { background-color: #000000 !important; }
+}
+/* The same, for Dark chosen in Settings. */
+:root[data-theme="dark"] .shell-host .xterm-viewport, :root[data-theme="dark"] .agent-term .xterm-viewport { background-color: #000000 !important; }
 .shell-host { position: relative; }

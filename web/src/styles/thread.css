@@ -18,7 +18,7 @@
   --on-inverse: #ffffff;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --needs-you-edge: #4a2818;
     --link: #419cff;
     --mention: #7fccda;
@@ -27,6 +27,15 @@
     --on-inverse: #000000;
   }
 }
+/* The same, for Dark chosen in Settings. */
+:root[data-theme="dark"] {
+    --needs-you-edge: #4a2818;
+    --link: #419cff;
+    --mention: #7fccda;
+    --diff-add: #13281c; --diff-remove: #2c1517; --diff-hunk: #1a1f3d;
+    --loader-pink: #ff5c9a;
+    --on-inverse: #000000;
+  }
 
 /* Detail */
 .detail { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--paper); }

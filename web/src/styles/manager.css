@@ -11,8 +11,10 @@
   --am-placeholder: rgba(0, 0, 0, 0.75);
 }
 @media (prefers-color-scheme: dark) {
-  :root { --am-inverse: #f2f2f2; --am-on-inverse: #000000; --am-accent: #0a84ff; --am-placeholder: rgba(255, 255, 255, 0.75); }
+  :root:not([data-theme="light"]) { --am-inverse: #f2f2f2; --am-on-inverse: #000000; --am-accent: #0a84ff; --am-placeholder: rgba(255, 255, 255, 0.75); }
 }
+/* The same, for Dark chosen in Settings. */
+:root[data-theme="dark"] { --am-inverse: #f2f2f2; --am-on-inverse: #000000; --am-accent: #0a84ff; --am-placeholder: rgba(255, 255, 255, 0.75); }
 
 .am-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* Text drawn as macOS draws it in an app, with its stems darkened, not
@@ -243,9 +245,12 @@
 .inactive .am-push.prominent { background: #ebebeb; color: rgba(0, 0, 0, 0.85); }
 .am-push:disabled { opacity: 0.5; }
 @media (prefers-color-scheme: dark) {
-  .am-push, .inactive .am-push.prominent { background: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.85); }
-  .am-push.prominent { background: var(--am-accent); color: #fff; }
+  :root:not([data-theme="light"]) .am-push, :root:not([data-theme="light"]) .inactive .am-push.prominent { background: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.85); }
+  :root:not([data-theme="light"]) .am-push.prominent { background: var(--am-accent); color: #fff; }
 }
+/* The same, for Dark chosen in Settings. */
+:root[data-theme="dark"] .am-push, :root[data-theme="dark"] .inactive .am-push.prominent { background: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.85); }
+:root[data-theme="dark"] .am-push.prominent { background: var(--am-accent); color: #fff; }
 
 /* A suggested note: surface, radius 16, 18 around, 14 between. */
 .am-note { padding: 18px; display: flex; flex-direction: column; gap: 14px; background: var(--surface); border-radius: 16px; box-shadow: inset 0 0 0 1px var(--line); }
@@ -277,13 +282,20 @@
 .am-checkbox.disabled { color: var(--faint); }
 .am-checkbox.disabled input { opacity: 0.5; }
 @media (prefers-color-scheme: dark) {
-  .am-note-title-field { border-color: rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.06); box-shadow: none; }
-  .am-segmented { background: rgba(255, 255, 255, 0.08); }
-  .am-segmented button { color: rgba(255, 255, 255, 0.85); }
-  .am-segmented button.on { background: rgba(255, 255, 255, 0.22); }
-  .am-checkbox input { background: rgba(255, 255, 255, 0.16); }
-  .am-checkbox input:checked::after { background: #f2f2f2; }
+  :root:not([data-theme="light"]) .am-note-title-field { border-color: rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.06); box-shadow: none; }
+  :root:not([data-theme="light"]) .am-segmented { background: rgba(255, 255, 255, 0.08); }
+  :root:not([data-theme="light"]) .am-segmented button { color: rgba(255, 255, 255, 0.85); }
+  :root:not([data-theme="light"]) .am-segmented button.on { background: rgba(255, 255, 255, 0.22); }
+  :root:not([data-theme="light"]) .am-checkbox input { background: rgba(255, 255, 255, 0.16); }
+  :root:not([data-theme="light"]) .am-checkbox input:checked::after { background: #f2f2f2; }
 }
+/* The same, for Dark chosen in Settings. */
+:root[data-theme="dark"] .am-note-title-field { border-color: rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.06); box-shadow: none; }
+:root[data-theme="dark"] .am-segmented { background: rgba(255, 255, 255, 0.08); }
+:root[data-theme="dark"] .am-segmented button { color: rgba(255, 255, 255, 0.85); }
+:root[data-theme="dark"] .am-segmented button.on { background: rgba(255, 255, 255, 0.22); }
+:root[data-theme="dark"] .am-checkbox input { background: rgba(255, 255, 255, 0.16); }
+:root[data-theme="dark"] .am-checkbox input:checked::after { background: #f2f2f2; }
 .am-note-buttons { display: flex; justify-content: flex-end; gap: 10px; }
 
 /* The popup: 400 wide, 22 from the right, 64 from the top. */
@@ -309,7 +321,11 @@
 /* The scheduled button and its popover (360 wide, 18 around). */
 /* A push button with a Label, as macOS 26 draws one: a grey capsule. */
 .am-scheduled-button { display: inline-flex; align-items: center; gap: 8.5px; height: 23px; padding: 0 13px; border-radius: 999px; font-size: 12px; color: rgba(0, 0, 0, 0.85); background: #ebebeb; }
-@media (prefers-color-scheme: dark) { .am-scheduled-button { background: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.85); } }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .am-scheduled-button { background: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.85); }
+}
+/* The same, for Dark chosen in Settings. */
+:root[data-theme="dark"] .am-scheduled-button { background: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.85); }
 .am-popover { position: fixed; z-index: 50; width: 360px; background: var(--surface); border-radius: 12px; box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.15), 0 10px 30px rgba(0, 0, 0, 0.18); }
 .am-popover-arrow { position: absolute; top: -7px; width: 14px; height: 14px; margin-left: -7px; background: var(--surface); transform: rotate(45deg); border-radius: 2px; box-shadow: -0.5px -0.5px 0 0 rgba(0, 0, 0, 0.12); }
 .am-schedules { position: relative; padding: 18px; display: flex; flex-direction: column; gap: 14px; }

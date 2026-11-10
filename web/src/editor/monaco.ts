@@ -5,6 +5,7 @@
 // follows the disk. The page holds the live text and reports every edit, so
 // a document's text is always what a save writes.
 
+import { isDark, onAppearance } from "../terminal/theme";
 import { daemon } from "../daemon";
 import { editorTheme } from "../editorTheme";
 import { popupMenu, type MenuEntry } from "../thread/menu";
@@ -46,16 +47,17 @@ export class MonacoBridge implements MonacoLike {
   private languages = 0;
   private watching = 0;
   private stopWatching: (() => void) | null = null;
-  private darkQuery = matchMedia("(prefers-color-scheme: dark)");
+  // Light or dark as the app is: the Appearance setting, else the computer.
+  private stopAppearance: () => void;
 
   constructor(private readonly store: EditorStore) {
     window.addEventListener("message", this.onMessage);
-    this.darkQuery.addEventListener("change", this.sendTheme);
+    this.stopAppearance = onAppearance(this.sendTheme);
   }
 
   dispose() {
     window.removeEventListener("message", this.onMessage);
-    this.darkQuery.removeEventListener("change", this.sendTheme);
+    this.stopAppearance();
     window.clearTimeout(this.languages);
     window.clearInterval(this.watching);
     this.stopWatching?.();
@@ -83,7 +85,7 @@ export class MonacoBridge implements MonacoLike {
 
   private sendTheme = () => {
     if (!this.ready) return;
-    void this.call("configure", { theme: editorTheme(this.darkQuery.matches) });
+    void this.call("configure", { theme: editorTheme(isDark()) });
   };
 
   // MARK: - Keeping the page in step

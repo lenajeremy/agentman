@@ -19,7 +19,7 @@
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --paper: #000000; --sidebar: #050505; --surface: #0d0d0d; --fill: #202020; --fill-strong: #303030; --line: #242424;
     --tool-card: #0d0d0d; --tool-edge: #202020; --tool-well: #101010;
     --text: #f2f2f2; --text-2: #d0d0d0; --muted: #a0a0a0; --faint: #737373;
@@ -30,6 +30,17 @@
     color-scheme: dark;
   }
 }
+/* The same, for Dark chosen in Settings. */
+:root[data-theme="dark"] {
+    --paper: #000000; --sidebar: #050505; --surface: #0d0d0d; --fill: #202020; --fill-strong: #303030; --line: #242424;
+    --tool-card: #0d0d0d; --tool-edge: #202020; --tool-well: #101010;
+    --text: #f2f2f2; --text-2: #d0d0d0; --muted: #a0a0a0; --faint: #737373;
+    --working: #578cff; --working-text: #9daaff; --working-wash: #1a1f3d;
+    --needs-you: #ff7d45; --needs-you-text: #ff9a6c; --needs-you-wash: #2e1b12;
+    --ok: #2bc784; --error: #ff6b70; --error-text: #ff8a8e; --error-wash: #2c1517;
+    --primary: 255 255 255;
+    color-scheme: dark;
+  }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
