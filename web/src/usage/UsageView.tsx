@@ -21,7 +21,7 @@ import { AgentMark, ChromeButton } from "../ui";
 import "../styles/usage.css";
 
 const ESTIMATE = "What these tokens would cost through each provider's API. A subscription like Claude Max doesn't bill per token.";
-const LIMITS_FOOTNOTE = "Read from Claude Code, Codex and Antigravity on this computer, as their own /usage and /status show. Other agents don't report plan limits.";
+export const LIMITS_FOOTNOTE = "Read from Claude Code, Codex and Antigravity on this computer, as their own /usage and /status show. Other agents don't report plan limits.";
 const LAST_TURN_HELP = "Codex's shared daemon isn't running, so these are the numbers Codex wrote down with its last reply.";
 const PACE_HELP: Record<Pace, string> = {
   ahead: "Spending faster than the window passes",
@@ -43,7 +43,7 @@ export function agentTint(kind: string): string {
   return `light-dark(${light}, ${dark})`;
 }
 
-async function readUsage(days: number): Promise<Usage> {
+export async function readUsage(days: number): Promise<Usage> {
   const reply = await daemon.request({ type: "usage", days }, 120_000);
   if (reply.type === "error") {
     const message = reply.error ?? "";
@@ -53,7 +53,7 @@ async function readUsage(days: number): Promise<Usage> {
   return reply.usage;
 }
 
-async function readLimits(force: boolean): Promise<Limits> {
+export async function readLimits(force: boolean): Promise<Limits> {
   const reply = await daemon.request({ type: "limits", ...(force ? { force: true } : {}) }, 60_000);
   if (reply.type === "error") {
     const message = reply.error ?? "";
@@ -518,7 +518,7 @@ function BreakdownTable({ usage, metric, breakdown, setBreakdown, unit }: {
 /** What is left of each agent's plan, as T3 Code's Limits tab shows it. The
  *  numbers are each agent's own: Claude Code's /usage, Codex's /status,
  *  Antigravity's /usage. */
-function LimitsPage({ limits }: { limits: Limits }) {
+export function LimitsPage({ limits }: { limits: Limits }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);

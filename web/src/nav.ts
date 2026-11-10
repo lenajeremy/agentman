@@ -6,6 +6,8 @@
 import { setBoardChatOpen } from "./manager/store";
 import { useSyncExternalStore } from "react";
 import { onOpenLink, openEditor, openSettings } from "./host";
+import { showLastAway } from "./away/away";
+import { setShell } from "./shell/state";
 
 export type Route =
   | { kind: "agentman" }
@@ -83,6 +85,14 @@ export function openLink(link: string) {
     case "usage":
       openUsage();
       break;
+    case "away":
+      showLastAway();
+      break;
+    // agentman://filter/<state>, or /all: the sidebar's filter.
+    case "filter":
+      if (parts[1] === "all") setShell({ stateFilter: null, folderFilter: null });
+      else if (parts[1] === "waiting_input" || parts[1] === "busy" || parts[1] === "idle") setShell({ stateFilter: parts[1] });
+      break;
     case "terminal": {
       const folder = url.searchParams.get("folder");
       if (folder) void openEditor({ folder, terminal: true });
@@ -95,7 +105,7 @@ export function openLink(link: string) {
     }
     case "settings": {
       // A page it has, else the last one shown.
-      const pages = ["general", "notifications", "permissions", "personality", "knowledge", "keys", "languages"];
+      const pages = ["general", "notifications", "devices", "pair", "permissions", "personality", "knowledge", "keys", "languages"];
       void openSettings(pages.includes(parts[1] ?? "") ? parts[1] : "");
       break;
     }

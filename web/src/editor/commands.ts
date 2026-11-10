@@ -18,7 +18,7 @@ export type Command =
   | "goToDefinition" | "findReferences" | "renameSymbol" | "formatDocument" | "goToSymbol" | "nextProblem"
   | "commentLines" | "indentLines" | "outdentLines"
   | "toggleVim" | "biggerText" | "smallerText" | "actualSize"
-  | "closeTab";
+  | "closeTab" | "palette";
 
 const MONACO: Partial<Record<Command, string>> = {
   goToDefinition: "editor.action.revealDefinition",
@@ -114,6 +114,11 @@ export async function runCommand(store: EditorStore, command: Command) {
     case "actualSize":
       setPref("editorFontSize", 14);
       break;
+    case "palette":
+      // ⌘K over this editor, not the main window.
+      store.showPalette = true;
+      store.changed();
+      break;
     case "closeTab": {
       // An agent's Diff or History in front closes first.
       if (store.workspaceTab) {
@@ -179,6 +184,7 @@ export function commandFor(e: Keys): Command | null {
     case "-": return "smallerText";
     case "0": return "actualSize";
     case "w": return "closeTab";
+    case "k": return "palette";
     default: return null;
   }
 }

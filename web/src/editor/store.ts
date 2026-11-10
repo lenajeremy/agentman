@@ -143,6 +143,9 @@ export class EditorStore {
   changesSession: string | null = null;
   workspaceTabs: WorkspaceTab[] = [];
   workspaceTab: WorkspaceTab | null = null;
+  /** ⌘K over this editor, and the status bar's Usage popover. */
+  showPalette = false;
+  showUsage = false;
   marked = new Set<string>();
   treeClipboard: TreeClipboard | null = null;
   creatingIn: string | null = null;

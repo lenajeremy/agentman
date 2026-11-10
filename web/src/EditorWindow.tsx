@@ -14,6 +14,8 @@ import { commandFor, onMenuCommand, runCommand } from "./editor/commands";
 import { files, inShell } from "./editor/fs";
 import { MonacoBridge } from "./editor/monaco";
 import { GoToFile, GoToText } from "./editor/Palette";
+import { EditorCommandPalette } from "./palette/CommandPalette";
+import { UsagePopover } from "./usage/UsagePopover";
 import { StatusBar } from "./editor/StatusBar";
 import { EditorStore, useEditor, type WorkspaceTab } from "./editor/store";
 import { DiffPanel } from "./panel/DiffPanel";
@@ -140,6 +142,8 @@ function FolderEditor({ folder }: { folder: string }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const command = commandFor(e);
+      // ⌘K in a terminal clears it, as it does everywhere a shell shows.
+      if (command === "palette" && (e.target as HTMLElement | null)?.closest?.(".xterm")) return;
       if (store.treeFocused && !command) {
         const mod = /Mac/.test(navigator.platform) ? e.metaKey : e.ctrlKey;
         if (mod && !e.altKey && e.key.toLowerCase() === "z") {
@@ -273,6 +277,15 @@ function FolderEditor({ folder }: { folder: string }) {
         </div>
       </div>
       <EditorAlerts store={store} />
+      <EditorCommandPalette store={store} />
+      {store.showUsage && (
+        <UsagePopover
+          close={() => {
+            store.showUsage = false;
+            store.changed();
+          }}
+        />
+      )}
     </div>
   );
 }

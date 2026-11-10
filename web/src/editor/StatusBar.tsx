@@ -2,7 +2,7 @@
 // ProblemCount and LanguageLabel): branch and changes on the left; the
 // cursor, the file's settings and its language server on the right.
 
-import { CircleX, GitBranch, TriangleAlert } from "lucide-react";
+import { ChartSpline, CircleX, GitBranch, TriangleAlert } from "lucide-react";
 import { Icon } from "../ui";
 import type { EditorDocument } from "./document";
 import type { EditorStore } from "./store";
@@ -22,6 +22,18 @@ export function StatusBar({ store }: { store: EditorStore }) {
       )}
       {changed > 0 && <span>{changed} changed</span>}
       <span className="status-spacer" />
+      {/* What the agents spent and what's left of each plan, over the editor. */}
+      <button
+        className={`status-usage ${store.showUsage ? "open" : ""}`}
+        title="What your agents spent, and what's left of each plan"
+        onClick={() => {
+          store.showUsage = !store.showUsage;
+          store.changed();
+        }}
+      >
+        <Icon icon={ChartSpline} sf="chart.xyaxis.line" size={11} />
+        <span>Usage</span>
+      </button>
       {document && (
         <>
           {document.kind === "text" && (
