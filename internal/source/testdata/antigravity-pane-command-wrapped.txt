@@ -1,0 +1,45 @@
+
+? Which size?
+> large
+? Which fruits?
+> apple, cherry
+? Which colour?
+> red
+
+  Size: large | Fruits: apple, cherry | Colour: red
+
+────────────────────────────────────────────────────────────
+> Run the shell command: echo amend-check   in this folder, then tell me what it printed.
+
+● Ran (echo amend-check) (ctrl+o to expand)
+
+  It printed amend-check.
+
+────────────────────────────────────────────────────────────
+> Run this exact shell command, as one command with its line breaks kept: python3 -c "import sys; print(1)"
+  followed on a new line by: echo
+  second-line-of-a-long-command-that-goes-on-and-on-and-on-and-on-to-wrap-past-the-edge-of-the-terminal-windo
+  w-for-sure
+
+○ Thought for 10.4s (The request is to execute two shell commands sequentially, with the second command o...)
+● Ran (python3 -c "import sys; print(1)" echo second-line-of-a-long-command-that-goe...) (ctrl+o to expand)
+
+Command
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Requesting permission for:
+   python3 -c "import sys; print(1)"
+   echo
+second-line-of-a-long-command-that-goes-on-and-on-and-on-and-on-to-wrap-past-the-edge-of-the-terminal-wi
+ndow-for-sure
+
+Run this command?
+> 1. Yes, run command
+  2. Yes, and always allow in this conversation for commands that start with 'python3 -c "import sys;
+print(1)"'
+  3. Yes, and always allow for commands that start with 'python3 -c "import sys; print(1)"' (Persist to
+settings.json)
+  4. No, cancel
+
+  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command
+esc to cancel                                                                            Gemini 4 Argon · high

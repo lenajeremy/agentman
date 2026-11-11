@@ -70,7 +70,7 @@ func (s *AntigravitySource) Answer(ctx context.Context, sessionID string, answer
 	if shown == nil || answer.QuestionID == "" || answer.QuestionID != shown.ID {
 		return errors.New("source: that question is no longer current; refresh the session")
 	}
-	current, form, err := s.currentForm(ctx, session.tmuxName, shown)
+	current, form, err := s.currentForm(ctx, session.tmuxName, session.transcript, shown)
 	if err != nil {
 		return err
 	}
@@ -123,7 +123,7 @@ func (s *AntigravitySource) MoveQuestion(ctx context.Context, sessionID, questio
 	if shown == nil || questionID == "" || questionID != shown.ID {
 		return errors.New("source: that question is no longer current; refresh the session")
 	}
-	_, form, err := s.currentForm(ctx, session.tmuxName, shown)
+	_, form, err := s.currentForm(ctx, session.tmuxName, session.transcript, shown)
 	if err != nil {
 		return err
 	}
@@ -172,13 +172,16 @@ func antigravityQuestion(found *question.Question, form question.AntigravityForm
 // currentForm reads the pane and checks it still shows the question the phone
 // was answering.
 func (s *AntigravitySource) currentForm(
-	ctx context.Context, name string, shown *protocol.Question,
+	ctx context.Context, name, transcript string, shown *protocol.Question,
 ) (*question.Question, question.AntigravityForm, error) {
 	pane, err := s.capturePane(ctx, name)
 	if err != nil {
 		return nil, question.AntigravityForm{}, fmt.Errorf("source: could not inspect the question: %w", err)
 	}
 	current, form := question.DetectAntigravityForm(pane)
+	// Read as the app was shown it, the command whole, or it would never
+	// match.
+	s.withFullCommand(transcript, current, form)
 	if current == nil || !sameQuestion(shown, protocolQuestion(current)) {
 		return nil, form, errors.New("source: that question is no longer on screen; refresh the session")
 	}

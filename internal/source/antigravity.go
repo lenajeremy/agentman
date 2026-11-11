@@ -89,7 +89,10 @@ type AntigravitySource struct {
 	cacheMu sync.Mutex
 	states  map[string]antigravityStateEntry
 	names   map[string]string
-	titles  map[string]antigravityTitle
+	// commands is the run_command call each transcript waits on, for an
+	// approval agy shows shortened (antigravity_command.go).
+	commands map[string]antigravityCommandEntry
+	titles   map[string]antigravityTitle
 
 	lsofMu sync.Mutex
 	lsof   antigravityLsofAnswer
@@ -114,6 +117,12 @@ type AntigravitySource struct {
 
 // antigravityStateEntry caches the state a transcript's last line implies,
 // keyed by the file's size and mtime so an unchanged file is never re-read.
+type antigravityCommandEntry struct {
+	size    int64
+	mtime   time.Time
+	command string
+}
+
 type antigravityStateEntry struct {
 	size  int64
 	mtime time.Time
@@ -267,7 +276,7 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 		var footer antigravityFooter
 		if tmuxName != "" {
 			session.Inject = protocol.InjectTmux
-			footer = s.applyPane(ctx, &session, tmuxName)
+			footer = s.applyPane(ctx, &session, tmuxName, transcript)
 			if footer.queued && process.log != "" {
 				if text, ok := s.logTail(process.log); ok {
 					session.Queued = antigravityQueued(text, session.Queued)
@@ -315,7 +324,8 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 			State: protocol.StateIdle, Inject: protocol.InjectTmux, Model: s.defaultModel(),
 			StartedAt: started, LastActivityAt: started, AgentPID: pane.PanePID,
 		}
-		footer := s.applyPane(ctx, &session, pane.Name)
+		// No conversation known yet: the screen is all there is.
+		footer := s.applyPane(ctx, &session, pane.Name, "")
 		s.offerSwitches(&session, footer)
 		found = append(found, session)
 		next[id] = antigravitySession{meta: session, tmuxName: pane.Name, footer: footer}
@@ -555,8 +565,11 @@ func parseAntigravityFooter(lines []string) antigravityFooter {
 // applyPane refines a session from its terminal. agy writes a step only once
 // it completes, so a reply still being generated looks, on disk, exactly like
 // a turn that has not started — and a permission prompt is not on disk at all.
+//
+// transcript is the conversation's, when it is known: a command agy shortens
+// on screen is shown whole from it (see withFullCommand).
 func (s *AntigravitySource) applyPane(
-	ctx context.Context, session *protocol.Session, tmuxName string,
+	ctx context.Context, session *protocol.Session, tmuxName, transcript string,
 ) antigravityFooter {
 	capture := s.capturePane
 	if capture == nil {
@@ -572,6 +585,7 @@ func (s *AntigravitySource) applyPane(
 		session.Model = footer.model + " (" + footer.effort + ")"
 	}
 	if found, form := question.DetectAntigravityForm(pane); found != nil {
+		s.withFullCommand(transcript, found, form)
 		session.Question = antigravityQuestion(found, form)
 		session.State = protocol.StateWaitingInput
 		return footer
@@ -839,6 +853,11 @@ func (s *AntigravitySource) forgetCaches(live map[string]antigravitySession) {
 	for path := range s.names {
 		if !keep[path] {
 			delete(s.names, path)
+		}
+	}
+	for path := range s.commands {
+		if !keep[path] {
+			delete(s.commands, path)
 		}
 	}
 	for conversation := range s.titles {
@@ -1165,6 +1184,7 @@ func (s *AntigravitySource) CurrentQuestion(ctx context.Context, sessionID strin
 	if found == nil {
 		return nil, nil
 	}
+	s.withFullCommand(session.transcript, found, form)
 	return antigravityQuestion(found, form), nil
 }
 
