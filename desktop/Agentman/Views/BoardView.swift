@@ -842,7 +842,9 @@ private struct BoardCard: View {
             .environment(\.compactChoices, true)
             .environment(\.roomyChoices, true)
             .id(question.id ?? question.prompt)
-            .padding(.horizontal, -5)
+            // In New the choices are buttons: in line with the card's words,
+            // clear of the colour strip down its edge.
+            .padding(.horizontal, Look.site ? 0 : -5)
         } else if let card {
             line(card.title, lines: 3)
             if let question = card.question {
@@ -852,7 +854,7 @@ private struct BoardCard: View {
                 .environment(\.compactChoices, true)
                 .environment(\.roomyChoices, true)
                 .id(card.id)
-                .padding(.horizontal, -5)
+                .padding(.horizontal, Look.site ? 0 : -5)
             } else {
                 BoardReply(placeholder: "Reply to Agentman") { text in
                     await store.manager.reply(to: card, with: QuestionReply(text: text)) == nil
@@ -1361,15 +1363,21 @@ private struct BoardReply: View {
 extension View {
     /// A Board card in New: calm, an ink edge on white; loud only when it
     /// needs you, cream with a heavier edge on the site's orange shadow. The
-    /// folder or project colour, if one is chosen, is a bar down its edge.
+    /// folder or project colour, if one is chosen, is a strip inside its
+    /// left edge.
     func siteCard(needsYou: Bool, tint: Color?) -> some View {
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
         return background {
             shape.hardShadowFill(needsYou ? Palette.bubble : Palette.surface, shadow: Palette.flood, depth: needsYou ? 4 : 0)
         }
-        .overlay(alignment: .leading) {
+        .overlay {
+            // Inside the card: its own shape, kept to a strip down the left
+            // edge, so the strip follows the rounded corners and the ink
+            // edge is drawn over it.
             if let tint {
-                Rectangle().fill(tint).frame(width: 4).clipShape(shape).allowsHitTesting(false)
+                shape.fill(tint)
+                    .mask(alignment: .leading) { Rectangle().frame(width: 6) }
+                    .allowsHitTesting(false)
             }
         }
         .overlay(shape.strokeBorder(Palette.edge, lineWidth: needsYou ? 2 : Palette.edgeWidth))
