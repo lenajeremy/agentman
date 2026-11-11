@@ -1049,7 +1049,7 @@ func (d *Daemon) HandleFrom(
 		return manager.Handle(ctx, req)
 	}
 	if err := validateRequest(req); err != nil {
-		if req.Type == protocol.ReqSendMessage || req.Type == protocol.ReqAnswer || req.Type == protocol.ReqMoveQuestion ||
+		if req.Type == protocol.ReqSendMessage || req.Type == protocol.ReqAnswer || req.Type == protocol.ReqMoveQuestion || req.Type == protocol.ReqCloseQuestion ||
 			req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqReviewArtifact ||
 			req.Type == protocol.ReqSetMode || req.Type == protocol.ReqSetModel ||
 			req.Type == protocol.ReqSendQueued {
@@ -1301,6 +1301,18 @@ func (d *Daemon) HandleFrom(
 			ClientID: req.ClientID, Status: protocol.StatusDelivered,
 		}
 
+	case protocol.ReqCloseQuestion:
+		if err := d.registry.CloseQuestion(ctx, req.SessionID, req.QuestionID); err != nil {
+			return protocol.Event{
+				Type: protocol.EvtSendResult, SessionID: req.SessionID,
+				ClientID: req.ClientID, Status: protocol.StatusFailed, Error: err.Error(),
+			}
+		}
+		return protocol.Event{
+			Type: protocol.EvtSendResult, SessionID: req.SessionID,
+			ClientID: req.ClientID, Status: protocol.StatusDelivered,
+		}
+
 	case protocol.ReqInterrupt:
 		if err := d.registry.Interrupt(ctx, req.SessionID); err != nil {
 			return protocol.Event{
@@ -1400,7 +1412,7 @@ func (d *Daemon) HandleFrom(
 }
 
 func requestMutatesSession(kind protocol.RequestType) bool {
-	return kind == protocol.ReqSendMessage || kind == protocol.ReqAnswer || kind == protocol.ReqMoveQuestion ||
+	return kind == protocol.ReqSendMessage || kind == protocol.ReqAnswer || kind == protocol.ReqMoveQuestion || kind == protocol.ReqCloseQuestion ||
 		kind == protocol.ReqInterrupt || kind == protocol.ReqStartSession ||
 		// Resume and end start or stop a process. Run concurrently, two resumes
 		// of one session each launched their own.
@@ -1468,7 +1480,7 @@ const wireTruncation = "\n\n[output truncated by agentman]"
 func validateRequest(req protocol.Request) error {
 	requiresSession := req.Type == protocol.ReqSubscribe || req.Type == protocol.ReqUnsubscribe ||
 		req.Type == protocol.ReqFetchMessages || req.Type == protocol.ReqSendMessage ||
-		req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqAnswer || req.Type == protocol.ReqMoveQuestion ||
+		req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqAnswer || req.Type == protocol.ReqMoveQuestion || req.Type == protocol.ReqCloseQuestion ||
 		req.Type == protocol.ReqSendQueued ||
 		req.Type == protocol.ReqOpenServer || req.Type == protocol.ReqCloseServer ||
 		req.Type == protocol.ReqStopServer ||
@@ -1601,6 +1613,11 @@ func validateRequest(req protocol.Request) error {
 	case protocol.ReqMoveQuestion:
 		if req.QuestionID == "" || req.Step < 1 || req.Step > 16 {
 			return fmt.Errorf("daemon: invalid question move")
+		}
+		return nil
+	case protocol.ReqCloseQuestion:
+		if req.QuestionID == "" {
+			return fmt.Errorf("daemon: invalid question close")
 		}
 		return nil
 	case protocol.ReqAnswer:

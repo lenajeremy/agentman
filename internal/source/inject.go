@@ -367,31 +367,42 @@ func (s *ClaudeSource) capture(ctx context.Context, tmuxName string) (string, er
 	return capture(ctx, tmuxName)
 }
 
-// MoveQuestion goes to another question of the multi-question form a Claude
-// session shows, without answering the one on screen: step is the one to go
-// to, from 1, and one past the last is the form's review. The form must
-// still be the one the app saw, and which question it is on must be known,
-// or the keys could land somewhere else.
-func (s *ClaudeSource) MoveQuestion(ctx context.Context, sessionID, questionID string, step int) error {
+// questionOnScreen is the question a Claude session shows, re-read from its
+// pane, when it is still the one the app saw (questionID): what a key
+// pressed on the app's behalf is checked against, so it can't land on
+// something else.
+func (s *ClaudeSource) questionOnScreen(ctx context.Context, sessionID, questionID string) (claudeSession, *question.Question, error) {
 	s.mu.RLock()
 	session, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
 	if !ok {
-		return fmt.Errorf("source: unknown claude session %q", sessionID)
+		return session, nil, fmt.Errorf("source: unknown claude session %q", sessionID)
 	}
 	if session.tmuxName == "" {
-		return fmt.Errorf("source: only sessions started with `am claude` can be moved through")
+		return session, nil, fmt.Errorf("source: only sessions started with `am claude` can be answered")
 	}
 	if session.meta.Question == nil || questionID == "" || questionID != session.meta.Question.ID {
-		return fmt.Errorf("source: that question is no longer current; refresh the session")
+		return session, nil, fmt.Errorf("source: that question is no longer current; refresh the session")
 	}
 	current, err := s.captureQuestion(ctx, session.tmuxName)
 	if err != nil {
-		return fmt.Errorf("source: that question is no longer on screen; refresh the session")
+		return session, nil, fmt.Errorf("source: that question is no longer on screen; refresh the session")
 	}
 	s.enrichClaudeQuestion(sessionID, session.transcript, current)
 	if !sameQuestion(session.meta.Question, protocolQuestion(current)) {
-		return fmt.Errorf("source: that question is no longer on screen; refresh the session")
+		return session, nil, fmt.Errorf("source: that question is no longer on screen; refresh the session")
+	}
+	return session, current, nil
+}
+
+// MoveQuestion goes to another question of the multi-question form a Claude
+// session shows, without answering the one on screen: step is the one to go
+// to, from 1, and one past the last is the form's review. Which question the
+// form is on must be known, or the keys could go the wrong way.
+func (s *ClaudeSource) MoveQuestion(ctx context.Context, sessionID, questionID string, step int) error {
+	session, current, err := s.questionOnScreen(ctx, sessionID, questionID)
+	if err != nil {
+		return err
 	}
 	if len(current.Steps) < 2 || current.Step == 0 {
 		return fmt.Errorf("source: this form has no other questions to move to")
@@ -407,6 +418,24 @@ func (s *ClaudeSource) MoveQuestion(ctx context.Context, sessionID, questionID s
 		move = tmux.MoveQuestion
 	}
 	return move(ctx, session.tmuxName, step-current.Step)
+}
+
+// CloseQuestion closes a question the agent asked without answering it, as
+// Esc does in Claude Code: the agent is told it was declined and waits for a
+// message. Not a permission prompt, where Esc is a no.
+func (s *ClaudeSource) CloseQuestion(ctx context.Context, sessionID, questionID string) error {
+	session, current, err := s.questionOnScreen(ctx, sessionID, questionID)
+	if err != nil {
+		return err
+	}
+	if !current.Closable {
+		return fmt.Errorf("source: only a question the agent asked can be closed; answer this one")
+	}
+	press := s.closeQuestion
+	if press == nil {
+		press = tmux.Escape
+	}
+	return press(ctx, session.tmuxName)
 }
 
 func (s *ClaudeSource) captureQuestion(ctx context.Context, tmuxName string) (*question.Question, error) {
@@ -442,12 +471,14 @@ func protocolQuestion(found *question.Question) *protocol.Question {
 		Multiple: found.Multiple,
 		Custom:   found.Custom,
 		Step:     found.Step,
+		Closable: found.Closable,
 	}
 	for _, step := range found.Steps {
 		question.Steps = append(question.Steps, protocol.QuestionStep{Title: step.Title, Answered: step.Answered})
 	}
 	// The steps are left out of its id: moving between questions, or one
-	// being answered, is not this question changing.
+	// being answered, is not this question changing. Closable is read off
+	// the same screen, so it is left out too.
 	question.ID = terminalQuestionID(question)
 	return question
 }

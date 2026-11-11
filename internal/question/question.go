@@ -43,6 +43,10 @@ type Question struct {
 	// does not mark the current tab; the source finds it in the transcript).
 	Steps []Step `json:"steps,omitempty"`
 	Step  int    `json:"step,omitempty"`
+	// Closable means Esc closes it without an answer, which for a question
+	// the agent asked (not a permission prompt, where Esc says no) leaves the
+	// agent waiting for a message instead.
+	Closable bool `json:"-"`
 
 	// The remaining fields describe Claude's terminal layout. They are used to
 	// complete a multi-select form atomically, but are not part of the wire

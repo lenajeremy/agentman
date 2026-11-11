@@ -56,8 +56,10 @@ type ClaudeSource struct {
 	// closeDialog presses Esc on a dialog Claude Code has open, and is
 	// injectable for the same reason. See question.Question.Dialog.
 	closeDialog func(ctx context.Context, name string) error
-	// moveQuestion presses ← or → in a multi-question form; injectable too.
-	moveQuestion func(ctx context.Context, name string, distance int) error
+	// moveQuestion presses ← or → in a multi-question form, and
+	// closeQuestion Esc on a question; injectable too.
+	moveQuestion  func(ctx context.Context, name string, distance int) error
+	closeQuestion func(ctx context.Context, name string) error
 	// processArgs reads full command lines, which the process snapshot does
 	// not carry; infra remembers what they said. See withoutInfra.
 	processArgs func(context.Context, []int) map[int]string
@@ -142,6 +144,7 @@ func NewClaudeSource(home string) (*ClaudeSource, error) {
 		answerWithNote:    tmux.AnswerWithNote,
 		closeDialog:       tmux.Escape,
 		moveQuestion:      tmux.MoveQuestion,
+		closeQuestion:     tmux.Escape,
 		switcher:          newPaneDriver(),
 		processArgs:       claudeProcessArgs,
 		infra:             map[claudeProcessKey]bool{},

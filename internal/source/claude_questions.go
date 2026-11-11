@@ -71,7 +71,9 @@ func (s *ClaudeSource) enrichClaudeQuestion(
 		s.questionSpecs[sessionID] = cached
 		s.questionMu.Unlock()
 	}
-	applyClaudeQuestionSpecs(detected, cached.specs)
+	asked := applyClaudeQuestionSpecs(detected, cached.specs)
+	// The agent's own question, or the review of its form: Esc closes it.
+	detected.Closable = asked || (len(detected.Steps) > 1 && detected.Step == len(detected.Steps)+1)
 }
 
 func (s *ClaudeSource) forgetClaudeQuestionSpecs(live map[string]bool) {

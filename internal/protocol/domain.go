@@ -317,6 +317,9 @@ type Question struct {
 	// zero means it is not known. ReqMoveQuestion moves to another.
 	Steps []QuestionStep `json:"steps,omitempty"`
 	Step  int            `json:"step,omitempty"`
+	// Closable means ReqCloseQuestion can close it unanswered: a question
+	// the agent asked, which then waits for a message.
+	Closable bool `json:"closable,omitempty"`
 }
 
 // QuestionStep is one question of a multi-question form.

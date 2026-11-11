@@ -127,3 +127,39 @@ func TestNoMoveWithoutKnowingWhichQuestionIsOnScreen(t *testing.T) {
 		t.Errorf("keys pressed: %v", *moves)
 	}
 }
+
+func TestTheAgentsQuestionClosesWithEsc(t *testing.T) {
+	for _, pane := range []string{"claude_set_second_after_answer_real_pane.txt", "claude_set_review_partly_answered_real_pane.txt"} {
+		src, shown, _ := claudeOnFormStep(t, pane)
+		if !shown.Closable {
+			t.Errorf("%s: not closable", pane)
+		}
+		var pressed []string
+		src.closeQuestion = func(_ context.Context, name string) error {
+			pressed = append(pressed, name)
+			return nil
+		}
+		if err := src.CloseQuestion(context.Background(), "claude:s1", shown.ID); err != nil {
+			t.Fatalf("%s: %v", pane, err)
+		}
+		if len(pressed) != 1 || pressed[0] != "agentman-claude-s1" {
+			t.Errorf("%s: Esc pressed in %v", pane, pressed)
+		}
+		if err := src.CloseQuestion(context.Background(), "claude:s1", "terminal-old"); err == nil {
+			t.Errorf("%s: a stale question was closed", pane)
+		}
+	}
+}
+
+// Esc on a permission prompt is a no, not a close: it is answered instead.
+func TestAPermissionPromptIsNotClosed(t *testing.T) {
+	src, shown, _ := claudeOnFormStep(t, "claude_permission_real_pane.txt")
+	if shown.Closable {
+		t.Fatal("a permission prompt reads as closable")
+	}
+	pressed := 0
+	src.closeQuestion = func(context.Context, string) error { pressed++; return nil }
+	if err := src.CloseQuestion(context.Background(), "claude:s1", shown.ID); err == nil || pressed != 0 {
+		t.Errorf("closed a permission prompt: %v, %d presses", err, pressed)
+	}
+}
