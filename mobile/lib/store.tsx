@@ -268,6 +268,13 @@ interface Store {
    *  Mac has seen the agent take the switch; rejects with the reason it did
    *  not. */
   switchSession(sessionId: string, kind: "mode" | "model", value: string): Promise<void>;
+  /** Go to another question of the form a session shows (step from 1),
+   *  without answering the one on screen. Resolves once the Mac has pressed
+   *  the keys; the next session list shows where it went. */
+  moveQuestion(sessionId: string, step: number): Promise<void>;
+  /** Close the question a session shows without answering it; the agent
+   *  then waits for a message. */
+  closeQuestion(sessionId: string): Promise<void>;
   /** Ask the Mac something and resolve with its answer, or reject with why
    *  it could not: offline, an error, or no answer in time. */
   ask(request: DaemonRequest, timeoutMs?: number): Promise<DaemonEvent>;
@@ -1176,6 +1183,44 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return merged.filter((session) => !isHidden(session, dismissals));
   }, [sessions, folderSessions, folderFilter, folderRoot, dismissals]);
 
+  // Moving through a form, or closing its question: sent for the question on
+  // screen, and settled on its own reply, as a switch is.
+  const questionRequest = (
+    sessionId: string,
+    questionId: string | undefined,
+    type: "move_question" | "close_question",
+    step?: number,
+  ) =>
+    new Promise<void>((resolve, reject) => {
+      if (!questionId) {
+        reject(new Error("That question is no longer on screen."));
+        return;
+      }
+      const id = clientRef.current?.send({
+        type,
+        sessionId,
+        questionId,
+        ...(step !== undefined ? { step } : {}),
+        clientId: `${type === "move_question" ? "move" : "close"}-${newFrameId()}`,
+      });
+      if (!id) {
+        reject(new Error("Not connected to your Mac right now."));
+        return;
+      }
+      const timer = setTimeout(() => settleLaunchRequest(id), 30_000);
+      launchRequests.current.set(id, {
+        resolve: (event) => {
+          if (event.type === "send_result" && event.status === "failed") {
+            reject(new Error(event.error || "The Mac could not reach that question."));
+          } else {
+            resolve();
+          }
+        },
+        reject,
+        timer,
+      });
+    });
+
   const store: Store = useMemo(
     () => ({
       ready,
@@ -1857,6 +1902,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             timer,
           });
         });
+      },
+
+      moveQuestion(sessionId, step) {
+        const questionId = sessions.find((session) => session.id === sessionId)?.question?.id;
+        return questionRequest(sessionId, questionId, "move_question", step);
+      },
+
+      closeQuestion(sessionId) {
+        const questionId = sessions.find((session) => session.id === sessionId)?.question?.id;
+        return questionRequest(sessionId, questionId, "close_question");
       },
 
       ask(request, timeoutMs = 20_000) {

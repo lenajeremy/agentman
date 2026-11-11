@@ -1593,6 +1593,8 @@ export default function SessionScreen() {
             <QuestionCard
               question={session.question}
               onAnswer={(answer) => store.answerQuestion(sessionId, answer)}
+              onMove={(step) => store.moveQuestion(sessionId, step)}
+              onClose={() => store.closeQuestion(sessionId)}
               disabled={!store.daemonOnline}
               submissionStatus={answerAction?.status}
               submissionError={answerAction?.error}
