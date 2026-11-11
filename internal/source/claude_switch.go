@@ -379,7 +379,10 @@ func (s *ClaudeSource) SetModel(ctx context.Context, sessionID, model string) er
 	switched := func(pane string) bool {
 		return !claudeSwitchOpen(pane) && strings.Contains(strings.Join(bottomLines(pane, 8), "\n"), done)
 	}
-	pane, err = d.await(ctx, name, func(pane string) bool {
+	// Long: in a long conversation the warning below comes only once Claude
+	// has weighed the history. Given up on too soon, the phone was told the
+	// switch failed and the warning then sat unanswered in the terminal.
+	pane, err = d.awaitLong(ctx, name, func(pane string) bool {
 		return switched(pane) || strings.Contains(pane, claudeSwitchWarning)
 	})
 	if err == nil && !switched(pane) {
@@ -392,7 +395,7 @@ func (s *ClaudeSource) SetModel(ctx context.Context, sessionID, model string) er
 		if err := d.keys(ctx, name, "Enter"); err != nil {
 			return fail(fmt.Errorf("source: could not confirm %s: %w", label, err))
 		}
-		_, err = d.await(ctx, name, switched)
+		_, err = d.awaitLong(ctx, name, switched)
 	}
 	if err != nil {
 		return fail(fmt.Errorf("source: Claude did not confirm %s", label))
