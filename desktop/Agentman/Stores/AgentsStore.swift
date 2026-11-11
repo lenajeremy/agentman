@@ -499,6 +499,28 @@ final class AgentsStore {
         return await perform(request, for: sessionId)
     }
 
+    /// Goes to another question of the form an agent shows, without
+    /// answering the one on screen: step from 1, one past the last for the
+    /// form's review.
+    @discardableResult
+    func moveQuestion(_ sessionId: String, question: Question, to step: Int) async -> Bool {
+        var request = DaemonRequest(.moveQuestion, sessionId: sessionId)
+        request.questionId = question.id
+        request.step = step
+        request.clientId = "mac-move-\(UUID().uuidString)"
+        return await perform(request, for: sessionId)
+    }
+
+    /// Closes a question the agent asked without answering it, as Esc does
+    /// in its terminal: the agent waits for a message instead.
+    @discardableResult
+    func closeQuestion(_ sessionId: String, question: Question) async -> Bool {
+        var request = DaemonRequest(.closeQuestion, sessionId: sessionId)
+        request.questionId = question.id
+        request.clientId = "mac-close-\(UUID().uuidString)"
+        return await perform(request, for: sessionId)
+    }
+
     /// Answers a question however the reply was given.
     @discardableResult
     func answer(_ sessionId: String, question: Question, reply: QuestionReply) async -> Bool {

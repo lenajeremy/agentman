@@ -332,7 +332,7 @@ struct AgentThreadView: View {
                         // The question is part of the conversation, so it
                         // scrolls with it and is never squeezed to fit.
                         if let question = session.question {
-                            QuestionCard(session: session, question: question, typedInComposer: true)
+                            QuestionCard(session: session, question: question)
                                 .id("question")
                         }
                         // Below the last message, so following the thread

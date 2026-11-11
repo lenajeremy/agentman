@@ -115,6 +115,16 @@ extension SiteShotsTests {
     }
 
     /// Agentman's chat and an agent's thread in each of their states.
+    /// Claude's form of two questions, on the second, the first answered.
+    static let formQuestion = Question(
+        id: "q-form-2", prompt: "How many items should the badge count to before it shows 9+?", title: "Count",
+        detail: nil, options: [
+            QuestionOption(key: "1", label: "Nine", description: "Ten or more shows as 9+."),
+            QuestionOption(key: "2", label: "Ninety-nine", description: "A hundred or more shows as 99+."),
+            QuestionOption(key: "3", label: "No limit", description: "Always the full number."),
+        ], multiple: false, custom: true,
+        steps: [QuestionStep(title: "Placement", answered: true), QuestionStep(title: "Count")], step: 2, closable: true)
+
     func testAuditMainStates() throws {
         _ = try auditFolder
         let size = Self.common
@@ -138,7 +148,7 @@ extension SiteShotsTests {
         try audit(ContentView(), area: "main", screen: "chat", state: "nokey-conversation", size: size, store: noKeyTalk.store)
 
         // An agent's thread.
-        func thread(_ state: String, _ id: String, customize: ((inout Fixtures) -> Void)? = nil,
+        func thread(_ state: String, _ id: String, dark: Bool = false, customize: ((inout Fixtures) -> Void)? = nil,
                     setUp: ((AgentsStore) -> Void)? = nil) throws {
             let world = try world(customize: { fixtures in
                 Self.moreThreads(&fixtures)
@@ -146,11 +156,41 @@ extension SiteShotsTests {
             }, more: extras)
             world.store.selection = .agent(id)
             setUp?(world.store)
-            try audit(ContentView(), area: "main", screen: "thread", state: state, size: size, store: world.store, wait: 2.0)
+            try audit(ContentView(), area: "main", screen: "thread", state: state, size: size, dark: dark, store: world.store, wait: 2.0)
         }
         try thread("working", "d")
         try thread("approval", "c")
         try thread("question", "b")
+        // Claude's form of several questions: on the second, the first
+        // answered; back on an answered one; its review.
+        func form(_ change: @escaping (inout Question) -> Void) -> (inout Fixtures) -> Void {
+            { fixtures in
+                guard let index = fixtures.sessions.firstIndex(where: { $0.id == "b" }) else { return }
+                var question = Self.formQuestion
+                change(&question)
+                fixtures.sessions[index].question = question
+            }
+        }
+        try thread("question-form", "b", customize: form { _ in })
+        try thread("question-form", "b", dark: true, customize: form { _ in })
+        try thread("question-form-back", "b", customize: form {
+            $0.id = "q-form-1"
+            $0.step = 1
+            $0.prompt = "Where should the badge sit?"
+            $0.options = [
+                QuestionOption(key: "1", label: "On the icon's corner", description: "Overlapping the top right of the cart icon."),
+                QuestionOption(key: "2", label: "Beside the icon", description: "To the right, on the same line.", checked: true),
+            ]
+        })
+        try thread("question-form-review", "b", customize: form {
+            $0.id = "q-form-review"
+            $0.step = 3
+            $0.title = "Review your answers"
+            $0.prompt = "Ready to submit your answers?"
+            $0.detail = "⚠ You have not answered all questions\n● Where should the badge sit?\n  → Beside the icon"
+            $0.options = [QuestionOption(key: "1", label: "Submit answers"), QuestionOption(key: "2", label: "Cancel")]
+            $0.custom = false
+        })
         try thread("plan", "f")
         try thread("long-message", "e")
         try thread("error-over-composer", "a", setUp: { $0.actionError["a"] = "Couldn't deliver the message: the agent's terminal closed before it arrived." })
@@ -796,7 +836,7 @@ extension SiteShotsTests {
             said("d4", "d", 6, .assistant, "The limiter is in. Each sender gets 120 deliveries a minute; past that they get a 429 with `Retry-After`. Running the tests now."),
             tool("d5", "d", 0.1, "Bash", "go test ./webhooks/...", "Running the webhook tests", "running"),
         ]
-        // b asks a question with choices.
+        // b asks a question with choices (a form of two is formQuestion).
         if let index = fixtures.sessions.firstIndex(where: { $0.id == "b" }) {
             fixtures.sessions[index].state = .waitingInput
             fixtures.sessions[index].question = Question(id: "q-badge", prompt: "Which badge style should the cart use?", title: "Badge style",
@@ -804,7 +844,7 @@ extension SiteShotsTests {
                 QuestionOption(key: "1", label: "A count in a dot", description: "The number of items, in a small red dot on the cart icon."),
                 QuestionOption(key: "2", label: "A count beside the icon", description: "The number in plain text to the right of the icon."),
                 QuestionOption(key: "3", label: "No count, a dot only", description: "Just a dot while the cart has anything in it."),
-            ], multiple: false, custom: true)
+            ], multiple: false, custom: true, closable: true)
         }
         fixtures.messages["b"] = [
             said("b1", "b", 9, .user, "The cart badge counts the same item twice when you add it from the product page. Fix it."),

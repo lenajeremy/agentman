@@ -81,6 +81,49 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(event.daemon?.install, "managed")
     }
 
+    // Claude's form of several questions, as internal/protocol's Question
+    // carries it: its questions, the one on screen, and that it closes.
+    func testAFormOfSeveralQuestionsDecodes() throws {
+        let question = try JSONDecoder().decode(Question.self, from: Data("""
+        {"id":"terminal-1","prompt":"Which size?","options":[{"key":"1","label":"Small"}],
+         "steps":[{"title":"Colour","answered":true},{"title":"Size"},{"title":"Shape"}],"step":2,"closable":true}
+        """.utf8))
+        XCTAssertTrue(question.isForm)
+        XCTAssertFalse(question.isReview)
+        XCTAssertEqual(question.steps?.map(\.title), ["Colour", "Size", "Shape"])
+        XCTAssertEqual(question.steps?.first?.answered, true)
+        XCTAssertNil(question.steps?[1].answered)
+        XCTAssertEqual(question.closable, true)
+
+        var review = question
+        review.step = 4
+        XCTAssertTrue(review.isReview)
+        // The question on screen not known: no moving through it.
+        var unknown = question
+        unknown.step = nil
+        XCTAssertFalse(unknown.isForm)
+        // A daemon from before forms sends none of it.
+        let plain = try JSONDecoder().decode(Question.self, from: Data(#"{"prompt":"Proceed?","options":[]}"#.utf8))
+        XCTAssertFalse(plain.isForm)
+        XCTAssertNil(plain.closable)
+    }
+
+    func testMovingAndClosingSayWhichQuestion() throws {
+        var move = DaemonRequest(.moveQuestion, sessionId: "claude:s1")
+        move.questionId = "terminal-1"
+        move.step = 3
+        let moved = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(move)) as? [String: Any])
+        XCTAssertEqual(moved["type"] as? String, "move_question")
+        XCTAssertEqual(moved["questionId"] as? String, "terminal-1")
+        XCTAssertEqual(moved["step"] as? Int, 3)
+
+        var close = DaemonRequest(.closeQuestion, sessionId: "claude:s1")
+        close.questionId = "terminal-1"
+        let closed = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(close)) as? [String: Any])
+        XCTAssertEqual(closed["type"] as? String, "close_question")
+        XCTAssertNil(closed["step"])
+    }
+
     // The daemon decodes requests with Go's encoding/json: unset fields are
     // left out rather than sent as null.
     func testARequestLeavesOutWhatItDoesNotSet() throws {

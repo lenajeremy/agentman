@@ -35,6 +35,8 @@ enum RequestType: String, Codable, Sendable {
     case interrupt
     case sendQueued = "send_queued"
     case answerQuestion = "answer_question"
+    case moveQuestion = "move_question"
+    case closeQuestion = "close_question"
     case readSeenFile = "read_seen_file"
     case renameSession = "rename_session"
     case setAgentAlerts = "set_agent_alerts"
@@ -129,6 +131,8 @@ struct DaemonRequest: Codable, Sendable {
     var optionKey: String?
     var optionKeys: [String]?
     var answerText: String?
+    /// The question moveQuestion goes to.
+    var step: Int?
     var clientId: String?
     var path: String?
     var manager: ManagerSettings?
@@ -1188,6 +1192,25 @@ struct Question: Codable, Sendable, Hashable {
     var custom: Bool?
     /// What macOS itself will ask if this is agreed to.
     var notice: String?
+    /// The questions of a form that asks several, in order, and the one on
+    /// screen, from 1; one past the last is the form's review. moveQuestion
+    /// goes to another.
+    var steps: [QuestionStep]?
+    var step: Int?
+    /// A question the agent asked, which closeQuestion closes unanswered;
+    /// the agent then waits for a message.
+    var closable: Bool?
+
+    /// A form of several questions, with the one on screen known.
+    var isForm: Bool { (steps?.count ?? 0) > 1 && (step ?? 0) > 0 }
+    /// The form's review of its answers, the step past its last question.
+    var isReview: Bool { isForm && step == (steps?.count ?? 0) + 1 }
+}
+
+/// One question of a form that asks several.
+struct QuestionStep: Codable, Sendable, Hashable {
+    var title: String
+    var answered: Bool?
 }
 
 struct QuestionOption: Codable, Sendable, Hashable, Identifiable {
