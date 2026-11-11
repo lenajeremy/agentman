@@ -12,8 +12,20 @@ import SwiftUI
 // default, draws the background over the selection, the same fault. Both
 // views here are TextKit 1.
 
-/// The prose of a reply as one selectable text view.
-struct MarkdownProse: NSViewRepresentable {
+/// The prose of a reply as one selectable text view. The view reaches a
+/// little past the text on each side, its text inset by as much, so inline
+/// code that starts a line has room for its box's padding there too.
+struct MarkdownProse: View {
+    let blocks: [MarkdownBlock]
+    let key: String
+
+    var body: some View {
+        MarkdownProseView(blocks: blocks, key: key)
+            .padding(.horizontal, -InlineCodeLayoutManager.padding)
+    }
+}
+
+struct MarkdownProseView: NSViewRepresentable {
     let blocks: [MarkdownBlock]
     /// What the blocks were made from: the text is built again only when
     /// this changes, so a selection survives the view being drawn again.
@@ -88,15 +100,21 @@ final class MarkdownTextCoordinator: NSObject, NSTextViewDelegate {
 /// given, or as wide as its longest line when it doesn't wrap.
 final class MarkdownTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
     private let wraps: Bool
+    /// The text's inset on each side: room for inline code's box.
+    private let side: CGFloat
 
     init(wraps: Bool) {
         self.wraps = wraps
         let storage = NSTextStorage()
-        let layout = NSLayoutManager()
+        let layout = InlineCodeLayoutManager()
         storage.addLayoutManager(layout)
+        // Room beside wrapped text for inline code's box (see MarkdownProse).
+        side = wraps ? InlineCodeLayoutManager.padding : 0
         let container = NSTextContainer(size: NSSize(width: wraps ? 600 : CGFloat.greatestFiniteMagnitude,
                                                      height: CGFloat.greatestFiniteMagnitude))
-        container.lineFragmentPadding = 0
+        // Room inside the container for inline code's box beside text that
+        // starts a line: a text view draws nothing outside its container.
+        container.lineFragmentPadding = side
         container.widthTracksTextView = false
         layout.addTextContainer(container)
         super.init(frame: .zero, textContainer: container)
@@ -114,6 +132,7 @@ final class MarkdownTextView: NSTextView, @preconcurrency NSLayoutManagerDelegat
 
     override init(frame frameRect: NSRect, textContainer container: NSTextContainer?) {
         wraps = true
+        side = 0
         super.init(frame: frameRect, textContainer: container)
     }
 
@@ -364,6 +383,7 @@ enum MarkdownProseText {
             if intent.contains(.code) {
                 runFont = mono
                 attributes[.backgroundColor] = NSColor(Palette.fill)
+                attributes[.inlineCode] = true
             }
             if intent.contains(.stronglyEmphasized) {
                 runFont = NSFontManager.shared.convert(runFont, toHaveTrait: .boldFontMask)
@@ -383,7 +403,28 @@ enum MarkdownProseText {
             let string = String(text[run.range].characters).replacingOccurrences(of: "\n", with: "\u{2028}")
             out.append(NSAttributedString(string: string, attributes: attributes))
         }
+        roomForCode(in: out)
         return out
+    }
+
+    /// Room either side of inline code for its box's padding: space after
+    /// the letter before it, unless the code starts the line, and after its
+    /// own last letter.
+    static func roomForCode(in text: NSMutableAttributedString) {
+        let whole = NSRange(location: 0, length: text.length)
+        let breaks = CharacterSet(charactersIn: "\n\u{2028}")
+        text.enumerateAttribute(.inlineCode, in: whole) { value, range, _ in
+            guard value != nil, range.length > 0 else { return }
+            let pad = InlineCodeLayoutManager.padding
+            text.addAttribute(.kern, value: pad, range: NSRange(location: NSMaxRange(range) - 1, length: 1))
+            if range.location > 0 {
+                let before = NSRange(location: range.location - 1, length: 1)
+                let character = (text.string as NSString).substring(with: before)
+                if character.rangeOfCharacter(from: breaks) == nil {
+                    text.addAttribute(.kern, value: pad, range: before)
+                }
+            }
+        }
     }
 
     /// A code block's text: the code font, 4 between lines.
@@ -398,5 +439,60 @@ enum MarkdownProseText {
             if value == nil { out.addAttribute(.foregroundColor, value: NSColor(Palette.text), range: range) }
         }
         return out
+    }
+}
+
+extension NSAttributedString.Key {
+    /// Inline code in a reply, which draws its grey as a box of its own.
+    static let inlineCode = NSAttributedString.Key("agentmanInlineCode")
+}
+
+/// Inline code's grey as a rounded box round the code's own letters, with
+/// room either side of them, rather than the plain rectangle a text view
+/// fills: the line's whole height, edge to edge with the words beside it,
+/// and on wrapped code one block across the lines. Every other background,
+/// a Find mark among them, is drawn as before.
+final class InlineCodeLayoutManager: NSLayoutManager {
+    /// The room either side of the code, kept for it by kerning.
+    static let padding: CGFloat = 3
+    /// Where the glyphs being drawn start in the view, for finding a line's
+    /// baseline from a rectangle there.
+    private var drawingAt = CGPoint.zero
+
+    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        drawingAt = origin
+        super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+    }
+
+    override func fillBackgroundRectArray(_ rectArray: UnsafePointer<NSRect>, count rectCount: Int, forCharacterRange charRange: NSRange, color: NSColor) {
+        guard let storage = textStorage, charRange.location < storage.length,
+              storage.attribute(.inlineCode, at: charRange.location, effectiveRange: nil) != nil,
+              let container = textContainers.first,
+              let font = storage.attribute(.font, at: charRange.location, effectiveRange: nil) as? NSFont else {
+            super.fillBackgroundRectArray(rectArray, count: rectCount, forCharacterRange: charRange, color: color)
+            return
+        }
+        color.setFill()
+        for index in 0..<rectCount {
+            Self.box(rectArray[index], font: font, baseline: baseline(in: rectArray[index], container: container)).fill()
+        }
+    }
+
+    /// The line's baseline in the view, from a glyph inside the rectangle.
+    private func baseline(in rect: NSRect, container: NSTextContainer) -> CGFloat {
+        let point = CGPoint(x: rect.midX - drawingAt.x, y: rect.midY - drawingAt.y)
+        let glyph = glyphIndex(for: point, in: container)
+        let line = lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        return drawingAt.y + line.minY + location(forGlyphAt: glyph).y
+    }
+
+    /// The box for one line's run of code: the code font's height and a
+    /// little more, round its baseline; out to the left into the room kept
+    /// before it (the room after is in the run already).
+    static func box(_ rect: NSRect, font: NSFont, baseline: CGFloat) -> NSBezierPath {
+        let top = baseline - font.ascender - 2
+        let bottom = baseline - font.descender + 2
+        let frame = CGRect(x: rect.minX - padding, y: top, width: rect.width + padding, height: bottom - top)
+        return NSBezierPath(roundedRect: frame, xRadius: 4, yRadius: 4)
     }
 }

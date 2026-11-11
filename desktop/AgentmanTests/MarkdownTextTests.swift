@@ -149,6 +149,44 @@ final class MarkdownTextTests: XCTestCase {
         XCTAssertNotEqual(MarkdownView.proseKey(h2), MarkdownView.proseKey(h3), "a heading's level")
     }
 
+    /// Inline code has room either side for its box's padding: after the
+    /// letter before it and after its own last one; none before it at the
+    /// start of a line.
+    func testInlineCodeHasRoomEitherSide() throws {
+        func inline(_ markdown: String) throws -> NSAttributedString {
+            MarkdownProseText.inline(try AttributedString(markdown: markdown), font: MarkdownProseText.body, color: .textColor)
+        }
+        func kern(_ text: NSAttributedString, at index: Int) -> CGFloat {
+            text.attribute(.kern, at: index, effectiveRange: nil) as? CGFloat ?? 0
+        }
+        let pad = InlineCodeLayoutManager.padding
+        let middle = try inline("run `ls -la` now")
+        let code = (middle.string as NSString).range(of: "ls -la")
+        XCTAssertNotNil(middle.attribute(.inlineCode, at: code.location, effectiveRange: nil))
+        XCTAssertEqual(kern(middle, at: code.location - 1), pad, "room after the space before it")
+        XCTAssertEqual(kern(middle, at: NSMaxRange(code) - 1), pad, "room after its last letter")
+        XCTAssertEqual(kern(middle, at: 0), 0, "the words around it are as they were")
+        XCTAssertEqual(kern(middle, at: code.location + 1), 0)
+        XCTAssertNil(middle.attribute(.inlineCode, at: 0, effectiveRange: nil))
+
+        let first = try inline("`ls` first")
+        XCTAssertEqual(kern(first, at: 1), pad, "after its last letter")
+        XCTAssertEqual(kern(first, at: 0), 0, "nothing before code that starts the line")
+    }
+
+    /// Its box: the code font's height round the baseline, out to the left
+    /// into the room kept there.
+    func testInlineCodeBoxSitsRoundTheCodesLetters() {
+        let font = MarkdownProseText.mono
+        let rect = NSRect(x: 40, y: 0, width: 60, height: 30)
+        let box = InlineCodeLayoutManager.box(rect, font: font, baseline: 18).bounds
+        XCTAssertEqual(box.minX, 40 - InlineCodeLayoutManager.padding, accuracy: 0.01)
+        XCTAssertEqual(box.maxX, 100, accuracy: 0.01)
+        XCTAssertEqual(box.minY, 18 - font.ascender - 2, accuracy: 0.01)
+        XCTAssertEqual(box.maxY, 18 - font.descender + 2, accuracy: 0.01)
+        XCTAssertLessThan(box.height, rect.height, "not the line's whole height")
+    }
+
     // MARK: Code
 
     /// A reply's code is coloured as the editor colours it, without a
@@ -167,7 +205,11 @@ final class MarkdownTextTests: XCTestCase {
         XCTAssertEqual(try colour(of: "name"), Self.rgb(NSColor(Palette.text)), "the rest in the text's colour")
         let font = try XCTUnwrap(text.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
         XCTAssertTrue(font.fontName.contains("GoogleSansCode") || font.isFixedPitch)
-        XCTAssertTrue(MarkdownCodeText.coloured(code, language: "swift") === text, "coloured once")
+        // Kept and used again, though the cache may let it go under memory
+        // pressure: the same either way.
+        let again = MarkdownCodeText.coloured(code, language: "swift")
+        XCTAssertEqual(again.string, text.string)
+        XCTAssertEqual(try Self.rgb(XCTUnwrap(again.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor)), try colour(of: "let"))
     }
 
     func testCodeInALanguageNotKnownIsPlain() throws {
@@ -210,7 +252,7 @@ final class MarkdownTextTests: XCTestCase {
             window.isReleasedWhenClosed = false
             window.alphaValue = 0
             window.appearance = NSAppearance(named: appearance)
-            let short = "A short block, as wide as its box:\n\n```sh\nam service restart\n```\n\n> A longer quote that runs on past the width of one line, so the bar is seen to follow it down.\n\n---\n\nAfter the rule."
+            let short = "Run `! bash /private/tmp/claude-501/-Users-mac-Documents-job-automation/33e3853e-07aa-4157-8a0b/scratchpad/rej/pull.sh` so I can see the resume, then `npm test` again.\n\nA short block, as wide as its box:\n\n```sh\nam service restart\n```\n\n> A longer quote that runs on past the width of one line, so the bar is seen to follow it down.\n\n---\n\nAfter the rule."
             let host = NSHostingView(rootView: VStack(alignment: .leading, spacing: 24) {
                 MarkdownView(Self.reply)
                 MarkdownView(short)

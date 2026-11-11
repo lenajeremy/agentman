@@ -496,7 +496,8 @@ export class Client {
 function isAction(request: Request): boolean {
   return request.type === "send_message" || request.type === "interrupt" ||
 	    request.type === "send_queued" ||
-	    request.type === "answer_question" || request.type === "start_session";
+	    request.type === "answer_question" || request.type === "move_question" ||
+	    request.type === "close_question" || request.type === "start_session";
 }
 
 // React Native supports upgrade headers in the third constructor argument,

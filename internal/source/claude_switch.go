@@ -73,8 +73,9 @@ func claudeModesFor(current string) []string {
 }
 
 // claudePickerModels are the rows Claude Code 2.1.289's /model picker lists
-// for an account with every model. They are what the phone is offered until
-// agentman next opens the picker, which replaces them with what it shows.
+// for an account with every model: what is offered only when Claude Code
+// can't be asked for its own list (see claude_models.go) and agentman has not
+// opened the picker yet.
 var claudePickerModels = []string{
 	"Opus 5.5", "Fable 5.1", "Sonnet 5.5", "Haiku 4.5", "Sonnet 5", "Opus 5",
 	"Fable 5", "Opus 4.8", "Opus 4.7", "Opus 4.6", "Sonnet 4.6",
@@ -113,10 +114,16 @@ func claudeModelID(label string) string {
 	return id
 }
 
+// offeredModels are the models a session can be switched to: what Claude
+// Code itself lists; else what its picker last showed; else the list it had
+// when agentman was written.
 func (s *ClaudeSource) offeredModels() []string {
-	s.switchMu.Lock()
-	labels := s.pickerLabels
-	s.switchMu.Unlock()
+	labels := s.catalog.labels()
+	if len(labels) == 0 {
+		s.switchMu.Lock()
+		labels = s.pickerLabels
+		s.switchMu.Unlock()
+	}
 	if len(labels) == 0 {
 		labels = claudePickerModels
 	}
@@ -131,7 +138,9 @@ func (s *ClaudeSource) offeredModels() []string {
 
 // applyPane fills in what a pane-bound session's screen says about it: the
 // question it is blocked on, and the mode and models it can be switched to.
-func (s *ClaudeSource) applyPane(meta *protocol.Session, transcript, pane string) {
+// styled captures the pane with its colours, for what only colour says; nil
+// where there is no pane to ask.
+func (s *ClaudeSource) applyPane(meta *protocol.Session, transcript, pane string, styled func() (string, error)) {
 	// /usage left open in the terminal is not something to answer, and the
 	// registry's "waiting" for it is not either.
 	if claudeInfoPanel(pane) {
@@ -141,6 +150,7 @@ func (s *ClaudeSource) applyPane(meta *protocol.Session, transcript, pane string
 		return
 	}
 	if detected := question.Detect(pane); detected != nil {
+		placeClaudeFormStep(detected, styled)
 		s.enrichClaudeQuestion(meta.ID, transcript, detected)
 		meta.Question = protocolQuestion(detected)
 		meta.State = protocol.StateWaitingInput
@@ -369,7 +379,10 @@ func (s *ClaudeSource) SetModel(ctx context.Context, sessionID, model string) er
 	switched := func(pane string) bool {
 		return !claudeSwitchOpen(pane) && strings.Contains(strings.Join(bottomLines(pane, 8), "\n"), done)
 	}
-	pane, err = d.await(ctx, name, func(pane string) bool {
+	// Long: in a long conversation the warning below comes only once Claude
+	// has weighed the history. Given up on too soon, the phone was told the
+	// switch failed and the warning then sat unanswered in the terminal.
+	pane, err = d.awaitLong(ctx, name, func(pane string) bool {
 		return switched(pane) || strings.Contains(pane, claudeSwitchWarning)
 	})
 	if err == nil && !switched(pane) {
@@ -382,7 +395,7 @@ func (s *ClaudeSource) SetModel(ctx context.Context, sessionID, model string) er
 		if err := d.keys(ctx, name, "Enter"); err != nil {
 			return fail(fmt.Errorf("source: could not confirm %s: %w", label, err))
 		}
-		_, err = d.await(ctx, name, switched)
+		_, err = d.awaitLong(ctx, name, switched)
 	}
 	if err != nil {
 		return fail(fmt.Errorf("source: Claude did not confirm %s", label))

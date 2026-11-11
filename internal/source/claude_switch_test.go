@@ -370,7 +370,7 @@ func TestClaudesNoCarriesANoteWhenAutoModeIsOffered(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := protocol.Session{ID: "claude:s1"}
-	src.applyPane(&session, "", permissionPane(t, "claude_permission_auto_offer_real_pane.txt"))
+	src.applyPane(&session, "", permissionPane(t, "claude_permission_auto_offer_real_pane.txt"), nil)
 	if session.Question == nil || len(session.Question.Options) != 4 {
 		t.Fatalf("question %+v", session.Question)
 	}
@@ -378,5 +378,47 @@ func TestClaudesNoCarriesANoteWhenAutoModeIsOffered(t *testing.T) {
 		if option.WithText != (option.Label == "No") {
 			t.Errorf("%s %q: WithText = %v", option.Key, option.Label, option.WithText)
 		}
+	}
+}
+
+// In a long conversation Claude weighs the history before it asks "Switch
+// model?": the warning came after the two seconds the switch waited, so the
+// phone was told it failed and the warning sat open in the terminal. It is
+// now waited for, and confirmed when it comes.
+func TestSetModelWaitsForALateCacheWarning(t *testing.T) {
+	terminal := modelPickingClaude(t)
+	prompt := permissionPane(t, "claude_mode_manual_real_pane.txt")
+	warning := permissionPane(t, "claude_model_switch_confirm_real_pane.txt")
+	asked := false
+	terminal.onLiteral = func(key string) string {
+		asked = key == "s"
+		return prompt // the picker closes; the warning is still to come
+	}
+	pickerKeys := terminal.onKey
+	terminal.onKey = func(key string) string {
+		if strings.Contains(terminal.screen, "Switch model?") && key == "Enter" {
+			return permissionPane(t, "claude_model_session_set_real_pane.txt")
+		}
+		return pickerKeys(key)
+	}
+	src := claudeAtPrompt(t, terminal)
+	looks := 0
+	capture := src.switcher.capture
+	src.switcher.capture = func(ctx context.Context, name string) (string, error) {
+		if asked {
+			looks++
+			if looks == 120 { // well past the old two seconds' worth of looks
+				terminal.mu.Lock()
+				terminal.screen = warning
+				terminal.mu.Unlock()
+			}
+		}
+		return capture(ctx, name)
+	}
+	if err := src.SetModel(context.Background(), "claude:s1", "claude-sonnet-5-5"); err != nil {
+		t.Fatal(err)
+	}
+	if terminal.keys[len(terminal.keys)-1] != "Enter" {
+		t.Errorf("the late warning was not confirmed: pressed %v", terminal.keys)
 	}
 }

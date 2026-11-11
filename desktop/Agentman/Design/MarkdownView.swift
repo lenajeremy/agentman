@@ -430,8 +430,18 @@ private struct BlockView: View {
             let label = MarkdownCodeText.label(language)
             VStack(alignment: .leading, spacing: 0) {
                 // Which language, above the code, where the Copy button
-                // shows too rather than over the first line.
-                if let label {
+                // shows too rather than over the first line. In New, on a
+                // strip of the site's ink.
+                if Look.site {
+                    SwiftUI.Text((label ?? "code").uppercased())
+                        .font(Fonts.eyebrow)
+                        .tracking(1.2)
+                        .foregroundStyle(Palette.onInk)
+                        .padding(.horizontal, 12)
+                        .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+                        .background(Palette.ink)
+                        .accessibilityLabel("\(label ?? "") code")
+                } else if let label {
                     SwiftUI.Text(label)
                         .font(TextStyle.label)
                         .foregroundStyle(Palette.muted)
@@ -443,7 +453,7 @@ private struct BlockView: View {
                 ScrollView(.horizontal, showsIndicators: true) {
                     MarkdownCode(text: MarkdownCodeText.coloured(code, language: language), key: "\(code.hashValue)-\(language ?? "")")
                         .padding(.horizontal, 14)
-                        .padding(.top, label == nil ? 12 : 8)
+                        .padding(.top, Look.site ? 11 : label == nil ? 12 : 8)
                         .padding(.bottom, 12)
                 }
                 // A scroll view and a quote's bar both stretch to any height, so
@@ -451,7 +461,13 @@ private struct BlockView: View {
                 // the quote: the code was cut off and the bar ran on below it.
                 .fixedSize(horizontal: false, vertical: true)
             }
-            .background(Palette.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .look {
+                $0.background(Palette.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
+            } classic: {
+                $0.background(Palette.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
             .modifier(CopyOnHover(text: code))
         case .quote(let blocks):
             HStack(alignment: .top, spacing: 10) {

@@ -56,6 +56,12 @@ type ClaudeSource struct {
 	// closeDialog presses Esc on a dialog Claude Code has open, and is
 	// injectable for the same reason. See question.Question.Dialog.
 	closeDialog func(ctx context.Context, name string) error
+	// captureStyledPane captures a pane with its colours (see
+	// placeClaudeFormStep); moveQuestion presses ← or → in a multi-question
+	// form, and closeQuestion Esc on a question; injectable too.
+	captureStyledPane func(ctx context.Context, name string) (string, error)
+	moveQuestion      func(ctx context.Context, name string, distance int) error
+	closeQuestion     func(ctx context.Context, name string) error
 	// processArgs reads full command lines, which the process snapshot does
 	// not carry; infra remembers what they said. See withoutInfra.
 	processArgs func(context.Context, []int) map[int]string
@@ -82,6 +88,9 @@ type ClaudeSource struct {
 	switchMu      sync.Mutex
 	pickerLabels  []string
 	modelSwitches map[string]claudeModelSwitch
+	// catalog is the list of models Claude Code itself reports; see
+	// claude_models.go. It comes before pickerLabels.
+	catalog *claudeModelCatalog
 
 	// editor is the editing mode the user set for Claude's prompt.
 	editor claudeEditorMode
@@ -136,9 +145,13 @@ func NewClaudeSource(home string) (*ClaudeSource, error) {
 		capturePane:       tmux.Capture,
 		answerWithNote:    tmux.AnswerWithNote,
 		closeDialog:       tmux.Escape,
+		captureStyledPane: tmux.CaptureStyled,
+		moveQuestion:      tmux.MoveQuestion,
+		closeQuestion:     tmux.Escape,
 		switcher:          newPaneDriver(),
 		processArgs:       claudeProcessArgs,
 		infra:             map[claudeProcessKey]bool{},
+		catalog:           newClaudeModelCatalog(home),
 	}, nil
 }
 
@@ -158,6 +171,8 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// The models Claude Code offers, asked again in the background when due.
+	s.catalog.refreshIfDue()
 	entries, err := os.ReadDir(s.sessionsDir())
 	if err != nil {
 		// The CLI may have launched but not written its registry yet. Keep
@@ -267,7 +282,7 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 		// you" is the truth and "idle" is not.
 		if tmuxName != "" {
 			if pane, err := s.capture(ctx, tmuxName); err == nil {
-				s.applyPane(&meta, transcript, pane)
+				s.applyPane(&meta, transcript, pane, s.styledCapture(ctx, tmuxName))
 			}
 		}
 		if meta.LastActivityAt == 0 {
@@ -322,7 +337,7 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 		}
 		transcript := s.transcriptPath(pane.Cwd, uuid)
 		if screen, err := s.capture(ctx, pane.Name); err == nil {
-			s.applyPane(&meta, transcript, screen)
+			s.applyPane(&meta, transcript, screen, s.styledCapture(ctx, pane.Name))
 		}
 		found = append(found, meta)
 		next[id] = claudeSession{meta: meta, transcript: transcript,

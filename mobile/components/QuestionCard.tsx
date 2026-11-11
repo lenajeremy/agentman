@@ -13,7 +13,7 @@ import {
 import { questionSnapshotIdentity } from "../lib/action-state";
 import { useStyles, useTheme } from "../lib/appearance";
 import { Question, QuestionAnswer, SendStatus } from "../lib/protocol";
-import { MAX_NOTE_CHARS, noteAnswer, submitAnswer, tapAnswer } from "../lib/question-answer";
+import { MAX_NOTE_CHARS, noteAnswer, reviewAnswers, submitAnswer, tapAnswer } from "../lib/question-answer";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { MotionPressable } from "./MotionPressable";
 import { edged, hardShadow, heading } from "./Brand";
@@ -50,6 +50,8 @@ export function QuestionCard({
   submissionStatus,
   submissionError,
   customPlaceholder = "Write another answer…",
+  onMove,
+  onClose,
 }: {
   question: Question;
   onAnswer: (answer: QuestionAnswer) => void;
@@ -64,6 +66,10 @@ export function QuestionCard({
   submissionError?: string;
   /** The typed answer's box, which in Agentman's chat is for Agentman. */
   customPlaceholder?: string;
+  /** Go to another question of a form (from 1), without answering. */
+  onMove?: (step: number) => Promise<void>;
+  /** Close a question the agent asked, unanswered. */
+  onClose?: () => Promise<void>;
 }) {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
@@ -78,11 +84,19 @@ export function QuestionCard({
   // synchronous latch closes the tiny window in which a fast double-tap could
   // type the same terminal answer twice.
   const commitLock = useRef(false);
+  // The question a move was asked for, or that it is being closed, until the
+  // Mac shows another; the choices wait meanwhile.
+  const [moving, setMoving] = useState<number | null>(null);
+  const [closing, setClosing] = useState(false);
+  const [formError, setFormError] = useState("");
   useEffect(() => {
     setSelected(terminalSelection);
     setCustom("");
     setNoteFor(null);
     setNote("");
+    setMoving(null);
+    setClosing(false);
+    setFormError("");
     commitLock.current = false;
   }, [identity, terminalSelection]);
   useEffect(() => {
@@ -97,7 +111,43 @@ export function QuestionCard({
   const canSubmit = pendingSubmit !== null;
   const submitting = submissionStatus === "sending";
   const submitted = submissionStatus === "delivered";
-  const interactionDisabled = disabled || submitting || submitted;
+  const interactionDisabled = disabled || submitting || submitted || moving !== null || closing;
+  const steps = question.steps ?? [];
+  const isForm = steps.length > 1 && (question.step ?? 0) > 0 && onMove !== undefined;
+  const lastStep = steps.length + (question.reviewStep ? 1 : 0);
+  const currentStep = moving ?? question.step ?? 0;
+  // Claude names its questions in a word or two; Antigravity by the whole
+  // question, which would only say the heading again.
+  const namesSteps = steps.length > 0 && steps.every((step) => step.title.length > 0 && step.title.length <= 24);
+  const onReview = question.reviewStep === true && steps.length > 1 && question.step === steps.length + 1;
+  const review = onReview && question.detail ? reviewAnswers(question.detail) : null;
+
+  const move = (step: number) => {
+    if (!onMove || disabled || moving !== null || closing || step === question.step) return;
+    if (step < 1 || step > lastStep) return;
+    setMoving(step);
+    setFormError("");
+    onMove(step)
+      // The next session list shows where it went; if it never does, the
+      // choices come back rather than staying greyed.
+      .then(() => setTimeout(() => setMoving(null), 4000))
+      .catch((reason: Error) => {
+        setMoving(null);
+        setFormError(reason.message.replace(/^(daemon|source): /, ""));
+      });
+  };
+
+  const close = () => {
+    if (!onClose || disabled || closing) return;
+    setClosing(true);
+    setFormError("");
+    onClose()
+      .then(() => setTimeout(() => setClosing(false), 4000))
+      .catch((reason: Error) => {
+        setClosing(false);
+        setFormError(reason.message.replace(/^(daemon|source): /, ""));
+      });
+  };
   const activePreview = question.options.find(
     (option) => selected.includes(option.key) && option.preview,
   )?.preview;
@@ -245,10 +295,106 @@ export function QuestionCard({
           <View style={styles.pillDot} />
           <Text style={styles.pillLabel}>Needs you</Text>
         </View>
+        <View style={styles.formControls}>
+          {isForm ? (
+            <>
+              <MotionPressable
+                onPress={() => move(currentStep - 1)}
+                disabled={disabled || currentStep <= 1 || moving !== null}
+                style={[styles.formButton, (currentStep <= 1 || moving !== null) && styles.controlDisabled]}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Previous question"
+              >
+                <Feather name="chevron-left" size={18} color={color.muted} />
+              </MotionPressable>
+              <Text style={styles.formCount}>
+                {currentStep > steps.length ? "Review" : `${currentStep} of ${steps.length}`}
+              </Text>
+              <MotionPressable
+                onPress={() => move(currentStep + 1)}
+                disabled={disabled || currentStep >= lastStep || moving !== null}
+                style={[styles.formButton, (currentStep >= lastStep || moving !== null) && styles.controlDisabled]}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={currentStep === steps.length ? "Review your answers" : "Next question"}
+              >
+                <Feather name="chevron-right" size={18} color={color.muted} />
+              </MotionPressable>
+            </>
+          ) : null}
+          {question.closable && onClose ? (
+            <MotionPressable
+              onPress={close}
+              disabled={disabled || closing}
+              style={[styles.formButton, closing && styles.controlDisabled]}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Close the question unanswered"
+              accessibilityHint="The agent waits for your message instead"
+            >
+              <Feather name="x" size={18} color={color.muted} />
+            </MotionPressable>
+          ) : null}
+        </View>
       </View>
       <Text style={styles.title}>{question.title || "Decision needed"}</Text>
+      {isForm && namesSteps ? (
+        <View style={styles.stepChips}>
+          {steps.map((step, index) => {
+            const current = currentStep === index + 1;
+            return (
+              <MotionPressable
+                key={`${index}-${step.title}`}
+                onPress={() => move(index + 1)}
+                disabled={disabled || moving !== null}
+                style={[styles.stepChip, current && styles.stepChipCurrent]}
+                accessibilityRole="button"
+                accessibilityLabel={step.answered ? `${step.title}, answered` : step.title}
+                accessibilityState={{ selected: current }}
+              >
+                {step.answered ? <Feather name="check" size={12} color={color.ok} /> : null}
+                <Text style={[styles.stepChipLabel, current && styles.stepChipLabelCurrent]} numberOfLines={1}>
+                  {step.title}
+                </Text>
+              </MotionPressable>
+            );
+          })}
+          {question.reviewStep ? (
+            <MotionPressable
+              onPress={() => move(steps.length + 1)}
+              disabled={disabled || moving !== null}
+              style={[styles.stepChip, currentStep === steps.length + 1 && styles.stepChipCurrent]}
+              accessibilityRole="button"
+              accessibilityLabel="Review your answers"
+              accessibilityState={{ selected: currentStep === steps.length + 1 }}
+            >
+              <Text style={[styles.stepChipLabel, currentStep === steps.length + 1 && styles.stepChipLabelCurrent]}>
+                Review
+              </Text>
+            </MotionPressable>
+          ) : null}
+        </View>
+      ) : null}
+      {formError ? <Text style={styles.formError}>{formError}</Text> : null}
 
-      {question.detail ? (
+      {review ? (
+        // A form's review: the answers given, as rows to read.
+        <View style={styles.reviewBox}>
+          {review.answers.map((row, index) => (
+            <View key={index} style={styles.reviewRow}>
+              <Text style={styles.reviewQuestion}>{row.question}</Text>
+              <Text style={styles.reviewAnswer}>{row.answer}</Text>
+            </View>
+          ))}
+          {review.warning ? (
+            <View style={styles.reviewWarning}>
+              <Feather name="alert-triangle" size={13} color={color.needsYouText} />
+              <Text style={styles.reviewWarningText}>{review.warning}</Text>
+            </View>
+          ) : null}
+        </View>
+      ) : question.detail ? (
         <View style={styles.detailBox}>
           <Text style={styles.detail} selectable>
             {question.detail}
@@ -526,8 +672,33 @@ function AnswerStatus({
 
 const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
+
+    reviewBox: { gap: space.sm, backgroundColor: c.fill, borderRadius: radius.md, paddingHorizontal: space.md, paddingVertical: 12 },
+    reviewRow: { gap: 2 },
+    reviewQuestion: { ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.muted },
+    reviewAnswer: { ...font.sansMedium, fontSize: size.body, lineHeight: scaled(21), color: c.text },
+    reviewWarning: { flexDirection: "row", alignItems: "center", gap: 6 },
+    reviewWarningText: { flex: 1, ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.needsYouText },
     full: { gap: space.md },
     compact: { gap: space.sm },
+
+    formControls: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 2 },
+    formButton: { width: 32, height: 28, alignItems: "center", justifyContent: "center", borderRadius: radius.sm },
+    formCount: { ...font.sans, fontSize: size.caption, color: c.muted, fontVariant: ["tabular-nums"] },
+    stepChips: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: -space.xs },
+    stepChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      height: 28,
+      paddingHorizontal: 10,
+      borderRadius: radius.pill,
+      backgroundColor: c.fill,
+    },
+    stepChipCurrent: { backgroundColor: c.inverse },
+    stepChipLabel: { ...font.sansMedium, fontSize: size.caption, color: c.muted },
+    stepChipLabelCurrent: { color: c.onInverse },
+    formError: { ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.errorText },
 
     eyebrowRow: { flexDirection: "row" },
     pill: {
@@ -753,8 +924,33 @@ const makeSiteStyles = (c: Palette) =>
 
 const makeClassicStyles = (c: Palette) =>
   StyleSheet.create({
+
+    reviewBox: { gap: space.sm, backgroundColor: c.fill, borderRadius: radius.md, paddingHorizontal: space.md, paddingVertical: 12 },
+    reviewRow: { gap: 2 },
+    reviewQuestion: { ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.muted },
+    reviewAnswer: { ...font.sansMedium, fontSize: size.body, lineHeight: scaled(21), color: c.text },
+    reviewWarning: { flexDirection: "row", alignItems: "center", gap: 6 },
+    reviewWarningText: { flex: 1, ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.needsYouText },
     full: { gap: space.md },
     compact: { gap: space.sm },
+
+    formControls: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 2 },
+    formButton: { width: 32, height: 28, alignItems: "center", justifyContent: "center", borderRadius: radius.sm },
+    formCount: { ...font.sans, fontSize: size.caption, color: c.muted, fontVariant: ["tabular-nums"] },
+    stepChips: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: -space.xs },
+    stepChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      height: 28,
+      paddingHorizontal: 10,
+      borderRadius: radius.pill,
+      backgroundColor: c.fill,
+    },
+    stepChipCurrent: { backgroundColor: c.inverse },
+    stepChipLabel: { ...font.sansMedium, fontSize: size.caption, color: c.muted },
+    stepChipLabelCurrent: { color: c.onInverse },
+    formError: { ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.errorText },
 
     eyebrowRow: { flexDirection: "row" },
     pill: {

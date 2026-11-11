@@ -34,6 +34,16 @@ final class TerminalScrollTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))
     }
 
+    /// Runs the loop until the screen shows what shows does, for up to
+    /// within seconds: a real program on a busy Mac can take longer than a
+    /// fixed pause to draw it.
+    private func settle(within seconds: TimeInterval, until shows: (String) -> Bool) {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline, !shows(screen) {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        }
+    }
+
     private var screen: String {
         let terminal = session.view.getTerminal()
         return (0..<terminal.rows).compactMap { terminal.getLine(row: $0)?.translateToString(trimRight: true) }.joined(separator: "\n")
@@ -42,6 +52,16 @@ final class TerminalScrollTests: XCTestCase {
     /// A wheel of a mouse, a few lines at a time; positive is up.
     private func wheel(_ lines: Int32) throws -> NSEvent {
         let event = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: lines, wheel2: 0, wheel3: 0))
+        // Over the middle of the terminal. A new event is wherever the real
+        // pointer is on the Mac's screen, and a report goes to the cell under
+        // it: over tmux's status line (its bottom row), tmux takes the wheel
+        // as one over that line and never scrolls back, so the test passed
+        // or failed by where the pointer had been left. An event with no
+        // window has its location in screen points from the bottom, which
+        // the terminal reads as its window's.
+        let middle = session.view.convert(NSPoint(x: session.view.bounds.midX, y: session.view.bounds.midY), to: nil)
+        let height = NSScreen.screens.first?.frame.height ?? 0
+        event.location = CGPoint(x: middle.x, y: height - middle.y)
         return try XCTUnwrap(NSEvent(cgEvent: event))
     }
 
@@ -84,11 +104,14 @@ final class TerminalScrollTests: XCTestCase {
         session.terminate()
         session = TerminalSession(folder: FileManager.default.temporaryDirectory, number: 1, command: [tmux, "-S", socket, "attach-session", "-t", "scroll"])
         window.contentView = session.view
-        settle(2)
+        settle(within: 10) { $0.contains("300") }
         XCTAssertTrue(screen.contains("300"), "Attached, at the end of its output:\n\(screen)")
+        // tmux turns its mouse on once attached: let it.
+        settle()
         for _ in 0..<4 { session.view.scroll(with: try wheel(3)) }
-        settle(1)
-        XCTAssertNotNil(screen.range(of: #"\[\d+/\d+\]"#, options: .regularExpression), "tmux is in copy mode, scrolled back:\n\(screen)")
+        let marker = #"\[\d+/\d+\]"#
+        settle(within: 6) { $0.range(of: marker, options: .regularExpression) != nil }
+        XCTAssertNotNil(screen.range(of: marker, options: .regularExpression), "tmux is in copy mode, scrolled back:\n\(screen)")
     }
 
     func testAFullScreenProgramWithoutTheMouseGetsArrowKeys() throws {

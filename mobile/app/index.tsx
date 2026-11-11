@@ -462,9 +462,10 @@ function AgentRow({
     }
     // One that ended, and is in no list, is kept so its screen can show it.
     if (!store.sessions.some((other) => other.id === session.id)) store.rememberSession(session);
+    // One template, not two joined: the route's type is kept, which a joined
+    // string loses.
     router.push(
-      `/session/${encodeURIComponent(session.id)}?message=${encodeURIComponent(match.messageId)}` +
-        `&find=${encodeURIComponent(query ?? "")}`,
+      `/session/${encodeURIComponent(session.id)}?message=${encodeURIComponent(match.messageId)}&find=${encodeURIComponent(query ?? "")}`,
     );
   };
 

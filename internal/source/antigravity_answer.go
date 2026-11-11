@@ -70,7 +70,7 @@ func (s *AntigravitySource) Answer(ctx context.Context, sessionID string, answer
 	if shown == nil || answer.QuestionID == "" || answer.QuestionID != shown.ID {
 		return errors.New("source: that question is no longer current; refresh the session")
 	}
-	current, form, err := s.currentForm(ctx, session.tmuxName, shown)
+	current, form, err := s.currentForm(ctx, session.tmuxName, session.transcript, shown)
 	if err != nil {
 		return err
 	}
@@ -107,6 +107,49 @@ func (s *AntigravitySource) Answer(ctx context.Context, sessionID string, answer
 	})
 }
 
+// MoveQuestion implements QuestionMover: in agy's form of several questions
+// → goes to the next without answering and ← back, as its footer offers.
+// Step is from 1; agy's form has no review past its last question. Like an
+// answer, it is refused unless the pane still shows the question the app saw.
+func (s *AntigravitySource) MoveQuestion(ctx context.Context, sessionID, questionID string, step int) error {
+	session, err := s.session(sessionID)
+	if err != nil {
+		return err
+	}
+	if session.tmuxName == "" {
+		return errors.New("source: only sessions started through Agentman can be answered")
+	}
+	shown := session.meta.Question
+	if shown == nil || questionID == "" || questionID != shown.ID {
+		return errors.New("source: that question is no longer current; refresh the session")
+	}
+	_, form, err := s.currentForm(ctx, session.tmuxName, session.transcript, shown)
+	if err != nil {
+		return err
+	}
+	if form.Typing {
+		return errors.New("source: a reply is being typed into this question on the Mac; finish it there")
+	}
+	if form.Kind != "question" || form.Count < 2 || form.Index < 1 {
+		return errors.New("source: this form has no other questions to move to")
+	}
+	if step < 1 || step > form.Count {
+		return fmt.Errorf("source: the form has no question %d", step)
+	}
+	if step == form.Index {
+		return nil
+	}
+	key, distance := "Right", step-form.Index
+	if distance < 0 {
+		key, distance = "Left", -distance
+	}
+	keys := make([]string, distance)
+	for i := range keys {
+		keys[i] = key
+	}
+	return s.keys.send(ctx, session.tmuxName, keys...)
+}
+
 // antigravityAmendLabel is what agy's first option becomes once Tab opens a
 // message box under it.
 const antigravityAmendLabel = "Yes, and tell Antigravity CLI what to do next"
@@ -129,13 +172,16 @@ func antigravityQuestion(found *question.Question, form question.AntigravityForm
 // currentForm reads the pane and checks it still shows the question the phone
 // was answering.
 func (s *AntigravitySource) currentForm(
-	ctx context.Context, name string, shown *protocol.Question,
+	ctx context.Context, name, transcript string, shown *protocol.Question,
 ) (*question.Question, question.AntigravityForm, error) {
 	pane, err := s.capturePane(ctx, name)
 	if err != nil {
 		return nil, question.AntigravityForm{}, fmt.Errorf("source: could not inspect the question: %w", err)
 	}
 	current, form := question.DetectAntigravityForm(pane)
+	// Read as the app was shown it, the command whole, or it would never
+	// match.
+	s.withFullCommand(transcript, current, form)
 	if current == nil || !sameQuestion(shown, protocolQuestion(current)) {
 		return nil, form, errors.New("source: that question is no longer on screen; refresh the session")
 	}

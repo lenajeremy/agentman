@@ -45,7 +45,7 @@ func TestAClaudeCodeDialogIsShownOnThePhone(t *testing.T) {
 		t.Fatal(err)
 	}
 	meta := protocol.Session{ID: "claude:s1", State: protocol.StateIdle}
-	src.applyPane(&meta, "", permissionPane(t, "claude_auto_mode_setup_dialog_real_pane.txt"))
+	src.applyPane(&meta, "", permissionPane(t, "claude_auto_mode_setup_dialog_real_pane.txt"), nil)
 	if meta.State != protocol.StateWaitingInput || meta.Question == nil {
 		t.Fatalf("state %q, question %+v: the dialog is not shown", meta.State, meta.Question)
 	}

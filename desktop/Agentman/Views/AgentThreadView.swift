@@ -332,7 +332,7 @@ struct AgentThreadView: View {
                         // The question is part of the conversation, so it
                         // scrolls with it and is never squeezed to fit.
                         if let question = session.question {
-                            QuestionCard(session: session, question: question, typedInComposer: true)
+                            QuestionCard(session: session, question: question)
                                 .id("question")
                         }
                         // Below the last message, so following the thread
@@ -782,7 +782,9 @@ private struct ThreadTitle: View {
     var body: some View {
         HStack(spacing: 10) {
             Text(Worktrees.label(session.cwd))
-                .font(TextStyle.caption)
+                .font(Look.site ? Fonts.eyebrow : TextStyle.caption)
+                .tracking(Look.site ? 0.8 : 0)
+                .textCase(Look.site ? .uppercase : nil)
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)
             Text("/").foregroundStyle(Palette.faint)
@@ -807,7 +809,7 @@ private struct ThreadTitle: View {
                 HStack(spacing: 6) {
                     Button(action: begin) {
                         Text(session.name)
-                            .font(TextStyle.bodyMedium)
+                            .font(Look.site ? Fonts.heading(15) : TextStyle.bodyMedium)
                             .foregroundStyle(Palette.text)
                             .lineLimit(1)
                             .padding(.horizontal, 5)
@@ -1208,7 +1210,11 @@ struct MessageRow: View {
                             QuotedMessage(text: sent.text) { LongText(text: $0) }
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 12)
-                                .background(Palette.bubble, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                .look {
+                                    $0.edged(18, fill: Palette.bubble, depth: 2)
+                                } classic: {
+                                    $0.background(Palette.bubble, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                }
                                 .contextMenu {
                                     Button("Copy") { Clipboard.copy(sent.text) }
                                 }
@@ -1453,7 +1459,7 @@ struct WorkedLine: View {
         HStack(spacing: 8) {
             if live { Loader(size: 9) }
             Text(text)
-                .font(TextStyle.caption)
+                .font(Look.site ? Fonts.mono(11.5) : TextStyle.caption)
                 .monospacedDigit()
                 .foregroundStyle(Palette.muted)
         }
@@ -1734,8 +1740,12 @@ extension View {
     func stepPill(open: Bool) -> some View {
         padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(open ? Palette.fill.mix(with: Palette.text, by: 0.06) : Palette.fill,
-                        in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .look {
+                $0.edged(13, fill: open ? Palette.bubble : Palette.surface)
+            } classic: {
+                $0.background(open ? Palette.fill.mix(with: Palette.text, by: 0.06) : Palette.fill,
+                              in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            }
             .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 
@@ -2036,12 +2046,12 @@ struct Composer: View {
         // A click on the card around the text, not on a control, goes to
         // the text.
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous).hardShadowFill(Palette.surface, shadow: Palette.edge, depth: 3)
+            RoundedRectangle(cornerRadius: 18, style: .continuous).hardShadowFill(Palette.surface, shadow: Palette.edge, depth: 4)
                 .onTapGesture { if enabled { focused = true } }
         }
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Look.site ? Palette.edge : (focused ? Palette.fillStrong : Palette.line), lineWidth: Palette.edgeWidth)
+                .strokeBorder(Look.site ? Palette.edge : (focused ? Palette.fillStrong : Palette.line), lineWidth: Look.site ? 2 : Palette.edgeWidth)
         )
         // The commands for `/`, and the files for `@`, just above the box.
         .overlay(alignment: .top) {
@@ -2139,7 +2149,14 @@ struct Composer: View {
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(canSend ? Color.white : Palette.muted)
                     .frame(width: 28, height: 28)
-                    .background(canSend ? (Look.site ? Palette.flood : Palette.working) : Palette.fillStrong, in: Circle())
+                    .look {
+                        $0.background {
+                            Circle().hardShadowFill(canSend ? Palette.flood : Palette.fillStrong, shadow: Palette.edge, depth: canSend ? 2 : 0)
+                        }
+                        .overlay(Circle().strokeBorder(canSend ? Palette.edge : .clear, lineWidth: Palette.edgeWidth))
+                    } classic: {
+                        $0.background(canSend ? Palette.working : Palette.fillStrong, in: Circle())
+                    }
             }
             .buttonStyle(.plain)
             .disabled(!canSend)

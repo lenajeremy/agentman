@@ -367,6 +367,77 @@ func (s *ClaudeSource) capture(ctx context.Context, tmuxName string) (string, er
 	return capture(ctx, tmuxName)
 }
 
+// questionOnScreen is the question a Claude session shows, re-read from its
+// pane, when it is still the one the app saw (questionID): what a key
+// pressed on the app's behalf is checked against, so it can't land on
+// something else.
+func (s *ClaudeSource) questionOnScreen(ctx context.Context, sessionID, questionID string) (claudeSession, *question.Question, error) {
+	s.mu.RLock()
+	session, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return session, nil, fmt.Errorf("source: unknown claude session %q", sessionID)
+	}
+	if session.tmuxName == "" {
+		return session, nil, fmt.Errorf("source: only sessions started with `am claude` can be answered")
+	}
+	if session.meta.Question == nil || questionID == "" || questionID != session.meta.Question.ID {
+		return session, nil, fmt.Errorf("source: that question is no longer current; refresh the session")
+	}
+	current, err := s.captureQuestion(ctx, session.tmuxName)
+	if err != nil {
+		return session, nil, fmt.Errorf("source: that question is no longer on screen; refresh the session")
+	}
+	s.enrichClaudeQuestion(sessionID, session.transcript, current)
+	if !sameQuestion(session.meta.Question, protocolQuestion(current)) {
+		return session, nil, fmt.Errorf("source: that question is no longer on screen; refresh the session")
+	}
+	return session, current, nil
+}
+
+// MoveQuestion goes to another question of the multi-question form a Claude
+// session shows, without answering the one on screen: step is the one to go
+// to, from 1, and one past the last is the form's review. Which question the
+// form is on must be known, or the keys could go the wrong way.
+func (s *ClaudeSource) MoveQuestion(ctx context.Context, sessionID, questionID string, step int) error {
+	session, current, err := s.questionOnScreen(ctx, sessionID, questionID)
+	if err != nil {
+		return err
+	}
+	if len(current.Steps) < 2 || current.Step == 0 {
+		return fmt.Errorf("source: this form has no other questions to move to")
+	}
+	if step < 1 || step > len(current.Steps)+1 {
+		return fmt.Errorf("source: the form has no question %d", step)
+	}
+	if step == current.Step {
+		return nil
+	}
+	move := s.moveQuestion
+	if move == nil {
+		move = tmux.MoveQuestion
+	}
+	return move(ctx, session.tmuxName, step-current.Step)
+}
+
+// CloseQuestion closes a question the agent asked without answering it, as
+// Esc does in Claude Code: the agent is told it was declined and waits for a
+// message. Not a permission prompt, where Esc is a no.
+func (s *ClaudeSource) CloseQuestion(ctx context.Context, sessionID, questionID string) error {
+	session, current, err := s.questionOnScreen(ctx, sessionID, questionID)
+	if err != nil {
+		return err
+	}
+	if !current.Closable {
+		return fmt.Errorf("source: only a question the agent asked can be closed; answer this one")
+	}
+	press := s.closeQuestion
+	if press == nil {
+		press = tmux.Escape
+	}
+	return press(ctx, session.tmuxName)
+}
+
 func (s *ClaudeSource) captureQuestion(ctx context.Context, tmuxName string) (*question.Question, error) {
 	pane, err := s.capture(ctx, tmuxName)
 	if err != nil {
@@ -376,7 +447,19 @@ func (s *ClaudeSource) captureQuestion(ctx context.Context, tmuxName string) (*q
 	if found == nil || claudeInfoPanel(pane) {
 		return nil, errNoAnswerableQuestion
 	}
+	placeClaudeFormStep(found, s.styledCapture(ctx, tmuxName))
 	return found, nil
+}
+
+// styledCapture captures a pane with its colours when asked to.
+func (s *ClaudeSource) styledCapture(ctx context.Context, tmuxName string) func() (string, error) {
+	return func() (string, error) {
+		capture := s.captureStyledPane
+		if capture == nil {
+			capture = tmux.CaptureStyled
+		}
+		return capture(ctx, tmuxName)
+	}
 }
 
 func protocolQuestion(found *question.Question) *protocol.Question {
@@ -393,13 +476,22 @@ func protocolQuestion(found *question.Question) *protocol.Question {
 		})
 	}
 	question := &protocol.Question{
-		Prompt:   found.Prompt,
-		Title:    found.Title,
-		Detail:   found.Detail,
-		Options:  options,
-		Multiple: found.Multiple,
-		Custom:   found.Custom,
+		Prompt:     found.Prompt,
+		Title:      found.Title,
+		Detail:     found.Detail,
+		Options:    options,
+		Multiple:   found.Multiple,
+		Custom:     found.Custom,
+		Step:       found.Step,
+		ReviewStep: found.ReviewStep,
+		Closable:   found.Closable,
 	}
+	for _, step := range found.Steps {
+		question.Steps = append(question.Steps, protocol.QuestionStep{Title: step.Title, Answered: step.Answered})
+	}
+	// The steps are left out of its id: moving between questions, or one
+	// being answered, is not this question changing. Closable is read off
+	// the same screen, so it is left out too.
 	question.ID = terminalQuestionID(question)
 	return question
 }

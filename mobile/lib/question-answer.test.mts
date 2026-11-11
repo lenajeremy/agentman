@@ -76,3 +76,18 @@ test("the full form waits for an answer, and for only one when only one is allow
   assert.equal(submitAnswer(form, ["1"], "MySQL"), null);
   assert.equal(submitAnswer(form, ["1", "2"], ""), null);
 });
+
+test("a form's review reads as its answers and its warning", async () => {
+  const { reviewAnswers } = await import("./question-answer.ts");
+  assert.deepEqual(
+    reviewAnswers("⚠ You have not answered all questions\n● Which shape?\n  → Square\n● Which size?\n  → Large"),
+    {
+      warning: "You have not answered all questions",
+      answers: [{ question: "Which shape?", answer: "Square" }, { question: "Which size?", answer: "Large" }],
+    },
+  );
+  assert.deepEqual(reviewAnswers("● Which shape?\n  → Square"), { warning: undefined, answers: [{ question: "Which shape?", answer: "Square" }] });
+  // Not the review's shape: shown as it came.
+  assert.equal(reviewAnswers("rm -rf build"), null);
+  assert.equal(reviewAnswers(""), null);
+});

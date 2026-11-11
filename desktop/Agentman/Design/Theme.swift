@@ -27,14 +27,21 @@ extension NSColor {
 
 enum Palette {
     static let paper = Color(light: 0xFAFAFA, dark: 0x000000)
-    static let sidebar = Color(light: 0xF5F5F5, dark: 0x050505)
+    /// The sidebars' ground: the site's cream, lighter, in the New theme.
+    static var sidebar: Color { Look.site ? siteSidebar : classicSidebar }
+    private static let classicSidebar = Color(light: 0xF5F5F5, dark: 0x050505)
+    private static let siteSidebar = Color(light: 0xFFF7EC, dark: 0x14100D)
     static let surface = Color(light: 0xFFFFFF, dark: 0x0D0D0D)
     static let fill = Color(light: 0xEFEFEF, dark: 0x202020)
     static let fillStrong = Color(light: 0xE4E4E4, dark: 0x303030)
     static let line = Color(light: 0xE5E5E5, dark: 0x242424)
     /// A column of the Board, and words on it, which `muted` is too light
     /// for on this grey.
-    static let boardWell = Color(light: 0xF4F4F4, dark: 0x0B0B0B)
+    /// A Board column's ground: in New, a deeper shade of the Board's
+    /// orange tint, so the columns still read on it.
+    static var boardWell: Color { Look.site ? siteBoardWell : classicBoardWell }
+    private static let classicBoardWell = Color(light: 0xF4F4F4, dark: 0x0B0B0B)
+    private static let siteBoardWell = Color(light: 0xFCE7D4, dark: 0x1F1610)
     static let boardMuted = Color(light: 0x666666, dark: 0xA0A0A0)
     // Tool calls in a thread: a soft card a step greyer than the page, set
     // apart from the conversation and from the user's own bubbles, with a

@@ -109,7 +109,7 @@ struct Sidebar: View {
                     // The name, where it fits whole; at the narrowest the
                     // mark alone, rather than "Ag…".
                     ViewThatFits(in: .horizontal) {
-                        Text("Agentman").font(Fonts.heading(14)).fixedSize()
+                        Text("Agentman").font(Look.site ? Fonts.display(16) : Fonts.heading(14)).fixedSize()
                         Color.clear.frame(width: 0, height: 0)
                     }
                     Spacer(minLength: 0)
@@ -119,11 +119,19 @@ struct Sidebar: View {
                 .padding(.trailing, 14)
                 .frame(height: 32)
                 HStack(spacing: 9) {
-                    Image(systemName: "magnifyingglass")
-                    TextField("Search", text: $store.search)
-                        .textFieldStyle(.plain)
-                        .accessibilityLabel("Search agents and messages")
-                        .onExitCommand { store.search = "" }
+                    HStack(spacing: 9) {
+                        Image(systemName: "magnifyingglass")
+                        TextField("Search", text: $store.search)
+                            .textFieldStyle(.plain)
+                            .accessibilityLabel("Search agents and messages")
+                            .onExitCommand { store.search = "" }
+                    }
+                    // In New, a field of its own: edged, a little raised.
+                    .look {
+                        $0.padding(.horizontal, 10)
+                            .frame(height: 30)
+                            .edged(8, fill: Palette.surface, depth: 2)
+                    } classic: { $0 }
                     FilterMenu()
                         .labelStyle(.iconOnly)
                         .fixedSize()
@@ -342,14 +350,7 @@ private struct RowHighlight: View {
     var tint: Color?
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 7, style: .continuous)
-            .fill(Color.primary.opacity(selected ? 0.10 : hovering ? 0.05 : 0))
-            .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(selected ? 0.10 : 0))
-            )
-            .padding(.horizontal, 10)
-            .padding(.vertical, 1)
+        highlight
             .overlay(alignment: .leading) {
                 if let tint {
                     UnevenRoundedRectangle(bottomTrailingRadius: 1, topTrailingRadius: 1, style: .continuous)
@@ -359,6 +360,31 @@ private struct RowHighlight: View {
                         .accessibilityHidden(true)
                 }
             }
+    }
+
+    /// In New, the open row is a card of its own: raised on the cream, its
+    /// shadow kept inside the row so the list doesn't cut it off.
+    @ViewBuilder private var highlight: some View {
+        if Look.site, selected {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .hardShadowFill(Palette.surface, shadow: Palette.edge, depth: 3)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth)
+                )
+                .padding(.horizontal, 10)
+                .padding(.top, 1)
+                .padding(.bottom, 4)
+        } else {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.primary.opacity(selected ? 0.10 : hovering ? 0.05 : 0))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(selected ? 0.10 : 0))
+                )
+                .padding(.horizontal, 10)
+                .padding(.vertical, 1)
+        }
     }
 }
 
@@ -406,7 +432,7 @@ struct AgentmanCard: View {
             .padding(.horizontal, 11)
             .padding(.vertical, 8)
             .look {
-                $0.edged(12, fill: background, depth: selected ? 3 : 2)
+                $0.edged(12, fill: background, depth: selected ? 5 : 4, lineWidth: 2)
             } classic: {
                 $0.background(background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(
@@ -867,8 +893,8 @@ struct PaneResizeHandle: View {
 
     var body: some View {
         Rectangle()
-            .fill(Palette.line)
-            .frame(width: 1)
+            .fill(Palette.edge)
+            .frame(width: Palette.edgeWidth)
             .frame(maxHeight: .infinity)
             .overlay {
                 Color.clear
@@ -912,9 +938,14 @@ private struct SectionHeading: View {
             Spacer(minLength: 4)
             if let count {
                 Text(String(count))
-                    .font(TextStyle.label)
+                    .font(Look.site ? Fonts.mono(10, .medium) : TextStyle.label)
                     .monospacedDigit()
-                    .foregroundStyle(Palette.faint)
+                    .foregroundStyle(Look.site ? (tint ?? Palette.edge) : Palette.faint)
+                    .look {
+                        $0.padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .overlay(Capsule().strokeBorder(tint ?? Palette.edge, lineWidth: 1.5))
+                    } classic: { $0 }
             }
             if let open {
                 Image(systemName: "chevron.right")
@@ -944,8 +975,8 @@ private struct SectionHeading: View {
 private struct SectionRule: View {
     var body: some View {
         Rectangle()
-            .fill(Palette.line)
-            .frame(height: 1)
+            .fill(Look.site ? Palette.edge.opacity(0.25) : Palette.line)
+            .frame(height: Palette.edgeWidth)
             .padding(.horizontal, SidebarMetrics.inset)
             .padding(.vertical, 6)
             .listRowSeparator(.hidden)

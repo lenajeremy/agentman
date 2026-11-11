@@ -515,3 +515,31 @@ test("decodes a session's commands and a panel's text", () => {
   assert.equal(decodeDaemonEvent({ type: "command_panel", panel: { command: "/usage", text: "68% used" } })?.panel?.text, "68% used");
   assert.equal(decodeDaemonEvent({ type: "command_panel", panel: { command: "", text: "x" } }), null);
 });
+
+test("a form's steps arrive with its question, and steps the app can't read are dropped, not the question", () => {
+  const session = {
+    id: "s", kind: "claude", nativeId: "n", name: "name", cwd: "/tmp",
+    state: "waiting_input", inject: "tmux", startedAt: 1, lastActivityAt: 2,
+    question: {
+      id: "q", prompt: "Which size?", options: [{ key: "1", label: "Small" }],
+      steps: [{ title: "Colour", answered: true }, { title: "Size" }], step: 2, reviewStep: true, closable: true,
+    },
+  };
+  const event = decodeDaemonEvent({ type: "session_update", session });
+  assert.ok(event && event.type === "session_update");
+  const question = event.session.question!;
+  assert.deepEqual(question.steps, [{ title: "Colour", answered: true }, { title: "Size" }]);
+  assert.equal(question.step, 2);
+  assert.equal(question.reviewStep, true);
+  assert.equal(question.closable, true);
+
+  const odd = decodeDaemonEvent({
+    type: "session_update",
+    session: { ...session, question: { ...session.question, steps: [{ title: 7 }], step: "two", closable: "yes" } },
+  });
+  assert.ok(odd && odd.type === "session_update");
+  assert.equal(odd.session.question?.prompt, "Which size?");
+  assert.equal(odd.session.question?.steps, undefined);
+  assert.equal(odd.session.question?.step, undefined);
+  assert.equal(odd.session.question?.closable, undefined);
+});

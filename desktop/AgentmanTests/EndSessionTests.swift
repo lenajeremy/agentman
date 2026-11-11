@@ -62,6 +62,20 @@ final class EndSessionTests: XCTestCase {
         XCTAssertTrue(store.stillRunning.contains("claude:own"))
     }
 
+    /// Ended here but still running in its own terminal, it then leaves the
+    /// daemon's list: the page keeps saying it runs on there, not "ended,
+    /// resume", which would start a second copy of it.
+    func testOneStillRunningStaysSoWhenItLeavesTheList() async throws {
+        let store = try store(closing: false, sessions: #"{"type":"sessions","sessions":[{"id":"claude:own","kind":"claude","nativeId":"own","name":"mine","cwd":"/w/mine","state":"idle","inject":"hook"}]}"#)
+        store.selection = .agent("claude:own")
+        _ = await store.end("claude:own")
+        store.apply(try JSONDecoder().decode(DaemonEvent.self, from: Data(#"{"type":"session_gone","sessionId":"claude:own"}"#.utf8)))
+        store.apply(try JSONDecoder().decode(DaemonEvent.self, from: Data(#"{"type":"sessions","sessions":[]}"#.utf8)))
+        XCTAssertEqual(store.selection, .agent("claude:own"))
+        XCTAssertTrue(store.stillRunning.contains("claude:own"), "it still runs in its terminal")
+        XCTAssertEqual(store.session("claude:own")?.state, .ended)
+    }
+
     /// Ending one from elsewhere, while another's page is open, moves nothing.
     func testEndingAnotherAgentLeavesThePageAlone() async throws {
         let store = try store(closing: true, sessions: #"{"type":"sessions","sessions":[{"id":"claude:a","kind":"claude","name":"a","cwd":"/w/a","state":"idle","inject":"tmux"},{"id":"claude:b","kind":"claude","name":"b","cwd":"/w/b","state":"idle","inject":"tmux"}]}"#)
@@ -69,6 +83,49 @@ final class EndSessionTests: XCTestCase {
         _ = await store.end("claude:b")
         XCTAssertEqual(store.selection, .agent("claude:a"))
         XCTAssertNil(store.foundSessions["claude:b"])
+    }
+
+    /// Quit outside the app while its page is open (Ctrl-C or /exit in its
+    /// terminal, a crash, the phone): the page stays, ended, to resume, as
+    /// when it is ended here, rather than "This agent has ended".
+    func testAnOpenAgentThatQuitsElsewhereKeepsItsPage() throws {
+        let store = try store(closing: true, sessions: #"{"type":"sessions","sessions":[{"id":"claude:abc","kind":"claude","nativeId":"abc","name":"site","cwd":"/w/site","state":"idle","inject":"tmux"}]}"#)
+        store.selection = .agent("claude:abc")
+        store.apply(try JSONDecoder().decode(DaemonEvent.self, from: Data(#"{"type":"sessions","sessions":[]}"#.utf8)))
+        XCTAssertEqual(store.selection, .agent("claude:abc"), "the page stays")
+        let shown = try XCTUnwrap(store.session("claude:abc"), "not the gone page")
+        XCTAssertEqual(shown.state, .ended)
+        XCTAssertEqual(shown.name, "site")
+        XCTAssertTrue(AgentThreadView.resumable(shown))
+        XCTAssertFalse(store.stillRunning.contains("claude:abc"))
+    }
+
+    func testOneTheDaemonSaysIsGoneKeepsItsPageToo() throws {
+        let store = try store(closing: true, sessions: #"{"type":"sessions","sessions":[{"id":"codex:tmux-agentman-codex-1-T9","kind":"codex","nativeId":"T9","name":"api","cwd":"/w/api","state":"busy","inject":"tmux"}]}"#)
+        store.selection = .agent("codex:tmux-agentman-codex-1-T9")
+        store.apply(try JSONDecoder().decode(DaemonEvent.self, from: Data(#"{"type":"session_gone","sessionId":"codex:tmux-agentman-codex-1-T9"}"#.utf8)))
+        let shown = try XCTUnwrap(store.session("codex:tmux-agentman-codex-1-T9"))
+        XCTAssertEqual(shown.state, .ended)
+        XCTAssertEqual(shown.id, "codex:T9", "under the conversation's own id, which Resume reopens")
+        XCTAssertNotNil(store.session("codex:T9"))
+    }
+
+    /// Resumed, the agent is live again: the live one comes first.
+    func testWhenItComesBackTheLiveOneIsShown() throws {
+        let store = try store(closing: true, sessions: #"{"type":"sessions","sessions":[{"id":"claude:abc","kind":"claude","nativeId":"abc","name":"site","cwd":"/w/site","state":"idle","inject":"tmux"}]}"#)
+        store.selection = .agent("claude:abc")
+        store.apply(try JSONDecoder().decode(DaemonEvent.self, from: Data(#"{"type":"sessions","sessions":[]}"#.utf8)))
+        store.apply(try JSONDecoder().decode(DaemonEvent.self, from: Data(#"{"type":"sessions","sessions":[{"id":"claude:abc","kind":"claude","nativeId":"abc","name":"site","cwd":"/w/site","state":"busy","inject":"tmux"}]}"#.utf8)))
+        XCTAssertEqual(store.session("claude:abc")?.state, .busy)
+    }
+
+    /// Another agent quitting, while this one's page is open, keeps nothing.
+    func testAnotherAgentQuittingKeepsNothing() throws {
+        let store = try store(closing: true, sessions: #"{"type":"sessions","sessions":[{"id":"claude:a","kind":"claude","name":"a","cwd":"/w/a","state":"idle","inject":"tmux"},{"id":"claude:b","kind":"claude","name":"b","cwd":"/w/b","state":"idle","inject":"tmux"}]}"#)
+        store.selection = .agent("claude:a")
+        store.apply(try JSONDecoder().decode(DaemonEvent.self, from: Data(#"{"type":"sessions","sessions":[{"id":"claude:a","kind":"claude","name":"a","cwd":"/w/a","state":"idle","inject":"tmux"}]}"#.utf8)))
+        XCTAssertNil(store.foundSessions["claude:b"])
+        XCTAssertNil(store.session("claude:b"))
     }
 
     // MARK: Pictures
