@@ -62,6 +62,20 @@ final class EndSessionTests: XCTestCase {
         XCTAssertTrue(store.stillRunning.contains("claude:own"))
     }
 
+    /// Ended here but still running in its own terminal, it then leaves the
+    /// daemon's list: the page keeps saying it runs on there, not "ended,
+    /// resume", which would start a second copy of it.
+    func testOneStillRunningStaysSoWhenItLeavesTheList() async throws {
+        let store = try store(closing: false, sessions: #"{"type":"sessions","sessions":[{"id":"claude:own","kind":"claude","nativeId":"own","name":"mine","cwd":"/w/mine","state":"idle","inject":"hook"}]}"#)
+        store.selection = .agent("claude:own")
+        _ = await store.end("claude:own")
+        store.apply(try JSONDecoder().decode(DaemonEvent.self, from: Data(#"{"type":"session_gone","sessionId":"claude:own"}"#.utf8)))
+        store.apply(try JSONDecoder().decode(DaemonEvent.self, from: Data(#"{"type":"sessions","sessions":[]}"#.utf8)))
+        XCTAssertEqual(store.selection, .agent("claude:own"))
+        XCTAssertTrue(store.stillRunning.contains("claude:own"), "it still runs in its terminal")
+        XCTAssertEqual(store.session("claude:own")?.state, .ended)
+    }
+
     /// Ending one from elsewhere, while another's page is open, moves nothing.
     func testEndingAnotherAgentLeavesThePageAlone() async throws {
         let store = try store(closing: true, sessions: #"{"type":"sessions","sessions":[{"id":"claude:a","kind":"claude","name":"a","cwd":"/w/a","state":"idle","inject":"tmux"},{"id":"claude:b","kind":"claude","name":"b","cwd":"/w/b","state":"idle","inject":"tmux"}]}"#)

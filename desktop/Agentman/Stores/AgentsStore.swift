@@ -233,8 +233,10 @@ final class AgentsStore {
         let ended = Self.ended(was)
         foundSessions[id] = ended
         foundSessions[ended.id] = ended
-        // It quit: nothing of it runs on, so it can be resumed.
-        stillRunning.remove(ended.id)
+        // It quit, so it can be resumed, unless it was ended here from its
+        // page and still runs in the terminal it was opened in: then it only
+        // left the list, which end() said, and that stands.
+        if !stillRunning.contains(id) { stillRunning.remove(ended.id) }
     }
 
     /// The window follows a conversation that went on as another.
