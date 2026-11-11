@@ -73,8 +73,9 @@ func claudeModesFor(current string) []string {
 }
 
 // claudePickerModels are the rows Claude Code 2.1.289's /model picker lists
-// for an account with every model. They are what the phone is offered until
-// agentman next opens the picker, which replaces them with what it shows.
+// for an account with every model: what is offered only when Claude Code
+// can't be asked for its own list (see claude_models.go) and agentman has not
+// opened the picker yet.
 var claudePickerModels = []string{
 	"Opus 5.5", "Fable 5.1", "Sonnet 5.5", "Haiku 4.5", "Sonnet 5", "Opus 5",
 	"Fable 5", "Opus 4.8", "Opus 4.7", "Opus 4.6", "Sonnet 4.6",
@@ -113,10 +114,16 @@ func claudeModelID(label string) string {
 	return id
 }
 
+// offeredModels are the models a session can be switched to: what Claude
+// Code itself lists; else what its picker last showed; else the list it had
+// when agentman was written.
 func (s *ClaudeSource) offeredModels() []string {
-	s.switchMu.Lock()
-	labels := s.pickerLabels
-	s.switchMu.Unlock()
+	labels := s.catalog.labels()
+	if len(labels) == 0 {
+		s.switchMu.Lock()
+		labels = s.pickerLabels
+		s.switchMu.Unlock()
+	}
 	if len(labels) == 0 {
 		labels = claudePickerModels
 	}

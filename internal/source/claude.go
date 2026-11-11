@@ -82,6 +82,9 @@ type ClaudeSource struct {
 	switchMu      sync.Mutex
 	pickerLabels  []string
 	modelSwitches map[string]claudeModelSwitch
+	// catalog is the list of models Claude Code itself reports; see
+	// claude_models.go. It comes before pickerLabels.
+	catalog *claudeModelCatalog
 
 	// editor is the editing mode the user set for Claude's prompt.
 	editor claudeEditorMode
@@ -139,6 +142,7 @@ func NewClaudeSource(home string) (*ClaudeSource, error) {
 		switcher:          newPaneDriver(),
 		processArgs:       claudeProcessArgs,
 		infra:             map[claudeProcessKey]bool{},
+		catalog:           newClaudeModelCatalog(home),
 	}, nil
 }
 
@@ -158,6 +162,8 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// The models Claude Code offers, asked again in the background when due.
+	s.catalog.refreshIfDue()
 	entries, err := os.ReadDir(s.sessionsDir())
 	if err != nil {
 		// The CLI may have launched but not written its registry yet. Keep
