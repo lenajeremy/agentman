@@ -391,7 +391,7 @@ func TestClaudeInfoPanelIsNotAQuestion(t *testing.T) {
 	s := &ClaudeSource{home: t.TempDir(), questionSpecs: map[string]claudeQuestionSpecCache{},
 		capturePane: func(context.Context, string) (string, error) { return usage, nil }}
 	meta := protocol.Session{ID: "claude:s1", State: protocol.StateWaitingInput}
-	s.applyPane(&meta, "", usage)
+	s.applyPane(&meta, "", usage, nil)
 	if meta.Question != nil || meta.State != protocol.StateIdle {
 		t.Errorf("question %+v, state %s", meta.Question, meta.State)
 	}

@@ -370,7 +370,7 @@ func TestClaudesNoCarriesANoteWhenAutoModeIsOffered(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := protocol.Session{ID: "claude:s1"}
-	src.applyPane(&session, "", permissionPane(t, "claude_permission_auto_offer_real_pane.txt"))
+	src.applyPane(&session, "", permissionPane(t, "claude_permission_auto_offer_real_pane.txt"), nil)
 	if session.Question == nil || len(session.Question.Options) != 4 {
 		t.Fatalf("question %+v", session.Question)
 	}

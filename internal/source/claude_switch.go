@@ -138,7 +138,9 @@ func (s *ClaudeSource) offeredModels() []string {
 
 // applyPane fills in what a pane-bound session's screen says about it: the
 // question it is blocked on, and the mode and models it can be switched to.
-func (s *ClaudeSource) applyPane(meta *protocol.Session, transcript, pane string) {
+// styled captures the pane with its colours, for what only colour says; nil
+// where there is no pane to ask.
+func (s *ClaudeSource) applyPane(meta *protocol.Session, transcript, pane string, styled func() (string, error)) {
 	// /usage left open in the terminal is not something to answer, and the
 	// registry's "waiting" for it is not either.
 	if claudeInfoPanel(pane) {
@@ -148,6 +150,7 @@ func (s *ClaudeSource) applyPane(meta *protocol.Session, transcript, pane string
 		return
 	}
 	if detected := question.Detect(pane); detected != nil {
+		placeClaudeFormStep(detected, styled)
 		s.enrichClaudeQuestion(meta.ID, transcript, detected)
 		meta.Question = protocolQuestion(detected)
 		meta.State = protocol.StateWaitingInput

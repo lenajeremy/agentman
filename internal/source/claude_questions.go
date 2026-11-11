@@ -46,16 +46,54 @@ type claudeQuestionTranscriptBlock struct {
 	Input json.RawMessage `json:"input"`
 }
 
+// enrichClaudeQuestion adds what the plain screen doesn't say: the
+// question's own words from the transcript's AskUserQuestion call when it is
+// there (Claude Code 2.1.322 writes it only once the form is answered), and
+// whether it can be closed.
 func (s *ClaudeSource) enrichClaudeQuestion(
 	sessionID, transcript string,
 	detected *question.Question,
 ) {
-	if detected == nil || transcript == "" {
+	if detected == nil {
 		return
+	}
+	asked := s.applyClaudeTranscript(sessionID, transcript, detected)
+	// The agent's own question: its call in the transcript, Claude's
+	// "Type something" row, which only AskUserQuestion draws, or a form of
+	// several. Esc closes it; on a permission prompt Esc is a no.
+	detected.Closable = asked || detected.Custom || len(detected.Steps) > 1
+}
+
+// placeClaudeFormStep finds which of a form's questions is on screen when
+// nothing else has said: the tab Claude draws on a background, from a
+// capture with colours. The question's name is that tab's.
+func placeClaudeFormStep(detected *question.Question, styled func() (string, error)) {
+	if detected == nil || len(detected.Steps) < 2 || detected.Step != 0 || styled == nil {
+		return
+	}
+	pane, err := styled()
+	if err != nil {
+		return
+	}
+	step := question.CurrentStep(pane)
+	if step < 1 || step > len(detected.Steps) {
+		return
+	}
+	detected.Step = step
+	if detected.Title == "" {
+		detected.Title = detected.Steps[step-1].Title
+	}
+}
+
+// applyClaudeTranscript fills in the question from the transcript's latest
+// AskUserQuestion call, reporting whether one matched.
+func (s *ClaudeSource) applyClaudeTranscript(sessionID, transcript string, detected *question.Question) bool {
+	if transcript == "" {
+		return false
 	}
 	info, err := os.Stat(transcript)
 	if err != nil {
-		return
+		return false
 	}
 
 	s.questionMu.Lock()
@@ -64,16 +102,14 @@ func (s *ClaudeSource) enrichClaudeQuestion(
 	if !ok || cached.transcriptSize != info.Size() {
 		specs, err := readLatestClaudeQuestionSpecs(transcript, info.Size())
 		if err != nil {
-			return
+			return false
 		}
 		cached = claudeQuestionSpecCache{transcriptSize: info.Size(), specs: specs}
 		s.questionMu.Lock()
 		s.questionSpecs[sessionID] = cached
 		s.questionMu.Unlock()
 	}
-	asked := applyClaudeQuestionSpecs(detected, cached.specs)
-	// The agent's own question, or the review of its form: Esc closes it.
-	detected.Closable = asked || (len(detected.Steps) > 1 && detected.Step == len(detected.Steps)+1)
+	return applyClaudeQuestionSpecs(detected, cached.specs)
 }
 
 func (s *ClaudeSource) forgetClaudeQuestionSpecs(live map[string]bool) {

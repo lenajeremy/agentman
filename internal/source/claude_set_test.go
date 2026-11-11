@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,8 @@ func claudeOnFormStep(t *testing.T, pane string) (src *ClaudeSource, shown *prot
 	}
 	screen := permissionPane(t, pane)
 	src.capturePane = func(context.Context, string) (string, error) { return screen, nil }
+	// No colours to read: the transcript says where the form is.
+	src.captureStyledPane = func(context.Context, string) (string, error) { return "", errors.New("no colours") }
 	detected := question.Detect(screen)
 	if detected == nil {
 		t.Fatalf("%s: no question", pane)
@@ -161,5 +164,51 @@ func TestAPermissionPromptIsNotClosed(t *testing.T) {
 	src.closeQuestion = func(context.Context, string) error { pressed++; return nil }
 	if err := src.CloseQuestion(context.Background(), "claude:s1", shown.ID); err == nil || pressed != 0 {
 		t.Errorf("closed a permission prompt: %v, %d presses", err, pressed)
+	}
+}
+
+// The tab strip of a real Claude Code 2.1.322 form, captured with its
+// colours: on the first question, then after one press of →.
+const (
+	claudeStripOnFirst  = "← \x1b[38;5;16m\x1b[48;5;153m ☐ Colour \x1b[39m\x1b[49m ☐ Size  ☐ Shape  ✔ Submit  →"
+	claudeStripOnSecond = "\x1b[39m←  ☐ Colour \x1b[38;5;16m\x1b[48;5;153m ☐ Size \x1b[39m\x1b[49m ☐ Shape  ✔ Submit  →"
+)
+
+// Claude Code 2.1.322 writes the AskUserQuestion call to the transcript only
+// once the form is answered, so while it is open the question on screen is
+// read from the colours: the current tab is drawn on a background.
+func TestTheQuestionOnScreenIsReadFromItsColours(t *testing.T) {
+	src, err := NewClaudeSource(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	screen := permissionPane(t, "claude_set_second_after_answer_real_pane.txt")
+	src.capturePane = func(context.Context, string) (string, error) { return screen, nil }
+	src.captureStyledPane = func(context.Context, string) (string, error) {
+		return "Which size?\n" + claudeStripOnSecond + "\n", nil
+	}
+	const id = "claude:s1"
+	// A transcript with no call in it yet.
+	transcript := filepath.Join(t.TempDir(), "s1.jsonl")
+	if err := os.WriteFile(transcript, []byte(`{"type":"user","message":{"content":"ask me"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	meta := protocol.Session{ID: id}
+	src.applyPane(&meta, transcript, screen, src.styledCapture(context.Background(), "agentman-claude-s1"))
+	shown := meta.Question
+	if shown == nil || shown.Step != 2 || shown.Title != "Size" || !shown.Closable {
+		t.Fatalf("shown %+v", shown)
+	}
+	src.sessions[id] = claudeSession{meta: meta, transcript: transcript, tmuxName: "agentman-claude-s1"}
+	var moves []int
+	src.moveQuestion = func(_ context.Context, _ string, distance int) error {
+		moves = append(moves, distance)
+		return nil
+	}
+	if err := src.MoveQuestion(context.Background(), id, shown.ID, 3); err != nil {
+		t.Fatal(err)
+	}
+	if len(moves) != 1 || moves[0] != 1 {
+		t.Errorf("moves %v", moves)
 	}
 }

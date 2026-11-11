@@ -447,7 +447,19 @@ func (s *ClaudeSource) captureQuestion(ctx context.Context, tmuxName string) (*q
 	if found == nil || claudeInfoPanel(pane) {
 		return nil, errNoAnswerableQuestion
 	}
+	placeClaudeFormStep(found, s.styledCapture(ctx, tmuxName))
 	return found, nil
+}
+
+// styledCapture captures a pane with its colours when asked to.
+func (s *ClaudeSource) styledCapture(ctx context.Context, tmuxName string) func() (string, error) {
+	return func() (string, error) {
+		capture := s.captureStyledPane
+		if capture == nil {
+			capture = tmux.CaptureStyled
+		}
+		return capture(ctx, tmuxName)
+	}
 }
 
 func protocolQuestion(found *question.Question) *protocol.Question {

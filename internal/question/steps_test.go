@@ -74,3 +74,26 @@ func TestAFormsStepsAreReadFromRealScreens(t *testing.T) {
 		t.Errorf("a form's question has no title of its own: %q", first.Title)
 	}
 }
+
+// Real captures with colours (see source's claudeStripOnFirst): the current
+// tab is the one on a background.
+func TestTheCurrentTabIsTheOneOnABackground(t *testing.T) {
+	for want, styled := range map[int]string{
+		1: "← \x1b[38;5;16m\x1b[48;5;153m ☐ Colour \x1b[39m\x1b[49m ☐ Size  ☐ Shape  ✔ Submit  →",
+		2: "\x1b[39m←  ☐ Colour \x1b[38;5;16m\x1b[48;5;153m ☐ Size \x1b[39m\x1b[49m ☐ Shape  ✔ Submit  →",
+		// Answered tabs, a reversed current one, a truecolour foreground
+		// whose numbers contain a 48.
+		3: "\x1b[38;2;48;48;48m←  ☒ Colour  ☒ Size \x1b[7m ☐ Shape \x1b[27m ✔ Submit  →",
+		// Submit current: the review.
+		4: "←  ☒ Colour  ☐ Size  ☒ Shape \x1b[48;5;153m ✔ Submit \x1b[0m →",
+		// Nothing marked, or no strip at all.
+		0: "←  ☐ Colour  ☐ Size  ✔ Submit  →\nWhich colour?",
+	} {
+		if got := CurrentStep("Which one?\n" + styled + "\n"); got != want {
+			t.Errorf("%q: step %d, want %d", styled, got, want)
+		}
+	}
+	if got := CurrentStep("\x1b[48;5;153m❯ 1. Red\x1b[0m"); got != 0 {
+		t.Errorf("a highlighted option read as a tab: %d", got)
+	}
+}

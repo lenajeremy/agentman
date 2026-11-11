@@ -877,6 +877,16 @@ func captureFresh(ctx context.Context, name string) (string, error) {
 	return out, nil
 }
 
+// CaptureStyled is the visible pane with its colours as escape sequences,
+// for what only colour says, like which tab of Claude's question form is
+// current. Never from a sweep's cache, which holds plain captures.
+func CaptureStyled(ctx context.Context, name string) (string, error) {
+	if !Available() {
+		return "", ErrNotInstalled
+	}
+	return run(ctx, "capture-pane", "-e", "-t", name, "-p")
+}
+
 // CaptureScrollback returns the pane plus up to lines of history above it.
 //
 // Capture is the right tool for a prompt, which always sits at the bottom of
