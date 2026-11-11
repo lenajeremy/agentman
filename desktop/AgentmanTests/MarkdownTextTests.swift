@@ -205,7 +205,11 @@ final class MarkdownTextTests: XCTestCase {
         XCTAssertEqual(try colour(of: "name"), Self.rgb(NSColor(Palette.text)), "the rest in the text's colour")
         let font = try XCTUnwrap(text.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
         XCTAssertTrue(font.fontName.contains("GoogleSansCode") || font.isFixedPitch)
-        XCTAssertTrue(MarkdownCodeText.coloured(code, language: "swift") === text, "coloured once")
+        // Kept and used again, though the cache may let it go under memory
+        // pressure: the same either way.
+        let again = MarkdownCodeText.coloured(code, language: "swift")
+        XCTAssertEqual(again.string, text.string)
+        XCTAssertEqual(try Self.rgb(XCTUnwrap(again.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor)), try colour(of: "let"))
     }
 
     func testCodeInALanguageNotKnownIsPlain() throws {
