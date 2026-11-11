@@ -165,10 +165,15 @@ func boundedClaudeQuestionSpecs(specs []claudeQuestionSpec) []claudeQuestionSpec
 }
 
 func applyClaudeQuestionSpecs(detected *question.Question, specs []claudeQuestionSpec) bool {
-	for _, spec := range specs {
+	for index, spec := range specs {
 		if spec.Question != strings.TrimSpace(detected.Prompt) ||
 			len(spec.Options) != len(detected.Options) {
 			continue
+		}
+		// Which of the form's questions is on screen: the tab strip's plain
+		// text does not say, but the transcript lists them in its order.
+		if len(detected.Steps) == len(specs) && detected.Step == 0 {
+			detected.Step = index + 1
 		}
 		detected.Title = spec.Header
 		detected.Multiple = spec.MultiSelect

@@ -1,0 +1,42 @@
+
+ ▐▛███▛█   Claude Code v2.1.322
+▝▜██████▀  Opus 5.5 with xhigh effort · Claude Max
+ ▝▝   ▝▝   /…/-Users-mac-Desktop-all-agentman/262dcc60-8b49-4b3d-b0ed-c66a08c9b9fa/scratchpad/qlab-proj
+
+
+❯ This is a UI test. Call AskUserQuestion once, right now, with exactly three single-select questions and do
+  nothing else. Question 1: header Colour, question Which colour?, options Red (a warm colour) and Blue (a
+  cool colour). Question 2: header Size, question Which size?, options Small (fits a pocket) and Large (fills
+  a table). Question 3: header Shape, question Which shape?, options Round (no corners) and Square (four
+  corners). After that, wait.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☐ Colour  ☐ Size  ☒ Shape  ✔ Submit  →
+
+Review your answers
+
+⚠ You have not answered all questions
+
+ ● Which shape?
+   → Square
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

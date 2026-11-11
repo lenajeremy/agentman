@@ -36,6 +36,13 @@ type Question struct {
 	// row is intentionally not exposed as a normal option; the app renders a
 	// text box instead.
 	Custom bool `json:"custom,omitempty"`
+	// Steps are the questions of Claude's multi-question form, from its tab
+	// strip ("←  ☐ Colour  ☒ Size  ✔ Submit  →"), each with whether it is
+	// answered. Step is the one on screen, from 1, and one past the last for
+	// the form's review; zero when it can't be told (the strip's plain text
+	// does not mark the current tab; the source finds it in the transcript).
+	Steps []Step `json:"steps,omitempty"`
+	Step  int    `json:"step,omitempty"`
 
 	// The remaining fields describe Claude's terminal layout. They are used to
 	// complete a multi-select form atomically, but are not part of the wire
@@ -63,6 +70,45 @@ type Question struct {
 	// permission prompt's "No" becomes "No, and tell Claude what to do
 	// differently".
 	AmendWithTab bool `json:"-"`
+}
+
+// Step is one question of a multi-question form.
+type Step struct {
+	Title    string `json:"title"`
+	Answered bool   `json:"answered,omitempty"`
+}
+
+// parseSteps reads Claude's tab strip: an arrow either side, a box before
+// each question (☐ unanswered, ☒ or ☑ answered) and ✔ before Submit. Nil for
+// any other line, and for a form of one question, which has nothing to move
+// between.
+func parseSteps(line string) []Step {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "←") || !strings.HasSuffix(line, "→") {
+		return nil
+	}
+	runes := []rune(strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "←"), "→")))
+	const marks = "☐☒☑✔"
+	var steps []Step
+	for i := 0; i < len(runes); {
+		mark := runes[i]
+		if !strings.ContainsRune(marks, mark) {
+			i++
+			continue
+		}
+		j := i + 1
+		for j < len(runes) && !strings.ContainsRune(marks, runes[j]) {
+			j++
+		}
+		if title := strings.TrimSpace(string(runes[i+1 : j])); mark != '✔' && title != "" {
+			steps = append(steps, Step{Title: title, Answered: mark != '☐'})
+		}
+		i = j
+	}
+	if len(steps) < 2 {
+		return nil
+	}
+	return steps
 }
 
 // Option is one selectable answer.
@@ -574,6 +620,7 @@ func detectMenu(lines []string) *Question {
 			// there promotes an unrelated line of transcript into a heading.
 			if bounded {
 				q.Title = cleanTitle(rest[len(rest)-1])
+				q.Steps = parseSteps(rest[len(rest)-1])
 				body = append([]string(nil), rest[:len(rest)-1]...)
 			}
 			// Restore top-down order for the detail.
@@ -788,6 +835,15 @@ func populateReviewContext(q *Question, lines []string, first int) {
 	q.Title = "Review your answers"
 	if titleIndex < 0 {
 		titleIndex = len(context)
+	}
+	// The tab strip above the review: every question, and this is the step
+	// past the last.
+	for _, line := range context[min(titleIndex+1, len(context)):] {
+		if steps := parseSteps(line); steps != nil {
+			q.Steps = steps
+			q.Step = len(steps) + 1
+			break
+		}
 	}
 	body := append([]string(nil), context[1:titleIndex]...)
 	for len(body) > 0 && body[0] == "" {

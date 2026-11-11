@@ -212,6 +212,12 @@ type Answerer interface {
 	Answer(ctx context.Context, sessionID string, answer protocol.QuestionAnswer) error
 }
 
+// QuestionMover is implemented by adapters whose forms ask several questions
+// that can be moved between without answering.
+type QuestionMover interface {
+	MoveQuestion(ctx context.Context, sessionID, questionID string, step int) error
+}
+
 // QuestionInspector is implemented by terminal adapters that can cheaply
 // re-read one live pane. It lets a Stop hook distinguish a real completion
 // from an agent that stopped only to ask the user something, without waiting
@@ -444,6 +450,19 @@ func (r *Registry) Answer(ctx context.Context, sessionID string, answer protocol
 		return fmt.Errorf("source: %s questions cannot be answered remotely", s.Kind())
 	}
 	return answerer.Answer(ctx, sessionID, answer)
+}
+
+// MoveQuestion goes to another question of the form a session shows.
+func (r *Registry) MoveQuestion(ctx context.Context, sessionID, questionID string, step int) error {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return err
+	}
+	mover, ok := s.(QuestionMover)
+	if !ok {
+		return fmt.Errorf("source: %s forms can't be moved through from here", s.Kind())
+	}
+	return mover.MoveQuestion(ctx, sessionID, questionID, step)
 }
 
 // CurrentQuestion performs a targeted live check when the owning adapter

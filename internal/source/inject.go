@@ -367,6 +367,48 @@ func (s *ClaudeSource) capture(ctx context.Context, tmuxName string) (string, er
 	return capture(ctx, tmuxName)
 }
 
+// MoveQuestion goes to another question of the multi-question form a Claude
+// session shows, without answering the one on screen: step is the one to go
+// to, from 1, and one past the last is the form's review. The form must
+// still be the one the app saw, and which question it is on must be known,
+// or the keys could land somewhere else.
+func (s *ClaudeSource) MoveQuestion(ctx context.Context, sessionID, questionID string, step int) error {
+	s.mu.RLock()
+	session, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("source: unknown claude session %q", sessionID)
+	}
+	if session.tmuxName == "" {
+		return fmt.Errorf("source: only sessions started with `am claude` can be moved through")
+	}
+	if session.meta.Question == nil || questionID == "" || questionID != session.meta.Question.ID {
+		return fmt.Errorf("source: that question is no longer current; refresh the session")
+	}
+	current, err := s.captureQuestion(ctx, session.tmuxName)
+	if err != nil {
+		return fmt.Errorf("source: that question is no longer on screen; refresh the session")
+	}
+	s.enrichClaudeQuestion(sessionID, session.transcript, current)
+	if !sameQuestion(session.meta.Question, protocolQuestion(current)) {
+		return fmt.Errorf("source: that question is no longer on screen; refresh the session")
+	}
+	if len(current.Steps) < 2 || current.Step == 0 {
+		return fmt.Errorf("source: this form has no other questions to move to")
+	}
+	if step < 1 || step > len(current.Steps)+1 {
+		return fmt.Errorf("source: the form has no question %d", step)
+	}
+	if step == current.Step {
+		return nil
+	}
+	move := s.moveQuestion
+	if move == nil {
+		move = tmux.MoveQuestion
+	}
+	return move(ctx, session.tmuxName, step-current.Step)
+}
+
 func (s *ClaudeSource) captureQuestion(ctx context.Context, tmuxName string) (*question.Question, error) {
 	pane, err := s.capture(ctx, tmuxName)
 	if err != nil {
@@ -399,7 +441,13 @@ func protocolQuestion(found *question.Question) *protocol.Question {
 		Options:  options,
 		Multiple: found.Multiple,
 		Custom:   found.Custom,
+		Step:     found.Step,
 	}
+	for _, step := range found.Steps {
+		question.Steps = append(question.Steps, protocol.QuestionStep{Title: step.Title, Answered: step.Answered})
+	}
+	// The steps are left out of its id: moving between questions, or one
+	// being answered, is not this question changing.
 	question.ID = terminalQuestionID(question)
 	return question
 }

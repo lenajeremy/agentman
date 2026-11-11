@@ -312,6 +312,17 @@ type Question struct {
 	Custom   bool `json:"custom,omitempty"`
 	// Notice says what macOS itself will ask the user if this is agreed to.
 	Notice string `json:"notice,omitempty"`
+	// Steps are the questions of a multi-question form, in order, and Step
+	// the one on screen, from 1; one past the last is the form's review, and
+	// zero means it is not known. ReqMoveQuestion moves to another.
+	Steps []QuestionStep `json:"steps,omitempty"`
+	Step  int            `json:"step,omitempty"`
+}
+
+// QuestionStep is one question of a multi-question form.
+type QuestionStep struct {
+	Title    string `json:"title"`
+	Answered bool   `json:"answered,omitempty"`
 }
 
 // QuestionOption is one choice. Key is what gets sent to select it.
