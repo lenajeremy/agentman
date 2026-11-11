@@ -97,6 +97,8 @@ export interface Session {
   kind: AgentKind;
   nativeId: string;
   name: string;
+  /** The agent's own name for a session you renamed; name is yours. */
+  originalName?: string;
   /** You asked to hear from this agent itself, even while Agentman speaks
    *  for the agents. */
   alerts?: boolean;
@@ -236,6 +238,7 @@ export type RequestType =
   | "answer_question"
   | "register_push"
   | "set_agent_alerts"
+  | "rename_session"
   | "open_server"
   | "close_server"
   | "stop_server"
@@ -1427,6 +1430,7 @@ function isSession(value: unknown): value is Session {
     boundedString(value.kind, 64, true) &&
     boundedString(value.nativeId, 512, true) &&
     boundedString(value.name, 4096) &&
+    optionalBoundedString(value.originalName, 4096) &&
     boundedString(value.cwd, 64 * 1024) &&
     isOneOf(value.state, ["busy", "idle", "waiting_input", "ended"] as const) &&
     isOneOf(value.inject, ["api", "tmux", "hook", "none"] as const) &&

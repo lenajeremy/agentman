@@ -250,6 +250,9 @@ interface Store {
   /** Hear from this agent itself, or not, on every device, even while
    *  Agentman speaks for the agents. Returns the problem, if any. */
   setAgentAlerts(sessionId: string, on: boolean): Promise<string | null>;
+  /** Give a session a name of your own, everywhere it shows; an empty name
+   *  gives back the agent's. Resolves with why not, or null once renamed. */
+  renameSession(sessionId: string, name: string): Promise<string | null>;
   startSession(
     kind: "claude" | "codex" | "cursor-cli" | "opencode" | "kiro" | "antigravity" | "muse",
     path: string,
@@ -1791,6 +1794,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           const timer = setTimeout(() => settleAskRequest(id), 20_000);
           askRequests.current.set(id, {
             resolve: (reply) => resolve(reply.type === "error" ? reply.error || "Couldn't change that." : null),
+            reject: (error) => resolve(error.message),
+            timer,
+          });
+        });
+      },
+
+      renameSession(sessionId, name) {
+        // The answer is the session renamed, which every app also hears.
+        return new Promise<string | null>((resolve) => {
+          const id = clientRef.current?.send({ type: "rename_session", sessionId, text: name.trim() });
+          if (!id) {
+            resolve("Not connected to your Mac right now.");
+            return;
+          }
+          const timer = setTimeout(() => settleAskRequest(id), 20_000);
+          askRequests.current.set(id, {
+            resolve: (reply) => resolve(reply.type === "error" ? reply.error || "Couldn't rename it." : null),
             reject: (error) => resolve(error.message),
             timer,
           });
