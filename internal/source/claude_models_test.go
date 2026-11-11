@@ -242,3 +242,42 @@ func TestTheDaemonsTestsNeverStartTheRealClaude(t *testing.T) {
 		t.Error("a test found a claude to start")
 	}
 }
+
+// A first lookup that fails, with no list ever had, waits the retry delay
+// like any other failure rather than starting a Claude every minute; so does
+// one failing right after Claude Code updates.
+func TestAFailedFirstProbeWaitsTooBeforeTryingAgain(t *testing.T) {
+	lab := newCatalogLab(t, t.TempDir())
+	lab.fail = true
+	lab.refresh(t)
+	for range 5 {
+		lab.clock = lab.clock.Add(claudeModelsLook + time.Second)
+		lab.refresh(t)
+	}
+	if lab.count() != 1 {
+		t.Fatalf("probed %d times inside the retry delay", lab.count())
+	}
+	lab.clock = lab.clock.Add(claudeModelsRetry)
+	lab.refresh(t)
+	if lab.count() != 2 {
+		t.Errorf("not tried again after the delay: %d", lab.count())
+	}
+
+	// After an update: the new program's failure waits too.
+	lab.fail = false
+	lab.clock = lab.clock.Add(claudeModelsRetry)
+	lab.refresh(t)
+	later := lab.clock.Add(time.Minute)
+	if err := os.Chtimes(lab.binary, later, later); err != nil {
+		t.Fatal(err)
+	}
+	lab.fail = true
+	lab.clock = later.Add(time.Minute)
+	lab.refresh(t)
+	probes := lab.count()
+	lab.clock = lab.clock.Add(claudeModelsLook + time.Second)
+	lab.refresh(t)
+	if lab.count() != probes {
+		t.Errorf("an updated Claude's failure was retried within the delay: %d then %d", probes, lab.count())
+	}
+}

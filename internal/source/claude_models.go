@@ -38,10 +38,13 @@ type claudeModelCatalog struct {
 	list   claudeModelList
 	loaded bool
 	// running is set while a probe is out; checked is when the program was
-	// last looked at; failed is when the last probe failed.
-	running bool
-	checked time.Time
-	failed  time.Time
+	// last looked at; failed is when the last probe failed, and failedFor
+	// the program it failed for, so a retry waits whether or not a list was
+	// ever had for it.
+	running   bool
+	checked   time.Time
+	failed    time.Time
+	failedFor string
 }
 
 // claudeModelList is what a probe found, as kept on disk.
@@ -118,7 +121,7 @@ func (c *claudeModelCatalog) refreshIfDue() {
 
 	c.mu.Lock()
 	due := len(c.list.Labels) == 0 || c.list.Binary != fingerprint || now.Sub(c.list.At) >= claudeModelsEvery
-	if !due || c.running || (!c.failed.IsZero() && now.Sub(c.failed) < claudeModelsRetry && c.list.Binary == fingerprint) {
+	if !due || c.running || (!c.failed.IsZero() && now.Sub(c.failed) < claudeModelsRetry && c.failedFor == fingerprint) {
 		c.mu.Unlock()
 		return
 	}
@@ -133,13 +136,13 @@ func (c *claudeModelCatalog) refreshIfDue() {
 		defer c.mu.Unlock()
 		c.running = false
 		if err != nil {
-			c.failed = c.now()
+			c.failed, c.failedFor = c.now(), fingerprint
 			return
 		}
 		list.Binary = fingerprint
 		list.At = c.now()
 		c.list = list
-		c.failed = time.Time{}
+		c.failed, c.failedFor = time.Time{}, ""
 		c.saveLocked()
 	}()
 }
