@@ -317,6 +317,9 @@ type Question struct {
 	// zero means it is not known. ReqMoveQuestion moves to another.
 	Steps []QuestionStep `json:"steps,omitempty"`
 	Step  int            `json:"step,omitempty"`
+	// ReviewStep means the form has a review after its last question, step
+	// len(Steps)+1, as Claude's does; Antigravity's submits from its last.
+	ReviewStep bool `json:"reviewStep,omitempty"`
 	// Closable means ReqCloseQuestion can close it unanswered: a question
 	// the agent asked, which then waits for a message.
 	Closable bool `json:"closable,omitempty"`

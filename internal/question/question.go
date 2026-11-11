@@ -43,6 +43,9 @@ type Question struct {
 	// does not mark the current tab; the source finds it in the transcript).
 	Steps []Step `json:"steps,omitempty"`
 	Step  int    `json:"step,omitempty"`
+	// ReviewStep means the form has a review after its last question, as
+	// Claude's does (its Submit tab); Antigravity's submits from the last.
+	ReviewStep bool `json:"reviewStep,omitempty"`
 	// Closable means Esc closes it without an answer, which for a question
 	// the agent asked (not a permission prompt, where Esc says no) leaves the
 	// agent waiting for a message instead.
@@ -732,6 +735,7 @@ func detectMenu(lines []string) *Question {
 			if bounded {
 				q.Title = cleanTitle(rest[len(rest)-1])
 				q.Steps = parseSteps(rest[len(rest)-1])
+				q.ReviewStep = q.Steps != nil
 				body = append([]string(nil), rest[:len(rest)-1]...)
 			}
 			// Restore top-down order for the detail.
@@ -953,6 +957,7 @@ func populateReviewContext(q *Question, lines []string, first int) {
 		if steps := parseSteps(line); steps != nil {
 			q.Steps = steps
 			q.Step = len(steps) + 1
+			q.ReviewStep = true
 			break
 		}
 	}

@@ -97,3 +97,61 @@ func TestTheCurrentTabIsTheOneOnABackground(t *testing.T) {
 		t.Errorf("a highlighted option read as a tab: %d", got)
 	}
 }
+
+// agy lists its form's questions above it, in order; "Question 2/3" says
+// which is on screen. Its form has no review after the last.
+func TestAntigravityFormsStepsAreItsListedQuestions(t *testing.T) {
+	for name, want := range map[string]int{
+		"antigravity_question_first_of_three_real_pane.txt":          1,
+		"antigravity_question_second_of_three_checked_real_pane.txt": 2,
+		"antigravity_question_third_of_three_real_pane.txt":          3,
+		"antigravity_question_second_unanswered_155_real_pane.txt":   2,
+	} {
+		raw, err := os.ReadFile(filepath.Join("testdata", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		found, form := DetectAntigravityForm(string(raw))
+		if found == nil {
+			t.Fatalf("%s: no question", name)
+		}
+		titles := []string{}
+		for _, step := range found.Steps {
+			titles = append(titles, step.Title)
+		}
+		if !reflect.DeepEqual(titles, []string{"Which size?", "Which fruits?", "Which colour?"}) ||
+			found.Step != want || form.Index != want || found.ReviewStep {
+			t.Errorf("%s: steps %v step %d (form %d) review %v", name, titles, found.Step, form.Index, found.ReviewStep)
+		}
+	}
+	// One question asked: nothing to move between.
+	raw, err := os.ReadFile(filepath.Join("testdata", "antigravity_question_real_pane.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found, _ := DetectAntigravityForm(string(raw)); found == nil || found.Steps != nil {
+		t.Errorf("a single question has steps: %+v", found)
+	}
+}
+
+func TestAntigravityListsAnAnswerUnderItsQuestion(t *testing.T) {
+	steps := antigravitySteps([]string{
+		"▸ Thought for 3s", "  thinking about it", "? Which size?", "> small", "? Which colour?", "",
+	}, 2)
+	if len(steps) != 2 || !steps[0].Answered || steps[1].Answered {
+		t.Errorf("steps %+v", steps)
+	}
+	// Fewer listed than the form asks: not its list.
+	if steps := antigravitySteps([]string{"? Which colour?"}, 2); steps != nil {
+		t.Errorf("read %+v", steps)
+	}
+}
+
+func TestClaudesFormHasAReviewStep(t *testing.T) {
+	if q := setPane(t, "claude_set_first_unanswered_real_pane.txt"); !q.ReviewStep {
+		t.Error("Claude's form has a review after its last question")
+	}
+	if q := setPane(t, "claude_set_review_partly_answered_real_pane.txt"); !q.ReviewStep {
+		t.Error("on the review")
+	}
+}

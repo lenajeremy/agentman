@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -475,5 +476,36 @@ func TestAntigravityMessageEndingOnAFileIsSent(t *testing.T) {
 	if _, err := s.Inject(context.Background(), id, "explain @main.go"); err != nil ||
 		strings.Join(keys.events, ";") != "type explain @main.go " {
 		t.Errorf("err %v keys %q", err, keys.events)
+	}
+}
+
+// agy's form of several: → on and ← back without answering, as its footer
+// offers, only while it shows the question the app saw.
+func TestAntigravityMovesThroughItsForm(t *testing.T) {
+	pane := agyFixture(t, "question-second-of-three")
+	s, keys, id := agyAsking(t, pane, true)
+	shown := s.sessions[id].meta.Question
+	if len(shown.Steps) != 3 || shown.Step != 2 || shown.ReviewStep {
+		t.Fatalf("shown %+v", shown)
+	}
+	for _, step := range []int{3, 1, 2} {
+		if err := s.MoveQuestion(context.Background(), id, shown.ID, step); err != nil {
+			t.Fatalf("to %d: %v", step, err)
+		}
+	}
+	want := []string{"send Right", "send Left"}
+	if !reflect.DeepEqual(keys.events, want) {
+		t.Errorf("pressed %v, want %v", keys.events, want)
+	}
+	for _, step := range []int{0, 4} {
+		if err := s.MoveQuestion(context.Background(), id, shown.ID, step); err == nil {
+			t.Errorf("moved to %d, past the form", step)
+		}
+	}
+	if err := s.MoveQuestion(context.Background(), id, "terminal-old", 1); err == nil {
+		t.Error("moved on a stale question")
+	}
+	if len(keys.events) != 2 {
+		t.Errorf("pressed more: %v", keys.events)
 	}
 }

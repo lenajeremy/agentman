@@ -476,14 +476,15 @@ func protocolQuestion(found *question.Question) *protocol.Question {
 		})
 	}
 	question := &protocol.Question{
-		Prompt:   found.Prompt,
-		Title:    found.Title,
-		Detail:   found.Detail,
-		Options:  options,
-		Multiple: found.Multiple,
-		Custom:   found.Custom,
-		Step:     found.Step,
-		Closable: found.Closable,
+		Prompt:     found.Prompt,
+		Title:      found.Title,
+		Detail:     found.Detail,
+		Options:    options,
+		Multiple:   found.Multiple,
+		Custom:     found.Custom,
+		Step:       found.Step,
+		ReviewStep: found.ReviewStep,
+		Closable:   found.Closable,
 	}
 	for _, step := range found.Steps {
 		question.Steps = append(question.Steps, protocol.QuestionStep{Title: step.Title, Answered: step.Answered})

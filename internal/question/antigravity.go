@@ -35,6 +35,36 @@ type AntigravityForm struct {
 	Typing bool
 }
 
+// antigravitySteps reads the questions agy lists above its form, one
+// "? Which size?" a question in the order asked, an answer it was given
+// ("> small") under it; above is the turn the form belongs to. Nil unless
+// there are as many as the form says it asks: then it is not that list.
+func antigravitySteps(above []string, count int) []Step {
+	var steps []Step
+	answered := false
+	end := len(above) - 1
+	for end >= 0 && strings.TrimSpace(above[end]) == "" {
+		end--
+	}
+	for i := end; i >= 0; i-- {
+		line := strings.TrimSpace(above[i])
+		switch {
+		case strings.HasPrefix(line, "? ") && len(line) > 2:
+			steps = append([]Step{{Title: strings.TrimSpace(line[2:]), Answered: answered}}, steps...)
+			answered = false
+			continue
+		case strings.HasPrefix(line, "> ") && !answered:
+			answered = true
+			continue
+		}
+		break
+	}
+	if len(steps) != count {
+		return nil
+	}
+	return steps
+}
+
 // DetectAntigravity returns the menu Antigravity CLI is blocked on, or nil.
 func DetectAntigravity(pane string) *Question {
 	q, _ := DetectAntigravityForm(pane)
@@ -174,6 +204,9 @@ func detectAntigravityControl(lines []string) (*Question, AntigravityForm) {
 		q.Prompt = heading[3]
 		if form.Count > 1 {
 			q.Title = fmt.Sprintf("%s %d/%d", title, form.Index, form.Count)
+			if steps := antigravitySteps(lines[:lastNonBlank(lines[:rule])], form.Count); steps != nil {
+				q.Steps, q.Step = steps, form.Index
+			}
 		}
 	} else if form.Kind == "" {
 		form.Kind = "approval"
