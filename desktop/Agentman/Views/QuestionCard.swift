@@ -66,11 +66,11 @@ struct QuestionCard: View {
     private var header: some View {
         HStack(spacing: 7) {
             Circle().fill(Palette.needsYou).frame(width: 7, height: 7)
-            if question.isForm, let steps = question.steps {
+            if question.isForm, question.namesSteps, let steps = question.steps {
                 // Every question's name, or, too many for the width, the one
                 // on screen.
                 ViewThatFits(in: .horizontal) {
-                    QuestionSteps(steps: steps, current: moving ?? question.step ?? 0, move: move)
+                    QuestionSteps(steps: steps, review: question.reviewStep == true, current: moving ?? question.step ?? 0, move: move)
                     stepTitle(steps)
                 }
             } else {
@@ -81,7 +81,7 @@ struct QuestionCard: View {
             }
             Spacer(minLength: 8)
             if question.isForm, let steps = question.steps {
-                StepPager(current: moving ?? question.step ?? 1, count: steps.count, move: move)
+                StepPager(current: moving ?? question.step ?? 1, count: steps.count, last: question.lastStep, move: move)
                     .disabled(moving != nil || closing)
             }
             if question.closable == true {
@@ -130,6 +130,8 @@ struct QuestionCard: View {
 /// in full colour, a tick on each answered, and a click on one goes to it.
 private struct QuestionSteps: View {
     let steps: [QuestionStep]
+    /// A review after the last question, with a tab of its own.
+    let review: Bool
     let current: Int
     let move: (Int) -> Void
 
@@ -140,8 +142,10 @@ private struct QuestionSteps: View {
                     move(index + 1)
                 }
             }
-            StepTab(title: "Review", answered: false, current: current == steps.count + 1) {
-                move(steps.count + 1)
+            if review {
+                StepTab(title: "Review", answered: false, current: current == steps.count + 1) {
+                    move(steps.count + 1)
+                }
             }
         }
         .fixedSize()
@@ -186,6 +190,8 @@ private struct StepTab: View {
 private struct StepPager: View {
     let current: Int
     let count: Int
+    /// The furthest it goes: the review, or the last question.
+    let last: Int
     let move: (Int) -> Void
 
     var body: some View {
@@ -198,7 +204,7 @@ private struct StepPager: View {
                 .foregroundStyle(Palette.muted)
                 .fixedSize()
             HeaderButton(systemImage: "chevron.right", help: current == count ? "Review your answers" : "Next question") { move(current + 1) }
-                .disabled(current > count)
+                .disabled(current >= last)
         }
     }
 }

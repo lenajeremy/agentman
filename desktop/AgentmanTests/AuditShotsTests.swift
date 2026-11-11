@@ -123,7 +123,7 @@ extension SiteShotsTests {
             QuestionOption(key: "2", label: "Ninety-nine", description: "A hundred or more shows as 99+."),
             QuestionOption(key: "3", label: "No limit", description: "Always the full number."),
         ], multiple: false, custom: true,
-        steps: [QuestionStep(title: "Placement", answered: true), QuestionStep(title: "Count")], step: 2, closable: true)
+        steps: [QuestionStep(title: "Placement", answered: true), QuestionStep(title: "Count")], step: 2, reviewStep: true, closable: true)
 
     func testAuditMainStates() throws {
         _ = try auditFolder
@@ -208,7 +208,8 @@ extension SiteShotsTests {
             id: "ag-2", prompt: "Which fruits?", title: "Question 2/3", detail: nil, options: [
                 QuestionOption(key: "1", label: "apple", selected: true), QuestionOption(key: "2", label: "banana"),
                 QuestionOption(key: "3", label: "cherry", checked: true),
-            ], multiple: true, custom: true)))
+            ], multiple: true, custom: true,
+            steps: [QuestionStep(title: "Which size?"), QuestionStep(title: "Which fruits?"), QuestionStep(title: "Which colour?")], step: 2)))
         try thread("plan", "f")
         try thread("long-message", "e")
         try thread("error-over-composer", "a", setUp: { $0.actionError["a"] = "Couldn't deliver the message: the agent's terminal closed before it arrived." })

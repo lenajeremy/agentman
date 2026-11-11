@@ -86,7 +86,7 @@ final class ProtocolTests: XCTestCase {
     func testAFormOfSeveralQuestionsDecodes() throws {
         let question = try JSONDecoder().decode(Question.self, from: Data("""
         {"id":"terminal-1","prompt":"Which size?","options":[{"key":"1","label":"Small"}],
-         "steps":[{"title":"Colour","answered":true},{"title":"Size"},{"title":"Shape"}],"step":2,"closable":true}
+         "steps":[{"title":"Colour","answered":true},{"title":"Size"},{"title":"Shape"}],"step":2,"reviewStep":true,"closable":true}
         """.utf8))
         XCTAssertTrue(question.isForm)
         XCTAssertFalse(question.isReview)
@@ -95,9 +95,19 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNil(question.steps?[1].answered)
         XCTAssertEqual(question.closable, true)
 
+        XCTAssertEqual(question.lastStep, 4)
+        XCTAssertTrue(question.namesSteps)
         var review = question
         review.step = 4
         XCTAssertTrue(review.isReview)
+        // Antigravity's: no review, and its questions named in full.
+        var agy = question
+        agy.reviewStep = nil
+        agy.steps = [QuestionStep(title: "Which size would suit a small kitchen best?"), QuestionStep(title: "Which colour?")]
+        agy.step = 2
+        XCTAssertEqual(agy.lastStep, 2)
+        XCTAssertFalse(agy.isReview)
+        XCTAssertFalse(agy.namesSteps)
         // The question on screen not known: no moving through it.
         var unknown = question
         unknown.step = nil
