@@ -191,6 +191,24 @@ extension SiteShotsTests {
             $0.options = [QuestionOption(key: "1", label: "Submit answers"), QuestionOption(key: "2", label: "Cancel")]
             $0.custom = false
         })
+        // Antigravity's form, as the daemon reads a real agy 1.5.5: one
+        // choice, then several.
+        func antigravity(_ question: Question) -> (inout Fixtures) -> Void {
+            { fixtures in
+                guard let index = fixtures.sessions.firstIndex(where: { $0.id == "b" }) else { return }
+                fixtures.sessions[index].kind = "antigravity"
+                fixtures.sessions[index].question = question
+            }
+        }
+        try thread("question-antigravity", "b", customize: antigravity(Question(
+            id: "ag-1", prompt: "Which size?", title: "Question 1/3", detail: nil, options: [
+                QuestionOption(key: "1", label: "small", selected: true), QuestionOption(key: "2", label: "large"),
+            ], multiple: false, custom: true)))
+        try thread("question-antigravity-multi", "b", customize: antigravity(Question(
+            id: "ag-2", prompt: "Which fruits?", title: "Question 2/3", detail: nil, options: [
+                QuestionOption(key: "1", label: "apple", selected: true), QuestionOption(key: "2", label: "banana"),
+                QuestionOption(key: "3", label: "cherry", checked: true),
+            ], multiple: true, custom: true)))
         try thread("plan", "f")
         try thread("long-message", "e")
         try thread("error-over-composer", "a", setUp: { $0.actionError["a"] = "Couldn't deliver the message: the agent's terminal closed before it arrived." })

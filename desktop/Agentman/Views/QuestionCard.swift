@@ -443,24 +443,34 @@ struct QuestionChoices: View {
         }
     }
 
+    /// Several may be chosen: rows like the single choices, a tick box where
+    /// their number is, and Submit under them once one is ticked.
     private var multipleChoice: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: compact ? 2 : 4) {
             ForEach(question.options) { option in
-                Toggle(isOn: Binding(
-                    get: { checked.contains(option.key) },
-                    set: { on in
-                        if on { checked.insert(option.key) } else { checked.remove(option.key) }
-                    }
-                )) {
-                    Text(option.label).font(TextStyle.body)
+                CheckRow(option: option, checked: checked.contains(option.key)) {
+                    if checked.contains(option.key) { checked.remove(option.key) } else { checked.insert(option.key) }
                 }
-                .toggleStyle(.checkbox)
             }
-            Button("Submit") {
-                send(QuestionReply(optionKeys: Array(checked)))
+            HStack(spacing: 10) {
+                Button {
+                    // In the order they are listed, not the order ticked.
+                    send(QuestionReply(optionKeys: question.options.map(\.key).filter(checked.contains)))
+                } label: {
+                    Text("Submit")
+                        .font(compact ? TextStyle.captionMedium : TextStyle.bodyMedium)
+                        .padding(.horizontal, compact ? 12 : 16)
+                        .padding(.vertical, compact ? 4 : 7)
+                }
+                .buttonStyle(ChoiceButtonStyle(primary: true))
+                .disabled(checked.isEmpty)
+                .opacity(checked.isEmpty ? 0.4 : 1)
+                Text(checked.isEmpty ? "Tick one or more" : checked.count == 1 ? "1 chosen" : "\(checked.count) chosen")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
             }
-            .buttonStyle(ChoiceButtonStyle(primary: true))
-            .disabled(checked.isEmpty)
+            .padding(.top, compact ? 4 : 8)
+            .padding(.leading, compact ? 8 : 12)
         }
         .onAppear {
             checked = Set(question.options.filter { $0.checked == true }.map(\.key))
@@ -628,6 +638,65 @@ private struct OptionRow: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(option.withText == true ? "Choose, and add a note for the agent" : option.label)
+    }
+}
+
+/// One of several choices that may be ticked: a box where a single choice
+/// has its number, its words in full, and a fill while ticked.
+private struct CheckRow: View {
+    let option: QuestionOption
+    let checked: Bool
+    let toggle: () -> Void
+    @State private var hovering = false
+    @Environment(\.compactChoices) private var compact
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(alignment: .firstTextBaseline, spacing: compact ? 8 : 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: compact ? 4 : 5, style: .continuous)
+                        .fill(checked ? Palette.inverse : Palette.surface)
+                    RoundedRectangle(cornerRadius: compact ? 4 : 5, style: .continuous)
+                        // Classic's edge is too light for an empty box to show.
+                        .strokeBorder(checked ? Palette.inverse : Look.site ? Palette.edge : Palette.faint, lineWidth: Palette.edgeWidth)
+                    if checked {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: compact ? 9 : 10, weight: .bold))
+                            .foregroundStyle(Palette.onInverse)
+                    }
+                }
+                .frame(width: compact ? 15 : 18, height: compact ? 15 : 18)
+                .frame(width: compact ? 17 : 20)
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + (compact ? 4 : 5) }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(option.label)
+                        .font(compact ? TextStyle.caption : TextStyle.body)
+                        .foregroundStyle(Palette.text)
+                        .lineSpacing(compact ? 2 : 4)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !compact, let description = option.description, !description.isEmpty {
+                        Text(description)
+                            .font(TextStyle.caption)
+                            .foregroundStyle(Palette.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, compact ? 8 : 12)
+            .padding(.vertical, compact ? 5 : 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous)
+                    .fill(hovering ? Palette.fillStrong : checked ? Palette.fill : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityAddTraits(checked ? .isSelected : [])
+        .help(checked ? "Untick \(option.label)" : "Tick \(option.label)")
     }
 }
 
