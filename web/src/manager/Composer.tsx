@@ -170,7 +170,7 @@ export function ManagerComposer({ text, setText, attachments, setAttachments, th
           onProblem={(p) => setProblem(p)}
         />
         <button
-          className={`am-round am-send ${canSend || thinking ? "can" : ""}`}
+          className={`am-round am-send ${canSend || thinking ? "can" : ""}${thinking ? " thinking" : ""}`}
           style={{ width: size, height: size }}
           disabled={disabled || (!thinking && !canSend)}
           title={thinking ? "Stop" : "Send"}
