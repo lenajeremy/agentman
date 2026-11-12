@@ -286,6 +286,35 @@ async function board() {
     expect(await page.locator(".board-card").count() >= 8, "eight cards or more");
   });
 
+  await check("board: agents are coloured by project or folder, never in a state's colours; old choices move", async () => {
+    // As a Mac's first palette of ten left them: State chosen, demo given
+    // the green (kept, now first), bugs the blue (too near Working: given
+    // again).
+    const old = `localStorage.setItem("agentman.agentColorBy", '"state"');
+      localStorage.setItem("agentman.agentColorsAssigned", JSON.stringify({ "folder|${DEMO_DIR}": 1, "folder|${H}/projects/bugs": 0 }));
+      localStorage.removeItem("agentman.agentColorsPalette");`;
+    const page = await open("", { init: [old], wait: ".board-card" });
+    try {
+      expect(await page.evaluate(() => !document.querySelector('[aria-label="Color agents by"]').classList.contains("on")), "State still colours them");
+      await click(page, '[aria-label="Color agents by"]');
+      const offered = await page.evaluate(() => [...document.querySelectorAll(".page-menu-item")].map((i) => i.innerText.replace("✓", "").trim()));
+      expect(offered.join() === "No Color,Project,Folder", `offered: ${offered}`);
+      await menu(page, "Folder");
+      // The Board's cards, as the sidebar is hidden on it: the colour each
+      // was given.
+      const tints = await until(page, () => {
+        const tint = (folder) => { const card = [...document.querySelectorAll(".board-card.tinted")].find((c) => c.innerText.split("\n").includes(folder)); return card?.style.getPropertyValue("--tint") || null; };
+        const demo = tint("demo"), bugs = tint("bugs");
+        return demo && bugs && { demo, bugs };
+      }, null, "demo's and bugs' colours on the Board");
+      expect(tints.demo.includes("#12A66A"), `demo kept its green: ${tints.demo}`);
+      const six = ["#12A66A", "#8A3FB0", "#0E9F9A", "#D6409F", "#6B9B1E", "#9F1F4A"];
+      expect(six.some((hex) => tints.bugs.includes(hex)) && !tints.bugs.includes("#12A66A"), `bugs given one of the six again: ${tints.bugs}`);
+    } finally {
+      await page.evaluate(() => ["agentColorBy", "agentColorsAssigned", "agentColorsPalette"].forEach((k) => localStorage.removeItem("agentman." + k)));
+    }
+  });
+
   await check("board: the folder menu lists the folders and shows one", async () => {
     const page = await open("", { wait: ".board-card" });
     await click(page, '[title="Show one folder\'s agents"]');

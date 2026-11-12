@@ -683,13 +683,13 @@ function SearchField({ width }: { width: number }) {
   );
 }
 
-/** Colour agents by state, project or folder. */
+/** Colour agents by project or folder. */
 function ColorMenu() {
   const [colorBy, setColorBy] = useColorBy();
   return (
     <button
       className={`board-top-button${colorBy === "none" ? "" : " on"}`}
-      title="Color agents by state, project or folder"
+      title="Color agents by project or folder"
       aria-label="Color agents by"
       onClick={(e) => menuUnder(e.currentTarget, COLOR_BY.map((c) => ({ label: c.title, checked: c.id === colorBy, action: () => setColorBy(c.id) })))}
     >
