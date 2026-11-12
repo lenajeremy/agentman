@@ -57,6 +57,8 @@ export function isArchived(s: Session, choices: Choices, now = Date.now()): bool
   return now - active > ARCHIVE_AFTER;
 }
 
+const RANK: Record<Session["state"], number> = { waiting_input: 0, busy: 1, idle: 2, ended: 3 };
+
 export function makeSections(sessions: Session[], choices: Choices, now = Date.now()): Sections {
   const sections: Sections = { pinned: [], needsYou: [], working: [], active: [], archived: [] };
   const pinned = new Map<string, Session>();
@@ -68,8 +70,9 @@ export function makeSections(sessions: Session[], choices: Choices, now = Date.n
     else sections.active.push(s);
   }
   sections.pinned = choices.pinned.map((id) => pinned.get(id)).filter((s): s is Session => !!s);
-  // Whatever came back to you last first.
-  const recent = (a: Session, b: Session) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0);
+  // Whatever came back to you last first, after what needs you and what
+  // works (AgentsStore.boardOrder).
+  const recent = (a: Session, b: Session) => RANK[a.state] - RANK[b.state] || (b.lastActivityAt || 0) - (a.lastActivityAt || 0);
   sections.needsYou.sort(recent);
   sections.active.sort(recent);
   sections.working.sort(recent);

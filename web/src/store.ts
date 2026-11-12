@@ -72,8 +72,10 @@ function apply(event: AppEvent) {
       // One without its id can't be placed, and drawn it would take the page
       // down; am serve always sends one.
       if (!updated?.id) break;
-      const others = state.sessions.filter((s) => s.id !== updated.id);
-      set({ sessions: [...others, updated] });
+      // Where it was, as the Mac keeps it: agents active in the same moment
+      // stay in the order am serve listed them.
+      const at = state.sessions.findIndex((s) => s.id === updated.id);
+      set({ sessions: at < 0 ? [...state.sessions, updated] : state.sessions.map((s, i) => (i === at ? updated : s)) });
       break;
     }
     case "session_gone": {

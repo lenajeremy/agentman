@@ -291,14 +291,7 @@
 .panel-heading { padding: 0 10px 4px; font-size: 11px; font-weight: 500; color: var(--faint); flex: none; }
 .panel-row { border-radius: 9px; text-align: left; flex: none; }
 .panel-row:hover { background: var(--fill); }
-.panel-agent-row { display: flex; flex-direction: column; gap: 6px; padding: 8px 5px; }
-.panel-agent-line3 { display: flex; align-items: center; gap: 5px; font-size: 12px; }
-.panel-agent-line3 .branch { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.panel-agent-line3 .question { color: var(--needs-you-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.panel-servers { display: inline-flex; align-items: center; gap: 3px; font: 10.5px var(--mono); color: var(--muted); }
-.panel-servers > :first-child { color: var(--ok); }
-.panel-agent-line1 { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
-.panel-agent-line2 { display: flex; align-items: center; gap: 5px; }
+.panel-agent-row { display: flex; flex-direction: column; gap: 3px; padding: 7px 5px; min-width: 0; }
 .panel-none { padding: 6px 10px 0; font-size: 12px; color: var(--muted); }
 .panel-gone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font-size: 14px; color: var(--text-2); }
 
