@@ -78,6 +78,24 @@ above and Copy beside it; inline code a rounded box; thin scroll bars.
 And the New theme now covers the sidebar, the conversation, the
 workspace card, the Board and Settings.
 
+The look pass, 2026-11-12: every screen pictured beside the Mac's test
+copy (web/teststack/compare-web.sh) in Classic and New, light and dark,
+and measured where it counted. Done in Classic: all of the above, and
+what the Mac had changed since the screens were ported (the filter panel,
+the keys on the Keys page, Knowledge's wording and width, New Agent's
+title row, ⌘K's words and place, the away summary's place, the editor's
+header, tree head, status bar and empty page, the empty sidebar, the
+starter questions). The New theme on the web (c6dfcf3 on): Settings ›
+General › Theme, styles/site.css, Rubik and the site's stickers, over the
+sidebar, the conversation and its card, questions, the Board, Agentman's
+chat, Settings, Usage and Limits, New Agent, ⌘K, the away summary, the
+terminal, the editor and the right panel. Dark matches in both themes.
+What still differs, on purpose or by the browser: no traffic lights (the
+header starts at 16), the system's own file icons (the editor's set
+instead), SF Symbols (Lucide, with the Mac's shapes drawn where Lucide
+has none), and the Mac's ideal tree width, which its test runs show at
+the most (420).
+
 Gone back over 1–9 on 2026-11-10, past the main path of each (the keyboard
 after each overlay, no data, no main window, every way in, dark mode):
 1. 9ce2375 Muse and Cursor CLI named as on the Mac, Muse's logo; 7064563
