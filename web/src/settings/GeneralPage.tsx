@@ -1,18 +1,16 @@
-// General (Views/SettingsView.swift GeneralPage): the keys Agentman runs
-// on, the look, the editor, the models it uses, briefs, and which app and
-// am serve this is.
+// General (Views/SettingsView.swift GeneralPage): the look, the editor, the
+// models Agentman uses, briefs, and which app and am serve this is. Its API
+// keys are on the Keys page (KeySection.tsx).
 
 import { useState } from "react";
-import { keptWhere } from "../host";
-import { useServerSystem } from "../shell/system";
 import pkg from "../../package.json";
 import type { ManagerSettings } from "@shared/protocol";
 import { usePref } from "../prefs";
 import { appearance, setAppearance, type AppearanceChoice } from "./appearance";
-import { PopUp, PushButton, Segmented, TextField, Toggle } from "./controls";
+import { PopUp, PushButton, Segmented, Toggle } from "./controls";
 import { Row, Section, SettingsPage } from "./layout";
 import { copyText } from "./native";
-import { providerOf, setKey, useSettingsState } from "./state";
+import { providerOf, useSettingsState } from "./state";
 
 export const MODELS: { id: string; name: string }[] = [
   { id: "claude-opus-5-5", name: "Claude Opus 5.5" },
@@ -40,23 +38,18 @@ export function GeneralPage({ draft, setDraft }: Props) {
   const { settings } = useSettingsState();
   const anthropic = settings?.anthropicKeySet ?? settings?.keySet === true;
   const gemini = settings?.geminiKeySet === true;
-  // A fresh page asks am serve first; until it answers, a key is neither
-  // saved nor missing.
-  const loaded = !!settings;
-
   // A model on an engine without its key cannot run; say so under the
   // pickers rather than when the first reply fails.
   const missing = (d: ManagerSettings) => {
     const keys = { anthropic, gemini };
     const engines = [...new Set([d.chatModel, d.briefModel].map(providerOf))].filter((e) => !keys[e]).sort();
     if (!engines.length) return undefined;
-    return `Add your ${engines[0] === "gemini" ? "Gemini" : "Anthropic"} API key above to use these models.`;
+    return `Add your ${engines[0] === "gemini" ? "Gemini" : "Anthropic"} API key in Keys to use these models.`;
   };
 
   return (
     <SettingsPage title="General">
-      <KeySection provider="anthropic" saved={loaded ? anthropic : undefined} />
-      <KeySection provider="gemini" saved={loaded ? gemini : undefined} />
+      {/* Agentman's API keys are on the Keys page, with the agents' keys. */}
       <AppearanceSection />
       <EditorSection />
       {draft && (
@@ -98,61 +91,6 @@ function ModelPicker({ value, onChange }: { value: string; onChange: (value: str
       ]}
       onChange={onChange}
     />
-  );
-}
-
-/** One engine's API key: whether it is saved, and a field to save one. */
-const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
-
-/** `saved`: undefined until am serve has said. */
-function KeySection({ provider, saved }: { provider: "anthropic" | "gemini"; saved: boolean | undefined }) {
-  const [key, setKeyText] = useState("");
-  const [message, setMessage] = useState<string>();
-  const gemini = provider === "gemini";
-  const system = useServerSystem();
-  const save = async (value: string) => {
-    const problem = await setKey(value.trim(), provider);
-    if (problem) {
-      setMessage(problem);
-    } else {
-      setKeyText("");
-      setMessage(value ? "Key saved." : "Key removed.");
-    }
-  };
-  return (
-    <Section
-      title={gemini ? "Gemini API key" : "Anthropic API key"}
-      footer={message ?? (system === null ? "\u00a0" : `${capitalized(keptWhere(system))} and only ever sent to ${gemini ? "Google" : "Anthropic"}.`)}
-    >
-      {/* Blank, its height kept, until am serve has said: not words that
-          change a moment later. */}
-      <Row
-        title={saved === undefined || (saved && system === null) ? "\u00a0" : saved ? (system === "darwin" ? "Saved in your Keychain" : "Saved") : "Not set yet"}
-        detail={saved === undefined ? "\u00a0" : saved ? "Paste a new key below to replace it." : gemini ? "For running Agentman on Gemini models." : "For running Agentman on Claude models."}
-      >
-        {saved && (
-          <PushButton destructive onClick={() => void save("")}>
-            Remove
-          </PushButton>
-        )}
-      </Row>
-      <Row title="Key" divider={false}>
-        <div className="hstack" style={{ gap: 8 }}>
-          <TextField
-            secure
-            mono
-            className="key-field"
-            value={key}
-            placeholder={gemini ? "Gemini API key" : "sk-ant-…"}
-            onChange={setKeyText}
-            onSubmit={() => void save(key)}
-          />
-          <PushButton disabled={!key.trim()} onClick={() => void save(key)}>
-            Save
-          </PushButton>
-        </div>
-      </Row>
-    </Section>
   );
 }
 

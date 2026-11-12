@@ -390,3 +390,7 @@ html[data-platform="darwin"] .settings.active .settings-sidebar { background: tr
 /* A folder's trust: its level, then the way back to the switch at the top. */
 .trust-remove { width: 20px; height: 20px; display: grid; place-items: center; color: var(--muted); margin-left: 8px; }
 .trust-remove:hover { color: var(--text); }
+/* Keys: the agents' keys under a small heading, their note under them
+   (KeysSettings.swift), both drawn into the page's 18 between blocks. */
+.keys-for-agents { font-size: 12px; line-height: 15px; font-weight: 500; color: var(--muted); padding-left: 4px; margin-bottom: -10px; }
+.keys-note { font-size: 12px; line-height: 15px; color: var(--muted); padding: 0 4px; margin-top: -10px; }

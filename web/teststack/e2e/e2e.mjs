@@ -948,15 +948,22 @@ async function generalPage() {
     if (anthropic.includes("on this computer")) window.__said.add("Kept on this computer");
     if (anthropic.includes("Not set yet")) window.__said.add("Not set yet, for the saved key");
   }).observe(document, { subtree: true, childList: true, characterData: true });`;
-  await check("settings: General's keys say where they're kept, on a Mac and off one, with no other words first", async () => {
-    let page = await open("view=settings&page=general", { size: [800, 700], init: [watchWords] });
+  await check("settings: Agentman's keys are on the Keys page, first, and say where they're kept, on a Mac and off one, with no other words first", async () => {
+    let page = await open("view=settings&page=keys", { size: [800, 700], init: [watchWords] });
     let [anthropic, gemini] = await until(page, () => { const k = [...document.querySelectorAll(".settings-section")].map((e) => e.innerText.replace(/\s+/g, " ")).filter((t) => / API key /.test(t + " ")); return k.length === 2 && k[0].includes("Keychain") && k; }, null, "the key sections, saying Keychain");
     expect(anthropic.includes("Saved in your Keychain") && anthropic.includes("Kept in your Mac's Keychain and only ever sent to Anthropic."), `Anthropic: ${anthropic}`);
     expect(gemini.includes("Not set yet") && gemini.includes("Kept in your Mac's Keychain and only ever sent to Google."), `Gemini: ${gemini}`);
     const before = await page.evaluate(() => [...window.__said]);
     expect(!before.length, `said first: ${before.join(", ")}`);
+    const order = await page.evaluate(() => [...document.querySelectorAll(".settings-page > *")].map((e) => e.innerText.split("\n")[0].trim()).filter(Boolean).join(" | "));
+    expect(/^Keys.* \| Anthropic API key \| .*Gemini API key \| .*For your agents \| .*Voice prompts/.test(order), `the page's order: ${order}`);
+    expect(/Values go into your Mac's Keychain and are never shown again\./.test(await page.evaluate(() => document.querySelector(".page-intro").innerText)), "the page's intro");
     await page.close();
-    page = await open("view=settings&page=general", { size: [800, 700], init: ["window.__system = 'linux';", fake("system")] });
+    const general = await open("view=settings&page=general", { size: [800, 700] });
+    await general.waitForSelector(".settings-section");
+    expect(!(await general.evaluate(() => document.body.innerText.includes("API key"))), "a key still on General");
+    await general.close();
+    page = await open("view=settings&page=keys", { size: [800, 700], init: ["window.__system = 'linux';", fake("system")] });
     [anthropic] = await until(page, () => { const k = [...document.querySelectorAll(".settings-section")].map((e) => e.innerText.replace(/\s+/g, " ")).filter((t) => t.includes("a file only you can read")); return k.length === 2 && k; }, null, "both keys' words off a Mac");
     expect(/Anthropic API key Saved (?!in your Keychain)/.test(anthropic) && anthropic.includes("Kept in a file only you can read and only ever sent to Anthropic."), `Anthropic off a Mac: ${anthropic}`);
   });

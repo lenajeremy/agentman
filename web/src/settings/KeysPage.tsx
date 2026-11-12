@@ -1,13 +1,16 @@
-// Keys (Views/KeysSettings.swift): the API keys Agentman hands to agents,
-// their names, what they are for and when Agentman may give one without
-// asking; values go to am serve's keychain and are never shown again. Above
-// them, Agentman's own sign-in for voice prompts (SettingsView.swift
-// VoiceSection).
+// Keys (Views/KeysSettings.swift): Agentman's own API keys first, then the
+// keys it hands to agents, their names, what they are for and when Agentman
+// may give one without asking; values go to am serve's keychain and are
+// never shown again. After them, Agentman's own sign-in for voice prompts
+// (SettingsView.swift VoiceSection).
 
 import { useEffect, useState } from "react";
 import type { Key } from "@shared/protocol";
 import { CircleMinus, Plus } from "lucide-react";
+import { keptWhere } from "../host";
+import { useServerSystem } from "../shell/system";
 import { Icon } from "../ui";
+import { KeySection } from "./KeySection";
 import { LinkButton, PopUp, PushButton, TextField, lastPart } from "./controls";
 import { Row, Section, useTestScroll } from "./layout";
 import { pick } from "./native";
@@ -36,7 +39,13 @@ const editDraft = (key: Key): KeyDraft => ({ name: key.name, value: "", descript
 const query = new URLSearchParams(location.search);
 
 export function KeysPage() {
-  const { keys } = useSettingsState();
+  const { keys, settings } = useSettingsState();
+  const system = useServerSystem();
+  // A fresh page asks am serve first; until it answers, a key is neither
+  // saved nor missing.
+  const loaded = !!settings;
+  const anthropic = settings?.anthropicKeySet ?? settings?.keySet === true;
+  const gemini = settings?.geminiKeySet === true;
   const [editing, setEditing] = useState<KeyDraft>();
   const scroll = useTestScroll();
 
@@ -59,8 +68,7 @@ export function KeysPage() {
           <div className="page-head-text">
             <h1 className="settings-display">Keys</h1>
             <div className="page-intro">
-              API keys for your agents. They ask for one through Agentman, or Agentman gives one when you ask. It goes into the project's .env, and only when git ignores
-              that file.
+              Agentman's own API keys, and the keys it hands to your agents. {system === "darwin" ? "Values go into your Mac's Keychain" : system ? `Values are ${keptWhere(system)}` : "Values are kept on this computer"} and are never shown again.
             </div>
           </div>
           <span className="page-head-gap" />
@@ -69,8 +77,11 @@ export function KeysPage() {
           </PushButton>
         </div>
 
-        <VoiceSection />
+        {/* Agentman's own keys first: they used to be in General. */}
+        <KeySection provider="anthropic" saved={loaded ? anthropic : undefined} />
+        <KeySection provider="gemini" saved={loaded ? gemini : undefined} />
 
+        <div className="keys-for-agents">For your agents</div>
         {keys.length === 0 ? (
           <div className="card keys-empty">No keys yet</div>
         ) : (
@@ -90,6 +101,11 @@ export function KeysPage() {
             ))}
           </Section>
         )}
+        <div className="keys-note">They ask for one through Agentman, or Agentman gives one when you ask. It goes into the project's .env, and only when git ignores that file.</div>
+
+        {/* Agentman's own sign-in for voice prompts, apart from the keys it
+            hands to agents. */}
+        <VoiceSection />
       </div>
       {editing && <KeyEditor initial={editing} close={() => setEditing(undefined)} />}
     </div>
