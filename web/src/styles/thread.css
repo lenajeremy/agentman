@@ -132,6 +132,7 @@
 .md a { color: var(--working-text); text-decoration: none; cursor: pointer; }
 .md-code { background: var(--fill); border-radius: 10px; }
 .md-code-label { font-size: 11px; font-weight: 500; line-height: 13px; color: var(--muted); padding: 10px 14px 0; }
+.md-code-label.none { display: none; }
 .md-code-scroll { overflow-x: auto; }
 .md-code-scroll::-webkit-scrollbar { display: none; }
 .md-code pre { margin: 0; padding: 12px 14px; width: max-content; min-width: 100%; box-sizing: border-box; }
@@ -161,7 +162,7 @@
 .tool-run { padding: 9px 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .tool-run.sidechain { opacity: 0.6; }
 .run-toggle { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); max-width: 100%; text-align: left; line-height: var(--lh12); }
-.run-summary { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.run-summary { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .run-failed { color: var(--error-text); white-space: nowrap; }
 .run-chevron { display: inline-flex; transition: transform 0.15s ease-out; flex: none; }
 .run-chevron.open { transform: rotate(90deg); }

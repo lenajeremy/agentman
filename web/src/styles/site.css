@@ -65,3 +65,55 @@
 :root[data-look="site"] .agentman-card { background: var(--cream); box-shadow: inset 0 0 0 2px var(--edge), 0 4px 0 var(--edge); }
 :root[data-look="site"] .agentman-card:hover, :root[data-look="site"] .agentman-card.selected { background: color-mix(in srgb, var(--edge) 6%, var(--cream)); }
 :root[data-look="site"] .agentman-card.selected { box-shadow: inset 0 0 0 2px var(--edge), 0 5px 0 var(--edge); }
+
+/* --- The conversation (AgentThreadView.swift, MarkdownView.swift) ------ */
+/* The title bar: the folder in mono capitals, the name in Rubik. */
+:root[data-look="site"] .crumb-folder { font: 500 10.5px var(--mono); letter-spacing: 0.8px; text-transform: uppercase; }
+:root[data-look="site"] .crumb-name { font: 600 15px var(--heading-font); }
+/* Your messages: cream, edged, a little raised. */
+:root[data-look="site"] .bubble { background: var(--bubble); box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+/* A step's pill: white and edged, cream while open. */
+:root[data-look="site"] .step-pill { background: var(--surface); box-shadow: inset 0 0 0 var(--edge-width) var(--edge); }
+:root[data-look="site"] .step-pill.open { background: var(--bubble); }
+/* The turn's line in mono. */
+:root[data-look="site"] .worked-text { font: 11.5px/15px var(--mono); }
+/* A code block: edged white under a strip of the site's ink, its language
+   in mono capitals. */
+:root[data-look="site"] .md-code { background: var(--surface); overflow: hidden; box-shadow: inset 0 0 0 var(--edge-width) var(--edge); }
+:root[data-look="site"] .md-code-label, :root[data-look="site"] .md-code-label.none { display: flex; align-items: center; min-height: 30px; padding: 0 12px;
+  font: 500 10.5px var(--mono); letter-spacing: 1.2px; text-transform: uppercase; color: var(--on-ink); background: var(--ink); }
+:root[data-look="site"] .md-code pre, :root[data-look="site"] .md-code pre.labelled { padding-top: 11px; }
+/* The bars over a thread and in place of the box: edged, raised. */
+:root[data-look="site"] .thread-bar { border: 0; box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+:root[data-look="site"] .resume-bar { border: 0; box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 3px 0 var(--edge); }
+/* The site's buttons (BrandButtonStyle): ink on a hard shadow for the
+   action to take. */
+:root[data-look="site"] .resume-bar button.prominent { min-height: 26px; padding: 0 11px; border-radius: 8px; font: 500 12.5px var(--sans);
+  color: var(--on-inverse); background: var(--inverse); box-shadow: 0 2px 0 var(--inverse-shadow); margin-bottom: 2px; }
+:root[data-look="site"] .resume-bar button.prominent:hover:not(:disabled) { background: color-mix(in srgb, var(--inverse) 88%, transparent); }
+:root[data-look="site"] .resume-bar button.prominent:active:not(:disabled) { transform: translateY(2px); box-shadow: none; }
+:root[data-look="site"] .resume-bar button.prominent:disabled { opacity: 0.45; }
+/* The composer: a heavier edge of 2 and a deeper shadow of 4; Send the
+   site's orange, edged and raised. */
+:root[data-look="site"] .composer-box, :root[data-look="site"] .composer-box.focused { box-shadow: inset 0 0 0 2px var(--edge), 0 4px 0 var(--edge); }
+:root[data-look="site"] .send.can { background: var(--flood); color: #fff; box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+
+/* --- A question (QuestionCard.swift) ---------------------------------- */
+/* The site's edge, lifted on the needs-you orange. */
+:root[data-look="site"] .decision-panel { box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 4px 0 var(--needs-you); margin-bottom: 4px; }
+/* The site's buttons: ink, or edged white, on a hard shadow. */
+:root[data-look="site"] .choice-button { box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+:root[data-look="site"] .choice-button.primary { box-shadow: 0 2px 0 var(--inverse-shadow); }
+:root[data-look="site"] .check-row:not(.checked) .check-box { box-shadow: inset 0 0 0 var(--edge-width) var(--edge); }
+:root[data-look="site"] .write-own { box-shadow: inset 0 0 0 var(--edge-width) var(--line); }
+:root[data-look="site"] .write-own:focus-within { box-shadow: inset 0 0 0 var(--edge-width) var(--edge); }
+
+/* --- The workspace card (WorkspacePanel.swift) ------------------------- */
+/* Raised on the page like the composer: a heavier edge, a hard shadow. */
+:root[data-look="site"] .workspace-card { box-shadow: 0 4px 0 var(--edge); }
+:root[data-look="site"] .workspace-card::after { border: 2px solid var(--edge); }
+
+/* --- Header buttons (Theme.swift's ChromeButton) --------------------- */
+/* The site's edge while its panel is open (on cream) or under the pointer. */
+:root[data-look="site"] .chrome:hover, :root[data-look="site"] .chrome.active { border-radius: 7px; background: var(--surface); box-shadow: inset 0 0 0 1.2px var(--edge); }
+:root[data-look="site"] .chrome.active { background: var(--cream); }

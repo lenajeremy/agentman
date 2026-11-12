@@ -101,7 +101,9 @@ function CodeBlock({ text, language }: { text: string; language?: string }) {
   return (
     <div className={`md-code-wrap ${copied ? "copied" : ""}`}>
       <div className="md-code">
-        {label && <div className="md-code-label" aria-label={`${label} code`}>{label}</div>}
+        {/* In New, on a strip of the site's ink, "code" when it names no
+            language; in Classic, only a language named. */}
+        <div className={`md-code-label${label ? "" : " none"}`} aria-label={label ? `${label} code` : undefined}>{label ?? "code"}</div>
         <div className="md-code-scroll">
           <pre data-language={language} className={label ? "labelled" : ""}>
             <code>{coloured ? coloured.map((run, i) => (run.token ? <span key={i} className={`tok-${run.token}`}>{run.text}</span> : run.text)) : text}</code>
