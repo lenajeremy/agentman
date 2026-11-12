@@ -128,6 +128,8 @@ export function Sidebar({ width, headerLeading }: { width: number; headerLeading
           <span className="no-drag"><ChromeButton icon={PanelLeft} sf="sidebar.left" title="Hide the sidebar (⌃⌘S)" onClick={() => setHidden(true)} /></span>
         </div>
         <div className="search-row">
+          {/* In New, a field of its own: edged, a little raised. */}
+          <span className="search-field">
           <span className="search-icon"><Icon icon={Search} sf="magnifyingglass" size={12} /></span>
           <input
             id="search"
@@ -139,6 +141,7 @@ export function Sidebar({ width, headerLeading }: { width: number; headerLeading
             // Escape clears it, as the Mac's does.
             onKeyDown={(e) => e.key === "Escape" && setShell({ search: "" })}
           />
+          </span>
           <FilterMenu sessions={sessions} />
           <button className="new-agent-button" title="New agent (⌘N)" aria-label="New agent" onClick={() => openNewAgent()}>
             <Icon icon={SquarePen} sf="square.and.pencil" size={12} />
@@ -449,7 +452,8 @@ function ConnectionFooter({ version }: { version?: string }) {
     <footer className="sidebar-footer" title={socket}>
       <span className={`conn ${status}`} />
       <span className="conn-text">{text}</span>
-      <Spacer />
+      {/* SwiftUI's Spacer keeps 8 at least. */}
+      <Spacer min={8} />
       <UsageButton />
       <AppearanceMenu />
     </footer>

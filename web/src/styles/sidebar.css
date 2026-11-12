@@ -7,13 +7,17 @@
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --loader-2: #ff5c9a; } }
 :root[data-theme="dark"] { --loader-2: #ff5c9a; }
 
-.sidebar { -webkit-font-smoothing: auto; flex: none; display: flex; flex-direction: column; background: var(--sidebar); box-shadow: inset -1px 0 var(--line); line-height: 1.193; position: relative; min-height: 0; }
+.sidebar { -webkit-font-smoothing: auto; flex: none; display: flex; flex-direction: column; background: var(--sidebar); line-height: 1.193; position: relative; min-height: 0; }
+/* Its edge, the whole height, over the top and foot that paint their own
+   ground: a hairline, or the ink edge in New. */
+.sidebar::after { content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: var(--edge-width); background: var(--edge); pointer-events: none; z-index: 3; }
 .sidebar-top, .sidebar-bottom { flex: none; background: var(--sidebar); }
 .sidebar-header { height: 32px; display: flex; align-items: center; gap: 8px; padding-right: 14px; }
 .app-name { font-size: 14px; font-weight: 600; white-space: nowrap; }
 /* 12 round it, as the Mac's; its filter menu stands a point taller than
    the words, which puts them and all below a point lower. */
 .search-row { display: flex; align-items: center; gap: 9px; padding: 13px 16px 12px; font-size: 12px; color: var(--muted); }
+.search-field { display: contents; }
 .search-row input { flex: 1; min-width: 0; border: 0; outline: none; background: none; font-size: 12px; line-height: inherit; color: var(--text); padding: 0; margin: 0; }
 .search-row input::placeholder { color: var(--text-2); opacity: 1; }
 /* SwiftUI lays a symbol out as wide as its own outline, not as its size. */

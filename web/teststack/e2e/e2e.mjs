@@ -1007,8 +1007,9 @@ async function filtersAndAway() {
     expect(!(await page.locator(".filter-panel").count()), "the panel stayed behind the folder picker");
     await page.keyboard.press("Meta+Shift+g");
     await page.waitForSelector(".op-ask input", { timeout: 8000 });
-    await page.keyboard.type(`${H}/projects/shots`);
-    await page.keyboard.press("Enter");
+    // Into the field itself: typing races the field taking the keyboard.
+    await page.fill(".op-ask input", `${H}/projects/shots`);
+    await page.press(".op-ask input", "Enter");
     await until(page, () => (document.querySelector(".op-where")?.innerText ?? "").includes("shots"), null, "in the shots folder");
     await click(page, ".op-button.default", "Show");
     try {
