@@ -8,8 +8,8 @@
 // can't give (a pairing code, plan limits, an agent's question, an offer) is
 // faked in the page (fakes/); what costs or publishes is a stand-in.
 import { chromium, webkit } from "playwright-core";
-import { execFileSync, execSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { execFileSync, execSync, spawn } from "node:child_process";
+import { appendFileSync, copyFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const HERE = new URL(".", import.meta.url).pathname;
@@ -458,6 +458,34 @@ async function thread() {
     await menu(page, "End Session…");
     await sheetButton(page, "End Session");
     await until(page, () => (document.querySelector(".resume-bar")?.innerText ?? "").startsWith("Off your list"), null, "Off your list, on the same page");
+  });
+
+  await check("thread: an agent that quits in its terminal keeps its page, to resume", async () => {
+    // A throwaway agent: bugs' conversation under an id of its own, its
+    // process a sleep that is then killed, as a Ctrl-C or a crash would.
+    const sid = "5c3e7a10-9d2b-4f1e-8a6c-3b4d5e6f7a8b";
+    const cwd = `${H}/projects/bugs`;
+    const dir = `${H}/.claude/projects/${cwd.replace(/[^A-Za-z0-9]/g, "-")}`;
+    const transcript = `${dir}/${sid}.jsonl`;
+    copyFileSync(`${dir}/${ID.bugs.slice("claude:".length)}.jsonl`, transcript);
+    const child = spawn("sleep", ["600"], { detached: true, stdio: "ignore" });
+    child.unref();
+    const registry = `${H}/.claude/sessions/${child.pid}.json`;
+    const now = Date.now();
+    writeFileSync(registry, JSON.stringify({ pid: child.pid, sessionId: sid, cwd, startedAt: now, kind: "interactive", status: "idle", updatedAt: now }) + "\n");
+    try {
+      const page = await open(`agent=claude:${sid}`, { wait: ".thread-item" });
+      expect(!(await page.locator(".resume-bar").count()), "ended before it quit");
+      process.kill(child.pid);
+      await until(page, () => {
+        const bar = document.querySelector(".resume-bar")?.innerText ?? "";
+        return bar.startsWith("This session has ended") && [...document.querySelectorAll(".resume-bar button")].some((b) => b.innerText.trim() === "Resume");
+      }, null, "This session has ended, with Resume, on the same page");
+      expect(!(await page.locator(".gone").count()) && (await page.locator(".thread-item").count()) > 0, "the conversation went");
+    } finally {
+      try { process.kill(child.pid); } catch {}
+      for (const file of [registry, transcript]) if (existsSync(file)) unlinkSync(file);
+    }
   });
 }
 

@@ -48,12 +48,25 @@ function mergeMessages(sessionId: string, incoming: Message[]) {
   set({ messages: { ...state.messages, [sessionId]: merged } });
 }
 
+type Left = (before: readonly Session[], now: readonly Session[]) => void;
+const leftListeners = new Set<Left>();
+
+/** Called once agents may have left the list (a new list, or one gone),
+ *  with the list before and after. */
+export function onSessionsLeft(listener: Left): () => void {
+  leftListeners.add(listener);
+  return () => leftListeners.delete(listener);
+}
+
 function apply(event: AppEvent) {
   switch (event.type) {
-    case "sessions":
+    case "sessions": {
+      const before = state.sessions;
       set({ sessions: event.sessions ?? [], version: event.daemon?.version });
       for (const session of event.sessions ?? []) void workspace(session);
+      for (const listener of leftListeners) listener(before, state.sessions);
       break;
+    }
     case "session_update": {
       const updated = event.session;
       // One without its id can't be placed, and drawn it would take the page
@@ -63,9 +76,12 @@ function apply(event: AppEvent) {
       set({ sessions: [...others, updated] });
       break;
     }
-    case "session_gone":
+    case "session_gone": {
+      const before = state.sessions;
       set({ sessions: state.sessions.filter((s) => s.id !== event.sessionId) });
+      for (const listener of leftListeners) listener(before, state.sessions);
       break;
+    }
     case "messages":
       if (event.sessionId && event.messages) mergeMessages(event.sessionId, event.messages);
       break;
