@@ -17,6 +17,8 @@ import { isMuted, setMuted } from "./notify/policy";
 import { usePref, setPref } from "./prefs";
 import { useAgentmanOn } from "./shell/agentman";
 import { AgentRow } from "./shell/AgentRow";
+import { StickerOnDots } from "./shell/Sticker";
+import { useTheme } from "./settings/theme";
 import { FilterPanel } from "./shell/FilterPanel";
 import { useServerSystem } from "./shell/system";
 import { Sym } from "./shell/Sym";
@@ -49,6 +51,7 @@ function liveIds(sessions: Session[]) {
 export function Sidebar({ width, headerLeading }: { width: number; headerLeading: number }) {
   const { sessions, branches, version } = useStore();
   const shell = useShell();
+  const look = useTheme();
   const choices = useChoices();
   const route = useRoute();
   const { status } = useStatus();
@@ -208,11 +211,30 @@ export function Sidebar({ width, headerLeading }: { width: number; headerLeading
           </>
         )}
         {sessions.length === 0 && status === "connected" && (
-          <div className="no-agents">
-            <Icon icon={Sparkles} sf="sparkles" size={37} weight="regular" />
-            <div className="no-agents-title">No agents yet</div>
-            <div className="no-agents-text">Start one with am claude or am codex in a terminal.</div>
-          </div>
+          look === "site" ? (
+            // The website's terminal sticker on its dots, a Rubik title, the
+            // commands set as code so they never break across lines, and the
+            // site's orange button (EmptySidebar).
+            <div className="no-agents site">
+              <StickerOnDots name="terminal" size={118} />
+              <div className="no-agents-title">No agents yet</div>
+              <div className="no-agents-text">Start one here, or with <code>am claude</code> or <code>am codex</code> in a terminal.</div>
+              <button className="no-agents-button" onClick={() => openNewAgent()}>
+                <Icon icon={SquarePen} sf="square.and.pencil" size={12} />
+                New Agent
+              </button>
+            </div>
+          ) : (
+            <div className="no-agents">
+              <Icon icon={Sparkles} sf="sparkles" size={37} weight="regular" />
+              <div className="no-agents-title">No agents yet</div>
+              <div className="no-agents-text">Start one here, or with am claude or am codex in a terminal.</div>
+              <button className="no-agents-button" onClick={() => openNewAgent()}>
+                <Icon icon={SquarePen} sf="square.and.pencil" size={10.5} />
+                New Agent
+              </button>
+            </div>
+          )
         )}
       </div>
       <div className="sidebar-bottom">

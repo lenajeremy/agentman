@@ -7,6 +7,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent }
 import { ArrowDown, Images, MessageSquarePlus } from "lucide-react";
 import { chatItems } from "@shared/manager-feed";
 import { useStatus } from "../store";
+import { StickerOnDots } from "../shell/Sticker";
+import { useTheme } from "../settings/theme";
 import { confirmSheet } from "../thread/menu";
 import { AppIcon, ChromeButton, Icon } from "../ui";
 import { dragHoldsImages, encoded, fromFiles, fromPaths, MAX_COUNT, type Attachment } from "./attach";
@@ -30,6 +32,7 @@ const TOP_SLACK = 160;
 export function AgentmanView({ inPanel = false }: { inPanel?: boolean }) {
   const s = useManager();
   const { status } = useStatus();
+  const look = useTheme();
   const [draft, setDraft] = useState(() => (query.get("draft") ?? "").replace(/\\n/g, "\n"));
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [sending, setSending] = useState(false);
@@ -192,8 +195,10 @@ export function AgentmanView({ inPanel = false }: { inPanel?: boolean }) {
               {entry ? (
                 <div className="am-hero">
                   <span className="am-hero-space top" />
-                  <div className="am-hero-name">
-                    <AppIcon size={46} />
+                  {/* The website's Agentman mascot on its dots, over the
+                      name in Rubik; the badge in the Classic theme. */}
+                  <div className={`am-hero-name${look === "site" ? " site" : ""}`}>
+                    {look === "site" ? <StickerOnDots name="mascot" size={150} /> : <AppIcon size={46} />}
                     <span className="am-wordmark">Agentman</span>
                   </div>
                   <div className="am-hero-box">

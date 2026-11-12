@@ -1022,6 +1022,18 @@ async function filtersAndAway() {
     }
   });
 
+  await check("sidebar: with no agents yet, it says how to start one, and New Agent opens the page for it", async () => {
+    for (const look of ["classic", "site"]) {
+      const page = await open(`prefs=${encodeURIComponent(JSON.stringify({ appTheme: look }))}&page=usage`, { init: [fake("empty")], wait: ".no-agents" });
+      const words = await page.evaluate(() => document.querySelector(".no-agents").innerText.replace(/\s+/g, " ").trim());
+      expect(words === "No agents yet Start one here, or with am claude or am codex in a terminal. New Agent", `${look}: ${words}`);
+      if (look === "site") expect(await page.evaluate(() => !!document.querySelector(".no-agents .sticker img")), "New: the terminal sticker");
+      await click(page, ".no-agents-button");
+      await until(page, () => !!document.querySelector(".new-agent-line, .new-agent-title"), null, `${look}: the New Agent page`);
+      await page.close();
+    }
+  });
+
   await check("away: the summary since an hour ago lists who was busy, closes on Escape, comes back from ⌘K, and opens an agent", async () => {
     const page = await open("away=60", { wait: ".away-panel" });
     const who = await page.evaluate(() => [...document.querySelectorAll(".away-name")].map((e) => e.innerText.trim()));

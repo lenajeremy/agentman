@@ -63,6 +63,14 @@ for (const set of await readdir(assets)) {
     else if (name.startsWith('FileIcon-')) await cp(join(assets, set, file), join(pictures, 'files', `${name.slice(9)}${ext}`))
   }
 }
+// The website's stickers the New theme's empty pages show, animated, with
+// a still frame for Reduce Motion (Design/Sticker.swift).
+await mkdir(join(pictures, 'stickers'), { recursive: true })
+for (const name of ['terminal', 'mascot']) {
+  for (const ext of ['.webp', '.png']) {
+    await cp(join(desktop, 'Agentman/Resources/Stickers', name + ext), join(pictures, 'stickers', name + ext))
+  }
+}
 console.log('pictures copied to public/assets')
 
 // The file icon theme's rules (desktop/Agentman/Design/FileIconMap.swift,

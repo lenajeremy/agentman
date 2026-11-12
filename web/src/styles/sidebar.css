@@ -63,6 +63,10 @@
 .no-agents .sf, .no-agents svg { color: rgb(var(--primary) / 0.26); }
 .no-agents-title { margin-top: 12px; font-size: 15px; line-height: 18px; font-weight: 700; color: rgb(var(--primary) / 0.5); }
 .no-agents-text { margin-top: 5.5px; font-size: 15px; line-height: 20px; color: rgb(var(--primary) / 0.5); }
+/* Its action: the Mac's SmallButton, ink. */
+.no-agents-button { pointer-events: auto; margin-top: 12px; height: 26px; padding: 0 10px; display: inline-flex; align-items: center; gap: 5px; border-radius: 7px;
+  font-size: 12px; font-weight: 500; color: var(--on-inverse); background: var(--inverse); }
+.no-agents .no-agents-button .sf, .no-agents .no-agents-button svg { color: inherit; }
 
 /* The archived, at the foot under a heading that folds them away. */
 .shelf { padding-top: 4px; }
