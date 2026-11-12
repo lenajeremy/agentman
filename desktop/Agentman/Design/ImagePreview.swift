@@ -263,6 +263,32 @@ struct ImageThumbnail: View {
         return String(text[match.range])
     }
 
+    /// The picture a file tool opened, from its summary, which names one
+    /// file and nothing else, so a space in it is part of the name: "09
+    /// Waitlist.png", or macOS's "Screenshot 2026-10-05 at 10.00.00 AM.png".
+    /// The whole first line, one absolute path, with nothing a shell would
+    /// act on and no control characters, as the daemon serves it
+    /// (toolFilePath) and the phone shows it (lib/imagepath.ts): a summary
+    /// that is a path but not such a one is no picture, since the daemon
+    /// would refuse it. One that isn't a path at all is searched as before,
+    /// with no spaces guessed at.
+    static func imageFile(inSummary summary: String) -> String? {
+        let first = (summary.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? "")
+            .trimmingCharacters(in: .whitespaces)
+        guard first.hasPrefix("/") else { return imagePath(in: summary) }
+        let components = first.split(separator: "/", omittingEmptySubsequences: false).dropFirst()
+        guard first.count <= 4096,
+              first.rangeOfCharacter(from: shellCharacters) == nil,
+              !first.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+              // As written, not needing cleaning: no "//", "." or "..".
+              !components.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }),
+              first.wholeMatch(of: imageEnding) != nil else { return nil }
+        return first
+    }
+
+    nonisolated(unsafe) private static let imageEnding = try! Regex(#".+\.(?i:png|jpe?g|gif|webp|heic|bmp|tiff?)"#)
+    private static let shellCharacters = CharacterSet(charactersIn: "\t\"'`$&|;<>()*?[]\\")
+
     /// Made once: making it took longer than most searches with it.
     nonisolated(unsafe) private static let imagePattern = try! Regex(#"/[^\s"'`]+?\.(?i:png|jpe?g|gif|webp|heic|bmp|tiff?)"#)
 }

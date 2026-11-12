@@ -1414,7 +1414,7 @@ enum ThreadItem: Identifiable {
             }
             turn.add(message)
             if message.role == .tool, ToolKind(message.tool?.name) == .read,
-               let path = ImageThumbnail.imagePath(in: message.tool?.summary ?? message.text ?? "") {
+               let path = message.tool?.summary.flatMap { ImageThumbnail.imageFile(inSummary: $0) } ?? ImageThumbnail.imagePath(in: message.text ?? "") {
                 flush()
                 pictures.append((message, path))
             } else if message.role == .tool {
