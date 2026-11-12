@@ -227,3 +227,22 @@
 /* --- The connection banner, ⌘K (ConnectionBanner.swift, PaletteView.swift) */
 :root[data-look="site"] .connection-banner-title { font: 600 13px var(--heading-font); }
 :root[data-look="site"] .palette { box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 12px 30px rgb(0 0 0 / 0.18); }
+
+/* --- The terminal panel (TerminalPanel.swift) ------------------------ */
+/* A card with the theme's edge and a small hard shadow, down and to the
+   right, 10 in from the page at the top and left (BrutalCard). */
+:root[data-look="site"] .term-panel { inset: 10px 13px 13px 10px; border-radius: 10px; overflow: hidden; box-shadow: 3px 3px 0 var(--edge); }
+:root[data-look="site"] .term-panel::after { content: ""; position: absolute; inset: 0; border: 1.5px solid var(--edge); border-radius: 10px; pointer-events: none; z-index: 5; }
+/* Its bar cream and 34 tall, the edge under it; TERMINAL in Rubik, in the
+   prompt's orange. */
+:root[data-look="site"] .term-bar { height: 34px; background: var(--cream); box-shadow: inset 0 -1.5px 0 var(--edge); }
+:root[data-look="site"] .term-label { font: 600 12.5px var(--heading-font); color: var(--prompt); }
+:root[data-look="site"] .term-body, :root[data-look="site"] .term-note { background: #ffffff; }
+:root[data-look="site"] .term-slot { padding: 6px 8px 8px 10px; box-sizing: border-box; }
+/* A tab: the open one a small card on the bar. */
+:root[data-look="site"] .term-tab.active { margin-right: 3px; background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--edge), 1.5px 1.5px 0 var(--edge); }
+:root[data-look="site"] .term-tab:not(.active):hover { background: color-mix(in srgb, var(--fill) 50%, transparent); }
+@media (prefers-color-scheme: dark) {
+  :root[data-look="site"]:not([data-theme="light"]) .term-body, :root[data-look="site"]:not([data-theme="light"]) .term-note { background: #000000; }
+}
+:root[data-look="site"][data-theme="dark"] .term-body, :root[data-look="site"][data-theme="dark"] .term-note { background: #000000; }
