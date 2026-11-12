@@ -78,7 +78,16 @@ final class ConversationSpeedTests: XCTestCase {
         XCTAssertEqual(small.size.width, 165, accuracy: 1, "its shape kept")
         let pixels = try XCTUnwrap(small.representations.first)
         XCTAssertLessThanOrEqual(pixels.pixelsHigh, 221, "decoded at twice the points, not 2000 pixels")
-        XCTAssertNotNil(Thumbnail.cached(Thumbnail.key(path, "110")), "kept for the next time")
+        // Kept for the next time, though the cache may let it go under
+        // memory pressure, and did in a full run on a busy Mac: the next
+        // time gives the same thumbnail either way, and what the cache holds
+        // then is that one.
+        let remade = await Thumbnail.file(path, height: 110)
+        let again = try XCTUnwrap(remade)
+        XCTAssertEqual(again.size, small.size)
+        if let kept = Thumbnail.cached(Thumbnail.key(path, "110")) {
+            XCTAssertTrue(kept === again, "the one kept is the one shown")
+        }
     }
 
     // A working agent's session arrives every second with only when it last
