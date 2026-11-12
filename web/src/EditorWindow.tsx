@@ -5,7 +5,7 @@
 // a status bar.
 
 import { useEffect, useMemo, useState } from "react";
-import { Folder, PanelRight, Search, SquareTerminal } from "lucide-react";
+import { Folder, PanelRight, Search, Split, SquareTerminal } from "lucide-react";
 import { Window } from "@wailsio/runtime";
 import { EditorPanes } from "./Editor";
 import { AgentPanel, ColumnDivider, PANEL_MIN } from "./editor/AgentPanel";
@@ -210,15 +210,12 @@ function FolderEditor({ folder }: { folder: string }) {
           <AppIcon size={20} />
           <span className="editor-brand-name">Agentman</span>
         </div>
-        <span className="editor-folder-icon">
-          <Icon icon={Folder} sf="folder" size={13} />
-        </span>
-        <span className="editor-folder-name">{store.name}</span>
+        {/* The folder is named above the tree; up here, its branch. */}
         {store.branch && (
-          <>
-            <span className="editor-slash">/</span>
-            <span className="editor-branch">{store.branch}</span>
-          </>
+          <span className="editor-branch" title={`The branch checked out in ${store.name}`}>
+            <Icon icon={Split} sf="arrow.triangle.branch" size={12} />
+            <span className="editor-branch-name">{store.branch}</span>
+          </span>
         )}
         <span className="editor-header-spacer" />
         <span className="editor-header-buttons no-drag">
@@ -278,9 +275,11 @@ function FolderEditor({ folder }: { folder: string }) {
               </>
             )}
           </div>
-          <StatusBar store={store} />
         </div>
       </div>
+      {/* Across the whole window, under the tree too, so what it says has
+          room at any width. */}
+      <StatusBar store={store} />
       <EditorAlerts store={store} />
       <EditorCommandPalette store={store} />
       {store.showUsage && (

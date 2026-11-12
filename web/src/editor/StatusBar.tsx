@@ -2,7 +2,7 @@
 // ProblemCount and LanguageLabel): branch and changes on the left; the
 // cursor, the file's settings and its language server on the right.
 
-import { ChartSpline, CircleX, GitBranch, TriangleAlert } from "lucide-react";
+import { ChartSpline, CircleX, TriangleAlert } from "lucide-react";
 import { Icon } from "../ui";
 import type { EditorDocument } from "./document";
 import type { EditorStore } from "./store";
@@ -14,12 +14,6 @@ export function StatusBar({ store }: { store: EditorStore }) {
     <div className="status-bar">
       {store.vimMode && <VimModeLabel mode={store.vimMode} keys={store.vimKeys} />}
       {store.notice && <span className="status-notice">{store.notice}</span>}
-      {store.branch && (
-        <span className="status-label">
-          <Icon icon={GitBranch} sf="arrow.triangle.branch" size={11} />
-          <span>{store.branch}</span>
-        </span>
-      )}
       {changed > 0 && <span>{changed} changed</span>}
       <span className="status-spacer" />
       {/* What the agents spent and what's left of each plan, over the editor. */}

@@ -2,7 +2,7 @@
 // NonTextView and MarkdownPreview, with Design/MarkdownView.swift's look).
 
 import { Fragment, useMemo, type ReactNode } from "react";
-import { CodeXml, FileQuestion, FolderSearch } from "lucide-react";
+import { CodeXml, Ellipsis, FileQuestion, FolderSearch, PanelRight, Search, Split, SquareTerminal, TextSearch, type LucideIcon } from "lucide-react";
 import { parseDocument, type Block, type Inline, type Picture } from "@shared/markdown";
 import { Icon } from "../ui";
 import { openPath, openURL } from "../host";
@@ -11,58 +11,100 @@ import { fileURL, paths } from "./fs";
 import { fenceFile, highlight } from "./highlight";
 import { MARK_LETTER, MARK_TINT, type EditorStore } from "./store";
 import { ZoomableImage } from "./ZoomableImage";
+import { FileTypeIcon } from "./fileIcons";
 
-/** No file open: how to find one, and what agents changed lately. */
+/** No file open (EditorEmpty): where you are, the folder by name and where
+ *  it is, under the empty page's mark; the commands to start with, in one
+ *  card; and the files changed and not yet committed, in another. Centred
+ *  while it fits; scrolls from the top once it doesn't. */
 export function EditorEmpty({ store }: { store: EditorStore }) {
   const changed = Object.entries(store.marks)
     .filter(([, mark]) => mark !== "deleted")
     .map(([path]) => path)
-    .sort()
-    .slice(0, 8);
-  const shortcut = (title: string, keys: string, action?: () => void) => (
-    <div className="empty-shortcut">
-      {action ? (
-        <button className="mac-link" onClick={action}>{title}</button>
-      ) : (
-        <span className="empty-shortcut-title">{title}</span>
-      )}
-      <span style={{ flex: 1 }} />
-      <span className="empty-shortcut-keys">{keys}</span>
-    </div>
-  );
+    .sort();
+  const act = (work: () => void) => () => {
+    work();
+    store.changed();
+  };
   return (
     <div className="editor-empty">
-      <div className="empty-head">
-        <span className="empty-icon">
-          <Icon icon={CodeXml} sf="chevron.left.forwardslash.chevron.right" size={26} weight="regular" />
-        </span>
-        <span className="empty-name">{store.name}</span>
-        <span className="empty-path">{paths.tilde(store.root, store.home)}</span>
-      </div>
-      <div className="empty-shortcuts">
-        {shortcut("Go to File", "⌘P", () => {
-          store.quickOpen = true;
-          store.changed();
-        })}
-        {shortcut("Save", "⌘S")}
-        {shortcut("Close Tab", "⌘W")}
-        {shortcut("Comment Lines", "⌘/")}
-      </div>
-      {changed.length > 0 && (
-        <div className="empty-changed">
-          <span className="empty-changed-title">Changed</span>
-          {changed.map((path) => {
-            const mark = store.marks[path];
-            return (
-              <button key={path} className="empty-changed-row" onClick={() => store.open(path)}>
-                <span className="empty-changed-letter" style={{ color: MARK_TINT[mark] }}>{MARK_LETTER[mark]}</span>
-                <span className="empty-changed-path">{path}</span>
-              </button>
-            );
-          })}
+      <div className="empty-column">
+        <div className="empty-head">
+          <EmptyMark />
+          <span className="empty-name">{store.name}</span>
+          <span className="empty-path">{paths.tilde(store.root, store.home)}</span>
         </div>
-      )}
+        <div className="empty-list">
+          <EmptyAction icon={Search} sf="magnifyingglass" title="Go to File…" keys={["⌘", "P"]} onClick={act(() => { store.searchOpen = false; store.quickOpen = true; })} />
+          <EmptyAction icon={TextSearch} sf="text.magnifyingglass" title="Search in Folder…" keys={["⇧", "⌘", "F"]} onClick={act(() => store.showSearch())} />
+          <EmptyAction icon={SquareTerminal} sf="terminal" title={store.showTerminal ? "Hide Terminal" : "Open Terminal"} keys={["⌃", "`"]} onClick={act(() => store.toggleTerminal())} />
+          <EmptyAction icon={PanelRight} sf="sidebar.right" title={store.showAgentPanel ? "Hide Agent Panel" : "Show Agent Panel"} keys={["⌘", "L"]} onClick={act(() => store.setShowAgentPanel(!store.showAgentPanel))} />
+        </div>
+        {changed.length > 0 && (
+          <div className="empty-changes">
+            <div className="empty-changes-head">
+              <Icon icon={Split} sf="arrow.triangle.branch" size={11} />
+              <span className="empty-changes-title">Changed</span>
+              <span style={{ flex: 1, minWidth: 4 }} />
+              <span className="empty-changes-count">{changed.length}</span>
+            </div>
+            <div className="empty-list">
+              {changed.slice(0, 8).map((path) => {
+                const mark = store.marks[path];
+                const slash = path.lastIndexOf("/");
+                return (
+                  <button key={path} className="empty-row empty-file" onClick={() => store.open(path)} aria-label={`${path}, ${mark}`}>
+                    <span className="empty-row-icon"><FileTypeIcon name={path.slice(slash + 1)} size={15} /></span>
+                    <span className="empty-file-words">
+                      <span className="empty-file-name">{path.slice(slash + 1)}</span>
+                      <span className="empty-file-folder">{slash < 0 ? "Top of the folder" : path.slice(0, slash)}</span>
+                    </span>
+                    <span style={{ flex: 1, minWidth: 8 }} />
+                    <span className="empty-file-mark" style={{ color: MARK_TINT[mark] }} title={mark}>{MARK_LETTER[mark]}</span>
+                  </button>
+                );
+              })}
+              {changed.length > 8 && (
+                <EmptyAction icon={Ellipsis} sf="ellipsis" title={`${changed.length - 8} more in Go to File`} keys={[]} onClick={act(() => { store.searchOpen = false; store.quickOpen = true; })} />
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+/** The empty page's mark: an icon on a small raised tile, with two ghost
+ *  tiles fanned out behind it. */
+function EmptyMark() {
+  return (
+    <span className="empty-mark" aria-hidden>
+      <span className="empty-tile ghost left" />
+      <span className="empty-tile ghost right" />
+      <span className="empty-tile"><Icon icon={CodeXml} sf="chevron.left.forwardslash.chevron.right" size={15} weight="medium" /></span>
+    </span>
+  );
+}
+
+/** A command in the list: what it does, and its keys. */
+function EmptyAction({ icon, sf, title, keys, onClick }: { icon: LucideIcon; sf: string; title: string; keys: string[]; onClick: () => void }) {
+  return (
+    <button className="empty-row empty-action" onClick={onClick}>
+      <span className="empty-row-icon"><Icon icon={icon} sf={sf} size={12.5} weight="medium" /></span>
+      <span className="empty-action-title">{title}</span>
+      <span style={{ flex: 1, minWidth: 8 }} />
+      {keys.length > 0 && <KeyCaps keys={keys} />}
+    </button>
+  );
+}
+
+/** Keys as small caps, one each (KeyCaps). */
+export function KeyCaps({ keys }: { keys: string[] }) {
+  return (
+    <span className="key-caps" aria-label={keys.join(" ")}>
+      {keys.map((key, i) => <span key={i} className={`key-cap${key.length > 1 ? " wide" : ""}`}>{key}</span>)}
+    </span>
   );
 }
 

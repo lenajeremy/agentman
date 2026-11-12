@@ -53,9 +53,12 @@ export function FileTree({ store }: { store: EditorStore }) {
   return (
     <div className="tree">
       <div className="tree-top">
+        {/* The folder this editor is for, where the tree starts; as tall as
+            the tabs beside it and the agent panel's header, with the same
+            line under it, so the three read as one row. */}
         <div className="tree-head">
-          <span className="tree-title">Files</span>
-          <span style={{ flex: 1 }} />
+          <span className="tree-title" title={paths.tilde(store.root, store.home)}>{store.name}</span>
+          <span style={{ flex: 1, minWidth: 4 }} />
           <ChromeButton icon={FilePlus} sf="doc.badge.plus" title="New file" onClick={() => askName(store, { kind: "file", folder: "", name: "" })} />
           <ChromeButton icon={FolderPlus} sf="folder.badge.plus" title="New folder" onClick={() => askName(store, { kind: "folder", folder: "", name: "" })} />
         </div>
@@ -76,7 +79,7 @@ export function FileTree({ store }: { store: EditorStore }) {
       >
         {rows ? (
           <>
-            <div className="tree-section">{store.name}</div>
+            {/* The folder's name is the header above the tree. */}
             {rows.map(({ entry, depth }) => (
               <FileRow key={entry.path} store={store} entry={entry} depth={depth} onMenu={(e) => contextMenu(e, menuFor(entry))} />
             ))}
