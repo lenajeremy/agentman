@@ -8,12 +8,13 @@ import "./settings/appearance";
 import "./shell/keepEnded";
 
 daemon.start();
-// Asked now, so the words that depend on it (where a key is kept) are right
-// from their first showing.
-void serverSystem();
-
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+// Asked before the first draw, so the words that depend on it ("This Mac",
+// Finder, where a key is kept) are right from their first showing: a call
+// to am serve on this computer, waited for half a second at most.
+void Promise.race([serverSystem(), new Promise((done) => setTimeout(done, 500))]).then(() => {
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+});

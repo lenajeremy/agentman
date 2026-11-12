@@ -1,8 +1,12 @@
 // What the Mac app calls "this Mac", said for the computer the app is on,
-// and its file manager's name.
+// and its file manager's name. In a browser that is the computer am serve
+// runs on, whose folders these are and where Reveal shows them.
+
+import { knownSystem } from "../host";
 
 function os(): string {
-  return document.documentElement.dataset.platform ?? "";
+  const platform = document.documentElement.dataset.platform ?? "";
+  return platform === "browser" ? knownSystem() ?? "" : platform;
 }
 
 /** "This Mac" on a Mac, else "This computer". */
