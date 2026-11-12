@@ -13,6 +13,7 @@
   --working: #3268f5; --working-text: #1f35c7; --working-wash: #eef1ff;
   --needs-you: #ff6a2b; --needs-you-text: #c2451a; --needs-you-wash: #fff2eb;
   --ok: #12a66a; --error: #e5484d; --error-text: #c4343a; --error-wash: #fdedee;
+  --inverse: #101010; --on-inverse: #ffffff;
   --primary: 0 0 0;
   --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
   --mono: "Google Sans Code", ui-monospace, Menlo, Consolas, monospace;
@@ -26,6 +27,7 @@
     --working: #578cff; --working-text: #9daaff; --working-wash: #1a1f3d;
     --needs-you: #ff7d45; --needs-you-text: #ff9a6c; --needs-you-wash: #2e1b12;
     --ok: #2bc784; --error: #ff6b70; --error-text: #ff8a8e; --error-wash: #2c1517;
+    --inverse: #f2f2f2; --on-inverse: #000000;
     --primary: 255 255 255;
     color-scheme: dark;
   }
@@ -38,6 +40,7 @@
     --working: #578cff; --working-text: #9daaff; --working-wash: #1a1f3d;
     --needs-you: #ff7d45; --needs-you-text: #ff9a6c; --needs-you-wash: #2e1b12;
     --ok: #2bc784; --error: #ff6b70; --error-text: #ff8a8e; --error-wash: #2c1517;
+    --inverse: #f2f2f2; --on-inverse: #000000;
     --primary: 255 255 255;
     color-scheme: dark;
   }

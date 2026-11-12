@@ -312,7 +312,7 @@ export function Thread({ session, stickToEnd, card = true, panel = false, findab
             ))}
             {session.question && (
               <div className="thread-item" data-question>
-                <QuestionCard key={session.question.id} session={session} question={session.question} typedInComposer />
+                <QuestionCard key={session.question.id} session={session} question={session.question} />
               </div>
             )}
             <div className="thread-end" />

@@ -1032,6 +1032,115 @@ async function sidebar() {
   });
 }
 
+/** pick's questions as the agents ask them now (QuestionCard.swift): forms
+ *  of several, their review, ticks, an answer of your own. am serve's side
+ *  is the form fake's. */
+async function forms() {
+  const FORM = { id: "q-form", title: "Size", prompt: "Which size should the cards be?", custom: true, closable: true, reviewStep: true, step: 2,
+    options: [{ key: "1", label: "Small" }, { key: "2", label: "Medium", checked: true }, { key: "3", label: "Large" }],
+    steps: [{ title: "Colour", answered: true }, { title: "Size", answered: true }, { title: "Finish" }] };
+  const asking = (q) => `window.__q = ${JSON.stringify(q)};`;
+  const sent = (page) => page.evaluate(() => window.__sent);
+  const card = ".thread .question-card";
+
+  await check("forms: a form names its questions, ticks the answered, and moves with ‹ › and its tabs", async () => {
+    const page = await open(`agent=${ID.pick}`, { init: [asking(FORM), fake("form")], wait: card });
+    const tabs = await page.evaluate(() => [...document.querySelectorAll(".question-steps .step-tab")].map((t) => `${t.querySelector(".step-tab-tick") ? "✓" : ""}${t.innerText.trim()}${t.classList.contains("current") ? "*" : ""}`));
+    expect(tabs.join(" ") === "✓Colour ✓Size* Finish Review", `the tabs: ${tabs.join(" ")}`);
+    expect(await page.evaluate(() => document.querySelector(".step-pager-count")?.innerText === "2 of 3"), "the pager says 2 of 3");
+    expect(await page.evaluate(() => document.querySelector(".question-heading")?.innerText === "Which size should the cards be?"), "the question as the heading");
+    expect(await page.evaluate(() => !!document.querySelector(".option-row.leading .option-chosen") && document.querySelector(".option-row.leading .option-label")?.innerText === "Medium"), "the answer given before, ticked and filled");
+    await page.evaluate(() => { window.__delay = 1200; });
+    await click(page, '.step-pager [aria-label="Review your answers"], .step-pager [aria-label="Next question"]');
+    await until(page, () => window.__sent.some((r) => r.type === "move_question" && r.step === 3 && r.questionId === "q-form"), null, "a move to question 3");
+    expect(await page.evaluate(() => !!document.querySelector(".question-choices.stepping")), "the choices step back while it moves");
+    await until(page, () => document.querySelector(".step-pager-count")?.innerText === "3 of 3" && !document.querySelector(".question-choices.stepping"), null, "on question 3, the choices back");
+    await page.evaluate(() => { window.__delay = 100; });
+    await page.locator(".question-steps .step-tab", { hasText: "Colour" }).click();
+    await until(page, () => window.__sent.some((r) => r.type === "move_question" && r.step === 1), null, "a move to question 1, from its tab");
+    await until(page, () => document.querySelector(".step-pager-count")?.innerText === "1 of 3" && document.querySelector('.step-pager [aria-label="Previous question"]').disabled, null, "on question 1, ‹ off");
+  });
+
+  await check("forms: ✕ closes a question unanswered", async () => {
+    const page = await open(`agent=${ID.pick}`, { init: [asking(FORM), fake("form")], wait: card });
+    await click(page, '.question-header-button[aria-label^="Close the question unanswered"]');
+    await until(page, () => !document.querySelector(".thread .question-card"), null, "the card gone");
+    const requests = await sent(page);
+    expect(requests.length === 1 && requests[0].type === "close_question" && requests[0].questionId === "q-form", JSON.stringify(requests));
+  });
+
+  await check("forms: a form's review lists the answers given, with its warning, and goes no further", async () => {
+    const review = { ...FORM, id: "q-review", title: "Review your answers", prompt: "Ready to submit your answers?", custom: false, step: 4,
+      detail: "● Which colour?\n  → Red\n● Which size?\n  → Medium\n\n⚠ You have not answered all questions",
+      options: [{ key: "1", label: "Submit answers" }, { key: "2", label: "Cancel" }] };
+    const page = await open(`agent=${ID.pick}`, { init: [asking(review), fake("form")], wait: card });
+    const rows = await page.evaluate(() => [...document.querySelectorAll(".review-answer")].map((r) => r.innerText.replace(/\s+/g, " ").trim()));
+    expect(rows.join(" | ") === "Which colour? Red | Which size? Medium", `the answers: ${rows.join(" | ")}`);
+    expect(await page.evaluate(() => document.querySelector(".review-warning")?.innerText.trim() === "You have not answered all questions"), "the warning");
+    expect(await page.evaluate(() => !document.querySelector(".thread .question-card .code-box")), "the review shown as terminal text");
+    expect(await page.evaluate(() => document.querySelector(".step-pager-count")?.innerText === "Review" && document.querySelector('.step-pager [aria-label="Next question"], .step-pager [aria-label="Review your answers"]').disabled), "Review, › off");
+  });
+
+  await check("forms: several answers are ticked in rows, counted, and sent in the order listed", async () => {
+    const ticks = { id: "q-ticks", title: "Checks", prompt: "Which checks should run?", multiple: true,
+      options: [{ key: "1", label: "Unit tests" }, { key: "2", label: "Lint" }, { key: "3", label: "End-to-end" }] };
+    const page = await open(`agent=${ID.pick}`, { init: [asking(ticks), fake("form")], wait: card });
+    expect(await page.evaluate(() => document.querySelector(".choices-submit button").disabled && document.querySelector(".choices-count").innerText === "Tick one or more"), "Submit off until one is ticked");
+    await page.locator(".check-row", { hasText: "End-to-end" }).click();
+    await page.locator(".check-row", { hasText: "Unit tests" }).click();
+    await until(page, () => document.querySelector(".choices-count").innerText === "2 chosen" && document.querySelectorAll('.check-row[aria-checked="true"]').length === 2, null, "2 chosen, ticked");
+    await page.locator(".check-row", { hasText: "Unit tests" }).click();
+    await page.locator(".check-row", { hasText: "Unit tests" }).click();
+    await click(page, ".choices-submit button", "Submit");
+    await until(page, () => window.__sent.length === 1, null, "the answer sent");
+    const [answer] = await sent(page);
+    expect(answer.type === "answer_question" && JSON.stringify(answer.optionKeys) === '["1","3"]', JSON.stringify(answer));
+  });
+
+  await check("forms: an answer of your own is written in the card; Return sends it, Shift-Return starts a line", async () => {
+    const page = await open(`agent=${ID.pick}`, { init: [asking({ ...FORM, steps: undefined, step: undefined }), fake("form")], wait: card });
+    expect(await page.evaluate(() => !document.querySelector(".write-own-send") || getComputedStyle(document.querySelector(".write-own-send")).opacity === "0"), "a send arrow with nothing written");
+    await page.locator(".write-own-field").click();
+    await page.keyboard.type("Extra");
+    await page.keyboard.press("Shift+Enter");
+    await page.keyboard.type("large");
+    expect(await page.evaluate(() => !!document.querySelector(".choices-single.stepping")), "the choices step back while writing");
+    expect(await page.evaluate(() => window.__sent.length === 0), "Shift-Return sent it");
+    await page.keyboard.press("Enter");
+    await until(page, () => window.__sent.length === 1, null, "sent on Return");
+    const [answer] = await sent(page);
+    expect(answer.type === "answer_question" && answer.answerText === "Extra\nlarge" && !answer.optionKey, JSON.stringify(answer));
+  });
+
+  await check("forms: a refused move says why, and the choices come back", async () => {
+    const page = await open(`agent=${ID.pick}`, { init: [asking(FORM), "window.__refuse = 'The form on screen has changed.';", fake("form")], wait: card });
+    await page.locator(".question-steps .step-tab", { hasText: "Finish" }).click();
+    await until(page, () => (document.querySelector(".composer-wrap")?.innerText ?? "").includes("The form on screen has changed."), null, "the reason under the box");
+    await until(page, () => !document.querySelector(".question-choices.stepping") && document.querySelector(".step-pager-count")?.innerText === "2 of 3", null, "still on 2 of 3, the choices back");
+  });
+
+  await check("forms: Antigravity's form, named by its whole questions, says which it is on and stops at its last", async () => {
+    const agy = { id: "q-agy", title: "Question 3/3", prompt: "Which finish should the buttons have?", reviewStep: false, step: 3,
+      options: [{ key: "1", label: "Matte" }, { key: "2", label: "Gloss" }],
+      steps: [{ title: "Which colour should the cards be on the Board?", answered: true }, { title: "Which size should they be?", answered: true }, { title: "Which finish should the buttons have?" }] };
+    const page = await open(`agent=${ID.pick}`, { init: [asking(agy), fake("form")], wait: card });
+    expect(await page.evaluate(() => !document.querySelector(".question-steps") && document.querySelector(".question-title-text")?.innerText === "Question 3/3"), "its title, no tabs");
+    expect(await page.evaluate(() => document.querySelector(".step-pager-count")?.innerText === "3 of 3" && document.querySelector('.step-pager [aria-label="Next question"], .step-pager [aria-label="Review your answers"]').disabled), "3 of 3, › off: no review");
+    expect(await page.evaluate(() => !document.querySelector(".question-header-button[aria-label^='Close']")), "a ✕ on a question that can't be closed");
+  });
+
+  await check("forms: short names that don't fit say the one on screen", async () => {
+    const many = { ...FORM, steps: [{ title: "Branch to ship", answered: true }, { title: "Deploy target" }, { title: "Rollback plan" }, { title: "Who to notify" }], title: "Deploy target" };
+    const page = await open(`agent=${ID.pick}`, { init: [asking(many), fake("form")], wait: card, size: [700, 700] });
+    await until(page, () => {
+      const wide = document.querySelector(".question-fits-wide");
+      return wide?.classList.contains("measuring") && [...document.querySelectorAll(".question-fits > .question-title-text")].map((t) => t.innerText).join() === "Deploy target";
+    }, null, "the one on screen's name, the tabs hidden");
+    await page.setViewportSize({ width: 1500, height: 700 });
+    await until(page, () => !document.querySelector(".question-fits-wide.measuring") && document.querySelectorAll(".question-steps .step-tab").length === 5, null, "wider, every name");
+  });
+}
+
 async function threadMore() {
   await check("thread: Stop asks am serve to interrupt the turn", async () => {
     const page = await open(`agent=${ID.demo}`, { init: [fake("record"), fake("busy")], wait: '[aria-label="Stop the agent\'s turn"]' });
@@ -1228,7 +1337,7 @@ for (const [index, [name, engine]] of engines.entries()) {
   if (want("editor")) { await editor(); await editorMore(); }
   if (want("notify")) await notify();
   if (want("newagent")) await newAgent();
-  if (want("thread")) { await threadMore(); await thread(); }
+  if (want("thread")) { await threadMore(); await thread(); await forms(); }
   if (want("connection")) await connection();
   await browser.close();
 }

@@ -37,7 +37,7 @@ import { git, type GitState } from "../workspace/api";
 import { openCardTab } from "../workspace/cardTab";
 import { quickAction } from "../workspace/gitAction";
 import { confirmSheet, menuUnder, contextMenu, type MenuEntry } from "../thread/menu";
-import { QuestionChoices } from "../thread/QuestionCard";
+import { promptRepeatsDetail, QuestionChoices, QuestionNotice } from "../thread/QuestionCard";
 import { perform, send as sendToAgent, useActionError } from "../thread/state";
 import { AgentMark, ChromeButton, FolderMark, Icon } from "../ui";
 import { makeDigest, type BoardDigest, type BoardProgress, type BoardStep } from "./digest";
@@ -405,13 +405,14 @@ function NeedsYou({ session, digest }: { session: Session; digest: BoardDigest }
         {summary && <BoardText text={summary} lines={3} />}
         <BoardText text={question.title || "Needs your answer"} lines={3} />
         {question.detail && <div className="board-code code-box">{question.detail}</div>}
-        {question.prompt && question.prompt !== question.detail && <BoardText text={question.prompt} lines={4} />}
+        <QuestionNotice question={question} />
+        {question.prompt && !promptRepeatsDetail(question) && <BoardText text={question.prompt} lines={4} />}
         <div className="board-choices">
           <QuestionChoices
             key={question.id ?? question.prompt}
             question={question}
             suggested={card?.questionId === question.id ? card?.suggested : undefined}
-            compact
+            roomy
             answer={(reply) => answer(session, question, reply)}
           />
         </div>
@@ -425,7 +426,7 @@ function NeedsYou({ session, digest }: { session: Session; digest: BoardDigest }
         <BoardText text={card.title} lines={3} />
         {asked ? (
           <div className="board-choices">
-            <QuestionChoices key={card.id} question={asked} suggested={card.suggested} typedPrompt="Or reply to Agentman" compact
+            <QuestionChoices key={card.id} question={asked} suggested={card.suggested} typedPrompt="Or reply to Agentman" roomy
               answer={async (reply) => (await replyToCard(card, reply)) === undefined} />
           </div>
         ) : (

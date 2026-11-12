@@ -257,10 +257,42 @@
 /* The question (QuestionCard.swift) */
 .decision-panel { padding: 20px; background: var(--surface); border-radius: 16px; box-shadow: inset 0 0 0 1px var(--line), 0 3px 20px rgba(0, 0, 0, 0.035); }
 .question-card { display: flex; flex-direction: column; gap: 14px; }
-.question-title { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 500; color: var(--text); }
+.question-card.asked { gap: 12px; }
+.question-title { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 500; color: var(--text); min-height: 17px; }
 .question-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--needs-you); flex: none; }
+/* The title, or the form's questions, take the room up to the pager; at
+   least 8 between them (Spacer(minLength: 8)). */
+.question-title-fill, .question-fits { flex: 1; min-width: 0; padding-right: 8px; display: flex; align-items: center; position: relative; }
+.question-title-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.question-title-text.asked { font-size: 12px; font-weight: 500; color: var(--muted); }
+.question-fits-wide { display: inline-flex; flex: none; }
+.question-fits-wide.measuring { position: absolute; visibility: hidden; pointer-events: none; }
+.question-steps { display: inline-flex; gap: 4px; flex: none; }
+.step-tab { display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border-radius: 6px; font-size: 12px; font-weight: 500; line-height: var(--lh12); color: var(--muted); white-space: nowrap; }
+.step-tab:hover { color: var(--text-2); background: color-mix(in srgb, var(--fill) 60%, transparent); }
+.step-tab.current { color: var(--text); background: var(--fill); }
+.step-tab-tick { color: var(--ok); display: inline-flex; }
+.step-pager { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.step-pager-count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.question-header-button { width: 24px; height: 24px; flex: none; display: inline-grid; place-items: center; border-radius: 6px; color: var(--muted); }
+.question-header-button:hover:not(:disabled) { color: var(--text); background: var(--fill); }
+.question-header-button:disabled { color: color-mix(in srgb, var(--faint) 60%, transparent); }
+/* The agent's question, as the card's heading. */
+.question-heading { font-size: 17px; font-weight: 600; line-height: 23px; margin: -1.5px 0; color: var(--text); user-select: text; overflow-wrap: anywhere; }
+.question-heading code { font-family: var(--mono); font-size: 0.88em; background: var(--fill); }
 .code-box { font: var(--code)/var(--code-lh) var(--mono); color: var(--text); padding: 10px 12px; background: var(--fill); border-radius: 10px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .question-prompt { font-size: 14px; color: var(--text-2); line-height: var(--lh14); }
+.question-notice { display: flex; align-items: flex-start; gap: 5px; font-size: 12px; line-height: var(--lh12); color: var(--text-2); }
+.question-notice > :first-child, .review-warning > :first-child { flex: none; margin-top: 1px; }
+/* A form's review: the answers given, and its warning. */
+.review-answers { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; background: color-mix(in srgb, var(--fill) 60%, transparent); border-radius: 10px; }
+.review-answer { display: flex; align-items: baseline; gap: 12px; font-size: 14px; line-height: var(--lh14); }
+.review-answer-question { flex: 1; min-width: 0; color: var(--muted); }
+.review-answer-answer { color: var(--text); font-weight: 500; text-align: right; }
+.review-warning { display: flex; align-items: flex-start; gap: 5px; font-size: 12px; line-height: var(--lh12); color: var(--needs-you-text); }
+/* Choices stepping back: a form moving or closing, words being written. */
+.question-choices { transition: opacity 0.15s; }
+.question-choices.stepping, .choices-single.stepping { opacity: 0.45; }
 .choices { display: flex; flex-direction: column; gap: 12px; }
 .choices.compact { gap: 6px; }
 .choices-single { display: flex; flex-direction: column; gap: 4px; }
@@ -269,22 +301,50 @@
 .option-row.leading { background: var(--fill); }
 .option-row:hover:not(:disabled) { background: var(--fill-strong); }
 .option-row.compact { gap: 8px; padding: 5px 8px; border-radius: 8px; }
+.option-row.roomy { padding: 4px 6px; border-radius: 6px; }
 .option-number { width: 20px; height: 20px; flex: none; display: inline-grid; place-items: center; border-radius: 6px; background: var(--fill); font-size: 11px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
 .option-row.compact .option-number { width: 17px; height: 17px; border-radius: 5px; }
+.option-row.roomy .option-number { width: 12px; background: transparent; color: var(--faint); }
 .option-words { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; margin-right: 8px; }
 .option-label { font-size: 14px; color: var(--text); line-height: calc(var(--lh14) + 4px); margin: -2px 0; }
-.option-row.compact .option-label { font-size: 12px; line-height: calc(var(--lh12) + 2px); margin: -1px 0; }
+.option-row.compact .option-label, .check-row.compact .option-label { font-size: 12px; line-height: calc(var(--lh12) + 2px); margin: -1px 0; }
+.option-row.roomy .option-label { font-size: 13px; line-height: calc(var(--lh13) + 2px); }
 .option-description { font-size: 12px; color: var(--muted); }
 .option-pick { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; color: var(--working-text); padding: 3px 8px; background: var(--working-wash); border-radius: 999px; white-space: nowrap; align-self: center; }
 .option-pick-mark { color: var(--working-text); display: flex; align-self: center; }
 .option-return { color: var(--faint); display: none; align-self: center; }
 .option-row:hover:not(:disabled) .option-return { display: flex; }
-.choices-multiple { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.option-chosen { color: var(--ok); display: flex; align-self: center; }
+/* Several may be ticked: rows like the single choices, a box where their
+   number is, and Submit under them. */
+.choices-multiple { display: flex; flex-direction: column; gap: 4px; }
+.choices-multiple.compact { gap: 2px; }
+.check-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 10px; width: 100%; text-align: left; }
+.check-row.checked { background: var(--fill); }
+.check-row:hover:not(:disabled) { background: var(--fill-strong); }
+.check-row.compact { gap: 8px; padding: 5px 8px; border-radius: 8px; }
+.check-box-slot { width: 20px; height: 17px; flex: none; display: grid; place-items: center; }
+.check-row.compact .check-box-slot { width: 17px; height: 15px; }
+.check-box { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; background: var(--surface); box-shadow: inset 0 0 0 1px var(--faint); color: var(--on-inverse); }
+.check-row.compact .check-box { width: 15px; height: 15px; border-radius: 4px; }
+.check-row.checked .check-box { background: var(--inverse); box-shadow: inset 0 0 0 1px var(--inverse); }
+.choices-submit { display: flex; align-items: center; gap: 10px; padding: 8px 0 0 12px; }
+.choices-multiple.compact .choices-submit { padding: 4px 0 0 8px; }
+.choices-count { font-size: 12px; color: var(--muted); }
 .choices-note { display: flex; flex-direction: column; gap: 8px; }
 .choices-note-label { font-size: 12px; color: var(--muted); }
-.choice-button { padding: 6px 14px; border-radius: 15px; font-size: 13px; background: var(--surface); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
-.choice-button.primary { background: var(--text); color: var(--on-inverse); box-shadow: none; }
-.choice-button:disabled { opacity: 0.5; }
+.choice-button { padding: 7px 16px; border-radius: 15px; font-size: 14px; font-weight: 500; line-height: var(--lh14); background: var(--surface); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+.choices-multiple.compact .choice-button { padding: 4px 12px; font-size: 12px; line-height: var(--lh12); }
+.choice-button.primary { background: var(--inverse); color: var(--on-inverse); box-shadow: none; }
+.choice-button:disabled { opacity: 0.4; }
+/* An answer of your own: a pencil where a choice has its number, the
+   words, and a send arrow once there are some. */
+.write-own { display: flex; align-items: center; gap: 10px; padding: 7px 8px 7px 12px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--line); cursor: text; }
+.write-own-icon { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border-radius: 6px; background: var(--fill); color: var(--muted); }
+.write-own-field { flex: 1; min-width: 0; font: 14px/17px var(--sans); color: var(--text); background: transparent; border: 0; outline: none; padding: 0; margin: 0; resize: none; overflow-y: auto; user-select: text; }
+.write-own-field::placeholder { color: color-mix(in srgb, var(--text) 35%, transparent); }
+.write-own-send { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 7px; background: var(--inverse); color: var(--on-inverse); }
+.write-own-send.hidden { opacity: 0; pointer-events: none; }
 
 /* macOS's own controls, as SwiftUI draws them: a rounded text field, a
    push button, a check box. */
