@@ -136,6 +136,23 @@ final class ToolRunTests: XCTestCase {
         XCTAssertEqual(ImageThumbnail.imageFile(inSummary: "open /a/b/c.jpeg now"), "/a/b/c.jpeg")
     }
 
+    // A file that mentions a picture is still the file read: what is in it
+    // is not searched for one, or a README's contents went missing behind a
+    // picture the agent never opened.
+    func testAFileMentioningAPictureIsStillAFileRead() {
+        var readme = message("1", .tool, tool: "Read", summary: "/work/README.md")
+        readme.text = "# Shop\n\n![Preview](/work/shot.png)\n"
+        let items = ThreadItem.items(from: [readme])
+        guard items.count == 1, case .tools(let run, _) = items[0], run.map(\.id) == ["1"] else {
+            return XCTFail("items = \(items)")
+        }
+        // With no summary at all, the text is all there is to go by.
+        var bare = message("2", .tool, tool: "Read", summary: "")
+        bare.tool?.summary = nil
+        bare.text = "/tmp/shot.png"
+        XCTAssertEqual(ThreadItem.picture(read: bare), "/tmp/shot.png")
+    }
+
     // Images read one after another are one run with the pictures side by
     // side, as Claude's own app shows them; one on its own stays as it was.
     func testImagesReadTogetherAreOneRun() {

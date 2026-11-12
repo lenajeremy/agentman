@@ -1382,6 +1382,15 @@ enum ThreadItem: Identifiable {
         return turn
     }
 
+    /// The picture a read opened: from its summary, which names what it
+    /// read. Only a read with no summary is looked for in its text, since a
+    /// file's text is what is in it: a README mentioning a screenshot is
+    /// still a README read.
+    static func picture(read message: Message) -> String? {
+        if let summary = message.tool?.summary { return ImageThumbnail.imageFile(inSummary: summary) }
+        return ImageThumbnail.imagePath(in: message.text ?? "")
+    }
+
     static func items(from messages: [Message]) -> [ThreadItem] {
         var items: [ThreadItem] = []
         var run: [Message] = []
@@ -1414,7 +1423,7 @@ enum ThreadItem: Identifiable {
             }
             turn.add(message)
             if message.role == .tool, ToolKind(message.tool?.name) == .read,
-               let path = message.tool?.summary.flatMap { ImageThumbnail.imageFile(inSummary: $0) } ?? ImageThumbnail.imagePath(in: message.text ?? "") {
+               let path = picture(read: message) {
                 flush()
                 pictures.append((message, path))
             } else if message.role == .tool {
