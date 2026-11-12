@@ -211,34 +211,34 @@
 .md-doc .centered { text-align: center; }
 .md-doc code { font: 12.5px var(--mono); background: var(--fill); }
 .md-doc a { color: var(--working-text); text-decoration: none; cursor: pointer; }
-.md-h { font-weight: 500; color: var(--text); }
-.md-h1 { font-size: 19px; line-height: calc(19px * 1.19 + 3px); padding-top: 10px; margin: -1.5px 0; }
-.md-h2 { font-size: 16.5px; line-height: calc(16.5px * 1.19 + 3px); padding-top: 10px; margin: -1.5px 0; }
-.md-h3 { font-size: 14.5px; line-height: calc(14.5px * 1.19 + 3px); padding-top: 4px; margin: -1.5px 0; }
-.md-code { margin: 0; padding: 10px 14px; border-radius: 10px; background: var(--fill); overflow-x: auto; font: 12.5px/calc(12.5px * 1.27 + 4px) var(--mono); color: var(--text); }
-.md-code code { background: none; font: inherit; }
+.md-doc .md-h { font-weight: 500; color: var(--text); }
+.md-doc .md-h1 { font-size: 19px; line-height: calc(19px * 1.19 + 3px); padding-top: 10px; margin: -1.5px 0; }
+.md-doc .md-h2 { font-size: 16.5px; line-height: calc(16.5px * 1.19 + 3px); padding-top: 10px; margin: -1.5px 0; }
+.md-doc .md-h3 { font-size: 14.5px; line-height: calc(14.5px * 1.19 + 3px); padding-top: 4px; margin: -1.5px 0; }
+.md-doc .md-code { margin: 0; padding: 10px 14px; border-radius: 10px; background: var(--fill); overflow-x: auto; font: 12.5px/calc(12.5px * 1.27 + 4px) var(--mono); color: var(--text); }
+.md-doc .md-code code { background: none; font: inherit; }
 .tok-comment { color: var(--code-comment); }
 .tok-string { color: var(--code-string); }
 .tok-number { color: var(--code-number); }
 .tok-keyword { color: var(--code-keyword); }
 .tok-type { color: var(--code-type); }
-.md-quote { display: flex; gap: 10px; }
-.md-quote-bar { width: 3px; flex: none; border-radius: 1.5px; background: var(--line); }
-.md-quote-body { display: flex; flex-direction: column; gap: 10px; opacity: 0.85; }
-.md-list { display: flex; flex-direction: column; gap: 10px; }
-.md-item { display: flex; align-items: baseline; gap: 10px; }
-.md-marker { font-size: 14px; color: var(--muted); text-align: right; flex: none; }
-.md-item-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.md-rule { height: 1px; background: var(--line); margin: 8px 0; }
-.md-table-wrap { overflow-x: auto; }
-.md-table { border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; font-size: 14px; color: var(--text); }
-.md-table th { background: var(--fill); font-weight: 500; text-align: left; }
-.md-table th, .md-table td { padding: 8px 12px; vertical-align: top; line-height: 1.19; }
-.md-table td { border-top: 1px solid var(--line); }
-.md-pictures { display: flex; flex-wrap: wrap; gap: 6px; }
-.md-pictures.centered { justify-content: center; }
-.md-pictures img { max-width: 100%; border-radius: 4px; display: block; }
-.md-picture-words { font-size: 14px; color: var(--muted); }
+.md-doc .md-quote { display: flex; gap: 10px; }
+.md-doc .md-quote-bar { width: 3px; flex: none; border-radius: 1.5px; background: var(--line); }
+.md-doc .md-quote-body { display: flex; flex-direction: column; gap: 10px; opacity: 0.85; }
+.md-doc .md-list { display: flex; flex-direction: column; gap: 10px; }
+.md-doc .md-item { display: flex; align-items: baseline; gap: 10px; }
+.md-doc .md-marker { font-size: 14px; color: var(--muted); text-align: right; flex: none; }
+.md-doc .md-item-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.md-doc .md-rule { height: 1px; background: var(--line); margin: 8px 0; }
+.md-doc .md-table-wrap { overflow-x: auto; }
+.md-doc .md-table { border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; font-size: 14px; color: var(--text); }
+.md-doc .md-table th { background: var(--fill); font-weight: 500; text-align: left; }
+.md-doc .md-table th, .md-doc .md-table td { padding: 8px 12px; vertical-align: top; line-height: 1.19; }
+.md-doc .md-table td { border-top: 1px solid var(--line); }
+.md-doc .md-pictures { display: flex; flex-wrap: wrap; gap: 6px; }
+.md-doc .md-pictures.centered { justify-content: center; }
+.md-doc .md-pictures img { max-width: 100%; border-radius: 4px; display: block; }
+.md-doc .md-picture-words { font-size: 14px; color: var(--muted); }
 
 /* Palettes: 580 wide, 70 from the top of the editor. Under .palette-layer
    only: the main window's palette (palette.css) uses some of the names. */
