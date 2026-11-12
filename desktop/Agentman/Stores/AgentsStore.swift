@@ -221,6 +221,24 @@ final class AgentsStore {
         sessions.first { $0.previous == id }?.id
     }
 
+    /// The open agent's page stays when the agent ends, however it ended:
+    /// quit in its terminal (Ctrl-C, /exit), crashed, or ended from the
+    /// phone, as when it is ended here (see end). It reads as ended, to be
+    /// resumed; a live agent under the same id, once it is back, comes first.
+    private func keepEndedPage(before: [Session]) {
+        guard case .agent(let id) = selection,
+              !sessions.contains(where: { $0.id == id }),
+              !pastSessions.contains(where: { $0.id == id }),
+              let was = before.first(where: { $0.id == id }), was.state != .ended else { return }
+        let ended = Self.ended(was)
+        foundSessions[id] = ended
+        foundSessions[ended.id] = ended
+        // It quit, so it can be resumed, unless it was ended here from its
+        // page and still runs in the terminal it was opened in: then it only
+        // left the list, which end() said, and that stands.
+        if !stillRunning.contains(id) { stillRunning.remove(ended.id) }
+    }
+
     /// The window follows a conversation that went on as another.
     private func followTakeovers() {
         if case .agent(let id) = selection, let next = successor(of: id) {
@@ -480,6 +498,28 @@ final class AgentsStore {
         request.optionKey = optionKey
         request.answerText = text?.isEmpty == false ? text : nil
         request.clientId = "mac-answer-\(UUID().uuidString)"
+        return await perform(request, for: sessionId)
+    }
+
+    /// Goes to another question of the form an agent shows, without
+    /// answering the one on screen: step from 1, one past the last for the
+    /// form's review.
+    @discardableResult
+    func moveQuestion(_ sessionId: String, question: Question, to step: Int) async -> Bool {
+        var request = DaemonRequest(.moveQuestion, sessionId: sessionId)
+        request.questionId = question.id
+        request.step = step
+        request.clientId = "mac-move-\(UUID().uuidString)"
+        return await perform(request, for: sessionId)
+    }
+
+    /// Closes a question the agent asked without answering it, as Esc does
+    /// in its terminal: the agent waits for a message instead.
+    @discardableResult
+    func closeQuestion(_ sessionId: String, question: Question) async -> Bool {
+        var request = DaemonRequest(.closeQuestion, sessionId: sessionId)
+        request.questionId = question.id
+        request.clientId = "mac-close-\(UUID().uuidString)"
         return await perform(request, for: sessionId)
     }
 
@@ -975,6 +1015,7 @@ final class AgentsStore {
         }
         switch event.type {
         case "sessions":
+            let before = sessions
             sessions = (event.sessions ?? []).sorted(by: Self.boardOrder)
             for session in sessions { activities[session.id]?.update(session.lastActivityAt) }
             sessionsLoaded = true
@@ -985,6 +1026,7 @@ final class AgentsStore {
             // A daemon too old to say anything of itself is level 0.
             setup.daemonReported(event.daemon ?? DaemonInfo(version: ""))
             followTakeovers()
+            keepEndedPage(before: before)
             bringBackHiddenAgents()
         case "turn_complete":
             if let id = event.sessionId { away.record(.finished(event.preview), sessionId: id) }
@@ -1017,7 +1059,9 @@ final class AgentsStore {
             followTakeovers()
             bringBackHiddenAgents()
         case "session_gone":
+            let before = sessions
             sessions.removeAll { $0.id == event.sessionId }
+            keepEndedPage(before: before)
         case "devices":
             devices = event.devices ?? []
         case "messages":

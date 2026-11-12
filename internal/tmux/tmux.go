@@ -551,6 +551,41 @@ func SendQueued(ctx context.Context, name string, keys ...string) error {
 	return nil
 }
 
+// MoveQuestion presses → (distance > 0) or ← as many times as distance says,
+// which in Claude's multi-question form goes to another question without
+// answering the one on screen. A few at most: a form has four questions.
+func MoveQuestion(ctx context.Context, name string, distance int) error {
+	if len(name) <= len(Prefix) || !strings.HasPrefix(name, Prefix) {
+		return errors.New("tmux: refusing to press keys in a session Agentman did not start")
+	}
+	key := "Right"
+	if distance < 0 {
+		key, distance = "Left", -distance
+	}
+	if distance == 0 || distance > 8 {
+		return fmt.Errorf("tmux: %d questions is not a move to make", distance)
+	}
+	if !Available() {
+		return ErrNotInstalled
+	}
+	lock := actionLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	for index := 0; index < distance; index++ {
+		if index > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(keyInterval):
+			}
+		}
+		if _, err := run(ctx, "send-keys", "-t", name, key); err != nil {
+			return fmt.Errorf("tmux: could not move to another question: %w", err)
+		}
+	}
+	return nil
+}
+
 // sendNowKey is one Ctrl or alt letter, in tmux's spelling.
 var sendNowKey = regexp.MustCompile(`^(C|M)-[a-z]$`)
 
@@ -840,6 +875,16 @@ func captureFresh(ctx context.Context, name string) (string, error) {
 		return "", err
 	}
 	return out, nil
+}
+
+// CaptureStyled is the visible pane with its colours as escape sequences,
+// for what only colour says, like which tab of Claude's question form is
+// current. Never from a sweep's cache, which holds plain captures.
+func CaptureStyled(ctx context.Context, name string) (string, error) {
+	if !Available() {
+		return "", ErrNotInstalled
+	}
+	return run(ctx, "capture-pane", "-e", "-t", name, "-p")
 }
 
 // CaptureScrollback returns the pane plus up to lines of history above it.

@@ -109,7 +109,7 @@ struct Sidebar: View {
                     // The name, where it fits whole; at the narrowest the
                     // mark alone, rather than "Ag…".
                     ViewThatFits(in: .horizontal) {
-                        Text("Agentman").font(Fonts.heading(14)).fixedSize()
+                        Text("Agentman").font(Look.site ? Fonts.display(16) : Fonts.heading(14)).fixedSize()
                         Color.clear.frame(width: 0, height: 0)
                     }
                     Spacer(minLength: 0)
@@ -119,11 +119,19 @@ struct Sidebar: View {
                 .padding(.trailing, 14)
                 .frame(height: 32)
                 HStack(spacing: 9) {
-                    Image(systemName: "magnifyingglass")
-                    TextField("Search", text: $store.search)
-                        .textFieldStyle(.plain)
-                        .accessibilityLabel("Search agents and messages")
-                        .onExitCommand { store.search = "" }
+                    HStack(spacing: 9) {
+                        Image(systemName: "magnifyingglass")
+                        TextField("Search", text: $store.search)
+                            .textFieldStyle(.plain)
+                            .accessibilityLabel("Search agents and messages")
+                            .onExitCommand { store.search = "" }
+                    }
+                    // In New, a field of its own: edged, a little raised.
+                    .look {
+                        $0.padding(.horizontal, 10)
+                            .frame(height: 30)
+                            .edged(8, fill: Palette.surface, depth: 2)
+                    } classic: { $0 }
                     FilterMenu()
                         .labelStyle(.iconOnly)
                         .fixedSize()
@@ -233,7 +241,8 @@ struct Sidebar: View {
             }
         }
         .scrollIndicators(.never)
-        .frame(maxHeight: min(CGFloat(sessions.count) * 80, 190))
+        // Rows of two lines; three and a half show before it scrolls.
+        .frame(maxHeight: min(CGFloat(sessions.count) * 54, 190))
     }
 
     private func row(_ session: Session, inList: Bool = true, match: SearchHit? = nil) -> some View {
@@ -306,19 +315,16 @@ private struct AgentButton: View {
     @State private var hovering = false
 
     var body: some View {
+        // Archived, its colour goes grey with the rest of it.
+        let tint = AgentColors.color(for: session, by: colorBy).map { store.isArchived(session) ? Palette.faint : $0 }
         AgentRow(session: session, match: match, query: store.messageHits?.query ?? "")
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
-                if let tint = AgentColors.color(for: session, by: colorBy) {
-                    Capsule().fill(tint).frame(width: 3).padding(.vertical, 9).offset(x: -4).accessibilityHidden(true)
-                }
-            }
             .padding(.horizontal, inList ? 0 : SidebarMetrics.margin + SidebarMetrics.list)
             .contentShape(Rectangle())
             .onTapGesture { open() }
             .onHover { hovering = $0 }
-            .background { if !inList { RowHighlight(selected: selected, hovering: hovering) } }
-            .listRowBackground(RowHighlight(selected: selected, hovering: hovering))
+            .background { if !inList { RowHighlight(selected: selected, hovering: hovering, tint: tint) } }
+            .listRowBackground(RowHighlight(selected: selected, hovering: hovering, tint: tint))
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             .accessibilityAction { open() }
     }
@@ -335,20 +341,50 @@ private struct AgentButton: View {
 }
 
 /// Behind a row: grey with a hairline edge while it is open, fainter under
-/// the pointer, as Agentman's card is.
+/// the pointer, as Agentman's card is. The colour the user picked for its
+/// folder or project, if any, is a thin bar on the sidebar's own edge, out
+/// of the row's way.
 private struct RowHighlight: View {
     var selected: Bool
     var hovering: Bool
+    var tint: Color?
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 7, style: .continuous)
-            .fill(Color.primary.opacity(selected ? 0.10 : hovering ? 0.05 : 0))
-            .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(selected ? 0.10 : 0))
-            )
-            .padding(.horizontal, 10)
-            .padding(.vertical, 1)
+        highlight
+            .overlay(alignment: .leading) {
+                if let tint {
+                    UnevenRoundedRectangle(bottomTrailingRadius: 1, topTrailingRadius: 1, style: .continuous)
+                        .fill(tint)
+                        .frame(width: 4)
+                        .padding(.vertical, 9)
+                        .accessibilityHidden(true)
+                }
+            }
+    }
+
+    /// In New, the open row is a card of its own: raised on the cream, its
+    /// shadow kept inside the row so the list doesn't cut it off.
+    @ViewBuilder private var highlight: some View {
+        if Look.site, selected {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .hardShadowFill(Palette.surface, shadow: Palette.edge, depth: 3)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth)
+                )
+                .padding(.horizontal, 10)
+                .padding(.top, 1)
+                .padding(.bottom, 4)
+        } else {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.primary.opacity(selected ? 0.10 : hovering ? 0.05 : 0))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(selected ? 0.10 : 0))
+                )
+                .padding(.horizontal, 10)
+                .padding(.vertical, 1)
+        }
     }
 }
 
@@ -396,7 +432,7 @@ struct AgentmanCard: View {
             .padding(.horizontal, 11)
             .padding(.vertical, 8)
             .look {
-                $0.edged(12, fill: background, depth: selected ? 3 : 2)
+                $0.edged(12, fill: background, depth: selected ? 5 : 4, lineWidth: 2)
             } classic: {
                 $0.background(background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(
@@ -484,79 +520,60 @@ struct AgentRow: View {
     var match: SearchHit?
     var query = ""
 
+    /// The dot's column, and the room after it: the second line starts under
+    /// the title.
+    private static let dot: CGFloat = 9
+    private static let afterDot: CGFloat = 8
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 7) {
-                FolderMark(session: session)
-                Text(Worktrees.label(session.cwd))
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                status
-            }
-            .font(TextStyle.caption)
-            .foregroundStyle(Palette.muted)
-            HStack(spacing: 5) {
+        VStack(alignment: .leading, spacing: 3) {
+            // What and when: its state, its title, how long since it last
+            // did anything.
+            HStack(spacing: Self.afterDot) {
+                StateDot(state: dotState)
+                    .frame(width: Self.dot, height: Self.dot)
                 if store.renaming == session.id {
                     RenameField(session: session)
                 } else {
                     Text(session.name)
-                        .font(Fonts.sans(13.5, session.state == .waitingInput ? .medium : .regular))
+                        .font(Fonts.sans(13.5, .medium))
                         .foregroundStyle(session.state == .ended || store.isArchived(session) ? Palette.muted : Palette.text)
                         .lineLimit(1)
                         .help(session.originalName.map { "Renamed from “\($0)”" } ?? session.name)
                 }
-                // With nothing under it, the agent's mark sits by its title.
-                if !detailLine {
-                    Spacer(minLength: 4)
-                    AgentMark(kind: session.kind, size: 14)
-                }
-            }
-            if detailLine {
-            HStack(spacing: 5) {
-                // What it asks while it needs you; otherwise its branch.
-                if waiting {
-                    Text(detail).lineLimit(1)
-                        .foregroundStyle(Palette.needsYouText)
-                } else if let branch = store.branches[session.cwd] {
-                    Text(branch)
-                        .foregroundStyle(Palette.muted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .help("On branch \(branch)")
-                }
                 Spacer(minLength: 4)
-                if let servers = session.servers, !servers.isEmpty {
-                    HStack(spacing: 3) {
-                        Image(systemName: "globe")
-                            .font(.system(size: 9))
-                            .foregroundStyle(Palette.ok)
-                        Text(servers.map { ":\($0.port)" }.joined(separator: " "))
-                            .font(Fonts.mono(10.5))
-                            .lineLimit(1)
-                    }
-                    .help("Dev servers it is running")
-                }
-                AgentMark(kind: session.kind, size: 14)
+                when
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
+            }
+            // Who and where: the agent's logo, then its folder and branch,
+            // or what it asks while it needs you.
+            HStack(spacing: 6) {
+                AgentMark(kind: session.kind, size: 12, muted: store.isArchived(session))
+                place
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
             .font(TextStyle.caption)
-            }
+            .padding(.leading, Self.dot + Self.afterDot)
             if let match {
                 Text(SearchWords.snippet(match, query: query))
                     .font(TextStyle.caption)
                     .lineLimit(2)
                     .help(match.snippet)
+                    .padding(.leading, Self.dot + Self.afterDot)
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 7)
         .padding(.horizontal, SidebarMetrics.inset)
         .accessibilityElement(children: .combine)
     }
 
     private var waiting: Bool { AgentsStore.filterState(session) == .waitingInput }
 
-    /// A third line, under the title: what it asks, its branch, its servers.
-    private var detailLine: Bool {
-        waiting || store.branches[session.cwd] != nil || !(session.servers ?? []).isEmpty
+    private var dotState: StateDot.Kind {
+        if waiting { return .needsYou }
+        return session.state == .busy ? .working : .idle
     }
 
     /// What it asks, while it needs you.
@@ -564,25 +581,55 @@ struct AgentRow: View {
         session.question?.title ?? session.question?.prompt ?? "Waiting for your answer"
     }
 
-    /// At the top right, as T3 Code has it: what it is doing while that
-    /// matters, otherwise how long since it last did anything.
-    @ViewBuilder private var status: some View {
+    /// Its folder, then what it asks while it needs you, or its branch and
+    /// the dev servers it runs.
+    private var place: Text {
+        let folder = Worktrees.label(session.cwd)
         if waiting {
-            HStack(spacing: 4) {
-                Circle().fill(Palette.dot(.waitingInput)).frame(width: 5, height: 5)
-                Text("Needs you")
-            }
-            .foregroundStyle(Palette.needsYouText)
-        } else if session.state == .busy {
-            HStack(spacing: 4) {
-                Loader(size: 9)
-                Text("Working")
-            }
-            .foregroundStyle(Palette.workingText)
-        } else if session.state == .ended, match == nil {
+            return Text("\(folder) · \(detail)").foregroundStyle(Palette.needsYouText)
+        }
+        var line = Text(folder)
+        if let branch = store.branches[session.cwd] {
+            line = line + Text(" · \(branch)")
+        }
+        if let servers = session.servers, !servers.isEmpty {
+            line = line + Text(" · ") + Text(servers.map { ":\($0.port)" }.joined(separator: " ")).font(Fonts.mono(10.5))
+        }
+        return line.foregroundStyle(Palette.muted)
+    }
+
+    /// At the top right: how long since it last did anything, or that it
+    /// has ended.
+    @ViewBuilder private var when: some View {
+        if session.state == .ended, match == nil {
             Text("Ended")
-        } else if let when = session.lastActivity {
-            Text(Relative.short(when)).monospacedDigit()
+        } else if let last = session.lastActivity {
+            Text(Relative.short(last)).monospacedDigit()
+        }
+    }
+}
+
+/// An agent's state, before its title, in the same colours everywhere:
+/// orange when it needs you, the loader turning while it works, a grey
+/// ring while it waits for something to do.
+struct StateDot: View {
+    enum Kind { case needsYou, working, idle }
+    let state: Kind
+
+    var body: some View {
+        switch state {
+        case .needsYou:
+            Circle()
+                .fill(Palette.needsYou)
+                .frame(width: 8, height: 8)
+                .accessibilityLabel("Needs you")
+        case .working:
+            Loader(size: 9)
+        case .idle:
+            Circle()
+                .strokeBorder(Palette.faint, lineWidth: 1.5)
+                .frame(width: 8, height: 8)
+                .accessibilityHidden(true)
         }
     }
 }
@@ -846,8 +893,8 @@ struct PaneResizeHandle: View {
 
     var body: some View {
         Rectangle()
-            .fill(Palette.line)
-            .frame(width: 1)
+            .fill(Palette.edge)
+            .frame(width: Palette.edgeWidth)
             .frame(maxHeight: .infinity)
             .overlay {
                 Color.clear
@@ -891,9 +938,14 @@ private struct SectionHeading: View {
             Spacer(minLength: 4)
             if let count {
                 Text(String(count))
-                    .font(TextStyle.label)
+                    .font(Look.site ? Fonts.mono(10, .medium) : TextStyle.label)
                     .monospacedDigit()
-                    .foregroundStyle(Palette.faint)
+                    .foregroundStyle(Look.site ? (tint ?? Palette.edge) : Palette.faint)
+                    .look {
+                        $0.padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .overlay(Capsule().strokeBorder(tint ?? Palette.edge, lineWidth: 1.5))
+                    } classic: { $0 }
             }
             if let open {
                 Image(systemName: "chevron.right")
@@ -923,8 +975,8 @@ private struct SectionHeading: View {
 private struct SectionRule: View {
     var body: some View {
         Rectangle()
-            .fill(Palette.line)
-            .frame(height: 1)
+            .fill(Look.site ? Palette.edge.opacity(0.25) : Palette.line)
+            .frame(height: Palette.edgeWidth)
             .padding(.horizontal, SidebarMetrics.inset)
             .padding(.vertical, 6)
             .listRowSeparator(.hidden)

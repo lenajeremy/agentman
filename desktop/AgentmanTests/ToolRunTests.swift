@@ -1,7 +1,56 @@
+import AppKit
+import SwiftUI
 import XCTest
 @testable import Agentman
 
 final class ToolRunTests: XCTestCase {
+    /// Steps as pills, and opened: a run's steps a row each, an edit's diff,
+    /// a command's output, each hung under its pill; one left closed. Light
+    /// and dark. Runs with TEST_RUNNER_AGENTMAN_SHOTS=<folder>.
+    @MainActor
+    func testRenderStepsOpened() throws {
+        guard let out = ProcessInfo.processInfo.environment["AGENTMAN_SHOTS"] else { throw XCTSkip("for screenshots") }
+        func call(_ id: String, _ name: String, _ summary: String, title: String, text: String? = nil, status: String = "ok") -> Message {
+            Message(id: id, sessionId: "s", role: .tool, ts: 1, text: text, tool: ToolCall(name: name, summary: summary, status: status, title: title))
+        }
+        let reads = [call("1", "Read", "web/checkout/CheckoutSheet.tsx", title: "Read the checkout sheet"),
+                     call("2", "Read", "web/checkout/useCart.ts", title: "Read the cart hook"),
+                     call("3", "Grep", "canMakePayments", title: "Searched for canMakePayments")]
+        let edit = call("4", "Edit", "web/checkout/CheckoutSheet.tsx", title: "Added the Apple Pay button",
+                        text: "@@ -41,4 +41,7 @@\n   <CartSummary cart={cart} />\n+  {canPay && (\n+    <ApplePayButton total={cart.total} />\n+  )}\n   <CardForm onSubmit={pay} />")
+        let closed = call("5", "Bash", "npm test", title: "Ran the tests · 52 passed")
+        let ipad = call("6", "Bash", "npx playwright test checkout --project=\"iPad Safari\"", title: "Ran the checkout flow in Safari on iPad",
+                        text: "Running 3 tests using 1 worker\n  ✓ shows the Apple Pay button (1.2s)\n  ✓ opens the payment sheet (2.4s)\n3 passed (5.1s)")
+        let running = call("7", "Bash", "go test ./...", title: "Fixed the two test mistakes and ran the full suite", status: "running")
+        let store = AgentsStore(client: DaemonClient(socketPath: "/nonexistent/agentman-steps.sock"))
+        for (look, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            let size = CGSize(width: 640, height: 700)
+            let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.alphaValue = 0
+            window.appearance = NSAppearance(named: appearance)
+            let host = NSHostingView(rootView: VStack(alignment: .leading, spacing: 0) {
+                ToolRun(calls: reads, open: true)
+                ToolRun(calls: [edit], open: true)
+                ToolRun(calls: [closed])
+                ToolRun(calls: [ipad], open: true)
+                ToolRun(calls: [running])
+            }
+            .padding(24).frame(width: size.width, height: size.height, alignment: .top)
+            .background(Palette.paper)
+            .environment(store))
+            window.contentView = host
+            window.orderFrontRegardless()
+            defer { window.orderOut(nil) }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+            host.display()
+            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                .write(to: URL(fileURLWithPath: out).appendingPathComponent("steps-opened-\(look).png"))
+        }
+    }
+
     private func message(_ id: String, _ role: Role, tool: String? = nil, summary: String? = nil, status: String? = nil) -> Message {
         Message(id: id, sessionId: "s", role: role, ts: 1, text: role == .tool ? nil : "text",
                 tool: tool.map { ToolCall(name: $0, summary: summary, status: status) })
@@ -19,7 +68,7 @@ final class ToolRunTests: XCTestCase {
             case .tools(let calls, _): "tools \(calls.map(\.id).joined())"
             case .image(let m, _): "image \(m.id)"
             case .images(let calls, _, _): "images \(calls.map(\.id).joined())"
-            case .worked(_, let seconds): "worked \(seconds)"
+            case .worked(_, let seconds, _): "worked \(seconds)"
             }
         }
         XCTAssertEqual(shapes, ["message 1", "tools 23", "message 4", "tools 5"])
@@ -59,6 +108,49 @@ final class ToolRunTests: XCTestCase {
         XCTAssertNil(ImageThumbnail.imagePath(in: "/tmp/notes.md"))
         XCTAssertEqual(ImageThumbnail.imagePath(in: "Looked at /a/b c.jpeg"), nil, "a path with a space is not guessed at")
         XCTAssertEqual(ImageThumbnail.imagePath(in: "open /a/b/c.jpeg now"), "/a/b/c.jpeg")
+    }
+
+    // A file tool's summary is one path, so a space in it is part of the
+    // name: Codex looking at "09 Waitlist.png" showed a plain row, because
+    // only paths without a space were taken for pictures.
+    func testAPictureWithASpaceInItsNameIsShown() {
+        let items = ThreadItem.items(from: [
+            message("1", .tool, tool: "Read", summary: "/Users/me/design/sections/09 Waitlist.png"),
+            message("2", .tool, tool: "Read", summary: "/Users/me/design/01 Landing · desktop.png"),
+            message("3", .tool, tool: "Read", summary: "/Users/me/Desktop/Screenshot 2026-10-05 at 10.00.00\u{202F}AM.png"),
+        ])
+        guard items.count == 1, case .images(_, let paths, _) = items[0] else {
+            return XCTFail("items = \(items)")
+        }
+        XCTAssertEqual(paths, [
+            "/Users/me/design/sections/09 Waitlist.png",
+            "/Users/me/design/01 Landing · desktop.png",
+            "/Users/me/Desktop/Screenshot 2026-10-05 at 10.00.00\u{202F}AM.png",
+        ])
+        // Still not a picture: what a shell would act on, a path that isn't
+        // as written, a relative one, or one that isn't a picture.
+        for summary in ["/tmp/a.png; rm -rf ~", "/tmp/$(whoami).png", "/tmp//a.png", "/tmp/../a.png", "shots/a b.png", "/tmp/notes b.md"] {
+            XCTAssertNil(ImageThumbnail.imageFile(inSummary: summary), summary)
+        }
+        // A command is still searched for a path, without guessing at spaces.
+        XCTAssertEqual(ImageThumbnail.imageFile(inSummary: "open /a/b/c.jpeg now"), "/a/b/c.jpeg")
+    }
+
+    // A file that mentions a picture is still the file read: what is in it
+    // is not searched for one, or a README's contents went missing behind a
+    // picture the agent never opened.
+    func testAFileMentioningAPictureIsStillAFileRead() {
+        var readme = message("1", .tool, tool: "Read", summary: "/work/README.md")
+        readme.text = "# Shop\n\n![Preview](/work/shot.png)\n"
+        let items = ThreadItem.items(from: [readme])
+        guard items.count == 1, case .tools(let run, _) = items[0], run.map(\.id) == ["1"] else {
+            return XCTFail("items = \(items)")
+        }
+        // With no summary at all, the text is all there is to go by.
+        var bare = message("2", .tool, tool: "Read", summary: "")
+        bare.tool?.summary = nil
+        bare.text = "/tmp/shot.png"
+        XCTAssertEqual(ThreadItem.picture(read: bare), "/tmp/shot.png")
     }
 
     // Images read one after another are one run with the pictures side by

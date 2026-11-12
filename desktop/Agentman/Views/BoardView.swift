@@ -43,6 +43,8 @@ struct BoardView: View {
                 }
             }
             .frame(minWidth: 0, maxWidth: .infinity)
+            // In New, the Board's page has a tint of the site's orange.
+            .background(Look.site ? Palette.boardTint : Color.clear)
             .overlay(alignment: .bottom) {
                 if !store.boardChatOpen {
                     ask.transition(.opacity)
@@ -158,10 +160,14 @@ struct BoardView: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 38)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .strokeBorder(searchFocused ? Palette.text.opacity(0.35) : Palette.line))
-        .shadow(color: .black.opacity(0.06), radius: 12, y: 3)
+        .look {
+            $0.edged(10, fill: Palette.surface)
+        } classic: {
+            $0.background(Palette.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(searchFocused ? Palette.text.opacity(0.35) : Palette.line))
+                .shadow(color: .black.opacity(0.06), radius: 12, y: 3)
+        }
         .background {
             Button("Search the Board") { searchFocused = true }
                 .keyboardShortcut("f", modifiers: .command)
@@ -246,8 +252,8 @@ struct BoardView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(store.boardSearch.map { Self.headline(of: $0, shown: sections.shown) }
                 ?? sections.headline(connected: store.status == .connected && store.sessionsLoaded))
-                .font(Fonts.sans(20, .semibold))
-                .tracking(-0.2)
+                .font(Look.site ? Fonts.display(22) : Fonts.sans(20, .semibold))
+                .tracking(Look.site ? 0 : -0.2)
                 .foregroundStyle(Palette.text)
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
@@ -505,14 +511,18 @@ private struct BoardColumn: View {
 
     private var header: some View {
         HStack(spacing: 7) {
-            glyph.frame(width: 14, height: 14)
-            Text(kind.title)
-                .font(Fonts.sans(13, .medium))
-                .foregroundStyle(Palette.text)
-            Text("\(sessions.count + offers.count)")
-                .font(Fonts.sans(13))
-                .monospacedDigit()
-                .foregroundStyle(Palette.boardMuted)
+            if Look.site {
+                siteTitle
+            } else {
+                glyph.frame(width: 14, height: 14)
+                Text(kind.title)
+                    .font(Fonts.sans(13, .medium))
+                    .foregroundStyle(Palette.text)
+                Text("\(sessions.count + offers.count)")
+                    .font(Fonts.sans(13))
+                    .monospacedDigit()
+                    .foregroundStyle(Palette.boardMuted)
+            }
             Spacer()
             if !hidden.isEmpty { hiddenMenu }
             if kind == .idle, !sessions.isEmpty {
@@ -537,6 +547,27 @@ private struct BoardColumn: View {
     }
 
     /// Colour and motion only while the column holds something.
+    /// The column's name in the site's mono capitals with its count; what
+    /// needs you on an orange chip, the one loud thing on the Board.
+    @ViewBuilder private var siteTitle: some View {
+        let words = Text("\(kind.title) · \(sessions.count + offers.count)")
+            .font(Fonts.eyebrow)
+            .tracking(1.2)
+            .textCase(.uppercase)
+            .monospacedDigit()
+        if kind == .needsYou {
+            words
+                .foregroundStyle(Palette.onFlood)
+                .padding(.horizontal, 10)
+                .frame(height: 22)
+                .background(Palette.flood, in: Capsule())
+                .overlay(Capsule().strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
+        } else {
+            glyph.frame(width: 14, height: 14)
+            words.foregroundStyle(Palette.text)
+        }
+    }
+
     @ViewBuilder private var glyph: some View {
         switch (kind, sessions.isEmpty && offers.isEmpty) {
         case (.needsYou, false):
@@ -635,7 +666,7 @@ private struct BoardCard: View {
     @State private var hovering = false
     @State private var git: GitState?
 
-    private static let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+    private static var shape: RoundedRectangle { RoundedRectangle(cornerRadius: Look.site ? 12 : 9, style: .continuous) }
 
     private var brief: Brief? { store.manager.briefs[session.id] }
 
@@ -652,7 +683,7 @@ private struct BoardCard: View {
                 }
                 Button(action: open) {
                     Text(session.name)
-                        .font(Fonts.sans(13.5, .medium))
+                        .font(Look.site ? Fonts.heading(14.5) : Fonts.sans(13.5, .medium))
                         .foregroundStyle(Palette.text)
                         .underline(hovering)
                         .lineLimit(2)
@@ -681,16 +712,18 @@ private struct BoardCard: View {
                     .lineLimit(2)
             }
         }
-        .padding(11)
+        .padding(Look.site ? 12 : 11)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tint?.opacity(0.08) ?? .clear, in: Self.shape)
-        .background(Palette.surface, in: Self.shape)
-        .overlay(Self.shape.strokeBorder(tint?.opacity(hovering ? 0.75 : 0.45) ?? (hovering ? Palette.fillStrong : Palette.line)))
+        .look { $0.siteCard(needsYou: kind == .needsYou, tint: tint) } classic: {
+            $0.background(tint?.opacity(0.08) ?? .clear, in: Self.shape)
+                .background(Palette.surface, in: Self.shape)
+                .overlay(Self.shape.strokeBorder(tint?.opacity(hovering ? 0.75 : 0.45) ?? (hovering ? Palette.fillStrong : Palette.line)))
+        }
         .overlay {
             // The cards Agentman's answer is about.
             if outlined { Self.shape.strokeBorder(Palette.working, lineWidth: 1.5) }
         }
-        .shadow(color: .black.opacity(0.025), radius: 1.5, y: 1)
+        .shadow(color: .black.opacity(Look.site ? 0 : 0.025), radius: 1.5, y: 1)
         .contentShape(Self.shape)
         .onTapGesture(perform: open)
         .onHover { hovering = $0 }
@@ -729,6 +762,9 @@ private struct BoardCard: View {
         HStack(spacing: 5) {
             FolderMark(session: session, size: 14)
             Text(Worktrees.label(session.cwd))
+                .font(Look.site ? Fonts.eyebrow : Fonts.sans(12))
+                .tracking(Look.site ? 0.6 : 0)
+                .textCase(Look.site ? .uppercase : nil)
                 .lineLimit(1)
             Spacer(minLength: 4)
             if let when = kind == .working ? digest.turnStarted : session.lastActivity {
@@ -806,7 +842,9 @@ private struct BoardCard: View {
             .environment(\.compactChoices, true)
             .environment(\.roomyChoices, true)
             .id(question.id ?? question.prompt)
-            .padding(.horizontal, -5)
+            // In New the choices are buttons: in line with the card's words,
+            // clear of the colour strip down its edge.
+            .padding(.horizontal, Look.site ? 0 : -5)
         } else if let card {
             line(card.title, lines: 3)
             if let question = card.question {
@@ -816,7 +854,7 @@ private struct BoardCard: View {
                 .environment(\.compactChoices, true)
                 .environment(\.roomyChoices, true)
                 .id(card.id)
-                .padding(.horizontal, -5)
+                .padding(.horizontal, Look.site ? 0 : -5)
             } else {
                 BoardReply(placeholder: "Reply to Agentman") { text in
                     await store.manager.reply(to: card, with: QuestionReply(text: text)) == nil
@@ -1319,5 +1357,29 @@ private struct BoardReply: View {
             if await send(words) { text = "" }
             busy = false
         }
+    }
+}
+
+extension View {
+    /// A Board card in New: calm, an ink edge on white; loud only when it
+    /// needs you, cream with a heavier edge on the site's orange shadow. The
+    /// folder or project colour, if one is chosen, is a strip inside its
+    /// left edge.
+    func siteCard(needsYou: Bool, tint: Color?) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        return background {
+            shape.hardShadowFill(needsYou ? Palette.bubble : Palette.surface, shadow: Palette.flood, depth: needsYou ? 4 : 0)
+        }
+        .overlay {
+            // Inside the card: its own shape, kept to a strip down the left
+            // edge, so the strip follows the rounded corners and the ink
+            // edge is drawn over it.
+            if let tint {
+                shape.fill(tint)
+                    .mask(alignment: .leading) { Rectangle().frame(width: 6) }
+                    .allowsHitTesting(false)
+            }
+        }
+        .overlay(shape.strokeBorder(Palette.edge, lineWidth: needsYou ? 2 : Palette.edgeWidth))
     }
 }

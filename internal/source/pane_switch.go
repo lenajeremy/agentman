@@ -40,8 +40,21 @@ func newPaneDriver() paneDriver {
 
 // await reads the pane until check accepts it, for about two seconds.
 func (d paneDriver) await(ctx context.Context, name string, check func(pane string) bool) (string, error) {
+	return d.awaitFor(ctx, name, check, 30)
+}
+
+// awaitLong is await for a step the agent can take its time over, for
+// about twenty seconds: Claude asks "Switch model?" of a long conversation
+// only once it has weighed its history, which took longer than await gives.
+func (d paneDriver) awaitLong(ctx context.Context, name string, check func(pane string) bool) (string, error) {
+	return d.awaitFor(ctx, name, check, 330)
+}
+
+// awaitFor reads the pane until check accepts it, at most attempts times,
+// settle apart.
+func (d paneDriver) awaitFor(ctx context.Context, name string, check func(pane string) bool, attempts int) (string, error) {
 	var pane string
-	for attempt := 0; attempt < 30; attempt++ {
+	for attempt := 0; attempt < attempts; attempt++ {
 		if attempt > 0 || d.settle > 0 {
 			select {
 			case <-ctx.Done():

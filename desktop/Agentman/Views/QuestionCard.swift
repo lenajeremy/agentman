@@ -3,36 +3,290 @@ import SwiftUI
 /// The decision an agent is blocked on, answerable in place: a permission
 /// prompt, a multiple-choice question, a typed answer, or one of Claude
 /// Code's own dialogs.
+///
+/// A question the agent asked reads as Claude's own app shows one: the
+/// question as the heading, the choices under it, a row to write your own,
+/// and a ✕ to close it unanswered. A form of several questions names each
+/// one along the top, ticked once answered, with ‹ › to move between them.
+/// A permission prompt keeps its command first and its question under it.
 struct QuestionCard: View {
     @Environment(AgentsStore.self) private var store
     let session: Session
     let question: Question
-    /// A typed answer goes in the thread's own message box, so the card
-    /// shows no second box for it.
-    var typedInComposer = false
+    /// The question a move was asked for, until the form shows it.
+    @State private var moving: Int?
+    @State private var closing = false
+
+    /// The agent's own question, not a permission prompt: its words are the
+    /// heading.
+    private var asked: Bool {
+        question.isReview || (!question.isApproval && (question.detail ?? "").isEmpty && !question.prompt.isEmpty)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 7) {
-                Circle().fill(Palette.needsYou).frame(width: 7, height: 7)
-                Text(question.title ?? "Needs your answer")
-                    .font(TextStyle.bodyMedium)
+        VStack(alignment: .leading, spacing: asked ? 12 : 14) {
+            header
+            if asked {
+                Text(inlineMarkdown(question.prompt))
+                    .font(Fonts.heading(17, classic: Fonts.sans(17, .semibold)))
                     .foregroundStyle(Palette.text)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
             if let detail = question.detail, !detail.isEmpty {
-                CodeBox(text: detail)
+                if question.isReview, let answers = ReviewAnswers(detail: detail) {
+                    answers
+                } else {
+                    CodeBox(text: detail)
+                }
             }
             QuestionNotice(question: question)
-            if !question.prompt.isEmpty, !question.promptRepeatsDetail {
+            if !asked, !question.prompt.isEmpty, !question.promptRepeatsDetail {
                 Text(inlineMarkdown(question.prompt))
                     .font(TextStyle.body)
                     .foregroundStyle(Palette.textSecondary)
             }
-            QuestionChoices(question: question, typed: !typedInComposer) { reply in
+            QuestionChoices(question: question, typedPrompt: "Write your own answer") { reply in
                 await store.answer(session.id, question: question, reply: reply)
             }
+            // A new question starts with nothing typed or ticked.
+            .id(question.id)
+            // The form is moving to another question: these are going.
+            .opacity(moving == nil && !closing ? 1 : 0.45)
+            .disabled(moving != nil || closing)
         }
         .modifier(DecisionPanel())
+        .onChange(of: question.id) {
+            moving = nil
+            closing = false
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 7) {
+            Circle().fill(Palette.needsYou).frame(width: 7, height: 7)
+            if question.isForm, question.namesSteps, let steps = question.steps {
+                // Every question's name, or, too many for the width, the one
+                // on screen.
+                ViewThatFits(in: .horizontal) {
+                    QuestionSteps(steps: steps, review: question.reviewStep == true, current: moving ?? question.step ?? 0, move: move)
+                    stepTitle(steps)
+                }
+            } else {
+                Text(question.title ?? "Needs your answer")
+                    .font(asked ? TextStyle.captionMedium : TextStyle.bodyMedium)
+                    .foregroundStyle(asked ? Palette.muted : Palette.text)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if question.isForm, let steps = question.steps {
+                StepPager(current: moving ?? question.step ?? 1, count: steps.count, last: question.lastStep, move: move)
+                    .disabled(moving != nil || closing)
+            }
+            if question.closable == true {
+                HeaderButton(systemImage: "xmark", help: "Close the question unanswered: \(session.name) waits for your message") {
+                    close()
+                }
+                .disabled(closing)
+            }
+        }
+    }
+
+    private func stepTitle(_ steps: [QuestionStep]) -> some View {
+        let step = moving ?? question.step ?? 0
+        let title = step >= 1 && step <= steps.count ? steps[step - 1].title : "Review"
+        return Text(title)
+            .font(TextStyle.captionMedium)
+            .foregroundStyle(Palette.muted)
+            .lineLimit(1)
+    }
+
+    private func move(to step: Int) {
+        guard moving == nil, step != question.step else { return }
+        moving = step
+        let shown = question.id
+        Task {
+            let moved = await store.moveQuestion(session.id, question: question, to: step)
+            // The next look at the agent shows where it went; if it never
+            // does, the choices come back rather than staying greyed.
+            try? await Task.sleep(for: .seconds(moved ? 4 : 0))
+            if question.id == shown { moving = nil }
+        }
+    }
+
+    private func close() {
+        closing = true
+        let shown = question.id
+        Task {
+            let closed = await store.closeQuestion(session.id, question: question)
+            try? await Task.sleep(for: .seconds(closed ? 4 : 0))
+            if question.id == shown { closing = false }
+        }
+    }
+}
+
+/// A form's questions by name along the top of its card: the one on screen
+/// in full colour, a tick on each answered, and a click on one goes to it.
+private struct QuestionSteps: View {
+    let steps: [QuestionStep]
+    /// A review after the last question, with a tab of its own.
+    let review: Bool
+    let current: Int
+    let move: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                StepTab(title: step.title, answered: step.answered == true, current: current == index + 1) {
+                    move(index + 1)
+                }
+            }
+            if review {
+                StepTab(title: "Review", answered: false, current: current == steps.count + 1) {
+                    move(steps.count + 1)
+                }
+            }
+        }
+        .fixedSize()
+    }
+}
+
+private struct StepTab: View {
+    let title: String
+    let answered: Bool
+    let current: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if answered {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Palette.ok)
+                }
+                Text(title)
+                    .font(TextStyle.captionMedium)
+                    .foregroundStyle(current ? Palette.text : hovering ? Palette.textSecondary : Palette.muted)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(current ? Palette.fill : hovering ? Palette.fill.opacity(0.6) : .clear,
+                        in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(answered ? "\(title): answered" : title)
+        .accessibilityAddTraits(current ? .isSelected : [])
+    }
+}
+
+/// ‹ 2 of 3 ›: back and on through a form, one question at a time. Past the
+/// last question is the review of the answers.
+private struct StepPager: View {
+    let current: Int
+    let count: Int
+    /// The furthest it goes: the review, or the last question.
+    let last: Int
+    let move: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 2) {
+            HeaderButton(systemImage: "chevron.left", help: "Previous question") { move(current - 1) }
+                .disabled(current <= 1)
+            Text(current > count ? "Review" : "\(current) of \(count)")
+                .font(TextStyle.caption)
+                .monospacedDigit()
+                .foregroundStyle(Palette.muted)
+                .fixedSize()
+            HeaderButton(systemImage: "chevron.right", help: current == count ? "Review your answers" : "Next question") { move(current + 1) }
+                .disabled(current >= last)
+        }
+    }
+}
+
+/// A small icon button at the top of the card.
+private struct HeaderButton: View {
+    let systemImage: String
+    let help: String
+    let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(enabled ? (hovering ? Palette.text : Palette.muted) : Palette.faint.opacity(0.6))
+                .frame(width: 24, height: 24)
+                .background(hovering && enabled ? Palette.fill : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
+/// The answers a form's review lists ("● Which shape?" over "→ Square"), as
+/// rows to read rather than terminal text, with its warning when some are
+/// unanswered. Nil when the text is not in that shape.
+private struct ReviewAnswers: View {
+    let warning: String?
+    let answers: [(question: String, answer: String)]
+
+    init?(detail: String) {
+        var warning: String?
+        var answers: [(String, String)] = []
+        var asked: String?
+        for raw in detail.split(separator: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("⚠") {
+                warning = line.dropFirst().trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("●") {
+                asked = line.dropFirst().trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("→"), let question = asked {
+                answers.append((question, line.dropFirst().trimmingCharacters(in: .whitespaces)))
+                asked = nil
+            } else if !line.isEmpty {
+                return nil
+            }
+        }
+        guard warning != nil || !answers.isEmpty else { return nil }
+        self.warning = warning
+        self.answers = answers
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(answers.enumerated()), id: \.offset) { _, row in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(inlineMarkdown(row.question))
+                        .font(TextStyle.body)
+                        .foregroundStyle(Palette.muted)
+                    Spacer(minLength: 12)
+                    Text(row.answer)
+                        .font(TextStyle.bodyMedium)
+                        .foregroundStyle(Palette.text)
+                        .multilineTextAlignment(.trailing)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            if let warning {
+                Label(warning, systemImage: "exclamationmark.triangle")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.needsYouText)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Palette.fill.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -136,6 +390,7 @@ struct QuestionChoices: View {
     @State private var checked: Set<String> = []
     @State private var busy = false
     @Environment(\.compactChoices) private var compact
+    @Environment(\.roomyChoices) private var roomy
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 6 : 12) {
@@ -145,9 +400,16 @@ struct QuestionChoices: View {
                 noteField(for: option)
             } else {
                 singleChoice
+                    // Words being written are the answer: the choices step back.
+                    .opacity(writing ? 0.45 : 1)
             }
 
             if typed, question.custom == true, question.multiple != true, noting == nil {
+                if !compact && !roomy {
+                    WriteYourOwnRow(prompt: typedPrompt, text: $note, busy: busy) {
+                        send(QuestionReply(text: note))
+                    }
+                } else {
                 HStack {
                     TextField(typedPrompt, text: $note)
                         .textFieldStyle(.roundedBorder)
@@ -157,17 +419,25 @@ struct QuestionChoices: View {
                         .controlSize(compact ? .small : .regular)
                         .disabled(note.trimmingCharacters(in: .whitespaces).isEmpty || busy)
                 }
+                }
             }
         }
         .disabled(busy)
     }
 
+    private var writing: Bool {
+        typed && !compact && !roomy && question.custom == true && !note.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     private var singleChoice: some View {
-        VStack(spacing: compact ? 2 : 4) {
+        // On the Board in New the choices are buttons on hard shadows: room
+        // for the shadows between them.
+        VStack(spacing: Look.site && roomy ? 7 : compact ? 2 : 4) {
             ForEach(Array(question.options.enumerated()), id: \.element.id) { index, option in
                 OptionRow(
                     number: index + 1, option: option,
-                    pick: option.key == suggested, leading: option.id == primaryKey
+                    pick: option.key == suggested, leading: option.id == primaryKey, strong: option.key == strongKey,
+                    chosen: option.checked == true
                 ) {
                     if option.withText == true {
                         noting = option
@@ -179,24 +449,34 @@ struct QuestionChoices: View {
         }
     }
 
+    /// Several may be chosen: rows like the single choices, a tick box where
+    /// their number is, and Submit under them once one is ticked.
     private var multipleChoice: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: compact ? 2 : 4) {
             ForEach(question.options) { option in
-                Toggle(isOn: Binding(
-                    get: { checked.contains(option.key) },
-                    set: { on in
-                        if on { checked.insert(option.key) } else { checked.remove(option.key) }
-                    }
-                )) {
-                    Text(option.label).font(TextStyle.body)
+                CheckRow(option: option, checked: checked.contains(option.key)) {
+                    if checked.contains(option.key) { checked.remove(option.key) } else { checked.insert(option.key) }
                 }
-                .toggleStyle(.checkbox)
             }
-            Button("Submit") {
-                send(QuestionReply(optionKeys: Array(checked)))
+            HStack(spacing: 10) {
+                Button {
+                    // In the order they are listed, not the order ticked.
+                    send(QuestionReply(optionKeys: question.options.map(\.key).filter(checked.contains)))
+                } label: {
+                    Text("Submit")
+                        .font(compact ? TextStyle.captionMedium : TextStyle.bodyMedium)
+                        .padding(.horizontal, compact ? 12 : 16)
+                        .padding(.vertical, compact ? 4 : 7)
+                }
+                .buttonStyle(ChoiceButtonStyle(primary: true))
+                .disabled(checked.isEmpty)
+                .opacity(checked.isEmpty ? 0.4 : 1)
+                Text(checked.isEmpty ? "Tick one or more" : checked.count == 1 ? "1 chosen" : "\(checked.count) chosen")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.muted)
             }
-            .buttonStyle(ChoiceButtonStyle(primary: true))
-            .disabled(checked.isEmpty)
+            .padding(.top, compact ? 4 : 8)
+            .padding(.leading, compact ? 8 : 12)
         }
         .onAppear {
             checked = Set(question.options.filter { $0.checked == true }.map(\.key))
@@ -220,16 +500,22 @@ struct QuestionChoices: View {
         }
     }
 
-    /// Agentman's pick when it made one; otherwise the first affirmative
-    /// option, the one most people reach for.
+    /// The answer already given, back on a question of a form; Agentman's
+    /// pick when it made one; otherwise the first affirmative option, the
+    /// one most people reach for.
     private var primaryKey: String? {
+        question.options.first { $0.checked == true }?.key ?? strongKey ?? question.options.first?.key
+    }
+
+    /// The answer worth the orange on the Board: Agentman's pick, or a yes.
+    /// Never merely the first of several, which would push one at random.
+    private var strongKey: String? {
         if let suggested, question.options.contains(where: { $0.key == suggested }) { return suggested }
-        let affirmative = question.options.first {
+        return question.options.first {
             let label = $0.label.lowercased()
             return label.hasPrefix("yes") || label.hasPrefix("allow") || label.hasPrefix("approve") ||
                 label.hasPrefix("continue") || label.hasPrefix("proceed")
-        }
-        return (affirmative ?? question.options.first)?.key
+        }?.key
     }
 
     private func send(_ reply: QuestionReply) {
@@ -277,10 +563,17 @@ private struct OptionRow: View {
     let option: QuestionOption
     var pick = false
     var leading = false
+    /// On the Board in New, in the orange: Agentman's pick, or a yes.
+    var strong = false
+    /// The answer given before, back on a question of a form.
+    var chosen = false
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.compactChoices) private var compact
     @Environment(\.roomyChoices) private var roomy
+
+    /// On the Board in New: a button of the site's, not a row.
+    private var siteButton: Bool { Look.site && roomy }
 
     var body: some View {
         Button(action: action) {
@@ -288,14 +581,14 @@ private struct OptionRow: View {
                 Text("\(number)")
                     .font(TextStyle.label)
                     .monospacedDigit()
-                    .foregroundStyle(roomy ? Palette.faint : Palette.muted)
+                    .foregroundStyle(siteButton && strong ? Palette.onFlood.opacity(0.8) : roomy ? Palette.faint : Palette.muted)
                     .frame(width: roomy ? 12 : compact ? 17 : 20, height: compact ? 17 : 20)
                     .background(roomy ? Color.clear : Palette.fill, in: RoundedRectangle(cornerRadius: compact ? 5 : 6, style: .continuous))
                     .alignmentGuide(.firstTextBaseline) { $0[.firstTextBaseline] }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(option.label)
-                        .font(roomy ? Fonts.sans(13) : compact ? TextStyle.caption : TextStyle.body)
-                        .foregroundStyle(Palette.text)
+                        .font(roomy ? Fonts.sans(13, siteButton && strong ? .semibold : .regular) : compact ? TextStyle.caption : TextStyle.body)
+                        .foregroundStyle(siteButton && strong ? Palette.onFlood : Palette.text)
                         .lineSpacing(compact ? 2 : 4)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -320,24 +613,145 @@ private struct OptionRow: View {
                         .padding(.vertical, 3)
                         .background(Palette.workingWash, in: Capsule())
                 }
-                if hovering {
+                if chosen {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Palette.ok)
+                        .help("Your answer")
+                } else if hovering {
                     Image(systemName: "return")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Palette.faint)
                 }
             }
-            .padding(.horizontal, roomy ? 6 : compact ? 8 : 12)
-            .padding(.vertical, roomy ? 4 : compact ? 5 : 10)
+            .padding(.horizontal, siteButton ? 10 : roomy ? 6 : compact ? 8 : 12)
+            .padding(.vertical, siteButton ? 6 : roomy ? 4 : compact ? 5 : 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: roomy ? 6 : compact ? 8 : 10, style: .continuous)
-                    .fill(hovering ? Palette.fillStrong : (leading || pick ? Palette.fill : Color.clear))
-            )
+            .background {
+                if siteButton {
+                    // The site's buttons: edged, on a hard shadow; the likely
+                    // answer in the orange.
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .hardShadowFill(strong ? Palette.flood : (hovering ? Palette.fill : Palette.surface), shadow: Palette.edge, depth: 2)
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
+                } else {
+                    RoundedRectangle(cornerRadius: roomy ? 6 : compact ? 8 : 10, style: .continuous)
+                        .fill(hovering ? Palette.fillStrong : (leading || pick ? Palette.fill : Color.clear))
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(option.withText == true ? "Choose, and add a note for the agent" : option.label)
+    }
+}
+
+/// One of several choices that may be ticked: a box where a single choice
+/// has its number, its words in full, and a fill while ticked.
+private struct CheckRow: View {
+    let option: QuestionOption
+    let checked: Bool
+    let toggle: () -> Void
+    @State private var hovering = false
+    @Environment(\.compactChoices) private var compact
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(alignment: .firstTextBaseline, spacing: compact ? 8 : 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: compact ? 4 : 5, style: .continuous)
+                        .fill(checked ? Palette.inverse : Palette.surface)
+                    RoundedRectangle(cornerRadius: compact ? 4 : 5, style: .continuous)
+                        // Classic's edge is too light for an empty box to show.
+                        .strokeBorder(checked ? Palette.inverse : Look.site ? Palette.edge : Palette.faint, lineWidth: Palette.edgeWidth)
+                    if checked {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: compact ? 9 : 10, weight: .bold))
+                            .foregroundStyle(Palette.onInverse)
+                    }
+                }
+                .frame(width: compact ? 15 : 18, height: compact ? 15 : 18)
+                .frame(width: compact ? 17 : 20)
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + (compact ? 4 : 5) }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(option.label)
+                        .font(compact ? TextStyle.caption : TextStyle.body)
+                        .foregroundStyle(Palette.text)
+                        .lineSpacing(compact ? 2 : 4)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !compact, let description = option.description, !description.isEmpty {
+                        Text(description)
+                            .font(TextStyle.caption)
+                            .foregroundStyle(Palette.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, compact ? 8 : 12)
+            .padding(.vertical, compact ? 5 : 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous)
+                    .fill(hovering ? Palette.fillStrong : checked ? Palette.fill : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityAddTraits(checked ? .isSelected : [])
+        .help(checked ? "Untick \(option.label)" : "Tick \(option.label)")
+    }
+}
+
+/// The row under a question's choices for an answer of your own: a pencil
+/// where a choice has its number, the words, and a send arrow once there
+/// are some.
+private struct WriteYourOwnRow: View {
+    let prompt: String
+    @Binding var text: String
+    let busy: Bool
+    let send: () -> Void
+    @FocusState private var focused: Bool
+
+    private var empty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "pencil")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Palette.muted)
+                .frame(width: 20, height: 20)
+                .background(Palette.fill, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            TextField(prompt, text: $text, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(TextStyle.body)
+                .lineLimit(1...6)
+                .focused($focused)
+                .onSubmit(send)
+            Button(action: send) {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Palette.onInverse)
+                    .frame(width: 24, height: 24)
+                    .background(Palette.inverse, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .opacity(empty ? 0 : 1)
+            .disabled(empty || busy)
+            .help("Send this answer")
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(focused ? Palette.edge : Palette.line, lineWidth: Palette.edgeWidth)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { focused = true }
     }
 }
 

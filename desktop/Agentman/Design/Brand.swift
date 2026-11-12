@@ -44,9 +44,10 @@ enum Look {
 /// The website's look, as the phone has it: Rubik for titles, the site's
 /// mono labels, a warm dark edge on cards and controls with a hard shadow
 /// under the ones that stand out, cream for Agentman's own things, and the
-/// site's orange for the one thing to tap. What a person reads (messages,
-/// tools, code, diffs) never takes any of it. Each colour that replaced one
-/// of today's goes back to it in the Classic theme.
+/// site's orange for the one thing to tap. What a person reads (the agent's
+/// words, diffs) stays plain; the frames round it (steps, your messages,
+/// code) take the edge, as the site's cards do. Each colour that replaced
+/// one of today's goes back to it in the Classic theme.
 extension Palette {
     /// The website's orange, and the white set on it.
     static let flood = Color(light: 0xFF5F1F, dark: 0xFF5F1F)
@@ -68,6 +69,13 @@ extension Palette {
     static let inverseShadow = Color(light: 0x000000, dark: 0xFFFFFF).opacity(0.25)
     /// The $ before a command, and the icons on Agentman's cream.
     static let prompt = Color(light: 0xE5480A, dark: 0xFF8A55)
+    /// A switch that is on, in New: the site's ink, or its cream in the dark.
+    static let switchOn = Color(light: 0x2A1C14, dark: 0xE8DCCB)
+    /// The Board's ground in New: the page with a tint of the site's orange.
+    static let boardTint = Color(light: 0xFFF3E8, dark: 0x140E0A)
+    /// The site's ink, as a strip over a code block, and the cream set on it.
+    static let ink = Color(light: 0x160D08, dark: 0x2A211B)
+    static let onInk = Color(light: 0xFFF3E3, dark: 0xFFF3E3)
 }
 
 extension Fonts {
@@ -277,4 +285,53 @@ extension PrimitiveButtonStyle where Self == BrandButtonStyle {
     static var brand: BrandButtonStyle { BrandButtonStyle() }
     /// White with the site's edge: the others beside it.
     static var brandSecondary: BrandButtonStyle { BrandButtonStyle(prominent: false) }
+}
+
+/// The app's switch: the Mac's own in Classic; in New, the site's, an edged
+/// capsule filled with ink when on, its knob edged white. Drawn rather than
+/// tinted, so it looks the same in a window that isn't the active one.
+struct AppSwitchStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        if Look.site {
+            SiteSwitch(configuration: configuration)
+        } else {
+            Toggle(configuration).toggleStyle(.switch)
+        }
+    }
+}
+
+extension ToggleStyle where Self == AppSwitchStyle {
+    static var appSwitch: AppSwitchStyle { AppSwitchStyle() }
+}
+
+private struct SiteSwitch: View {
+    let configuration: ToggleStyleConfiguration
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
+        let on = configuration.isOn
+        // Every switch in Settings sits beside words of its own, its label
+        // empty: no room is kept for one.
+        HStack(spacing: 0) {
+            configuration.label
+            Capsule()
+                .fill(on ? Palette.switchOn : Palette.surface)
+                .overlay(Capsule().strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
+                .frame(width: 34, height: 20)
+                .overlay(alignment: on ? .trailing : .leading) {
+                    Circle()
+                        .fill(Palette.surface)
+                        .overlay(Circle().strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
+                        .frame(width: 14, height: 14)
+                        .padding(.horizontal, 3)
+                }
+                .animation(.easeOut(duration: 0.12), value: on)
+                .opacity(enabled ? 1 : 0.45)
+                .contentShape(Capsule())
+                .onTapGesture { if enabled { configuration.isOn.toggle() } }
+        }
+        .accessibilityRepresentation {
+            Toggle(isOn: configuration.$isOn) { configuration.label }
+        }
+    }
 }

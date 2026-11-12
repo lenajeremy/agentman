@@ -313,8 +313,8 @@ struct AgentThreadView: View {
                                                    label: "Read " + (path as NSString).lastPathComponent, carded: true)
                                 case .images(let calls, let paths, let said):
                                     PicturesRun(sessionId: session.id, calls: calls, paths: paths, said: said)
-                                case .worked(_, let seconds):
-                                    WorkedLine(text: "Worked for " + WorkDuration.text(seconds))
+                                case .worked(_, let seconds, let steps):
+                                    WorkedLine(seconds: seconds, steps: steps)
                                 }
                             }
                             .onAppear { if !rowsDrawn { rowsDrawn = true } }
@@ -332,7 +332,7 @@ struct AgentThreadView: View {
                         // The question is part of the conversation, so it
                         // scrolls with it and is never squeezed to fit.
                         if let question = session.question {
-                            QuestionCard(session: session, question: question, typedInComposer: true)
+                            QuestionCard(session: session, question: question)
                                 .id("question")
                         }
                         // Below the last message, so following the thread
@@ -782,7 +782,9 @@ private struct ThreadTitle: View {
     var body: some View {
         HStack(spacing: 10) {
             Text(Worktrees.label(session.cwd))
-                .font(TextStyle.caption)
+                .font(Look.site ? Fonts.eyebrow : TextStyle.caption)
+                .tracking(Look.site ? 0.8 : 0)
+                .textCase(Look.site ? .uppercase : nil)
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)
             Text("/").foregroundStyle(Palette.faint)
@@ -807,7 +809,7 @@ private struct ThreadTitle: View {
                 HStack(spacing: 6) {
                     Button(action: begin) {
                         Text(session.name)
-                            .font(TextStyle.bodyMedium)
+                            .font(Look.site ? Fonts.heading(15) : TextStyle.bodyMedium)
                             .foregroundStyle(Palette.text)
                             .lineLimit(1)
                             .padding(.horizontal, 5)
@@ -1208,7 +1210,11 @@ struct MessageRow: View {
                             QuotedMessage(text: sent.text) { LongText(text: $0) }
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 12)
-                                .background(Palette.bubble, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                .look {
+                                    $0.edged(18, fill: Palette.bubble, depth: 2)
+                                } classic: {
+                                    $0.background(Palette.bubble, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                }
                                 .contextMenu {
                                     Button("Copy") { Clipboard.copy(sent.text) }
                                 }
@@ -1313,15 +1319,16 @@ enum ThreadItem: Identifiable {
     case image(Message, path: String)
     /// Images read one after another: one run, the pictures side by side.
     case images([Message], paths: [String], said: String)
-    /// A turn that has been followed by another: how long the agent took.
-    case worked(after: String, seconds: Int)
+    /// A turn that has been followed by another: how long the agent took,
+    /// and how many steps it took.
+    case worked(after: String, seconds: Int, steps: Int)
 
     /// The last message's ID, so scrolling to the newest message finds it.
     var id: String {
         switch self {
         case .message(let message), .image(let message, _): message.id
         case .tools(let calls, _), .images(let calls, _, _): calls.last?.id ?? ""
-        case .worked(let after, _): "worked-" + after
+        case .worked(let after, _, _): "worked-" + after
         }
     }
 
@@ -1344,12 +1351,15 @@ enum ThreadItem: Identifiable {
     struct Turn {
         var start: Message?
         var last: Message?
+        /// The tools it used.
+        var steps = 0
 
         mutating func add(_ message: Message) {
             if message.startsTurn {
                 start = message
             } else if start != nil, message.role != .system {
                 last = message
+                if message.role == .tool { steps += 1 }
             }
         }
 
@@ -1370,6 +1380,15 @@ enum ThreadItem: Identifiable {
             turn.add(message)
         }
         return turn
+    }
+
+    /// The picture a read opened: from its summary, which names what it
+    /// read. Only a read with no summary is looked for in its text, since a
+    /// file's text is what is in it: a README mentioning a screenshot is
+    /// still a README read.
+    static func picture(read message: Message) -> String? {
+        if let summary = message.tool?.summary { return ImageThumbnail.imageFile(inSummary: summary) }
+        return ImageThumbnail.imagePath(in: message.text ?? "")
     }
 
     static func items(from messages: [Message]) -> [ThreadItem] {
@@ -1398,13 +1417,13 @@ enum ThreadItem: Identifiable {
                 flush()
                 flushPictures()
                 if let seconds = turn.seconds, let start = turn.start {
-                    items.append(.worked(after: start.id, seconds: seconds))
+                    items.append(.worked(after: start.id, seconds: seconds, steps: turn.steps))
                 }
                 turn = Turn()
             }
             turn.add(message)
             if message.role == .tool, ToolKind(message.tool?.name) == .read,
-               let path = ImageThumbnail.imagePath(in: message.tool?.summary ?? message.text ?? "") {
+               let path = picture(read: message) {
                 flush()
                 pictures.append((message, path))
             } else if message.role == .tool {
@@ -1438,24 +1457,36 @@ enum WorkDuration {
     }
 }
 
-/// How long the agent took, between its work and what comes next.
+/// How long the agent took and how many steps, in one small line under its
+/// work; or, while it works, how long so far.
 struct WorkedLine: View {
-    let text: String
+    let seconds: Int
+    var steps = 0
     var live = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             if live { Loader(size: 9) }
             Text(text)
-                .font(TextStyle.caption)
+                .font(Look.site ? Fonts.mono(11.5) : TextStyle.caption)
                 .monospacedDigit()
                 .foregroundStyle(Palette.muted)
-            Rectangle()
-                .fill(Palette.line)
-                .frame(height: 1)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(text)
+        .accessibilityLabel(spoken)
+    }
+
+    static func stepCount(_ steps: Int) -> String { steps == 1 ? "1 step" : "\(steps) steps" }
+
+    var text: String {
+        if live { return "Working for " + WorkDuration.text(seconds) }
+        return WorkDuration.text(seconds) + (steps > 0 ? " · " + Self.stepCount(steps) : "")
+    }
+
+    private var spoken: String {
+        if live { return text }
+        return "Worked for " + WorkDuration.text(seconds) + (steps > 0 ? ", " + Self.stepCount(steps) : "")
     }
 }
 
@@ -1470,10 +1501,10 @@ private struct LatestTurnLine: View {
         if session.state == .busy, let start = turn.start {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let seconds = max(0, Int(context.date.timeIntervalSince(start.date)))
-                WorkedLine(text: "Working for " + WorkDuration.text(seconds), live: true)
+                WorkedLine(seconds: seconds, live: true)
             }
         } else if session.state != .waitingInput, session.question == nil, let seconds = turn.seconds {
-            WorkedLine(text: "Worked for " + WorkDuration.text(seconds))
+            WorkedLine(seconds: seconds, steps: turn.steps)
         }
     }
 }
@@ -1508,12 +1539,19 @@ struct ToolRun: View {
     @Environment(AgentsStore.self) private var store
     let calls: [Message]
     var said = ""
-    @State private var open = false
+    @State private var open: Bool
+
+    /// Closed, unless asked: a picture of it opened.
+    init(calls: [Message], said: String = "", open: Bool = false) {
+        self.calls = calls
+        self.said = said
+        _open = State(initialValue: open)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if calls.count == 1, let call = calls.first {
-                ToolCallRow(call: call)
+                ToolCallRow(call: call, pill: true, open: open)
             } else {
                 Button {
                     withAnimation(.easeOut(duration: 0.15)) { open.toggle() }
@@ -1522,6 +1560,7 @@ struct ToolRun: View {
                         statusIcon
                         Text(summary)
                             .lineLimit(1)
+                            .foregroundStyle(Palette.textSecondary)
                         if failures > 0 {
                             Text("· \(failures) failed")
                                 .foregroundStyle(Palette.errorText)
@@ -1532,21 +1571,17 @@ struct ToolRun: View {
                     }
                     .font(TextStyle.caption)
                     .foregroundStyle(Palette.muted)
-                    .contentShape(Rectangle())
+                    .stepPill(open: open)
                 }
                 .buttonStyle(.plain)
                 if open {
-                    Rectangle()
-                        .fill(Palette.toolCardEdge)
-                        .frame(height: 1)
-                        .padding(.vertical, 3)
                     VStack(alignment: .leading, spacing: 9) {
                         ForEach(calls) { call in
                             ToolCallRow(call: call)
                         }
                     }
-                    .padding(.leading, 18)
-                    .padding(.bottom, 2)
+                    .padding(.vertical, 2)
+                    .stepDetail()
                 }
             }
         }
@@ -1606,11 +1641,20 @@ struct ToolRun: View {
 /// command or path a click away.
 private struct ToolCallRow: View {
     let call: Message
-    @State private var showRaw = false
+    /// On its own in the conversation, as a pill; inside an opened run, a
+    /// plain row.
+    var pill = false
+    @State private var showRaw: Bool
+
+    init(call: Message, pill: Bool = false, open: Bool = false) {
+        self.call = call
+        self.pill = pill
+        _showRaw = State(initialValue: open)
+    }
 
     var body: some View {
         if let title = call.tool?.title, !title.isEmpty {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 6) {
                 Button {
                     withAnimation(.easeOut(duration: 0.12)) { showRaw.toggle() }
                 } label: {
@@ -1622,18 +1666,24 @@ private struct ToolCallRow: View {
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .contentShape(Rectangle())
+                    .modifier(PillIf(pill: pill, open: showRaw))
                 }
                 .buttonStyle(.plain)
                 .help(showRaw ? "Hide the command" : "Show the command")
                 if showRaw {
-                    StepDetail(command: call.tool?.summary, output: call.text, failed: call.tool?.status == "error")
-                        .padding(.leading, 19)
+                    if pill {
+                        StepDetail(command: call.tool?.summary, output: call.text, failed: call.tool?.status == "error")
+                            .stepDetail()
+                    } else {
+                        StepDetail(command: call.tool?.summary, output: call.text, failed: call.tool?.status == "error")
+                            .padding(.leading, 19)
+                    }
                 }
             }
             .opacity(call.isSidechain == true ? 0.6 : 1)
         } else {
             rawRow
+                .modifier(PillIf(pill: pill, open: false))
         }
     }
 
@@ -1642,7 +1692,7 @@ private struct ToolCallRow: View {
         Group {
             switch call.tool?.status {
             case "running":
-                Loader()
+                Loader().stepIconBaseline()
             case "error":
                 Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.error)
             default:
@@ -1660,7 +1710,7 @@ private struct ToolCallRow: View {
             Group {
                 switch call.tool?.status {
                 case "running":
-                    Loader()
+                    Loader().stepIconBaseline()
                 case "error":
                     Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.error)
                 default:
@@ -1688,11 +1738,55 @@ private struct ToolCallRow: View {
 }
 
 extension View {
-    /// A tool call's soft card: a step greyer than the page, so the work
-    /// stands apart from the conversation.
+    /// A tool call's room in the conversation, the width of it.
     func toolCard() -> some View {
         padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// A step, closed: a small grey pill, quieter than the reply around it.
+    /// A shade deeper while it is open.
+    func stepPill(open: Bool) -> some View {
+        padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .look {
+                $0.edged(13, fill: open ? Palette.bubble : Palette.surface)
+            } classic: {
+                $0.background(open ? Palette.fill.mix(with: Palette.text, by: 0.06) : Palette.fill,
+                              in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+    }
+
+    /// The loader has no text of its own, so beside a step's words it hung
+    /// from its top and stretched the pill; its middle sits on the words'.
+    func stepIconBaseline() -> some View {
+        alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+    }
+
+    /// What an opened step holds, hung under its pill on a thin line.
+    func stepDetail() -> some View {
+        padding(.leading, 12)
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(Palette.line)
+                    .frame(width: 1.5)
+            }
+            .padding(.leading, 12)
+    }
+}
+
+/// A pill around a step standing on its own; a plain row inside a run.
+private struct PillIf: ViewModifier {
+    let pill: Bool
+    let open: Bool
+
+    func body(content: Content) -> some View {
+        if pill {
+            content.stepPill(open: open)
+        } else {
+            content.contentShape(Rectangle())
+        }
     }
 }
 
@@ -1961,12 +2055,12 @@ struct Composer: View {
         // A click on the card around the text, not on a control, goes to
         // the text.
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous).hardShadowFill(Palette.surface, shadow: Palette.edge, depth: 3)
+            RoundedRectangle(cornerRadius: 18, style: .continuous).hardShadowFill(Palette.surface, shadow: Palette.edge, depth: 4)
                 .onTapGesture { if enabled { focused = true } }
         }
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Look.site ? Palette.edge : (focused ? Palette.fillStrong : Palette.line), lineWidth: Palette.edgeWidth)
+                .strokeBorder(Look.site ? Palette.edge : (focused ? Palette.fillStrong : Palette.line), lineWidth: Look.site ? 2 : Palette.edgeWidth)
         )
         // The commands for `/`, and the files for `@`, just above the box.
         .overlay(alignment: .top) {
@@ -2064,7 +2158,14 @@ struct Composer: View {
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(canSend ? Color.white : Palette.muted)
                     .frame(width: 28, height: 28)
-                    .background(canSend ? (Look.site ? Palette.flood : Palette.working) : Palette.fillStrong, in: Circle())
+                    .look {
+                        $0.background {
+                            Circle().hardShadowFill(canSend ? Palette.flood : Palette.fillStrong, shadow: Palette.edge, depth: canSend ? 2 : 0)
+                        }
+                        .overlay(Circle().strokeBorder(canSend ? Palette.edge : .clear, lineWidth: Palette.edgeWidth))
+                    } classic: {
+                        $0.background(canSend ? Palette.working : Palette.fillStrong, in: Circle())
+                    }
             }
             .buttonStyle(.plain)
             .disabled(!canSend)

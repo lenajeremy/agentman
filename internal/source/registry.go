@@ -212,6 +212,18 @@ type Answerer interface {
 	Answer(ctx context.Context, sessionID string, answer protocol.QuestionAnswer) error
 }
 
+// QuestionMover is implemented by adapters whose forms ask several questions
+// that can be moved between without answering.
+type QuestionMover interface {
+	MoveQuestion(ctx context.Context, sessionID, questionID string, step int) error
+}
+
+// QuestionCloser is implemented by adapters whose agents' questions can be
+// closed unanswered, leaving the agent waiting for a message.
+type QuestionCloser interface {
+	CloseQuestion(ctx context.Context, sessionID, questionID string) error
+}
+
 // QuestionInspector is implemented by terminal adapters that can cheaply
 // re-read one live pane. It lets a Stop hook distinguish a real completion
 // from an agent that stopped only to ask the user something, without waiting
@@ -444,6 +456,32 @@ func (r *Registry) Answer(ctx context.Context, sessionID string, answer protocol
 		return fmt.Errorf("source: %s questions cannot be answered remotely", s.Kind())
 	}
 	return answerer.Answer(ctx, sessionID, answer)
+}
+
+// MoveQuestion goes to another question of the form a session shows.
+func (r *Registry) MoveQuestion(ctx context.Context, sessionID, questionID string, step int) error {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return err
+	}
+	mover, ok := s.(QuestionMover)
+	if !ok {
+		return fmt.Errorf("source: %s forms can't be moved through from here", s.Kind())
+	}
+	return mover.MoveQuestion(ctx, sessionID, questionID, step)
+}
+
+// CloseQuestion closes the question a session shows without answering it.
+func (r *Registry) CloseQuestion(ctx context.Context, sessionID, questionID string) error {
+	s, err := r.forSession(sessionID)
+	if err != nil {
+		return err
+	}
+	closer, ok := s.(QuestionCloser)
+	if !ok {
+		return fmt.Errorf("source: %s questions can't be closed from here", s.Kind())
+	}
+	return closer.CloseQuestion(ctx, sessionID, questionID)
 }
 
 // CurrentQuestion performs a targeted live check when the owning adapter

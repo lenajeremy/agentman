@@ -102,7 +102,14 @@ struct WorkspacePanel: View {
         .animation(.easeOut(duration: 0.18), value: expanded || !stack.isEmpty)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14))
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Palette.edge, lineWidth: Palette.edgeWidth))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Palette.edge, lineWidth: Look.site ? 2 : Palette.edgeWidth))
+        // In New, raised on the page like the composer: a hard shadow under
+        // the clipped card, drawn behind it.
+        .background {
+            if Look.site {
+                RoundedRectangle(cornerRadius: 14).fill(Palette.edge).offset(y: 4)
+            }
+        }
         // Again as the agent works: a turn changes files long before it ends.
         // A burst of activity asks once, a second after it settles.
         .task(id: Refresh(state: session.state, activity: store.activity(session.id).at, reread: reread)) {

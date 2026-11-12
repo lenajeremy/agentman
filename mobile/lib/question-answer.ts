@@ -54,3 +54,36 @@ export function submitAnswer(
     answerText: customText || undefined,
   };
 }
+
+/** What a form's review lists: each question answered, and its warning
+ *  when some were not ("⚠ You have not answered all questions"). */
+export interface ReviewAnswers {
+  warning?: string;
+  answers: { question: string; answer: string }[];
+}
+
+/**
+ * Reads Claude's review of a form ("● Which shape?" over "→ Square") so it
+ * can be shown as rows rather than as terminal text. Null when the text is
+ * not in that shape, and it is shown as it came.
+ */
+export function reviewAnswers(detail: string): ReviewAnswers | null {
+  let warning: string | undefined;
+  const answers: { question: string; answer: string }[] = [];
+  let asked: string | null = null;
+  for (const raw of detail.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("⚠")) {
+      warning = line.slice(1).trim();
+    } else if (line.startsWith("●")) {
+      asked = line.slice(1).trim();
+    } else if (line.startsWith("→") && asked !== null) {
+      answers.push({ question: asked, answer: line.slice(1).trim() });
+      asked = null;
+    } else if (line) {
+      return null;
+    }
+  }
+  if (!warning && answers.length === 0) return null;
+  return { warning, answers };
+}

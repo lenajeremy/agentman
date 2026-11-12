@@ -50,6 +50,21 @@ export interface Question {
   multiple?: boolean;
   custom?: boolean;
   notice?: string;
+  /** The questions of a form that asks several, in order, and the one on
+   *  screen, from 1; past the last is the form's review, when reviewStep
+   *  says it has one (Claude's does; Antigravity's submits from its last). */
+  steps?: QuestionStep[];
+  step?: number;
+  reviewStep?: boolean;
+  /** A question the agent asked, which close_question closes unanswered:
+   *  the agent then waits for a message. */
+  closable?: boolean;
+}
+
+/** One question of a form that asks several. */
+export interface QuestionStep {
+  title: string;
+  answered?: boolean;
 }
 
 export interface QuestionAnswer {
@@ -82,6 +97,8 @@ export interface Session {
   kind: AgentKind;
   nativeId: string;
   name: string;
+  /** The agent's own name for a session you renamed; name is yours. */
+  originalName?: string;
   /** You asked to hear from this agent itself, even while Agentman speaks
    *  for the agents. */
   alerts?: boolean;
@@ -221,6 +238,7 @@ export type RequestType =
   | "answer_question"
   | "register_push"
   | "set_agent_alerts"
+  | "rename_session"
   | "open_server"
   | "close_server"
   | "stop_server"
@@ -245,6 +263,8 @@ export type RequestType =
   | "review_artifact"
   | "set_mode"
   | "set_model"
+  | "move_question"
+  | "close_question"
   | "list_commits"
   | "commit_files"
   | "commit_diff"
@@ -313,6 +333,8 @@ export interface Request {
   force?: boolean;
   /** An agent's own alerts on or off, on set_agent_alerts. */
   alerts?: boolean;
+  /** The question move_question goes to, from 1. */
+  step?: number;
   /** Chooses an option on answer_question. */
   optionKey?: string;
   optionKeys?: string[];
@@ -1559,6 +1581,7 @@ function isSession(value: unknown): value is Session {
     boundedString(value.kind, 64, true) &&
     boundedString(value.nativeId, 512, true) &&
     boundedString(value.name, 4096) &&
+    optionalBoundedString(value.originalName, 4096) &&
     boundedString(value.cwd, 64 * 1024) &&
     isOneOf(value.state, ["busy", "idle", "waiting_input", "ended"] as const) &&
     isOneOf(value.inject, ["api", "tmux", "hook", "none"] as const) &&
@@ -1642,6 +1665,14 @@ function isQuestion(value: unknown): value is Question {
   // answered safely from here. The question is still worth showing, and
   // rejecting it took the whole session list it arrived in.
   value.options ??= [];
+  // A form's steps the app can't read are dropped, not the question: it can
+  // still be answered, only not moved through.
+  if (value.steps !== undefined && !boundedArray(value.steps, 16, (step): step is QuestionStep =>
+    isRecord(step) && boundedString(step.title, 4096) &&
+    (step.answered === undefined || typeof step.answered === "boolean"))) delete value.steps;
+  if (value.step !== undefined && !(Number.isInteger(value.step) && (value.step as number) >= 0 && (value.step as number) <= 17)) delete value.step;
+  if (value.reviewStep !== undefined && typeof value.reviewStep !== "boolean") delete value.reviewStep;
+  if (value.closable !== undefined && typeof value.closable !== "boolean") delete value.closable;
   return boundedArray(value.options, 256, (option): option is QuestionOption =>
     isRecord(option) && boundedString(option.key, 4096, true) &&
     (option.withText === undefined || typeof option.withText === "boolean") &&

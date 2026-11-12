@@ -684,6 +684,18 @@ export default function SessionScreen() {
       icon: "search",
       onPress: () => setFinding((current) => current ?? { query: "", searched: null, matches: [], index: null }),
     });
+    // Inline rather than an alert: an alert raised as the menu's Modal closes
+    // is dismissed with it on iOS.
+    sessionMenuItems.push({
+      key: "rename",
+      label: "Rename",
+      icon: "edit-2",
+      disabled: !store.daemonOnline,
+      onPress: () => {
+        setRenameError("");
+        setRenaming(session.name);
+      },
+    });
     sessionMenuItems.push({
       key: "files",
       label: "Files & changes",
@@ -780,6 +792,25 @@ export default function SessionScreen() {
     warning: string;
   } | null>(null);
   const [switchError, setSwitchError] = useState("");
+  // The name being written, while the rename field is open; why the last
+  // rename failed, if it did.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameError, setRenameError] = useState("");
+  const [renameSaving, setRenameSaving] = useState(false);
+  const saveName = (name: string) => {
+    if (!session || renameSaving) return;
+    setRenameSaving(true);
+    setRenameError("");
+    void store.renameSession(session.id, name).then((problem) => {
+      setRenameSaving(false);
+      if (problem) {
+        const reason = problem.replace(/^daemon: /, "");
+        setRenameError(reason.charAt(0).toUpperCase() + reason.slice(1));
+        return;
+      }
+      setRenaming(null);
+    });
+  };
   useEffect(() => {
     setSwitchMenu(null);
     setSwitchConfirm(null);
@@ -1209,6 +1240,27 @@ export default function SessionScreen() {
             />
           </ContentColumn>
         ) : null}
+        {session && renaming !== null ? (
+          <ContentColumn>
+            <RenameNote
+              value={renaming}
+              ownName={session.originalName}
+              error={renameError}
+              saving={renameSaving}
+              disabled={!store.daemonOnline}
+              onChange={(text) => {
+                setRenaming(text);
+                setRenameError("");
+              }}
+              onCancel={() => {
+                setRenaming(null);
+                setRenameError("");
+              }}
+              onSave={() => saveName(renaming)}
+              onUseOwnName={() => saveName("")}
+            />
+          </ContentColumn>
+        ) : null}
         {switchConfirm ? (
           <ContentColumn>
             <SwitchConfirmNote
@@ -1593,6 +1645,8 @@ export default function SessionScreen() {
             <QuestionCard
               question={session.question}
               onAnswer={(answer) => store.answerQuestion(sessionId, answer)}
+              onMove={(step) => store.moveQuestion(sessionId, step)}
+              onClose={() => store.closeQuestion(sessionId)}
               disabled={!store.daemonOnline}
               submissionStatus={answerAction?.status}
               submissionError={answerAction?.error}
@@ -1731,6 +1785,95 @@ function ModelButton({
  * Confirms a model switch the CLI also saves as its default. The sentence
  * names the agent, because "the default" means nothing without saying whose.
  */
+/**
+ * A name of your own for this session, everywhere it shows: on the Mac,
+ * here and in Agentman's chat. The agent keeps its own; a renamed session
+ * offers it back.
+ */
+function RenameNote({
+  value,
+  ownName,
+  error,
+  saving,
+  disabled,
+  onChange,
+  onCancel,
+  onSave,
+  onUseOwnName,
+}: {
+  value: string;
+  ownName?: string;
+  error: string;
+  saving: boolean;
+  disabled: boolean;
+  onChange(text: string): void;
+  onCancel(): void;
+  onSave(): void;
+  onUseOwnName(): void;
+}) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const empty = value.trim().length === 0;
+  const blocked = disabled || saving;
+  return (
+    <View style={[styles.note, styles.switchConfirm]} accessibilityLiveRegion="polite">
+      <TextInput
+        style={styles.renameInput}
+        value={value}
+        onChangeText={onChange}
+        autoFocus
+        selectTextOnFocus
+        maxLength={80}
+        returnKeyType="done"
+        onSubmitEditing={() => {
+          if (!empty && !blocked) onSave();
+        }}
+        editable={!saving}
+        placeholder="Name this session"
+        placeholderTextColor={color.faint}
+        accessibilityLabel="Session name"
+      />
+      {error ? <Text style={styles.renameError}>{error}</Text> : null}
+      <View style={styles.switchConfirmButtons}>
+        {ownName ? (
+          <MotionPressable
+            onPress={onUseOwnName}
+            disabled={blocked}
+            style={[styles.renameOwn, blocked && styles.switchButtonDisabled]}
+            accessibilityRole="button"
+            accessibilityLabel={`Use the agent's own name, ${ownName}`}
+          >
+            <Text style={styles.renameOwnLabel} numberOfLines={1}>
+              Use “{ownName}”
+            </Text>
+          </MotionPressable>
+        ) : null}
+        <MotionPressable
+          onPress={onCancel}
+          style={[styles.switchButton, styles.switchButtonSecondary]}
+          accessibilityRole="button"
+        >
+          <Text style={styles.switchButtonLabel}>Cancel</Text>
+        </MotionPressable>
+        <MotionPressable
+          onPress={onSave}
+          disabled={empty || blocked}
+          style={[styles.switchButton, styles.switchButtonPrimary, (empty || blocked) && styles.switchButtonDisabled]}
+          accessibilityRole="button"
+          accessibilityLabel="Save the name"
+          accessibilityState={{ disabled: empty || blocked, busy: saving }}
+        >
+          {saving ? (
+            <ActivityIndicator size="small" color={color.onInverse} />
+          ) : (
+            <Text style={[styles.switchButtonLabel, styles.switchButtonLabelPrimary]}>Save</Text>
+          )}
+        </MotionPressable>
+      </View>
+    </View>
+  );
+}
+
 function SwitchConfirmNote({
   warning,
   value,
@@ -2493,6 +2636,19 @@ const makeSiteStyles = (c: Palette) =>
     // On its way: the value being switched to, in the working colour.
     switchPending: { color: c.workingText },
     switchConfirm: { flexDirection: "column", alignItems: "stretch", gap: space.sm },
+    renameInput: {
+      ...font.sans,
+      fontSize: size.body,
+      color: c.text,
+      minHeight: 40,
+      paddingHorizontal: space.md,
+      paddingVertical: 8,
+      borderRadius: radius.md,
+      backgroundColor: c.surface,
+    },
+    renameError: { ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.errorText },
+    renameOwn: { flexShrink: 1, minHeight: 36, justifyContent: "center", paddingHorizontal: space.sm, marginRight: "auto" },
+    renameOwnLabel: { ...font.sansMedium, fontSize: size.caption, color: c.muted },
     switchConfirmTop: { flexDirection: "row", alignItems: "center", gap: 10 },
     switchConfirmButtons: { flexDirection: "row", justifyContent: "flex-end", gap: space.sm },
     switchButton: {
@@ -2876,6 +3032,19 @@ const makeClassicStyles = (c: Palette) =>
     // On its way: the value being switched to, in the working colour.
     switchPending: { color: c.workingText },
     switchConfirm: { flexDirection: "column", alignItems: "stretch", gap: space.sm },
+    renameInput: {
+      ...font.sans,
+      fontSize: size.body,
+      color: c.text,
+      minHeight: 40,
+      paddingHorizontal: space.md,
+      paddingVertical: 8,
+      borderRadius: radius.md,
+      backgroundColor: c.surface,
+    },
+    renameError: { ...font.sans, fontSize: size.caption, lineHeight: scaled(18), color: c.errorText },
+    renameOwn: { flexShrink: 1, minHeight: 36, justifyContent: "center", paddingHorizontal: space.sm, marginRight: "auto" },
+    renameOwnLabel: { ...font.sansMedium, fontSize: size.caption, color: c.muted },
     switchConfirmTop: { flexDirection: "row", alignItems: "center", gap: 10 },
     switchConfirmButtons: { flexDirection: "row", justifyContent: "flex-end", gap: space.sm },
     switchButton: {

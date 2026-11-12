@@ -36,6 +36,20 @@ type Question struct {
 	// row is intentionally not exposed as a normal option; the app renders a
 	// text box instead.
 	Custom bool `json:"custom,omitempty"`
+	// Steps are the questions of Claude's multi-question form, from its tab
+	// strip ("←  ☐ Colour  ☒ Size  ✔ Submit  →"), each with whether it is
+	// answered. Step is the one on screen, from 1, and one past the last for
+	// the form's review; zero when it can't be told (the strip's plain text
+	// does not mark the current tab; the source finds it in the transcript).
+	Steps []Step `json:"steps,omitempty"`
+	Step  int    `json:"step,omitempty"`
+	// ReviewStep means the form has a review after its last question, as
+	// Claude's does (its Submit tab); Antigravity's submits from the last.
+	ReviewStep bool `json:"reviewStep,omitempty"`
+	// Closable means Esc closes it without an answer, which for a question
+	// the agent asked (not a permission prompt, where Esc says no) leaves the
+	// agent waiting for a message instead.
+	Closable bool `json:"-"`
 
 	// The remaining fields describe Claude's terminal layout. They are used to
 	// complete a multi-select form atomically, but are not part of the wire
@@ -63,6 +77,152 @@ type Question struct {
 	// permission prompt's "No" becomes "No, and tell Claude what to do
 	// differently".
 	AmendWithTab bool `json:"-"`
+}
+
+// Step is one question of a multi-question form.
+type Step struct {
+	Title    string `json:"title"`
+	Answered bool   `json:"answered,omitempty"`
+}
+
+// parseSteps reads Claude's tab strip: an arrow either side, a box before
+// each question (☐ unanswered, ☒ or ☑ answered) and ✔ before Submit. Nil for
+// any other line, and for a form of one question, which has nothing to move
+// between.
+func parseSteps(line string) []Step {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "←") || !strings.HasSuffix(line, "→") {
+		return nil
+	}
+	runes := []rune(strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "←"), "→")))
+	const marks = "☐☒☑✔"
+	var steps []Step
+	for i := 0; i < len(runes); {
+		mark := runes[i]
+		if !strings.ContainsRune(marks, mark) {
+			i++
+			continue
+		}
+		j := i + 1
+		for j < len(runes) && !strings.ContainsRune(marks, runes[j]) {
+			j++
+		}
+		if title := strings.TrimSpace(string(runes[i+1 : j])); mark != '✔' && title != "" {
+			steps = append(steps, Step{Title: title, Answered: mark != '☐'})
+		}
+		i = j
+	}
+	if len(steps) < 2 {
+		return nil
+	}
+	return steps
+}
+
+// CurrentStep is which of a form's questions is on screen, read from a
+// capture with its colours (tmux capture-pane -e): Claude draws the current
+// tab of its strip on a background, which plain text loses. From 1; one
+// past the last when Submit is the current tab; zero when there is no strip
+// or no tab is marked.
+func CurrentStep(styled string) int {
+	for _, line := range strings.Split(styled, "\n") {
+		plain, marked := unstyle(line)
+		text := strings.TrimSpace(string(plain))
+		if !strings.HasPrefix(text, "←") || !strings.HasSuffix(text, "→") {
+			continue
+		}
+		const marks = "☐☒☑✔"
+		tab := 0
+		for i := 0; i < len(plain); {
+			if !strings.ContainsRune(marks, plain[i]) {
+				i++
+				continue
+			}
+			j := i + 1
+			for j < len(plain) && !strings.ContainsRune(marks, plain[j]) && plain[j] != '→' {
+				j++
+			}
+			tab++
+			for k := i + 1; k < j; k++ {
+				if marked[k] && plain[k] != ' ' {
+					return tab
+				}
+			}
+			i = j
+		}
+		return 0
+	}
+	return 0
+}
+
+// unstyle takes the escape sequences out of a captured line, saying of each
+// character left whether it was drawn on a background (or reversed).
+func unstyle(line string) (plain []rune, marked []bool) {
+	runes := []rune(line)
+	on := false
+	for i := 0; i < len(runes); i++ {
+		if runes[i] != '\x1b' {
+			plain = append(plain, runes[i])
+			marked = append(marked, on)
+			continue
+		}
+		if i+1 >= len(runes) {
+			break
+		}
+		if runes[i+1] != '[' {
+			// Not a control sequence: OSC runs to BEL or ST; others are one
+			// more character.
+			if runes[i+1] == ']' {
+				for i += 2; i < len(runes) && runes[i] != '\a' && !(runes[i] == '\x1b' && i+1 < len(runes) && runes[i+1] == '\\'); i++ {
+				}
+				if i < len(runes) && runes[i] == '\x1b' {
+					i++
+				}
+			} else {
+				i++
+			}
+			continue
+		}
+		end := i + 2
+		for end < len(runes) && (runes[end] < 0x40 || runes[end] > 0x7e) {
+			end++
+		}
+		if end < len(runes) && runes[end] == 'm' {
+			on = backgroundAfter(on, string(runes[i+2:end]))
+		}
+		i = end
+	}
+	return plain, marked
+}
+
+// backgroundAfter is whether text is on a background after one SGR sequence.
+func backgroundAfter(on bool, params string) bool {
+	fields := strings.Split(params, ";")
+	for i := 0; i < len(fields); i++ {
+		switch code := fields[i]; code {
+		case "", "0", "49", "27":
+			on = false
+		case "7":
+			on = true
+		case "38", "48", "58":
+			if code == "48" {
+				on = true
+			}
+			// A colour's own numbers follow: 5;n or 2;r;g;b.
+			if i+1 < len(fields) {
+				switch fields[i+1] {
+				case "5":
+					i += 2
+				case "2":
+					i += 4
+				}
+			}
+		default:
+			if n, err := strconv.Atoi(code); err == nil && (n >= 40 && n <= 47 || n >= 100 && n <= 107) {
+				on = true
+			}
+		}
+	}
+	return on
 }
 
 // Option is one selectable answer.
@@ -574,6 +734,8 @@ func detectMenu(lines []string) *Question {
 			// there promotes an unrelated line of transcript into a heading.
 			if bounded {
 				q.Title = cleanTitle(rest[len(rest)-1])
+				q.Steps = parseSteps(rest[len(rest)-1])
+				q.ReviewStep = q.Steps != nil
 				body = append([]string(nil), rest[:len(rest)-1]...)
 			}
 			// Restore top-down order for the detail.
@@ -788,6 +950,16 @@ func populateReviewContext(q *Question, lines []string, first int) {
 	q.Title = "Review your answers"
 	if titleIndex < 0 {
 		titleIndex = len(context)
+	}
+	// The tab strip above the review: every question, and this is the step
+	// past the last.
+	for _, line := range context[min(titleIndex+1, len(context)):] {
+		if steps := parseSteps(line); steps != nil {
+			q.Steps = steps
+			q.Step = len(steps) + 1
+			q.ReviewStep = true
+			break
+		}
 	}
 	body := append([]string(nil), context[1:titleIndex]...)
 	for len(body) > 0 && body[0] == "" {

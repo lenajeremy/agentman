@@ -30,7 +30,7 @@ struct LanguagesSettings: View {
                             Toggle("", isOn: Binding(get: { !state.noDownloads },
                                                      set: { change(LanguageChange(noDownloads: !$0)) }))
                                 .labelsHidden()
-                                .toggleStyle(.switch)
+                                .toggleStyle(.appSwitch)
                         }
                     }
                     SettingsSection(title: "Servers") {

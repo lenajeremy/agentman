@@ -66,6 +66,11 @@ const (
 	ReqSendQueued RequestType = "send_queued"
 	// ReqAnswer selects an option in a pending question.
 	ReqAnswer RequestType = "answer_question"
+	// ReqMoveQuestion goes to another question of a multi-question form,
+	// Step (from 1; one past the last is its review), without answering.
+	ReqMoveQuestion RequestType = "move_question"
+	// ReqCloseQuestion closes a Closable question without answering it.
+	ReqCloseQuestion RequestType = "close_question"
 	// ReqRegisterPush hands the daemon an Expo push token so it can reach the
 	// phone once iOS has suspended the app and the websocket is gone. Additive:
 	// a daemon that predates it rejects the type and the app carries on with
@@ -238,6 +243,8 @@ type Request struct {
 	// selections or a custom response. OptionKey remains the terminal-menu path.
 	OptionKeys []string `json:"optionKeys,omitempty"`
 	AnswerText string   `json:"answerText,omitempty"`
+	// Step is the question ReqMoveQuestion goes to.
+	Step int `json:"step,omitempty"`
 	// Stop ends the turn under way before ReqReleaseSession lets go.
 	Stop bool `json:"stop,omitempty"`
 	// ClientID is echoed on SendResult so the app can settle its optimistic
