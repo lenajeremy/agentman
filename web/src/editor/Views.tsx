@@ -2,7 +2,7 @@
 // NonTextView and MarkdownPreview, with Design/MarkdownView.swift's look).
 
 import { Fragment, useMemo, type ReactNode } from "react";
-import { Code, FileQuestion, FolderSearch } from "lucide-react";
+import { CodeXml, FileQuestion, FolderSearch } from "lucide-react";
 import { parseDocument, type Block, type Inline, type Picture } from "@shared/markdown";
 import { Icon } from "../ui";
 import { openPath, openURL } from "../host";
@@ -34,7 +34,7 @@ export function EditorEmpty({ store }: { store: EditorStore }) {
     <div className="editor-empty">
       <div className="empty-head">
         <span className="empty-icon">
-          <Icon icon={Code} sf="chevron.left.forwardslash.chevron.right" size={26} weight="regular" />
+          <Icon icon={CodeXml} sf="chevron.left.forwardslash.chevron.right" size={26} weight="regular" />
         </span>
         <span className="empty-name">{store.name}</span>
         <span className="empty-path">{paths.tilde(store.root, store.home)}</span>

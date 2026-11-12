@@ -3,7 +3,8 @@
 // in the middle (truncationMode(.middle)).
 
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { parseMarkdown, type Inline } from "@shared/markdown";
+import { parseMarkdown, safeHref, type Inline } from "@shared/markdown";
+import { openURL } from "../host";
 
 function inline(nodes: Inline[], key = ""): ReactNode[] {
   return nodes.map((node, i) => {
@@ -20,7 +21,16 @@ function inline(nodes: Inline[], key = ""): ReactNode[] {
         return <em key={k}>{inline(node.children, k)}</em>;
       case "strike":
         return <s key={k}>{inline(node.children, k)}</s>;
-      case "link":
+      case "link": {
+        // In the link colour, opened by a click, as SwiftUI's Text has it;
+        // the card under it isn't clicked as well.
+        const href = safeHref(node.href);
+        return href ? (
+          <a key={k} className="inline-link" href={href} onClick={(e) => { e.preventDefault(); e.stopPropagation(); void openURL(href); }}>
+            {inline(node.children, k)}
+          </a>
+        ) : <span key={k}>{inline(node.children, k)}</span>;
+      }
       case "file":
         return <span key={k}>{inline(node.children, k)}</span>;
       case "break":

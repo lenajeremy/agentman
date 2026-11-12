@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  Bell, Book, Braces, Circle, Code, History, Key, ListFilter, MessageSquareText, MessagesSquare, Pencil, Settings, ShieldCheck, Sparkles,
+  Bell, Book, Braces, Circle, CodeXml, History, Key, ListFilter, MessageSquareText, MessagesSquare, Pencil, Settings, ShieldCheck, Sparkles,
   SquarePen, SquareTerminal, ChartSpline, QrCode, Smartphone, type LucideIcon,
 } from "lucide-react";
 import type { Session } from "@shared/protocol";
@@ -127,7 +127,7 @@ function Palette({ editor }: { editor?: EditorStore }) {
     // The agent open now, first; not over an editor, which has its own.
     const open = editor ? undefined : route.kind === "agent" ? sessions.find((s) => s.id === route.id) ?? pastSessions.find((s) => s.id === route.id) : undefined;
     if (open) {
-      list.push({ item: { id: "here-editor", title: `Open ${open.name}'s Folder in the Editor`, icon: "chevron.left.forwardslash.chevron.right", lucide: Code }, run: () => void openEditor({ folder: open.cwd }) });
+      list.push({ item: { id: "here-editor", title: `Open ${open.name}'s Folder in the Editor`, icon: "chevron.left.forwardslash.chevron.right", lucide: CodeXml }, run: () => void openEditor({ folder: open.cwd }) });
       list.push({ item: { id: "here-terminal", title: `Open a Terminal for ${open.name}`, icon: "terminal", lucide: SquareTerminal }, run: () => showTerminal(open.cwd) });
       list.push({ item: { id: "here-rename", title: `Rename ${open.name}…`, icon: "pencil", lucide: Pencil }, run: () => setShell({ renaming: open.id }) });
     }
@@ -162,14 +162,14 @@ function Palette({ editor }: { editor?: EditorStore }) {
     }
     list.push({ item: { id: "filter:all", title: "Show All Agents", icon: "line.3.horizontal.decrease", lucide: ListFilter }, keywords: "filter clear", run: () => inMain("agentman://filter/all", () => setShell({ stateFilter: null, folderFilter: null })) });
     list.push({
-      item: { id: "open-folder", title: "Open a Folder in the Editor…", icon: "chevron.left.forwardslash.chevron.right", lucide: Code, shortcut: "⌘O" },
+      item: { id: "open-folder", title: "Open a Folder in the Editor…", icon: "chevron.left.forwardslash.chevron.right", lucide: CodeXml, shortcut: "⌘O" },
       run: () => void pickFolder("Choose a folder to open in the editor", cachedHome()).then((folder) => {
         if (folder) void openEditor({ folder });
       }),
     });
     for (const folder of folders.slice(0, 8)) {
       const name = base(folder.path);
-      list.push({ item: { id: "editor:" + folder.path, title: `Open ${name} in the Editor`, detail: tilde(folder.path), icon: "chevron.left.forwardslash.chevron.right", lucide: Code }, keywords: folder.path, run: () => void openEditor({ folder: folder.path }) });
+      list.push({ item: { id: "editor:" + folder.path, title: `Open ${name} in the Editor`, detail: tilde(folder.path), icon: "chevron.left.forwardslash.chevron.right", lucide: CodeXml }, keywords: folder.path, run: () => void openEditor({ folder: folder.path }) });
       list.push({ item: { id: "terminal:" + folder.path, title: `Open a Terminal in ${name}`, detail: tilde(folder.path), icon: "terminal", lucide: SquareTerminal }, keywords: `${folder.path} shell`, run: () => void openEditor({ folder: folder.path, terminal: true }) });
     }
     list.push({ item: { id: "settings", title: "Settings", icon: "gearshape", lucide: Settings, shortcut: "⌘," }, run: () => void openSettings() });

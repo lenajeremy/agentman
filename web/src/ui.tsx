@@ -119,6 +119,21 @@ export function AppIcon({ size }: { size: number }) {
   );
 }
 
+/** SF Symbols' exclamationmark.circle.fill: a filled circle with the mark
+ *  cut out of it, where Lucide's CircleAlert is an outline. */
+export const CircleAlertFilled = createLucideIcon("circle-alert-filled", [
+  ["path", {
+    d: "M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20zM10.9 7.1a1.1 1.1 0 0 1 2.2 0v5.6a1.1 1.1 0 0 1-2.2 0zM12 15.2a1.35 1.35 0 1 0 0 2.7a1.35 1.35 0 1 0 0-2.7z",
+    fill: "currentColor", stroke: "none", fillRule: "evenodd", key: "mark",
+  }],
+]);
+
+/** SF Symbols' plus.forwardslash.minus as a Lucide icon, for a button that
+ *  takes one: the Board's Review. */
+export const PlusSlashMinusIcon = createLucideIcon("plus-forwardslash-minus", [
+  ["path", { d: "M7 3.5v7M3.5 7h7M16.5 4.5 7.5 19.5M13.5 17h7", key: "marks" }],
+]);
+
 /** SF Symbols' plus.forwardslash.minus, which Lucide has no match for. */
 export function PlusSlashMinus({ size = 14 }: { size?: number }) {
   return (

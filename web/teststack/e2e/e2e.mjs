@@ -1255,7 +1255,7 @@ async function threadMore() {
 async function boardMore() {
   await check("board: checks and missions (faked)", async () => {
     const page = await open("", { init: [fake("board")], wait: ".board-card" });
-    await until(page, () => { const t = document.querySelector(".board")?.innerText ?? document.body.innerText; return t.includes("Ship transcript search on every app") && t.includes("All 214 tests pass") && t.includes("Something looks off"); }, null, "the mission and both checks");
+    await until(page, () => { const t = (document.querySelector(".board")?.innerText ?? document.body.innerText).replace(/\u00a0/g, " "); return t.includes("Ship transcript search on every app") && t.includes("All 214 tests pass") && t.includes("Something looks off"); }, null, "the mission and both checks");
   });
 }
 

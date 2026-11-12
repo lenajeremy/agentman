@@ -7,7 +7,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useKeyboardBack } from "../palette/PaletteView";
 import {
-  BadgeCheck, ChevronDown, CircleArrowUp, CircleCheck, CircleX as XCircle, Palette, Search, Check, CircleAlert, Circle, CircleX, Clock, Code, Diff, EyeOff, Ellipsis, FileText, Globe, MessagesSquare, MessageSquarePlus,
+  BadgeCheck, ChevronDown, CircleArrowUp, CircleCheck, CircleX as XCircle, Palette, Search, Check, Circle, CircleX, Clock, Code, CodeXml, EyeOff, Ellipsis, FileText, Globe, MessagesSquare, MessageSquarePlus,
   Plus, SquarePen, TriangleAlert, X,
 } from "lucide-react";
 import type { ManagerCard, ManagerEntry, Mission, Question, SearchHit, Session, Verification } from "@shared/protocol";
@@ -50,6 +50,8 @@ import { agentColor, COLOR_BY, useColorBy } from "./colors";
 import { boardSearch, openHit, searchDetail, searchHeadline, useMessageHits, type BoardSearch } from "./search";
 import { saveSettings } from "../settings/state";
 import "../styles/board.css";
+import { InlineMarkdown } from "../manager/text";
+import { CircleAlertFilled, PlusSlashMinusIcon } from "../ui";
 
 /** Agentman's conversation, beside the columns. */
 const CHAT_WIDTH = 380;
@@ -278,7 +280,7 @@ function BoardColumn({ kind, sessions, outlined, found, offers = [], missions = 
     <section className="board-column">
       <div className="board-column-head">
         <span className="board-column-glyph">
-          {kind === "needsYou" && !quiet ? <Icon icon={CircleAlert} sf="exclamationmark.circle.fill" size={13} className="needs" />
+          {kind === "needsYou" && !quiet ? <Icon icon={CircleAlertFilled} sf="exclamationmark.circle.fill" size={13} className="needs" />
             : kind === "working" && !quiet ? <Loader size={11} />
             : <Icon icon={Circle} sf="circle" size={13} className="faint" />}
         </span>
@@ -483,13 +485,13 @@ function Idle({ session, said }: { session: Session; said?: string }) {
   const showsGit = !!run || (!!state && action.kind !== "idle");
   const id = session.id;
   const opening = state && state.changes > 0
-    ? [{ title: state.changes === 1 ? "Review 1 file" : `Review ${state.changes} files`, icon: Diff, sf: "plus.forwardslash.minus", onClick: () => {
+    ? [{ title: state.changes === 1 ? "Review 1 file" : `Review ${state.changes} files`, icon: PlusSlashMinusIcon, sf: "plus.forwardslash.minus", onClick: () => {
         showPanel("diff");
         openAgent(id);
       } }]
     : [];
   const elsewhere: { title: string; icon: typeof Code; sf: string; onClick: () => void }[] = [];
-  if (session.cwd) elsewhere.push({ title: "View", icon: Code, sf: "chevron.left.forwardslash.chevron.right", onClick: () => void openEditor({ folder: session.cwd }) });
+  if (session.cwd) elsewhere.push({ title: "View", icon: CodeXml, sf: "chevron.left.forwardslash.chevron.right", onClick: () => void openEditor({ folder: session.cwd }) });
   const documents = session.artifactsToReview ?? 0;
   if (documents > 0) {
     elsewhere.push({ title: documents === 1 ? "Review document" : `Review ${documents} documents`, icon: FileText, sf: "doc.text", onClick: () => {
@@ -544,9 +546,9 @@ function BoardCheck({ check }: { check: Verification }) {
           {good ? <BadgeCheck size={11} /> : check.state === "concerns" ? <TriangleAlert size={10} />
             : check.state === "failed" ? <CircleX size={11} /> : <Loader size={10} />}
         </span>
-        <span className="board-check-words">{inline(words)}</span>
+        <span className="board-check-words"><InlineMarkdown text={words} /></span>
       </div>
-      {(check.issues ?? []).map((issue) => <div key={issue} className="board-check-issue">{inline(issue)}</div>)}
+      {(check.issues ?? []).map((issue) => <div key={issue} className="board-check-issue"><InlineMarkdown text={issue} /></div>)}
       {check.sentBack && <div className="board-check-issue muted">Sent back for it to fix</div>}
     </div>
   );
@@ -559,15 +561,10 @@ function BoardText({ text, lines }: { text: string; lines: number }) {
   const long = text.length > lines * 58;
   return (
     <div className="board-text-wrap">
-      <div className="board-text" style={open ? undefined : { WebkitLineClamp: lines }} title={open ? undefined : text}>{inline(text)}</div>
+      <div className="board-text" style={open ? undefined : { WebkitLineClamp: lines }} title={open ? undefined : text}><InlineMarkdown text={text} /></div>
       {long && <button className="board-more" onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}
     </div>
   );
-}
-
-/** Markdown's inline marks taken off, as CompactCard.inline does. */
-function inline(text: string): string {
-  return text.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/(^|\W)[*_]([^*_]+)[*_](?=\W|$)/g, "$1$2").replace(/`([^`]+)`/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
 }
 
 function Step({ step }: { step: BoardStep }) {
@@ -756,7 +753,7 @@ function HandledPanel({ anchor, entries, close }: { anchor: HTMLElement | null; 
       <div className="board-popover-title">Approved for you today</div>
       {entries.map((entry) => (
         <div key={entry.id} className="board-handled-row">
-          <span className="board-handled-text">{inline(entry.text)}</span>
+          <span className="board-handled-text"><InlineMarkdown text={entry.text} /></span>
           {entry.approved && (
             <button className="board-handled-ask" disabled={asked.has(entry.id)} onClick={() => void alwaysAsk(entry)}>
               {asked.has(entry.id) ? "Will ask" : "Ask next time"}
