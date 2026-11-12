@@ -164,9 +164,9 @@ export function KnowledgePage() {
               <Checkbox
                 on={draft.always}
                 onChange={(always) => setDraft({ ...draft, always })}
-                title="Agentman writes it into CLAUDE.md or AGENTS.md when you ask it to update an agent's instructions."
+                title="Agentman puts it in each agent's own instructions, including agents already running."
               >
-                In project instructions
+                Every agent follows this
               </Checkbox>
             )}
           </div>
