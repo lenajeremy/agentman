@@ -119,6 +119,13 @@ export function AppIcon({ size }: { size: number }) {
   );
 }
 
+/** SF Symbols' circle.inset.filled: a ring round a large filled disc, where
+ *  Lucide's CircleDot has a small dot. A modified file's mark in a diff. */
+export const CircleInsetFilled = createLucideIcon("circle-inset-filled", [
+  ["circle", { cx: "12", cy: "12", r: "10", key: "ring" }],
+  ["circle", { cx: "12", cy: "12", r: "6.5", fill: "currentColor", stroke: "none", key: "disc" }],
+]);
+
 /** SF Symbols' exclamationmark.circle.fill: a filled circle with the mark
  *  cut out of it, where Lucide's CircleAlert is an outline. */
 export const CircleAlertFilled = createLucideIcon("circle-alert-filled", [

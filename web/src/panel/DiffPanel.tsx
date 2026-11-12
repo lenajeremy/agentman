@@ -6,7 +6,7 @@
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowDownUp, Check, ChevronDown, ChevronLeft, ChevronRight, CircleDot, CircleMinus, CirclePlus, CircleArrowRight, Copy,
+  ArrowDownUp, Check, ChevronDown, ChevronLeft, ChevronRight, CircleMinus, CirclePlus, CircleArrowRight, Copy,
   CornerDownLeft, FoldVertical, ListTree, Pilcrow, Rows2, Columns2, UnfoldVertical, X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -14,7 +14,7 @@ import type { Session, WorkspaceChange, WorkspaceCommit } from "@shared/protocol
 import { openEditor, reveal } from "../host";
 import { usePref } from "../prefs";
 import { contextMenu, menuUnder } from "../thread/menu";
-import { Icon } from "../ui";
+import { CircleInsetFilled, Icon } from "../ui";
 import { workspace } from "../workspace/api";
 import { Spinner } from "../workspace/Loaded";
 import { fileManager } from "../workspace/place";
@@ -41,7 +41,7 @@ const TREE_WIDTH = 196;
 const EVERY = 2500;
 
 const STATUS_ICON: Record<string, LucideIcon> = {
-  "plus.circle": CirclePlus, "minus.circle": CircleMinus, "arrow.right.circle": CircleArrowRight, "circle.inset.filled": CircleDot,
+  "plus.circle": CirclePlus, "minus.circle": CircleMinus, "arrow.right.circle": CircleArrowRight, "circle.inset.filled": CircleInsetFilled,
 };
 
 function layout(text: string, truncated: boolean, opened: Set<number>, file?: string[]): FileDiff {
