@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  Bell, Book, Braces, Circle, Code, Contrast, History, Key, ListFilter, MessageSquareText, MessagesSquare, Pencil, Settings, ShieldCheck, Sparkles,
+  Bell, Book, Braces, Circle, Code, History, Key, ListFilter, MessageSquareText, MessagesSquare, Pencil, Settings, ShieldCheck, Sparkles,
   SquarePen, SquareTerminal, ChartSpline, QrCode, Smartphone, type LucideIcon,
 } from "lucide-react";
 import type { Session } from "@shared/protocol";
@@ -24,6 +24,7 @@ import { askAgentman, useAgentmanOn } from "../shell/agentman";
 import { cachedHome } from "../shell/native";
 import { loadFolders, setShell, useShell, type FilterState } from "../shell/state";
 import { useStore } from "../store";
+import { CircleLeftHalfFilled } from "../ui";
 import { fuzzyScore } from "./fuzzy";
 import { PaletteView, type PaletteItem } from "./PaletteView";
 
@@ -177,7 +178,7 @@ function Palette({ editor }: { editor?: EditorStore }) {
       list.push({ item: { id: "settings:" + page.id, title: `Settings: ${page.title}`, icon: page.icon, lucide: page.lucide }, keywords: "preferences", run: () => void openSettings(page.id) });
     }
     for (const [value, title] of [["light", "Use the Light Appearance"], ["dark", "Use the Dark Appearance"], ["system", "Match the Mac's Appearance"]]) {
-      list.push({ item: { id: "appearance:" + value, title, icon: "circle.lefthalf.filled", lucide: Contrast }, keywords: "theme mode", run: () => setPref("appearance", value) });
+      list.push({ item: { id: "appearance:" + value, title, icon: "circle.lefthalf.filled", lucide: CircleLeftHalfFilled }, keywords: "theme mode", run: () => setPref("appearance", value) });
     }
     return list;
   }

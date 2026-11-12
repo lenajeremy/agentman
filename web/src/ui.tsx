@@ -3,10 +3,17 @@
 // in for SF Symbols (Lucide, drawn at SF's weights).
 
 import { useState, type ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
+import { createLucideIcon, type LucideIcon } from "lucide-react";
 import type { Session } from "@shared/protocol";
 import { fileURL } from "./editor/fs";
 import { initials } from "./labels";
+
+/** SF Symbols' circle.lefthalf.filled, which Lucide lacks (its Contrast
+ *  fills a smaller half inside): the appearance switch's mark. */
+export const CircleLeftHalfFilled = createLucideIcon("circle-left-half-filled", [
+  ["circle", { cx: "12", cy: "12", r: "10", key: "ring" }],
+  ["path", { d: "M12 2a10 10 0 0 0 0 20z", fill: "currentColor", key: "half" }],
+]);
 
 type Weight = "regular" | "medium" | "semibold" | "bold";
 
@@ -48,13 +55,15 @@ export function ChromeButton({ icon, sf, glyph, active, title, onClick }: { icon
 const TEMPLATE = new Set(["codex", "cursor", "cursor-cli", "opencode", "grok"]);
 const KNOWN = new Set(["claude", "kiro", "gemini", "antigravity", "muse", ...TEMPLATE]);
 
-export function AgentMark({ kind, size }: { kind: string; size: number }) {
+/** muted: grey with the rest of an archived row, the logo's shape in the
+ *  faint grey (AgentMark's template rendering). */
+export function AgentMark({ kind, size, muted = false }: { kind: string; size: number; muted?: boolean }) {
   if (!KNOWN.has(kind)) {
-    return <span className="mark mark-none" style={{ width: size, height: size, fontSize: size * 0.75 }}>›_</span>;
+    return <span className={`mark mark-none${muted ? " muted" : ""}`} style={{ width: size, height: size, fontSize: size * 0.75 }}>›_</span>;
   }
   const src = `/assets/agents/${kind}.${kind === "antigravity" ? "png" : "svg"}`;
-  if (TEMPLATE.has(kind)) {
-    return <span className="mark mark-template" style={{ width: size, height: size, WebkitMaskImage: `url(${src})`, maskImage: `url(${src})` }} />;
+  if (TEMPLATE.has(kind) || muted) {
+    return <span className={`mark mark-template${muted ? " muted" : ""}`} style={{ width: size, height: size, WebkitMaskImage: `url(${src})`, maskImage: `url(${src})` }} />;
   }
   return <img className="mark" src={src} width={size} height={size} alt="" />;
 }
@@ -120,5 +129,17 @@ export function Row({ gap, children, className, style }: { gap: number; children
     <div className={`hstack ${className ?? ""}`} style={{ gap, ...style }}>
       {children}
     </div>
+  );
+}
+
+/** A row of choices, one of them chosen (UsageView.swift's Segments): the
+ *  Usage page's ranges and the sidebar filter's. */
+export function Segments<T extends string | number | null>({ options, value, title, onChange }: { options: T[]; value: T; title: (v: T) => string; onChange: (v: T) => void }) {
+  return (
+    <span className="segments">
+      {options.map((o) => (
+        <button key={String(o)} className={o === value ? "chosen" : ""} aria-pressed={o === value} onClick={() => onChange(o)}>{title(o)}</button>
+      ))}
+    </span>
   );
 }

@@ -24,9 +24,6 @@
 .usage-link { font-size: 13px; color: var(--accent, #0a7aff); }
 .usage-heading { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); }
 
-.segments { display: inline-flex; gap: 2px; padding: 2px; border-radius: 7px; background: var(--fill); }
-.segments button { height: 22px; padding: 0 9px; border-radius: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; }
-.segments button.chosen { color: var(--text); font-weight: 500; background: var(--surface); box-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.1); }
 
 .spend { display: flex; flex-direction: column; gap: 34px; }
 .spend section { display: flex; flex-direction: column; gap: 12px; }

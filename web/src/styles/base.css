@@ -66,6 +66,8 @@ input, textarea { font: inherit; color: inherit; }
 .mark { display: inline-block; flex: none; object-fit: contain; }
 .sf { display: inline-block; flex: none; background-color: currentColor; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; }
 .mark-template { background: var(--text); -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; }
+.mark-template.muted { background: var(--faint); }
+.mark-none.muted { color: var(--faint); }
 .mark-none { color: var(--muted); font-family: var(--mono); font-weight: 500; line-height: 1; display: inline-grid; place-items: center; }
 .app-icon-frame { flex: none; display: grid; place-items: center; }
 .app-icon { border-radius: 22%; display: block; }
@@ -77,3 +79,8 @@ input, textarea { font: inherit; color: inherit; }
 .loader { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--working); border-right-color: transparent; animation: spin 0.8s linear infinite; display: inline-block; }
 .loader.small { width: 11px; height: 11px; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* A row of choices (UsageView.swift's Segments). */
+.segments { display: inline-flex; gap: 2px; padding: 2px; border-radius: 7px; background: var(--fill); }
+.segments button { height: 22px; padding: 0 9px; border-radius: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.segments button.chosen { color: var(--text); font-weight: 500; background: var(--surface); box-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.1); }

@@ -215,7 +215,7 @@ const keyboardIn = (page) => page.evaluate(() => document.activeElement?.classNa
 async function shell() {
   await check("shell: signed in, connected, every agent listed", async () => {
     const page = await open(`agent=${ID.bugs}`);
-    await until(page, () => document.querySelector(".sidebar-footer")?.innerText.includes("Connected"), null, "the footer says Connected");
+    await until(page, () => /^Mac connected · am /.test(document.querySelector(".sidebar-footer")?.innerText ?? ""), null, "the footer says Mac connected, with am serve's version");
     const agents = await until(page, () => document.querySelectorAll(".sidebar .agent-line1").length >= 8 && document.querySelectorAll(".sidebar .agent-line1").length, null, "eight agents or more");
     expect(agents >= 8, `${agents} agents`);
   });
@@ -632,7 +632,7 @@ async function connection() {
     execSync(`pkill -f "${T}/am serve"`);
     await until(page, () => !!document.querySelector(".connection-banner") && document.querySelector(".message-field")?.dataset.placeholder === "Can't send while Agentman isn't connected", null, "the banner, and the box can't send", 15000);
     execFileSync(`${HERE}restart.sh`);
-    await until(page, () => !document.querySelector(".connection-banner") && document.querySelector(".sidebar-footer").innerText.includes("Connected"), null, "connected again", 20000);
+    await until(page, () => !document.querySelector(".connection-banner") && /^Mac connected/.test(document.querySelector(".sidebar-footer").innerText), null, "connected again", 20000);
     const file = execSync(`ls "${H}/.claude/projects/"*demo*/*.jsonl | head -1`, { encoding: "utf8" }).trim();
     const before = readFileSync(file, "utf8");
     const lines = before.trim().split("\n");
@@ -979,24 +979,39 @@ async function generalPage() {
 // MARK: - The sidebar's filters, and the summary for coming back
 
 async function filtersAndAway() {
-  const item = (page, title) => page.locator(".page-menu-item").filter({ hasText: new RegExp(`^\\s*(✓\\s*)?${title}\\s+\\d+\\s*$`) }).first().click({ timeout: 8000 });
-  await check("sidebar: the filter shows one state, then one folder, each undone with its ×", async () => {
+  await check("sidebar: the filter's panel shows one state, then any folder chosen, each undone with its ×", async () => {
     // On an agent's page: the Board keeps the sidebar folded away.
     const page = await open(`agent=${ID.bugs}`, { init: [fake("question")], wait: ".sidebar .agent-row" });
-    await until(page, () => { const n = [...document.querySelectorAll(".sidebar .agent-row:not(.earlier) .agent-line2 .name")].map((e) => e.innerText.trim()); return n.length >= 6 && n.includes("pick"); }, null, "every agent");
+    await until(page, () => { const n = [...document.querySelectorAll(".sidebar .agent-row:not(.earlier) .agent-name")].map((e) => e.innerText.trim()); return n.length >= 6 && n.includes("pick"); }, null, "every agent");
     const count = await page.evaluate(() => document.querySelectorAll(".sidebar .agent-row:not(.earlier)").length);
     await click(page, ".filter-button");
-    await item(page, "Needs you");
-    await until(page, () => { const n = [...document.querySelectorAll(".sidebar .agent-row:not(.earlier) .agent-line2 .name")].map((e) => e.innerText.trim()); return n.length === 1 && n[0] === "pick"; }, null, "only pick, who needs you");
+    await until(page, () => [...document.querySelector(".filter-panel .segments").querySelectorAll("button")].map((b) => b.innerText).join("|").match(/^All\|Needs you 1\|Working( \d+)?\|Idle \d+$/), null, "Show: All, Needs you 1, Working, Idle n");
+    await page.locator(".filter-panel .segments button", { hasText: /^Needs you/ }).click();
+    await until(page, () => { const n = [...document.querySelectorAll(".sidebar .agent-row:not(.earlier) .agent-name")].map((e) => e.innerText.trim()); return n.length === 1 && n[0] === "pick"; }, null, "only pick, who needs you");
+    await page.keyboard.press("Escape");
+    await until(page, () => !document.querySelector(".filter-panel"), null, "the panel closed by Escape");
     expect((await page.evaluate(() => document.querySelector(".active-filters")?.innerText.trim())) === "Needs you", "the Needs you token");
     await click(page, ".filter-token");
     await until(page, (c) => document.querySelectorAll(".sidebar .agent-row:not(.earlier)").length === c && !document.querySelector(".active-filters"), count, "every agent again");
+    // Any folder, from the page's own folder picker: Go to the folder, Show.
     await click(page, ".filter-button");
-    await item(page, "shots");
-    await until(page, () => { const n = [...document.querySelectorAll(".sidebar .agent-row:not(.earlier) .agent-line2 .name")].map((e) => e.innerText.trim()); return n.length === 1 && n[0] === "shots"; }, null, "only the shots folder's agent");
-    expect((await page.evaluate(() => document.querySelector(".active-filters")?.innerText.trim())) === "shots", "the shots token");
-    await click(page, ".filter-token");
-    await until(page, (c) => document.querySelectorAll(".sidebar .agent-row:not(.earlier)").length === c, count, "every agent again");
+    await page.locator(".filter-row", { hasText: "Choose a folder…" }).click();
+    await page.waitForSelector(".op-panel", { timeout: 8000 });
+    expect(!(await page.locator(".filter-panel").count()), "the panel stayed behind the folder picker");
+    await page.keyboard.press("Meta+Shift+g");
+    await page.waitForSelector(".op-ask input", { timeout: 8000 });
+    await page.keyboard.type(`${H}/projects/shots`);
+    await page.keyboard.press("Enter");
+    await until(page, () => (document.querySelector(".op-where")?.innerText ?? "").includes("shots"), null, "in the shots folder");
+    await click(page, ".op-button.default", "Show");
+    try {
+      await until(page, () => { const n = [...document.querySelectorAll(".sidebar .agent-row:not(.earlier) .agent-name")].map((e) => e.innerText.trim()); return n.length === 1 && n[0] === "shots"; }, null, "only the shots folder's agent");
+      expect((await page.evaluate(() => document.querySelector(".active-filters")?.innerText.trim())) === "shots", "the shots token");
+      await click(page, ".filter-token");
+      await until(page, (c) => document.querySelectorAll(".sidebar .agent-row:not(.earlier)").length === c, count, "every agent again");
+    } finally {
+      await page.evaluate(() => localStorage.removeItem("agentman.chosenFolders"));
+    }
   });
 
   await check("away: the summary since an hour ago lists who was busy, closes on Escape, comes back from ⌘K, and opens an agent", async () => {

@@ -8,23 +8,23 @@ import { Snippet } from "./board/parts";
 import { openHit } from "./board/search";
 import { agentColor, useColorBy } from "./board/colors";
 import { confirmEnd, endable } from "./AgentHeader";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { ChevronRight, Contrast, Folder as FolderIcon, Globe, ListFilter, PanelLeft, Search, Sparkles, SquarePen, X, ChartSpline } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { ChevronRight, Folder as FolderIcon, ListFilter, PanelLeft, Search, Sparkles, SquarePen, X, ChartSpline } from "lucide-react";
 import type { SearchHit, Session } from "@shared/protocol";
-import { folderLabel, since } from "./labels";
 import { useManagerSummary } from "./manager/summary";
 import { openAgent, openAgentman, openNewAgent, useRoute, openUsage } from "./nav";
 import { isMuted, setMuted } from "./notify/policy";
 import { usePref, setPref } from "./prefs";
 import { useAgentmanOn } from "./shell/agentman";
-import { Loader } from "./shell/Loader";
+import { AgentRow } from "./shell/AgentRow";
+import { FilterPanel } from "./shell/FilterPanel";
+import { useServerSystem } from "./shell/system";
 import { Sym } from "./shell/Sym";
-import { Truncated } from "./shell/Truncated";
 import { archive, filterState, inFolder, isArchived, makeSections, pin, shownInOrder, unarchive, unpin, useChoices, type Choices } from "./shell/sections";
 import { ask, loadFolders, setShell, useShell, type FilterState } from "./shell/state";
 import { refreshBranches, useStatus, useStore } from "./store";
 import { contextMenu, menuUnder, type MenuEntry } from "./thread/menu";
-import { AgentMark, AppIcon, ChromeButton, FolderMark, Icon, Spacer } from "./ui";
+import { AppIcon, ChromeButton, CircleLeftHalfFilled, Icon, Spacer } from "./ui";
 import "./styles/sidebar.css";
 
 export const SIDEBAR_DEFAULT = 256;
@@ -131,8 +131,8 @@ export function Sidebar({ width, headerLeading }: { width: number; headerLeading
           <span className="search-icon"><Icon icon={Search} sf="magnifyingglass" size={12} /></span>
           <input
             id="search"
-            aria-label="Search agents"
-            placeholder="Search agents"
+            aria-label="Search agents and messages"
+            placeholder="Search"
             spellCheck={false}
             value={shell.search}
             onChange={(e) => setShell({ search: e.target.value })}
@@ -273,7 +273,9 @@ function AgentButton({ session, branch, selected, inList, earlier, choices, live
     });
     contextMenu(e, entries);
   }
-  const tint = agentColor(session, colorBy);
+  // Archived, its colour goes grey with the rest of it.
+  const color = agentColor(session, colorBy);
+  const tint = color && isArchived(session, choices) ? "var(--faint)" : color;
   return (
     <div
       className={`agent-row ${inList ? "in-list" : "on-shelf"} ${earlier ? "earlier" : ""} ${selected ? "selected" : ""}`}
@@ -283,7 +285,7 @@ function AgentButton({ session, branch, selected, inList, earlier, choices, live
       onContextMenu={earlier ? undefined : menu}
     >
       {tint && <span className="agent-tint" style={{ background: tint }} aria-hidden />}
-      <AgentRow session={session} branch={branch} renaming={renaming === session.id} archived={isArchived(session, choices)} />
+      <AgentRow session={session} branch={branch} archived={isArchived(session, choices)} title={renaming === session.id ? <RenameField session={session} /> : undefined} />
       {match && <div className="agent-match" title={match.snippet}><Snippet hit={match} query={query} /></div>}
     </div>
   );
@@ -295,68 +297,6 @@ async function rename(sessionId: string, name: string) {
   } catch {
     // The name stays as it was.
   }
-}
-
-function AgentRow({ session, branch, renaming, archived }: { session: Session; branch?: string; renaming: boolean; archived: boolean }) {
-  const waiting = filterState(session) === "waiting_input";
-  const servers = session.servers ?? [];
-  // A third line, under the title: what it asks, its branch, its servers.
-  const detailLine = waiting || !!branch || servers.length > 0;
-  const detail = session.question?.title || session.question?.prompt || "Waiting for your answer";
-  return (
-    <>
-      <div className="agent-line1">
-        <FolderMark session={session} />
-        <span className="folder">{folderLabel(session.cwd)}</span>
-        <Spacer min={4} />
-        {waiting ? (
-          <span className="status needs"><span className="needs-dot" />Needs you</span>
-        ) : session.state === "busy" ? (
-          <span className="status working"><Loader size={9} />Working</span>
-        ) : session.state === "ended" ? (
-          <span className="status">Ended</span>
-        ) : session.lastActivityAt ? (
-          <span className="status tabular">{since(session.lastActivityAt)}</span>
-        ) : null}
-      </div>
-      <div className="agent-line2">
-        {renaming ? (
-          <RenameField session={session} />
-        ) : (
-          <span
-            className={`name ${session.state === "waiting_input" ? "waiting" : ""} ${session.state === "ended" || archived ? "ended" : ""}`}
-            title={ownName(session) ? `Renamed from “${ownName(session)}”` : session.name}
-          >
-            {session.name}
-          </span>
-        )}
-        {/* With nothing under it, the agent's mark sits by its title. */}
-        {!detailLine && (
-          <>
-            <Spacer min={4} />
-            <AgentMark kind={session.kind} size={14} />
-          </>
-        )}
-      </div>
-      {detailLine && (
-        <div className="agent-line3">
-          {waiting ? (
-            <span className="question">{detail}</span>
-          ) : branch ? (
-            <Truncated mode="middle" className="branch" text={branch} title={`On branch ${branch}`} />
-          ) : null}
-          <Spacer min={4} />
-          {servers.length > 0 && (
-            <span className="servers" title="Dev servers it is running">
-              <Sym icon={Globe} sf="globe" size={9} />
-              <span className="ports">{servers.map((s) => `:${s.port}`).join(" ")}</span>
-            </span>
-          )}
-          <AgentMark kind={session.kind} size={14} />
-        </div>
-      )}
-    </>
-  );
 }
 
 /** A session's name, edited where it shows: Return keeps it, Escape or
@@ -397,38 +337,28 @@ function RenameField({ session }: { session: Session }) {
 
 /** One button for what the list shows: agents in one state, and in one
  *  folder, with how many are in each. */
+/** The filter button and its panel (FilterMenu, FilterPanel.swift). */
 function FilterMenu({ sessions }: { sessions: Session[] }) {
-  const { stateFilter, folderFilter, folders } = useShell();
+  const { stateFilter, folderFilter } = useShell();
   const filtering = !!stateFilter || !!folderFilter;
-  function open(e: MouseEvent<HTMLButtonElement>) {
-    const counts = { waiting_input: 0, busy: 0, idle: 0 };
-    for (const s of sessions) if (inFolder(s.cwd, folderFilter)) counts[filterState(s)] += 1;
-    const option = (title: string, on: boolean, action: () => void, count?: number): MenuEntry => ({
-      label: count === undefined ? title : `${title}  ${count}`,
-      checked: on,
-      action,
-    });
-    menuUnder(e.currentTarget, [
-      { label: "Show", header: true },
-      option("All agents", !stateFilter, () => setShell({ stateFilter: null })),
-      option("Needs you", stateFilter === "waiting_input", () => setShell({ stateFilter: "waiting_input" }), counts.waiting_input),
-      option("Working", stateFilter === "busy", () => setShell({ stateFilter: "busy" }), counts.busy),
-      option("Idle", stateFilter === "idle", () => setShell({ stateFilter: "idle" }), counts.idle),
-      { label: "Folder", header: true },
-      option("All folders", !folderFilter, () => setShell({ folderFilter: null })),
-      ...folders.slice(0, 15).map((f) => option(f.path.replace(/\/+$/, "").split("/").pop() || f.path, folderFilter === f.path, () => setShell({ folderFilter: f.path }), f.agents)),
-    ]);
-  }
+  const button = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
   return (
-    <button
-      className={`filter-button ${filtering ? "filtering" : ""}`}
-      title="Show agents in one state, or one folder with the sessions that ended there"
-      aria-label="Filter"
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={open}
-    >
-      <Icon icon={ListFilter} sf="line.3.horizontal.decrease" size={12} />
-    </button>
+    <>
+      <button
+        ref={button}
+        className={`filter-button ${filtering ? "filtering" : ""}`}
+        title="Show agents in one state, or in one folder with the sessions that ended there"
+        aria-label="Filter"
+        aria-expanded={open}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setOpen((was) => !was)}
+      >
+        <Icon icon={ListFilter} sf="line.3.horizontal.decrease" size={12} />
+      </button>
+      {open && <FilterPanel sessions={sessions} anchor={button.current} close={close} />}
+    </>
   );
 }
 
@@ -475,14 +405,18 @@ function SectionHeading({ title, count, open, onToggle, shelf, tint }: { title: 
 function AgentmanCard({ selected, sessions }: { selected: boolean; sessions: Session[] }) {
   const summary = useManagerSummary();
   const unread = selected ? 0 : summary.unread;
-  const waiting = sessions.filter((s) => s.state === "waiting_input").length;
+  const { status } = useStatus();
+  const waiting = sessions.filter((s) => filterState(s) === "waiting_input").length;
   const working = sessions.filter((s) => s.state === "busy").length;
   const attention = summary.cardsWaiting > 0 || waiting > 0;
+  // AgentmanCard.summary: what it has for you, what needs you, what's new,
+  // what's working; quiet is only known while connected.
   const text = summary.cardsWaiting > 0
-    ? summary.cardsWaiting === 1 ? "1 card waiting for you" : `${summary.cardsWaiting} cards waiting for you`
+    ? summary.cardsWaiting === 1 ? "1 thing needs you" : `${summary.cardsWaiting} things need you`
     : waiting > 0 ? waiting === 1 ? "1 agent needs you" : `${waiting} agents need you`
+    : unread > 0 ? unread === 1 ? "1 new message" : `${unread} new messages`
     : working > 0 ? working === 1 ? "1 agent working" : `${working} agents working`
-    : "All quiet";
+    : status === "connected" ? "All quiet" : "Not connected";
   return (
     <div className="agentman-card-wrap">
       <button className={`agentman-card ${selected ? "selected" : ""}`} title="Agentman (⌥⌘0)" aria-selected={selected} onClick={openAgentman}>
@@ -501,7 +435,8 @@ function AgentmanCard({ selected, sessions }: { selected: boolean; sessions: Ses
 /** Whether the app can reach am serve, and which version it is. */
 function ConnectionFooter({ version }: { version?: string }) {
   const { status } = useStatus();
-  const mac = document.documentElement.dataset.platform === "darwin";
+  // The computer am serve runs on, which this page is on: a Mac says so.
+  const mac = useServerSystem() === "darwin";
   const connected = mac ? "Mac connected" : "Connected";
   const text = status === "connected" ? (version ? `${connected} · am ${version}` : connected)
     // The whole story, and the way back, is in the banner over the page.
@@ -547,7 +482,7 @@ function AppearanceMenu() {
         { label: "Match the Mac", checked: appearance === "system", action: () => setPref("appearance", "system") },
       ])}
     >
-      <Icon icon={Contrast} sf="circle.lefthalf.filled" size={13} />
+      <Icon icon={CircleLeftHalfFilled} sf="circle.lefthalf.filled" size={13} />
     </button>
   );
 }

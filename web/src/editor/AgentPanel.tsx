@@ -4,14 +4,15 @@
 // The thread and Agentman's chat are the main window's own views.
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Globe, SquareArrowOutUpRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, SquareArrowOutUpRight, X } from "lucide-react";
 import type { Session } from "@shared/protocol";
 import { Composer } from "../Composer";
 import { Thread } from "../Thread";
 import { AgentmanView } from "../manager/AgentmanView";
+import { AgentRow } from "../shell/AgentRow";
 import { useStore } from "../store";
-import { AgentMark, AppIcon, FolderMark, Icon } from "../ui";
-import { folderLabel, needsYou, since } from "../labels";
+import { AgentMark, AppIcon, Icon } from "../ui";
+import { needsYou } from "../labels";
 import { paths } from "./fs";
 import { folderAgent, type EditorStore, type PanelRoute } from "./store";
 
@@ -184,46 +185,9 @@ function PanelAgentList({ folder, sessions, choose }: { folder: string; sessions
 /** An agent as the sidebar shows it (Sidebar.swift's AgentRow). */
 function PanelAgentRow({ session }: { session: Session }) {
   const { branches } = useStore();
-  const waiting = needsYou(session);
-  const branch = branches[session.cwd];
-  const servers = session.servers ?? [];
-  // A third line, under the title: what it asks, its branch, its servers.
-  const detailLine = waiting || !!branch || servers.length > 0;
   return (
     <span className="panel-agent-row">
-      <span className="panel-agent-line1">
-        <FolderMark session={session} />
-        <span className="folder">{folderLabel(session.cwd)}</span>
-        <span style={{ flex: 1, minWidth: 4 }} />
-        {waiting ? (
-          <span className="status needs"><span className="needs-dot" />Needs you</span>
-        ) : session.state === "busy" ? (
-          <span className="status working"><span className="loader" />Working</span>
-        ) : (
-          <span className="status tabular">{since(session.lastActivityAt)}</span>
-        )}
-      </span>
-      <span className="panel-agent-line2">
-        <span className={`name ${waiting ? "waiting" : ""}`}>{session.name || session.kind}</span>
-        {!detailLine && <AgentMark kind={session.kind} size={14} />}
-      </span>
-      {detailLine && (
-        <span className="panel-agent-line3">
-          {waiting ? (
-            <span className="question">{session.question?.title ?? session.question?.prompt ?? "Waiting for your answer"}</span>
-          ) : branch ? (
-            <span className="branch" title={`On branch ${branch}`}>{branch}</span>
-          ) : null}
-          <span style={{ flex: 1, minWidth: 4 }} />
-          {servers.length > 0 && (
-            <span className="panel-servers" title="Dev servers it is running">
-              <Icon icon={Globe} sf="globe" size={9} />
-              {servers.map((s) => `:${s.port}`).join(" ")}
-            </span>
-          )}
-          <AgentMark kind={session.kind} size={14} />
-        </span>
-      )}
+      <AgentRow session={session} branch={branches[session.cwd]} />
     </span>
   );
 }

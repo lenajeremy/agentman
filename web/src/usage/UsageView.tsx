@@ -17,7 +17,7 @@ import { useStatus } from "../store";
 import { agentName } from "../labels";
 import { usePref } from "../prefs";
 import { Loader } from "../shell/Loader";
-import { AgentMark, ChromeButton } from "../ui";
+import { AgentMark, ChromeButton, Segments } from "../ui";
 import "../styles/usage.css";
 
 const ESTIMATE = "What these tokens would cost through each provider's API. A subscription like Claude Max doesn't bill per token.";
@@ -218,16 +218,6 @@ function NothingUsed({ days }: { days: number }) {
 }
 
 /** A row of choices, the chosen one raised. */
-function Segments<T extends string | number>({ options, value, title, onChange }: { options: T[]; value: T; title: (v: T) => string; onChange: (v: T) => void }) {
-  return (
-    <span className="segments">
-      {options.map((o) => (
-        <button key={String(o)} className={o === value ? "chosen" : ""} aria-pressed={o === value} onClick={() => onChange(o)}>{title(o)}</button>
-      ))}
-    </span>
-  );
-}
-
 // MARK: - Spending
 
 function SpendingPage({ usage, metric, breakdown, setBreakdown, width }: {
