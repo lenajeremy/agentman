@@ -34,6 +34,7 @@
 .board-column-glyph .faint { color: var(--faint); }
 .board-column-title { font-size: 13px; font-weight: 500; color: var(--text); }
 .board-column-count { font-size: 13px; color: var(--board-muted); font-variant-numeric: tabular-nums; }
+.board-column-words { display: none; }
 .board-column-action { height: 22px; display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--board-muted); }
 .board-column-cards { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 2px 6px; scrollbar-width: none; }
 .board-column-cards::-webkit-scrollbar { display: none; }

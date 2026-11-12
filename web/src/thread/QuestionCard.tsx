@@ -353,6 +353,7 @@ export function QuestionChoices({ question, suggested, typedPrompt = "Or type an
             option={option}
             pick={option.key === suggested}
             leading={option.key === primary}
+            strong={option.key === strong}
             chosen={option.checked === true}
             compact={compact}
             roomy={roomy}
@@ -394,11 +395,13 @@ export function QuestionChoices({ question, suggested, typedPrompt = "Or type an
  *  The likeliest answer is lightly filled; the rest fill as the pointer
  *  passes, with a ⏎ at the end; the answer given before, back on a question
  *  of a form, is ticked. */
-function OptionRow({ number, option, pick, leading, chosen, compact, roomy, disabled, onChoose }: {
+function OptionRow({ number, option, pick, leading, strong, chosen, compact, roomy, disabled, onChoose }: {
   number: number;
   option: QuestionOption;
   pick: boolean;
   leading: boolean;
+  /** On the Board in New, in the orange: Agentman's pick, or a yes. */
+  strong: boolean;
   chosen: boolean;
   compact: boolean;
   roomy: boolean;
@@ -407,7 +410,7 @@ function OptionRow({ number, option, pick, leading, chosen, compact, roomy, disa
 }) {
   return (
     <button
-      className={`option-row ${leading || pick ? "leading" : ""} ${compact ? "compact" : ""} ${roomy ? "roomy" : ""}`}
+      className={`option-row ${leading || pick ? "leading" : ""} ${strong ? "strong" : ""} ${compact ? "compact" : ""} ${roomy ? "roomy" : ""}`}
       disabled={disabled}
       onClick={onChoose}
       title={option.withText ? "Choose, and add a note for the agent" : option.label}

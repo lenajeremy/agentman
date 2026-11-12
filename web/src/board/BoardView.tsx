@@ -277,7 +277,7 @@ function BoardColumn({ kind, sessions, outlined, found, offers = [], missions = 
       { label: "Show All", action: showAllOnBoard },
     ]);
   return (
-    <section className="board-column">
+    <section className={`board-column ${kind === "needsYou" ? "needs-you" : ""}`}>
       <div className="board-column-head">
         <span className="board-column-glyph">
           {kind === "needsYou" && !quiet ? <Icon icon={CircleAlertFilled} sf="exclamationmark.circle.fill" size={13} className="needs" />
@@ -286,6 +286,9 @@ function BoardColumn({ kind, sessions, outlined, found, offers = [], missions = 
         </span>
         <span className="board-column-title">{TITLES[kind]}</span>
         <span className="board-column-count">{sessions.length + offers.length}</span>
+        {/* In New: the name in the site's mono capitals with its count;
+            what needs you on an orange chip. */}
+        <span className="board-column-words">{TITLES[kind]} · {sessions.length + offers.length}</span>
         <span className="board-spacer" />
         {hidden.length > 0 && (
           <button className="board-column-action" title="Agents you hid. They come back by themselves when they need you." onClick={hiddenMenu}>
@@ -357,7 +360,7 @@ function BoardCard({ session, kind, outlined, match, query }: { session: Session
 
   return (
     <div
-      className={`board-card${outlined ? " outlined" : ""}${tint ? " tinted" : ""}`}
+      className={`board-card${outlined ? " outlined" : ""}${tint ? " tinted" : ""}${kind === "needsYou" ? " needs-you" : ""}`}
       style={tint ? ({ "--tint": tint } as React.CSSProperties) : undefined}
       onClick={cardClick}
       onContextMenu={(e) => contextMenu(e, items())}
