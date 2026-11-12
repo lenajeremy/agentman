@@ -4,6 +4,10 @@
 :root { --on-inverse: #ffffff; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --on-inverse: #000000; } }
 :root[data-theme="dark"] { --on-inverse: #000000; }
+.new-agent-page { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--paper); }
+/* Its title row, 32 tall, as every page has. */
+.new-agent-header { height: calc(var(--safe-top, 0px) + 32px); padding: var(--safe-top, 0px) 16px 0 calc(16px + var(--detail-header-leading, 0px)); flex: none; display: flex; align-items: center; box-sizing: border-box; }
+.new-agent-header-title { font-size: 14px; font-weight: 600; color: var(--text); }
 .new-agent { -webkit-font-smoothing: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 22px; padding: 0 32px; background: var(--paper); line-height: 1.193; }
 .new-agent-spacer { flex: 1 1 0; }
 .new-agent-spacer.top { min-height: 40px; }

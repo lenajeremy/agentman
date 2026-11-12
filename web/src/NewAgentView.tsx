@@ -233,6 +233,9 @@ export function NewAgentView({ worktree: namingAtStart }: { worktree?: boolean }
     : place.kind === "worktree" ? `${place.worktree.repo} · ${place.worktree.name}` : `${repo} · ${place.name}`;
 
   return (
+    <div className="new-agent-page">
+    {/* A title row, as every page has (NewAgentView's safeAreaInset). */}
+    <div className="new-agent-header"><span className="new-agent-header-title">New agent</span></div>
     <div className="new-agent">
       <div className="new-agent-spacer top" />
       <div className="new-agent-title">What should we work on?</div>
@@ -289,6 +292,7 @@ export function NewAgentView({ worktree: namingAtStart }: { worktree?: boolean }
         <div className="new-agent-line">{starting ? `Starting ${kindName(kind)} ${whereItStarts}…` : `Starts ${whereItStarts}`}</div>
       ) : null}
       <div className="new-agent-spacer bottom" />
+    </div>
     </div>
   );
 }
