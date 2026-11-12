@@ -53,6 +53,31 @@ done. One at a time, in this order.
     two paths (~/projects/pics and /private/var/…/projects/pics in the test
     stack), so ⌘K offers "Open pics in the Editor" twice.
 
+From main on 2026-11-12 (Mac 0.45.0, PR #187, #189 and #190, merged in
+03e5463):
+13. ✓ (f6f35de) A picture with a space in its name ("09 Waitlist.png",
+    macOS's screenshots) shows as one; a file mentioning a picture is
+    still the file read.
+14. ✓ (3a253eb) An agent that quits while its page is open (Ctrl-C, /exit,
+    a crash, ended from the phone) keeps its page, read-only, to resume.
+15. ✓ (588cbf0) Questions as Claude's app shows them: the question as the
+    heading, write your own answer in the card, ✕ to close it unanswered;
+    a form of several moves back and on (its questions named and ticked,
+    ‹ 2 of 3 ›), its review lists the answers; several answers are tick
+    rows with a count. Also the Mac's older notice (what macOS will ask)
+    and a prompt that repeats its command left out, and the Board's
+    roomy choices.
+Already on the web: renaming back to the agent's own name.
+For the look pass (Classic): the sidebar's rows in two lines with the
+state as a dot and a 4pt colour bar on its edge, archived rows grey, the
+loader's orange; the ten agent colours (lime and wine for those near a
+state; State no longer a Color by choice); a step as a small grey pill,
+opened with its contents on a thin line; replies at 15pt; "4m 6s · 3
+steps" without the rule; code coloured in replies with its language
+above and Copy beside it; inline code a rounded box; thin scroll bars.
+And the New theme now covers the sidebar, the conversation, the
+workspace card, the Board and Settings.
+
 Gone back over 1–9 on 2026-11-10, past the main path of each (the keyboard
 after each overlay, no data, no main window, every way in, dark mode):
 1. 9ce2375 Muse and Cursor CLI named as on the Mac, Muse's logo; 7064563
