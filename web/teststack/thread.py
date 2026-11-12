@@ -85,7 +85,7 @@ shots = os.path.join(cwd, "shots")
 png(os.path.join(shots, "sidebar.png"), 640, 400, (50, 104, 245), (240, 64, 127))
 png(os.path.join(shots, "composer.png"), 300, 520, (18, 166, 106), (50, 104, 245))
 png(os.path.join(shots, "header.png"), 900, 260, (255, 106, 43), (250, 250, 250))
-png(os.path.join(shots, "menu.png"), 420, 420, (16, 16, 16), (153, 153, 153))
+png(os.path.join(shots, "09 Menu.png"), 420, 420, (16, 16, 16), (153, 153, 153))
 kept = os.path.join(home, ".agentman", "images", "claude-" + session_id)
 png(os.path.join(kept, "1a2b3c4d.png"), 800, 500, (240, 64, 127), (255, 214, 102))
 png(os.path.join(kept, "5e6f7a8b.png"), 500, 500, (50, 104, 245), (127, 204, 218))
@@ -106,7 +106,7 @@ tool("Read", {"file_path": os.path.join(shots, "sidebar.png")}, [{"type": "text"
 say("The sidebar's rows are 4 points taller than the phone's. Let me check the rest.")
 tool("Read", {"file_path": os.path.join(shots, "composer.png")}, [{"type": "text", "text": "[image]"}])
 tool("Read", {"file_path": os.path.join(shots, "header.png")}, [{"type": "text", "text": "[image]"}])
-tool("Read", {"file_path": os.path.join(shots, "menu.png")}, [{"type": "text", "text": "[image]"}])
+tool("Read", {"file_path": os.path.join(shots, "09 Menu.png")}, [{"type": "text", "text": "[image]"}])
 if part == "top":
     with open(out, "w") as f:
         for line in lines:

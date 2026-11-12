@@ -5,6 +5,9 @@
 
 import type { Message } from "@shared/protocol";
 import { addToTurn, startsTurn, turnSeconds, type Turn } from "@shared/toolgroups";
+import { pictureRead } from "./pictures";
+
+export { imagePath } from "./pictures";
 
 export type ThreadItem =
   | { kind: "message"; id: string; message: Message }
@@ -16,11 +19,6 @@ export type ThreadItem =
   | { kind: "images"; id: string; calls: Message[]; paths: string[]; said: string }
   /** A turn that has been followed by another: how long the agent took. */
   | { kind: "worked"; id: string; seconds: number };
-
-/** The image file a path names, if it is one (ImageThumbnail.imagePath). */
-export function imagePath(text: string): string | null {
-  return /\/[^\s"'`]+?\.(?:png|jpe?g|gif|webp|heic|bmp|tiff?)/i.exec(text)?.[0] ?? null;
-}
 
 export function threadItems(messages: readonly Message[]): ThreadItem[] {
   const items: ThreadItem[] = [];
@@ -55,7 +53,7 @@ export function threadItems(messages: readonly Message[]): ThreadItem[] {
     }
     addToTurn(turn, message);
     const path = message.role === "tool" && toolKind(message.tool?.name).kind === "read"
-      ? imagePath(message.tool?.summary ?? message.text ?? "") : null;
+      ? pictureRead(message) : null;
     if (path) {
       flush();
       pictures.push({ message, path });

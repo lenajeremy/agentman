@@ -1028,6 +1028,18 @@ async function threadMore() {
     expect(first.includes("of"), first);
   });
 
+  await check("thread: a picture with a space in its name shows as one, and opens under its name", async () => {
+    const id = await sessionId("pics");
+    const page = await open(`agent=${encodeURIComponent(id)}`, { wait: ".thumb" });
+    // The run of three the agent read last: composer, header, "09 Menu.png".
+    await until(page, () => [...document.querySelectorAll(".thumb img")].filter((img) => img.naturalWidth === 420).length === 1, null, "the 420-wide picture, 09 Menu.png");
+    expect(!(await page.locator(".run-summary, .call-row").filter({ hasText: "09 Menu" }).count()), "09 Menu.png also listed as a plain read");
+    await page.evaluate(() => [...document.querySelectorAll(".thumb")].find((t) => t.querySelector("img")?.naturalWidth === 420).focus());
+    await page.keyboard.press("Enter");
+    await until(page, () => document.querySelector(".lightbox-title")?.textContent === "09 Menu.png", null, "the viewer titled 09 Menu.png");
+    await page.keyboard.press("Escape");
+  });
+
   await check("thread: / lists the agent's commands", async () => {
     const id = await sessionId("ask");
     const page = await open(`agent=${encodeURIComponent(id)}`, { wait: ".message-field" });
