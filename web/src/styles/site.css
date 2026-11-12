@@ -170,3 +170,43 @@
 :root[data-look="site"] .am-composer .am-send { background: var(--fill-strong); color: var(--muted); }
 :root[data-look="site"] .am-composer .am-send.can { background: var(--flood); color: #fff; }
 :root[data-look="site"] .am-composer .am-send.thinking { background: var(--inverse); color: #fff; }
+
+/* --- Settings (SettingsView.swift) ----------------------------------- */
+/* The pages' list on the main window's cream, the ink edge beside it; the
+   open page a card raised on the cream. */
+:root[data-look="site"] .settings-sidebar, :root[data-look="site"] .settings.active .settings-sidebar { background: var(--sidebar); gap: 5px; }
+:root[data-look="site"] .settings-divider-v { width: var(--edge-width); background: var(--edge); }
+:root[data-look="site"] .settings-tab.selected { background: var(--surface); box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 3px 0 var(--edge); }
+:root[data-look="site"] .settings.active .settings-tab.selected:hover { background: var(--surface); }
+:root[data-look="site"] .settings-display { font: 700 28px var(--heading-font); }
+/* A section: its name in the site's mono capitals, its card edged and
+   raised on a hard shadow of 3. */
+:root[data-look="site"] .section-title { font: 500 10.5px var(--mono); letter-spacing: 1.2px; text-transform: uppercase; }
+:root[data-look="site"] .section-card { box-shadow: 0 3px 0 var(--edge); }
+/* The other cards (Keys' empty one, Knowledge's list and note) on 2. */
+:root[data-look="site"] .card { box-shadow: 0 2px 0 var(--edge); }
+:root[data-look="site"] .section-card::after, :root[data-look="site"] .card::after { border: var(--edge-width) solid var(--edge); }
+/* The site's switch: an edged capsule, ink when on (cream in the dark), its
+   knob edged white. Drawn, not tinted, so it reads the same in a window
+   that isn't the active one. */
+:root[data-look="site"] .mac-switch, :root[data-look="site"] .settings.active .mac-switch { width: 34px; height: 20px; border-radius: 10px; background: var(--surface); box-shadow: inset 0 0 0 var(--edge-width) var(--edge); }
+:root[data-look="site"] .mac-switch.on, :root[data-look="site"] .settings.active .mac-switch.on { background: var(--switch-on); }
+:root[data-look="site"] .mac-switch .knob { top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 var(--edge-width) var(--edge); }
+:root[data-look="site"] .mac-switch.on .knob { transform: translateX(14px); }
+/* Look and Theme: the site's edged segments (UsageView.swift's Segments). */
+:root[data-look="site"] .mac-segmented.site-segments { grid-auto-columns: auto; height: auto; gap: 2px; padding: 2px; border-radius: 7px; background: var(--fill); }
+:root[data-look="site"] .mac-segmented.site-segments .segment { height: 22px; padding: 0 9px; border-radius: 5px; font-size: 12px; color: var(--muted); background: none; }
+:root[data-look="site"] .mac-segmented.site-segments .segment::before { display: none; }
+:root[data-look="site"] .mac-segmented.site-segments .segment.selected { font-weight: 500; color: var(--text); background: var(--surface); box-shadow: inset 0 0 0 1.2px var(--edge); }
+
+/* --- Segments, wherever they are (Usage, the sidebar's filter) -------- */
+:root[data-look="site"] .segments button.chosen { background: var(--surface); box-shadow: inset 0 0 0 1.2px var(--edge); }
+
+/* --- Knowledge and Devices (KnowledgeSettings.swift, DevicesSettings.swift) */
+/* The open note cream, edged and a little raised, as the open page is. */
+:root[data-look="site"] .note-list-scroll { gap: 5px; }
+:root[data-look="site"] .note-row.selected { background: var(--bubble); box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+/* Devices' buttons: the site's, edged white on a hard shadow. */
+:root[data-look="site"] .mac-button.small-button { height: 26px; padding: 0 10px; border-radius: 8px; margin-bottom: 2px; font: 500 12px var(--sans); color: var(--text);
+  background: var(--surface); box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+:root[data-look="site"] .mac-button.small-button:hover:not(:disabled) { background: var(--fill); }

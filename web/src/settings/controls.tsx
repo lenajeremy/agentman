@@ -74,10 +74,12 @@ export function LinkButton({ children, onClick, disabled, className, style }: { 
 
 /** A segmented control (.pickerStyle(.segmented)); segments as wide as
  *  the widest, as .fixedSize() lays them out. */
-export function Segmented<T extends string>({ value, options, onChange, equal = true }: { value: T; options: { value: T; label: string }[]; onChange: (value: T) => void; equal?: boolean }) {
+/** site: one of the pickers New draws as the site's edged segments (Look
+ *  and Theme); the rest stay the Mac's own control in both themes. */
+export function Segmented<T extends string>({ value, options, onChange, equal = true, site = false }: { value: T; options: { value: T; label: string }[]; onChange: (value: T) => void; equal?: boolean; site?: boolean }) {
   const index = options.findIndex((o) => o.value === value);
   return (
-    <div className={`mac-segmented ${equal ? "equal" : ""}`} role="radiogroup" style={{ ["--segments" as string]: options.length }}>
+    <div className={`mac-segmented ${equal ? "equal" : ""} ${site ? "site-segments" : ""}`} role="radiogroup" style={{ ["--segments" as string]: options.length }}>
       {options.map((o, i) => (
         <button
           key={o.value}

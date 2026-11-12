@@ -31,9 +31,9 @@ export function DevicesPage({ pairRequest = 0 }: { pairRequest?: number }) {
       <Section>
         <Row title="Pair a device" detail="Make a one-time code another phone or tablet can scan to reach your agents from anywhere." divider={false} className="pair-row">
           {pairing ? (
-            <PushButton onClick={() => setPairing(false)}>Cancel</PushButton>
+            <PushButton className="small-button" onClick={() => setPairing(false)}>Cancel</PushButton>
           ) : (
-            <PushButton icon={QrCode} sf="qrcode" onClick={() => setPairing(true)}>
+            <PushButton className="small-button" icon={QrCode} sf="qrcode" onClick={() => setPairing(true)}>
               Create code
             </PushButton>
           )}
@@ -154,7 +154,7 @@ function PairingPanel({ onDone }: { onDone: () => void }) {
           <div className="pairing-caption">Agentman tells it when an agent finishes or needs you.</div>
         </div>
         <span className="row-spacer" />
-        <PushButton prominent onClick={onDone}>
+        <PushButton className="small-button" prominent onClick={onDone}>
           Done
         </PushButton>
       </div>
@@ -175,10 +175,10 @@ function PairingPanel({ onDone }: { onDone: () => void }) {
           <div className="pairing-actions">
             <span className="code-pill mono">{grouped(code.code)}</span>
             <span className="copy-buttons">
-              <PushButton icon={copied === "code" ? Check : Copy} sf={copied === "code" ? "checkmark" : "doc.on.doc"} onClick={() => copy(code.code, "code")}>
+              <PushButton className="small-button" icon={copied === "code" ? Check : Copy} sf={copied === "code" ? "checkmark" : "doc.on.doc"} onClick={() => copy(code.code, "code")}>
                 {copied === "code" ? "Copied" : "Copy code"}
               </PushButton>
-              <PushButton icon={copied === "link" ? Check : Link} sf={copied === "link" ? "checkmark" : "link"} onClick={() => copy(code.url, "link")}>
+              <PushButton className="small-button" icon={copied === "link" ? Check : Link} sf={copied === "link" ? "checkmark" : "link"} onClick={() => copy(code.url, "link")}>
                 {copied === "link" ? "Copied" : "Copy link"}
               </PushButton>
             </span>
@@ -196,7 +196,7 @@ function PairingPanel({ onDone }: { onDone: () => void }) {
         </span>
         <span className="pairing-caption problem">{problem}</span>
         <span className="row-spacer" />
-        <PushButton
+        <PushButton className="small-button"
           icon={RotateCw}
           sf="arrow.clockwise"
           onClick={() => {

@@ -103,6 +103,7 @@ function AppearanceSection() {
     <Section title="Appearance" footer="New is the website's look, still being designed.">
       <Row title="Look">
         <Segmented<AppearanceChoice>
+          site
           value={(choice === "light" || choice === "dark" ? choice : "system") as AppearanceChoice}
           options={[
             { value: "system", label: "Match the Mac" },
@@ -117,6 +118,7 @@ function AppearanceSection() {
       </Row>
       <Row title="Theme" divider={false}>
         <Segmented<ThemeChoice>
+          site
           value={look}
           options={[
             { value: "classic", label: "Classic" },
