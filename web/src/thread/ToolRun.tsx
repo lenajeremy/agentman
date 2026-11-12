@@ -11,6 +11,7 @@ import type { LucideIcon } from "lucide-react";
 import type { Message } from "@shared/protocol";
 import { parseDiff, type DiffRow } from "@shared/diff";
 import { openLightbox } from "../lightbox";
+import { WrenchAndScrewdriver } from "../ui";
 import { Sym } from "./Sym";
 import { baseName, runCounts, tidy, toolKind, toolSymbol, toolVerb } from "./items";
 import { Loader, Spinner } from "./Loader";
@@ -78,26 +79,32 @@ function StepDetail({ command, output, failed }: { command?: string; output?: st
 
 /** One tool call in a line: what it did in plain words, with the raw command
  *  or path a click away; a call from a daemon too old to describe it shows
- *  its verb and target. */
-export function ToolCallRow({ call }: { call: Message }) {
+ *  its verb and target. pill: on its own in the conversation, a small grey
+ *  pill, its command and output hung under it on a thin line; inside an
+ *  opened run, a plain row. */
+export function ToolCallRow({ call, pill = false }: { call: Message; pill?: boolean }) {
   const [open, setOpen] = useState(false);
   const title = call.tool?.title;
   const side = call.isSidechain ? " sidechain" : "";
   if (title) {
     return (
       <div className={`call${side}`}>
-        <button className="call-row" onClick={() => setOpen(!open)} title={open ? "Hide the command" : "Show the command"}>
+        <button className={`call-row${pill ? ` step-pill${open ? " open" : ""}` : ""}`} onClick={() => setOpen(!open)} title={open ? "Hide the command" : "Show the command"}>
           <StatusIcon call={call} />
           <span className="call-title">{title}</span>
         </button>
-        {open && <StepDetail command={call.tool?.summary} output={call.text} failed={call.tool?.status === "error"} />}
+        {open && (
+          <div className={pill ? "step-hung" : "step-under"}>
+            <StepDetail command={call.tool?.summary} output={call.text} failed={call.tool?.status === "error"} />
+          </div>
+        )}
       </div>
     );
   }
   const kind = toolKind(call.tool?.name);
   const target = tidy(call.tool?.summary ?? call.text ?? "");
   return (
-    <div className={`call-raw${side}`}>
+    <div className={`call-raw${pill ? " step-pill" : ""}${side}`}>
       <StatusIcon call={call} />
       <span className="call-verb">{toolVerb(kind)}</span>
       {target ? <span className="call-target" title={call.tool?.summary ?? ""}>{middle(target)}</span> : null}
@@ -132,7 +139,7 @@ export function ToolRun({ calls, said = "" }: { calls: Message[]; said?: string 
   if (calls.length === 1) {
     return (
       <div className={`tool-run${sidechain ? " sidechain" : ""}`}>
-        <ToolCallRow call={calls[0]} />
+        <ToolCallRow call={calls[0]} pill />
       </div>
     );
   }
@@ -145,19 +152,18 @@ export function ToolRun({ calls, said = "" }: { calls: Message[]; said?: string 
   }
   return (
     <div className={`tool-run${sidechain ? " sidechain" : ""}`}>
-      <button className="run-toggle" onClick={() => setOpen(!open)}>
-        {last.tool?.status === "running" ? <Loader /> : <Sym icon={Wrench} sf="wrench.and.screwdriver" size={10} weight="medium" />}
+      <button className={`run-toggle step-pill${open ? " open" : ""}`} onClick={() => setOpen(!open)}>
+        {last.tool?.status === "running" ? <Loader /> : <Sym icon={WrenchAndScrewdriver} sf="wrench.and.screwdriver" size={10} weight="medium" />}
         <span className="run-summary">{summary}</span>
         {failures > 0 && <span className="run-failed">· {failures} failed</span>}
         <span className={`run-chevron ${open ? "open" : ""}`}><Sym icon={ChevronRight} sf="chevron.right" size={9} weight="semibold" /></span>
       </button>
       {open && (
-        <>
-          <div className="run-rule" />
+        <div className="step-hung">
           <div className="run-calls">
             {calls.map((c) => <ToolCallRow key={c.id} call={c} />)}
           </div>
-        </>
+        </div>
       )}
     </div>
   );

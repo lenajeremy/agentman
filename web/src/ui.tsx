@@ -8,6 +8,14 @@ import type { Session } from "@shared/protocol";
 import { fileURL } from "./editor/fs";
 import { initials } from "./labels";
 
+/** SF Symbols' wrench.and.screwdriver, which Lucide lacks: its wrench,
+ *  crossed by a screwdriver from the top left. A run of steps' mark. */
+export const WrenchAndScrewdriver = createLucideIcon("wrench-and-screwdriver", [
+  ["path", { d: "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z", key: "wrench" }],
+  ["path", { d: "M2.6 6.1a1 1 0 0 1 0-1.4l2.1-2.1a1 1 0 0 1 1.4 0l3.2 3.2a1 1 0 0 1 0 1.4l-2.1 2.1a1 1 0 0 1-1.4 0z", key: "handle" }],
+  ["path", { d: "m9.5 9.5 11 11", key: "shaft" }],
+]);
+
 /** SF Symbols' circle.lefthalf.filled, which Lucide lacks (its Contrast
  *  fills a smaller half inside): the appearance switch's mark. */
 export const CircleLeftHalfFilled = createLucideIcon("circle-left-half-filled", [

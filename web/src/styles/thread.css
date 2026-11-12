@@ -115,25 +115,36 @@
 .dashed { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 
 /* Markdown (MarkdownView.swift): blocks 14 apart. */
-.md { display: flex; flex-direction: column; gap: 14px; font-size: 14px; color: var(--text); overflow-wrap: anywhere; min-width: 0; }
-.md-p { margin: -3px 0; line-height: calc(var(--lh14) + 6px); }
+/* Replies a size above the interface's own text, so what the agent says
+   reads first, before its steps (MarkdownProseText): 15pt, 6 between lines;
+   headings 20, 17.5 and 15.5; code 13. */
+.md { display: flex; flex-direction: column; gap: 14px; font-size: 15px; color: var(--text); overflow-wrap: anywhere; min-width: 0; }
+.md-p { margin: -3px 0; line-height: 24px; }
 .md-h { margin: 0; font-weight: 500; }
-.md-h1 { font-size: 19px; line-height: calc(var(--lh19) + 3px); padding-top: 8.5px; margin-bottom: -1.5px; }
-.md-h2 { font-size: 16.5px; line-height: calc(var(--lh16h) + 3px); padding-top: 8.5px; margin-bottom: -1.5px; }
-.md-h3 { font-size: 14.5px; line-height: calc(var(--lh14h) + 3px); padding-top: 2.5px; margin-bottom: -1.5px; }
+.md-h1 { font-size: 20px; line-height: 27px; padding-top: 8.5px; margin-bottom: -1.5px; }
+.md-h2 { font-size: 17.5px; line-height: 24px; padding-top: 8.5px; margin-bottom: -1.5px; }
+.md-h3 { font-size: 15.5px; line-height: 21.5px; padding-top: 2.5px; margin-bottom: -1.5px; }
 .md strong { font-weight: 700; }
-.md code, .question-prompt code { font-family: var(--mono); font-size: var(--code); background: var(--fill); }
+/* Inline code: a rounded box round its own letters, 2 above and below
+   them and 3 either side (InlineCodeLayoutManager). */
+.md code { font-family: var(--mono); font-size: 13px; background: var(--fill); border-radius: 4px; padding: 2px 3px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.question-prompt code { font-family: var(--mono); font-size: var(--code); background: var(--fill); }
 .md a { color: var(--working-text); text-decoration: none; cursor: pointer; }
-.md-code { background: var(--fill); border-radius: 10px; overflow-x: auto; }
-.md-code::-webkit-scrollbar { display: none; }
-.md-code pre { margin: 0; padding: 12px 14px; width: max-content; min-width: 100%; }
-.md-code code { display: block; background: none; font-family: var(--mono); font-size: var(--code); line-height: calc(var(--code-lh) + 4px); margin: -2px 0; white-space: pre; tab-size: 4; color: var(--text); }
+.md-code { background: var(--fill); border-radius: 10px; }
+.md-code-label { font-size: 11px; font-weight: 500; line-height: 13px; color: var(--muted); padding: 10px 14px 0; }
+.md-code-scroll { overflow-x: auto; }
+.md-code-scroll::-webkit-scrollbar { display: none; }
+.md-code pre { margin: 0; padding: 12px 14px; width: max-content; min-width: 100%; box-sizing: border-box; }
+.md-code pre.labelled { padding-top: 8px; }
+/* Drawn by the text system at 13pt exactly, as the Mac's text view draws
+   it (no --mono-scale), its tabs NSParagraphStyle's default stops, 28 apart. */
+.md-code code { display: block; background: none; border-radius: 0; padding: 0; font-family: var(--mono); font-size: 13px; line-height: 21px; margin: -2px 0; white-space: pre; tab-size: 28px; color: var(--text); }
 .md-quote { display: flex; gap: 10px; }
 .md-quote-bar { width: 3px; border-radius: 1.5px; background: var(--line); flex: none; }
 .md-quote-body { display: flex; flex-direction: column; gap: 10px; opacity: 0.85; min-width: 0; flex: 1; }
 .md-list { display: flex; flex-direction: column; gap: 10px; }
 .md-item { display: flex; gap: 10px; align-items: baseline; }
-.md-marker { flex: none; min-width: 10px; text-align: right; color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; line-height: calc(var(--lh14) + 6px); margin: -3px 0; }
+.md-marker { flex: none; min-width: 10px; text-align: right; color: var(--muted); font-size: 15px; font-variant-numeric: tabular-nums; line-height: 24px; margin: -3px 0; }
 .md-marker.ordered { min-width: 18px; }
 .md-item-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .md-rule { height: 1px; background: var(--line); margin: 8px 0; flex: none; }
@@ -154,9 +165,16 @@
 .run-failed { color: var(--error-text); white-space: nowrap; }
 .run-chevron { display: inline-flex; transition: transform 0.15s ease-out; flex: none; }
 .run-chevron.open { transform: rotate(90deg); }
-.run-rule { align-self: stretch; height: 1px; background: var(--tool-edge); margin: 3px 0; }
-.run-calls { align-self: stretch; padding: 0 0 2px 18px; display: flex; flex-direction: column; gap: 9px; }
-.call { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; }
+.run-calls { padding: 2px 0; display: flex; flex-direction: column; gap: 9px; }
+/* A step, closed: a small grey pill, quieter than the reply around it; a
+   shade deeper while it is open (stepPill). What an opened step holds hangs
+   under it on a thin line, 12 in and 12 past the line (stepDetail). */
+.step-pill { padding: 5px 10px; border-radius: 13px; background: var(--fill); max-width: 100%; }
+.step-pill.open { background: color-mix(in srgb, var(--text) 6%, var(--fill)); }
+.step-hung { align-self: stretch; margin-left: 12px; padding-left: 12px; box-shadow: inset 1.5px 0 var(--line); }
+.step-hung > .step-detail { padding-left: 0; }
+.step-under { align-self: stretch; }
+.call { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; max-width: 100%; }
 .call.sidechain, .call-raw.sidechain { opacity: 0.6; }
 .call-row { display: flex; gap: 7px; align-items: flex-start; text-align: left; }
 .call-icon { width: 12px; flex: none; display: flex; align-items: flex-start; justify-content: center; color: var(--faint); }
@@ -382,11 +400,10 @@
 ::highlight(find) { background-color: light-dark(#FFEB99, #5A4A0C); }
 ::highlight(find-current) { background-color: light-dark(#FFB866, #9A5A12); }
 
-/* How long the agent took (WorkedLine): the time, then a rule to the edge;
-   while it works, the loader before it. */
-.worked-line { display: flex; align-items: center; gap: 10px; }
-.worked-text { flex: none; font-size: 12px; color: var(--muted); }
-.worked-rule { flex: 1; height: 1px; background: var(--line); }
+/* How long the agent took and how many steps (WorkedLine), "4m 6s · 3
+   steps", no rule; while it works, the loader before it. */
+.worked-line { display: flex; align-items: center; gap: 8px; }
+.worked-text { flex: none; font-size: 12px; line-height: var(--lh12); color: var(--muted); }
 
 /* A code block's Copy, at its corner while the pointer is over it, and for
    a moment after (CopyOnHover). */

@@ -15,7 +15,6 @@ import { addDropped, dropAccepts } from "./thread/attachments";
 import { threadItems, threadPictures } from "./thread/items";
 import { LatestTurnLine, WorkedLine } from "./thread/Worked";
 import { giveKeyboardBack, keyboardNow, type KeyboardPlace } from "./palette/PaletteView";
-import { workDuration } from "@shared/toolgroups";
 import { Spinner } from "./thread/Loader";
 import { MessageRow, QueuedBubble } from "./thread/Messages";
 import { QuestionCard } from "./thread/QuestionCard";
@@ -289,7 +288,7 @@ export function Thread({ session, stickToEnd, card = true, panel = false, findab
                 ) : item.kind === "image" ? (
                   <ImageThumbnail sessionId={session.id} path={item.path} gallery={gallery} />
                 ) : item.kind === "worked" ? (
-                  <WorkedLine text={"Worked for " + workDuration(item.seconds)} />
+                  <WorkedLine seconds={item.seconds} steps={item.steps} />
                 ) : (
                   <PicturesRun sessionId={session.id} calls={item.calls} paths={item.paths} said={item.said} gallery={gallery} />
                 )}

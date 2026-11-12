@@ -6,6 +6,7 @@ import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "reac
 import { Check, Copy } from "lucide-react";
 import { parseMarkdown, safeHref, type Block, type Inline } from "@shared/markdown";
 import { openURL } from "./host";
+import { languageFor, runs } from "./panel/highlight";
 import { copyText } from "./thread/clipboard";
 import { smartBlocks } from "./thread/smart";
 import { Icon } from "./ui";
@@ -65,9 +66,29 @@ function cellWidth(columns: number): number {
   return Math.min(360, Math.max(140, 700 / Math.max(columns, 1)));
 }
 
-/** A code block, with a Copy button at its corner while the pointer is
- *  over it (CopyOnHover), saying Copied for a moment after. */
+/** The editor's names for a fence's language, where they differ
+ *  (MarkdownCodeText.coloured). */
+const FENCE_NAMES: Record<string, string> = {
+  typescript: "ts", javascript: "js", python: "py", shell: "sh", bash: "sh", zsh: "sh",
+  console: "sh", rust: "rs", ruby: "rb", kotlin: "kt", yml: "yaml", golang: "go",
+};
+
+/** The language a block names, as its fence wrote it (MarkdownCodeText.label). */
+export function fenceLabel(language?: string): string | null {
+  const name = (language ?? "").trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+  return name || null;
+}
+
+/** A code block: which language, above the code, where the Copy button
+ *  shows while the pointer is over it (CopyOnHover), saying Copied for a
+ *  moment after; the code coloured the editor's way when it names a
+ *  language the editor knows. */
 function CodeBlock({ text, language }: { text: string; language?: string }) {
+  const label = fenceLabel(language);
+  const coloured = useMemo(() => {
+    const grammar = label ? languageFor("code." + (FENCE_NAMES[label] ?? label)) : null;
+    return grammar ? runs(text, grammar) : null;
+  }, [text, label]);
   const [copied, setCopied] = useState(false);
   const timer = useRef(0);
   useEffect(() => () => window.clearTimeout(timer.current), []);
@@ -80,7 +101,12 @@ function CodeBlock({ text, language }: { text: string; language?: string }) {
   return (
     <div className={`md-code-wrap ${copied ? "copied" : ""}`}>
       <div className="md-code">
-        <pre data-language={language}><code>{text}</code></pre>
+        {label && <div className="md-code-label" aria-label={`${label} code`}>{label}</div>}
+        <div className="md-code-scroll">
+          <pre data-language={language} className={label ? "labelled" : ""}>
+            <code>{coloured ? coloured.map((run, i) => (run.token ? <span key={i} className={`tok-${run.token}`}>{run.text}</span> : run.text)) : text}</code>
+          </pre>
+        </div>
       </div>
       <button className="code-copy" data-nofind onClick={copy}>
         <Icon icon={copied ? Check : Copy} sf={copied ? "checkmark" : "doc.on.doc"} size={10} />

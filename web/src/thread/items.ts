@@ -17,8 +17,9 @@ export type ThreadItem =
   | { kind: "image"; id: string; message: Message; path: string }
   /** Images read one after another: one run, the pictures side by side. */
   | { kind: "images"; id: string; calls: Message[]; paths: string[]; said: string }
-  /** A turn that has been followed by another: how long the agent took. */
-  | { kind: "worked"; id: string; seconds: number };
+  /** A turn that has been followed by another: how long the agent took,
+   *  and how many steps. */
+  | { kind: "worked"; id: string; seconds: number; steps: number };
 
 export function threadItems(messages: readonly Message[]): ThreadItem[] {
   const items: ThreadItem[] = [];
@@ -26,6 +27,7 @@ export function threadItems(messages: readonly Message[]): ThreadItem[] {
   let pictures: { message: Message; path: string }[] = [];
   let said = "";
   let turn: Turn = { start: null, last: null };
+  let steps = 0;
   const flush = () => {
     if (run.length) items.push({ kind: "tools", id: run.at(-1)!.id, calls: run, said });
     run = [];
@@ -48,9 +50,11 @@ export function threadItems(messages: readonly Message[]): ThreadItem[] {
       flush();
       flushPictures();
       const seconds = turnSeconds(turn);
-      if (seconds !== null && turn.start) items.push({ kind: "worked", id: "worked-" + turn.start.id, seconds });
+      if (seconds !== null && turn.start) items.push({ kind: "worked", id: "worked-" + turn.start.id, seconds, steps });
       turn = { start: null, last: null };
+      steps = 0;
     }
+    steps += stepOf(turn, message);
     addToTurn(turn, message);
     const path = message.role === "tool" && toolKind(message.tool?.name).kind === "read"
       ? pictureRead(message) : null;
@@ -70,6 +74,27 @@ export function threadItems(messages: readonly Message[]): ThreadItem[] {
   flush();
   flushPictures();
   return items;
+}
+
+/** Whether a message is one of its turn's steps (ThreadItem.Turn.add): a
+ *  tool the agent used once the turn has started. */
+function stepOf(turn: Turn, message: Message): number {
+  return turn.start && !startsTurn(message) && message.role === "tool" ? 1 : 0;
+}
+
+/** How many steps the latest turn took. */
+export function latestSteps(messages: readonly Message[]): number {
+  let turn: Turn = { start: null, last: null };
+  let steps = 0;
+  for (const message of messages) {
+    if (startsTurn(message)) {
+      turn = { start: null, last: null };
+      steps = 0;
+    }
+    steps += stepOf(turn, message);
+    addToTurn(turn, message);
+  }
+  return steps;
 }
 
 /** The pictures the agent looked at, in order, each once: what the image
