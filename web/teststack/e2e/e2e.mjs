@@ -1131,7 +1131,9 @@ async function forms() {
 
   await check("forms: short names that don't fit say the one on screen", async () => {
     const many = { ...FORM, steps: [{ title: "Branch to ship", answered: true }, { title: "Deploy target" }, { title: "Rollback plan" }, { title: "Who to notify" }], title: "Deploy target" };
-    const page = await open(`agent=${ID.pick}`, { init: [asking(many), fake("form")], wait: card, size: [700, 700] });
+    // From the default settings: a panel left open by another check would
+    // leave the thread no room at all.
+    const page = await open(`agent=${ID.pick}&fresh`, { init: [asking(many), fake("form")], wait: card, size: [900, 700] });
     await until(page, () => {
       const wide = document.querySelector(".question-fits-wide");
       return wide?.classList.contains("measuring") && [...document.querySelectorAll(".question-fits > .question-title-text")].map((t) => t.innerText).join() === "Deploy target";
