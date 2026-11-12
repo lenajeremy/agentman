@@ -110,6 +110,49 @@ final class ToolRunTests: XCTestCase {
         XCTAssertEqual(ImageThumbnail.imagePath(in: "open /a/b/c.jpeg now"), "/a/b/c.jpeg")
     }
 
+    // A file tool's summary is one path, so a space in it is part of the
+    // name: Codex looking at "09 Waitlist.png" showed a plain row, because
+    // only paths without a space were taken for pictures.
+    func testAPictureWithASpaceInItsNameIsShown() {
+        let items = ThreadItem.items(from: [
+            message("1", .tool, tool: "Read", summary: "/Users/me/design/sections/09 Waitlist.png"),
+            message("2", .tool, tool: "Read", summary: "/Users/me/design/01 Landing · desktop.png"),
+            message("3", .tool, tool: "Read", summary: "/Users/me/Desktop/Screenshot 2026-10-05 at 10.00.00\u{202F}AM.png"),
+        ])
+        guard items.count == 1, case .images(_, let paths, _) = items[0] else {
+            return XCTFail("items = \(items)")
+        }
+        XCTAssertEqual(paths, [
+            "/Users/me/design/sections/09 Waitlist.png",
+            "/Users/me/design/01 Landing · desktop.png",
+            "/Users/me/Desktop/Screenshot 2026-10-05 at 10.00.00\u{202F}AM.png",
+        ])
+        // Still not a picture: what a shell would act on, a path that isn't
+        // as written, a relative one, or one that isn't a picture.
+        for summary in ["/tmp/a.png; rm -rf ~", "/tmp/$(whoami).png", "/tmp//a.png", "/tmp/../a.png", "shots/a b.png", "/tmp/notes b.md"] {
+            XCTAssertNil(ImageThumbnail.imageFile(inSummary: summary), summary)
+        }
+        // A command is still searched for a path, without guessing at spaces.
+        XCTAssertEqual(ImageThumbnail.imageFile(inSummary: "open /a/b/c.jpeg now"), "/a/b/c.jpeg")
+    }
+
+    // A file that mentions a picture is still the file read: what is in it
+    // is not searched for one, or a README's contents went missing behind a
+    // picture the agent never opened.
+    func testAFileMentioningAPictureIsStillAFileRead() {
+        var readme = message("1", .tool, tool: "Read", summary: "/work/README.md")
+        readme.text = "# Shop\n\n![Preview](/work/shot.png)\n"
+        let items = ThreadItem.items(from: [readme])
+        guard items.count == 1, case .tools(let run, _) = items[0], run.map(\.id) == ["1"] else {
+            return XCTFail("items = \(items)")
+        }
+        // With no summary at all, the text is all there is to go by.
+        var bare = message("2", .tool, tool: "Read", summary: "")
+        bare.tool?.summary = nil
+        bare.text = "/tmp/shot.png"
+        XCTAssertEqual(ThreadItem.picture(read: bare), "/tmp/shot.png")
+    }
+
     // Images read one after another are one run with the pictures side by
     // side, as Claude's own app shows them; one on its own stays as it was.
     func testImagesReadTogetherAreOneRun() {
