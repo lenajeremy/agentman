@@ -5,6 +5,7 @@ import { daemon } from "./daemon";
 import { serverSystem } from "./host";
 import "./styles/base.css";
 import "./settings/appearance";
+import "./settings/theme";
 import "./shell/keepEnded";
 
 daemon.start();

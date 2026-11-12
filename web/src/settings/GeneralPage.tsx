@@ -7,6 +7,7 @@ import pkg from "../../package.json";
 import type { ManagerSettings } from "@shared/protocol";
 import { usePref } from "../prefs";
 import { appearance, setAppearance, type AppearanceChoice } from "./appearance";
+import { setTheme, useTheme, type ThemeChoice } from "./theme";
 import { PopUp, PushButton, Segmented, Toggle } from "./controls";
 import { Row, Section, SettingsPage } from "./layout";
 import { copyText } from "./native";
@@ -97,9 +98,10 @@ function ModelPicker({ value, onChange }: { value: string; onChange: (value: str
 /** Light, dark, or as the Mac is set. */
 function AppearanceSection() {
   const [choice, setChoice] = usePref<string>("appearance", appearance());
+  const look = useTheme();
   return (
-    <Section title="Appearance">
-      <Row title="Look" divider={false}>
+    <Section title="Appearance" footer="New is the website's look, still being designed.">
+      <Row title="Look">
         <Segmented<AppearanceChoice>
           value={(choice === "light" || choice === "dark" ? choice : "system") as AppearanceChoice}
           options={[
@@ -111,6 +113,16 @@ function AppearanceSection() {
             setAppearance(next);
             setChoice(next);
           }}
+        />
+      </Row>
+      <Row title="Theme" divider={false}>
+        <Segmented<ThemeChoice>
+          value={look}
+          options={[
+            { value: "classic", label: "Classic" },
+            { value: "site", label: "New" },
+          ]}
+          onChange={setTheme}
         />
       </Row>
     </Section>

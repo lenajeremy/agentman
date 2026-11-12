@@ -29,7 +29,8 @@ await mkdir(appFonts, { recursive: true })
 for (const font of ['GoogleSansCode.ttf', 'GoogleSansCode-Italic.ttf', 'OFL-GoogleSansCode.txt']) {
   await cp(join(fonts, font), join(out, 'fonts', font))
 }
-for (const font of ['GoogleSans.ttf', 'GoogleSans-Italic.ttf', 'GoogleSansCode.ttf', 'OFL-GoogleSans.txt', 'OFL-GoogleSansCode.txt']) {
+// Rubik, the website's headline face, for the New theme's titles.
+for (const font of ['GoogleSans.ttf', 'GoogleSans-Italic.ttf', 'GoogleSansCode.ttf', 'OFL-GoogleSans.txt', 'OFL-GoogleSansCode.txt', 'Rubik-Bold.ttf', 'Rubik-SemiBold.ttf', 'OFL-Rubik.txt']) {
   await cp(join(fonts, font), join(appFonts, font))
 }
 

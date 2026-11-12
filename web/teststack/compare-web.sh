@@ -16,7 +16,7 @@
 # Board too. Web steps are browser.sh's (JS, click:, type:, key:…).
 #   LOOK=light|dark   both apps' appearance (default light; the Mac's own
 #                     doesn't matter)
-#   THEME=classic|site  the Mac's theme (default classic)
+#   THEME=classic|site  both apps' theme (default classic)
 #   WAIT=<s>          seconds before the pictures (default 10)
 #   SIZE=WxH          the window (default 1560x980)
 #   MAC_WINDOW, MAC_ENV, MAC_DEFAULTS, KEEP_STATE: as compare.sh
@@ -79,8 +79,8 @@ open -g -n --env AGENTMAN_SOCKET="$H/.agentman/am.sock" --env "AGENTMAN_OPEN=$MA
   "${MAC_ENV_ARGS[@]}" "$MAC_APP" \
   --args -ApplePersistenceIgnoreState YES -AgentmanTestRun "$RUN"
 
-# The web app: its defaults (fresh), the same look, this run only.
-PREFS=$(python3 -c 'import json,sys; p={"appearance": sys.argv[1]}; p.update(json.loads(sys.argv[2] or "{}")); print(json.dumps(p))' "$LOOK" "${WEB_PREFS:-}")
+# The web app: its defaults (fresh), the same look and theme, this run only.
+PREFS=$(python3 -c 'import json,sys; p={"appearance": sys.argv[1], "appTheme": sys.argv[3]}; p.update(json.loads(sys.argv[2] or "{}")); print(json.dumps(p))' "$LOOK" "${WEB_PREFS:-}" "$THEME")
 Q="fresh&prefs=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' "$PREFS")${WEB_QUERY:+&$WEB_QUERY}"
 DARK_ARG=; [ "$LOOK" = dark ] && DARK_ARG=1
 DARK=$DARK_ARG SIZE=$SIZE WAIT=$WAIT "$HERE/browser.sh" "$OUT/web.png" "$Q" "$@" > "$OUT/web.log" 2>&1 &
