@@ -127,9 +127,9 @@ function Palette({ editor }: { editor?: EditorStore }) {
     // The agent open now, first; not over an editor, which has its own.
     const open = editor ? undefined : route.kind === "agent" ? sessions.find((s) => s.id === route.id) ?? pastSessions.find((s) => s.id === route.id) : undefined;
     if (open) {
-      list.push({ item: { id: "here-editor", title: `Open ${open.name}'s Folder in the Editor`, icon: "chevron.left.forwardslash.chevron.right", lucide: CodeXml }, run: () => void openEditor({ folder: open.cwd }) });
-      list.push({ item: { id: "here-terminal", title: `Open a Terminal for ${open.name}`, icon: "terminal", lucide: SquareTerminal }, run: () => showTerminal(open.cwd) });
-      list.push({ item: { id: "here-rename", title: `Rename ${open.name}…`, icon: "pencil", lucide: Pencil }, run: () => setShell({ renaming: open.id }) });
+      list.push({ item: { id: "here-editor", title: "Open Its Folder in the Editor", detail: open.name, icon: "chevron.left.forwardslash.chevron.right", lucide: CodeXml }, run: () => void openEditor({ folder: open.cwd }) });
+      list.push({ item: { id: "here-terminal", title: "Open a Terminal in Its Folder", detail: open.name, icon: "terminal", lucide: SquareTerminal }, run: () => showTerminal(open.cwd) });
+      list.push({ item: { id: "here-rename", title: "Rename…", detail: open.name, icon: "pencil", lucide: Pencil }, run: () => setShell({ renaming: open.id }) });
     }
     // Agents, those that need the user first.
     const agents = [...sessions].sort((a: Session, b: Session) => {
