@@ -246,3 +246,18 @@
   :root[data-look="site"]:not([data-theme="light"]) .term-body, :root[data-look="site"]:not([data-theme="light"]) .term-note { background: #000000; }
 }
 :root[data-look="site"][data-theme="dark"] .term-body, :root[data-look="site"][data-theme="dark"] .term-note { background: #000000; }
+
+/* --- The editor (EditorWindow.swift, AgentPanel.swift) --------------- */
+:root[data-look="site"] .editor-brand-name, :root[data-look="site"] .panel-title-text { font: 600 13px var(--heading-font); }
+:root[data-look="site"] .tree-title { font: 600 13px var(--heading-font); }
+/* The open tab: no fill, the site's orange under it. */
+:root[data-look="site"] .tab { position: relative; }
+:root[data-look="site"] .tab.active .tab-body { background: none; }
+:root[data-look="site"] .tab:not(.active):hover .tab-body { background: color-mix(in srgb, var(--fill) 45%, transparent); }
+:root[data-look="site"] .tab.active::after { content: ""; position: absolute; left: 11px; right: 11px; bottom: 0; height: 2.5px; border-radius: 2px; background: var(--flood); }
+:root[data-look="site"] .path-save { box-shadow: 0 2px 0 var(--inverse-shadow); }
+:root[data-look="site"] .panel-agentman { box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+/* The empty page: the name in Rubik, the tile cream, the cards raised. */
+:root[data-look="site"] .empty-name { font: 700 24px var(--heading-font); letter-spacing: -0.3px; }
+:root[data-look="site"] .empty-tile { background: var(--cream); box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+:root[data-look="site"] .empty-list { overflow: visible; box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 3px 0 var(--edge); }
