@@ -37,7 +37,7 @@
 .agent-view { flex: 1; min-height: 0; display: flex; }
 .agent-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .right-panel-slot { flex: none; position: relative; display: flex; min-width: 0; }
-.pane-edge { position: absolute; left: 0; top: 0; bottom: 0; width: 1px; background: var(--line); z-index: 4; }
+.pane-edge { position: absolute; left: 0; top: 0; bottom: 0; width: var(--edge-width); background: var(--edge); z-index: 4; }
 .pane-grab { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; }
 
 /* The right panel: a 32 tab row, a hairline, the tab. */
@@ -62,7 +62,8 @@
 .panel-button:hover { background: color-mix(in srgb, var(--fill) 50%, transparent); }
 .panel-button.on { background: var(--fill); color: var(--text); }
 .panel-button:disabled { opacity: 0.4; }
-.segmented { display: flex; padding: 0; border: 1px solid var(--line); border-radius: 7px; }
+/* 1 round its buttons, the edge drawn inside that (strokeBorder). */
+.segmented { display: flex; padding: 1px; border-radius: 7px; box-shadow: inset 0 0 0 var(--edge-width) var(--edge); }
 .empty-note { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; padding: 28px; font-size: 12px; color: var(--muted); }
 .loaded-wait { flex: 1; display: grid; place-items: center; }
 .loaded-problem { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; font-size: 12px; color: var(--muted); text-align: center; }
