@@ -54,6 +54,10 @@
 .am-hero-name { display: flex; flex-direction: column; align-items: center; gap: 16px; padding-bottom: 28px; }
 .am-wordmark { font-size: 34px; line-height: 41px; color: var(--text); }
 .am-hero-box { width: 100%; max-width: 620px; }
+/* Questions to start with: chips 8 apart under the box (StarterChip). */
+.am-starters { width: 100%; max-width: 620px; display: flex; flex-wrap: wrap; gap: 8px; padding-top: 6px; }
+.am-starter { height: 28px; padding: 0 12px; border-radius: 14px; font-size: 12px; color: var(--text-2); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); white-space: nowrap; }
+.am-starter:hover { color: var(--text); background: var(--fill); }
 
 /* The foot: the box, 4 above it and 22 below. */
 .am-foot { flex: none; max-width: 740px; width: 100%; margin: 0 auto; padding-top: 4px; padding-bottom: 22px; display: flex; flex-direction: column; gap: 8px; }

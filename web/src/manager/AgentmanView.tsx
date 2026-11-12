@@ -20,6 +20,8 @@ const NEW_CHAT_MESSAGE = "This conversation is set aside, and Agentman keeps wha
 
 const query = new URLSearchParams(location.search);
 
+const STARTERS = ["What needs me?", "What happened while I was away?", "What is everyone working on?"];
+
 /** How close to the bottom still counts as there; how close to the top
  *  starts loading what came before (Design/FollowsEnd.swift). */
 const SLACK = 80;
@@ -121,8 +123,8 @@ export function AgentmanView({ inPanel = false }: { inPanel?: boolean }) {
     if (!end && el.scrollTop <= TOP_SLACK) void earlier();
   };
 
-  const submit = () => {
-    const message = draft.trim();
+  const submit = (asked?: string) => {
+    const message = (asked ?? draft).trim();
     if ((!message && attachments.length === 0) || sending) return;
     setSending(true);
     following.current = true;
@@ -197,6 +199,15 @@ export function AgentmanView({ inPanel = false }: { inPanel?: boolean }) {
                   <div className="am-hero-box">
                     <ManagerBox {...boxProps} large />
                   </div>
+                  {/* A few questions to start with, once there is someone to
+                      ask (EntryHero.starters). */}
+                  {status === "connected" && !needsKey(s) && (
+                    <div className="am-starters">
+                      {STARTERS.map((question) => (
+                        <button key={question} className="am-starter" onClick={() => { setDraft(question); submit(question); }}>{question}</button>
+                      ))}
+                    </div>
+                  )}
                   <span className="am-hero-space" />
                   <span className="am-hero-space small" />
                 </div>
