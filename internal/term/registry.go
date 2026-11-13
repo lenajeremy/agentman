@@ -13,9 +13,14 @@ package term
 //     JSON ({"type":"state","shells":[…],"active":id,"splits":{left:right}})
 //     at once and after every change; the app sends commands as JSON: new,
 //     ensure, agent, split, unsplit, close, restart, activate.
-//   - ?id=<shell>: one shell's screen. The server sends the scrollback, then
-//     the output as it comes, as binary messages; the app sends keystrokes
-//     as binary and {"type":"resize"} or {"type":"clear"} as JSON.
+//   - ?id=<shell>: one shell's screen. The server sends the scrollback (an
+//     empty message when there is none, so the app knows which is the
+//     replay), then the output as it comes, as binary messages; the app sends keystrokes
+//     as binary and {"type":"resize"} or {"type":"clear"} as JSON, and its
+//     terminal's answers to a program's questions (where the cursor is, what
+//     terminal it is) as {"type":"reply","data":…}. Every panel showing a
+//     shell answers; only the one whose size the shell has is heard, as a
+//     terminal answers once.
 
 import (
 	"bufio"
@@ -544,6 +549,9 @@ type PanelShell struct {
 	ring    []byte
 	osc     oscParser
 	viewers map[*viewer]struct{}
+	// answerer is the panel whose terminal's answers reach the program: the
+	// one that last gave the shell its size.
+	answerer *viewer
 }
 
 type process struct {
@@ -714,15 +722,30 @@ func (s *PanelShell) Clear() {
 	}
 }
 
-func (s *PanelShell) resize(size Size) {
+func (s *PanelShell) resize(v *viewer, size Size) {
 	if !size.valid() {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.size = size
+	s.answerer = v
 	if s.proc != nil && !s.exited {
 		_ = pty.Setsize(s.proc.ptmx, &pty.Winsize{Cols: size.Cols, Rows: size.Rows})
+	}
+}
+
+// reply passes on a panel's answer to a program's question, if it is the
+// panel answering, or the first to answer since that one went.
+func (s *PanelShell) reply(v *viewer, data []byte) {
+	s.mu.Lock()
+	if s.answerer == nil {
+		s.answerer = v
+	}
+	heard := s.answerer == v
+	s.mu.Unlock()
+	if heard {
+		s.write(data)
 	}
 }
 
@@ -806,6 +829,7 @@ func (r *Registry) Attach(ctx context.Context, c *websocket.Conn, s *PanelShell,
 	s.viewers[v] = struct{}{}
 	if size.valid() {
 		s.size = size
+		s.answerer = v
 	}
 	if !s.started {
 		s.startLocked()
@@ -818,6 +842,9 @@ func (r *Registry) Attach(ctx context.Context, c *websocket.Conn, s *PanelShell,
 	defer func() {
 		s.mu.Lock()
 		delete(s.viewers, v)
+		if s.answerer == v {
+			s.answerer = nil
+		}
 		s.mu.Unlock()
 	}()
 
@@ -839,20 +866,24 @@ func (r *Registry) Attach(ctx context.Context, c *websocket.Conn, s *PanelShell,
 				}
 				switch msg.Type {
 				case "resize":
-					s.resize(msg.Size)
+					s.resize(v, msg.Size)
 				case "clear":
 					s.Clear()
+				case "reply":
+					s.reply(v, []byte(msg.Data))
 				}
 			}
 		}
 	}()
 
+	scrollback := true
 	for {
 		select {
 		case data := <-v.queue:
-			if len(data) == 0 {
+			if len(data) == 0 && !scrollback {
 				continue
 			}
+			scrollback = false
 			if err := c.Write(ctx, websocket.MessageBinary, data); err != nil {
 				return
 			}

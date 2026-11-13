@@ -50,6 +50,18 @@ export function ShellView({ id, visible }: { id: string; visible: boolean }) {
     let ws: WebSocket | undefined;
     let disposed = false;
     const encoder = new TextEncoder();
+    // What xterm sends is either the user's (typed, pasted, a click) or its
+    // own answer to a program's question (where the cursor is, what terminal
+    // this is). It marks the user's (CoreService.onUserInput), so answers can
+    // go apart: none for the scrollback replayed on attaching, whose
+    // questions were answered when they were asked (tmux's, answered again,
+    // would be typed into the shell as "1;2c0;276;0c"), and the rest as
+    // replies, which am serve takes from one window when two show the shell.
+    // Without the mark, everything goes as typed, as before.
+    const core = (term as unknown as { _core?: { coreService?: { onUserInput?: (listener: () => void) => { dispose(): void } } } })._core?.coreService;
+    let typed = false;
+    const userInput = core?.onUserInput?.(() => (typed = true));
+    let replaying = false;
     const send = (data: string | Uint8Array<ArrayBuffer>) => {
       if (ws?.readyState === WebSocket.OPEN) ws.send(data);
     };
@@ -124,12 +136,29 @@ export function ShellView({ id, visible }: { id: string; visible: boolean }) {
       ws.onopen = () => {
         send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
       };
+      // The first message is the scrollback, then what the shell says now.
+      let scrollback = true;
       ws.onmessage = (e) => {
-        if (e.data instanceof ArrayBuffer) term.write(new Uint8Array(e.data));
+        if (!(e.data instanceof ArrayBuffer)) return;
+        const data = new Uint8Array(e.data);
+        if (scrollback) {
+          scrollback = false;
+          replaying = true;
+          // Called once xterm has read it all, before what comes after.
+          term.write(data, () => (replaying = false));
+        } else {
+          term.write(data);
+        }
       };
     })().catch(() => {});
 
-    const input = term.onData((data) => send(encoder.encode(data)));
+    const input = term.onData((data) => {
+      const user = typed;
+      typed = false;
+      // Focus reports are the window's own and go as typed from each.
+      if (!userInput || user || data === "\x1b[I" || data === "\x1b[O") send(encoder.encode(data));
+      else if (!replaying) send(JSON.stringify({ type: "reply", data }));
+    });
     const binary = term.onBinary((data) => send(Uint8Array.from(data, (c) => c.charCodeAt(0))));
     const resize = term.onResize(({ cols, rows }) => send(JSON.stringify({ type: "resize", cols, rows })));
     const observer = new ResizeObserver(refit);
@@ -144,6 +173,7 @@ export function ShellView({ id, visible }: { id: string; visible: boolean }) {
       observer.disconnect();
       offTheme();
       input.dispose();
+      userInput?.dispose();
       binary.dispose();
       resize.dispose();
       ws?.close();

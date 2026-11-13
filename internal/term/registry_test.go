@@ -3,6 +3,7 @@ package term
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -157,6 +158,23 @@ func TestOutputComesBackAndIsReplayedToALaterPanel(t *testing.T) {
 	readUntil(t, ctx, later, "still-2")
 }
 
+// The first message is the scrollback even when there is none, so the app
+// can tell the replay (whose questions were answered long ago) from what
+// the shell says now.
+func TestTheScrollbackComesFirstEvenEmpty(t *testing.T) {
+	r, base, ctx := testRegistry(t)
+	s := r.New(t.TempDir())
+	c := attach(t, ctx, base, s.ID)
+	kind, first, err := c.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind != websocket.MessageBinary || len(first) != 0 {
+		t.Fatalf("a new shell's first message is %v %q, want an empty scrollback", kind, first)
+	}
+	readUntil(t, ctx, c, "$ ")
+}
+
 func TestTwoPanelsShowTheSameShell(t *testing.T) {
 	r, base, ctx := testRegistry(t)
 	s := r.New(t.TempDir())
@@ -166,6 +184,58 @@ func TestTwoPanelsShowTheSameShell(t *testing.T) {
 	send(t, ctx, one, "echo both-$((2+3))\r")
 	readUntil(t, ctx, one, "both-5")
 	readUntil(t, ctx, two, "both-5")
+}
+
+// A program's question (where's the cursor, what terminal is this) is
+// answered by every panel showing the shell; only the panel whose size the
+// shell has is heard, so the program gets one answer and no answer is left
+// over to be typed at the prompt.
+func TestOnlyThePanelSizingTheShellAnswersForIt(t *testing.T) {
+	r, base, ctx := testRegistry(t)
+	s := r.New(t.TempDir())
+	one := attach(t, ctx, base, s.ID)
+	readUntil(t, ctx, one, "$ ")
+	two := attach(t, ctx, base, s.ID)
+	time.Sleep(100 * time.Millisecond)
+
+	answer := func(c *websocket.Conn, text string) {
+		ask(t, ctx, c, map[string]string{"type": "reply", "data": text})
+	}
+	// What the shell read, from the line it printed it on, "read<n>=<x>."
+	// (the typed command shows "read$((n+0))=", and each time has its own n,
+	// so neither the command nor an earlier answer matches).
+	n := 0
+	heard := func(c *websocket.Conn, first, second *websocket.Conn) string {
+		n++
+		mark := fmt.Sprintf("read%d=", n)
+		send(t, ctx, c, fmt.Sprintf("read x; echo \"read$((%d+0))=$x.\"\r", n))
+		time.Sleep(200 * time.Millisecond)
+		answer(first, "a\r")
+		answer(second, "b\r")
+		out := readUntil(t, ctx, c, mark)
+		if !strings.Contains(out[strings.Index(out, mark):], ".") {
+			out += readUntil(t, ctx, c, ".")
+		}
+		rest := out[strings.Index(out, mark)+len(mark):]
+		return rest[:strings.Index(rest, ".")]
+	}
+
+	// Two attached last, at its size: its answer is the one heard.
+	if got := heard(one, one, two); got != "b" {
+		t.Fatalf("the shell read %q, want two's answer", got)
+	}
+	// Sizing it again makes one the panel heard.
+	ask(t, ctx, one, map[string]any{"type": "resize", "cols": 90, "rows": 20})
+	time.Sleep(100 * time.Millisecond)
+	if got := heard(one, one, two); got != "a" {
+		t.Fatalf("the shell read %q, want one's answer once it sized the shell", got)
+	}
+	// When the panel answering goes, the next to answer is heard.
+	_ = one.Close(websocket.StatusNormalClosure, "")
+	time.Sleep(200 * time.Millisecond)
+	if got := heard(two, two, two); got != "a" {
+		t.Fatalf("the shell read %q, want the remaining panel's first answer", got)
+	}
 }
 
 func TestTheShellsEnvironmentIsATerminalsOfItsOwn(t *testing.T) {

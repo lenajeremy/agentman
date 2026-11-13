@@ -773,6 +773,34 @@ async function editor() {
     await until(page, () => [...document.querySelectorAll(".xterm-rows > div")].some((d) => d.innerText.trim() === "e2e-42"), null, "the shell's answer", 15000);
   });
 
+  // A program's question (here bash asking where the cursor is) reaches
+  // every window showing its shell, and each answers; one answer is heard,
+  // so the program reads one and none is left over to be typed. (Not in
+  // tmux: tmux answers its own shell's questions.)
+  await check("editor: with a shell in two windows, a program's question is answered once", async () => {
+    const shown = '.editor-terminal .shell-host[style*="visibility: visible"]';
+    const q = `view=editor&folder=${folder}&file=TODO.txt&terminal=1&renderer=dom`;
+    const one = await open(q, { wait: ".editor-terminal" });
+    const start = one.locator(".term-note button");
+    // A shell of its own, in front in both windows.
+    if (await start.count()) await start.click();
+    else await one.locator('[aria-label="New terminal (⌃⇧`)"]').click();
+    await one.waitForSelector(`${shown} .xterm-rows`, { timeout: 10000 });
+    await sleep(1000);
+    const two = await open(q, { wait: `${shown} .xterm-rows` });
+    await sleep(1000);
+    await two.locator(shown).click();
+    // Echo off first, or an answer quicker than read shows as typed; a
+    // second read, for a second answer.
+    await two.keyboard.type(`bash -c 'stty -echo; printf "\\033[6n"; read -rs -d R -t 3 at; read -rs -d R -t 1 again; stty echo; echo "at-\${at#*[}-read\${again:+-twice}"'`);
+    await two.keyboard.press("Enter");
+    const rows = () => two.evaluate((shown) => [...document.querySelectorAll(`${shown} .xterm-rows > div`)].map((d) => d.innerText.trim()), shown);
+    await until(two, (shown) => [...document.querySelectorAll(`${shown} .xterm-rows > div`)].some((d) => /^at-\d+;\d+-read$/.test(d.innerText.trim())), shown, "the cursor's place, read once", 10000)
+      .catch(async (e) => { throw new Error(`${e.message}: ${JSON.stringify((await rows()).filter(Boolean).slice(-4))}`); });
+    await one.close();
+    await two.close();
+  });
+
   await check("editor: a narrow window keeps the agent panel inside it", async () => {
     const page = await open(`view=editor&folder=${folder}&file=TODO.txt&agent=here&panel=1`, { size: [800, 700], wait: ".agent-panel-column" });
     const fit = await page.evaluate(() => ({ right: document.querySelector(".agent-panel-column").getBoundingClientRect().right, width: innerWidth, scroll: document.documentElement.scrollWidth }));
@@ -1208,6 +1236,46 @@ async function forms() {
 }
 
 async function threadMore() {
+  // tmux asks the terminal what it is as it attaches. The answer was given
+  // then; the screen replayed to a page opened later holds the question
+  // again, and answering it a second time typed "1;2c0;276;0c" into the
+  // agent's shell.
+  await check("thread: the agent's own terminal, opened again, types nothing into it", async () => {
+    // The shell on screen: the folder's other shells, kept in tabs, are hidden.
+    const shown = '.shell-host[style*="visibility: visible"]';
+    const rows = (page) => page.evaluate((shown) => [...document.querySelectorAll(`${shown} .xterm-rows > div`)].map((d) => d.innerText).join("\n"), shown);
+    let screen = "";
+    const pages = [];
+    for (let round = 1; round <= 2; round++) {
+      const page = await open(`agent=${ID.demo}&renderer=dom`, { wait: ".detail-header .ellipsis" });
+      pages.push(page);
+      await page.locator(".detail-header .ellipsis").click();
+      await menu(page, "Show the Agent's Own Terminal");
+      await page.waitForSelector(`${shown} .xterm-rows`, { timeout: 10000 });
+      await sleep(2000);
+      if (round === 1) {
+        // From an empty line and a clear screen (earlier runs may have left
+        // text at the prompt).
+        await page.locator(shown).click();
+        await page.keyboard.press("Control+U");
+        await page.keyboard.type("clear");
+        await page.keyboard.press("Enter");
+        await sleep(1000);
+      }
+      screen = await rows(page);
+      expect(!/1;2c|0;276;0c|\[\?|\[>/.test(screen), `after opening it ${round === 1 ? "once" : "again"}: ${JSON.stringify(screen.trim().split("\n").filter(Boolean).slice(-3))}`);
+      if (round === 2) {
+        // What's typed still reaches the shell (with the first page still
+        // showing it too).
+        await page.locator(shown).click();
+        await page.keyboard.type("echo own-$((6*7))");
+        await page.keyboard.press("Enter");
+        await until(page, (shown) => [...document.querySelectorAll(`${shown} .xterm-rows > div`)].some((d) => d.innerText.trim() === "own-42"), shown, "the shell's answer", 10000);
+      }
+    }
+    for (const page of pages) await page.close();
+  });
+
   await check("thread: Stop asks am serve to interrupt the turn", async () => {
     const page = await open(`agent=${ID.demo}`, { init: [fake("record"), fake("busy")], wait: '[aria-label="Stop the agent\'s turn"]' });
     await click(page, '[aria-label="Stop the agent\'s turn"]');

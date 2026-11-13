@@ -34,6 +34,8 @@ func (s Size) valid() bool { return s.Cols > 0 && s.Rows > 0 && s.Cols < 2000 &&
 type command struct {
 	Type string `json:"type"`
 	Size
+	// Data is a "reply": the terminal's answer to the program's question.
+	Data string `json:"data"`
 }
 
 // Env is the environment a terminal's program gets: am serve's own (the
@@ -117,8 +119,18 @@ func Serve(ctx context.Context, c *websocket.Conn, cmd *exec.Cmd, size Size) err
 				}
 			case websocket.MessageText:
 				var msg command
-				if json.Unmarshal(data, &msg) == nil && msg.Type == "resize" && msg.valid() {
+				if json.Unmarshal(data, &msg) != nil {
+					continue
+				}
+				switch {
+				case msg.Type == "resize" && msg.valid():
 					_ = pty.Setsize(ptmx, &pty.Winsize{Cols: msg.Cols, Rows: msg.Rows})
+				case msg.Type == "reply":
+					// One terminal shows this program, so its answers are heard.
+					if _, err := ptmx.Write([]byte(msg.Data)); err != nil {
+						inputDone <- err
+						return
+					}
 				}
 			}
 		}
