@@ -9,10 +9,12 @@ import { openHit } from "./board/search";
 import { agentColor, useColorBy } from "./board/colors";
 import { confirmEnd, endable } from "./AgentHeader";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { ChevronRight, Folder as FolderIcon, ListFilter, PanelLeft, Search, Sparkles, SquarePen, X, ChartSpline } from "lucide-react";
+import { ChevronRight, Folder as FolderIcon, ListFilter, PanelLeft, Search, Settings as Gear, Sparkles, SquarePen, X, ChartSpline } from "lucide-react";
 import type { SearchHit, Session } from "@shared/protocol";
 import { useManagerSummary } from "./manager/summary";
 import { openAgent, openAgentman, openNewAgent, useRoute, openUsage } from "./nav";
+import { inShell, openSettings } from "./host";
+import { shortcutLabel } from "./palette/PaletteView";
 import { isMuted, setMuted } from "./notify/policy";
 import { usePref, setPref } from "./prefs";
 import { useAgentmanOn } from "./shell/agentman";
@@ -144,9 +146,17 @@ export function Sidebar({ width, headerLeading }: { width: number; headerLeading
             // Escape clears it, as the Mac's does.
             onKeyDown={(e) => e.key === "Escape" && setShell({ search: "" })}
           />
+          {/* A browser has no menu bar to show ⌘K in (Go › Command
+              Palette…), so the field shows it, and a click opens it. */}
+          {!inShell && !shell.search && (
+            <button className="palette-hint" title="Go to an agent, run a command, or ask Agentman" aria-label="Command palette"
+              onMouseDown={(e) => e.preventDefault()} onClick={() => setShell({ showPalette: true })}>
+              {shortcutLabel("⌘K")}
+            </button>
+          )}
           </span>
           <FilterMenu sessions={sessions} />
-          <button className="new-agent-button" title="New agent (⌘N)" aria-label="New agent" onClick={() => openNewAgent()}>
+          <button className="new-agent-button" title={withKey("New agent", "⌘N")} aria-label="New agent" onClick={() => openNewAgent()}>
             <Icon icon={SquarePen} sf="square.and.pencil" size={12} />
           </button>
         </div>
@@ -478,7 +488,25 @@ function ConnectionFooter({ version }: { version?: string }) {
       <Spacer min={8} />
       <UsageButton />
       <AppearanceMenu />
+      {!inShell && <SettingsButton />}
     </footer>
+  );
+}
+
+/** "New agent (⌘N)", or just "New agent" where the key isn't the page's
+ *  (a browser keeps ⌘N for a window of its own). */
+function withKey(words: string, key: string) {
+  const label = shortcutLabel(key);
+  return label ? `${words} (${label})` : words;
+}
+
+/** Settings, in a browser, which has no menu bar to hold it (the Mac's
+ *  Agentman › Settings…, ⌘,); the desktop shell keeps it in its menu. */
+function SettingsButton() {
+  return (
+    <button className="settings-button" title={withKey("Settings", "⌘,")} aria-label="Settings" onMouseDown={(e) => e.preventDefault()} onClick={() => void openSettings()}>
+      <Icon icon={Gear} sf="gearshape" size={13} />
+    </button>
   );
 }
 

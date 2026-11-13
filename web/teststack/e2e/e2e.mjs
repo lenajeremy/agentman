@@ -1086,6 +1086,28 @@ async function filtersAndAway() {
 const sessionId = async (name) => (await daemon({ type: "list_sessions" })).sessions?.find((s) => s.name === name && s.kind === "claude")?.id;
 
 async function sidebar() {
+  // A browser has no menu bar, where the Mac keeps Settings… and Command
+  // Palette…: the sidebar shows both.
+  await check("sidebar: Settings and ⌘K have their own buttons in a browser", async () => {
+    const page = await open(`agent=${ID.demo}`);
+    const gear = page.locator('.sidebar-footer [aria-label="Settings"]');
+    const title = await gear.getAttribute("title");
+    expect(title === "Settings (⌘,)" || title === "Settings (Ctrl+,)", `the button's help: ${title}`);
+    // (The page's window.open is the stubs' record.)
+    await gear.click();
+    await until(page, () => window.__opened.some((u) => new URL(u, location.href).searchParams.get("view") === "settings"), null, "Settings opened");
+    const hint = page.locator('.search-row [aria-label="Command palette"]');
+    expect(/^(⌘K|Ctrl\+K)$/.test((await hint.innerText()).trim()), "the hint reads ⌘K");
+    await hint.click();
+    await page.waitForSelector(".palette", { timeout: 5000 });
+    await page.keyboard.press("Escape");
+    // Typing in the field, the hint steps aside.
+    await page.locator("#search").fill("dem");
+    expect(!(await hint.count()), "the hint stays while searching");
+    // ⌘N is the browser's there, so New agent's help doesn't offer it.
+    expect((await page.locator(".new-agent-button").getAttribute("title")) === "New agent", "New agent's help");
+  });
+
   await check("sidebar: rename, then back", async () => {
     const page = await open(`agent=${ID.bugs}`);
     const row = page.locator(".sidebar .agent-line1").filter({ hasText: "shots" }).first();

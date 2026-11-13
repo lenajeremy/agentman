@@ -25,6 +25,10 @@
 .filter-button { display: flex; justify-content: center; width: 15px; color: var(--text-2); }
 .filter-button.filtering { color: var(--working); }
 .new-agent-button { display: flex; justify-content: center; width: 15px; color: var(--muted); }
+/* ⌘K at the field's end, in a browser (no menu bar shows it there). */
+.palette-hint { flex: none; height: 16px; padding: 0 4px; border-radius: 4px; font-size: 10.5px; line-height: 16px; font-weight: 500; color: var(--text-2); box-shadow: inset 0 0 0 1px var(--line); white-space: nowrap; }
+.palette-hint:hover { color: var(--text); }
+:root[data-look="site"] .palette-hint { font-family: var(--mono); font-size: 10px; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--edge) 35%, transparent); }
 
 .agent-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; outline: none; position: relative; }
 .section-head { display: flex; align-items: center; gap: 6px; margin: 0 18px; padding: 12px 5px 4px; font-size: 12px; line-height: 15px; flex: none; }
@@ -103,7 +107,7 @@
 .agent-tint { position: absolute; left: -10px; top: 8px; bottom: 8px; width: 4px; border-radius: 0 1px 1px 0; pointer-events: none; }
 
 /* Usage, beside the appearance switch (UsageButton). */
-.usage-button { width: 22px; height: 20px; display: grid; place-items: center; color: var(--muted); flex: none; }
+.usage-button, .settings-button { width: 22px; height: 20px; display: grid; place-items: center; color: var(--muted); flex: none; }
 .usage-button.open { color: var(--text); }
 
 /* Searching what was said (SearchWords.snippet), and finding nothing. */
