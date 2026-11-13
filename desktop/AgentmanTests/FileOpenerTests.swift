@@ -38,6 +38,37 @@ final class FileOpenerTests: XCTestCase {
                        "a folder whose name only begins the same doesn't hold it")
     }
 
+    // An editor opened through a link takes the files of the folder it
+    // links to, compared by real paths, and opens them under the path it
+    // was opened with.
+    func testAnEditorOpenedThroughALinkTakesItsFiles() {
+        let real = ["/Users/me/link": "/Users/me/code/shop"]
+        let place = EditorOpener.place(file: "/Users/me/code/shop/docs/a.md", open: ["/Users/me/link"], home: home,
+                                       real: { real[$0] ?? $0 }, isRepository: { $0 == "/Users/me/code/shop" })
+        XCTAssertEqual(place.folder, "/Users/me/link")
+        XCTAssertEqual(place.file, "docs/a.md")
+        let none = EditorOpener.place(file: "/Users/me/code/shop/docs/a.md", open: [], home: home,
+                                      real: { $0 }, isRepository: { $0 == "/Users/me/code/shop" })
+        XCTAssertEqual(none.folder, "/Users/me/code/shop")
+        XCTAssertEqual(none.file, "docs/a.md")
+    }
+
+    // Real paths as `am open` and the agents name them: /tmp is
+    // /private/tmp, which Foundation's resolvingSymlinksInPath drops.
+    func testRealPathsAreTheSystemsOwn() throws {
+        XCTAssertEqual(EditorOpener.realPath("/tmp"), "/private/tmp")
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let link = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: folder)
+        defer {
+            try? FileManager.default.removeItem(at: link)
+            try? FileManager.default.removeItem(at: folder)
+        }
+        XCTAssertEqual(EditorOpener.realPath(link.path), EditorOpener.realPath(folder.path))
+        XCTAssertEqual(EditorOpener.realPath("/no/such/place/../here"), "/no/such/here", "a path that isn't there, tidied")
+    }
+
     // The app says which files it opens: text of every kind by type, and
     // code no app may have given a type by its extension; never as the
     // default by itself.
