@@ -20,6 +20,14 @@ export interface FieldApi {
   replace(start: number, end: number, text: string): void;
   /** Puts text in place of everything, as typing would. */
   replaceAll(text: string): void;
+  /** Whether the caret, with nothing selected, is on the field's first or
+   *  last line as drawn: a long line wraps onto several (MessageField.swift's
+   *  caretLine). */
+  caretOnLine(line: "first" | "last"): boolean;
+  /** Puts a prompt from the history, or the draft back, in the field, as one
+   *  change undo takes back: going back, the caret at its start, so the next
+   *  ↑ goes on back; coming forward, at its end. */
+  show(text: string, caretAtStart: boolean): void;
 }
 
 interface Props {
@@ -117,6 +125,19 @@ function positionOf(root: HTMLElement, segs: Segment[], at: number): { node: Nod
     return { node: parent, offset: at <= s.start ? index : index + 1 };
   }
   return { node: root, offset: root.childNodes.length };
+}
+
+/** Where a collapsed range is drawn; null where the browser can't say (a
+ *  position between elements). */
+function caretRect(range: Range): DOMRect | null {
+  const rects = range.getClientRects();
+  const rect = rects.length ? rects[0] : range.getBoundingClientRect();
+  return rect.height === 0 && rect.top === 0 ? null : rect;
+}
+
+/** Two rects on one line as drawn: their middles within half a line. */
+function sameLine(a: DOMRect, b: DOMRect): boolean {
+  return Math.abs(a.top + a.height / 2 - (b.top + b.height / 2)) < Math.max(4, Math.min(a.height, b.height) / 2);
 }
 
 function escape(text: string): string {
@@ -301,6 +322,40 @@ export const MessageField = forwardRef<FieldApi, Props>(function MessageField(pr
       const segs = segments(root);
       select(0, segs.length ? segs[segs.length - 1].start + segs[segs.length - 1].length : 0);
       document.execCommand("insertText", false, text);
+      report();
+    },
+    caretOnLine(line) {
+      const root = el.current;
+      const selection = window.getSelection();
+      if (!root || !selection || !selection.rangeCount || !selection.isCollapsed || !root.contains(selection.anchorNode)) return false;
+      const segs = segments(root);
+      const text = display(segs);
+      if (!text) return true;
+      const caret = offsetOf(root, segs, selection.anchorNode!, selection.anchorOffset);
+      // The lines as written first, then as drawn.
+      if (line === "first" ? text.slice(0, caret).includes("\n") : text.slice(caret).includes("\n")) return false;
+      const edgeAt = positionOf(root, segs, line === "first" ? 0 : text.length);
+      const edge = document.createRange();
+      edge.setStart(edgeAt.node, edgeAt.offset);
+      edge.collapse(true);
+      const here = caretRect(selection.getRangeAt(0));
+      const there = caretRect(edge);
+      return !here || !there || sameLine(here, there);
+    },
+    show(text, caretAtStart) {
+      const root = el.current;
+      if (!root) return;
+      root.focus();
+      const segs = segments(root);
+      const total = segs.length ? segs[segs.length - 1].start + segs[segs.length - 1].length : 0;
+      select(0, total);
+      if (text) document.execCommand("insertText", false, text);
+      else if (total) document.execCommand("delete");
+      makeChips(true, true);
+      const now = segments(root);
+      const end = caretAtStart ? 0 : now.length ? now[now.length - 1].start + now[now.length - 1].length : 0;
+      select(end, end);
+      root.scrollTop = caretAtStart ? 0 : root.scrollHeight;
       report();
     },
   }), [makeChips, report]);

@@ -14,7 +14,7 @@ import { endpoint } from "./host";
 
 /** Requests only an app on this computer makes, beyond the phone's: the
  *  devices and a code to pair one are refused to the phone. */
-export type AppRequest = Omit<Request, "type"> & { type: Request["type"] | "lsp_endpoint" | "session_terminal" | "devices" | "pair_code" };
+export type AppRequest = Omit<Request, "type"> & { type: Request["type"] | "lsp_endpoint" | "session_terminal" | "devices" | "pair_code" | "fetch_prompts" };
 
 /** An event, with what the decoder doesn't know kept as sent. */
 export type AppEvent = DaemonEvent & Record<string, unknown>;

@@ -1278,6 +1278,54 @@ async function forms() {
 }
 
 async function threadMore() {
+  // ↑ in the message box goes back through what was said to the agent, past
+  // the page loaded (a few prompts) through am serve's fetch_prompts, and ↓
+  // comes forward again to the words being written (PromptHistory).
+  await check("thread: ↑ and ↓ in the message box go through what was said", async () => {
+    const prompts = [
+      "Add a retry with backoff to the uploader, and make sure the tests cover the timeout path.",
+      "Why does the sidebar jump when an agent finishes? Find the cause before changing anything.",
+      "Write a migration that moves the settings file to the new location, keeping the old one as a fallback.",
+      "Summarise what changed in the last three commits in plain words.",
+      "The terminal flickers on resize. Can you reproduce it and fix it?",
+    ];
+    const page = await open(`agent=${ID.demo}`, { wait: ".composer-wrap .message-field" });
+    const box = page.locator(".composer-wrap .message-field");
+    const text = () => box.evaluate((el) => el.innerText.trim());
+    await box.click();
+    await page.keyboard.type("half a thought");
+    const seen = [];
+    for (let step = 0; step < 30; step++) {
+      const before = await text();
+      await page.keyboard.press("ArrowUp");
+      await until(page, (before) => document.querySelector(".composer-wrap .message-field").innerText.trim() !== before, before, `↑ number ${step + 1} (after ${seen.length})`, 8000);
+      seen.push(await text());
+    }
+    const at = prompts.indexOf(seen[0]);
+    expect(at >= 0, `the newest prompt first: ${seen[0]}`);
+    seen.forEach((said, i) => expect(said === prompts[(((at - i) % 5) + 5) % 5], `↑ ${i + 1} read ${JSON.stringify(said.slice(0, 40))}`));
+    // ↓ comes forward again, and past the newest gives the words back.
+    for (let step = 0; step < 29; step++) await page.keyboard.press("ArrowDown");
+    expect((await text()) === seen[0], "29 ↓ back at the newest");
+    await page.keyboard.press("ArrowDown");
+    expect((await text()) === "half a thought", `the words back: ${await text()}`);
+    await page.keyboard.press("ArrowDown");
+    expect((await text()) === "half a thought", "↓ on the words is the caret's");
+    // A draft of two lines: ↑ climbs its lines first.
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.keyboard.type("line one");
+    await page.keyboard.press("Shift+Enter");
+    await page.keyboard.type("line two");
+    await page.keyboard.press("ArrowUp");
+    expect((await text()) === "line one\nline two", `the first ↑ moves up a line: ${JSON.stringify(await text())}`);
+    await page.keyboard.press("ArrowUp");
+    await until(page, (want) => document.querySelector(".composer-wrap .message-field").innerText.trim() === want, seen[0], "then the newest prompt");
+    await page.keyboard.press("ArrowDown");
+    expect((await text()) === "line one\nline two", `↓ gives the two lines back: ${JSON.stringify(await text())}`);
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.keyboard.press("Backspace");
+  });
+
   // tmux asks the terminal what it is as it attaches. The answer was given
   // then; the screen replayed to a page opened later holds the question
   // again, and answering it a second time typed "1;2c0;276;0c" into the

@@ -201,6 +201,12 @@ export async function loadThrough(sessionId: string, messageId: string): Promise
   return false;
 }
 
+/** The thread as loaded, and where its older pages start: where ↑ in the
+ *  message box begins (AgentsStore.loadedPrompts). */
+export function loadedThread(sessionId: string): { messages: readonly Message[]; cursor?: string; hasMore: boolean } {
+  return { messages: state.messages[sessionId] ?? [], cursor: cursors[sessionId], hasMore: !!state.hasMore[sessionId] };
+}
+
 export async function loadOlder(sessionId: string): Promise<void> {
   const cursor = cursors[sessionId];
   if (!state.hasMore[sessionId] || !cursor || loadingOlder.has(sessionId)) return;

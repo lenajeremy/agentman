@@ -6,6 +6,7 @@
 import type { Message } from "@shared/protocol";
 import { addToTurn, startsTurn, turnSeconds, type Turn } from "@shared/toolgroups";
 import { pictureRead } from "./pictures";
+import { isKeptImage } from "./keptImage";
 
 export { imagePath } from "./pictures";
 
@@ -222,11 +223,6 @@ export function tidy(text: string): string {
   return out.split(/[\n\r]+/).join(" ").trim();
 }
 
-/** An image the daemon filed for a message: under its own images folder. */
-function isKeptImage(token: string): boolean {
-  return token.startsWith("/") && token.includes("/.agentman/images/") && !token.includes("..") &&
-    ["png", "jpg", "jpeg", "gif", "webp"].includes(token.split(".").at(-1)?.toLowerCase() ?? "");
-}
 
 export interface SentMessage {
   images: string[];

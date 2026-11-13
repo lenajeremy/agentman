@@ -7,7 +7,8 @@
 
 import { useStatus } from "./store";
 import { useShell } from "./shell/state";
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { agentHistory } from "./thread/history";
 import { ArrowUp, ChevronDown, Paperclip } from "lucide-react";
 import type { CommandPanel, Session } from "@shared/protocol";
 import { daemon, type AppRequest } from "./daemon";
@@ -70,7 +71,15 @@ async function fileReference(sessionId: string, path: string): Promise<string> {
 }
 
 export function Composer({ session, onSent }: { session: Session; onSent: () => void }) {
+  // ↑ and ↓ go back through what was said to the agent (PromptHistory).
+  const history = useMemo(agentHistory, []);
+  /** The words as the field last read them back, and whether the history
+   *  put them there rather than the user. */
+  const fieldText = useRef("");
+  const fromHistory = useRef(false);
   const [draft, setDraft] = useState(() => draftFor(session.id));
+  // A draft set from outside (kept for the agent, a test's) is the field's.
+  fieldText.current = draft;
   const [sending, setSending] = useState(false);
   const [readingPanel, setReadingPanel] = useState(false);
   const [panel, setPanel] = useState<CommandPanel | null>(null);
@@ -95,6 +104,10 @@ export function Composer({ session, onSent }: { session: Session; onSent: () => 
 
   // An unsent draft waits for the user's return, as on the phone.
   useEffect(() => setDraft(draftFor(session.id)), [session.id]);
+  // The history is the agent's; another agent starts again.
+  useEffect(() => {
+    history.sessionId = canReceive ? session.id : null;
+  }, [history, session.id, canReceive]);
 
   // For tests and pictures (the AGENTMAN_OPEN query): draft=<text> sets the
   // box's words; type=<text> types them, as the Mac's AGENTMAN_TEST_TYPE.
@@ -113,6 +126,9 @@ export function Composer({ session, onSent }: { session: Session; onSent: () => 
   }, [session.id]);
   const change = useCallback(
     (text: string) => {
+      fieldText.current = text;
+      // The user's own change: a step ↑ is still reading for isn't made.
+      if (!fromHistory.current) history.edited();
       setDraft(text);
       saveDraft(session.id, text);
       slash.update(text);
@@ -124,6 +140,8 @@ export function Composer({ session, onSent }: { session: Session; onSent: () => 
   const sendNow = async () => {
     let text = draft.trim();
     if (!canSend) return;
+    // The history lets go: the next ↑ starts from what is being said.
+    history.reset();
     // While a question takes a typed answer, what is typed is the answer.
     if (typedAnswer) {
       if (!text) return;
@@ -192,7 +210,33 @@ export function Composer({ session, onSent }: { session: Session; onSent: () => 
     if (picked !== null) field.current?.replaceAll(picked);
   };
 
+  /** A prompt from the history, or the draft back, in the box. */
+  const showFromHistory = (text: string, caretAtStart: boolean) => {
+    fromHistory.current = true;
+    try {
+      field.current?.show(text, caretAtStart);
+    } finally {
+      fromHistory.current = false;
+    }
+    history.showing(fieldText.current);
+    mentions.dismiss();
+    slash.dismiss();
+  };
+
+  /** ↑ on the box's first line goes back through what was said to the agent,
+   *  ↓ on its last line forward again, as in a terminal; on any other line
+   *  they move the caret, and a menu for / or @ takes them first, unless
+   *  the box shows a prompt from the history (MessageField.swift). */
+  const stepsThroughHistory = (e: KeyboardEvent<HTMLDivElement>): boolean => {
+    if ((e.key !== "ArrowUp" && e.key !== "ArrowDown") || e.shiftKey || e.metaKey || e.altKey || e.ctrlKey) return false;
+    const text = fieldText.current;
+    if (!history.shows(text) && ((slash.isOpen && slash.results.length > 0) || mentions.isOpen)) return false;
+    if (e.key === "ArrowUp") return !!field.current?.caretOnLine("first") && history.older(text, (t) => showFromHistory(t, true));
+    return !!field.current?.caretOnLine("last") && history.newer(text, (t) => showFromHistory(t, false));
+  };
+
   const onKey = (e: KeyboardEvent<HTMLDivElement>): boolean => {
+    if (stepsThroughHistory(e)) return true;
     if (slash.isOpen && slash.results.length) {
       switch (e.key) {
         case "ArrowDown": slash.move(1); return true;
