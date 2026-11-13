@@ -7,6 +7,7 @@ import { EditorWindow } from "./EditorWindow";
 import { platform } from "./host";
 import { MainWindow } from "./MainWindow";
 import { SettingsWindow } from "./settings/SettingsWindow";
+import { SettingsSheet } from "./settings/SettingsSheet";
 import "./nav";
 import "./shell/native";
 import "./notify/onScreen";
@@ -18,7 +19,12 @@ export default function App() {
   useEffect(() => {
     void platform().then(setOs);
   }, []);
-  if (view === "editor") return <EditorWindow />;
   if (view === "settings") return <SettingsWindow />;
-  return <MainWindow platform={os} />;
+  // Settings over either, in a browser (settings/overPage.ts).
+  return (
+    <>
+      {view === "editor" ? <EditorWindow /> : <MainWindow platform={os} />}
+      <SettingsSheet />
+    </>
+  );
 }

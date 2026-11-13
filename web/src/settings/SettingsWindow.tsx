@@ -5,7 +5,7 @@
 // windows.go with ?view=settings&page=<page>; the page "pair" is Devices,
 // pairing a new one.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ManagerSettings } from "@shared/protocol";
 import { Events } from "@wailsio/runtime";
 import { BellDot, BookOpen, Braces, KeyRound, MessageSquareText, Settings as Gear, ShieldCheck, Smartphone, type LucideIcon } from "lucide-react";
@@ -22,6 +22,7 @@ import { NotificationsPage } from "./NotificationsPage";
 import { PermissionsPage } from "./PermissionsPage";
 import { PersonalityPage } from "./PersonalityPage";
 import { editable, saveSettings, useSettingsState } from "./state";
+import type { SheetAsk } from "./overPage";
 import "../styles/settings.css";
 
 export type Page = "general" | "notifications" | "devices" | "permissions" | "personality" | "knowledge" | "keys" | "languages";
@@ -41,7 +42,9 @@ const isPage = (p: string | null): p is Page => PAGES.some((x) => x.id === p);
 const query = new URLSearchParams(location.search);
 const inShell = location.protocol === "wails:" || location.hostname === "wails.localhost";
 
-export function SettingsWindow() {
+/** asked: shown as a sheet over the page (SettingsSheet), on that page;
+ *  otherwise the window's own address says. */
+export function SettingsWindow({ asked }: { asked?: SheetAsk } = {}) {
   const [stored, setPage] = usePref<string>("settingsTab", "general");
   const page: Page = isPage(stored) ? stored : "general";
   const { settings } = useSettingsState();
@@ -51,19 +54,28 @@ export function SettingsWindow() {
   // Bumped by each ask to pair a device, which opens Devices pairing.
   const [pairRequest, setPairRequest] = useState(0);
 
-  useEffect(() => {
-    void platform().then(setOs);
-    // A link to a page (agentman://settings/<page>) shows it, as the Mac's.
-    const show = (asked: string | null) => {
-      if (asked === "pair") {
+  // A link to a page (agentman://settings/<page>) shows it, as the Mac's.
+  const show = useCallback(
+    (wanted: string | null) => {
+      if (wanted === "pair") {
         setPage("devices");
         setPairRequest((n) => n + 1);
-      } else if (isPage(asked)) setPage(asked);
-    };
+      } else if (isPage(wanted)) setPage(wanted);
+    },
+    [setPage],
+  );
+  useEffect(() => {
+    void platform().then(setOs);
+    if (asked) return;
     show(query.get("page"));
     if (!inShell) return;
     return Events.On("agentman:settings-page", (event) => show(String(event.data)));
-  }, [setPage]);
+  }, [show, asked]);
+  // Each ask of the sheet, even for the page already shown.
+  const ask = asked?.n;
+  useEffect(() => {
+    if (asked) show(asked.page);
+  }, [ask, show]);
 
   // The draft starts as the settings once they come, and stays the user's
   // until saved or reverted.

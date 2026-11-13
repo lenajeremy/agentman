@@ -3,6 +3,7 @@
 // browser, while the screens are developed, the Vite server stands in.
 
 import { openPanel } from "./picker/OpenPanel";
+import { showSettingsSheet } from "./settings/overPage";
 import { Daemon, Host, Windows } from "../bindings/github.com/lenajeremy/agentman/crossplatform";
 import { Call, Events } from "@wailsio/runtime";
 import { NotificationService } from "../bindings/github.com/wailsapp/wails/v3/pkg/services/notifications";
@@ -117,9 +118,8 @@ export async function openEditor(opts: EditorOptions): Promise<void> {
 /** The Settings window, on a page ("" for the last one shown). */
 export async function openSettings(page = ""): Promise<void> {
   if (inShell) return Windows.OpenSettings(page);
-  // One Settings window, as the Mac's: opening it again shows the page asked
-  // for in the same window.
-  window.open(`/?view=settings${page ? `&page=${page}` : ""}`, "agentman-settings", "width=800,height=580");
+  // In a browser, over the page it's asked from (settings/SettingsSheet).
+  showSettingsSheet(page);
 }
 
 // What the system does for the screens (host.go). In a browser, while the

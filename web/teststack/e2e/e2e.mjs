@@ -274,7 +274,8 @@ async function shell() {
     await page.keyboard.press("Meta+k");
     await page.keyboard.type("connect a device");
     await page.keyboard.press("Enter");
-    await until(page, () => window.__opened.some((u) => u.includes("view=settings") && u.includes("page=pair")), null, "Settings opened on pair");
+    // Over the page, in a browser, on Devices.
+    await until(page, () => document.querySelector(".settings-sheet .settings-tab.selected")?.innerText.trim() === "Devices", null, "Settings opened on Devices");
   });
 }
 
@@ -1087,15 +1088,32 @@ const sessionId = async (name) => (await daemon({ type: "list_sessions" })).sess
 
 async function sidebar() {
   // A browser has no menu bar, where the Mac keeps Settings… and Command
-  // Palette…: the sidebar shows both.
+  // Palette…: the sidebar shows both. Settings opens over the page.
   await check("sidebar: Settings and ⌘K have their own buttons in a browser", async () => {
     const page = await open(`agent=${ID.demo}`);
     const gear = page.locator('.sidebar-footer [aria-label="Settings"]');
     const title = await gear.getAttribute("title");
     expect(title === "Settings (⌘,)" || title === "Settings (Ctrl+,)", `the button's help: ${title}`);
-    // (The page's window.open is the stubs' record.)
+    const sheet = () => page.evaluate(() => !!document.querySelector(".settings-sheet .settings-content"));
     await gear.click();
-    await until(page, () => window.__opened.some((u) => new URL(u, location.href).searchParams.get("view") === "settings"), null, "Settings opened");
+    await until(page, () => !!document.querySelector(".settings-sheet .settings-content") && document.activeElement?.closest(".settings-sheet"), null, "Settings over the page, with the keyboard");
+    expect(!(await page.evaluate(() => window.__opened.length)), "no window opened for it");
+    // A page of its own, then Escape closes it.
+    await page.locator(".settings-sheet .settings-tab").filter({ hasText: "Keys" }).click();
+    await until(page, () => document.querySelector(".settings-sheet .settings-tab.selected")?.innerText.trim() === "Keys", null, "Keys shown");
+    await page.keyboard.press("Escape");
+    await until(page, () => !document.querySelector(".settings-sheet"), null, "closed by Escape");
+    // ⌘, opens it again, on the page last shown; the ✕ closes it.
+    await page.locator(".detail-header").click();
+    await page.keyboard.press("Meta+,");
+    await until(page, () => document.querySelector(".settings-sheet .settings-tab.selected")?.innerText.trim() === "Keys", null, "⌘, opens it on Keys");
+    await page.locator(".settings-sheet-close").click();
+    expect(!(await sheet()), "closed by its ✕");
+    // A click beside it closes it too.
+    await gear.click();
+    await until(page, () => !!document.querySelector(".settings-sheet"), null, "open again");
+    await page.mouse.click(1380, 60);
+    await until(page, () => !document.querySelector(".settings-sheet"), null, "closed by a click beside it");
     const hint = page.locator('.search-row [aria-label="Command palette"]');
     expect(/^(⌘K|Ctrl\+K)$/.test((await hint.innerText()).trim()), "the hint reads ⌘K");
     await hint.click();
