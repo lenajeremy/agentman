@@ -222,12 +222,6 @@ export function tidy(text: string): string {
   return out.split(/[\n\r]+/).join(" ").trim();
 }
 
-/** The summary Claude Code writes when it compacts a conversation, which
- *  arrives as a message from the user. */
-export function isCompactionSummary(text: string): boolean {
-  return text.startsWith("This session is being continued from a previous conversation");
-}
-
 /** An image the daemon filed for a message: under its own images folder. */
 function isKeptImage(token: string): boolean {
   return token.startsWith("/") && token.includes("/.agentman/images/") && !token.includes("..") &&
