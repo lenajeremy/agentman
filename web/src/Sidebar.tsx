@@ -16,7 +16,7 @@ import { openAgent, openAgentman, openNewAgent, useRoute, openUsage } from "./na
 import { inShell, openSettings } from "./host";
 import { shortcutLabel } from "./palette/PaletteView";
 import { isMuted, setMuted } from "./notify/policy";
-import { usePref, setPref } from "./prefs";
+import { usePref } from "./prefs";
 import { useAgentmanOn } from "./shell/agentman";
 import { AgentRow } from "./shell/AgentRow";
 import { StickerOnDots } from "./shell/Sticker";
@@ -27,8 +27,8 @@ import { Sym } from "./shell/Sym";
 import { archive, filterState, inFolder, isArchived, makeSections, pin, shownInOrder, unarchive, unpin, useChoices, type Choices } from "./shell/sections";
 import { ask, loadFolders, setShell, useShell, type FilterState } from "./shell/state";
 import { refreshBranches, useStatus, useStore } from "./store";
-import { contextMenu, menuUnder, type MenuEntry } from "./thread/menu";
-import { AppIcon, ChromeButton, CircleLeftHalfFilled, Icon, Spacer } from "./ui";
+import { contextMenu, type MenuEntry } from "./thread/menu";
+import { AppIcon, ChromeButton, Icon, Spacer } from "./ui";
 import "./styles/sidebar.css";
 
 export const SIDEBAR_DEFAULT = 256;
@@ -487,8 +487,7 @@ function ConnectionFooter({ version }: { version?: string }) {
       {/* SwiftUI's Spacer keeps 8 at least. */}
       <Spacer min={8} />
       <UsageButton />
-      <AppearanceMenu />
-      {!inShell && <SettingsButton />}
+      <SettingsButton />
     </footer>
   );
 }
@@ -500,8 +499,9 @@ function withKey(words: string, key: string) {
   return label ? `${words} (${label})` : words;
 }
 
-/** Settings, in a browser, which has no menu bar to hold it (the Mac's
- *  Agentman › Settings…, ⌘,); the desktop shell keeps it in its menu. */
+/** Opens Settings, as ⌘, does, at the page it was last on (Sidebar.swift's
+ *  SettingsButton, where the appearance switch was; the look is in
+ *  Settings › General and ⌘K). */
 function SettingsButton() {
   return (
     <button className="settings-button" title={withKey("Settings", "⌘,")} aria-label="Settings" onMouseDown={(e) => e.preventDefault()} onClick={() => void openSettings()}>
@@ -510,8 +510,7 @@ function SettingsButton() {
   );
 }
 
-/** Opens the usage page, beside the appearance switch (Sidebar.swift's
- *  UsageButton). */
+/** Opens the usage page, beside Settings (Sidebar.swift's UsageButton). */
 function UsageButton() {
   const route = useRoute();
   return (
@@ -521,22 +520,3 @@ function UsageButton() {
   );
 }
 
-/** Light, Dark, or Match the Mac (SettingsView.swift's AppearanceMenu). */
-function AppearanceMenu() {
-  const [appearance] = usePref("appearance", "system");
-  return (
-    <button
-      className="appearance"
-      title="Appearance: Light, Dark, or Match the Mac"
-      aria-label="Appearance"
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={(e) => menuUnder(e.currentTarget, [
-        { label: "Light", checked: appearance === "light", action: () => setPref("appearance", "light") },
-        { label: "Dark", checked: appearance === "dark", action: () => setPref("appearance", "dark") },
-        { label: "Match the Mac", checked: appearance === "system", action: () => setPref("appearance", "system") },
-      ])}
-    >
-      <Icon icon={CircleLeftHalfFilled} sf="circle.lefthalf.filled" size={13} />
-    </button>
-  );
-}

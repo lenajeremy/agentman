@@ -93,8 +93,6 @@
 .conn.connected { background: var(--ok); }
 .conn.offline { background: var(--error); }
 .conn-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* A borderless menu draws its symbol in the label colour, not the muted one asked for. */
-.appearance { width: 22px; height: 15px; display: grid; place-items: center; color: rgb(var(--primary) / 0.85); flex: none; }
 
 /* The line on the sidebar's edge: drag to resize, double-click for 256. */
 .pane-resize { position: absolute; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 5; --wails-draggable: no-drag; }
@@ -106,7 +104,7 @@
    own edge, out of the row's way, 9 inside the row's height. */
 .agent-tint { position: absolute; left: -10px; top: 8px; bottom: 8px; width: 4px; border-radius: 0 1px 1px 0; pointer-events: none; }
 
-/* Usage, beside the appearance switch (UsageButton). */
+/* Usage and Settings (UsageButton, SettingsButton): 22 by 20, muted. */
 .usage-button, .settings-button { width: 22px; height: 20px; display: grid; place-items: center; color: var(--muted); flex: none; }
 .usage-button.open { color: var(--text); }
 

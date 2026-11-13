@@ -1087,11 +1087,13 @@ async function filtersAndAway() {
 const sessionId = async (name) => (await daemon({ type: "list_sessions" })).sessions?.find((s) => s.name === name && s.kind === "claude")?.id;
 
 async function sidebar() {
-  // A browser has no menu bar, where the Mac keeps Settings… and Command
-  // Palette…: the sidebar shows both. Settings opens over the page.
+  // The footer's gear opens Settings, as the Mac's does (in a browser, over
+  // the page); a browser has no menu bar to show ⌘K, so the search field
+  // does. The appearance switch the footer had is gone, as on the Mac.
   await check("sidebar: Settings and ⌘K have their own buttons in a browser", async () => {
     const page = await open(`agent=${ID.demo}`);
     const gear = page.locator('.sidebar-footer [aria-label="Settings"]');
+    expect(!(await page.locator('.sidebar-footer [aria-label="Appearance"]').count()), "no appearance switch in the footer");
     const title = await gear.getAttribute("title");
     expect(title === "Settings (⌘,)" || title === "Settings (Ctrl+,)", `the button's help: ${title}`);
     const sheet = () => page.evaluate(() => !!document.querySelector(".settings-sheet .settings-content"));
