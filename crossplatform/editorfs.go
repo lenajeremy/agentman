@@ -272,7 +272,18 @@ func (e *EditorFiles) Copy(from, to string) error {
 	if _, err := os.Lstat(to); err == nil {
 		return fmt.Errorf("%s is already there", filepath.Base(to))
 	}
+	// A folder copied into itself would find its own copy as it went and
+	// copy that again, and again, until the disk filled.
+	if within(to, from) {
+		return fmt.Errorf("“%s” can’t be copied into itself", filepath.Base(from))
+	}
 	return plainError(copyItem(from, to))
+}
+
+// within reports whether path is dir or inside it, by their cleaned paths.
+func within(path, dir string) bool {
+	rel, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(path))
+	return err == nil && (rel == "." || rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 func copyItem(from, to string) error {
@@ -476,6 +487,13 @@ func withEditorFiles(next http.Handler) http.Handler {
 		}
 		w.Header().Set("Content-Type", kind)
 		w.Header().Set("Cache-Control", "no-cache")
+		// A picture from someone's repository, opened in a tab of its own,
+		// is a page at the app's own address: an SVG's scripts would run
+		// as the app, with its sign-in, and could reach files and
+		// terminals. Sandboxed, it has no scripts and no origin of the
+		// app's; as an <img> it shows as before.
+		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		_, _ = w.Write(data)
 	})
 }
