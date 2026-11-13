@@ -158,11 +158,11 @@ Not for the web app: the setup screen, installing the am command, Sparkle
 updates and the catch-up prompt (am serve serves the web app itself, so the
 two always match).
 
-Seen while testing, not yet looked into: attaching an agent's own
-terminal can type the terminal's answer to tmux's query ("1;2c0;276;0c")
-into its shell. For the
-looks pass: "Show in Files" where a Mac says Finder
-(the platform label), and the iPad and phone icons alike in Lucide.
+Seen while testing, since fixed: opening an agent's own terminal again
+typed the terminal's answer to tmux's question ("1;2c0;276;0c") into its
+shell, and a shell in two windows answered a program twice (dc628da);
+"Show in Files" where a Mac says Finder, and the iPad and phone icons
+alike (now Finder, and Lucide's tablet and phone).
 
 Known browser limits: ⌘N, ⌘T, ⌘W and ⌘Q stay the browser's; files copied in
 the editor's tree go on the clipboard as paths.
