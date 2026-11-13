@@ -82,6 +82,31 @@ targets:
         NSHumanReadableCopyright: "Agentman is open source under the MIT license."
         # Voice prompts: what the user says is written out by Celery.
         NSMicrophoneUsageDescription: "Agentman listens while you record with the mic button, so you can speak a message to an agent or to Agentman instead of typing it. Celery writes it out."
+        # Text and code open in the editor (Editor/FileOpener.swift) when the
+        # user picks Agentman for them: Open With, Get Info's Change All, or
+        # Settings ▸ General ▸ Editor. Alternate, so Agentman never becomes
+        # what opens a file by itself. The second kind is code no app on the
+        # Mac may have given a type (Go, Rust, TOML…), known by its extension.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Text
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.text
+              - public.plain-text
+              - net.daringfireball.markdown
+              - public.source-code
+              - public.script
+              - public.json
+              - public.yaml
+              - public.xml
+              - public.comma-separated-values-text
+              - com.apple.log
+              - com.microsoft.typescript
+          - CFBundleTypeName: Code
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Alternate
+            CFBundleTypeExtensions: [go, mod, sum, rs, toml, lock, env, tsx, jsx, mjs, cjs, vue, svelte, kt, kts, dart, zig, proto, graphql, gql, prisma, tf, hcl, ini, cfg, conf, gradle, mdx]
         # agentman://agent/<session id> opens that agent: what Agentman's
         # cards and notifications link to.
         CFBundleURLTypes:

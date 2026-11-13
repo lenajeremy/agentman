@@ -123,9 +123,9 @@ struct ContentView: View {
         }
     }
 
-    /// The editor's links open an editor; agentman://settings opens
-    /// Settings, at a tab with agentman://settings/keys; the rest are the
-    /// store's to open.
+    /// Files from Finder and the editor's links open an editor;
+    /// agentman://settings opens Settings, at a tab with
+    /// agentman://settings/keys; the rest are the store's to open.
     private func open(_ url: URL) {
         if EditorOpener.open(link: url, with: openWindow) {
             return

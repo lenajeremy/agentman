@@ -21,13 +21,21 @@ enum EditorOpener {
     /// The links an editor opens, as their starts: a folder (`am open`,
     /// `am .`) and a folder's terminal.
     static let links: Set<String> = ["agentman://edit", "agentman://terminal"]
+    /// What an editor window takes itself: those links, and files from
+    /// Finder.
+    static let opens = links.union(["file://"])
 
-    /// Opens what an editor link asks for:
+    /// Opens a file from Finder (FileOpener.swift), or what an editor link
+    /// asks for:
     /// agentman://edit?folder=…&file=…&agent=here, as `am open` sends, or
     /// agentman://terminal?folder=…. False for any other link.
     @MainActor
     @discardableResult
     static func open(link url: URL, with openWindow: OpenWindowAction) -> Bool {
+        if url.isFileURL {
+            open(file: url, with: openWindow)
+            return true
+        }
         guard let link = EditorLink(url) else { return false }
         guard let folder = link.folder else { return true }
         if link.terminal {
@@ -248,11 +256,12 @@ struct EditorWindow: View {
             }
         }
         .onAppear(perform: installKeys)
-        // A folder opened (`am .`) while an editor is open: the editor takes
-        // the link, so a main window that was closed stays closed. With no
-        // editor open, the main window takes it, as it takes every other.
+        // A folder opened (`am .`) or a file from Finder while an editor is
+        // open: the editor takes it, so a main window that was closed stays
+        // closed. With no editor open, the main window takes it, as it takes
+        // every other link.
         .onOpenURL { EditorOpener.open(link: $0, with: openWindow) }
-        .handlesExternalEvents(preferring: EditorOpener.links, allowing: EditorOpener.links)
+        .handlesExternalEvents(preferring: EditorOpener.opens, allowing: EditorOpener.opens)
         .onChange(of: FolderAgentWait(asked: store.showsFolderAgent, loaded: agents.sessionsLoaded, sessions: agents.sessions.map(\.id)),
                   initial: true) {
             store.showFolderAgent(in: agents.sessions, loaded: agents.sessionsLoaded)
