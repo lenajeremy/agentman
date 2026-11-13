@@ -302,7 +302,8 @@ func webReady(base, token string) error {
 		select {
 		case <-done:
 		case <-time.After(700 * time.Millisecond):
-			fmt.Println(dim("Getting Agentman's web app, once for this version (about 9 MB)…"))
+			// On stderr: `am web -print` prints only the link, for a script.
+			fmt.Fprintln(os.Stderr, dim("Getting Agentman's web app, once for this version (about 9 MB)…"))
 		}
 	}()
 	resp, err := client.Get(base + "/app/web-ready?token=" + token)
