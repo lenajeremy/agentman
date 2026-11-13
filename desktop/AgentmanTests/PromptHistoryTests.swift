@@ -200,6 +200,11 @@ final class PromptHistoryTests: XCTestCase {
             return reply
         }
         let store = AgentsStore(client: client)
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        var thread = DaemonEvent(type: "messages")
+        thread.sessionId = "claude:s1"
+        thread.messages = [Message(id: "t1", sessionId: "claude:s1", role: .assistant, ts: now - 60_000, text: "Working on it.")]
+        store.apply(thread)
         let picture = InlineImage(mime: "image/png", data: "iVBORw0KGgo=")
         await store.send("2 images", to: "claude:s1")
         await store.send("1 image · fix this", images: [picture], to: "claude:s1")
@@ -210,7 +215,6 @@ final class PromptHistoryTests: XCTestCase {
 
         // Scrolling up brings older messages through the same way: none of
         // them is a copy, though one has the same words and one a picture.
-        let now = Int64(Date().timeIntervalSince1970 * 1000)
         var older = DaemonEvent(type: "messages")
         older.sessionId = "claude:s1"
         older.messages = [
@@ -236,6 +240,41 @@ final class PromptHistoryTests: XCTestCase {
         pictures.messages = [Message(id: "d", sessionId: "claude:s1", role: .user, ts: now + 4_000, text: "", images: ["/Users/me/.agentman/images/claude-s1/y.png"])]
         store.apply(pictures)
         XCTAssertEqual(store.queued["claude:s1"] ?? [], [])
+    }
+
+    // Cursor's ts is the chat's start and a row number, not the time: in a
+    // chat days old a new copy is still found, by its place after the last
+    // message, and a picture by Cursor's "[image]".
+    func testACursorCopyIsFoundByItsPlace() async throws {
+        let client = DaemonClient(socketPath: "/nonexistent/agentman-history.sock")
+        client.answer = { request in
+            guard request.type == .sendMessage else { return nil }
+            var reply = DaemonEvent(type: "send_result")
+            reply.status = .queued
+            return reply
+        }
+        let store = AgentsStore(client: client)
+        let started: Int64 = 1_700_000_000_000 // a chat started long ago
+        var thread = DaemonEvent(type: "messages")
+        thread.sessionId = "cursor:c1"
+        thread.messages = [Message(id: "r10", sessionId: "cursor:c1", role: .assistant, ts: started + 10, text: "Done.")]
+        store.apply(thread)
+        await store.send("tidy the tests", to: "cursor:c1")
+        await store.send("", images: [InlineImage(mime: "image/png", data: "iVBORw0KGgo=")], to: "cursor:c1")
+
+        var older = DaemonEvent(type: "messages")
+        older.sessionId = "cursor:c1"
+        older.messages = [Message(id: "r3", sessionId: "cursor:c1", role: .user, ts: started + 3, text: "tidy the tests"),
+                          Message(id: "r4", sessionId: "cursor:c1", role: .user, ts: started + 4, text: "[image]")]
+        store.apply(older)
+        XCTAssertEqual(store.queued["cursor:c1"]?.count, 2, "earlier rows aren't the copies")
+
+        var copies = DaemonEvent(type: "messages")
+        copies.sessionId = "cursor:c1"
+        copies.messages = [Message(id: "r11", sessionId: "cursor:c1", role: .user, ts: started + 11, text: "tidy the tests"),
+                           Message(id: "r12", sessionId: "cursor:c1", role: .user, ts: started + 12, text: "[image]")]
+        store.apply(copies)
+        XCTAssertEqual(store.queued["cursor:c1"] ?? [], [])
     }
 
     // Typing while ↑ waits on an older page keeps what was typed.

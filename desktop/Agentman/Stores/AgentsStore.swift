@@ -484,7 +484,7 @@ final class AgentsStore {
         request.clientId = "mac-send-\(UUID().uuidString)"
         let status = await performWithStatus(request, for: sessionId)
         if status == .queued {
-            queued[sessionId, default: []].append(QueuedMessage(words: text, images: images.count))
+            queued[sessionId, default: []].append(QueuedMessage(words: text, images: images.count, after: messages[sessionId]?.last?.id))
         }
         return status != .failed
     }
@@ -1325,8 +1325,16 @@ final class AgentsStore {
         messages[sessionId] = current
         // A queued message that has reached the agent shows as its own.
         if var waiting = queued[sessionId], !waiting.isEmpty {
+            // Only a message placed after the last one the thread had when it
+            // was sent: older pages come through here too, scrolling up, and
+            // land before it. By place, not time: Cursor's ts is the chat's
+            // start and a row number.
+            let place = Dictionary(current.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
             for message in added {
-                if let index = waiting.firstIndex(where: { $0.isCopy(message) }) {
+                guard let at = place[message.id] else { continue }
+                if let index = waiting.firstIndex(where: { queued in
+                    queued.isCopy(message) && (queued.after.flatMap { place[$0] }.map { at > $0 } ?? true)
+                }) {
                     waiting.remove(at: index)
                 }
             }
@@ -1604,19 +1612,22 @@ final class ToolRunTitle {
 struct QueuedMessage: Hashable, Sendable {
     var words: String
     var images = 0
-    /// When it was sent, in the milliseconds of a message's ts.
-    var sent = Int64(Date().timeIntervalSince1970 * 1000)
+    /// The last message the thread had when it was sent: its copy comes
+    /// after.
+    var after: String?
 
-    /// Whether a message is the agent's copy of this one: the user's, from
-    /// after it was sent (older pages come through the same way, scrolling
-    /// up), with its words; found by its words, not by how it is shown, as
-    /// "1 image · …" is nowhere in the copy. Images alone, by a message
-    /// that has images: the daemon types their paths in, from its folder.
+    /// Whether a message could be the agent's copy of this one: the user's,
+    /// with its words; found by its words, not by how it is shown, as
+    /// "1 image · …" is nowhere in the copy. Images alone, by a message with
+    /// images: attached, typed in as the daemon's paths, or "[image]", as
+    /// Cursor records one.
     func isCopy(_ message: Message) -> Bool {
-        guard message.role == .user, message.isSidechain != true, message.ts >= sent - 2_000 else { return false }
+        guard message.role == .user, message.isSidechain != true else { return false }
         let text = (message.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let words = words.trimmingCharacters(in: .whitespacesAndNewlines)
-        if words.isEmpty { return !(message.images ?? []).isEmpty || text.contains("/.agentman/images/") }
+        if words.isEmpty {
+            return !(message.images ?? []).isEmpty || text.contains("/.agentman/images/") || text.contains("[image]")
+        }
         return text.contains(words)
     }
 
