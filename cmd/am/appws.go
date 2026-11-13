@@ -14,6 +14,7 @@ import (
 	"github.com/lenajeremy/agentman/internal/daemon"
 	"github.com/lenajeremy/agentman/internal/term"
 	"github.com/lenajeremy/agentman/internal/tmux"
+	"github.com/lenajeremy/agentman/internal/webapp"
 )
 
 // appGateway serves the cross-platform app on the hook listener: the app
@@ -26,8 +27,11 @@ type appGateway struct {
 	gate daemon.AppGate
 	// web signs the browser in: the web app uses a session cookie where the
 	// desktop shell and tools use the app token (webapp.go).
-	web   *daemon.WebSessions
-	ready atomic.Pointer[appTargets]
+	web *daemon.WebSessions
+	// webStore holds the web app's files, fetched once per version
+	// (internal/webapp/fetch.go); nil fetches nothing.
+	webStore *webapp.Store
+	ready    atomic.Pointer[appTargets]
 }
 
 type appTargets struct {
