@@ -1331,15 +1331,23 @@ final class AgentsStore {
             // land before it. By place, not time: Cursor's ts is the chat's
             // start and a row number.
             let place = Dictionary(current.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
-            // Sent before the thread had loaded: its first page is all from
-            // before, so its newest message is where the copy comes after.
-            if hadNone, let newest = current.last?.id {
-                for i in waiting.indices where waiting[i].after == nil { waiting[i].after = newest }
+            // Sent before the thread had loaded: the copy comes after the
+            // newest message from before it was sent, by the clock, which
+            // the first page may already hold. (Where ts isn't the clock, as
+            // in Cursor's, that is the first page's newest.)
+            if hadNone, !current.isEmpty {
+                for i in waiting.indices where waiting[i].after == nil {
+                    waiting[i].after = current.last(where: { $0.ts < waiting[i].sent - 2_000 })?.id ?? QueuedMessage.beforeAll
+                }
+            }
+            func boundary(_ queued: QueuedMessage) -> Int? {
+                guard let after = queued.after else { return nil }
+                return after == QueuedMessage.beforeAll ? -1 : place[after]
             }
             for message in added {
                 guard let at = place[message.id] else { continue }
                 if let index = waiting.firstIndex(where: { queued in
-                    queued.isCopy(message) && (queued.after.flatMap { place[$0] }.map { at > $0 } ?? false)
+                    queued.isCopy(message) && (boundary(queued).map { at > $0 } ?? false)
                 }) {
                     waiting.remove(at: index)
                 }
@@ -1619,8 +1627,13 @@ struct QueuedMessage: Hashable, Sendable {
     var words: String
     var images = 0
     /// The last message the thread had when it was sent: its copy comes
-    /// after.
+    /// after. Nil until the thread has loaded, when nothing counts as one.
     var after: String?
+    /// When it was sent, in the milliseconds of a message's ts: where the
+    /// boundary goes when it was sent before the thread had loaded.
+    var sent = Int64(Date().timeIntervalSince1970 * 1000)
+    /// A boundary before every message: all of them came after it.
+    static let beforeAll = "\u{0}before"
 
     /// Whether a message could be the agent's copy of this one: the user's,
     /// with its words; found by its words, not by how it is shown, as

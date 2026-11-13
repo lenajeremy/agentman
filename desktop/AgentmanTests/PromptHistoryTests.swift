@@ -267,6 +267,38 @@ final class PromptHistoryTests: XCTestCase {
         XCTAssertEqual(store.queued["codex:x1"] ?? [], [])
     }
 
+    // Sent before the thread loaded, and read by the agent before it did:
+    // the copy on the first page is found by the clock, not an older
+    // message with the same words.
+    func testACopyAlreadyOnTheFirstPageIsFound() async throws {
+        let client = DaemonClient(socketPath: "/nonexistent/agentman-history.sock")
+        client.answer = { request in
+            guard request.type == .sendMessage else { return nil }
+            var reply = DaemonEvent(type: "send_result")
+            reply.status = .queued
+            return reply
+        }
+        let store = AgentsStore(client: client)
+        await store.send("run the tests again", to: "codex:x2")
+        let sent = store.queued["codex:x2"]?.first?.sent ?? 0
+        var firstPage = DaemonEvent(type: "messages")
+        firstPage.sessionId = "codex:x2"
+        firstPage.messages = [Message(id: "q1", sessionId: "codex:x2", role: .user, ts: sent - 90_000, text: "run the tests again"),
+                              Message(id: "q2", sessionId: "codex:x2", role: .assistant, ts: sent - 60_000, text: "All pass."),
+                              Message(id: "q3", sessionId: "codex:x2", role: .user, ts: sent + 5_000, text: "run the tests again")]
+        store.apply(firstPage)
+        XCTAssertEqual(store.queued["codex:x2"] ?? [], [])
+
+        // And with only the copy on it.
+        await store.send("one more thing", to: "codex:x3")
+        let later = store.queued["codex:x3"]?.first?.sent ?? 0
+        var only = DaemonEvent(type: "messages")
+        only.sessionId = "codex:x3"
+        only.messages = [Message(id: "z1", sessionId: "codex:x3", role: .user, ts: later + 1_000, text: "one more thing")]
+        store.apply(only)
+        XCTAssertEqual(store.queued["codex:x3"] ?? [], [])
+    }
+
     // Cursor's ts is the chat's start and a row number, not the time: in a
     // chat days old a new copy is still found, by its place after the last
     // message, and a picture by Cursor's "[image]".
