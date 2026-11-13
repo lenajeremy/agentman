@@ -14,6 +14,38 @@
     <description>Updates to Agentman for Mac.</description>
     <language>en</language>
     <item>
+      <title>Agentman 0.46.0</title>
+      <link>https://github.com/lenajeremy/agentman/releases/tag/v0.46.0</link>
+      <pubDate>Fri, 13 Nov 2026 17:37:37 GMT</pubDate>
+      <sparkle:version>54</sparkle:version>
+      <sparkle:shortVersionString>0.46.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <sparkle:fullReleaseNotesLink>https://github.com/lenajeremy/agentman/releases/tag/v0.46.0</sparkle:fullReleaseNotesLink>
+      <description sparkle:format="markdown"><![CDATA[## Go back through what you said
+
+- In an agent's message box, ↑ brings back what you sent it before, as far back as the conversation goes. ↓ comes forward again, to what you were writing.
+
+## Files and folders in the editor
+
+- `am .` in a terminal opens that folder in the editor.
+- Choose Agentman for Markdown, text or code files in Finder (Open With, or Get Info › Change All), or turn it on in Settings › General › Editor. A file opens in its project.
+
+## Questions agents ask
+
+- A question reads as it does in Claude's app, and a form of several questions moves back and on. A question can be closed without answering.
+- Questions with several answers are ticked in rows.
+- Antigravity's forms move too, and a command it asks to run is shown whole.
+
+## Also
+
+- The New look reaches the conversation, the sidebar, the Board and Settings.
+- The gear at the bottom of the sidebar opens Settings.
+- Switching Claude's model from Agentman waits for Claude's "Switch model?" question.
+- A picture an agent looked at shows even when its name has a space.
+- An agent that quits while you're on its page keeps the page.]]></description>
+      <enclosure url="https://github.com/lenajeremy/agentman/releases/download/v0.46.0/Agentman.dmg" length="46078608" type="application/octet-stream" sparkle:edSignature="+JIWJaJVr3VYDua9Qj+sYORjQVvRq3WuxK3a1dvxsmabx4oGwgq1K4c6JZb+7OE1cTmQ1xP3DdX2DSxDLwiiAA=="/>
+    </item>
+    <item>
       <title>Agentman 0.45.0</title>
       <link>https://github.com/lenajeremy/agentman/releases/tag/v0.45.0</link>
       <pubDate>Tue, 10 Nov 2026 20:30:16 GMT</pubDate>
