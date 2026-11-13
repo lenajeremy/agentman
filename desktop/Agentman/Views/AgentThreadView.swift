@@ -1239,9 +1239,13 @@ struct MessageRow: View {
 
 extension MessageRow {
     /// The summary Claude Code writes when it compacts a conversation, which
-    /// arrives as a message from the user.
+    /// arrives as a message from the user. Newer versions put a note or two
+    /// before it, opening with a tag such as
+    /// <artifact-content-authored-by-others/>.
     static func isCompactionSummary(_ text: String) -> Bool {
-        text.hasPrefix("This session is being continued from a previous conversation")
+        let opening = "This session is being continued from a previous conversation"
+        if text.hasPrefix(opening) { return true }
+        return text.hasPrefix("<") && text.prefix(2000).contains("\n" + opening)
     }
 }
 
