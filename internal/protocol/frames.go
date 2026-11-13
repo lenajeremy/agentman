@@ -60,6 +60,13 @@ const (
 	ReqFetchMessages RequestType = "fetch_messages"
 	ReqSendMessage   RequestType = "send_message"
 	ReqInterrupt     RequestType = "interrupt"
+	// ReqFetchPrompts pages back through what the user said to the session
+	// named by SessionID, for ↑ in a message box: from Before, a cursor of
+	// fetch_messages or of an earlier fetch_prompts, up to about Limit of
+	// the user's own messages, and nothing else of the conversation.
+	// Answered with EvtPage. Additive: an older daemon rejects it, and the
+	// app goes back only as far as the thread it has.
+	ReqFetchPrompts RequestType = "fetch_prompts"
 	// ReqSendQueued tells the agent to read the messages it is holding now,
 	// rather than when its current step ends: Ctrl-X Ctrl-S in Claude Code.
 	// Answered with a send_result, like interrupt.
