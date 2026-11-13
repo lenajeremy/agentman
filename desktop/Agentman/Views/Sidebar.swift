@@ -659,7 +659,7 @@ struct ConnectionFooter: View {
                 .lineLimit(1)
             Spacer()
             UsageButton()
-            AppearanceMenu()
+            SettingsButton()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -732,7 +732,7 @@ struct ConnectionFooter: View {
     }
 }
 
-/// Opens the usage page, beside the appearance switch.
+/// Opens the usage page, beside Settings.
 private struct UsageButton: View {
     @Environment(AgentsStore.self) private var store
 
@@ -748,6 +748,24 @@ private struct UsageButton: View {
         .buttonStyle(.plain)
         .help("Usage: what the agents spent")
         .accessibilityLabel("Usage")
+    }
+}
+
+/// Opens Settings, as ⌘, does, at the page it was last on.
+private struct SettingsButton: View {
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        Button { openSettings() } label: {
+            Image(systemName: "gearshape")
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.muted)
+                .frame(width: 22, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Settings (⌘,)")
+        .accessibilityLabel("Settings")
     }
 }
 
