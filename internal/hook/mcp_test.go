@@ -251,3 +251,38 @@ func TestMuseGetsAgentmansServerAndKeepsItsSettings(t *testing.T) {
 		t.Fatalf("got %s", raw)
 	}
 }
+
+// Muse refuses a settings file without a schema_version ("malformed settings
+// file … missing field `schema_version`") and then starts no session, so one
+// Agentman writes from nothing carries Muse's own first version.
+func TestMuseSettingsWrittenFromNothingCarryTheSchemaVersion(t *testing.T) {
+	home := mcpHome(t, ".config/muse")
+	path := filepath.Join(home, ".config", "muse", "settings.json")
+	plans, err := Installer{Binary: "/bin/am", Home: home}.MCPPlans(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var muse *Plan
+	for i := range plans {
+		if plans[i].Kind == protocol.KindMuse {
+			muse = &plans[i]
+		}
+	}
+	if muse == nil {
+		t.Fatal("Muse wasn't given the server")
+	}
+	if err := muse.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		SchemaVersion int                        `json:"schema_version"`
+		MCPServers    map[string]json.RawMessage `json:"mcpServers"`
+	}
+	raw, _ := os.ReadFile(path)
+	if err := json.Unmarshal(raw, &config); err != nil {
+		t.Fatal(err)
+	}
+	if config.SchemaVersion != 1 || config.MCPServers[MCPServerName] == nil {
+		t.Fatalf("got %s", raw)
+	}
+}

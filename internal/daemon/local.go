@@ -33,6 +33,12 @@ type LocalServer struct {
 	listener net.Listener
 	conns    map[*localConn]struct{}
 	next     uint64
+
+	// What Serve was given, for apps that arrive another way: over a
+	// WebSocket (ServeWebSocket), from an app that cannot open the socket.
+	ctx          context.Context
+	handler      func(context.Context, string, protocol.Request) protocol.Event
+	disconnected func(string)
 }
 
 // localConn is one connected app.
@@ -106,6 +112,9 @@ func (s *LocalServer) Serve(
 ) error {
 	s.mu.Lock()
 	listener := s.listener
+	if listener != nil {
+		s.ctx, s.handler, s.disconnected = ctx, handler, disconnected
+	}
 	s.mu.Unlock()
 	if listener == nil {
 		return errors.New("daemon: local socket is not listening")

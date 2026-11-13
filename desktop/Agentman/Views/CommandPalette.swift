@@ -28,6 +28,16 @@ struct CommandPalette: View {
         let run: () -> Void
     }
 
+    /// What a comparison run types into it (AGENTMAN_TEST_PALETTE, Debug
+    /// builds only; TestSnapshot.swift).
+    private static var testQuery: String {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["AGENTMAN_TEST_PALETTE"] ?? ""
+        #else
+        ""
+        #endif
+    }
+
     var body: some View {
         PaletteView(
             placeholder: "Go to an agent, run a command, or ask Agentman",
@@ -48,7 +58,7 @@ struct CommandPalette: View {
             dismiss: { store.showPalette = false },
             typed: search,
             status: pending ? "Searching messages…" : nil,
-            query: query
+            query: query.isEmpty ? Self.testQuery : query
         )
         .task { await store.loadFolders() }
     }

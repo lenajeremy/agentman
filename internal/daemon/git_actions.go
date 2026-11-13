@@ -166,14 +166,40 @@ func (d *Daemon) gitCommit(ctx context.Context, cwd, message string, paths []str
 		}
 		message = written
 	}
-	if _, err := runGitAction(ctx, cwd, "git", append([]string{"add", "--all", "--"}, paths...)...); err != nil {
-		return "", "", err
+	// A path git can no longer match is left out of the add: one whose
+	// removal is already staged (a renamed file's old name) is neither on
+	// disk nor in the index, and git add refuses the whole list over it;
+	// the commit still takes it.
+	if staged := stageable(ctx, cwd, paths); len(staged) > 0 {
+		if _, err := runGitAction(ctx, cwd, "git", append([]string{"add", "--all", "--"}, staged...)...); err != nil {
+			return "", "", err
+		}
 	}
 	if _, err := runGitAction(ctx, cwd, "git", append([]string{"commit", "--message", message, "--only", "--"}, paths...)...); err != nil {
 		return "", "", err
 	}
 	hash, _, _ := runGit(ctx, cwd, "rev-parse", "--short", "HEAD")
 	return strings.TrimSpace(hash), message, nil
+}
+
+// stageable keeps the paths git add can take: those on disk, and those in
+// the index (a deleted file's removal to stage).
+func stageable(ctx context.Context, cwd string, paths []string) []string {
+	indexed := map[string]bool{}
+	if out, _, err := runGit(ctx, cwd, append([]string{"ls-files", "--cached", "-z", "--"}, paths...)...); err == nil {
+		for _, p := range strings.Split(out, "\x00") {
+			if p != "" {
+				indexed[p] = true
+			}
+		}
+	}
+	var kept []string
+	for _, p := range paths {
+		if _, err := os.Lstat(filepath.Join(cwd, p)); err == nil || indexed[p] {
+			kept = append(kept, p)
+		}
+	}
+	return kept
 }
 
 // writeCommitMessage asks Agentman for a message for the change to the

@@ -44,6 +44,7 @@ Usage:
   am claude [args...]         Start Claude Code so you can message it later
   am attach [name|number]     Show a running agent's terminal again
   am open [folder]            Open a folder (this one by default) in Agentman
+  am web                      Open Agentman in your browser
                               for Mac's editor, with its agent beside the code
                               when one works there (or: am <folder>, am .)
   am codex [args...]          Start Codex so you can message it later
@@ -152,6 +153,8 @@ func main() {
 		err = runAttach(ctx, args)
 	case "open":
 		err = runOpen(args)
+	case "web":
+		err = runWeb(args)
 	case "setup":
 		err = runSetup(ctx, args)
 	case "doctor":

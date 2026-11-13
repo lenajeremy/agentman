@@ -1,0 +1,285 @@
+/* The website's look, New (Design/Brand.swift), drawn over today's where
+   data-look="site" is on the page. As the phone has it: Rubik for titles,
+   the site's mono labels, a warm dark edge on cards and controls with a hard
+   shadow under the ones that stand out, cream for Agentman's own things,
+   and the site's orange for the one thing to tap. What a person reads stays
+   plain. Classic draws exactly as it did: every rule here is under
+   [data-look="site"], save the tokens Classic shares. */
+
+@font-face { font-family: "Rubik"; src: url("/fonts/Rubik-SemiBold.ttf"); font-weight: 600; }
+@font-face { font-family: "Rubik"; src: url("/fonts/Rubik-Bold.ttf"); font-weight: 700; }
+
+/* The edge: today's hairline in Classic, at its width. */
+:root { --edge: var(--line); --edge-width: 1px; --heading-font: var(--sans); }
+
+:root[data-look="site"] {
+  --flood: #ff5f1f; --on-flood: #ffffff;
+  --cream: #fff3e3; --bubble: #fff3e3; --cream-dots: rgb(22 13 8 / 0.1);
+  --edge: #4a423c; --edge-width: 1.5px;
+  --inverse-shadow: rgb(0 0 0 / 0.25);
+  --prompt: #e5480a; --switch-on: #2a1c14; --board-tint: #fff3e8;
+  --ink: #160d08; --on-ink: #fff3e3;
+  --sidebar: #fff7ec; --board-well: #fce7d4;
+  --loader-2: #ff5f1f;
+  --heading-font: "Rubik", var(--sans);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-look="site"]:not([data-theme="light"]) {
+    --cream: #16110d; --bubble: #2a1f18; --cream-dots: rgb(255 243 227 / 0.1);
+    --edge: #a69b92; --inverse-shadow: rgb(255 255 255 / 0.25);
+    --prompt: #ff8a55; --switch-on: #e8dccb; --board-tint: #140e0a;
+    --ink: #2a211b; --sidebar: #14100d; --board-well: #1f1610; --loader-2: #ff7a3d;
+  }
+}
+:root[data-look="site"][data-theme="dark"] {
+  --cream: #16110d; --bubble: #2a1f18; --cream-dots: rgb(255 243 227 / 0.1);
+  --edge: #a69b92; --inverse-shadow: rgb(255 255 255 / 0.25);
+  --prompt: #ff8a55; --switch-on: #e8dccb; --board-tint: #140e0a;
+  --ink: #2a211b; --sidebar: #14100d; --board-well: #1f1610; --loader-2: #ff7a3d;
+}
+
+/* The site's small labels: mono, upper case, spaced (Fonts.eyebrow). */
+:root[data-look="site"] .eyebrow { font: 500 10.5px var(--mono); letter-spacing: 1.2px; text-transform: uppercase; }
+
+/* --- The sidebar (Sidebar.swift) ------------------------------------- */
+/* The site's cream (--sidebar), the ink edge beside it (sidebar.css's
+   .sidebar::after, at --edge-width). */
+:root[data-look="site"] .app-name { font: 700 16px var(--heading-font); }
+/* Search: an edged field, raised on a hard shadow of 2. */
+:root[data-look="site"] .search-row { padding: 12px 16px; }
+:root[data-look="site"] .search-field { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; height: 30px; padding: 0 10px; box-sizing: border-box;
+  border-radius: 8px; background: var(--surface); box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+/* Section headings in the site's mono capitals; counts in edged badges. */
+:root[data-look="site"] .section-title { font: 500 10.5px/13px var(--mono); letter-spacing: 1.2px; text-transform: uppercase; }
+:root[data-look="site"] .section-head .count { font: 500 10px/12px var(--mono); color: var(--edge); padding: 1px 5px; border-radius: 999px; box-shadow: inset 0 0 0 1.5px var(--edge); }
+:root[data-look="site"] .section-head.needs-you .count { color: var(--needs-you-text); box-shadow: inset 0 0 0 1.5px var(--needs-you-text); }
+:root[data-look="site"] .section-rule { height: var(--edge-width); background: color-mix(in srgb, var(--edge) 25%, transparent); }
+/* The open agent: a white card raised on the cream, its shadow of 3 kept
+   inside the row so the list doesn't cut it off. */
+:root[data-look="site"] .agent-row { isolation: isolate; }
+:root[data-look="site"] .agent-row.selected { background: none; box-shadow: none; }
+:root[data-look="site"] .agent-row.selected::before { content: ""; position: absolute; inset: 0 0 3px; z-index: -1; border-radius: 8px;
+  background: var(--surface); box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 3px 0 var(--edge); }
+/* Agentman's card: cream, a heavier edge of 2, a deeper shadow; a shade
+   deeper while open or under the pointer. */
+:root[data-look="site"] .agentman-card { background: var(--cream); box-shadow: inset 0 0 0 2px var(--edge), 0 4px 0 var(--edge); }
+:root[data-look="site"] .agentman-card:hover, :root[data-look="site"] .agentman-card.selected { background: color-mix(in srgb, var(--edge) 6%, var(--cream)); }
+:root[data-look="site"] .agentman-card.selected { box-shadow: inset 0 0 0 2px var(--edge), 0 5px 0 var(--edge); }
+
+/* --- The conversation (AgentThreadView.swift, MarkdownView.swift) ------ */
+/* The title bar: the folder in mono capitals, the name in Rubik. */
+:root[data-look="site"] .crumb-folder { font: 500 10.5px var(--mono); letter-spacing: 0.8px; text-transform: uppercase; }
+:root[data-look="site"] .crumb-name { font: 600 15px var(--heading-font); }
+/* Your messages: cream, edged, a little raised. */
+:root[data-look="site"] .bubble { background: var(--bubble); box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+/* A step's pill: white and edged, cream while open. */
+:root[data-look="site"] .step-pill { background: var(--surface); box-shadow: inset 0 0 0 var(--edge-width) var(--edge); }
+:root[data-look="site"] .step-pill.open { background: var(--bubble); }
+/* The turn's line in mono. */
+:root[data-look="site"] .worked-text { font: 11.5px/15px var(--mono); }
+/* A code block: edged white under a strip of the site's ink, its language
+   in mono capitals. */
+:root[data-look="site"] .md-code { background: var(--surface); overflow: hidden; box-shadow: inset 0 0 0 var(--edge-width) var(--edge); }
+:root[data-look="site"] .md-code-label, :root[data-look="site"] .md-code-label.none { display: flex; align-items: center; min-height: 30px; padding: 0 12px;
+  font: 500 10.5px var(--mono); letter-spacing: 1.2px; text-transform: uppercase; color: var(--on-ink); background: var(--ink); }
+:root[data-look="site"] .md-code pre, :root[data-look="site"] .md-code pre.labelled { padding-top: 11px; }
+/* The bars over a thread and in place of the box: edged, raised. */
+:root[data-look="site"] .thread-bar { border: 0; box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+:root[data-look="site"] .resume-bar { border: 0; box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 3px 0 var(--edge); }
+/* The site's buttons (BrandButtonStyle): ink on a hard shadow for the
+   action to take. */
+:root[data-look="site"] .resume-bar button.prominent { min-height: 26px; padding: 0 11px; border-radius: 8px; font: 500 12.5px var(--sans);
+  color: var(--on-inverse); background: var(--inverse); box-shadow: 0 2px 0 var(--inverse-shadow); margin-bottom: 2px; }
+:root[data-look="site"] .resume-bar button.prominent:hover:not(:disabled) { background: color-mix(in srgb, var(--inverse) 88%, transparent); }
+:root[data-look="site"] .resume-bar button.prominent:active:not(:disabled) { transform: translateY(2px); box-shadow: none; }
+:root[data-look="site"] .resume-bar button.prominent:disabled { opacity: 0.45; }
+/* The composer: a heavier edge of 2 and a deeper shadow of 4; Send the
+   site's orange, edged and raised. */
+:root[data-look="site"] .composer-box, :root[data-look="site"] .composer-box.focused { box-shadow: inset 0 0 0 2px var(--edge), 0 4px 0 var(--edge); }
+:root[data-look="site"] .send.can { background: var(--flood); color: #fff; box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+
+/* --- A question (QuestionCard.swift) ---------------------------------- */
+/* The site's edge, lifted on the needs-you orange. */
+:root[data-look="site"] .decision-panel { box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 4px 0 var(--needs-you); margin-bottom: 4px; }
+/* The site's buttons: ink, or edged white, on a hard shadow. */
+:root[data-look="site"] .choice-button { box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+:root[data-look="site"] .choice-button.primary { box-shadow: 0 2px 0 var(--inverse-shadow); }
+:root[data-look="site"] .check-row:not(.checked) .check-box { box-shadow: inset 0 0 0 var(--edge-width) var(--edge); }
+:root[data-look="site"] .write-own { box-shadow: inset 0 0 0 var(--edge-width) var(--line); }
+:root[data-look="site"] .write-own:focus-within { box-shadow: inset 0 0 0 var(--edge-width) var(--edge); }
+
+/* --- The workspace card (WorkspacePanel.swift) ------------------------- */
+/* Raised on the page like the composer: a heavier edge, a hard shadow. */
+:root[data-look="site"] .workspace-card { box-shadow: 0 4px 0 var(--edge); }
+:root[data-look="site"] .workspace-card::after { border: 2px solid var(--edge); }
+
+/* --- Header buttons (Theme.swift's ChromeButton) --------------------- */
+/* The site's edge while its panel is open (on cream) or under the pointer. */
+:root[data-look="site"] .chrome:hover, :root[data-look="site"] .chrome.active { border-radius: 7px; background: var(--surface); box-shadow: inset 0 0 0 1.2px var(--edge); }
+:root[data-look="site"] .chrome.active { background: var(--cream); }
+
+/* --- The Board (BoardView.swift) -------------------------------------- */
+/* Its page a light orange; each column a deeper shade of it (--board-well). */
+:root[data-look="site"] .board-page { background: var(--board-tint); }
+:root[data-look="site"] .board-headline { font: 700 22px var(--heading-font); letter-spacing: 0; }
+:root[data-look="site"] .board-search, :root[data-look="site"] .board-search.focused { box-shadow: inset 0 0 0 var(--edge-width) var(--edge); }
+/* A column's name in mono capitals with its count; Needs you on an orange
+   chip, the one loud thing on the Board. */
+:root[data-look="site"] .board-column-title, :root[data-look="site"] .board-column-count { display: none; }
+:root[data-look="site"] .board-column-words { display: inline; font: 500 10.5px var(--mono); letter-spacing: 1.2px; text-transform: uppercase; font-variant-numeric: tabular-nums; color: var(--text); }
+:root[data-look="site"] .board-column.needs-you .board-column-glyph { display: none; }
+:root[data-look="site"] .board-column.needs-you .board-column-words { display: inline-flex; align-items: center; height: 22px; padding: 0 10px; box-sizing: border-box; border-radius: 999px;
+  color: var(--on-flood); background: var(--flood); box-shadow: inset 0 0 0 var(--edge-width) var(--edge); }
+/* A card: white with the ink edge, 12 round and 12 in; what needs you cream
+   with a heavier edge on the orange's hard shadow. A folder's or project's
+   colour is a strip inside its left edge, under the ink edge. */
+:root[data-look="site"] .board-card, :root[data-look="site"] .board-card:hover, :root[data-look="site"] .board-card.outlined, :root[data-look="site"] .board-card.tinted,
+:root[data-look="site"] .board-card.tinted:hover { position: relative; isolation: isolate; border-radius: 12px; padding: 12px; background: var(--surface); box-shadow: none; }
+:root[data-look="site"] .board-card::after { content: ""; position: absolute; inset: 0; border-radius: 12px; box-shadow: inset 0 0 0 var(--edge-width) var(--edge); pointer-events: none; z-index: 2; }
+:root[data-look="site"] .board-card.needs-you { background: var(--bubble); box-shadow: 0 4px 0 var(--flood); margin-bottom: 4px; }
+:root[data-look="site"] .board-card.needs-you::after { box-shadow: inset 0 0 0 2px var(--edge); }
+:root[data-look="site"] .board-card.tinted::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; border-radius: 12px 0 0 12px; background: var(--tint); pointer-events: none; z-index: 1; }
+:root[data-look="site"] .board-card-folder { font: 500 10.5px var(--mono); letter-spacing: 0.6px; text-transform: uppercase; }
+:root[data-look="site"] .board-card-name { font: 600 14.5px/17px var(--heading-font); }
+/* Its answers as the site's buttons, in line with the card's words: the
+   likely one orange when it is Agentman's pick or a yes. */
+:root[data-look="site"] .board-choices { margin: 0; }
+:root[data-look="site"] .choices-single.roomy { gap: 7px; }
+:root[data-look="site"] .option-row.roomy, :root[data-look="site"] .option-row.roomy.leading, :root[data-look="site"] .option-row.roomy:hover:not(:disabled) {
+  padding: 6px 10px; border-radius: 8px; background: var(--surface); box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+:root[data-look="site"] .option-row.roomy:hover:not(:disabled) { background: var(--fill); }
+:root[data-look="site"] .option-row.roomy.strong, :root[data-look="site"] .option-row.roomy.strong:hover:not(:disabled) { background: var(--flood); }
+:root[data-look="site"] .option-row.roomy.strong .option-label { color: var(--on-flood); font-weight: 600; }
+:root[data-look="site"] .option-row.roomy.strong .option-number { color: color-mix(in srgb, var(--on-flood) 80%, transparent); }
+
+/* --- Agentman's chat (ManagerChatView.swift) -------------------------- */
+:root[data-look="site"] .am-title { font: 600 14px var(--heading-font); }
+:root[data-look="site"] .am-wordmark { font: 700 36px/43px var(--heading-font); }
+/* The questions to start with: cream chips, edged, on a hard shadow. */
+:root[data-look="site"] .am-starter { margin-bottom: 2px; background: var(--cream); box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+:root[data-look="site"] .am-starter:hover { background: color-mix(in srgb, var(--edge) 6%, var(--cream)); }
+/* Your messages cream; briefs and cards edged, raised. */
+:root[data-look="site"] .am-bubble { background: var(--bubble); }
+:root[data-look="site"] .am-brief { box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 3px 0 var(--edge); }
+:root[data-look="site"] .am-card-box { box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 3px 0 var(--edge); }
+/* The box: edged, on a hard shadow of 3; Send the site's orange, ink while
+   it thinks. */
+:root[data-look="site"] .am-composer, :root[data-look="site"] .am-composer.focused,
+:root[data-look="site"] .am-composer.large, :root[data-look="site"] .am-composer.large.focused { box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 3px 0 var(--edge); }
+:root[data-look="site"] .am-keybox { box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 3px 0 var(--edge); }
+:root[data-look="site"] .am-composer .am-send { background: var(--fill-strong); color: var(--muted); }
+:root[data-look="site"] .am-composer .am-send.can { background: var(--flood); color: #fff; }
+:root[data-look="site"] .am-composer .am-send.thinking { background: var(--inverse); color: #fff; }
+
+/* --- Settings (SettingsView.swift) ----------------------------------- */
+/* The pages' list on the main window's cream, the ink edge beside it; the
+   open page a card raised on the cream. */
+:root[data-look="site"] .settings-sidebar, :root[data-look="site"] .settings.active .settings-sidebar { background: var(--sidebar); gap: 5px; }
+:root[data-look="site"] .settings-divider-v { width: var(--edge-width); background: var(--edge); }
+:root[data-look="site"] .settings-tab.selected { background: var(--surface); box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 3px 0 var(--edge); }
+:root[data-look="site"] .settings.active .settings-tab.selected:hover { background: var(--surface); }
+:root[data-look="site"] .settings-display { font: 700 28px var(--heading-font); }
+/* A section: its name in the site's mono capitals, its card edged and
+   raised on a hard shadow of 3. */
+:root[data-look="site"] .section-title { font: 500 10.5px var(--mono); letter-spacing: 1.2px; text-transform: uppercase; }
+:root[data-look="site"] .section-card { box-shadow: 0 3px 0 var(--edge); }
+/* The other cards (Keys' empty one, Knowledge's list and note) on 2. */
+:root[data-look="site"] .card { box-shadow: 0 2px 0 var(--edge); }
+:root[data-look="site"] .section-card::after, :root[data-look="site"] .card::after { border: var(--edge-width) solid var(--edge); }
+/* The site's switch: an edged capsule, ink when on (cream in the dark), its
+   knob edged white. Drawn, not tinted, so it reads the same in a window
+   that isn't the active one. */
+:root[data-look="site"] .mac-switch, :root[data-look="site"] .settings.active .mac-switch { width: 34px; height: 20px; border-radius: 10px; background: var(--surface); box-shadow: inset 0 0 0 var(--edge-width) var(--edge); }
+:root[data-look="site"] .mac-switch.on, :root[data-look="site"] .settings.active .mac-switch.on { background: var(--switch-on); }
+:root[data-look="site"] .mac-switch .knob { top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 var(--edge-width) var(--edge); }
+:root[data-look="site"] .mac-switch.on .knob { transform: translateX(14px); }
+/* Look and Theme: the site's edged segments (UsageView.swift's Segments). */
+:root[data-look="site"] .mac-segmented.site-segments { grid-auto-columns: auto; height: auto; gap: 2px; padding: 2px; border-radius: 7px; background: var(--fill); }
+:root[data-look="site"] .mac-segmented.site-segments .segment { height: 22px; padding: 0 9px; border-radius: 5px; font-size: 12px; color: var(--muted); background: none; }
+:root[data-look="site"] .mac-segmented.site-segments .segment::before { display: none; }
+:root[data-look="site"] .mac-segmented.site-segments .segment.selected { font-weight: 500; color: var(--text); background: var(--surface); box-shadow: inset 0 0 0 1.2px var(--edge); }
+
+/* --- Segments, wherever they are (Usage, the sidebar's filter) -------- */
+:root[data-look="site"] .segments button.chosen { background: var(--surface); box-shadow: inset 0 0 0 1.2px var(--edge); }
+
+/* --- Knowledge and Devices (KnowledgeSettings.swift, DevicesSettings.swift) */
+/* The open note cream, edged and a little raised, as the open page is. */
+:root[data-look="site"] .note-list-scroll { gap: 5px; }
+:root[data-look="site"] .note-row.selected { background: var(--bubble); box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+/* Devices' buttons: the site's, edged white on a hard shadow. */
+:root[data-look="site"] .mac-button.small-button { height: 26px; padding: 0 10px; border-radius: 8px; margin-bottom: 2px; font: 500 12px var(--sans); color: var(--text);
+  background: var(--surface); box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+:root[data-look="site"] .mac-button.small-button:hover:not(:disabled) { background: var(--fill); }
+
+/* --- Usage and Limits (UsageView.swift, LimitsView.swift) ------------- */
+:root[data-look="site"] .usage-title, :root[data-look="site"] .usage-heading, :root[data-look="site"] .usage-popover-title { font: 600 14px var(--heading-font); }
+:root[data-look="site"] .spend-total { font: 700 36px var(--heading-font); letter-spacing: 0; }
+:root[data-look="site"] .limit-number { font: 700 28px var(--heading-font); letter-spacing: 0; }
+:root[data-look="site"] .limits-plan { background: var(--cream); box-shadow: inset 0 0 0 1px var(--edge); }
+:root[data-look="site"] .limit-card { box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 3px 0 var(--edge); }
+:root[data-look="site"] .chart-tip { box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 8px rgb(0 0 0 / 0.08); }
+
+/* --- New Agent (NewAgentView.swift) ---------------------------------- */
+:root[data-look="site"] .new-agent-title { font: 700 28px var(--heading-font); }
+:root[data-look="site"] .new-agent-header-title { font: 600 14px var(--heading-font); }
+:root[data-look="site"] .new-agent-box { box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 3px 0 var(--edge); }
+
+/* --- The connection banner, ⌘K (ConnectionBanner.swift, PaletteView.swift) */
+:root[data-look="site"] .connection-banner-title { font: 600 13px var(--heading-font); }
+:root[data-look="site"] .palette { box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 12px 30px rgb(0 0 0 / 0.18); }
+
+/* --- The terminal panel (TerminalPanel.swift) ------------------------ */
+/* A card with the theme's edge and a small hard shadow, down and to the
+   right, 10 in from the page at the top and left (BrutalCard). */
+:root[data-look="site"] .term-panel { inset: 10px 13px 13px 10px; border-radius: 10px; overflow: hidden; box-shadow: 3px 3px 0 var(--edge); }
+:root[data-look="site"] .term-panel::after { content: ""; position: absolute; inset: 0; border: 1.5px solid var(--edge); border-radius: 10px; pointer-events: none; z-index: 5; }
+/* Its bar cream and 34 tall, the edge under it; TERMINAL in Rubik, in the
+   prompt's orange. */
+:root[data-look="site"] .term-bar { height: 34px; background: var(--cream); box-shadow: inset 0 -1.5px 0 var(--edge); }
+:root[data-look="site"] .term-label { font: 600 12.5px var(--heading-font); color: var(--prompt); }
+:root[data-look="site"] .term-body, :root[data-look="site"] .term-note { background: #ffffff; }
+:root[data-look="site"] .term-slot { padding: 6px 8px 8px 10px; box-sizing: border-box; }
+/* A tab: the open one a small card on the bar. */
+:root[data-look="site"] .term-tab.active { margin-right: 3px; background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--edge), 1.5px 1.5px 0 var(--edge); }
+:root[data-look="site"] .term-tab:not(.active):hover { background: color-mix(in srgb, var(--fill) 50%, transparent); }
+@media (prefers-color-scheme: dark) {
+  :root[data-look="site"]:not([data-theme="light"]) .term-body, :root[data-look="site"]:not([data-theme="light"]) .term-note { background: #000000; }
+}
+:root[data-look="site"][data-theme="dark"] .term-body, :root[data-look="site"][data-theme="dark"] .term-note { background: #000000; }
+
+/* --- The editor (EditorWindow.swift, AgentPanel.swift) --------------- */
+:root[data-look="site"] .editor-brand-name, :root[data-look="site"] .panel-title-text { font: 600 13px var(--heading-font); }
+:root[data-look="site"] .tree-title { font: 600 13px var(--heading-font); }
+/* The open tab: no fill, the site's orange under it. */
+:root[data-look="site"] .tab { position: relative; }
+:root[data-look="site"] .tab.active .tab-body { background: none; }
+:root[data-look="site"] .tab:not(.active):hover .tab-body { background: color-mix(in srgb, var(--fill) 45%, transparent); }
+:root[data-look="site"] .tab.active::after { content: ""; position: absolute; left: 11px; right: 11px; bottom: 0; height: 2.5px; border-radius: 2px; background: var(--flood); }
+:root[data-look="site"] .path-save { box-shadow: 0 2px 0 var(--inverse-shadow); }
+:root[data-look="site"] .panel-agentman { box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+/* The empty page: the name in Rubik, the tile cream, the cards raised. */
+:root[data-look="site"] .empty-name { font: 700 24px var(--heading-font); letter-spacing: -0.3px; }
+:root[data-look="site"] .empty-tile { background: var(--cream); box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+:root[data-look="site"] .empty-list { overflow: visible; box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 3px 0 var(--edge); }
+
+/* --- Empty pages (Sidebar.swift's EmptySidebar, ManagerChatView's hero) -- */
+:root[data-look="site"] .no-agents.site { top: 90px; gap: 8px; padding: 0; }
+:root[data-look="site"] .no-agents.site .no-agents-title { margin: 0; font: 600 17px var(--heading-font); color: var(--text); }
+:root[data-look="site"] .no-agents.site .no-agents-text { margin: 0; padding: 0 22px; font-size: 12px; line-height: 15px; color: var(--muted); }
+:root[data-look="site"] .no-agents.site code { font: 500 11.5px var(--mono); white-space: nowrap; }
+:root[data-look="site"] .no-agents.site .no-agents-button { margin: 6px 0 2px; height: 30px; padding: 0 12px; gap: 6px; border-radius: 9px; font: 600 12.5px var(--sans);
+  color: #160d08; background: var(--flood); box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 2px 0 var(--edge); }
+:root[data-look="site"] .no-agents.site .no-agents-button:hover { background: color-mix(in srgb, var(--flood) 90%, transparent); }
+:root[data-look="site"] .am-hero-name.site { gap: 4px; padding-bottom: 24px; }
+
+/* --- The away summary (AwaySummary.swift) ---------------------------- */
+:root[data-look="site"] .away-panel { box-shadow: inset 0 0 0 var(--edge-width) var(--edge), 0 16px 40px rgb(0 0 0 / 0.2); }
+:root[data-look="site"] .away-title { font: 600 16px/20px var(--heading-font); }
+/* Done: the site's ink button on a hard shadow (BrandButtonStyle). */
+:root[data-look="site"] .away-done, :root[data-look="site"] .away-done.key { min-height: 26px; height: auto; padding: 0 11px; border-radius: 8px; margin-bottom: 2px;
+  font: 500 12.5px var(--sans); color: var(--on-inverse); background: var(--inverse); box-shadow: 0 2px 0 var(--inverse-shadow); }
+
+/* --- Settings over the page, in a browser (SettingsSheet) ------------ */
+/* Edged and raised on a hard shadow, as the workspace card. */
+:root[data-look="site"] .settings-sheet { border-radius: 14px; box-shadow: 0 4px 0 var(--edge), 0 20px 50px rgb(0 0 0 / 0.2); }
+:root[data-look="site"] .settings-sheet::after { box-shadow: inset 0 0 0 var(--edge-width) var(--edge); }

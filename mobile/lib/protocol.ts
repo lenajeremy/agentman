@@ -275,6 +275,12 @@ export type RequestType =
   | "manager_reset"
   | "manager_image"
   | "manager_briefs"
+  | "manager_verifications"
+  | "manager_missions"
+  | "manager_ship"
+  | "manager_queue"
+  | "manager_queue_add"
+  | "manager_queue_remove"
   | "manager_card_reply"
   | "manager_card_dismiss"
   | "manager_entry_close"
@@ -303,6 +309,11 @@ export type RequestType =
 export interface Request {
   type: RequestType;
   sessionId?: string;
+  /** The agents a manager_ship is for. */
+  sessionIds?: string[];
+  /** The work for a manager_queue_add; what a manager_queue_remove takes out. */
+  queue?: { agent: string; folder: string; task: string };
+  queueId?: string;
   before?: string;
   limit?: number;
   text?: string;
@@ -462,6 +473,10 @@ export type EventType =
   | "manager_status"
   | "manager_brief"
   | "manager_schedules"
+  | "manager_verification"
+  | "manager_missions"
+  | "manager_ship"
+  | "manager_queue"
   | "manager_settings"
   | "manager_permission"
   | "manager_reset"
@@ -764,6 +779,16 @@ export interface DaemonEvent {
   /** An agent's brief, or all of them, on "manager_brief". */
   brief?: Brief;
   briefs?: Brief[];
+  /** What Agentman found checking an agent's finished work, or all of it,
+   *  on "manager_verification". */
+  verification?: Verification;
+  verifications?: Verification[];
+  /** The teams Agentman has planned or is running, on "manager_missions". */
+  missions?: Mission[];
+  /** The latest shipping run, on "manager_ship". */
+  ship?: ShipRun;
+  /** The work lined up for tonight, on "manager_queue". */
+  queue?: QueueItem[];
   /** Everything Agentman has scheduled, on "manager_schedules". */
   schedules?: ManagerSchedule[];
   /** How Agentman works, on "manager_settings". */
@@ -798,7 +823,39 @@ export interface PermissionCheck {
 }
 
 /** How Agentman works, as the user set it on the Mac or here. */
+/** What Agentman does by itself beyond approving; all off to begin with.
+ *  Absent from daemons that predate it. */
+export interface Autopilot {
+  /** Check an agent's work when it finishes a turn that changed something. */
+  verify: boolean;
+  /** Give an agent the output of its failing tests to fix. */
+  sendBack: boolean;
+  /** Offer to make a rule of what the user keeps approving. */
+  learnRules: boolean;
+  /** Notice agents that have stopped getting anywhere. */
+  unstick: boolean;
+  /** Notice agents working on the same files. */
+  overlap: boolean;
+  /** Suggest a note for what the user keeps telling agents. */
+  learnNotes: boolean;
+  /** Run the work lined up for tonight. */
+  overnight: boolean;
+  /** "HH:MM"; absent takes the daemon's default. */
+  nightStart?: string;
+  nightEnd?: string;
+  nightAgents?: number;
+  /** Reviews by the model a day. */
+  verifyDaily?: number;
+  /** Yes to an agent asking only whether to commit finished work. */
+  replyCommit?: boolean;
+  /** Yes to an agent asking only whether to install a finished build on the
+   *  user's own phone or Mac. */
+  replyInstall?: boolean;
+}
+
 export interface ManagerSettings {
+  /** What Agentman does by itself; kept as the daemon sent it. */
+  autopilot?: Autopilot;
   chatModel: string;
   briefModel: string;
   effort: string;
@@ -806,6 +863,9 @@ export interface ManagerSettings {
   autoApprove: boolean;
   approve?: { reads: boolean; edits: boolean; commands: boolean; continue: boolean };
   rules?: { action: string; kind: string; pattern: string; folder?: string }[];
+  /** How much Agentman does by itself in a folder: "watch", "suggest" or
+   *  "handle", the closest folder's level applying. */
+  trust?: { folder: string; level: string }[];
   style: string;
   instructions: string;
   /** Whether the chat model's engine has its key on the Mac. Read only. */
@@ -878,6 +938,9 @@ export interface ManagerEntry {
   card?: ManagerCard;
   /** The user closed it, here or on the Mac: it is left out. */
   closed?: boolean;
+  /** What Agentman approved by itself, on a "approve" activity entry, so
+   *  the user can have it ask next time. */
+  approved?: { kind: string; target: string; folder?: string };
 }
 
 export interface ManagerStatus {
@@ -892,11 +955,78 @@ export interface Brief {
   sessionId: string;
   name: string;
   summary: string;
+  /** What the agent set out to do, and what it is doing now: the Board's
+   *  cards say them (absent from daemons that predate them). */
+  goal?: string;
+  now?: string;
   needsYou?: string;
   updatedAt: number;
 }
 
 /** A reminder Agentman left itself, or a watch on an agent. */
+/** What Agentman found checking an agent's latest work. */
+export interface Verification {
+  sessionId: string;
+  /** "checking", "verified", "passed", "concerns", "failed" or "none". */
+  state: string;
+  summary?: string;
+  issues?: string[];
+  command?: string;
+  output?: string;
+  sentBack?: boolean;
+  updatedAt: number;
+}
+
+/** A goal given to Agentman, as a team of agents. */
+export interface Mission {
+  id: string;
+  goal: string;
+  /** "proposed", "running", "done" or "dismissed". */
+  state: string;
+  tasks: MissionTask[];
+  createdAt: number;
+}
+
+export interface MissionTask {
+  id: string;
+  title: string;
+  agent: string;
+  /** "planned", "running", "done" or "failed". */
+  state: string;
+  sessionId?: string;
+  dependsOn?: string[];
+  problem?: string;
+}
+
+/** Several finished agents being shipped together. */
+export interface ShipRun {
+  id: string;
+  /** "running" or "done". */
+  state: string;
+  items: ShipItem[];
+}
+
+export interface ShipItem {
+  sessionId: string;
+  name: string;
+  /** "waiting", "working", "shipped", "skipped" or "failed". */
+  state: string;
+  note?: string;
+  url?: string;
+}
+
+/** Work lined up for tonight. */
+export interface QueueItem {
+  id: string;
+  agent: string;
+  folder: string;
+  task: string;
+  /** "waiting", "running", "done" or "failed". */
+  state: string;
+  problem?: string;
+  createdAt: number;
+}
+
 export interface ManagerSchedule {
   id: string;
   kind: "reminder" | "watch" | string;
@@ -1025,6 +1155,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
     "session_ended", "artifacts", "tools_title",
     "manager_entry", "manager_delta", "manager_history", "manager_status",
     "manager_brief", "manager_schedules", "manager_settings",
+    "manager_verification", "manager_missions", "manager_ship", "manager_queue",
     "manager_permission", "manager_reset", "knowledge", "keys",
     "transcript", "voice_account", "commands", "command_panel", "files", "attached", "usage",
     "limits", "search",
@@ -1092,6 +1223,26 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
         if (!Array.isArray(value.briefs) || value.briefs.length > 10_000) return null;
         value.briefs = value.briefs.filter(isBrief);
       }
+      break;
+    case "manager_verification":
+      if (value.verification !== undefined && !isVerification(value.verification)) delete value.verification;
+      if (value.verifications !== undefined) {
+        if (!Array.isArray(value.verifications) || value.verifications.length > 10_000) return null;
+        value.verifications = value.verifications.filter(isVerification);
+      }
+      break;
+    case "manager_missions":
+      value.missions ??= [];
+      if (!Array.isArray(value.missions) || value.missions.length > 1_000) return null;
+      value.missions = value.missions.filter(isMission);
+      break;
+    case "manager_ship":
+      if (value.ship !== undefined && !isShipRun(value.ship)) delete value.ship;
+      break;
+    case "manager_queue":
+      value.queue ??= [];
+      if (!Array.isArray(value.queue) || value.queue.length > 1_000) return null;
+      value.queue = value.queue.filter(isQueueItem);
       break;
     case "manager_settings":
       if (!isRecord(value.managerSettings)) return null;
@@ -1588,7 +1739,47 @@ function isBrief(value: unknown): value is Brief {
   if (!isRecord(value) || !boundedString(value.sessionId, 512, true) || !boundedString(value.name, 4096) ||
       !boundedString(value.summary, 64 * 1024)) return false;
   if (!optionalBoundedString(value.needsYou, 64 * 1024)) delete value.needsYou;
+  if (!optionalBoundedString(value.goal, 64 * 1024)) delete value.goal;
+  if (!optionalBoundedString(value.now, 64 * 1024)) delete value.now;
   if (!finiteNumber(value.updatedAt)) value.updatedAt = 0;
+  return true;
+}
+
+function isVerification(value: unknown): value is Verification {
+  if (!isRecord(value) || !boundedString(value.sessionId, 512, true) || !boundedString(value.state, 64, true)) return false;
+  for (const key of ["summary", "command", "output"] as const) {
+    if (!optionalBoundedString(value[key], 256 * 1024)) delete value[key];
+  }
+  if (value.issues !== undefined && !(Array.isArray(value.issues) && value.issues.length <= 200 && value.issues.every((i) => boundedString(i, 64 * 1024)))) delete value.issues;
+  if (value.sentBack !== undefined && typeof value.sentBack !== "boolean") delete value.sentBack;
+  if (!finiteNumber(value.updatedAt)) value.updatedAt = 0;
+  return true;
+}
+
+function isMission(value: unknown): value is Mission {
+  if (!isRecord(value) || !boundedString(value.id, 512, true) || !boundedString(value.goal, 64 * 1024) ||
+      !boundedString(value.state, 64, true) || !Array.isArray(value.tasks) || value.tasks.length > 200) return false;
+  value.tasks = value.tasks.filter((t): t is MissionTask =>
+    isRecord(t) && boundedString(t.id, 512, true) && boundedString(t.title, 4096) && boundedString(t.agent, 64) &&
+    boundedString(t.state, 64, true) && optionalBoundedString(t.sessionId, 512) && optionalBoundedString(t.problem, 64 * 1024));
+  if (!finiteNumber(value.createdAt)) value.createdAt = 0;
+  return true;
+}
+
+function isShipRun(value: unknown): value is ShipRun {
+  if (!isRecord(value) || !boundedString(value.id, 512, true) || !boundedString(value.state, 64, true) ||
+      !Array.isArray(value.items) || value.items.length > 200) return false;
+  value.items = value.items.filter((i): i is ShipItem =>
+    isRecord(i) && boundedString(i.sessionId, 512, true) && boundedString(i.name, 4096) && boundedString(i.state, 64, true) &&
+    optionalBoundedString(i.note, 64 * 1024) && optionalBoundedString(i.url, 4096));
+  return true;
+}
+
+function isQueueItem(value: unknown): value is QueueItem {
+  if (!isRecord(value) || !boundedString(value.id, 512, true) || !boundedString(value.agent, 64) ||
+      !boundedString(value.folder, 4096) || !boundedString(value.task, 64 * 1024) || !boundedString(value.state, 64)) return false;
+  if (!optionalBoundedString(value.problem, 64 * 1024)) delete value.problem;
+  if (!finiteNumber(value.createdAt)) value.createdAt = 0;
   return true;
 }
 

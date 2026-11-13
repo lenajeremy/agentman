@@ -1,0 +1,43 @@
+/* The terminal panel (Terminal/TerminalPanel.swift): a 32 bar with a hairline
+   over it, tabs 24 high, buttons 24×24 with symbols at 11 medium; each shell
+   10 from the left and 6 from the top, on the paper. */
+.term-panel { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--paper); }
+.term-bar { height: 32px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 12px; background: var(--paper); box-shadow: inset 0 1px 0 var(--line); }
+.term-label { font-size: 11px; font-weight: 500; color: var(--faint); margin-right: 8px; flex: none; }
+.term-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.term-tabs::-webkit-scrollbar { display: none; }
+.term-spacer { flex: 1; min-width: 8px; }
+.term-button { width: 24px; height: 24px; flex: none; display: grid; place-items: center; color: var(--muted); }
+.term-button:disabled { opacity: 0.3; }
+.term-tab { height: 24px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 9px; border-radius: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.term-tab.active { background: var(--fill); color: var(--text); font-weight: 500; }
+.term-tab-icon { display: grid; place-items: center; color: var(--muted); font-weight: 400; }
+.term-tab-icon.exited { color: var(--faint); }
+.term-tab-ended { font-size: 12px; font-weight: 400; color: var(--faint); }
+.term-tab-close { width: 14px; height: 14px; display: grid; place-items: center; color: var(--muted); opacity: 0; }
+.term-tab:hover .term-tab-close, .term-tab.active .term-tab-close { opacity: 1; }
+.term-body { flex: 1; min-height: 0; position: relative; background: var(--paper); overflow: hidden; }
+.term-slot { position: absolute; top: 0; bottom: 0; left: 0; width: 100%; padding: 6px 0 0 10px; }
+.term-body.split .term-slot { width: calc((100% - 1px) / 2); }
+.term-body.split .term-slot.right { left: calc((100% - 1px) / 2 + 1px); }
+.term-split-line { position: absolute; top: 0; bottom: 0; left: calc((100% - 1px) / 2); width: 1px; background: var(--line); z-index: 2; }
+.shell-host { width: 100%; height: 100%; }
+.shell-host .xterm { height: 100%; padding: 0; }
+.term-note { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: var(--paper); font-size: 12px; color: var(--muted); }
+
+/* The terminal under the conversation: its height kept, a divider over it. */
+.bottom-terminal { flex: none; position: relative; }
+.bottom-divider { height: 6px; margin: -3px 0; position: relative; z-index: 3; cursor: row-resize; flex: none; }
+
+/* An agent's tmux, on its own. */
+.agent-term { position: absolute; inset: 0; background: var(--paper); }
+.agent-term-host { position: absolute; inset: 6px 0 0 10px; }
+.agent-term-note { position: absolute; right: 16px; bottom: 12px; font-size: 12px; color: var(--muted); background: var(--fill); padding: 3px 10px; border-radius: 999px; }
+/* xterm leaves its viewport black below the last whole row: the page colour there. */
+.shell-host .xterm-viewport, .agent-term .xterm-viewport { background-color: #ffffff !important; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .shell-host .xterm-viewport, :root:not([data-theme="light"]) .agent-term .xterm-viewport { background-color: #000000 !important; }
+}
+/* The same, for Dark chosen in Settings. */
+:root[data-theme="dark"] .shell-host .xterm-viewport, :root[data-theme="dark"] .agent-term .xterm-viewport { background-color: #000000 !important; }
+.shell-host { position: relative; }

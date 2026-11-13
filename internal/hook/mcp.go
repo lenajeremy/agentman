@@ -58,7 +58,9 @@ func (in Installer) MCPPlans(remove bool) ([]Plan, error) {
 		plans = append(plans, planJSONMCP(protocol.KindKiro, filepath.Join(home, ".kiro", "settings", "mcp.json"), "mcpServers", stdio, remove))
 	}
 	if installed(filepath.Join(".config", "muse")) {
-		plans = append(plans, planJSONMCP(protocol.KindMuse, filepath.Join(home, ".config", "muse", "settings.json"), "mcpServers", stdio, remove))
+		// Muse refuses settings without a schema_version and then starts no
+		// session; a file written from nothing carries Muse's first one.
+		plans = append(plans, planJSONMCP(protocol.KindMuse, filepath.Join(home, ".config", "muse", "settings.json"), "mcpServers", stdio, remove, map[string]any{"schema_version": 1}))
 	}
 	// Every Antigravity app reads ~/.gemini/config, the CLI and the IDE alike
 	// (the IDE's ~/.gemini/antigravity/mcp_config.json links to it).
@@ -81,7 +83,9 @@ func (p Plan) MCPRegistered() bool {
 // planJSONMCP puts Agentman's server into, or takes it out of, a JSON config
 // that keeps its servers under key. Whatever else the user set on the entry,
 // such as an environment, stays.
-func planJSONMCP(kind protocol.Kind, path, key string, entry map[string]any, remove bool) Plan {
+// seed is what a config written from nothing starts with, beside the
+// server: what the agent won't read a config without.
+func planJSONMCP(kind protocol.Kind, path, key string, entry map[string]any, remove bool, seed ...map[string]any) Plan {
 	path = followLink(path)
 	plan := Plan{Kind: kind, Path: path}
 	raw, err := os.ReadFile(path)
@@ -98,6 +102,12 @@ func planJSONMCP(kind protocol.Kind, path, key string, entry map[string]any, rem
 		if err := json.Unmarshal(raw, &config); err != nil {
 			plan.Err = fmt.Errorf("%s is not valid JSON (%w), so it was left alone; add Agentman's server by hand", path, err)
 			return plan
+		}
+	} else if !remove {
+		for _, defaults := range seed {
+			for name, value := range defaults {
+				config[name] = value
+			}
 		}
 	}
 	servers, _ := config[key].(map[string]any)

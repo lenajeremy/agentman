@@ -120,6 +120,12 @@ struct ContentView: View {
             if let path = environment["AGENTMAN_LIGHTBOX"], let image = NSImage(contentsOfFile: path) {
                 store.lightbox = Lightbox(image: image, title: (path as NSString).lastPathComponent)
             }
+            #if DEBUG
+            // A comparison run (TestSnapshot.swift) opens the palette, typed into.
+            if environment["AGENTMAN_TEST_PALETTE"] != nil {
+                store.showPalette = true
+            }
+            #endif
         }
     }
 

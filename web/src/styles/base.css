@@ -1,0 +1,86 @@
+/* The Mac app's look, from its SwiftUI source: the palette (Design/Theme.swift),
+   type and spacing (Views/Sidebar.swift, AgentThreadView.swift,
+   WorkspacePanel.swift, Design/MarkdownView.swift). 1 pt = 1 px.
+   Interface text is the system font: SF Pro on macOS. Elsewhere, where SF
+   may not be used, Inter, the nearest open face. Code is Google Sans Code. */
+@font-face { font-family: "Inter"; src: url("/fonts/inter-latin-variable.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "Google Sans Code"; src: url("/fonts/GoogleSansCode.ttf"); font-weight: 300 800; }
+
+:root {
+  --paper: #fafafa; --sidebar: #f5f5f5; --surface: #ffffff; --fill: #efefef; --fill-strong: #e4e4e4; --line: #e5e5e5;
+  --tool-card: #f5f5f5; --tool-edge: #e8e8e8; --tool-well: #fafafa;
+  --text: #101010; --text-2: #3c3c3c; --muted: #737373; --faint: #999999;
+  --working: #3268f5; --working-text: #1f35c7; --working-wash: #eef1ff;
+  --needs-you: #ff6a2b; --needs-you-text: #c2451a; --needs-you-wash: #fff2eb;
+  --ok: #12a66a; --error: #e5484d; --error-text: #c4343a; --error-wash: #fdedee;
+  --inverse: #101010; --on-inverse: #ffffff;
+  --primary: 0 0 0;
+  --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  --mono: "Google Sans Code", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #000000; --sidebar: #050505; --surface: #0d0d0d; --fill: #202020; --fill-strong: #303030; --line: #242424;
+    --tool-card: #0d0d0d; --tool-edge: #202020; --tool-well: #101010;
+    --text: #f2f2f2; --text-2: #d0d0d0; --muted: #a0a0a0; --faint: #737373;
+    --working: #578cff; --working-text: #9daaff; --working-wash: #1a1f3d;
+    --needs-you: #ff7d45; --needs-you-text: #ff9a6c; --needs-you-wash: #2e1b12;
+    --ok: #2bc784; --error: #ff6b70; --error-text: #ff8a8e; --error-wash: #2c1517;
+    --inverse: #f2f2f2; --on-inverse: #000000;
+    --primary: 255 255 255;
+    color-scheme: dark;
+  }
+}
+/* The same, for Dark chosen in Settings. */
+:root[data-theme="dark"] {
+    --paper: #000000; --sidebar: #050505; --surface: #0d0d0d; --fill: #202020; --fill-strong: #303030; --line: #242424;
+    --tool-card: #0d0d0d; --tool-edge: #202020; --tool-well: #101010;
+    --text: #f2f2f2; --text-2: #d0d0d0; --muted: #a0a0a0; --faint: #737373;
+    --working: #578cff; --working-text: #9daaff; --working-wash: #1a1f3d;
+    --needs-you: #ff7d45; --needs-you-text: #ff9a6c; --needs-you-wash: #2e1b12;
+    --ok: #2bc784; --error: #ff6b70; --error-text: #ff8a8e; --error-wash: #2c1517;
+    --inverse: #f2f2f2; --on-inverse: #000000;
+    --primary: 255 255 255;
+    color-scheme: dark;
+  }
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--paper); color: var(--text); font: 13px/1.25 var(--sans); -webkit-font-smoothing: antialiased; overflow: hidden; user-select: none; cursor: default; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: default; }
+input, textarea { font: inherit; color: inherit; }
+.drag { --wails-draggable: drag; }
+.no-drag { --wails-draggable: no-drag; }
+.hstack { display: flex; align-items: center; }
+.tabular { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); }
+.app { display: flex; height: 100%; }
+.empty { color: var(--faint); padding: 12px; }
+.empty.big { flex: 1; display: grid; place-items: center; height: 100%; }
+
+/* ChromeButton: 28×28, 13 regular, muted; fill@0.55 on hover or active, radius 6. */
+.chrome { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 6px; color: var(--muted); }
+.chrome:hover, .chrome.active { background: color-mix(in srgb, var(--fill) 55%, transparent); }
+.chrome.active { color: var(--text); }
+.mark { display: inline-block; flex: none; object-fit: contain; }
+.sf { display: inline-block; flex: none; background-color: currentColor; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; }
+.mark-template { background: var(--text); -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; }
+.mark-template.muted { background: var(--faint); }
+.mark-none.muted { color: var(--faint); }
+.mark-none { color: var(--muted); font-family: var(--mono); font-weight: 500; line-height: 1; display: inline-grid; place-items: center; }
+.app-icon-frame { flex: none; display: grid; place-items: center; }
+.app-icon { border-radius: 22%; display: block; }
+/* Scroll bars as macOS draws them in an app: thin, over the content, only while used. */
+::-webkit-scrollbar { width: 10px; height: 10px; background: transparent; }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 5px; border: 3px solid transparent; background-clip: content-box; }
+:hover::-webkit-scrollbar-thumb { background-color: rgb(var(--primary) / 0.22); }
+
+.loader { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--working); border-right-color: transparent; animation: spin 0.8s linear infinite; display: inline-block; }
+.loader.small { width: 11px; height: 11px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* A row of choices (UsageView.swift's Segments). */
+.segments { display: inline-flex; gap: 2px; padding: 2px; border-radius: 7px; background: var(--fill); }
+.segments button { height: 22px; padding: 0 9px; border-radius: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.segments button.chosen { color: var(--text); font-weight: 500; background: var(--surface); box-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.1); }

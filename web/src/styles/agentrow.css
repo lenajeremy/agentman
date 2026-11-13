@@ -1,0 +1,16 @@
+/* An agent in two lines (Sidebar.swift's AgentRow). SwiftUI's lines of
+   text: 16 high at 13.5pt, 15 at 12. What and when: the state, the title,
+   how long since it did anything. */
+.agent-line1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.state-dot { width: 9px; height: 9px; flex: none; display: grid; place-items: center; }
+.dot-needs { width: 8px; height: 8px; border-radius: 50%; background: var(--needs-you); }
+.dot-idle { width: 8px; height: 8px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--faint); }
+.agent-name { min-width: 0; font-size: 13.5px; line-height: 16px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent-name.ended { color: var(--muted); }
+.agent-when { font-size: 12px; line-height: 15px; color: var(--muted); white-space: nowrap; flex: none; }
+/* Who and where, under the title: the agent's logo, its folder and branch,
+   or what it asks while it needs you. */
+.agent-line2 { display: flex; align-items: center; gap: 6px; padding-left: 17px; font-size: 12px; line-height: 15px; min-width: 0; position: relative; top: -0.5px; }
+.agent-place { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.agent-place.needs { color: var(--needs-you-text); }
+.agent-ports { font-family: var(--mono); font-size: 10.5px; }

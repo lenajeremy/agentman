@@ -1,0 +1,114 @@
+/* The open panel the page draws in a browser (picker/OpenPanel.tsx), in
+   the look of macOS's: a translucent sidebar, a white list with alternate
+   rows and the accent blue for the selection, in both appearances. */
+:root {
+  --op-bg: #ffffff;
+  --op-side: rgba(236, 236, 236, 0.96);
+  --op-bar: #f6f6f6;
+  --op-line: rgba(0, 0, 0, 0.1);
+  --op-text: rgba(0, 0, 0, 0.85);
+  --op-muted: rgba(0, 0, 0, 0.5);
+  --op-faint: rgba(0, 0, 0, 0.26);
+  --op-alt: #f4f5f5;
+  --op-hover: rgba(0, 0, 0, 0.06);
+  --op-current: rgba(0, 0, 0, 0.08);
+  --op-field: rgba(0, 0, 0, 0.05);
+  --op-button: #ffffff;
+  --op-button-edge: rgba(0, 0, 0, 0.14);
+  --op-accent: #0a7aff;
+  --op-folder: #3fa0f0;
+  --op-folder-fill: #9fd0f7;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --op-bg: #1e1e1e; --op-side: rgba(44, 44, 44, 0.96); --op-bar: #2a2a2a; --op-line: rgba(255, 255, 255, 0.1);
+    --op-text: rgba(255, 255, 255, 0.88); --op-muted: rgba(255, 255, 255, 0.5); --op-faint: rgba(255, 255, 255, 0.28);
+    --op-alt: #252525; --op-hover: rgba(255, 255, 255, 0.07); --op-current: rgba(255, 255, 255, 0.1); --op-field: rgba(255, 255, 255, 0.08);
+    --op-button: rgba(255, 255, 255, 0.16); --op-button-edge: rgba(255, 255, 255, 0.08); --op-accent: #0a84ff;
+    --op-folder: #4aa8f0; --op-folder-fill: #2f6fa3;
+  }
+}
+:root[data-theme="dark"] {
+  --op-bg: #1e1e1e; --op-side: rgba(44, 44, 44, 0.96); --op-bar: #2a2a2a; --op-line: rgba(255, 255, 255, 0.1);
+  --op-text: rgba(255, 255, 255, 0.88); --op-muted: rgba(255, 255, 255, 0.5); --op-faint: rgba(255, 255, 255, 0.28);
+  --op-alt: #252525; --op-hover: rgba(255, 255, 255, 0.07); --op-current: rgba(255, 255, 255, 0.1); --op-field: rgba(255, 255, 255, 0.08);
+  --op-button: rgba(255, 255, 255, 0.16); --op-button-edge: rgba(255, 255, 255, 0.08); --op-accent: #0a84ff;
+  --op-folder: #4aa8f0; --op-folder-fill: #2f6fa3;
+}
+
+.op-shade { position: fixed; inset: 0; z-index: 999; display: flex; justify-content: center; align-items: flex-start; padding: 8vh 16px 16px; background: rgba(0, 0, 0, 0.12); }
+.op-panel {
+  position: relative; width: min(780px, 100%); height: min(500px, 84vh); display: grid;
+  grid-template-columns: 172px 1fr; grid-template-rows: 1fr auto; overflow: hidden;
+  border-radius: 14px; background: var(--op-bg); color: var(--op-text); font: 13px var(--sans);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.25), 0 22px 60px rgba(0, 0, 0, 0.3); user-select: none;
+}
+.op-panel button { font: inherit; color: inherit; }
+
+.op-sidebar { grid-row: 1; background: var(--op-side); border-right: 1px solid var(--op-line); padding: 10px 8px; overflow-y: auto; }
+.op-side-title { padding: 10px 8px 4px; font-size: 11px; font-weight: 600; color: var(--op-muted); }
+.op-side-title:first-child { padding-top: 2px; }
+.op-side-row { width: 100%; height: 26px; display: flex; align-items: center; gap: 7px; padding: 0 8px; border-radius: 6px; text-align: left; white-space: nowrap; overflow: hidden; }
+.op-side-row span { overflow: hidden; text-overflow: ellipsis; }
+.op-side-row:hover { background: var(--op-hover); }
+.op-side-row.current { background: var(--op-current); }
+.op-side-icon { color: var(--op-accent); flex-shrink: 0; }
+
+.op-main { grid-row: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.op-message { padding: 8px 16px; text-align: center; font-size: 12px; color: var(--op-text); background: var(--op-bar); border-bottom: 1px solid var(--op-line); }
+.op-toolbar { height: 46px; flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--op-line); }
+.op-nav { display: flex; gap: 2px; }
+.op-nav button { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 6px; color: var(--op-muted); }
+.op-nav button:not(:disabled):hover { background: var(--op-hover); color: var(--op-text); }
+.op-nav button:disabled { color: var(--op-faint); }
+.op-where { height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 6px; font-weight: 600 !important; min-width: 0; }
+.op-where span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-where:hover { background: var(--op-hover); }
+.op-where svg:last-child { color: var(--op-muted); flex-shrink: 0; }
+.op-folder-glyph { color: var(--op-folder); fill: var(--op-folder-fill); flex-shrink: 0; }
+.op-search { margin-left: auto; width: 170px; height: 26px; display: flex; align-items: center; gap: 5px; padding: 0 8px; border-radius: 7px; background: var(--op-field); color: var(--op-muted); flex-shrink: 1; min-width: 90px; }
+.op-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font: 13px var(--sans); color: var(--op-text); }
+.op-search input::placeholder { color: var(--op-muted); }
+
+.op-head { height: 24px; flex-shrink: 0; display: grid; grid-template-columns: minmax(0, 1fr) 178px 78px 134px; border-bottom: 1px solid var(--op-line); padding: 0 8px; }
+.op-col { display: flex; align-items: center; gap: 4px; padding: 0 8px; font-size: 11px !important; color: var(--op-muted) !important; text-align: left; border-left: 1px solid var(--op-line); white-space: nowrap; overflow: hidden; }
+.op-col:first-child { border-left: 0; }
+.op-col.sorted { color: var(--op-text) !important; font-weight: 600 !important; }
+.op-col-size { justify-content: flex-end; }
+
+.op-list { flex: 1; overflow-y: auto; outline: none; padding: 2px 8px 8px; }
+.op-row { height: 24px; display: grid; grid-template-columns: minmax(0, 1fr) 178px 78px 134px; align-items: center; border-radius: 5px; }
+.op-row.odd { background: var(--op-alt); }
+.op-row.selected { background: var(--op-accent); color: #fff; }
+.op-row.selected .op-cell, .op-row.selected .op-icon { color: #fff; }
+.op-row.dim .op-cell, .op-row.dim .op-icon { color: var(--op-faint); }
+.op-cell { padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--op-muted); }
+.op-name { display: flex; align-items: center; gap: 6px; color: var(--op-text); }
+.op-label { overflow: hidden; text-overflow: ellipsis; }
+.op-size { text-align: right; }
+.op-icon { flex-shrink: 0; color: var(--op-muted); }
+.op-icon.folder { color: var(--op-folder); fill: var(--op-folder-fill); }
+.op-row.selected .op-icon.folder { fill: rgba(255, 255, 255, 0.35); }
+.op-icon.app { color: var(--op-accent); }
+.op-problem { padding: 40px 32px; text-align: center; color: var(--op-muted); line-height: 1.5; }
+
+.op-footer { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--op-line); background: var(--op-bar); }
+.op-spacer { flex: 1; }
+.op-button { height: 24px; min-width: 76px; padding: 0 14px; border-radius: 6px; background: var(--op-button); box-shadow: 0 0 0 0.5px var(--op-button-edge), 0 0.5px 1.5px rgba(0, 0, 0, 0.12); }
+.op-button.default { background: var(--op-accent); color: #fff !important; box-shadow: none; }
+.op-button:disabled { opacity: 0.45; }
+
+.op-ask-shade { position: absolute; inset: 0; z-index: 2; display: flex; justify-content: center; align-items: flex-start; padding-top: 46px; background: rgba(0, 0, 0, 0.08); }
+.op-ask { width: 320px; display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: 12px; background: var(--op-bg); box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.2), 0 12px 36px rgba(0, 0, 0, 0.25); }
+.op-ask-title { font-weight: 700; }
+.op-ask-label { font-size: 12px; color: var(--op-muted); }
+.op-ask input { height: 24px; padding: 0 7px; border-radius: 5px; border: 1px solid var(--op-line); outline: none; background: var(--op-bg); color: var(--op-text); font: 13px var(--sans); box-shadow: 0 0 0 3px color-mix(in srgb, var(--op-accent) 35%, transparent); }
+.op-ask-problem { font-size: 12px; color: #e0383e; }
+.op-ask-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
+@media (max-width: 640px) {
+  .op-panel { grid-template-columns: 1fr; }
+  .op-sidebar { display: none; }
+  .op-head, .op-row { grid-template-columns: minmax(0, 1fr) 72px; }
+  .op-col-modified, .op-col-kind, .op-modified, .op-kind { display: none; }
+}

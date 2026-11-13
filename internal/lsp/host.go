@@ -41,10 +41,15 @@ type Options struct {
 	Servers []*Server
 	// Find replaces looking for a server on the Mac, for tests.
 	Find func(*Server) string
+	// AllowOrigin admits pages besides the Mac app's editor: the
+	// cross-platform app's, which loads the same editor page from its own
+	// origin. The token is still required.
+	AllowOrigin func(origin string) bool
 }
 
 // Host runs the language servers for every editor window on this Mac.
 type Host struct {
+	allowOrigin  func(string) bool
 	tools        Tools
 	idleAfter    time.Duration
 	maxServers   int
@@ -79,6 +84,7 @@ func NewHost(opts Options) *Host {
 		noDownloads:  opts.NoDownloads,
 		paths:        opts.Paths,
 		disabled:     opts.Disabled,
+		allowOrigin:  opts.AllowOrigin,
 		startTimeout: time.Minute,
 		backoff:      func(tries int) time.Duration { return time.Duration(tries*tries) * time.Second },
 		sessions:     map[string]*Session{},
@@ -142,7 +148,8 @@ func (h *Host) allowed(r *http.Request) bool {
 	if token == "" || subtle.ConstantTimeCompare([]byte(given), []byte(token)) != 1 {
 		return false
 	}
-	return r.Header.Get("Origin") == Origin
+	origin := r.Header.Get("Origin")
+	return origin == Origin || h.allowOrigin != nil && origin != "" && h.allowOrigin(origin)
 }
 
 // Close stops every server.

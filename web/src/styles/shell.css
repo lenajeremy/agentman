@@ -1,0 +1,30 @@
+/* The main window around the sidebar and the detail (Views/ContentView.swift). */
+.sidebar-pane { position: relative; display: flex; flex: none; min-height: 0; }
+.app > .detail { position: relative; }
+/* With the sidebar hidden, the button that brings it back, by the window's own. */
+.show-sidebar { position: absolute; top: 2px; z-index: 6; }
+/* "This agent has ended": its symbol, a title, and a link back. */
+.gone { -webkit-font-smoothing: auto; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; line-height: 1.193; }
+/* moon.zzz at 28 is 37 high, as SwiftUI lays it out. */
+.gone-icon { color: var(--faint); height: 37px; display: flex; align-items: center; }
+.gone-title { font-size: 16px; line-height: 20px; font-weight: 500; color: var(--text); }
+/* A link button: the system's link colour. */
+:root { --link: #0068da; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --link: #419cff; } }
+:root[data-theme="dark"] { --link: #419cff; }
+.gone-link { color: var(--link); font-size: 13px; line-height: 16px; }
+
+/* ConnectionBanner.swift: under the top bar, over the page, while am serve
+   can't be reached. */
+.connection-banner {
+  position: absolute; top: calc(var(--safe-top, 0px) + 44px); left: 50%; transform: translateX(-50%); z-index: 30;
+  width: min(620px, calc(100% - 40px)); display: flex; align-items: flex-start; gap: 12px; padding: 11px 14px;
+  border-radius: 12px; background: var(--surface); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--error, #e0383e) 35%, transparent), 0 3px 10px rgba(0, 0, 0, 0.08);
+  animation: connection-banner-in 0.2s ease-out;
+}
+.connection-banner-icon { color: var(--error, #e0383e); padding-top: 2px; flex: none; }
+.connection-banner-text { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.connection-banner-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.connection-banner-explanation { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.connection-banner-reason { font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@keyframes connection-banner-in { from { opacity: 0; transform: translate(-50%, -8px); } }

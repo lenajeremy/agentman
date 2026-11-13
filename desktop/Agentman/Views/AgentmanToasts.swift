@@ -36,6 +36,17 @@ struct AgentmanToasts: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         }
         .animation(.spring(duration: 0.3, bounce: 0.15), value: store.toasts.map(\.id))
+        #if DEBUG
+        .task(id: store.manager.loaded) {
+            // For comparing with the cross-platform app (a test run is never
+            // in front, so it shows no toasts of its own): entries shown as
+            // toasts at launch, AGENTMAN_TOASTS=<id>,<id>.
+            guard store.manager.loaded, let ids = ProcessInfo.processInfo.environment["AGENTMAN_TOASTS"] else { return }
+            for id in ids.split(separator: ",") {
+                if let entry = store.manager.entry(String(id)) { store.showToast(entry) }
+            }
+        }
+        #endif
     }
 }
 

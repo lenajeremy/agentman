@@ -516,6 +516,30 @@ test("decodes a session's commands and a panel's text", () => {
   assert.equal(decodeDaemonEvent({ type: "command_panel", panel: { command: "", text: "x" } }), null);
 });
 
+test("the Board's checks, teams, shipping and tonight's work decode, and a bad entry is left out", () => {
+  const checks = decodeDaemonEvent({
+    type: "manager_verification",
+    verifications: [{ sessionId: "claude:a", state: "passed", summary: "Tests pass", updatedAt: 1 }, { state: "passed" }],
+  });
+  assert.equal(checks?.verifications?.length, 1);
+  assert.equal(checks?.verifications?.[0].summary, "Tests pass");
+
+  const teams = decodeDaemonEvent({
+    type: "manager_missions",
+    missions: [{ id: "m1", goal: "Ship search", state: "running", createdAt: 1, tasks: [
+      { id: "t1", title: "Index", agent: "claude", state: "done", sessionId: "claude:a" },
+      { id: 7, title: "broken" },
+    ] }],
+  });
+  assert.equal(teams?.missions?.[0].tasks.length, 1);
+
+  const ship = decodeDaemonEvent({ type: "manager_ship", ship: { id: "s1", state: "running", items: [{ sessionId: "claude:a", name: "a", state: "working" }] } });
+  assert.equal(ship?.ship?.items[0].state, "working");
+
+  const queue = decodeDaemonEvent({ type: "manager_queue" });
+  assert.deepEqual(queue?.queue, []);
+});
+
 test("a form's steps arrive with its question, and steps the app can't read are dropped, not the question", () => {
   const session = {
     id: "s", kind: "claude", nativeId: "n", name: "name", cwd: "/tmp",

@@ -103,6 +103,28 @@ func TestCommitTakesOnlyTheFilesNamed(t *testing.T) {
 	}
 }
 
+// A rename the agent staged with git mv lists both names; the old one is on
+// neither the disk nor the index, and git add refused the whole commit
+// over it ("pathspec did not match any files").
+func TestCommitTakesARenameAndADeletion(t *testing.T) {
+	dir, _, git := gitActionRepo(t)
+	git("mv", "a.txt", "renamed.txt")
+	if err := os.Remove(filepath.Join(dir, "b.txt")); err != nil {
+		t.Fatal(err)
+	}
+	request := protocol.Request{Type: protocol.ReqGitCommit, SessionID: "codex:test", Text: "Rename a, drop b", Paths: []string{"a.txt", "renamed.txt", "b.txt"}}
+	event := workspaceDaemon(dir).Handle(context.Background(), request)
+	if event.Type != protocol.EvtGit || event.Git.Done != "committed" {
+		t.Fatalf("unexpected event: %+v", event)
+	}
+	if status := git("status", "--porcelain"); status != "" {
+		t.Errorf("left behind:\n%q", status)
+	}
+	if files := git("show", "--name-status", "--format=", "HEAD"); !strings.Contains(files, "renamed.txt") || !strings.Contains(files, "D\tb.txt") {
+		t.Errorf("the commit:\n%s", files)
+	}
+}
+
 func TestCommitWithoutAMessageHasAgentmanWriteOne(t *testing.T) {
 	dir, _, git := gitActionRepo(t)
 	write(t, dir, "a.txt", "a2\n")

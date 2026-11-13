@@ -1,0 +1,11 @@
+/* A sticker on the site's dots (Sticker.swift's StickerOnDots, DotPatch):
+   dots 14 apart and 2.6 across, full inside the middle half and gone at the
+   edge; a cream disc under the sticker on a dark page. */
+.sticker-on-dots { position: relative; display: grid; place-items: center; flex: none; }
+.sticker-dots { position: absolute; inset: 0; background-image: radial-gradient(circle, var(--cream-dots) 1.3px, transparent 1.5px); background-size: 14px 14px;
+  -webkit-mask-image: radial-gradient(circle closest-side, #000 45%, transparent 100%); mask-image: radial-gradient(circle closest-side, #000 45%, transparent 100%); }
+.sticker-disc { position: absolute; border-radius: 50%; background: #f3e6d8; display: none; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .sticker-disc { display: block; } }
+:root[data-theme="dark"] .sticker-disc { display: block; }
+.sticker { position: relative; display: grid; }
+.sticker img { display: block; }

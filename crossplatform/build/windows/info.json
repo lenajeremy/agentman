@@ -1,0 +1,15 @@
+{
+	"fixed": {
+		"file_version": "0.1.0"
+	},
+	"info": {
+		"0409": {
+			"ProductVersion": "0.1.0",
+			"CompanyName": "Agentman",
+			"FileDescription": "Every coding agent on this computer, in one window",
+			"LegalCopyright": "Agentman is open source under the MIT license.",
+			"ProductName": "Agentman",
+			"Comments": "Agentman"
+		}
+	}
+}

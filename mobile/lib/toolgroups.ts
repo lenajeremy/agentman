@@ -17,14 +17,16 @@ export type FeedItem =
   | { kind: "worked"; key: string; seconds: number };
 
 /** Whether the user asked for something here, which starts a turn. */
-function startsTurn(message: Message): boolean {
+export function startsTurn(message: Message): boolean {
   return message.role === "user" && !message.isSidechain;
 }
 
 /** One request and the agent's work on it. */
 export type Turn = { start: Message | null; last: Message | null };
 
-function addToTurn(turn: Turn, message: Message): void {
+/** A message into its turn: the request that starts it, or the agent's
+ *  latest work on it. */
+export function addToTurn(turn: Turn, message: Message): void {
   if (startsTurn(message)) turn.start = message;
   else if (turn.start && message.role !== "system") turn.last = message;
 }

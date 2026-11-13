@@ -46,6 +46,23 @@ type Server struct {
 	// A function rather than the Speaker itself, so this package does not
 	// depend on how speech is produced -- or on it existing at all.
 	speak func(text string)
+
+	// mounts are routes other parts of am serve put on this loopback
+	// listener: the app protocol over WebSocket, for apps that cannot open
+	// the Unix socket.
+	mounts []mount
+}
+
+type mount struct {
+	pattern string
+	handler http.Handler
+}
+
+// Mount serves handler at pattern on the hook listener, beside the hooks.
+// Call it before Serve. The handler does its own authentication: the hook
+// token is for agents' hooks, not for whatever else is mounted here.
+func (s *Server) Mount(pattern string, handler http.Handler) {
+	s.mounts = append(s.mounts, mount{pattern: pattern, handler: handler})
 }
 
 // SetSpeaker installs a function to read finished turns aloud. Optional: with
@@ -109,6 +126,9 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
+	for _, m := range s.mounts {
+		mux.Handle(m.pattern, m.handler)
+	}
 	return mux
 }
 

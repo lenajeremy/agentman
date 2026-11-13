@@ -1,0 +1,478 @@
+# Parity with Agentman for Mac
+
+Everything the SwiftUI app (`desktop/Agentman`) does, as the checklist the
+cross-platform app is built against. An item is ticked only when it works in
+this app on macOS and on Ubuntu **and** looks the same as the Mac app side by
+side on the test stack (`scripts/teststack/compare.sh`). A deliberate
+difference goes in a sub-bullet starting "Differs:". Each line cites the
+Swift that does it today.
+
+## Native capabilities used
+- [ ] Copy text to the pasteboard (replies, messages, paths, share links, upgrade command, Vim yanks) — AgentThreadView.swift:1690, AgentThreadView.swift:717, SettingsView.swift:947, MonacoView.swift:454
+- [ ] Copy an image to the pasteboard as PNG and TIFF ("Copy Image" everywhere) — ImagePreview.swift:6
+- [ ] Read images and files from the pasteboard and from drags (Finder files, screenshots, browser images) — MessageField.swift:282, MessageField.swift:330, Attachments.swift:73
+- [ ] Tree y/c/x puts file URLs on the pasteboard, as Finder does — TreeVim.swift:333
+- [ ] NSOpenPanel to attach files (agent) or images (Agentman) — AgentThreadView.swift:1609, ManagerChatView.swift:777
+- [ ] NSOpenPanel to pick a folder (new agent, open in editor, rule folder, mute folder, key folders) or a program (LSP) — NewAgentView.swift:249, EditorWindow.swift:30, SettingsView.swift:619, SettingsView.swift:1049, KeysSettings.swift:179, LanguagesSettings.swift:155
+- [ ] NSWorkspace: reveal in Finder — WorkspacePanel.swift:45, WorkspacePanel.swift:724, RightPanel.swift:952, RightPanel.swift:1293, EditorWindow.swift:221, EditorWindow.swift:402
+- [ ] NSWorkspace: open a localhost server, a PR URL, a sent file, "Open with Its App", web links from the editor page — AgentThreadView.swift:648, GitActions.swift:131, ImagePreview.swift:595, EditorWindow.swift:843, MonacoView.swift:579
+- [ ] NSWorkspace file icons for attachments and sent-file chips — Attachments.swift:68, ImagePreview.swift:598
+- [ ] Move to Trash (FileManager.trashItem), with undo out of the Trash — EditorStore.swift:606, TreeVim.swift:464
+- [ ] UNUserNotificationCenter: asks permission on first use, banners in foreground, routes clicks, withdraws notifications — Notifier.swift:8
+- [x] Dock tile badge — Notifier.swift:90
+- [ ] AVAudioRecorder records 16 kHz mono WAV to a temp file; microphone permission prompt — VoiceRecorder.swift:24, VoiceRecorder.swift:35
+- [ ] FSEvents folder watcher feeds file changes to the LSP — FolderWatcher.swift:19
+- [x] launchctl kickstart -k gui/<uid>/dev.agentman.serve (Restart Daemon) — AgentsStore.swift:1155
+  - Differs: on Linux, where am serve isn't a launchd service, the failure alert says to run `am service restart`; against a test daemon (AGENTMAN_HOME) a service that doesn't exist is kicked, so a test never restarts the user's own.
+- [ ] git via /usr/bin/git with GIT_OPTIONAL_LOCKS=0 (branch, status, ls-files, show :path, rev-parse) — EditorStore.swift:835, AgentsStore.swift:296, FileMentions.swift:251, RightPanel.swift:1231
+- [ ] Connection to am serve; reconnects by itself (here: the loopback WebSocket, `~/.agentman/app.json`) — DaemonClient.swift:51
+- [ ] Real pty login shell (here: a pty am serve owns, `/app/terminal`) — TerminalSession.swift:54
+- [ ] Monaco page served to the editor (here: copied into `public/editor`) — MonacoView.swift:630
+- [x] App active/inactive, screen lock/unlock and sleep notifications, for away detection — AgentsStore.swift:146
+  - Differs: on Linux, active is any of the app's windows having the focus; the screen lock comes from logind or the desktop's screen saver over D-Bus.
+- [ ] Modal alerts (quit prompt, restart daemon) — AgentmanApp.swift:107, AgentsStore.swift:1138
+- [ ] Appearance override (light/dark/system) — SettingsView.swift:803
+- [ ] Bundled fonts — Theme.swift:99
+- [ ] Local event monitors: editor ⌘W and tree keys, swipe on cards, terminal wheel — EditorWindow.swift:235, SwipeToDismiss.swift:37, TerminalSession.swift:195
+- [ ] Resize cursors on pane dividers — Sidebar.swift:690, TerminalPanel.swift:225, AgentPanel.swift:380
+- [ ] Fetch of HTTPS images, SVG included, for markdown documents — MarkdownView.swift:534
+
+## 1. Windows & app shell
+- [x] One main window "Agentman" that links open in (never a new window): min 1040×640, default 1560×980, hidden title bar — AgentmanApp.swift:28
+  - Differs: a second launch hands its links to the first (Wails' single instance; a test run, or one on a test daemon, stays apart).
+- [x] Transparent full-size title bar; traffic-light inset 82pt, 16pt in full screen — EditorWindow.swift:1317
+- [ ] Editor windows: one per folder, restored after relaunch; a duplicate that macOS restores closes itself — AgentmanApp.swift:84, EditorWindow.swift:137
+- [ ] Settings window (800×580) — AgentmanApp.swift:94, SettingsView.swift:53
+- [x] Held keys repeat (press-and-hold accents off, unless the user set it) — AgentmanApp.swift:21
+- [x] File ▸ New Agent ⌘N — AgentmanApp.swift:43
+- [x] View ▸ Toggle Sidebar ⌃⌘S — AgentmanApp.swift:47
+  - Differs: Ctrl+Alt+S off macOS, where there is no ⌘ and Super belongs to the desktop. On Linux the menus are a menu bar in the window.
+- [x] View ▸ Cycle Appearance ⌥⇧⌘A (light → dark → system) — AgentmanApp.swift:53
+- [x] App menu ▸ Restart Daemon… (confirm alert; failure alert with instructions) — AgentmanApp.swift:64, AgentsStore.swift:1137
+  - Differs: in the File menu on Linux, which has no app menu.
+- [x] Go ▸ Command Palette… ⌘K — AgentmanApp.swift:68
+- [x] Go ▸ Agentman ⌥⌘0 — AgentmanApp.swift:73
+- [x] Go ▸ What Happened While I Was Away (last summary, else the past hour) — AgentmanApp.swift:75
+- [ ] Editor menus: Save group, Terminal, Editor (see §12) — EditorWindow.swift:1189
+- [ ] Quit with unsaved editor files asks: Save / Save All, Cancel, Don't Save; lists the paths when there are several — AgentmanApp.swift:102
+- [ ] Drafts written to disk at quit — AgentsStore.swift:143
+- [ ] Appearance light/dark/system applied at launch and live — AgentmanApp.swift:34, SettingsView.swift:802
+- [x] Dock badge shows the unread Agentman count — AgentsStore.swift:906
+  - Note: the count is the Agentman area's (src/manager/summary.ts).
+- [x] Detail area: Agentman (default), New Agent, an agent thread, or "This agent has ended" with Back to Agentman — ContentView.swift:96, ContentView.swift:140
+- [ ] Overlays over the window: toasts, note suggestion popup, command palette, away summary, lightbox — ContentView.swift:41
+- [x] agentman:// routes (any other scheme is ignored) — AgentsStore.swift:306
+  - [x] agentman://agent/<percent-encoded id> opens the agent — AgentsStore.swift:309
+  - [x] agentman://new opens New Agent — AgentsStore.swift:314
+  - [x] agentman://home and agentman://home/conversation open Agentman — AgentsStore.swift:316
+  - [x] agentman://terminal?folder= opens that folder's editor with its terminal — ContentView.swift:117
+  - [x] agentman://edit?folder=&file=&agent=here opens the editor at the file; agent=here shows the folder's agent in the panel — ContentView.swift:122
+  - [x] agentman://settings[/general|notifications|permissions|personality|knowledge|keys|languages] — ContentView.swift:129
+- [x] Launch env vars (here: `AGENTMAN_OPEN` as a query, see scripts/teststack/README.md) — ContentView.swift:76
+  - [x] AGENTMAN_OPEN (a link), AGENTMAN_FOLDER (folder filter), AGENTMAN_RENAMING (row in rename), AGENTMAN_LIGHTBOX (image path) — ContentView.swift:77
+    - Note: here open=<link>, folder=<path>, renaming=<id>, lightbox=<path>; also palette=<query>, and pref.<key>=<json> for a setting this run only.
+  - [x] AGENTMAN_AWAY=<minutes> shows the away summary after 4 s — AgentsStore.swift:176
+    - Note: here away=<minutes>.
+  - [ ] AGENTMAN_FILES=changes|files|history|plans; AGENTMAN_FILES_OPEN=diff:<path> or file:<path> — AgentThreadView.swift:135, WorkspacePanel.swift:143
+  - [ ] AGENTMAN_ATTACH (paths joined by ":"), AGENTMAN_DRAFT (\n kept) — ManagerChatView.swift:184
+  - [ ] AGENTMAN_NOTE=<name>, AGENTMAN_EDIT_NOTE=1 — KnowledgeSettings.swift:77, NoteSuggestion.swift:88
+  - [ ] AGENTMAN_PANEL=agents|agentman|<id>; AGENTMAN_TREE=keys;create;filter:x;mark:a,b — AgentPanel.swift:54, EditorWindow.swift:163
+
+## 2. Sidebar
+- [x] Header: app icon, "Agentman", hide-sidebar button (⌃⌘S) — Sidebar.swift:73
+- [x] Search agents by name, folder or branch — Sidebar.swift:84, AgentsStore.swift:212
+- [x] Filter menu: Show (All agents / Needs you / Working / Idle, with counts), Folder (All folders and 15 recent, with counts); icon blue while filtering — Sidebar.swift:572
+- [x] Active-filter chips above the list, each cleared with × — Sidebar.swift:611
+- [x] New agent button (⌘N) — Sidebar.swift:90
+- [x] Sections: Pinned (user's order), then Working (folds, shows a count), a rule, then Active (needs-you first, then most recent) — Sidebar.swift:34, SidebarSections.swift:24
+- [x] Archived shelf at the foot: folds, shows a count, scrolls past ~190pt — Sidebar.swift:135
+- [x] Auto-archive when ended or idle more than 3 days, unless unarchived since; never while working or waiting — SidebarSections.swift:56
+- [ ] "Earlier here": sessions that ended in the filtered folder (read, or resume) — Sidebar.swift:52, AgentsStore.swift:449
+- [x] Working and Archived fold state kept across launches — Sidebar.swift:10
+- [x] Row top line: repo initials badge, folder or "repo · worktree" label, status at right — Sidebar.swift:377
+  - [x] Status shows Needs you (orange dot), Working (loader), Ended, or time since activity (now, 4m, 3h, 2d) — Sidebar.swift:455, Sidebar.swift:522
+- [x] Row name: medium weight while waiting, muted when ended or archived, tooltip "Renamed from …" — Sidebar.swift:394
+- [x] Row third line: the question while waiting, else the branch (middle-truncated), dev-server ports, agent mark — Sidebar.swift:406
+- [x] Row highlight: grey with hairline when selected, fainter on hover — Sidebar.swift:241
+- [x] Click opens the thread; ↑/↓ step through visible agents; ↑ from the first opens Agentman — Sidebar.swift:198
+- [x] Inline rename: Return saves, Esc or click-away cancels — Sidebar.swift:536
+- [x] Row context menu — Sidebar.swift:164
+  - [x] Rename… / Show Project (filters to the folder) / Use the agent's own name, "…" — Sidebar.swift:165
+  - [x] Pin / Unpin; Archive / Unarchive (kept across launches) — Sidebar.swift:173, AgentsStore.swift:229
+  - [x] Notify Me About This Agent toggle (only while Agentman is on) — Sidebar.swift:186
+  - [x] Mute / Unmute Notifications From This Folder — Sidebar.swift:658
+- [x] Branches read again every 10 s — Sidebar.swift:114
+- [ ] Empty state "No agents yet", shown once connected — Sidebar.swift:120
+- [x] Agentman card: summary (N cards waiting / N agents need you / N working / All quiet), unread badge (99+), selected and hover states — Sidebar.swift:277
+  - Note: the card counts and unread number are the Agentman area's (src/manager/summary.ts).
+- [x] Footer: connection dot and "Mac connected · am <ver>" / "Connecting to am serve…" / "<reason>. Run am serve."; tooltip shows the socket path — Sidebar.swift:477
+  - Differs: "Connected · am <ver>" off macOS; the tooltip is the daemon's address, as the app reaches it over a WebSocket.
+- [x] Footer appearance menu (Light / Dark / Match the Mac) — SettingsView.swift:1115
+- [x] Resize by dragging the edge (min 208, leaves 640 for the detail); double-click resets to 256; width and hidden state kept — Sidebar.swift:15, Sidebar.swift:672
+- [x] With the sidebar hidden, a show-sidebar button sits in the detail header and headers shift right — ContentView.swift:29
+
+## 3. Agent thread
+- [ ] Header title "folder / name"; click the name to rename in place (Return, Esc, blur); context menu Rename… and Use the agent's own name — AgentThreadView.swift:526
+- [ ] Servers menu (globe with ":port" or a count). Each server gets a section (title · :port, or :port · command) with Open in browser, Share a link… (copies the link), Copy share link, Stop sharing, Stop server… (asks first) — AgentThreadView.swift:636
+- [ ] Terminal button ⌃` (shows or hides the bottom/side terminal; starts a shell) — AgentThreadView.swift:165
+- [ ] Diff-and-files panel button ⇧⌘D — AgentThreadView.swift:180
+- [ ] Workspace card toggle ⇧⌘E — AgentThreadView.swift:184
+- [ ] More (…) menu: Open in Editor, Show the Agent's Own Terminal (tmux), New Worktree from <repo>…, Remove This Worktree…, End Session… — AgentThreadView.swift:186
+- [ ] End-session confirm — AgentThreadView.swift:117
+- [ ] Remove-worktree confirm (folder goes, branch stays), then "Remove it anyway?" when there is uncommitted work or an agent still working — AgentThreadView.swift:121, AgentThreadView.swift:399
+- [ ] Thread follows the session that replaced it after /clear or /resume — AgentsStore.swift:199
+- [ ] Review bar "<Agent> wants you to review a plan / N documents" → Plans — AgentThreadView.swift:221
+- [ ] "N files changed" bar while card and panel are hidden (read again after each turn) — AgentThreadView.swift:231, AgentThreadView.swift:381
+- [ ] Conversation column at most 740pt; text fades out under the title bar — AgentThreadView.swift:146, Theme.swift:160
+- [ ] User bubble: right-aligned, selectable, Copy in context menu; long text (>700 chars or >10 lines) clipped to 8 lines with Show more / Show less — AgentThreadView.swift:898, AgentThreadView.swift:937
+- [ ] User message parsing: leading image paths the daemon kept become thumbnails; leading @/absolute paths become file chips (click opens) — ImagePreview.swift:544, ImagePreview.swift:588
+- [ ] Sent-image thumbnails open the lightbox, have Copy Image, show "Image no longer kept" when gone — ImagePreview.swift:620
+- [ ] Compaction summary folded as "Summary of the earlier conversation" — AgentThreadView.swift:887
+- [ ] Agent reply: markdown, Copy button on hover (✓ for 1.5 s), Copy in context menu — AgentThreadView.swift:1655
+- [ ] Sidechain (subagent) messages and tool calls drawn at 60% opacity — AgentThreadView.swift:915, AgentThreadView.swift:1144
+- [ ] System messages as a faint centred caption — AgentThreadView.swift:918
+- [ ] Markdown — MarkdownView.swift:37
+  - [ ] Paragraphs, headings, fenced code (scrolls sideways; coloured only in documents), quotes, ordered and bullet lists, task boxes ☑︎/☐ — MarkdownView.swift:344
+  - [ ] GFM tables (scroll sideways, cells wrap), rules — MarkdownView.swift:549
+  - [ ] Bold, italic, strikethrough, inline code, links — MarkdownView.swift:276
+  - [ ] Image-only paragraphs: local paths, HTTPS in documents, linked badges — MarkdownView.swift:429
+  - [ ] HTML blocks (<img>, headings, centred <div>), <br> — MarkdownView.swift:175
+  - Differs: a code block followed by a quote is drawn whole here; the Mac app cuts the code off ("}…") and leaves a gap under the quote, a bug being fixed there (MarkdownView.swift:360-379).
+- [ ] Tool runs: consecutive tool calls fold into one line; a single call shows directly — AgentThreadView.swift:999, AgentThreadView.swift:1097
+  - [ ] Running: loader with "<title>…" or "<verb> <target>…" — AgentThreadView.swift:1168
+  - [ ] Finished: Agentman's one-line title (asked once, again after 60 s if it failed), else "Ran 3 commands, read 2 files and …" — AgentThreadView.swift:1146, AgentsStore.swift:381
+  - [ ] "· N failed" in red; chevron opens one row per call — AgentThreadView.swift:1115
+- [ ] Tool call row: icon by kind (loader while running, ✗ on error) and title; click shows the command and output (edits as a diff, output box up to 220pt, red on error) — AgentThreadView.swift:1197, AgentThreadView.swift:785
+- [ ] Older-daemon call row: verb and tidied target (home as ~, agent temp folders dropped), monospace, tooltip — AgentThreadView.swift:1247, AgentThreadView.swift:1357
+- [ ] Tool kinds, verbs and icons (command, read, edit, write, search, web, task, plan, mcp/other) — AgentThreadView.swift:1290
+- [ ] Images the agent read: 120pt thumbnail (tries 4 times), runs of them side by side, open the lightbox over all of the thread's pictures, Copy Image — AgentThreadView.swift:259, ImagePreview.swift:145
+- [ ] Question card inside the conversation — QuestionCard.swift:6
+  - [ ] Title with orange dot; detail in a code box (never cut short); prompt with inline markdown — QuestionCard.swift:13
+  - [ ] Numbered options with descriptions; Agentman's pick or the first yes/allow/approve option lightly filled; ⏎ glyph on hover — QuestionCard.swift:228, QuestionCard.swift:179
+  - [ ] Option that takes a note: "Tell the agent what to do instead" with Cancel / Send — QuestionCard.swift:160
+  - [ ] Multiple choice: checkboxes (some pre-ticked) and Submit — QuestionCard.swift:136
+  - [ ] Typed answer "Or type an answer" with Send — QuestionCard.swift:104
+  - [ ] Disabled while sending; the composer is disabled while a question is up — QuestionCard.swift:116, AgentThreadView.swift:343
+- [ ] Queued messages as dashed bubbles: "Waiting for the agent to read it" with Send now (Claude in tmux), or "Queued: it reaches the agent when its turn ends" — AgentThreadView.swift:269, AgentThreadView.swift:1368
+- [ ] Follows the end only while at the bottom; ↓ jump-to-latest when scrolled up; goes to the end on send, new message or new question — FollowsEnd.swift:14, AgentThreadView.swift:299
+- [ ] Loads older pages of 40 near the top and keeps the reader's place; spinner — FollowsEnd.swift:67, AgentsStore.swift:724
+- [ ] After a reconnect, catches up on at most 4 pages — AgentsStore.swift:960
+- [ ] Empty state "No messages yet" with agent mark (two wordings) — AgentThreadView.swift:824
+- [ ] Drop images or files anywhere on the thread (dashed drop target) — AgentThreadView.swift:388, ImagePreview.swift:522
+- [ ] Error banner on the composer (4 lines max, × to dismiss) — AgentThreadView.swift:1699
+- [ ] Ended session: "This session has ended" bar with Resume (spinner) for resumable kinds — AgentThreadView.swift:604, AgentThreadView.swift:432
+- [ ] Panel-command sheet (/usage, /status output) with Done ⏎ — SlashCommands.swift:237
+
+## 4. Composer
+- [ ] Message box: Return sends, ⇧/⌥Return adds a line, ⌘Return sends; grows from 1 to 10 lines, then scrolls; undo; safe with IME input — MessageField.swift:268, AgentThreadView.swift:1646
+- [ ] Placeholders: "Message <name>", a hook-agent variant (reads at turn end), "Answer the question above first", "Start this agent with am <kind>…" — AgentThreadView.swift:449
+- [ ] Draft per session kept across launches (written after a pause) — AgentsStore.swift:76, AgentThreadView.swift:360
+- [ ] Click anywhere on the card focuses the text, caret at the end — AgentThreadView.swift:1536, MessageField.swift:197
+- [ ] @ mentions: up to 8 files above the box. With nothing typed, "Suggested" (changed or open files); while typing, fuzzy "Files". ↑↓ to move, Return/Tab to pick, Esc to close, hover selects, click picks — FileMentions.swift:49, FileMentions.swift:164
+- [ ] File chips: @path drawn as icon + name, deleted as one character, copied as @path. Sent relative to the agent's folder (absolute paths for Agentman) — FileChip.swift:8, FileMentions.swift:149
+- [ ] / commands (Claude, Codex, Antigravity in tmux; also $ skills for Codex) — SlashCommands.swift:36, MessageField.swift:241
+  - [ ] Listed on first use and again after 60 s; ranked; 9 visible; argument hint and description shown — SlashCommands.swift:94
+  - [ ] ↑↓ to move, Tab/Return to complete, Esc to close; error "Update agentman on your Mac…" — MessageField.swift:241, SlashCommands.swift:52
+- [ ] A bare panel command opens its output in a sheet; a bare /model shows a hint — AgentThreadView.swift:464
+- [ ] Attachments come from the paperclip (any file), from paste (⌘V, Edit ▸ Paste, context menu) or by drag; 4 at most — AgentThreadView.swift:1469, MessageField.swift:282, Attachments.swift:21
+  - [ ] Images shrunk to 1568px, PNG if ≤700 KB else JPEG; all together kept ≤12 MB by shrinking further — Attachments.swift:32, Attachments.swift:115
+  - [ ] Other files ≤10 MB go as @path (a daemon-kept copy when the path has spaces) — Attachments.swift:64, AgentThreadView.swift:517
+- [ ] Attachment strip: 56pt thumbnails, icon + name for other files, × removes — ImagePreview.swift:462
+- [ ] Voice button — VoiceRecorder.swift:109, VoiceRecorder.swift:35
+  - [ ] States: mic, then recording (red capsule, m:ss, halo follows loudness), then a spinner while the words are written out — VoiceRecorder.swift:121
+  - [ ] Words added to the box and focused; Esc throws the recording away; 10 min max; message when the mic is denied — VoiceRecorder.swift:193
+- [ ] Mode menu: the agent's modes, checkmark on the current one, readable labels — AgentThreadView.swift:1480, SessionLabels.swift:7
+- [ ] Model menu, only when the agent reports a scope; "default" scope asks "Switch to X? … also becomes the default…" — AgentThreadView.swift:1486, AgentThreadView.swift:1520
+- [ ] Without models: agent mark and current model or agent name — AgentThreadView.swift:1503
+- [ ] Send button (blue when enabled); becomes Stop (red square) while the agent works and the box is empty — AgentThreadView.swift:1621
+- [ ] Disabled (60% opacity) when the agent can't receive, while sending, while reading a panel, while a question is up — AgentThreadView.swift:343
+- [ ] Failed switch shown as composer error "Couldn't switch the mode to …" — AgentsStore.swift:655
+
+## 5. Workspace card & git
+- [x] Card beside the thread, 220pt wide (540 with a list, diff or file open); hidden when the right panel leaves too little room — WorkspacePanel.swift:164, AgentThreadView.swift:70
+- [x] "This Mac" row with Show the folder in Finder — WorkspacePanel.swift:43
+  - Differs: off macOS the row says "This computer", and the folder opens in the file manager.
+- [x] Open in editor and Open terminal rows (when the folder exists) — WorkspacePanel.swift:54
+- [x] Branch row — WorkspacePanel.swift:64
+- [x] Git quick-action row — GitActions.swift:33, GitActions.swift:92
+  - [x] Shows Commit, Commit & push, Push or Create PR, whichever fits — GitActions.swift:37
+  - [x] Idle states (hint as tooltip): Diverged, Behind, Up to date, no remote, no branch, status unavailable — GitActions.swift:34
+- [x] Git ▾ menu: Commit…, Push, Create PR, each enabled only when it applies — GitActions.swift:101
+  - Differs: the system menu here shows the items without their symbols (menus.go takes words only), here and in the panel's + menu.
+- [x] Push / Create PR confirm alert: branch, upstream, commit count, warning when pushing to the default branch — GitActions.swift:161, GitActions.swift:181
+- [ ] Commit sheet — GitActions.swift:248
+  - [ ] Branch, with "Default branch" warning; file list with Edit/Done checkboxes to leave files out, "(n of m)" — GitActions.swift:275
+  - [ ] Note of secret files left out; +/− totals — GitActions.swift:310
+  - [ ] Optional message (blank: Agentman writes it); Cancel / Commit / Commit & push — GitActions.swift:326
+- [ ] Progress text (Writing the message… / Committing… / Pushing… / Opening the PR…) with spinner — GitActions.swift:209
+- [ ] Outcome line ("Committed abc, pushed to …") with View PR link and ×; hides after 10 s unless it failed — GitActions.swift:123
+- [x] History row opens the right panel's History — WorkspacePanel.swift:73
+- [x] Changes row with +added −removed opens the right panel's Diff — WorkspacePanel.swift:76
+- [x] Files row opens the right panel's Files — WorkspacePanel.swift:86
+- [ ] Plans row (when the agent has artifacts) opens the Plans list — WorkspacePanel.swift:87
+- [ ] Plans list: icon by kind, title, "Needs your review", summary, relative time; empty text — WorkspacePanel.swift:743
+- [ ] Plan view: markdown or image; review box with comment, Ask for changes, Approve, then "Approved" / "Sent your changes" — WorkspacePanel.swift:813
+- [ ] In-card Changes list: summary, M/A/D/R/U letters tinted, dimmed folder before the name, +/−, note of hidden secret files; opens the diff — WorkspacePanel.swift:290
+- [x] In-card Files browser: folders first, file sizes, drill down — WorkspacePanel.swift:479
+- [ ] In-card file viewer — WorkspacePanel.swift:594
+  - [x] Code: read-only, line numbers, syntax colours, ⌘F find; "Showing the start of a long file" — CodeTextView.swift:8
+    - Differs: ⌘F opens a find bar the page draws, not AppKit's; the Mac's ruler also draws its edge line up through the card's header (an AppKit glitch), not copied.
+  - [ ] Image: click opens the lightbox; Copy Image — WorkspacePanel.swift:601
+- [x] File/diff bar: folder, line count or +/−, Copy, Edit in the editor, Show in Finder — WorkspacePanel.swift:657
+- [x] Back chevron (⌘[) through what was opened; changing tab resets it — WorkspacePanel.swift:174
+- [ ] Each list loads with a spinner, or shows the error with Try again — WorkspacePanel.swift:238
+- [x] "In this project · N": other running agents in the same folder (mark, state dot); click opens — WorkspacePanel.swift:95
+- [x] Changes read again as the agent works (1 s after activity settles); git status when a turn starts or ends and after a git action — WorkspacePanel.swift:126
+- [ ] Worktrees live in ~/Agentman/Worktrees/<repo>/<name>, labelled "repo · name"; created, listed and removed through the daemon — Worktrees.swift:11, Worktrees.swift:50
+
+## 6. Right panel
+- [x] Opens at the window's right edge with Diff / Files / History / Terminal tabs. Open tabs kept across launches; + menu opens any; × on hover closes a tab; closing the last closes the panel — RightPanel.swift:20, RightPanel.swift:113
+- [x] Resize from the leading edge (min 360; thread keeps 380); double-click resets to 540. Fill the window / Restore; Close (⇧⌘D) — RightPanel.swift:105, AgentThreadView.swift:107, RightPanel.swift:138
+- [x] Diff toolbar: "Uncommitted" scope, +/− totals, Collapse/Expand all, Stacked/Split, Wrap, Hide whitespace, File tree toggle (each kept across launches) — RightPanel.swift:496
+- [x] Diff read again every 2.5 s while working; everything again when a turn changes — RightPanel.swift:484
+- [x] File headers stick while their diff scrolls — RightPanel.swift:893
+  - [x] Chevron, status icon, path, Copy path on hover, −/+; click folds the file — RightPanel.swift:904
+  - [x] Context menu: Copy Path, Open in Editor, Show in Finder — RightPanel.swift:947
+- [x] Diff lines: syntax colours, changed words marked, coloured edge bars, line numbers; split view puts old and new side by side — RightPanel.swift:735, RightPanel.swift:819
+- [ ] Unchanged lines folded as "N unmodified lines"; click shows them (read from the file, or the commit's file) — RightPanel.swift:863, DiffLayout.swift:16
+- [ ] Diff states: loading, error, "No uncommitted changes", secrets only, binary or mode-only, too large, nothing with whitespace hidden — RightPanel.swift:546, RightPanel.swift:614
+- [x] Changed-files tree (when ≥480pt wide): folders fold, picking a file scrolls to it, status letters, × hides it — RightPanel.swift:963
+- [ ] Commit diff (from History): back, short hash, subject, author and date, body with Show more — RightPanel.swift:466, RightPanel.swift:665
+- [ ] History tab — HistoryPanel.swift:122
+  - [x] Branch menu (browse any branch without checking it out); refresh — HistoryPanel.swift:125
+  - [x] Commit rows: subject, hash, author, relative time, +/− — HistoryPanel.swift:195
+  - [ ] Load older commits / Try again; new commits appear on top; back from a commit scrolls to it — HistoryPanel.swift:178
+- [x] Files tab: project tree with git marks (letter, tint, dot on changed folders), git-ignored dimmed, search across files, refresh, collapse all, files open in the editor; context Copy Path / Copy Relative Path / Show in Finder — RightPanel.swift:1116
+  - Differs: git-ignored files aren't dimmed and files holding secrets (.env) aren't listed: the tree comes from am serve's list_files, which leaves secrets out and says nothing of what git ignores. The search is am serve's find_files, best first, not the Mac's own scoring.
+- [x] Terminal tab: the folder's shells (see §7); "No terminal open in this folder." with New Terminal; note when the folder is gone — RightPanel.swift:1078
+  - Differs: off macOS the note says "this computer".
+- [ ] Lightbox — ImagePreview.swift:269
+  - [ ] Dark overlay; title, "n of m", spinner while the next loads; "This image can't be read." — ImagePreview.swift:358
+  - [ ] ← → keys and side arrows; close with ×, Esc, or a click beside the picture — ImagePreview.swift:316
+- [ ] Zoomable image — ZoomableImage.swift:8
+  - [ ] Pinch about the pointer, ⌘+ / ⌘= / ⌘−, ⌘0 fits, double-click toggles actual size — ZoomableImage.swift:41
+  - [ ] Scrolls when zoomed, never blown up past its size, right-click Copy Image — ZoomableImage.swift:92
+- [ ] Plans rendered as markdown — WorkspacePanel.swift:831
+
+## 7. Terminal
+- [x] Terminal under the conversation (drag the divider, ≥120pt, height kept) or moved into the side panel (where it lives is kept) — AgentThreadView.swift:88, RightPanel.swift:81
+- [x] Shown only while the folder has a shell; the last shell closing hides it — AgentThreadView.swift:58
+- [x] Bar: TERMINAL label, shell tabs (title set by the program, "ended" when done), Restart for an ended shell — TerminalPanel.swift:16
+- [x] Bar buttons: + new (⌃⇧`), Split/Unsplit, Clear, Stop & close, Move under/to side, Hide (⌃`) — TerminalPanel.swift:36
+- [ ] Split tab: two shells side by side; closing the tab closes both — TerminalPanel.swift:63, TerminalPanel.swift:140
+- [x] Shells belong to the folder, shared with its editor; they outlive the panel and window until quit — EditorStore.swift:156, TerminalPanel.swift:166
+- [x] Login shell from the user record ($SHELL fallback); TERM=xterm-256color, TERM_PROGRAM=Agentman; tmux and agentman variables removed — TerminalSession.swift:34
+- [ ] Agent's own terminal: tmux attach in a tab of its own, reused if still open; closing it leaves the agent running — EditorStore.swift:516, AgentThreadView.swift:416
+- [x] ⌘K clears screen and scrollback; Option types characters (not Meta) — TerminalSession.swift:131, TerminalSession.swift:112
+- [ ] Wheel/trackpad: programs that take the mouse (tmux) get wheel events, full-screen programs get arrow keys, else scrollback; small trackpad movements add up — TerminalSession.swift:151
+- [x] Exit message "[The shell ended (with code N). Restart it from the panel.]" — TerminalSession.swift:99
+- [x] Light/dark theme with custom 16 ANSI colours; Google Sans Code 12.5 — TerminalSession.swift:214
+- [x] Keyboard goes to the shell when it is shown — TerminalPanel.swift:185
+
+## 8. Agentman (ManagerChatView, ManagerStore)
+- [ ] Header: "Agentman", "N scheduled" popover, New chat (asks first; open cards carry over) — ManagerChatView.swift:39
+- [x] Entry page while there is no conversation: large icon, wordmark, large box, centred — ManagerChatView.swift:219
+- [x] Box states — ManagerChatView.swift:249
+  - [x] "Waiting for am serve…" — ManagerChatView.swift:263
+  - [x] API key box (Anthropic or Gemini, by provider), secure field, "Get a key" link — ManagerChatView.swift:281
+    - Differs: on Linux the note says the key is "kept in a file only you can read", where am serve keeps it there (internal/secrets).
+  - [x] Composer; notes under it ("am serve isn't running…", "Connecting…") — ManagerChatView.swift:276
+- [ ] Onboarding key saved to the Keychain through the daemon; errors shown — ManagerChatView.swift:790, ManagerStore.swift:189
+- [ ] Composer pill: + to attach images, @ mentions (in the editor panel), voice, Send ↔ Stop while thinking; large variant focuses itself — ManagerChatView.swift:672
+- [ ] Replies stream in; thinking dots row — ManagerStore.swift:358, ManagerChatView.swift:639
+- [x] User entries with sent images (lightbox, Copy Image) — ManagerChatView.swift:353, ImagePreview.swift:407
+  - The lightbox they open is §6's (LightboxView.tsx).
+- [ ] Assistant replies: badge and markdown — ManagerChatView.swift:416
+- [x] Activity runs folded ("… and N more", icon per tool) — ManagerChatView.swift:436
+- [ ] Image activity thumbnails — ManagerChatView.swift:521
+- [x] Brief and agent-says cards: mark, name, text, "needs you" line, Open agent, × close, two-finger swipe to dismiss — ManagerChatView.swift:533, SwipeToDismiss.swift:9
+  - Differs: a page sees a trackpad swipe as wheel events without their phases, so a swipe ends when they stop for 140 ms (manager/swipe.ts).
+- [x] Open cards (question / needs_you / key) as CompactCard — CompactCard.swift:6
+  - [x] Header: agent, "needs you", Open (↗), Put away (×) — CompactCard.swift:21
+  - [x] Title, one-line detail (left out when the title already says it) — CompactCard.swift:39
+  - [x] Compact choices with Agentman's pick ✦, or a "Reply to Agentman about X" field; swipe to dismiss — CompactCard.swift:57, ManagerChatView.swift:387
+- [x] Card receipts "✓ name · outcome" with Open; note receipts; × appears on hover — ManagerChatView.swift:617, NoteSuggestion.swift:187, ManagerChatView.swift:597
+- [x] Note suggestion card inside the chat — ManagerChatView.swift:380
+- [x] Scheduled lines (bell or eye, time), error lines, compaction divider — ManagerChatView.swift:845, ManagerChatView.swift:397, ManagerChatView.swift:973
+  - Times follow the system's region and 24-hour choice, which the shell reads (locale.go): a web view's own would say 3:32 PM where the Mac says 15:32.
+- [x] Settled or dismissed cards and closed entries hidden — ManagerChatView.swift:327
+- [ ] Schedules popover: reminders and watches, repeats, "When X needs you…", "Gives up at", cancel ⓧ — ManagerChatView.swift:888
+- [ ] Loads older (80) at the top; follows the end with jump-to-latest; drop images on the chat — ManagerStore.swift:155, ManagerChatView.swift:112, ManagerChatView.swift:170
+- [x] Unread tracking: last-read time kept across launches; a first launch starts with nothing unread — ManagerStore.swift:44, ManagerStore.swift:55
+- [x] Toasts in the bottom-right, 3 at most, above the composer — AgentmanToasts.swift:8
+  - Compared with a Debug-only hook in the Mac app (AGENTMAN_TOASTS=<ids>; here toasts=<ids>), as a test run is never in front and shows none of its own.
+  - [x] News fades after 8 s unless hovered; click opens it — AgentmanToasts.swift:54
+  - [x] Cards stay until answered or hidden — AgentmanToasts.swift:61
+- [x] Note suggestion popup at top-right (not on the Agentman page), "1 of N" — NoteSuggestion.swift:208
+- [x] Note suggestion card — NoteSuggestion.swift:5
+  - Differs: macOS 26's controls (push buttons, the rounded field, the segmented control, the checkbox) are drawn by the page to look like the Mac's, the default button blue only while the window is in front.
+  - [x] Title, body, why, who reads it — NoteSuggestion.swift:92
+  - [x] Dismiss / Edit / Save note; editing: title, body, Shared or Only Agentman, "in every project's instructions" — NoteSuggestion.swift:61
+- [ ] Problem banner on the composer — ManagerChatView.swift:156
+
+## 9. Settings window
+- [ ] Sidebar pages with icons: General, Notifications, Permissions, Personality, Knowledge, Keys, Languages; last page kept — SettingsView.swift:99
+- [ ] Unsaved-changes bar on General, Permissions, Personality: Revert, Save ⌘S, error text — SettingsView.swift:749
+- [ ] General ▸ Anthropic and Gemini API key sections: saved or not set, Remove, secure field and Save, "Key saved." / "Key removed." — SettingsView.swift:301
+- [ ] General ▸ Appearance segmented control (Match the Mac / Light / Dark) — SettingsView.swift:782
+- [ ] General ▸ Editor ▸ Vim mode — SettingsView.swift:914
+- [ ] General ▸ Models: Conversation and Briefs pickers (Claude / Gemini sections), Effort (Low…Max); footer when a needed key is missing — SettingsView.swift:244
+- [ ] General ▸ "Brief me on each agent" toggle — SettingsView.swift:259
+- [ ] General ▸ About: app version (build), am serve version, update note, Copy upgrade command — SettingsView.swift:929
+- [ ] Notifications ▸ Agentman's messages; Note suggestions — SettingsView.swift:986
+- [ ] Notifications ▸ An agent finishes; An agent needs you; Every agent, while Agentman is on — SettingsView.swift:990
+- [ ] Notifications ▸ Use quiet hours, From/To time pickers, "Still tell me when an agent needs me" — SettingsView.swift:995
+- [ ] Notifications ▸ Muted folders list with Unmute; Mute a Folder… (recent folders, or Choose…) — SettingsView.swift:1010
+- [ ] Notifications ▸ "Show a summary when I'm back", after 10/15/30/60/120 min — SettingsView.swift:1066
+- [ ] Notifications ▸ Play a sound — SettingsView.swift:1082
+- [ ] Permissions ▸ "Approve low-risk requests for me"; per-kind switches (reads, edits, commands, "Continue?"), disabled while off — SettingsView.swift:353
+- [ ] Permissions ▸ Your rules — SettingsView.swift:370
+  - [ ] Rule rows: Allow / Always ask badge, kind icon, pattern, where; × on hover — SettingsView.swift:444
+  - [ ] Add Rule… sheet: action, kind, pattern (hints; refuses allow-everything), a folder or everywhere — SettingsView.swift:527
+- [ ] Permissions ▸ Try it: kind, target, folder menu, Check, then the verdict — SettingsView.swift:631
+- [ ] Permissions ▸ "Always waits for you" list — SettingsView.swift:410
+- [ ] Personality ▸ How Agentman talks (with "Use the default style"); Anything else Agentman should know — SettingsView.swift:719
+- [ ] Knowledge — KnowledgeSettings.swift:6
+  - [ ] Notes list (title, Shared/Private, "In instructions"), empty state, New note — KnowledgeSettings.swift:28
+  - [ ] Editor: title, Shared/Private menu, "In project instructions", body with placeholder — KnowledgeSettings.swift:94
+  - [ ] Delete; Add note / Save (⌘S) — KnowledgeSettings.swift:162
+- [ ] Keys: intro text, Add key, key list (rule text, "No value", Edit) — KeysSettings.swift:7
+- [ ] Keys ▸ Voice prompts (Celery sign-in): email, then the emailed code, then "Signed in as … · plan" with Sign Out; Back — SettingsView.swift:815, KeysSettings.swift:36
+- [ ] Key editor sheet — KeysSettings.swift:109
+  - [ ] Name (locked when editing); Value ("Leave empty to keep the current one"); What it's for — KeysSettings.swift:118
+  - [ ] Give it: any agent / only agents in these folders / ask me every time; add/remove folders — KeysSettings.swift:131
+  - [ ] Delete, Cancel, Save — KeysSettings.swift:159
+- [ ] Languages: "Download servers when needed" toggle; servers with source and "running for…" — LanguagesSettings.swift:27
+- [ ] Languages ▸ Remove (downloaded ones); … menu: Use My Own Program…, Use the Usual One, Turn On/Off — LanguagesSettings.swift:71
+- [ ] Languages ▸ Node.js remove; message for an am serve too old — LanguagesSettings.swift:45, LanguagesSettings.swift:147
+
+## 10. New agent / command palette / worktree flows
+- [x] New Agent page: "What should we work on?", task box (may be empty), Return starts — NewAgentView.swift:34
+- [x] Agent menu: Claude Code, Codex, Cursor CLI, OpenCode, Kiro, Antigravity (choice kept) — NewAgentView.swift:157
+- [x] Where menu: 10 recent folders, "Worktrees of <repo>" ("(the repository)" on the main one), New Worktree…, Choose a folder… — NewAgentView.swift:185
+- [x] Worktree namer popover: name suggested from the task's first 4 words, cleaned into a branch name; Cancel / Use — NewAgentView.swift:319, NewAgentView.swift:132
+  - Differs: drawn by the page as a card with an arrow, not an NSPopover.
+- [x] Line under the box: "Starts in …" / "Starting X …" / the error; the folder must be inside home — NewAgentView.swift:83, AgentsStore.swift:467
+- [x] Start: makes the worktree first, then starts the agent, opens it once listed, clears filters — NewAgentView.swift:262, AgentsStore.swift:490
+- [x] "New Worktree from…" in a thread opens this page with the namer up — NewAgentView.swift:138
+  - Note: the thread calls newWorktreeFrom(folder) from src/NewAgentView.tsx.
+- [x] Command palette ⌘K: fuzzy search, ↑↓, Return, Esc or click outside closes, "Nothing matches" — CommandPalette.swift:7, PaletteView.swift:22
+  - [x] Ask Agentman: "…" (first for a question, 4+ words or no match; needs a key) — CommandPalette.swift:51
+  - [x] For the agent open now: Open its folder in the Editor, Open a Terminal, Rename… — CommandPalette.swift:77
+    - Note: Open a Terminal sends the window an "agentman:show-terminal" event ({ folder }) for the right panel and terminal to show it, as RightPanel.showTerminal does.
+  - [x] Every agent (needs-you first, folder and state as detail) — CommandPalette.swift:92
+  - [x] New Agent ⌘N, Agentman, What Happened While I Was Away, Show agents that need you / working / idle / all — CommandPalette.swift:107
+  - [x] Open a Folder in the Editor… ⌘O; for 8 recent folders, Open in the Editor and Open a Terminal — CommandPalette.swift:129
+  - [x] Settings ⌘, and each Settings page; Light / Dark / Match the Mac — CommandPalette.swift:147
+    - Differs: shortcuts read "Ctrl+N" off macOS.
+
+## 11. Notifications
+- [x] Kinds: agent finished, agent needs you, Agentman (replies, briefs, what agents tell it), note suggestions — NotificationPolicy.swift:6
+  - Note: src/notify/policy.ts shouldNotify(kind, folder) answers for every kind; the Agentman area posts its own.
+- [x] Policy: switch per kind (on by default), muted folders and their subfolders, quiet hours that can cross midnight (needs-you may still come through) — NotificationPolicy.swift:39
+- [x] While Agentman is on, an agent notifies for itself only when flagged per agent or "every agent" is on — NotificationPolicy.swift:60
+- [x] Never for the thread in view (main window or editor panel, app in front) — AgentsStore.swift:1037
+  - Note: an editor's agent panel says what it shows with showInPanel() from src/notify/onScreen.ts.
+- [x] "<name> finished" with its last words; "<name> needs you" with the question — AgentsStore.swift:773, AgentsStore.swift:789
+- [ ] Agentman notifications — Notifier.swift:21
+  - [ ] "Agentman suggests a note" (silent) — Notifier.swift:29
+  - [ ] "<agent> needs you", subtitle "Agentman marked its pick for you to confirm" — Notifier.swift:34
+  - [ ] Briefs as "Agentman", agent messages as "<agent> says" (link to the agent); replies as "Agentman" — Notifier.swift:41
+  - [ ] Markdown flattened to plain text, body ≤400 chars — Notifier.swift:52, Notifier.swift:110
+- [ ] Routing: viewing Agentman marks it read; app in front shows a toast; otherwise a notification — AgentsStore.swift:842
+- [x] Grouped by thread (agentman / agent-<id>); sound per setting; shown even with the app in front — Notifier.swift:25, Notifier.swift:127
+  - Differs: not grouped by thread, which Wails' notifications can't set; the sound and the banner in front as the Mac's.
+- [x] Click activates the app and opens agentman://agent/<id> or agentman://home/conversation — Notifier.swift:135
+- [ ] A card answered anywhere takes back its notification; opening Agentman clears all delivered — Notifier.swift:79, AgentsStore.swift:897
+- [x] Permission asked the first time there is something to say, not at launch — Notifier.swift:96
+- [x] Tells the daemon what is on screen (again every minute) so agents in view get no card or push — AgentsStore.swift:1061
+
+## 12. Editor window
+- [ ] Header: app badge, folder / branch, Go to file, Toggle terminal, Show in Finder, Toggle agent panel — EditorWindow.swift:203
+- [ ] File tree rows — EditorWindow.swift:299, EditorWindow.swift:439
+  - [ ] Folder-name heading, New file / New folder buttons, folders expand — EditorWindow.swift:336
+  - [ ] Git letters and tint, deleted struck through, dot on changed folders — EditorWindow.swift:472
+  - [ ] Dotfiles and heavy folders dimmed, unsaved dot, ✓ on marked rows, cut rows faded — EditorWindow.swift:445
+- [ ] Selecting a file opens it; primary action on a folder toggles it — EditorWindow.swift:369
+- [ ] Tree context menu: New File…, New Folder…, Rename…, Show in Finder, Copy Path, Copy Relative Path, Move to Trash… — EditorWindow.swift:394
+- [ ] Name alert (New File / New Folder / Rename) and error alert — EditorWindow.swift:190
+- [ ] ⌘Z / ⇧⌘Z in the tree undo and redo file changes (100 deep), with a notice in the status bar — EditorWindow.swift:236, TreeVim.swift:440
+- [ ] Tree Vim keys (Vim on, tree focused) — TreeVim.swift:70
+  - [ ] Move: j k, gg G, l o, ⏎, h, / — TreeVim.swift:122
+  - [ ] Files: a, r, d (y or ⏎ confirms, n or Esc cancels), y c, x, p (copies become "name copy N"), Y gy — TreeVim.swift:129
+  - [ ] Space or v marks; u and ⌃R undo/redo; ? shows keys; Esc clears; ⌃B or ⌃W l back to the editor — TreeVim.swift:87
+- [ ] Filter bar (/): fuzzy matches; Return or ↓ goes into them; Esc or × clears — TreeVim.swift:528
+- [ ] Create bar (a): "name.ts, or folder/", nested paths; Return makes, Esc cancels — TreeVim.swift:576
+- [ ] Trash bar: "Move X to the Trash?" with the list; y Move to Trash / n Cancel — TreeVim.swift:621
+- [ ] Inline rename (r), name without extension selected — TreeVim.swift:680
+- [ ] Tree keys sheet (?) — TreeVim.swift:722
+- [ ] Tabs: icon, name (with its folder when two share a name), unsaved dot ↔ × on hover, struck through when deleted on disk; click activates — EditorWindow.swift:574
+- [ ] Tab context menu: Close, Close Others, Close Saved, Close All, Open to the Side, Show in Finder, Copy Path, Copy Relative Path. Empty strip: Close All / Saved / Others — EditorWindow.swift:627, EditorWindow.swift:564
+- [ ] Closing an unsaved tab asks: "Save the changes to X?" Save / Don't Save / Cancel; ⌘W closes the tab — EditorWindow.swift:175, EditorWindow.swift:231
+- [ ] Close All asks for each unsaved file; Close Others and Close Saved leave unsaved files — EditorStore.swift:333
+- [ ] Path bar: breadcrumbs; Preview/Edit (markdown); "Read only" (outside the folder); Revert and Save; save-error alert — EditorWindow.swift:644
+- [ ] Disk banner: changed on disk (Keep Mine / Use the Disk Version) or deleted (Close; Save puts it back) — EditorWindow.swift:711
+- [ ] Every 2 s: tree, git marks and open files follow the disk; window shows the edited dot — EditorWindow.swift:149, EditorStore.swift:643
+- [ ] Splits: ⌘\ split right (4 max), Close Split, click a split to focus it, close one from the page — EditorStore.swift:313, MonacoView.swift:407
+- [ ] Monaco: a model per tab, font size, Vim, theme from the palette; tab size and spaces from the file's own indent — MonacoView.swift:249, EditorDocument.swift:261
+- [ ] Gutter bars for lines added, changed or deleted since git's index — EditorStore.swift:682, MonacoView.swift:704
+- [ ] Right-click menu, built from what the page offers (cut, copy, paste, actions) — MonacoView.swift:529
+- [ ] Search in Folder ⇧⌘F — EditorSearch.swift:235
+  - [ ] Searches 1 s after typing stops, or at once on Return; Aa / ab / .* toggles; query kept between openings — EditorSearch.swift:249, EditorSearch.swift:294
+  - [ ] A row per matching line with matches marked; "N results in M files"; stops at 2000; unsaved edits searched — EditorSearch.swift:272, EditorSearch.swift:284, EditorSearch.swift:200
+  - [ ] Choosing a result opens the file at the match — EditorSearch.swift:220
+- [ ] Go to File ⌘P: open files then changed files when empty, fuzzy match otherwise, file icons — EditorWindow.swift:1084
+- [ ] Markdown preview (⇧⌘V): relative images, coloured code; links to folder files open or reveal them, web links open outside — EditorWindow.swift:801, EditorStore.swift:431
+- [ ] Image viewer (zooms) and non-text states (binary, over 8 MB, missing) with "Open with Its App" — EditorWindow.swift:824
+- [ ] Empty editor: folder name and path, shortcuts, recently changed files — EditorWindow.swift:863
+- [ ] Status bar — EditorWindow.swift:934
+  - [ ] Vim mode label and pending keys, notices, branch, "N changed" — EditorWindow.swift:939
+  - [ ] Problems (click goes to the next), Ln/Col, Tabs/Spaces N, UTF-8, LF/CRLF — EditorWindow.swift:956
+  - [ ] Language with LSP state: spinner while starting, failed (click to retry), green dot when ready — EditorWindow.swift:1042
+- [ ] LSP — MonacoView.swift:163
+  - [ ] Endpoint from the daemon, retried every 10 s; reconnects after am serve restarts — MonacoView.swift:163, MonacoView.swift:458
+  - [ ] Go to Definition into other files (outside the folder: read-only) — EditorStore.swift:241
+  - [ ] Rename edits to unopened files open them unsaved — MonacoView.swift:501
+  - [ ] File changes from the folder watcher passed to the servers — MonacoView.swift:180
+- [ ] Vim ex commands :w :q :wq :q! :wa :qa :e path :Ex and splits; yanks reach the system clipboard — EditorStore.swift:371, MonacoView.swift:451
+- [ ] Agent panel ⌘L — AgentPanel.swift:16
+  - [ ] Open state kept; width dragged, 300 min — EditorStore.swift:108, AgentPanel.swift:366
+  - [ ] Opens on the folder's agent: needs-you, then working, then idle; this folder before nested ones — AgentPanel.swift:66
+  - [ ] List: Agentman row (summary, unread), "This folder", "Elsewhere", empty text — AgentPanel.swift:207
+  - [ ] Agentman chat or a narrow agent thread; follows a replacing session; ended agent offers All Agents — AgentPanel.swift:28, AgentPanel.swift:351
+  - [ ] Header: back, title with state, New chat, Open in Agentman's window, close — AgentPanel.swift:92
+  - [ ] @ mentions use the editor's files; lightbox opens over the editor — AgentPanel.swift:49
+- [ ] Save ⌘S, Save All ⌥⌘S, Revert to Saved; saving keeps permissions and writes through symlinks — EditorWindow.swift:1195, EditorDocument.swift:124
+- [ ] File menu: Open Folder in Editor… ⌘O, Go to File… ⌘P, Search in Folder… ⇧⌘F, Toggle Agent Panel ⌘L; Print removed — EditorWindow.swift:1205
+- [ ] Terminal menu: Toggle Terminal ⌃`, New Terminal ⌃⇧`, Clear Terminal, Stop and Close Terminal — EditorWindow.swift:1226
+- [ ] Editor menu — EditorWindow.swift:1246
+  - [ ] Toggle Markdown Preview ⇧⌘V; Split Editor Right ⌘\; Close Split — EditorWindow.swift:1247
+  - [ ] Go to Definition F12, Find References ⇧F12, Rename Symbol F2, Format Document ⌥⇧F, Go to Symbol ⇧⌘O, Next Problem F8 — EditorWindow.swift:1259
+  - [ ] Comment Lines, Indent Lines, Outdent Lines — EditorWindow.swift:1278
+  - [ ] Vim Mode toggle — EditorWindow.swift:1285
+  - [ ] Bigger Text ⌘+, Smaller Text ⌘−, Actual Size ⌘0 (9–28pt, default 14) — EditorWindow.swift:1287
+- [ ] Monaco page kept 10 min after its window closes; reloaded if the web view's process dies — MonacoView.swift:121, MonacoView.swift:594
+- [ ] Each folder's editor (tabs, unsaved edits) outlives its window — EditorStore.swift:38
+- Differs: the legacy NSTextView editor (`-legacyEditor YES`, CodeTextView.swift) is not carried over; Monaco is the only editor.
+
+## 13. Anything else
+- [x] Away detection: app in the background, screen locked, computer asleep. Summary on return when away long enough and something happened — AgentsStore.swift:1019, AwayLog.swift:44
+- [x] Away summary sheet — AwaySummary.swift:6
+  - [x] "While you were away" and "<time> away · N agents worked · Agentman approved N · N need you" — AwaySummary.swift:84
+  - [x] Rows: mark, name, folder, Needs you badge, what it waits on, brief or last words, turns finished / approvals; click opens the agent — AwaySummary.swift:110
+  - [x] Ask Agentman for more (needs a key); Done ⏎, Esc, click outside — AwaySummary.swift:56
+- [x] Away log keeps at most a day, 3000 events — AwayLog.swift:23
+- [ ] File icon theme: exact name, then longest extension, then default; open/closed folder icons — WorkspacePanel.swift:529
+- [ ] Agent marks per kind (one-colour marks take the text colour; terminal symbol fallback); product names — Theme.swift:132, SessionLabels.swift:43
+- [ ] Readable mode and model labels (e.g. "Opus 5.5", "Accept edits", "GPT-…") — SessionLabels.swift:6
+- [ ] Fonts: system sans for the interface; bundled Google Sans Code for code, terminal and editor; type scale — Theme.swift:95, Theme.swift:116
+  - Differs: off macOS the interface font is Inter, as SF Pro may not be used there.
+- [ ] Light/dark palette: paper/surface/fill, working blue, needs-you orange, ok, error, code and diff colours — Theme.swift:28
+- [ ] SF Symbols for icons — everywhere
+  - Differs: off macOS, Lucide icons stand in, as SF Symbols may not be used there.
+- [x] Loader ring animation; stops with Reduce Motion — Loader.swift:8
+- [ ] Two-finger swipe to dismiss cards — SwipeToDismiss.swift:9
+- [x] Fuzzy matcher (name before path, word starts, letters together) for palettes, @ and the tree filter — EditorStore.swift:865
+  - Note: src/palette/fuzzy.ts, for the editor's palettes, @ and the tree filter too.
+- [ ] On reconnect: reload sessions and Agentman, follow open threads again — AgentsStore.swift:740
+- [ ] Settings kept across launches (here: `src/prefs.ts`, same key names): drafts, sidebarChoices, sidebarWidth/Hidden/WorkingOpen/ArchivedOpen, appearance, settingsTab, rightPanelOpen/Tab/Tabs/Width, terminalDock, bottomTerminalOpen/Height, diffSplit/Wrap/IgnoreWhitespace/FileTree, newAgentKind/Folder, editorVim, editorFontSize, terminalHeight, agentPanelOpen/Width, managerLastRead, notify*, mutedFolders, quiet*, awaySummary, awayMinutes — AgentsStore.swift:73, RightPanel.swift:21, NotificationPolicy.swift:17
