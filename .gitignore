@@ -2,6 +2,8 @@
 # also matches the cmd/am/ directory and would silently exclude the CLI source.
 /bin/
 /dist/
+# The web app's screens packed for a release (.github/workflows/release.yml).
+/dist-web/
 /am
 /relay
 *.exe

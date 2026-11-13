@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -25,6 +26,8 @@ import (
 // The web app: am serve serves it on its loopback listener, and `am web`
 // opens it in the browser, signed in (internal/daemon's websession.go).
 //
+//   GET /app/web-ready?token=<app token>    the web app's files, fetched the
+//                                           first time (internal/webapp), for am web
 //   GET /app/login-code?token=<app token>   a one-time code, for am web
 //   GET /login?code=<code>                  the code for a session cookie
 //   GET /…                                  the app, to a signed-in browser
@@ -46,6 +49,30 @@ func (g *appGateway) loginCode(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"code": code})
+}
+
+// webReady answers am web once the web app's files are here: at once if
+// they are, or after fetching this version's (internal/webapp/fetch.go),
+// about 9 MB, the first time. Only the app token proves the caller.
+func (g *appGateway) webReady(w http.ResponseWriter, r *http.Request) {
+	if g.gate.Allow(r) != nil || r.Header.Get("Origin") != "" {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if webapp.Ready(g.webStore) {
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ready": true})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+	_, fetched, err := g.webStore.Ensure(ctx)
+	if err != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ready": true, "fetched": fetched})
 }
 
 // login swaps the code for a session and goes to the app.
@@ -79,7 +106,7 @@ func (g *appGateway) page(w http.ResponseWriter, r *http.Request) {
 			"Run <code>am web</code> in a terminal: it opens Agentman here, signed in.")
 		return
 	}
-	webapp.Handler().ServeHTTP(w, r)
+	webapp.Handler(g.webStore).ServeHTTP(w, r)
 }
 
 // hostMethods are the calls /app/host/ answers.
@@ -233,6 +260,9 @@ func runWeb(args []string) error {
 	}
 	base := strings.TrimSuffix(strings.Replace(endpoint.URL, "ws://", "http://", 1), "/app")
 
+	if err := webReady(base, endpoint.Token); err != nil {
+		return err
+	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(base + "/app/login-code?token=" + endpoint.Token)
 	if err != nil {
@@ -258,6 +288,43 @@ func runWeb(args []string) error {
 		return nil
 	}
 	fmt.Println(dim("Agentman is open in your browser at " + base))
+	return nil
+}
+
+// webReady asks am serve to have the web app's files, which it fetches the
+// first time for each version, and says so while it does. An am serve from
+// before 0.47.0 doesn't know the question (404): it serves what it carries,
+// as it did.
+func webReady(base, token string) error {
+	client := &http.Client{Timeout: 6 * time.Minute}
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-done:
+		case <-time.After(700 * time.Millisecond):
+			// On stderr: `am web -print` prints only the link, for a script.
+			fmt.Fprintln(os.Stderr, dim("Getting Agentman's web app, once for this version (about 9 MB)…"))
+		}
+	}()
+	resp, err := client.Get(base + "/app/web-ready?token=" + token)
+	close(done)
+	if err != nil {
+		return fmt.Errorf("am serve isn't answering at %s: %w", base, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	var answer struct {
+		Error string `json:"error"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&answer)
+	if resp.StatusCode != http.StatusOK {
+		if answer.Error == "" {
+			answer.Error = "am serve couldn't get the web app (" + resp.Status + ")"
+		}
+		return errors.New(answer.Error)
+	}
 	return nil
 }
 

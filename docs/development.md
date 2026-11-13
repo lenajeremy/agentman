@@ -111,6 +111,15 @@ GitHub release archives, and updates the Homebrew tap's `agentman-cli` cask. It
 requires a `HOMEBREW_TAP_TOKEN` repository secret with write access to the tap
 repository.
 
+It also builds the web app (`web/`) and attaches it to the release as
+`agentman-web_v<version>.tar.gz`, about 9 MB, and stamps that file's SHA-256
+into every `am`. The screens aren't inside `am`: `am serve` fetches its own
+version's file the first time `am web` runs, keeps it in
+`~/.agentman/web/<version>/`, and uses it only if it matches
+(`internal/webapp/fetch.go`). A development build has no SHA-256 and fetches
+nothing; it serves `AGENTMAN_WEB_DIR=internal/webapp/dist` (after
+`cd web && npm ci && npm run build`) or what `-tags webapp` built in.
+
 ### Agentman for Mac
 
 The Mac app ships as a notarized DMG attached to the same GitHub release, and
@@ -120,7 +129,10 @@ https://agentman-nu.vercel.app/appcast.xml (`site/appcast.xml`).
 1. Bump `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in
    `desktop/project.yml` and commit. Sparkle compares the build number, so it
    must go up every release.
-2. Push the CLI's tag first, so the release the DMG goes on exists.
+2. Push the CLI's tag first, and wait for its release workflow: the DMG goes
+   on that release, and the `am` inside the app checks the web app's file the
+   workflow attaches, whose SHA-256 the script reads from the release.
+   (`WITHOUT_WEB=1` builds a test copy before then; `--publish` refuses it.)
 3. Run the release script from a clean checkout, off any VPN:
 
    ```bash

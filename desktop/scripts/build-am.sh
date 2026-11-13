@@ -37,13 +37,17 @@ if [ -z "$go" ] || [ ! -x "$go" ]; then
   exit 1
 fi
 
+# The web app's file on the release (internal/webapp/fetch.go), which this
+# am fetches and checks against: scripts/release-mac.sh passes its SHA-256.
+# Without it, as in a build from Xcode, the am fetches nothing.
 version="$MARKETING_VERSION"
 [ "$CONFIGURATION" = Release ] || version="$version-dev"
 
 mkdir -p "$work" "$helpers"
 for arch in arm64 amd64; do
   CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" "$go" build -C "$root" -trimpath \
-    -ldflags "-s -w -X main.version=$version" -o "$work/am-$arch" ./cmd/am
+    -ldflags "-s -w -X main.version=$version -X github.com/lenajeremy/agentman/internal/webapp.bundleSHA256=${AGENTMAN_WEB_SHA256:-}" \
+    -o "$work/am-$arch" ./cmd/am
 done
 lipo -create -output "$work/am" "$work/am-arm64" "$work/am-amd64"
 

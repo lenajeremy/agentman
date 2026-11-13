@@ -290,6 +290,9 @@ am watch [session-id]       Follow all sessions or one session
 am history <session-id>     Print recent messages
 am send <session-id> <text> Send a message
 am serve                    Run the daemon and relay client
+am web                      Open Agentman in your browser, signed in (fetches the
+                            web app once per version, about 9 MB)
+am open [folder] / am .     Open a folder in Agentman for Mac's editor
 am pair                     Create a mobile pairing code
 am expose <port>            Share a local port as a public preview link
 am servers                  List the web servers your agents have started

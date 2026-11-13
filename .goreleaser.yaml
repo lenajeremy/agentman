@@ -35,6 +35,10 @@ builds:
       # Without this the binary cannot report its own version, which matters
       # most for `brew install` where the user did not build it themselves.
       - -s -w -X main.version={{ .Version }}
+      # The web app's file on this release (release.yml), which am serve
+      # fetches and checks against this (internal/webapp/fetch.go). Empty in
+      # a build without it, which then fetches nothing.
+      - -X github.com/lenajeremy/agentman/internal/webapp.bundleSHA256={{ envOrDefault "WEB_SHA256" "" }}
     # Reproducible: strip local paths and pin the timestamp to the commit.
     flags: [-trimpath]
     mod_timestamp: "{{ .CommitTimestamp }}"
@@ -69,6 +73,8 @@ archives:
 
 checksum:
   name_template: checksums.txt
+  extra_files:
+    - glob: ./dist-web/agentman-web_*.tar.gz
 
 changelog:
   use: github
@@ -149,6 +155,9 @@ release:
   # attempt uploaded. Without this, fixing the tap token and retrying fails at
   # asset upload instead, because the release already holds those files.
   mode: replace
+  # The web app's screens, fetched by am serve (release.yml builds them).
+  extra_files:
+    - glob: ./dist-web/agentman-web_*.tar.gz
   footer: |
     ## Install
 

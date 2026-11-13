@@ -38,6 +38,7 @@ import (
 	"github.com/lenajeremy/agentman/internal/source"
 	"github.com/lenajeremy/agentman/internal/tmux"
 	"github.com/lenajeremy/agentman/internal/update"
+	"github.com/lenajeremy/agentman/internal/webapp"
 )
 
 // relayEnv overrides the built-in relay without passing a flag every time.
@@ -275,11 +276,13 @@ func runServe(ctx context.Context, args []string) error {
 	apps := newAppGateway(appToken)
 	if dir, dirErr := hook.ConfigDir(*configHome); dirErr == nil {
 		apps.web.KeepIn(filepath.Join(dir, daemon.WebSessionsFile))
+		apps.webStore = webapp.ForThisBuild(dir, version)
 	}
 	hookServer.Mount("/app", http.HandlerFunc(apps.protocol))
 	hookServer.Mount("/app/terminal", http.HandlerFunc(apps.terminal))
 	// The web app, for `am web`: the browser signs in with a one-time code
 	// and is then served the app (webapp.go).
+	hookServer.Mount("/app/web-ready", http.HandlerFunc(apps.webReady))
 	hookServer.Mount("/app/login-code", http.HandlerFunc(apps.loginCode))
 	hookServer.Mount("/login", http.HandlerFunc(apps.login))
 	hookServer.Mount("/app/host/", http.HandlerFunc(apps.host))
