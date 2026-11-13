@@ -1325,14 +1325,8 @@ final class AgentsStore {
         messages[sessionId] = current
         // A queued message that has reached the agent shows as its own.
         if var waiting = queued[sessionId], !waiting.isEmpty {
-            // Found by its words, not by how it is shown: "1 image · …" is
-            // nowhere in the agent's copy. Images alone, by the first.
-            for message in added where message.role == .user {
-                let text = (message.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                if let index = waiting.firstIndex(where: { queued in
-                    let words = queued.words.trimmingCharacters(in: .whitespacesAndNewlines)
-                    return words.isEmpty || text.contains(words)
-                }) {
+            for message in added {
+                if let index = waiting.firstIndex(where: { $0.isCopy(message) }) {
                     waiting.remove(at: index)
                 }
             }
@@ -1610,6 +1604,21 @@ final class ToolRunTitle {
 struct QueuedMessage: Hashable, Sendable {
     var words: String
     var images = 0
+    /// When it was sent, in the milliseconds of a message's ts.
+    var sent = Int64(Date().timeIntervalSince1970 * 1000)
+
+    /// Whether a message is the agent's copy of this one: the user's, from
+    /// after it was sent (older pages come through the same way, scrolling
+    /// up), with its words; found by its words, not by how it is shown, as
+    /// "1 image · …" is nowhere in the copy. Images alone, by a message
+    /// that has images: the daemon types their paths in, from its folder.
+    func isCopy(_ message: Message) -> Bool {
+        guard message.role == .user, message.isSidechain != true, message.ts >= sent - 2_000 else { return false }
+        let text = (message.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let words = words.trimmingCharacters(in: .whitespacesAndNewlines)
+        if words.isEmpty { return !(message.images ?? []).isEmpty || text.contains("/.agentman/images/") }
+        return text.contains(words)
+    }
 
     /// As the thread shows it: its words, after how many images go with it.
     var label: String {

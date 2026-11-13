@@ -208,16 +208,34 @@ final class PromptHistoryTests: XCTestCase {
         XCTAssertEqual(store.loadedPrompts("claude:s1").prompts, ["1 image · fix this", "2 images"],
                        "the words as written, newest first; pictures alone aren't")
 
+        // Scrolling up brings older messages through the same way: none of
+        // them is a copy, though one has the same words and one a picture.
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        var older = DaemonEvent(type: "messages")
+        older.sessionId = "claude:s1"
+        older.messages = [
+            Message(id: "o1", sessionId: "claude:s1", role: .user, ts: now - 600_000, text: "an older message"),
+            Message(id: "o2", sessionId: "claude:s1", role: .user, ts: now - 500_000, text: "2 images"),
+            Message(id: "o3", sessionId: "claude:s1", role: .user, ts: now - 400_000, text: "/Users/me/.agentman/images/claude-s1/old.png"),
+        ]
+        store.apply(older)
+        XCTAssertEqual(store.queued["claude:s1"]?.count, 3, "older messages aren't the queued ones")
+
         // The agent's copies arrive: the pictures' paths ahead of the words.
         var arrived = DaemonEvent(type: "messages")
         arrived.sessionId = "claude:s1"
         arrived.messages = [
-            Message(id: "a", sessionId: "claude:s1", role: .user, ts: 1, text: "2 images"),
-            Message(id: "b", sessionId: "claude:s1", role: .user, ts: 2, text: "/Users/me/.agentman/images/claude-s1/x.png 1 image · fix this"),
-            Message(id: "c", sessionId: "claude:s1", role: .user, ts: 3, text: "/Users/me/.agentman/images/claude-s1/y.png"),
+            Message(id: "a", sessionId: "claude:s1", role: .user, ts: now + 1_000, text: "2 images"),
+            Message(id: "b", sessionId: "claude:s1", role: .user, ts: now + 2_000, text: "/Users/me/.agentman/images/claude-s1/x.png 1 image · fix this"),
+            Message(id: "c", sessionId: "claude:s1", role: .user, ts: now + 3_000, text: "a later message, no picture"),
         ]
         store.apply(arrived)
-        XCTAssertEqual(store.queued["claude:s1"] ?? [], [], "each found by its words, not its label")
+        XCTAssertEqual(store.queued["claude:s1"]?.map(\.label), ["2 images"], "found by their words; pictures alone wait for a message with pictures")
+        var pictures = DaemonEvent(type: "messages")
+        pictures.sessionId = "claude:s1"
+        pictures.messages = [Message(id: "d", sessionId: "claude:s1", role: .user, ts: now + 4_000, text: "", images: ["/Users/me/.agentman/images/claude-s1/y.png"])]
+        store.apply(pictures)
+        XCTAssertEqual(store.queued["claude:s1"] ?? [], [])
     }
 
     // Typing while ↑ waits on an older page keeps what was typed.
