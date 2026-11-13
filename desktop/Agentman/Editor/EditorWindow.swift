@@ -18,6 +18,28 @@ enum EditorOpener {
         openWindow(id: "editor", value: store.root.path)
     }
 
+    /// The links an editor opens, as their starts: a folder (`am open`,
+    /// `am .`) and a folder's terminal.
+    static let links: Set<String> = ["agentman://edit", "agentman://terminal"]
+
+    /// Opens what an editor link asks for:
+    /// agentman://edit?folder=…&file=…&agent=here, as `am open` sends, or
+    /// agentman://terminal?folder=…. False for any other link.
+    @MainActor
+    @discardableResult
+    static func open(link url: URL, with openWindow: OpenWindowAction) -> Bool {
+        guard url.scheme == "agentman", let host = url.host(), links.contains("agentman://" + host) else { return false }
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func value(_ name: String) -> String? { items.first(where: { $0.name == name })?.value }
+        guard let folder = value("folder") else { return true }
+        if host == "terminal" {
+            openTerminal(folder: folder, with: openWindow)
+        } else {
+            open(folder: folder, file: value("file"), showingAgent: value("agent") == "here", with: openWindow)
+        }
+        return true
+    }
+
     /// Opens the folder's editor with its terminal showing.
     @MainActor
     static func openTerminal(folder: String, with openWindow: OpenWindowAction) {
@@ -45,6 +67,7 @@ struct EditorWindow: View {
     @State private var headerLeading: CGFloat = 82
     @Environment(AgentsStore.self) private var agents
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openWindow) private var openWindow
     @State private var store: EditorStore
     @State private var naming: Naming?
     @State private var keyMonitor: Any?
@@ -200,6 +223,11 @@ struct EditorWindow: View {
             }
         }
         .onAppear(perform: installKeys)
+        // A folder opened (`am .`) while an editor is open: the editor takes
+        // the link, so a main window that was closed stays closed. With no
+        // editor open, the main window takes it, as it takes every other.
+        .onOpenURL { EditorOpener.open(link: $0, with: openWindow) }
+        .handlesExternalEvents(preferring: EditorOpener.links, allowing: EditorOpener.links)
         .onChange(of: FolderAgentWait(asked: store.showsFolderAgent, loaded: agents.sessionsLoaded, sessions: agents.sessions.map(\.id)),
                   initial: true) {
             store.showFolderAgent(in: agents.sessions, loaded: agents.sessionsLoaded)

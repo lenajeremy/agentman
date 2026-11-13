@@ -123,21 +123,12 @@ struct ContentView: View {
         }
     }
 
-    /// agentman://settings opens Settings, at a tab with
-    /// agentman://settings/keys; the rest are the store's to open.
+    /// The editor's links open an editor; agentman://settings opens
+    /// Settings, at a tab with agentman://settings/keys; the rest are the
+    /// store's to open.
     private func open(_ url: URL) {
-        if url.host() == "terminal" {
-            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-            if let folder = items.first(where: { $0.name == "folder" })?.value {
-                EditorOpener.openTerminal(folder: folder, with: openWindow)
-            }
-        } else if url.host() == "edit" {
-            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-            // agentman://edit?folder=…&file=…&agent=here, as `am open` sends.
-            if let folder = items.first(where: { $0.name == "folder" })?.value {
-                EditorOpener.open(folder: folder, file: items.first(where: { $0.name == "file" })?.value,
-                                  showingAgent: items.first(where: { $0.name == "agent" })?.value == "here", with: openWindow)
-            }
+        if EditorOpener.open(link: url, with: openWindow) {
+            return
         } else if url.host() == "settings" {
             let tab = url.path().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             if SettingsPage(rawValue: tab) != nil { settingsTab = tab }
