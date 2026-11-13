@@ -175,6 +175,19 @@ final class PromptHistoryTests: XCTestCase {
         XCTAssertNil(AgentsStore.queuedWords(AgentsStore.queuedLabel("", images: 3)))
     }
 
+    // The box gets the words back, not the pictures that went with them.
+    func testOnlyThePromptsWordsComeBack() {
+        let kept = NSHomeDirectory() + "/.agentman/images/claude-s1/a1.png"
+        XCTAssertEqual(PromptHistory.words("\(kept) \(kept) fix this"), "fix this", "the daemon's paths ahead of the words")
+        XCTAssertEqual(PromptHistory.words("[Image #21] fix this\n[image]"), "[Image #21] fix this", "Claude's own label stays")
+        XCTAssertEqual(PromptHistory.words("look\n[image]\nand this\n[image]"), "look\nand this")
+        XCTAssertNil(PromptHistory.words("\(kept)"))
+        XCTAssertNil(PromptHistory.words("[image]\n"))
+        XCTAssertEqual(PromptHistory.words("@/Users/me/shop/main.go tidy it"), "@/Users/me/shop/main.go tidy it", "files stay, as chips")
+        XCTAssertEqual(PromptHistory.words("compare /tmp/a.png with the design"), "compare /tmp/a.png with the design",
+                       "a picture of the user's own, named in the words, is words")
+    }
+
     // MARK: - In the box
 
     @Observable

@@ -1002,8 +1002,8 @@ final class AgentsStore {
     /// with the messages waiting to reach it before them, and where the
     /// thread's older pages start: where ↑ in its box begins.
     func loadedPrompts(_ sessionId: String) -> PromptHistory.Prompts {
-        let said = (messages[sessionId] ?? []).filter(PromptHistory.isPrompt).compactMap(\.text)
-        let waiting = (queued[sessionId] ?? []).compactMap(Self.queuedWords)
+        let said = (messages[sessionId] ?? []).filter(PromptHistory.isPrompt).compactMap { $0.text.flatMap(PromptHistory.words) }
+        let waiting = (queued[sessionId] ?? []).compactMap(Self.queuedWords).compactMap(PromptHistory.words)
         return PromptHistory.Prompts(prompts: (said + waiting).reversed(), cursor: cursors[sessionId], hasMore: hasMore[sessionId] == true)
     }
 
@@ -1015,7 +1015,7 @@ final class AgentsStore {
         request.before = cursor
         request.limit = 20
         guard let page = try? await client.request(request).page else { return nil }
-        return PromptHistory.Prompts(prompts: page.messages.filter(PromptHistory.isPrompt).compactMap(\.text).reversed(),
+        return PromptHistory.Prompts(prompts: page.messages.filter(PromptHistory.isPrompt).compactMap { $0.text.flatMap(PromptHistory.words) }.reversed(),
                                      cursor: page.nextCursor, hasMore: page.hasMore)
     }
 

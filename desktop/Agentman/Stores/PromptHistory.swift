@@ -174,6 +174,24 @@ final class PromptHistory {
         }
     }
 
+    /// The words of a prompt as the box takes them again: without the
+    /// pictures that went with it, which come back as their paths the daemon
+    /// typed ahead of the words or as "[image]" where the agent read one;
+    /// nil for pictures alone. Files named with @ stay, as the box shows
+    /// them as chips.
+    nonisolated static func words(_ text: String) -> String? {
+        var rest = Substring(text).drop(while: \.isWhitespace)
+        while let end = rest.firstIndex(where: \.isWhitespace) ?? (rest.isEmpty ? nil : rest.endIndex),
+              SentMessage.isKeptImage(rest[..<end]) {
+            rest = rest[end...].drop(while: \.isWhitespace)
+        }
+        let words = rest.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { $0.trimmingCharacters(in: .whitespaces) != "[image]" }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return words.isEmpty ? nil : words
+    }
+
     /// A message the user wrote to the agent, for its history: theirs, with
     /// words, not a tool's result, a subagent's, or what the agent writes in
     /// the user's place: the summary of an earlier conversation, or Claude
