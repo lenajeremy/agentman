@@ -1939,6 +1939,8 @@ struct Composer: View {
     var onSend: () -> Void
     @State private var focused = false
     @State private var confirming: String?
+    /// ↑ and ↓: what was said to the agent before.
+    @State private var history = PromptHistory()
 
     private var canSend: Bool {
         enabled && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !(attachments?.wrappedValue.isEmpty ?? true))
@@ -1967,11 +1969,12 @@ struct Composer: View {
                 enabled: enabled,
                 focused: $focused,
                 autofocus: true,
-                onSubmit: { if canSend { onSend() } },
+                onSubmit: { if canSend { sendNow() } },
                 onImages: attachments == nil ? nil : { add($0) },
                 onDropTargeted: onDropTargeted,
                 mentions: files,
-                slash: slash
+                slash: slash,
+                history: session?.canReceive == true ? history : nil
             )
             .opacity(enabled ? 1 : 0.6)
             .fixedSize(horizontal: false, vertical: true)
@@ -2028,6 +2031,13 @@ struct Composer: View {
                 }
                 sendButton
             }
+        }
+        // The history is the agent's, read through the store; a panel that
+        // changes agents starts again.
+        .task(id: session?.id) {
+            history.sessionId = session?.id
+            history.loaded = { [store] in store.loadedPrompts($0) }
+            history.fetch = { [store] in await store.olderPrompts($0, before: $1) }
         }
         // Quoted, the next thing is to say why.
         .onChange(of: quotes?.wrappedValue.count ?? 0) { before, now in
@@ -2136,6 +2146,13 @@ struct Composer: View {
         }
     }
 
+    /// Sends, and the history lets go: the next ↑ starts from what was
+    /// just said.
+    private func sendNow() {
+        history.reset()
+        onSend()
+    }
+
     /// Send; or Stop while the agent works and nothing is typed, as T3
     /// Code has it, where the eyes already are.
     @ViewBuilder private var sendButton: some View {
@@ -2153,7 +2170,7 @@ struct Composer: View {
             .help("Stop the agent's turn")
             .accessibilityLabel("Stop the agent's turn")
         } else {
-            Button(action: onSend) {
+            Button(action: sendNow) {
                 Image(systemName: "arrow.up")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(canSend ? Color.white : Palette.muted)

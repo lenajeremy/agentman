@@ -484,10 +484,24 @@ final class AgentsStore {
         request.clientId = "mac-send-\(UUID().uuidString)"
         let status = await performWithStatus(request, for: sessionId)
         if status == .queued {
-            let note = images.count == 1 ? "1 image" : "\(images.count) images"
-            queued[sessionId, default: []].append(images.isEmpty ? text : text.isEmpty ? note : "\(note) · \(text)")
+            queued[sessionId, default: []].append(Self.queuedLabel(text, images: images.count))
         }
         return status != .failed
+    }
+
+    /// How a message waiting to reach its agent is shown: its words, after
+    /// how many images go with it.
+    nonisolated static func queuedLabel(_ text: String, images: Int) -> String {
+        guard images > 0 else { return text }
+        let note = images == 1 ? "1 image" : "\(images) images"
+        return text.isEmpty ? note : "\(note) · \(text)"
+    }
+
+    /// The words of a waiting message, from how it is shown; nil for images
+    /// alone.
+    nonisolated static func queuedWords(_ label: String) -> String? {
+        guard let match = label.firstMatch(of: /^(?:1 image|\d+ images)(?: · ([\s\S]*))?$/) else { return label }
+        return match.1.map(String.init)
     }
 
     /// Answers the question an agent is showing, with an option, a note, or both.
@@ -982,6 +996,27 @@ final class AgentsStore {
         merge(page.messages, into: sessionId)
         cursors[sessionId] = page.nextCursor
         hasMore[sessionId] = page.hasMore
+    }
+
+    /// What the user said to an agent in its thread as loaded, newest first,
+    /// with the messages waiting to reach it before them, and where the
+    /// thread's older pages start: where ↑ in its box begins.
+    func loadedPrompts(_ sessionId: String) -> PromptHistory.Prompts {
+        let said = (messages[sessionId] ?? []).filter(PromptHistory.isPrompt).compactMap(\.text)
+        let waiting = (queued[sessionId] ?? []).compactMap(Self.queuedWords)
+        return PromptHistory.Prompts(prompts: (said + waiting).reversed(), cursor: cursors[sessionId], hasMore: hasMore[sessionId] == true)
+    }
+
+    /// What the user said to an agent before a cursor, newest first, read
+    /// by the daemon a page of prompts at a time; nil from a daemon that
+    /// can't say.
+    func olderPrompts(_ sessionId: String, before cursor: String) async -> PromptHistory.Prompts? {
+        var request = DaemonRequest(.fetchPrompts, sessionId: sessionId)
+        request.before = cursor
+        request.limit = 20
+        guard let page = try? await client.request(request).page else { return nil }
+        return PromptHistory.Prompts(prompts: page.messages.filter(PromptHistory.isPrompt).compactMap(\.text).reversed(),
+                                     cursor: page.nextCursor, hasMore: page.hasMore)
     }
 
     // MARK: - Daemon events
