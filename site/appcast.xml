@@ -14,6 +14,20 @@
     <description>Updates to Agentman for Mac.</description>
     <language>en</language>
     <item>
+      <title>Agentman 0.47.0</title>
+      <link>https://github.com/lenajeremy/agentman/releases/tag/v0.47.0</link>
+      <pubDate>Fri, 13 Nov 2026 19:40:57 GMT</pubDate>
+      <sparkle:version>55</sparkle:version>
+      <sparkle:shortVersionString>0.47.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <sparkle:fullReleaseNotesLink>https://github.com/lenajeremy/agentman/releases/tag/v0.47.0</sparkle:fullReleaseNotesLink>
+      <description sparkle:format="markdown"><![CDATA[## Agentman in your browser
+
+- Run `am web` in a terminal and Agentman opens in your browser, signed in: your agents, the Board, the editor, terminals and Settings, as in the app.
+- The first time, it downloads the web app for your version, about 9 MB, and checks it before using it. After that it opens straight away, even offline.]]></description>
+      <enclosure url="https://github.com/lenajeremy/agentman/releases/download/v0.47.0/Agentman.dmg" length="46453460" type="application/octet-stream" sparkle:edSignature="KqsRUoIFAH2RNRuIXYJ/xiP7hilaywEob9iTLET9Jw2GfFwmAkk2FE8ytONA6YLol2Pgc5RWzYmfBJtud5ZxCA=="/>
+    </item>
+    <item>
       <title>Agentman 0.46.0</title>
       <link>https://github.com/lenajeremy/agentman/releases/tag/v0.46.0</link>
       <pubDate>Fri, 13 Nov 2026 17:37:37 GMT</pubDate>
