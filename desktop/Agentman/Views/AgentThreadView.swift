@@ -326,8 +326,8 @@ struct AgentThreadView: View {
                             QueuedBubble(text: text, note: "Waiting for the agent to read it",
                                          onSendNow: canSendNow ? { await store.sendQueuedNow(session.id) } : nil)
                         }
-                        ForEach(Array((store.queued[session.id] ?? []).enumerated()), id: \.offset) { _, text in
-                            QueuedBubble(text: text, note: "Queued: it reaches the agent when its turn ends")
+                        ForEach(Array((store.queued[session.id] ?? []).enumerated()), id: \.offset) { _, message in
+                            QueuedBubble(text: message.label, note: "Queued: it reaches the agent when its turn ends")
                         }
                         // The question is part of the conversation, so it
                         // scrolls with it and is never squeezed to fit.
@@ -1239,9 +1239,13 @@ struct MessageRow: View {
 
 extension MessageRow {
     /// The summary Claude Code writes when it compacts a conversation, which
-    /// arrives as a message from the user.
+    /// arrives as a message from the user. Newer versions put a note or two
+    /// before it, opening with a tag such as
+    /// <artifact-content-authored-by-others/>.
     static func isCompactionSummary(_ text: String) -> Bool {
-        text.hasPrefix("This session is being continued from a previous conversation")
+        let opening = "This session is being continued from a previous conversation"
+        if text.hasPrefix(opening) { return true }
+        return text.hasPrefix("<") && text.prefix(2000).contains("\n" + opening)
     }
 }
 
@@ -1939,6 +1943,8 @@ struct Composer: View {
     var onSend: () -> Void
     @State private var focused = false
     @State private var confirming: String?
+    /// ↑ and ↓: what was said to the agent before.
+    @State private var history = PromptHistory()
 
     private var canSend: Bool {
         enabled && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !(attachments?.wrappedValue.isEmpty ?? true))
@@ -1967,11 +1973,12 @@ struct Composer: View {
                 enabled: enabled,
                 focused: $focused,
                 autofocus: true,
-                onSubmit: { if canSend { onSend() } },
+                onSubmit: { if canSend { sendNow() } },
                 onImages: attachments == nil ? nil : { add($0) },
                 onDropTargeted: onDropTargeted,
                 mentions: files,
-                slash: slash
+                slash: slash,
+                history: session?.canReceive == true ? history : nil
             )
             .opacity(enabled ? 1 : 0.6)
             .fixedSize(horizontal: false, vertical: true)
@@ -2028,6 +2035,13 @@ struct Composer: View {
                 }
                 sendButton
             }
+        }
+        // The history is the agent's, read through the store; a panel that
+        // changes agents starts again.
+        .task(id: session?.id) {
+            history.sessionId = session?.id
+            history.loaded = { [store] in store.loadedPrompts($0) }
+            history.fetch = { [store] in await store.olderPrompts($0, before: $1) }
         }
         // Quoted, the next thing is to say why.
         .onChange(of: quotes?.wrappedValue.count ?? 0) { before, now in
@@ -2136,6 +2150,13 @@ struct Composer: View {
         }
     }
 
+    /// Sends, and the history lets go: the next ↑ starts from what was
+    /// just said.
+    private func sendNow() {
+        history.reset()
+        onSend()
+    }
+
     /// Send; or Stop while the agent works and nothing is typed, as T3
     /// Code has it, where the eyes already are.
     @ViewBuilder private var sendButton: some View {
@@ -2153,7 +2174,7 @@ struct Composer: View {
             .help("Stop the agent's turn")
             .accessibilityLabel("Stop the agent's turn")
         } else {
-            Button(action: onSend) {
+            Button(action: sendNow) {
                 Image(systemName: "arrow.up")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(canSend ? Color.white : Palette.muted)

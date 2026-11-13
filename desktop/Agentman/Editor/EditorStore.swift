@@ -53,7 +53,7 @@ enum GitMark: Sendable, Equatable {
 @MainActor
 final class EditorRegistry {
     static let shared = EditorRegistry()
-    private var stores: [String: EditorStore] = [:]
+    private(set) var stores: [String: EditorStore] = [:]
 
     func store(for folder: String) -> EditorStore {
         let key = URL(fileURLWithPath: folder).standardizedFileURL.path

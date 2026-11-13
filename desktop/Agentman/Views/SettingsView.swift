@@ -1104,14 +1104,47 @@ struct VoiceSection: View {
 /// How the code editor takes keys.
 private struct EditorSection: View {
     @AppStorage("editorVim") private var vim = false
+    /// Which kinds of file Agentman opens, as macOS says: Finder can change
+    /// it too, so it is read again whenever the page shows.
+    @State private var opens: Set<FileHandlers.Kind> = []
+    @State private var problem: String?
 
     var body: some View {
-        SettingsSection(title: "Editor") {
+        SettingsSection(title: "Editor",
+                        footer: problem ?? "macOS asks you to confirm each change. For other kinds of file, choose Agentman in Finder: Get Info, Open with, Change All.") {
             SettingsRow(title: "Vim mode",
-                        detail: "Vim's keys in the code editor and its file tree. Press ? in the tree to see its keys.",
-                        divider: false) {
+                        detail: "Vim's keys in the code editor and its file tree. Press ? in the tree to see its keys.") {
                 Toggle("", isOn: $vim).toggleStyle(.appSwitch).labelsHidden()
             }
+            ForEach(FileHandlers.Kind.allCases) { kind in
+                SettingsRow(title: kind.title, detail: kind.detail, divider: kind != FileHandlers.Kind.allCases.last) {
+                    Toggle("", isOn: Binding(get: { opens.contains(kind) }, set: { set(kind, $0) }))
+                        .toggleStyle(.appSwitch)
+                        .labelsHidden()
+                }
+            }
+        }
+        .onAppear(perform: read)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in read() }
+    }
+
+    private func read() {
+        opens = Set(FileHandlers.Kind.allCases.filter { FileHandlers.opens($0) })
+    }
+
+    private func set(_ kind: FileHandlers.Kind, _ on: Bool) {
+        if on { opens.insert(kind) } else { opens.remove(kind) }
+        Task {
+            do {
+                try await FileHandlers.set(kind, on: on)
+                problem = nil
+            } catch where FileHandlers.cancelled(error) {
+                // No to macOS's question: the switch goes back as it was.
+                problem = nil
+            } catch {
+                problem = "macOS didn't change what opens \(kind == .markdown ? "Markdown" : "text") files: \(error.localizedDescription)"
+            }
+            read()
         }
     }
 }
@@ -1304,32 +1337,5 @@ private struct NotificationsPage: View {
     private func setMuted(_ folder: String, _ on: Bool) {
         NotificationPolicy.setMuted(folder, on)
         muted = NotificationPolicy.mutedFolders()
-    }
-}
-
-
-/// The appearance picker stays within reach from the sidebar.
-struct AppearanceMenu: View {
-    @AppStorage("appearance") private var appearance = "system"
-
-    var body: some View {
-        Menu {
-            Picker("Appearance", selection: $appearance) {
-                Text("Light").tag("light")
-                Text("Dark").tag("dark")
-                Text("Match the Mac").tag("system")
-            }
-        } label: {
-            Image(systemName: "circle.lefthalf.filled")
-                .font(.system(size: 13))
-                .foregroundStyle(Palette.muted)
-                .frame(width: 22, height: 20)
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Appearance: Light, Dark, or Match the Mac")
-        .accessibilityLabel("Appearance")
-        .onChange(of: appearance) { _, choice in Appearance.apply(choice) }
     }
 }

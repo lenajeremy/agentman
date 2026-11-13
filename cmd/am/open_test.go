@@ -88,3 +88,27 @@ func TestOpenWithNoFolderOpensTheCurrentOne(t *testing.T) {
 		t.Fatal("took two folders")
 	}
 }
+
+// `am .`, as `code .`: what is typed in a command's place opens in the
+// editor when it is a folder or file, and is still an unknown command when
+// it is neither.
+func TestAFolderTypedAsTheCommandOpensIt(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.Mkdir("shop", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("notes.md", []byte("# notes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for arg, opens := range map[string]bool{
+		".": true, "..": true, "shop": true, "./shop": true, "notes.md": true, os.TempDir(): true,
+		// A path, there or not: a missing one is said to be missing.
+		"./missing": true, "shop/missing": true,
+		// A typo of a command, a flag and nothing at all are not paths.
+		"lsit": false, "-json": false, "--help": false, "": false,
+	} {
+		if got := namesAFolderOrFile(arg); got != opens {
+			t.Errorf("%q opens: %v, want %v", arg, got, opens)
+		}
+	}
+}

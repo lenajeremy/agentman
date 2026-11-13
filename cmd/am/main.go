@@ -46,6 +46,7 @@ Usage:
   am open [folder]            Open a folder (this one by default) in Agentman
   am web                      Open Agentman in your browser
                               for Mac's editor, with its agent beside the code
+                              when one works there (or: am <folder>, am .)
   am codex [args...]          Start Codex so you can message it later
   am opencode [args...]       Start OpenCode so you can message it later
   am cursor [args...]         Start Cursor Agent CLI so you can message it later
@@ -166,8 +167,13 @@ func main() {
 		fmt.Print(usage)
 		return
 	default:
-		fmt.Fprintf(os.Stderr, "am: unknown command %q\n\n%s", command, usage)
-		os.Exit(2)
+		// `am .`, as `code .`: a folder or file opens in the editor, with
+		// or without an agent working there.
+		if !namesAFolderOrFile(command) {
+			fmt.Fprintf(os.Stderr, "am: unknown command %q\n\n%s", command, usage)
+			os.Exit(2)
+		}
+		err = runOpen(os.Args[1:])
 	}
 
 	if err != nil && ctx.Err() == nil {
