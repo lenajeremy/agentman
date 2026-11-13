@@ -102,6 +102,53 @@ export function ShellView({ id, visible }: { id: string; visible: boolean }) {
       focused: () => !!el.contains(document.activeElement),
     });
 
+    // am serve lets a panel go when it falls behind ("behind"), and when it
+    // stops or restarts; the shell runs on. The panel comes back, a little
+    // later each time, and the scrollback it is sent first is the whole
+    // screen again. Closed normally, the shell ended or was closed: that
+    // stays.
+    let attempts = 0;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let attached = false;
+    const again = () => {
+      if (disposed) return;
+      const wait = Math.min(10_000, 500 * 2 ** attempts++);
+      retry = setTimeout(() => void connect().catch(again), wait);
+    };
+    const connect = async () => {
+      const ep = await endpoint();
+      if (disposed) return;
+      const q = new URLSearchParams({ token: ep.token, id, cols: String(term.cols), rows: String(term.rows) });
+      const socket = new WebSocket(`${ep.terminal}?${q}`);
+      ws = socket;
+      socket.binaryType = "arraybuffer";
+      socket.onopen = () => {
+        attempts = 0;
+        send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+      };
+      // The first message is the scrollback, then what the shell says now.
+      let scrollback = true;
+      socket.onmessage = (e) => {
+        if (!(e.data instanceof ArrayBuffer)) return;
+        const data = new Uint8Array(e.data);
+        if (scrollback) {
+          scrollback = false;
+          replaying = true;
+          // Back after being let go: the scrollback replaces the screen.
+          if (attached) term.reset();
+          attached = true;
+          // Called once xterm has read it all, before what comes after.
+          term.write(data, () => (replaying = false));
+        } else {
+          term.write(data);
+        }
+      };
+      socket.onclose = (e) => {
+        if (disposed || ws !== socket || e.code === 1000) return;
+        again();
+      };
+    };
+
     // ⌘K clears the screen and scrollback while the terminal has the keyboard.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === "keydown" && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") {
@@ -128,28 +175,7 @@ export function ShellView({ id, visible }: { id: string; visible: boolean }) {
         }
       }
       refit();
-      const ep = await endpoint();
-      if (disposed) return;
-      const q = new URLSearchParams({ token: ep.token, id, cols: String(term.cols), rows: String(term.rows) });
-      ws = new WebSocket(`${ep.terminal}?${q}`);
-      ws.binaryType = "arraybuffer";
-      ws.onopen = () => {
-        send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
-      };
-      // The first message is the scrollback, then what the shell says now.
-      let scrollback = true;
-      ws.onmessage = (e) => {
-        if (!(e.data instanceof ArrayBuffer)) return;
-        const data = new Uint8Array(e.data);
-        if (scrollback) {
-          scrollback = false;
-          replaying = true;
-          // Called once xterm has read it all, before what comes after.
-          term.write(data, () => (replaying = false));
-        } else {
-          term.write(data);
-        }
-      };
+      await connect();
     })().catch(() => {});
 
     const input = term.onData((data) => {
@@ -167,6 +193,7 @@ export function ShellView({ id, visible }: { id: string; visible: boolean }) {
 
     return () => {
       disposed = true;
+      clearTimeout(retry);
       views.delete(id);
       window.removeEventListener("focus", claim);
       document.removeEventListener("visibilitychange", cameForward);
