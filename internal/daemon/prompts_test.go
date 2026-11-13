@@ -58,6 +58,12 @@ func TestPromptsPageBackThroughWhatTheUserSaid(t *testing.T) {
 			message.Role, message.Text, message.IsSidechain = protocol.RoleUser, "a subagent's prompt", true
 		case i%10 == 7:
 			message.Role, message.Text = protocol.RoleUser, "  \n"
+		case i%30 == 1:
+			message.Role, message.Text = protocol.RoleUser, "[Request interrupted by user for tool use]"
+		case i%30 == 11:
+			message.Role, message.Text = protocol.RoleUser, compactionOpening+" that ran out of context."
+		case i%30 == 21:
+			message.Role, message.Text = protocol.RoleUser, "<artifact-content-authored-by-others/>\nA note.\n"+compactionOpening+"."
 		}
 		conversation.messages = append(conversation.messages, message)
 	}

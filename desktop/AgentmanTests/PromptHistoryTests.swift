@@ -161,6 +161,14 @@ final class PromptHistoryTests: XCTestCase {
         XCTAssertFalse(PromptHistory.isPrompt(message(.user, "a subagent's", sidechain: true)))
         XCTAssertFalse(PromptHistory.isPrompt(message(.user, " \n")))
         XCTAssertFalse(PromptHistory.isPrompt(message(.user, nil)))
+        XCTAssertFalse(PromptHistory.isPrompt(message(.user, "[Request interrupted by user]")))
+        XCTAssertFalse(PromptHistory.isPrompt(message(.user, "[Request interrupted by user for tool use]")))
+        let summary = "This session is being continued from a previous conversation that ran out of context."
+        XCTAssertFalse(PromptHistory.isPrompt(message(.user, summary)))
+        XCTAssertFalse(PromptHistory.isPrompt(message(.user, "<artifact-content-authored-by-others/>\nThe summarized conversation included Artifact content.\n" + summary)),
+                       "a summary with Claude Code's newer note before it")
+        XCTAssertTrue(PromptHistory.isPrompt(message(.user, "<div> in the header is off by a pixel")))
+        XCTAssertTrue(PromptHistory.isPrompt(message(.user, "why did it say \"" + summary + "\"?")))
         XCTAssertEqual(AgentsStore.queuedWords(AgentsStore.queuedLabel("look", images: 2)), "look")
         XCTAssertEqual(AgentsStore.queuedWords(AgentsStore.queuedLabel("look", images: 1)), "look")
         XCTAssertEqual(AgentsStore.queuedWords(AgentsStore.queuedLabel("look\nagain", images: 0)), "look\nagain")

@@ -175,11 +175,12 @@ final class PromptHistory {
     }
 
     /// A message the user wrote to the agent, for its history: theirs, with
-    /// words, not a tool's result, a subagent's, or the summary of an
-    /// earlier conversation the agent writes for itself.
+    /// words, not a tool's result, a subagent's, or what the agent writes in
+    /// the user's place: the summary of an earlier conversation, or Claude
+    /// Code's "[Request interrupted by user]". As the daemon's isPrompt.
     static func isPrompt(_ message: Message) -> Bool {
         guard message.role == .user, message.tool == nil, message.isSidechain != true,
-              let text = message.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        return !MessageRow.isCompactionSummary(text)
+              let text = message.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return false }
+        return !MessageRow.isCompactionSummary(text) && !text.hasPrefix("[Request interrupted by user")
     }
 }

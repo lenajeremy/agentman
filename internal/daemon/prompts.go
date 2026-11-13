@@ -54,8 +54,24 @@ func (d *Daemon) prompts(ctx context.Context, sessionID, before string, limit in
 }
 
 // isPrompt is a message the user wrote to the agent: theirs, with words,
-// not a tool's result or a subagent's.
+// not a tool's result, a subagent's, or what the agent writes in the user's
+// place: the summary of an earlier conversation, or Claude Code's "[Request
+// interrupted by user]". As the Mac's PromptHistory.isPrompt.
 func isPrompt(message protocol.Message) bool {
-	return message.Role == protocol.RoleUser && message.Tool == nil && !message.IsSidechain &&
-		strings.TrimSpace(message.Text) != ""
+	text := strings.TrimSpace(message.Text)
+	return message.Role == protocol.RoleUser && message.Tool == nil && !message.IsSidechain && text != "" &&
+		!isCompactionSummary(text) && !strings.HasPrefix(text, "[Request interrupted by user")
+}
+
+// compactionOpening begins the summary Claude Code writes when it compacts
+// a conversation; newer versions put a note or two before it, opening with
+// a tag such as <artifact-content-authored-by-others/>.
+const compactionOpening = "This session is being continued from a previous conversation"
+
+func isCompactionSummary(text string) bool {
+	if strings.HasPrefix(text, compactionOpening) {
+		return true
+	}
+	head := text[:min(len(text), 2000)]
+	return strings.HasPrefix(text, "<") && strings.Contains(head, "\n"+compactionOpening)
 }
