@@ -48,8 +48,9 @@
 #     let sign_update use it ("Always Allow" stops it asking again).
 #
 # Before running it, bump MARKETING_VERSION and CURRENT_PROJECT_VERSION in
-# desktop/project.yml and commit, and push the CLI's tag so the GitHub
-# release exists.
+# desktop/project.yml and commit, push the CLI's tag, and wait for its
+# release workflow: the am inside the app checks the web app's file on that
+# release (agentman-web_v<version>.tar.gz), whose SHA-256 is read from it.
 #
 # Usage:
 #   scripts/release-mac.sh                    # build and prepare; publish nothing
@@ -63,6 +64,9 @@
 #   SPARKLE_KEY_FILE=<file>     sign with this throwaway key instead, to try the
 #                               script; the item it writes cannot install, so
 #                               --publish refuses it
+#   WITHOUT_WEB=1               build before the release has the web app's
+#                               file, to try the script: the app's am then
+#                               can't fetch the web app, so --publish refuses it
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -195,6 +199,21 @@ if [ "$release_exists" = 0 ]; then
   say "GitHub has no $tag release yet; push the tag before uploading."
 fi
 
+# The am inside the app fetches the web app's screens from this release the
+# first time `am web` runs, and uses them only if they match this SHA-256:
+# the file the release workflow attached, read here from the release itself.
+web_sha=""
+web_file="agentman-web_$tag.tar.gz"
+if [ "$release_exists" = 1 ] && rm -f "$OUT/$web_file" && mkdir -p "$OUT" &&
+   gh release download "$tag" -R "$REPO" -p "$web_file" -D "$OUT" >/dev/null 2>&1; then
+  web_sha="$(shasum -a 256 "$OUT/$web_file" | cut -d' ' -f1)"
+  say "The web app's file on $tag: $web_sha."
+elif [ "${WITHOUT_WEB:-}" = 1 ] && [ "$publish" = 0 ]; then
+  say "Building without the web app's file (WITHOUT_WEB=1): this app's am can't fetch the web app."
+else
+  fail "the $tag release has no $web_file yet: push the tag and wait for its release workflow, which attaches it. (WITHOUT_WEB=1 builds a test copy without it.)"
+fi
+
 # MARK: Building
 
 mkdir -p "$OUT"
@@ -209,7 +228,7 @@ step "Archiving (a few minutes; the log is $OUT/archive.log)"
 xcodebuild archive -project desktop/Agentman.xcodeproj -scheme Agentman -configuration Release \
   -destination generic/platform=macOS -archivePath "$archive" -derivedDataPath "$dd" \
   DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Manual "CODE_SIGN_IDENTITY=Developer ID Application" \
-  OTHER_CODE_SIGN_FLAGS=--timestamp >"$OUT/archive.log" 2>&1 ||
+  OTHER_CODE_SIGN_FLAGS=--timestamp AGENTMAN_WEB_SHA256="$web_sha" >"$OUT/archive.log" 2>&1 ||
   { tail -25 "$OUT/archive.log" >&2; fail "the archive failed; the whole log is $OUT/archive.log"; }
 xcodebuild -exportArchive -archivePath "$archive" -exportPath "$OUT/export" \
   -exportOptionsPlist desktop/ExportOptions.plist >"$OUT/export.log" 2>&1 ||
