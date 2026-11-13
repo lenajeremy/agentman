@@ -9,6 +9,7 @@ import type { Message, Tool } from "@shared/protocol";
 import { daemon, type AppEvent, type AppRequest } from "../daemon";
 import { getPref, setPref } from "../prefs";
 import { hostCall } from "../host";
+import { stillQueued, type QueuedMessage } from "./queue";
 
 type Listener = () => void;
 
@@ -60,17 +61,24 @@ export const useActionError = (sessionId: string) => errors.use(sessionId);
 
 // MARK: queued until the agent's turn ends
 
-const queued = new Keyed<string[]>();
-export const useQueued = (sessionId: string) => queued.use(sessionId) ?? [];
+export { queuedLabel } from "./queue";
 
-/** A queued message that has reached the agent shows as its own. */
+const queued = new Keyed<QueuedMessage[]>();
+export const useQueued = (sessionId: string) => queued.use(sessionId) ?? [];
+/** The words of what waits for the agent, oldest first, for ↑. */
+export const queuedWords = (sessionId: string) => (queued.get(sessionId) ?? []).map((m) => m.words);
+
+/** The thread's messages as last looked at, to tell which are new. */
+const seenIds = new Map<string, Set<string>>();
+
+/** A queued message that has reached the agent shows as its own: one taken
+ *  by each new message of the user's (queue.ts). */
 export function dropDelivered(sessionId: string, messages: readonly Message[]) {
+  const before = seenIds.get(sessionId);
+  seenIds.set(sessionId, new Set(messages.map((m) => m.id)));
   const waiting = queued.get(sessionId);
-  if (!waiting?.length) return;
-  const left = waiting.filter((text) => {
-    const want = text.trim();
-    return !messages.some((m) => m.role === "user" && (m.text ?? "").includes(want));
-  });
+  if (!waiting?.length || !before) return;
+  const left = stillQueued(waiting, messages.filter((m) => !before.has(m.id)));
   if (left.length !== waiting.length) queued.set(sessionId, left);
 }
 
@@ -91,8 +99,7 @@ export async function send(sessionId: string, text: string, images: { mime: stri
       return false;
     }
     if (reply.status === "queued") {
-      const note = images.length === 1 ? "1 image" : `${images.length} images`;
-      queued.set(sessionId, [...(queued.get(sessionId) ?? []), images.length === 0 ? text : text ? `${note} · ${text}` : note]);
+      queued.set(sessionId, [...(queued.get(sessionId) ?? []), { words: text, images: images.length }]);
     }
     return true;
   } catch (err) {

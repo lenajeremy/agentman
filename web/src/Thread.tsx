@@ -19,7 +19,7 @@ import { Spinner } from "./thread/Loader";
 import { MessageRow, QueuedBubble } from "./thread/Messages";
 import { QuestionCard } from "./thread/QuestionCard";
 import { ImageThumbnail, PicturesRun, ToolRun } from "./thread/ToolRun";
-import { dropDelivered, perform, useQueued } from "./thread/state";
+import { dropDelivered, perform, queuedLabel, useQueued } from "./thread/state";
 import { useChangedCount } from "./thread/changes";
 import "./styles/thread.css";
 
@@ -304,9 +304,9 @@ export function Thread({ session, stickToEnd, card = true, panel = false, findab
                 />
               </div>
             ))}
-            {localQueued.map((text, i) => (
+            {localQueued.map((message, i) => (
               <div key={`l${i}`} className="thread-item">
-                <QueuedBubble text={text} note="Queued: it reaches the agent when its turn ends" />
+                <QueuedBubble text={queuedLabel(message)} note="Queued: it reaches the agent when its turn ends" />
               </div>
             ))}
             {session.question && (
