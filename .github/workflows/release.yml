@@ -43,6 +43,22 @@ jobs:
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
       - run: go test -race ./...
 
+      # The web app's screens ship beside am, not inside it
+      # (internal/webapp/fetch.go): built here and packed as one file, which
+      # GoReleaser attaches to the release, and whose SHA-256 it stamps into
+      # every am. am serve fetches it the first time `am web` runs, and uses
+      # it only if it matches.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Build the web app
+        run: |
+          (cd web && npm ci && npm run build)
+          mkdir -p dist-web
+          bundle="dist-web/agentman-web_${GITHUB_REF_NAME}.tar.gz"
+          tar -C internal/webapp/dist -czf "$bundle" .
+          echo "WEB_SHA256=$(sha256sum "$bundle" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           version: "v2.17.1"
